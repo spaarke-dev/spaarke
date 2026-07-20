@@ -37,7 +37,7 @@ import {
   formatEventOutputMarkdown,
   formatNoticeMessage,
 } from "./DocumentUploadedEventStream";
-import { makeLocalAssistantMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 
 const EVENT_BATCH_FALLBACK_MS = 30_000;
 
@@ -207,7 +207,8 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       getAccessToken,
       handlers: {
         onClassification: (data) => {
-          enqueueAssistantMessage(makeLocalAssistantMessage(formatClassificationMessage(data)));
+          // P1-5: compact, collapsed-by-default classification entry (was a full chat bubble).
+          enqueueAssistantMessage(makeFileStatusMessage(formatClassificationMessage(data), "File classified"));
         },
         onOutput: (data) => {
           enqueueAssistantMessage(

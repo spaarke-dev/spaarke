@@ -1,0 +1,131 @@
+<task id="001" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Phase-0 audit (spike): live `sprk_communicationthread`/`sprk_communication` schema; confirm category/tags absent (Q2); verify email-r4 `Services/Communication` merged state; plan `sprk_role` choice-integers</title>
+    <phase>W0 — Schema + Foundation + ADR</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <deps>none</deps>
+    <blocks>002, 003</blocks>
+    <tags>dataverse, spike</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only Phase-0 verification spike — no schema mutation, no BFF code, no Step 9.5 gates. STANDARD per §8 (spike/inventory with a constraint set). It grounds the two schema deltas (002/003) so they add exactly what is missing; getting the live column delta + `sprk_role` integer plan wrong here cascades into wrong schema, so it is not MINIMAL.</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>— (Phase-0 spike; grounds FR-06 + FR-08)</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    De-risk the two W0 schema deltas (002 `sprk_communicationthread` typed-regarding lookups + markers; 003 `sprk_communicationparticipant` junction) by confirming the CURRENT live state before anything is added. This is a read-only spike — NO schema change, NO code change. Produce ONE findings note under `projects/messaging-communication-app-r2/notes/` that 002 and 003 consume so they add exactly what is missing (never recreate an existing column).
+
+    Confirm, at minimum, using Dataverse MCP against the live env:
+
+    1. **Live `sprk_communicationthread` schema** — enumerate its current attributes. Confirm the as-built set from `notes/messaging-schema-spec.md` (R1): `sprk_name`, `sprk_threadtype`, `sprk_privacystate`, `sprk_privacyeffectivefrom`, denormalized regarding TEXT quartet incl. `sprk_regardingrecordtype` (**Text**). Confirm there are **NO typed `sprk_regarding{...}` lookups yet**, **NO Lookup discriminator**, **NO naming-edited marker**, and **NO default-thread marker** — i.e. exactly what task 002 must add.
+    2. **Q2 negative check** — confirm **category / tags / description are ABSENT** on the thread (spec drops them from CC-1; the schema pass must NOT add them).
+    3. **Live `sprk_communication` schema** — confirm the fields the participant write + reads depend on exist: `sprk_communicationtype` (channel choice), `sprk_sentby`, `sprk_sentat`, `sprk_regardingperson`, the `sprk_from`/`sprk_to`/`sprk_cc` TEXT fields, `sprk_cc`/`sprk_bcc`, and that **NO `sprk_communicationparticipant` junction exists yet** (task 003 creates it net-new).
+    4. **email-r4 `Services/Communication` merged state on THIS worktree** — grep-verify the key R1/email-r4 files are present (this worktree is synced to master, but confirm empirically): `Services/Communication/CommunicationThreadReadService.cs`, `Services/Communication/ThreadResolver.cs`, `Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs`, `Services/Communication/Engine/RegardingFieldMap.cs`, `Services/Communication/Models/ParticipantReference.cs`. Note the `RegardingFieldMap.All` 11-entity → typed-lookup-field list verbatim (002 mirrors it).
+    5. **`sprk_role` choice-integer plan** — inspect existing Spaarke Choice/optionset integer conventions (via MCP `describe` on an existing option set, e.g. `sprk_communicationtype`) and PROPOSE the exact integer values task 003 will assign to `sprk_role` {From, To, Cc, Bcc} (e.g. the `100000000`+ base). This is a mechanical plan, not a decision — record it so 003 assigns deterministically.
+
+    Do NOT mutate schema, do NOT write code. The single deliverable is the findings note (the confirmed column delta + the `RegardingFieldMap.All` list + the `sprk_role` integer plan).
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema-verification engineer. Fluent in the Dataverse MCP read tools (`describe`, `read_query`, `search`), Spaarke option-set integer conventions, and the `Services/Communication/**` layout shipped by R1 / email-r4. You confirm ground truth and hand the next two schema tasks an exact, do-not-recreate delta — you add nothing speculative and change nothing live.
+  </role>
+
+  <goal>
+    A findings note exists under `projects/messaging-communication-app-r2/notes/` recording: (a) the live `sprk_communicationthread` attribute set with the confirmed ABSENCE of typed regarding lookups / Lookup discriminator / naming-edited marker / default-thread marker (the exact 002 delta) and of category/tags/description (Q2); (b) the live `sprk_communication` attribute set confirming the read/participant dependencies exist and NO participant junction exists yet (the 003 net-new confirmation); (c) grep-confirmation that the five email-r4/R1 `Services/Communication` reference files are present on this worktree plus the verbatim `RegardingFieldMap.All` list; (d) the proposed `sprk_role` {From,To,Cc,Bcc} choice-integer plan. 002 and 003 can build against ground truth with no re-creation risk. No schema or code changed.
+  </goal>
+
+  <context>
+    <background>
+      R2 is mostly read-surface + UI over R1's data model plus two schema deltas (design §Executive Summary). The two deltas (002 thread lookups/markers, 003 participant junction) must be ADDITIVE and non-breaking (NFR-04). The one recurring failure mode in Dataverse schema work is recreating a column that already exists, or retyping a field that must stay (the Text `sprk_regardingrecordtype` — retyping it is breaking, spec §Out-of-Scope). This spike removes that risk by pinning the live delta before any create call.
+
+      The R1 investigation already surfaced the key facts this spike CONFIRMS live: thread `sprk_regardingrecordtype` is **Text** (not Lookup) so RegardingResolver needs a NEW Lookup discriminator; participant data is unqueryable today (`sprk_from/to/cc` are `;`-joined TEXT, no junction). See `notes/r2-resource-investigation.md` §1/§5 and `../messaging-communication-app-r1/notes/messaging-schema-spec.md`. This task verifies those against the live env rather than trusting the note, and produces the integer plan the note does not contain.
+
+      This is a spike (verify-before-build, design §Phase 0), not new surface — no §11 Component Justification is required (it introduces no component; it changes nothing).
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md (§1 regarding/thread model + §5 membership/person — the audit this spike confirms live)</file>
+      <file>projects/messaging-communication-app-r1/notes/messaging-schema-spec.md (R1 as-built thread/communication schema — confirm live)</file>
+      <file>projects/messaging-communication-app-r2/spec.md (FR-06, FR-08, Q2, NFR-04 — what 002/003 must add / must not touch)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (the 11-entity → typed-lookup map 002 mirrors — capture `All` verbatim)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">READ-ONLY. This spike MUST NOT create, update, or delete any Dataverse attribute/entity/option-set and MUST NOT modify any code. The single deliverable is a findings note.</constraint>
+    <constraint source="spec NFR-04 / Out-of-Scope">Confirm the thread's `sprk_regardingrecordtype` is **Text** and flag it as MUST-NOT-RETYPE; the 002 delta is a NEW Lookup discriminator, never a retype of this field.</constraint>
+    <constraint source="spec Q2">Confirm category / tags / description are ABSENT on `sprk_communicationthread`; the note MUST record that 002/003 do NOT add them.</constraint>
+    <constraint source="project">Use Dataverse MCP read tools (`describe`/`read_query`/`search`) for live schema; verify option-set integer conventions via MCP before proposing `sprk_role` values. Do NOT guess integers from memory.</constraint>
+    <constraint source="project">Grep-verify (empirically, not by trusting the sync claim) that the five `Services/Communication/**` reference files are present on this worktree; record the `RegardingFieldMap.All` 11-entity list verbatim for 002.</constraint>
+    <constraint source="project">Blocks 002 + 003 — the note MUST be specific enough that each adds exactly the missing columns with zero re-creation and a deterministic `sprk_role` integer assignment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>projects/messaging-communication-app-r1/notes/messaging-schema-spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse MCP live-schema read" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Use the built-in MCP read tools (`describe`, `read_query`, `search`) to enumerate an entity's live attributes + option-set integers before proposing any schema. Read-only; no mutation.
+      </pattern>
+      <pattern name="Regarding field map" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        `RegardingFieldMap.All` is the 11-entity → typed-lookup-field source of truth; task 002 mirrors it for the thread's typed regarding lookups. Capture it verbatim in the note.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read spec FR-06 / FR-08 / Q2 / NFR-04 + `notes/r2-resource-investigation.md` §1/§5 + `../messaging-communication-app-r1/notes/messaging-schema-spec.md` to fix exactly what 002/003 intend to add and what MUST NOT change.</step>
+    <step order="2">MCP-verify (`describe`) the live `sprk_communicationthread` entity: enumerate attributes; confirm `sprk_regardingrecordtype` is **Text**; confirm ABSENCE of typed `sprk_regarding{...}` lookups, a Lookup discriminator, a naming-edited marker, a default-thread marker, and (Q2) category/tags/description.</step>
+    <step order="3">MCP-verify (`describe`) the live `sprk_communication` entity: confirm `sprk_communicationtype`, `sprk_sentby`, `sprk_sentat`, `sprk_regardingperson`, `sprk_from`/`sprk_to`/`sprk_cc` (TEXT), `sprk_cc`/`sprk_bcc` exist; confirm NO `sprk_communicationparticipant` junction exists yet.</step>
+    <step order="4">Grep-verify the five `Services/Communication/**` reference files are present on this worktree (`CommunicationThreadReadService.cs`, `ThreadResolver.cs`, `Engine/Rungs/ParticipantCorrelationRung.cs`, `Engine/RegardingFieldMap.cs`, `Models/ParticipantReference.cs`); record `RegardingFieldMap.All` (the 11 entity → regarding-field pairs) verbatim.</step>
+    <step order="5">MCP-`describe` an existing Spaarke option set (e.g. `sprk_communicationtype`) to read the integer convention; PROPOSE the exact `sprk_role` {From, To, Cc, Bcc} integer values task 003 will assign (deterministic, convention-aligned).</step>
+    <step order="6">Write the findings note `projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md`: (a) thread live-attributes + the confirmed 002 delta + Q2 absence; (b) communication live-attributes + confirmed 003 net-new; (c) the five-file presence check + verbatim `RegardingFieldMap.All`; (d) the `sprk_role` integer plan. Explicitly list "columns that already exist — do NOT recreate" and "MUST-NOT-retype: `sprk_regardingrecordtype` (Text)".</step>
+    <step order="7">Update `tasks/TASK-INDEX.md` (001 ✅) + `current-task.md`; confirm 002 + 003 unblocked and point them at the note.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Spec + R1/R2 notes + `RegardingFieldMap.cs`</tool>
+    <tool name="mcp-dataverse-describe">Live thread + communication attribute enumeration + option-set integers (read-only)</tool>
+    <tool name="grep">Confirm the five `Services/Communication/**` reference files are present; capture `RegardingFieldMap.All`</tool>
+    <tool name="write">The findings note under `notes/`</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/messaging-communication-app-r2/notes/001-phase0-schema-audit.md (the confirmed 002/003 delta + do-not-recreate list + MUST-NOT-retype flag + verbatim `RegardingFieldMap.All` + `sprk_role` integer plan)</output>
+    <output type="docs">projects/messaging-communication-app-r2/tasks/TASK-INDEX.md (status update 001 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The findings note enumerates the live `sprk_communicationthread` attributes and confirms the ABSENCE of typed regarding lookups, a Lookup discriminator, a naming-edited marker, and a default-thread marker (the exact 002 delta).</criterion>
+    <criterion testable="true">The note confirms `sprk_regardingrecordtype` is **Text** and flags it MUST-NOT-RETYPE (NFR-04); and confirms category/tags/description are ABSENT (Q2) and are not to be added.</criterion>
+    <criterion testable="true">The note enumerates the live `sprk_communication` attributes needed by the reads/participant write and confirms NO `sprk_communicationparticipant` junction exists yet (003 is net-new).</criterion>
+    <criterion testable="true">The note records grep-confirmation that all five `Services/Communication/**` reference files are present on this worktree and includes the verbatim `RegardingFieldMap.All` 11-entity list.</criterion>
+    <criterion testable="true">The note proposes deterministic, convention-aligned `sprk_role` {From, To, Cc, Bcc} choice-integer values (verified against an existing option set via MCP), ready for 003 to assign.</criterion>
+    <criterion testable="true">NEGATIVE: no Dataverse attribute/entity/option-set was created, updated, or deleted, and no source code was modified — this task changed nothing live (read-only spike).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 002 (thread typed-regarding lookups + markers) and 003 (participant junction). Both consume this note's delta so they add ONLY what is missing — the whole point of Phase 0 is to prevent re-creating existing columns and to prevent retyping the Text `sprk_regardingrecordtype`.
+
+    The `sprk_role` integer plan is a mechanical detail (spec Unresolved Questions marks it as the one residual, not a decision) — pin it here so 003 is deterministic.
+
+    Do NOT skip the live MCP read in favor of trusting the R1 note — the note is the hypothesis; this task confirms it against the deployed env.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — read-only spike, Step 9.5 gates SKIPPED. Use Dataverse MCP read tools only; NO schema mutation, NO code change. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

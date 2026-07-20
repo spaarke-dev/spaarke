@@ -9,12 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **R2 = "Communication Workspace"** — draft design done; awaiting owner decisions on 5 questions, then `/design-to-spec` → `/project-pipeline`. |
-| **R2 design** | [`projects/messaging-communication-app-r2/design.md`](design.md) (DRAFT). Investigation archive: [`notes/r2-resource-investigation.md`](notes/r2-resource-investigation.md). NO folder scaffolding beyond design + notes yet (no spec/plan/tasks/README/CLAUDE.md). |
-| **Next action** | **4 of 5 owner decisions LOCKED 2026-07-18** (design §10). Only **Q3 (coordination confirm)** remains — one-line owner answer, then `/design-to-spec` on `design.md` → `/project-pipeline`. |
-| **Locked decisions** | Q1=**build participant junction in R2** · Q2=**no category/tags** · Q4=**ship standalone page** · Q5=**all 11 regarding entities**. R2 is now the *full-breadth* build. |
-| **R1 status** | **28/29 tasks done, DEPLOYED + MERGED TO MASTER.** Only `090` wrap-up + owner config gates remain. Timeline verified working live. |
-| **Status** | R2 = planning/design; R1 = code-complete + deployed, wrap-up pending. |
+| **Active work** | **R2 = "Communication Workspace"** — **`/project-pipeline` COMPLETE 2026-07-18.** Artifacts + 21 POML task files (all validated, `Validate-TaskPoml.ps1` clean) generated; worktree synced to latest master. **Ready for Wave 0 (task 001).** No active task yet. |
+| **Next action** | `work on task 001` (Phase-0 audit spike) — or `continue` to pick up the first 🔲 in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md). All task work via `task-execute`. |
+| **Artifacts** | [`spec.md`](spec.md) (12 FR/8 NFR) · [`plan.md`](plan.md) (9-wave WBS) · [`README.md`](README.md) · [`CLAUDE.md`](CLAUDE.md) · [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) (24 tasks). |
+| **Base** | Branch synced to latest master 2026-07-18 (merge brought assistant-r1 + email-r4 checkpoint work; email-r4 `Services/Communication` merged — R2 builds additively). |
+| **Locked decisions** | Q1=**build participant junction** · Q2=**no category/tags** · Q3=**upgrade grid/widget in place** · Q4=**ship standalone page** · Q5=**all 11 entities** · Q-C=**two typed lookups** · Q-D=**write unresolved-address rows** · Q-E=**stay polling, no spine dependency**. |
+| **Coordination** | `/conflict-check` before every BFF wave. Shared-path edits = **050** (participant write) + **070** (auto-threading) — `parallel-safe:false`. Widget **030** merge-order vs dataset-grid-r2 + PR #508. |
+| **Status** | R2 = **initialized, ready to execute**; R1 = complete + deployed + archived. |
+
+> **✅ POML task files**: all 21 `tasks/NNN-*.poml` files authored (6 parallel wave-authors) + validated
+> (`Validate-TaskPoml.ps1` → 21 clean / 0 errors). Pipeline **paused before Step 5 wave execution** at owner
+> request — ready for `work on task 001` (or `continue`).
 
 ---
 

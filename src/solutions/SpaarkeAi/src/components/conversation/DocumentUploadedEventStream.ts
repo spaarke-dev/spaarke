@@ -48,6 +48,7 @@
  */
 
 import { readSseStream, parseSseEvent } from '@spaarke/ui-components';
+import { assistantTextToDraftHtml, escapeHtml } from './assistantDraftHtml';
 
 // ---------------------------------------------------------------------------
 // Wire shapes (BFF EventRuleSseContract.cs records, serialized camelCase)
@@ -194,15 +195,111 @@ export function formatClassificationMessage(data: EventClassificationData): stri
   return `Classified "${name}" as **${docType}**${confidencePart}.`;
 }
 
+/** Coerce a `string | string[] | {…}[]` field into a flat list of display strings. */
+function toDisplayList(value: unknown): string[] {
+  if (typeof value === 'string') {
+    return value.trim().length > 0 ? [value.trim()] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => {
+        if (typeof v === 'string') return v.trim();
+        if (v && typeof v === 'object') {
+          const o = v as Record<string, unknown>;
+          // Prefer a human label; fall back to a compact stringify.
+          const label = o.title ?? o.name ?? o.label ?? o.ref ?? o.id;
+          return typeof label === 'string' ? label.trim() : JSON.stringify(v);
+        }
+        return String(v).trim();
+      })
+      .filter((s) => s.length > 0);
+  }
+  return [];
+}
+
+/**
+ * True when a payload is a draft-correspondence result: a `{subject, body, recipients_suggestion?,
+ * cited_refs?}` shape (a body plus at least one correspondence-specific field). Kept narrow so it
+ * doesn't match generic tldr/summary payloads. Shared by the readable renderer + the Compose route.
+ */
+export function isCorrespondenceDraft(payload: unknown): payload is Record<string, unknown> {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
+  const body = typeof record.body === 'string' ? record.body.trim() : '';
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+  const hasCorrespondenceField =
+    'recipients_suggestion' in record || 'cited_refs' in record || subject.length > 0;
+  return body.length > 0 && hasCorrespondenceField;
+}
+
+/**
+ * Draft-a-response (draft-correspondence) renderer (UAT 2026-07-19). Renders the
+ * `{subject, body, recipients_suggestion?, cited_refs?}` shape as a readable draft instead of a raw
+ * JSON dump. Returns null when the payload is NOT a correspondence draft (so the caller falls through
+ * to its other branches). Grounded — every line comes straight from the stored payload (ADR-039).
+ */
+export function formatCorrespondenceDraft(record: Record<string, unknown>): string | null {
+  if (!isCorrespondenceDraft(record)) {
+    return null;
+  }
+  const body = (record.body as string).trim();
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+
+  const recipients = toDisplayList(record.recipients_suggestion);
+  const citedRefs = toDisplayList(record.cited_refs);
+
+  const parts: string[] = ['**Draft response**'];
+  if (subject.length > 0) {
+    parts.push(`**Subject:** ${subject}`);
+  }
+  parts.push(body);
+  if (recipients.length > 0) {
+    parts.push(`**Suggested recipients:** ${recipients.join(', ')}`);
+  }
+  if (citedRefs.length > 0) {
+    parts.push(`**Sources:** ${citedRefs.join(', ')}`);
+  }
+  return parts.join('\n\n');
+}
+
+/**
+ * Build the seed HTML for a Compose draft from a draft-correspondence payload (UAT 2026-07-19 —
+ * owner: "a Compose tab with the drafted response"). The Compose editor is a document-BODY editor
+ * with no subject/recipients fields, so the subject + suggested recipients + sources are folded into
+ * the body as small header/footer lines; the body itself flows through `assistantTextToDraftHtml`
+ * (paragraph-wrapped, HTML-escaped — never injects markup). Caller passes the result as
+ * `widget_load` → `widgetData.compose.draft.html`.
+ */
+export function buildCorrespondenceComposeHtml(record: Record<string, unknown>): string {
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+  const body = typeof record.body === 'string' ? record.body : '';
+  const recipients = toDisplayList(record.recipients_suggestion);
+  const citedRefs = toDisplayList(record.cited_refs);
+
+  const parts: string[] = [];
+  if (subject.length > 0) {
+    parts.push(`<p><strong>Subject:</strong> ${escapeHtml(subject)}</p>`);
+  }
+  if (recipients.length > 0) {
+    parts.push(`<p><strong>To:</strong> ${escapeHtml(recipients.join(', '))}</p>`);
+  }
+  parts.push(assistantTextToDraftHtml(body));
+  if (citedRefs.length > 0) {
+    parts.push(`<p><em>Sources: ${escapeHtml(citedRefs.join(', '))}</em></p>`);
+  }
+  return parts.join('');
+}
+
 /**
  * Render an `event_output` payload (the STORED ledger entry, ADR-040 — render
  * follows store) as chat markdown.
  *
  * For the P1 summarize member the payload is the SUM-CHAT@v1
  * `DocumentAnalysisResult`-shaped JSON (`tldr/summary/keywords/entities`) —
- * rendered as a structured summary. Unknown payload shapes degrade to a
- * fenced JSON block (the payload IS the grounded output; we never invent
- * prose around it — ADR-039 no ungrounded free-form output).
+ * rendered as a structured summary. The draft-correspondence capability's
+ * `{subject, body, …}` shape renders as a readable draft. Unknown payload shapes
+ * degrade to a fenced JSON block (the payload IS the grounded output; we never
+ * invent prose around it — ADR-039 no ungrounded free-form output).
  */
 export function formatEventOutputMarkdown(payload: unknown): string {
   if (payload === null || payload === undefined) {
@@ -216,6 +313,16 @@ export function formatEventOutputMarkdown(payload: unknown): string {
   }
 
   const record = payload as Record<string, unknown>;
+
+  // Draft-a-response (draft-correspondence) output (UAT 2026-07-19 fix): a
+  // `{subject, body, recipients_suggestion, cited_refs}` shape has no tldr/summary,
+  // so it used to fall through to the raw-JSON branch and dump `{…}` into the chat.
+  // Detect the correspondence shape and render it as a readable draft instead.
+  const correspondence = formatCorrespondenceDraft(record);
+  if (correspondence !== null) {
+    return correspondence;
+  }
+
   const tldr = typeof record.tldr === 'string' && record.tldr.length > 0 ? record.tldr : null;
   const summary = typeof record.summary === 'string' && record.summary.length > 0 ? record.summary : null;
   const keywords = Array.isArray(record.keywords)

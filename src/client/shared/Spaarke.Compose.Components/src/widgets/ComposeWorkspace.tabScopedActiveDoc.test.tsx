@@ -42,17 +42,13 @@ jest.mock('@spaarke/auth', () => ({
 // ── PaneEventBus — controllable usePaneEvent (capture the workspace handler) ──
 type WorkspaceHandler = (event: { type: string; widgetData?: unknown }) => void;
 const workspaceHandlers: WorkspaceHandler[] = [];
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: (_channel: string, handler: WorkspaceHandler) => {
-      // Register once per render; tests invoke the latest handler via fireTabChange().
-      workspaceHandlers[0] = handler;
-    },
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: (_channel: string, handler: WorkspaceHandler) => {
+    // Register once per render; tests invoke the latest handler via fireTabChange().
+    workspaceHandlers[0] = handler;
+  },
+}));
 function fireTabChange(event: { type: string; widgetType?: string; widgetData?: unknown }): void {
   workspaceHandlers[0]?.(event);
 }

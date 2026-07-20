@@ -82,6 +82,23 @@
 | E-UAT1-10 | A `create-project` `surface_launch` opens `sprk_createprojectwizard` PRE-SEEDED: drafted name → project name, description → description; a high-confidence resolved `sprk_projecttype_ref` / `sprk_practicearea_ref` pre-selects the dropdown (low/none leaves it default). |
 | E-UAT1-11 | When the draft carried a session file, the wizard fetches it via `GET /api/ai/chat/sessions/{sessionId}/documents/{fileId}/content`, pre-seeds the Add-file step, re-profiles it (native pre-fill → project-type/practice-area + AI badges), and attaches it to the created project. |
 
+## From UAT P1-7 (post-upload action chips — 2026-07-18)
+
+> **Catalog data change (live, spaarkedev1, UAT-tweakable — no code/deploy).** Owner decision: uploading a file should CLASSIFY then OFFER options (not auto-summarize). The `document_uploaded` event rule is already classify-only (`chat-classify` is its sole member, order 1 — verified via `sprk_oneventbindings`); the auto-summarize bound was retired 2026-07-05. So P1-7 = re-author the post-classify chips on `chat-classify` (`5f3898d8-db78-f111-ab0e-7ced8ddc4cc6`).
+>
+> **Before**: `[{Summarize this document→chat-summarize 651194cd, requires_attachments}]`
+> **After**: `[{Summarize this file→chat-summarize 651194cd},{Create a matter→create-matter 89cd91f6},{Draft a response→draft-correspondence f7dc4a00}]` (all `requires_attachments:true`). The trailing "More…" card is client-side (→ Quick Start, P1-8), not a chip transition.
+>
+> **Prod parity**: apply the same `sprk_chiptransitions` PATCH to `chat-classify` in prod.
+
+| # | Utterance / action | Expected | Assertion |
+|---|---|---|---|
+| E-P17-01 | upload a file | `chat-classify` runs (order-1 member), then the transcript offers three chips + a "More…" card | chips = Summarize this file / Create a matter / Draft a response; NO automatic summary output |
+| E-P17-02 | after upload, tap **"Summarize this file"** | `chat-summarize` dispatch → structured summary | the summary appears only on demand (chip click), never auto |
+| E-P17-03 | after upload, tap **"Create a matter"** | `create-matter` surface_launch → Create Matter wizard opens, pre-seeded from the file | reuses the shipped create-matter file-leg |
+| E-P17-04 | after upload, tap **"Draft a response"** | `draft-correspondence` dispatch | informational draft rendered in-pane |
+| E-P17-05 | after upload, tap **"More…"** | Quick Start modal opens (P1-8) | not the retired playbook library |
+
 ---
 
 *Add new rows below as later catalog tasks (050 authoring, 044 grounding) accrue eval debt.*

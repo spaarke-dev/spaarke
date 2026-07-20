@@ -225,6 +225,12 @@ export function redlineMarksToDocxAnnotations(
         if (mark.type !== 'insertion' && mark.type !== 'deletion') continue;
         const ledgerRef = typeof mark.attrs?.ledgerRef === 'string' ? mark.attrs.ledgerRef : '';
         if (!ledgerRef) continue;
+        // FR-24 (spaarkeai-compose-r3 task 050): an IMPORTED existing Word revision (ledgerRef prefixed
+        // `imported:`) already lives in the retained-original baseline the dirty save deltas onto — it
+        // rides that baseline (survival proven by task 052) and MUST NOT be re-emitted here as a new
+        // annotation, or the save would double-write it. AI-suggested redlines (no `imported:` prefix)
+        // are unaffected. Kept in sync with IMPORTED_LEDGER_PREFIX in importedRevisions.ts.
+        if (ledgerRef.startsWith('imported:')) continue;
         let acc = byRef.get(ledgerRef);
         if (!acc) {
           acc = { ledgerRef, deletionText: '', insertionText: '' };

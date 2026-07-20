@@ -1,0 +1,168 @@
+<task id="011" project="messaging-communication-app-r2">
+  <metadata>
+    <title>BFF filtered communication query endpoint (thread/regarding/channel/date facets; participant= stubbed until W5 per FR-02)</title>
+    <phase>W1 — BFF Reads (CC-3)</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <deps>002</deps>
+    <blocks>051,080</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a NEW filtered read endpoint to `Sprk.Bff.Api` that backs the global grid + workspace widget queries and MUST enforce NFR-03 access parity (impersonation + 2-rule filter) on every facet — no message content may bypass the BFF filter. BFF-touching: publish-size + CVE + bff-extensions Placement Justification required; access-filter no-leak correctness demands code-review + adr-check at Step 9.5. Modifies `.cs` in shared `Services/Communication/` (additive).</rigor-reason>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-02, NFR-03</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add a single new filtered-query route to the EXISTING communication endpoint group and the supporting query method to the EXISTING read service:
+
+    • **Route** — `GET /api/communications?thread=&regarding=&channel=&from=&to=` on `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` (add to the existing `MapGroup("/api/communications")` — NO new endpoint group).
+    • **Service support** — a filtered-query method on `src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs` that composes the query facets onto the SAME impersonation read path used by task 010.
+
+    Returns a filtered communication list in the R1 DTO shape (reuse `CommunicationThreadReadModels.cs`). The **thread / regarding / channel / date facets** all reuse the read path (`IImpersonatedCommunicationQuery`) + the access filter (`Access/CommunicationAccessFilter.cs`):
+    - `thread=` → filter `sprk_communication` by `sprk_thread`
+    - `regarding=` → resolve via `RegardingFieldMap` (entity-set-agnostic, same resolution task 010 uses)
+    - `channel=` → filter by `sprk_communicationtype`
+    - `from=` / `to=` → date-range filter by `sprk_sentat`
+
+    **`participant=` is STUBBED in this task** — it is wired in **task 051** after the `sprk_communicationparticipant` junction (003) + participant-index write (050) land. In task 011, `participant=` MUST be **inert / graceful**: either reject it with an ADR-019 ProblemDetails "not-yet-supported" response OR ignore it (documented), and NEVER attempt a text-LIKE fallback over the `;`-joined address text. State this explicitly in code + PR. Blocks 051.
+
+    **NFR-03 access parity is the load-bearing correctness property.** Every facet routes through `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` (impersonation + 2-rule privacy + internal-only). Do **NOT** author a new access mechanism, a bespoke ACL, or reintroduce **membership-union on reads** (retired 2026-07-16). Unknown / empty / malformed filters degrade gracefully (no 500 — empty result or ADR-019 bad-request as appropriate).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authority on `src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs` + `Services/Communication/` reads. Fluent in ADR-028 (blessed impersonation read path), ADR-008 (endpoint filters), ADR-019 (ProblemDetails — graceful degradation), ADR-024 (11-entity regarding family / `RegardingFieldMap`), the R1 impersonation + 2-rule access model, NFR-03 access parity, §10 BFF Hygiene, and §11 Component Justification.
+  </role>
+
+  <goal>
+    A `GET /api/communications?thread=&regarding=&channel=&from=&to=` filtered-query endpoint exists on the existing communication group, backed by a filtered-query method on `CommunicationThreadReadService`, returning access-filtered communications in the R1 DTO shape. thread/regarding/channel/date facets reuse the impersonation read path + `CommunicationAccessFilter`; `participant=` is stubbed (inert/graceful, wired in 051). Every facet honors NFR-03 (impersonation + 2-rule; no new mechanism, no membership-union); unknown/empty filters degrade gracefully. The endpoint carries the ADR-008 authorization filter + ADR-019 ProblemDetails and is registered unconditionally. Build clean; per-facet + access-filter tests pass; publish-size delta + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      The global All-Communications grid (Surface 2, task 040/041) and the rich workspace widget (Surface 3, task 030) present communications filtered by channel / person / date / regarding across records. While those UI surfaces read the DataGrid via `Xrm.WebApi`, the filtered `query` endpoint is the BFF-mediated equivalent that honors the `internal-only` access rule the client-fetch path cannot enforce — and it is the endpoint task 051 completes with the `participant=` facet once the junction lands. Today the communication read surface is thread-id-scoped only (`CommunicationEndpoints.cs`); there is no cross-record filtered query.
+
+      Component Justification (§11): (1) **Existing** — grep-verified: `CommunicationEndpoints.cs` is thread-id-scoped; no route filters communications by channel/person/date/regarding across records. But `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` + `RegardingFieldMap` already own the read + filter + regarding map. (2) **Extension** — ONE additive route + ONE additive query method reusing all existing pieces; no new service, no new access mechanism, no second filter. (3) **Cost-of-doing-nothing (concrete)** — without the filtered `query` endpoint the global grid / widget cannot filter by person/channel/date across records through the access-honoring BFF path, and there is no endpoint for task 051 to complete with `participant=` (FR-02 acceptance fails); if any facet bypassed the access filter, private/internal-only content would leak (NFR-03 security failure). Named contract failures, not "future flexibility."
+
+      Why `participant=` is stubbed here: the exact person facet requires the `sprk_communicationparticipant` junction (task 003 schema) + the participant-index write (task 050) — neither exists in W1. A text-LIKE fallback over the `;`-joined `sprk_from/to/cc` text would return wrong results with no role precision and is explicitly forbidden (spec §11). So `participant=` is inert/graceful in W1 and wired in W5 (task 051). This task BLOCKS 051 (the facet has nowhere to land without the route) and 080 (seam tests).
+
+      NFR-03 access parity (binding): every facet MUST apply R1's impersonation + 2-rule filter and MUST NOT reintroduce membership-union on reads (retired 2026-07-16). Graceful degradation: unknown/empty/malformed filters yield an empty result or an ADR-019 bad-request — never a 500 and never an unfiltered dump.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (ADD the filtered `query` route to the existing `/api/communications` group)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (ADD the filtered-query method reusing the read path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs (REUSE — impersonated Dataverse query seam)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs + ICommunicationAccessFilter.cs (REUSE — 2-rule privacy + internal-only filter)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs (REUSE — R1 read DTO shape)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (REUSE — `regarding=` facet resolution, entity-set-agnostic)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (BFF filtered read vs Xrm.WebApi grid)</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md (membership-union retired 2026-07-16 — binding)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Scope: the filtered `query` endpoint returns a communication list filtered by thread/regarding/channel/date — all reusing the read path; `participant=` resolves against the junction (FR-08) but is STUBBED here (inert/graceful) and wired in task 051; access filter applied; unknown/empty filters degrade gracefully; returns the R1 DTO shape.</constraint>
+    <constraint source="NFR-03">Scope: every facet MUST apply R1's impersonation + 2-rule (privacy + internal-only) filter via `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter`; no message content bypasses the BFF filter. MUST NOT reintroduce membership-union on reads (retired 2026-07-16). No second/divergent filter; no text-LIKE participant fallback.</constraint>
+    <constraint source="ADR-028">Scope: reuse the blessed impersonation read path (`CommunicationThreadReadService` / `IImpersonatedCommunicationQuery`); MUST NOT fork it or `new` a credential; inject central `TokenCredential` + canonical Dataverse interfaces.</constraint>
+    <constraint source="ADR-008">Scope: the new route carries the standard communication authorization endpoint filter; auth posture consistent with the existing `/api/communications` group.</constraint>
+    <constraint source="ADR-019">Scope: bad filters (malformed date, unknown channel, bad regarding `entityType`, `participant=` not-yet-supported) return RFC 7807 ProblemDetails; no unhandled 500; graceful degradation.</constraint>
+    <constraint source="ADR-024">Scope: the `regarding=` facet uses the existing 11-entity family via `RegardingFieldMap.All`; MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="ADR-032 / ADR-010">Scope: the route is registered unconditionally on the existing group; any feature-gated dependency uses the Null-Object pattern (no asymmetric registration); interfaces are test seams over concretes.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md` before designing; state the Placement Justification in the PR (extends the existing group + read service — no new group/mechanism); report publish-size delta vs ~46.99 MB baseline (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="project §11">Scope: Component Justification — the route is new only because REST needs a new path; state the concrete FR-02/NFR-03 failure modes prevented (grid/widget cannot filter across records; 051 has no route to complete; leak on any facet) with grep evidence that no existing route offers a cross-record filtered query.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/ICommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Facet composition on the impersonation read path" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        Build the OData filter for thread/regarding/channel/date, run it through `IImpersonatedCommunicationQuery.QueryAsync`, then compose privacy + internal-only via `CommunicationAccessFilter` — the endpoint NEVER re-derives access and NEVER unions membership.
+      </pattern>
+      <pattern name="Graceful degradation" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">
+        Unknown/empty/malformed filters → empty result or ADR-019 ProblemDetails bad-request; never a 500, never an unfiltered dump. `participant=` returns an ADR-019 not-yet-supported (or documented inert) response until task 051.
+      </pattern>
+      <pattern name="Stub-with-a-successor" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">
+        `participant=` is accepted in the route contract but inert in W1; task 051 joins the `sprk_communicationparticipant` junction. Document the stub in code + PR so 051 has a defined seam.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` §F/§G + §11 Component Justification + `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` + `../messaging-communication-app-r1/notes/access-model-decision.md` (no membership-union) before adding the endpoint.</step>
+    <step order="2">Read `CommunicationThreadReadService.cs`, `IImpersonatedCommunicationQuery.cs`, `CommunicationAccessFilter.cs`, `CommunicationThreadReadModels.cs`, and `RegardingFieldMap.cs` to identify the impersonation-query entry point + access-filter call + DTO shape to reuse, and the `sprk_thread` / `sprk_communicationtype` / `sprk_sentat` column names for the facets. Coordinate with task 010 (same read path) to avoid divergent method shapes.</step>
+    <step order="3">Grep `CommunicationEndpoints.cs` + the read service to confirm no cross-record filtered `query` route exists (§11 existing-question evidence).</step>
+    <step order="4">Implement the filtered-query method on `CommunicationThreadReadService`: compose an OData filter from `thread` (`sprk_thread`), `regarding` (via `RegardingFieldMap`, entity-set-agnostic), `channel` (`sprk_communicationtype`), `from`/`to` (`sprk_sentat` range) → run through `IImpersonatedCommunicationQuery` → compose privacy + internal-only via `CommunicationAccessFilter` → project into the R1 DTO shape. No new filter, no membership-union, no text-LIKE participant fallback.</step>
+    <step order="5">Add the `participant=` STUB: accept the param in the route contract but return an ADR-019 not-yet-supported ProblemDetails (or documented inert behavior); add a code comment + PR note that task 051 wires it against the `sprk_communicationparticipant` junction. Never text-LIKE over `;`-joined address text.</step>
+    <step order="6">Add `GET /api/communications?thread=&regarding=&channel=&from=&to=&participant=` to the existing `/api/communications` group in `CommunicationEndpoints.cs`: bind query params, call the filtered-query method, apply the ADR-008 authorization filter + ADR-019 ProblemDetails (graceful on bad/unknown/empty filters); register unconditionally (ADR-032/ADR-010).</step>
+    <step order="7">Write tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) per-facet coverage — `thread=`, `regarding=` (entity-set-agnostic), `channel=`, `from`/`to` each filter correctly; (b) the access filter is applied on the filtered path (NEGATIVE — a private/internal-only message the caller may not see is absent from a facet result); (c) graceful degradation — unknown/empty/malformed filter yields empty/ADR-019, not 500; (d) `participant=` returns the not-yet-supported/inert response and does NOT text-LIKE; (e) no second filter / no membership-union reintroduced (grep/diff-verifiable).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing communication tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~46.99 MB baseline. Expected ≈ 0 (no new packages).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus per-facet access-filter application / no-leak / no membership-union / participant stub is genuinely inert); `adr-check` against `spec.md` (focus FR-02/NFR-03, ADR-028 read-path reuse, ADR-008/019/024, §11 justification). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/`; coordinate with task 010 on the same read path + `spaarke-notification-spine-r1`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (011 ✅) + `current-task.md`; record decisions (facet→column map, participant-stub contract for 051, access-filter reuse point, graceful-degradation policy).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the read service, impersonation query, access filter, read models, RegardingFieldMap, existing endpoints</tool>
+    <tool name="grep">Confirm no existing cross-record filtered query route (§11 evidence); verify no membership-union / no text-LIKE participant fallback</tool>
+    <tool name="edit">Add the filtered `query` route to `CommunicationEndpoints.cs`; add the filtered-query method to the read service; add the participant stub</tool>
+    <tool name="bash">Build, per-facet/access-filter tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — filtered `query` route added to the existing group; `participant=` stubbed; access-filtered; unconditional)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (UPDATED — filtered-query method reusing the impersonation query + `CommunicationAccessFilter`; no second filter)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — per-facet tests + access-filter-applied negative case + graceful-degradation cases + participant-stub-inert case + no-second-filter/no-membership-union assertion</output>
+    <output type="docs">PR description with §11 Component Justification (FR-02/NFR-03 failure modes + grep evidence) + the `participant=` stub contract for task 051 + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GET /api/communications?thread=&regarding=&channel=&from=&to=` exists on the existing `/api/communications` group and returns a filtered communication list in the R1 DTO shape (reuses `CommunicationThreadReadModels`).</criterion>
+    <criterion testable="true">Each of thread / regarding / channel / date facets filters correctly and is covered by a test; `regarding=` resolves entity-set-agnostically via `RegardingFieldMap`.</criterion>
+    <criterion testable="true">Every facet routes through `IImpersonatedCommunicationQuery` + `CommunicationAccessFilter` — no new access mechanism, no second/divergent filter, and NO membership-union is reintroduced (grep/diff-verifiable).</criterion>
+    <criterion testable="true">NEGATIVE: a private/internal-only message the caller may not see is absent from a facet result (access filter applied on the filtered path).</criterion>
+    <criterion testable="true">Graceful degradation: an unknown / empty / malformed filter yields an empty result or an ADR-019 ProblemDetails bad-request — never a 500 and never an unfiltered dump.</criterion>
+    <criterion testable="true">`participant=` is inert/graceful (ADR-019 not-yet-supported or documented no-op), does NOT perform a text-LIKE fallback, and leaves a defined seam for task 051.</criterion>
+    <criterion testable="true">The route carries the ADR-008 authorization filter + ADR-019 ProblemDetails and is registered unconditionally (ADR-032).</criterion>
+    <criterion testable="true">`dotnet build` clean; existing communication tests still pass; publish-size delta ≈ 0 vs ~46.99 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 002 (thread typed-regarding lookups + Lookup discriminator — the `regarding=` facet reads over them). Blocks 051 (the `participant=` facet completion) and 080 (per-facet + access-parity seam tests). Shares the impersonation read path with task 010 — coordinate on the read-service method shape so 010 and 011 do not diverge (both are W1, parallel-safe, but touch the same file additively; `/conflict-check` before PR). The single most important correctness property is no-leak on every facet: the negative access case is non-negotiable (NFR-03, security-sensitive). The `participant=` text-LIKE fallback is explicitly forbidden (spec §11) — leave it inert until the junction lands.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (per-facet access-filter no-leak is security-sensitive per NFR-03). Per CLAUDE.md §10 + §11: publish-size delta (baseline ~46.99 MB) + CVE + bff-extensions Placement Justification + Component Justification (FR-02/NFR-03 failure modes + grep evidence) + the `participant=` stub contract for task 051 in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`; coordinate with task 010). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -14,7 +14,13 @@
  * @see src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx
  */
 
-import type { ComposeAssistantToWorkspaceFlow, ComposeDocumentRef } from '../types/compose-contracts';
+import type {
+  ComposeAssistantToWorkspaceFlow,
+  ComposeDocumentRef,
+  ParaIdMapEntry,
+  ImportedRevision,
+  ImportedComment,
+} from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Document-context state machine
@@ -86,8 +92,35 @@ export interface ComposeWorkspaceState {
   seedHtml: string | null;
   /** ETag from last load — used as if-match on save (per ComposeEndpoints contract). */
   etag: string | null;
+  /**
+   * R3 FR-06 (task 027): the LOAD-TIME SPE version id from the Load response. Sent as
+   * `baselineVersionId` on a dirty-loaded save so the server can re-fetch the load-time baseline even if
+   * the client no longer holds the retained bytes (e.g. after a page refresh). Null for a transient/
+   * born-in-editor mount (no server version yet) or when the Load did not surface one.
+   */
+  versionId: string | null;
   /** Mammoth import warnings (Tier 1 safe). */
   importWarnings: Array<{ type: string; message: string }>;
+  /**
+   * task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): the server pre-parse `w14:paraId` map
+   * from a STORED-DOCUMENT Load response (task 010), in document order. Set ATOMICALLY with
+   * `docxBytes` on `loadSucceeded` (the ComposeEditor mount contract) so the editor stamps
+   * paraIds immediately after import. Empty for every other mount door (Browse upload / assistant
+   * upload / AI-draft seed) — those never carry a server pre-parse.
+   */
+  paraIdMap: readonly ParaIdMapEntry[];
+  /**
+   * task 052 fast-follow — existing Word revisions (`w:ins`/`w:del`) recovered server-side on a
+   * STORED-DOCUMENT Load (task 050) and projected for the editor render (FR-24). Set atomically
+   * with `docxBytes` + `paraIdMap`. Empty for every other mount door.
+   */
+  importedRevisions: readonly ImportedRevision[];
+  /**
+   * task 052 fast-follow — existing Word comments (`w:comment`) recovered server-side on a
+   * STORED-DOCUMENT Load (task 051) and projected for the editor render (FR-25). Set atomically
+   * with `docxBytes` + `paraIdMap`. Empty for every other mount door.
+   */
+  importedComments: readonly ImportedComment[];
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
@@ -115,9 +148,15 @@ export type ComposeWorkspaceAction =
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
       etag: string | null;
+      versionId: string | null;
       sessionId: string;
       sprkDocumentId?: string;
       fileName?: string;
+      // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): parsed defensively by the caller from an
+      // optional Load response field — undefined (older BFF) is normalized to `[]` in the reducer.
+      paraIdMap?: readonly ParaIdMapEntry[];
+      importedRevisions?: readonly ImportedRevision[];
+      importedComments?: readonly ImportedComment[];
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -139,7 +178,20 @@ export type ComposeWorkspaceAction =
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
   // server-minted id back so a second Save targets the real item (the replace path), not the
   // empty transient pointer (gap 1.7).
-  | { kind: 'saveSucceeded'; sprkDocumentId?: string; documentSpeId?: string; etag: string | null }
+  | {
+      kind: 'saveSucceeded';
+      sprkDocumentId?: string;
+      documentSpeId?: string;
+      etag: string | null;
+      // UAT 2026-07-19 P2: the save response's driveId + versionId. Retained so a SUBSEQUENT
+      // replace-path save of a BORN-IN-EDITOR doc (which holds no retained bytes) can resolve
+      // its baseline by re-fetching the just-saved version (server ResolveSaveBaselineAsync
+      // path b needs BaselineVersionId + DriveId + DocumentSpeId). Without these, the second
+      // save sent content=undefined + baselineVersionId=undefined and the server threw
+      // "no baseline could be resolved — supply the retained original bytes (Content)".
+      driveId?: string;
+      versionId?: string | null;
+    }
   | { kind: 'saveFailed'; errorMessage: string }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
@@ -164,7 +216,11 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   docxBytes: null,
   seedHtml: null,
   etag: null,
+  versionId: null,
   importWarnings: [],
+  paraIdMap: [],
+  importedRevisions: [],
+  importedComments: [],
   errorMessage: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
@@ -193,7 +249,13 @@ export function composeWorkspaceReducer(
         docxBytes: action.docxBytes,
         seedHtml: null,
         etag: action.etag,
+        versionId: action.versionId,
         sessionId: action.sessionId,
+        // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): set ATOMICALLY with docxBytes (the
+        // ComposeEditor mount contract) — normalize an omitted field (older BFF) to `[]`.
+        paraIdMap: action.paraIdMap ?? [],
+        importedRevisions: action.importedRevisions ?? [],
+        importedComments: action.importedComments ?? [],
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -238,9 +300,17 @@ export function composeWorkspaceReducer(
         docxBytes: action.docxBytes,
         seedHtml: null,
         etag: null,
+        versionId: null,
         sessionId: action.sessionId ?? state.sessionId,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
+        // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
+        // stored-document Load response to source imports from. Explicitly clear rather than
+        // inheriting whatever a PRIOR loaded document may have populated (e.g. Browse-mounting a
+        // new local file after an earlier stored-document load in the same tab).
+        paraIdMap: [],
+        importedRevisions: [],
+        importedComments: [],
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -252,8 +322,13 @@ export function composeWorkspaceReducer(
         docxBytes: null,
         seedHtml: action.html,
         etag: null,
+        versionId: null,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
+        // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.
+        paraIdMap: [],
+        importedRevisions: [],
+        importedComments: [],
         errorMessage: null,
       };
     case 'requestSave':
@@ -266,6 +341,15 @@ export function composeWorkspaceReducer(
         etag: action.etag,
         // UAT #7: bump the token so the banner stack surfaces a fresh transient "Saved ✓".
         saveSuccessToken: state.saveSuccessToken + 1,
+        // UAT 2026-07-19 P2: adopt the just-saved SPE version id as the baseline ONLY on the
+        // first persist (when we had none). A born-in-editor doc holds no retained bytes
+        // (docxBytes stays null) and had no load-time versionId; its create-on-save minted this
+        // first version, which becomes the FIXED baseline its replace-path saves delta onto.
+        //   CRITICAL — adopt-only-when-null (`state.versionId ??`): a STORED doc's versionId is
+        //   the LOAD-TIME original (set on loadSucceeded) and MUST stay fixed across saves so
+        //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
+        //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
+        versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -276,6 +360,10 @@ export function composeWorkspaceReducer(
                 action.documentSpeId && action.documentSpeId.length > 0
                   ? action.documentSpeId
                   : state.documentRef.speDriveItemId,
+              // UAT 2026-07-19 P2: carry the server-resolved drive id (a create-on-save doc lands
+              // in the BU container's drive, which the host's `driveId` prop does NOT identify) so
+              // the replace-path save + baseline re-fetch target the correct drive.
+              driveId: action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
             }
           : state.documentRef,
       };

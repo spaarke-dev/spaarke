@@ -2,20 +2,44 @@
   <metadata>
     <title>FR-14 rationale-first, anti-rubber-stamp accept/reject surface (no auto-accept low-band)</title>
     <phase>3 E3</phase>
-    <gate>blocked</gate>
+    <gate>startable</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
     <parallel-group>W3-E3</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>030</deps>
+    <deps>012</deps>
     <tags>frontend,fluent-ui,tiptap</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
     <started></started>
     <completed></completed>
   </metadata>
+
+  <amendment date="2026-07-18" by="spaarkeai-compose-r3 §6.5 Path B — confidence client-derive">
+    SUPERSEDES the "server-derived confidence_band" premise throughout this POML. Per the architecture
+    decision (spec FR-13/FR-16 amended; [`docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`]): the
+    band AND offsets are DERIVED CLIENT-SIDE at render against the LIVE editor document. Task 030's
+    server `DeriveConfidenceBand`/`ResolveParaIdAnchor` + the `confidence_band`/`start_offset`/`end_offset`
+    payload fields have been REMOVED (`paraId` retained as an optional authored hint). So this task now
+    OWNS the derivation, not just the render:
+    (a) Derive `confidence_band` in the client at materialize/render time — rule ported from the retired
+        server function: cited source (payload `sources` non-empty) AND live-doc target support (the
+        redline's `target_text`/`paraId` actually RESOLVES in the current editor doc) =&gt; `high`; exactly
+        one signal =&gt; `medium`; neither =&gt; `low`. NEVER a numeric score; NEVER a model self-report
+        (a deterministic function over grounding — ignore any `confidence_band` key smuggled in the
+        payload). Recompute REACTIVELY as the doc changes (a suggestion whose target the user deletes
+        drops to `low`).
+    (b) Resolve `paraId`/character offsets against the LIVE doc (only the client holds the current
+        paraId layout — a server offset would be stale). Do NOT read a server band/offset — they no
+        longer exist.
+    (c) Port the retired server unit cases (`ComposeConfidenceBandTests`) to CLIENT tests: grounded=&gt;high,
+        one-signal=&gt;medium, ungrounded=&gt;low, spoofed-band-ignored, target-resolves-vs-not.
+    NFR-06 DoD for the band is a CLIENT render/interaction test (NOT a BFF seam) — the derivation is
+    client-side. Dep on task 012 (paraId substrate) stands; the task-030 dependency reduces to the
+    retained `paraId` field only.
+  </amendment>
 
   <prompt>
     Implement FR-14: redesign the Compose accept/reject surface so it **leads with the cited
@@ -24,10 +48,10 @@
     2026 HCI research (design §6.2): low-confidence edits are **NEVER pre-selected or auto-accepted**,
     and every low-band edit exposes an **explicit-review affordance**. "Accept all" MUST NOT include
     low-band edits without an explicit confirmation step. This is a client-only change to the existing
-    accept/reject render path in `ComposeEditor.tsx` (`redlineLabelText`, lines 271-294); it consumes
-    the additive `confidence_band` field that task 030 added to `ComposeDraftPayload`. Do NOT emit a
-    false-precision numeric score, do NOT re-derive the band client-side (it is server-derived), and do
-    NOT change the mark/range apply layer.
+    accept/reject render path in `ComposeEditor.tsx` (`redlineLabelText`, lines 271-294); it DERIVES the
+    `confidence_band` client-side at render (see the amendment above + `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
+    Do NOT emit a false-precision numeric score, do NOT read a server band (removed), and do NOT change
+    the mark/range apply layer.
   </prompt>
 
   <role>
@@ -67,14 +91,14 @@
       <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-14, NFR-10 (Fluent v9 + dark mode, `@spaarke/auth`).</file>
     </relevant-files>
     <dependencies>
-      <dependency task="030" status="pending">FR-13/FR-16 server-derived `confidence_band` + paraId/offsets. Provides the `confidence_band` field on `ComposeDraftPayload` (client mirror) that this UI consumes. Without it there is no band to render or gate on.</dependency>
+      <dependency task="012" status="done">FR-11/FR-12 paraId substrate — the load-time paraId map + live-doc paragraph texts this task derives offsets against (client-side). (Task 030's server band was removed per §6.5 Path B; there is no server field to consume — this task OWNS the client derivation.)</dependency>
     </dependencies>
   </context>
 
   <constraints>
     <constraint source="ADR-021 / NFR-10">New/changed UI uses Fluent UI v9 components + tokens with correct dark-mode rendering. No inline hex; use design tokens. No Fluent v8 or ad-hoc CSS colors.</constraint>
     <constraint source="project / design §6.2">Rationale is the PRIMARY trust cue (visually leads); `confidence_band` is SECONDARY and coarse (high/medium/low) — never a numeric/percentage score (no false precision). Low-confidence edits are NEVER pre-selected or auto-accepted; each exposes an explicit-review affordance. "Accept all" excludes low-band edits unless the user explicitly confirms including them.</constraint>
-    <constraint source="project / NFR-04">Client-only change; the band is SERVER-DERIVED — do NOT re-derive or synthesize a band client-side, and do NOT add a new AI call or dispatch. Consume the field task 030 provides.</constraint>
+    <constraint source="project / NFR-04 (amended §6.5 Path B)">Client-only change; the band is DERIVED CLIENT-SIDE deterministically from grounding evidence + live-doc resolvability (see amendment). It is NOT a model self-report and adds NO new AI call or dispatch. There is NO server band field to consume (task 030's was removed) — ignore any `confidence_band` key smuggled in the opaque payload.</constraint>
     <constraint source="project / S5">Do NOT modify the mark/range apply layer (`usePendingRedline.ts:461-465`) — it is already slice-safe. This task is popover/label + selection-gating logic only.</constraint>
     <constraint source="ADR-028 / NFR-10">Any client fetch uses `@spaarke/auth` (no bespoke token handling). This task is primarily render/interaction; if it reads data it goes through the existing authed path.</constraint>
     <constraint source="NFR-06 / ADR-038">Reachability + interaction evidence: the surface must be mounted + reachable in the running host, and the accept-all/no-auto-accept rules asserted by component/interaction tests — not just built in isolation.</constraint>
@@ -120,7 +144,7 @@
     <criterion testable="true">The accept/reject surface leads with the cited rationale as the primary trust cue; the `confidence_band` renders as a secondary coarse band (high/medium/low) — no numeric/percentage confidence score is shown (no false precision).</criterion>
     <criterion testable="true">Low-confidence edits are never pre-selected and never auto-accepted; each low-band edit exposes an explicit-review affordance — asserted by an interaction test.</criterion>
     <criterion testable="true">"Accept all" does not include low-band edits without an explicit confirmation step — asserted by an interaction test.</criterion>
-    <criterion testable="true">The band is consumed from the server-derived `confidence_band` field (task 030 mirror); the UI does NOT re-derive a band client-side and adds no new AI call.</criterion>
+    <criterion testable="true">The band is derived CLIENT-SIDE deterministically from grounding evidence + live-doc resolvability (cited source AND live target resolves =&gt; high; one =&gt; medium; neither =&gt; low) — not a model self-report, no new AI call — and recomputes reactively as the doc changes; ported client unit cases (from the retired `ComposeConfidenceBandTests`) assert it.</criterion>
     <criterion testable="true">New/changed UI uses Fluent v9 + correct dark-mode tokens (ADR-021); the mark/range apply layer (`usePendingRedline.ts:461-465`) is unchanged.</criterion>
     <criterion testable="true">The surface is mounted + reachable in the running host; client shared-lib build is green with matching tests passing.</criterion>
   </acceptance-criteria>

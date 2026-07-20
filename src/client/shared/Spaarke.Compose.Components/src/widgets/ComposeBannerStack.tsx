@@ -60,6 +60,49 @@ export interface ComposeBannerStackProps {
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
 const SAVE_SUCCESS_VISIBLE_MS = 4000;
 
+// ---------------------------------------------------------------------------
+// FR-21 (DEF-15, R3 UAT round-3 carry-in) — sessionStorage-backed dismissal
+// ---------------------------------------------------------------------------
+//
+// The R2 UAT-round-3 fix (DEF-15) shipped a per-mount-only dismissal (a plain
+// local flag, reset whenever a NEW `importWarnings` array reference arrived —
+// see the owner note this replaces: "it need not persist across mounts").
+// FR-21 upgrades that: the dismissal must persist for the rest of the browser
+// SESSION (sessionStorage, not localStorage — a fresh tab/session re-warns).
+// The sentinel is keyed by a CONTENT signature of the warnings (not object
+// identity) so the R2 "a genuinely different import re-warns" behavior is
+// preserved: a new document whose warnings differ in count/type/message gets
+// a different signature and is NOT suppressed by a prior dismissal, while the
+// SAME warnings set (re-render, remount, or the same document reopened this
+// session) stays dismissed. No network call (ADR-028) — sessionStorage only.
+
+/** Stable content signature for an import-warnings array — the sessionStorage dismissal key suffix. */
+function importWarningsSignature(warnings: ReadonlyArray<{ type: string; message: string }>): string {
+  return warnings.map(w => `${w.type}:${w.message}`).join('|');
+}
+
+const IMPORT_WARNINGS_DISMISS_KEY_PREFIX = 'spaarke-compose:import-warnings-dismissed:';
+
+/** Best-effort sessionStorage read — never throws (private-browsing / quota / SSR-safe). */
+function readImportWarningsDismissed(signature: string): boolean {
+  if (typeof window === 'undefined' || !window.sessionStorage || signature === '') return false;
+  try {
+    return window.sessionStorage.getItem(IMPORT_WARNINGS_DISMISS_KEY_PREFIX + signature) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** Best-effort sessionStorage write — never throws. */
+function writeImportWarningsDismissed(signature: string): void {
+  if (typeof window === 'undefined' || !window.sessionStorage || signature === '') return;
+  try {
+    window.sessionStorage.setItem(IMPORT_WARNINGS_DISMISS_KEY_PREFIX + signature, '1');
+  } catch {
+    // Ignore — a failed persist just means the per-mount React state still governs this render.
+  }
+}
+
 const useStyles = makeStyles({
   bannerStack: {
     display: 'flex',
@@ -83,16 +126,25 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     saveSuccessToken = 0,
   } = props;
 
-  // DEF-15 (UAT-R3): the "Document opened with N simplification(s)" warning is
-  // informational and permanent-until-dismissed. Per-mount dismissal is enough
-  // (owner: "it need not persist across mounts") — a plain local flag. It resets
-  // whenever a NEW set of import warnings arrives (a fresh document load hands a
-  // new `importWarnings` array reference) so a later, genuinely-different import
-  // is not silently swallowed by a stale dismissal.
-  const [importWarningsDismissed, setImportWarningsDismissed] = React.useState(false);
+  // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
+  // simplification(s)" warning is informational and dismiss-and-stay-closed for
+  // the SESSION (sessionStorage — see the helpers above), superseding the R2
+  // per-mount-only flag. Keyed by content SIGNATURE (not object identity) so a
+  // genuinely different import (new/changed warnings) still surfaces — only the
+  // SAME warnings set (re-render, remount, or the same document reopened this
+  // session) stays suppressed.
+  const importWarningsSig = React.useMemo(() => importWarningsSignature(importWarnings), [importWarnings]);
+  const [importWarningsDismissed, setImportWarningsDismissed] = React.useState<boolean>(() =>
+    readImportWarningsDismissed(importWarningsSig)
+  );
   React.useEffect(() => {
-    setImportWarningsDismissed(false);
-  }, [importWarnings]);
+    setImportWarningsDismissed(readImportWarningsDismissed(importWarningsSig));
+  }, [importWarningsSig]);
+
+  const dismissImportWarnings = React.useCallback((): void => {
+    writeImportWarningsDismissed(importWarningsSig);
+    setImportWarningsDismissed(true);
+  }, [importWarningsSig]);
 
   const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
 
@@ -189,8 +241,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
             Some advanced features may not be preserved on save.
           </MessageBarBody>
-          {/* DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
-              container action. Clears the banner for this mount only. */}
+          {/* FR-21/DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
+              container action. Clears the banner AND persists the dismissal to
+              sessionStorage so it stays closed for the rest of the session. */}
           <MessageBarActions
             containerAction={
               <Button
@@ -198,7 +251,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 aria-label="Dismiss"
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-import-warning-dismiss"
-                onClick={() => setImportWarningsDismissed(true)}
+                onClick={dismissImportWarnings}
               />
             }
           />

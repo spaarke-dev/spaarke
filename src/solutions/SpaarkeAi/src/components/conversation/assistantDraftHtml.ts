@@ -11,7 +11,7 @@
  */
 
 /** HTML-escape a raw text run so it renders as literal text in the editor (never markup). */
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

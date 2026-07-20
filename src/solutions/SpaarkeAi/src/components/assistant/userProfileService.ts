@@ -43,6 +43,13 @@ export const USERPROFILE_SET = 'sprk_userprofiles';
 /** Entity set (collection) for `sprk_practicearea_ref`. */
 export const PRACTICEAREA_SET = 'sprk_practicearea_refs';
 /**
+ * Entity set (collection) for `sprk_workoffice` — the office reference table backing the
+ * "Primary work location" dropdown (MA-3, UAT 2026-07-19). Columns `sprk_workofficeid` + `sprk_name`
+ * (verified via $metadata / describe 2026-07-19). The SELECTED office NAME is stored in the existing
+ * free-text `sprk_officelocation` column (owner decision: no schema change / no relational lookup).
+ */
+export const WORKOFFICE_SET = 'sprk_workoffices';
+/**
  * N:N relationship navigation property connecting `sprk_userprofile` → `sprk_practicearea_ref`.
  * Confirmed via `EntityDefinitions(...)/ManyToManyRelationships` (2026-07-16): the SchemaName IS the
  * nav-property name on both sides. (The schema-contract note's guess that the nav prop equals the
@@ -96,6 +103,12 @@ export interface PracticeArea {
   code: string | null;
 }
 
+/** A selectable primary work location (from `sprk_workoffice`, MA-3). Name is what gets stored. */
+export interface WorkOffice {
+  id: string;
+  name: string;
+}
+
 /** The stored profile as read back for cold-start + prefill. */
 export interface UserProfileRow {
   id: string;
@@ -126,6 +139,8 @@ export interface UserProfileFormValues {
 export interface IUserProfilePort {
   getProfileByUser(systemUserId: string): Promise<UserProfileRow | null>;
   listPracticeAreas(): Promise<PracticeArea[]>;
+  /** Active work offices for the "Primary work location" dropdown (MA-3). */
+  listWorkOffices(): Promise<WorkOffice[]>;
   /** TRUE keyed upsert by `sprk_systemuser`; returns the (created-or-updated) profile id. */
   upsertProfileByUser(
     systemUserId: string,
@@ -174,6 +189,92 @@ export function sanitizeOffice(value: string | null | undefined): string | null 
 /** True when the profile is complete (cold-start gate: incomplete ⇒ keep showing the questionnaire). */
 export function isProfileComplete(row: UserProfileRow | null): boolean {
   return row !== null && row.profileCompletedOn !== null && row.profileCompletedOn !== undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Curated profile chips (MA-4, UAT 2026-07-19)
+// ---------------------------------------------------------------------------
+
+/**
+ * The free-text Focus-areas + Preferences boxes were replaced by curated multi-select chips (owner
+ * decision "Curated multi-select chips", 2026-07-19). KEY INSIGHT: the profile's `sprk_focusareas` /
+ * `sprk_assistantpreferences` text fields are ALREADY injected into the agent turn via
+ * `ContextBinder.userFragment` (BFF) — so we store each selected chip's DIRECTIVE PHRASE (newline-joined)
+ * in those existing columns and the AI picks them up with NO BFF change. Determinism comes from the
+ * curated chip→phrase mapping here (the user selects from a fixed set; the phrasing is never LLM-authored).
+ *
+ * `label` is the chip caption; `phrase` is the exact text persisted + injected. These catalogs are a
+ * STARTING proposal for owner reaction during UAT — extend/reword freely; the encode/decode round-trips
+ * any catalog because it matches on `phrase`.
+ */
+export interface ProfileChip {
+  /** Stable id (used as the selection key + test id). */
+  id: string;
+  /** Chip caption shown in the UI. */
+  label: string;
+  /** The exact directive text persisted to Dataverse + injected into the agent turn. */
+  phrase: string;
+}
+
+/** Assistant-behaviour directives → stored in `sprk_assistantpreferences`. */
+export const PREFERENCE_CHIPS: ReadonlyArray<ProfileChip> = [
+  { id: 'concise', label: 'Be concise', phrase: 'Be concise and get to the point.' },
+  { id: 'cite-sources', label: 'Always cite sources', phrase: 'Always cite the source documents you used.' },
+  { id: 'bullets', label: 'Use bullet points', phrase: 'Prefer bullet points over long prose.' },
+  { id: 'summary-first', label: 'Summary first', phrase: 'Always start with a short summary, then the detail.' },
+  { id: 'flag-risks', label: 'Flag risks & deadlines', phrase: 'Flag risks, obligations, and deadlines explicitly.' },
+  { id: 'plain-english', label: 'Plain English', phrase: 'Use plain English and avoid legalese where possible.' },
+  { id: 'define-terms', label: 'Define legal terms', phrase: 'Briefly define legal terms of art when you use them.' },
+  { id: 'next-steps', label: 'Suggest next steps', phrase: 'End with suggested next steps or actions where helpful.' },
+];
+
+/** Practice-focus tags → stored (as their labels) in `sprk_focusareas`. */
+export const FOCUS_AREA_CHIPS: ReadonlyArray<ProfileChip> = [
+  { id: 'ma', label: 'M&A', phrase: 'Mergers & acquisitions' },
+  { id: 'litigation', label: 'Litigation', phrase: 'Litigation & disputes' },
+  { id: 'employment', label: 'Employment', phrase: 'Employment & labor' },
+  { id: 'real-estate', label: 'Commercial real estate', phrase: 'Commercial real estate' },
+  { id: 'ip', label: 'IP / Patents', phrase: 'Intellectual property & patents' },
+  { id: 'banking', label: 'Banking & finance', phrase: 'Banking & finance' },
+  { id: 'corporate', label: 'Corporate / governance', phrase: 'Corporate & governance' },
+  { id: 'contracts', label: 'Commercial contracts', phrase: 'Commercial contracts' },
+  { id: 'regulatory', label: 'Regulatory & compliance', phrase: 'Regulatory & compliance' },
+  { id: 'privacy', label: 'Data privacy', phrase: 'Data privacy & protection' },
+  { id: 'tax', label: 'Tax', phrase: 'Tax' },
+  { id: 'restructuring', label: 'Restructuring', phrase: 'Restructuring & insolvency' },
+];
+
+/** Split a stored free-text value into its trimmed, non-empty segments (newline- or semicolon-delimited). */
+function splitStoredSegments(stored: string | null | undefined): string[] {
+  return (stored ?? '')
+    .split(/[\n;]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/** Encode selected chip ids → the newline-joined directive string persisted to Dataverse. */
+export function encodeChipSelection(selectedIds: ReadonlyArray<string>, catalog: ReadonlyArray<ProfileChip>): string {
+  const byId = new Map(catalog.map((c) => [c.id, c] as const));
+  return selectedIds
+    .map((id) => byId.get(id)?.phrase)
+    .filter((p): p is string => !!p)
+    .join('\n');
+}
+
+/**
+ * Decode a stored free-text value → the chip ids whose phrase is present. Round-trips values authored by
+ * `encodeChipSelection`; pre-existing free text that doesn't match a curated phrase simply yields no chips
+ * (acceptable — the owner is replacing the free-text boxes with the curated set).
+ */
+export function decodeChipSelection(stored: string | null | undefined, catalog: ReadonlyArray<ProfileChip>): string[] {
+  const segments = splitStoredSegments(stored);
+  const byPhrase = new Map(catalog.map((c) => [c.phrase.trim().toLowerCase(), c.id] as const));
+  const ids: string[] = [];
+  for (const seg of segments) {
+    const id = byPhrase.get(seg.toLowerCase());
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +425,16 @@ export function createDataverseUserProfilePort(deps: UserProfilePortDeps = {}): 
         name: String(r.sprk_practiceareaname ?? ''),
         code: (r.sprk_practiceareacode as string | null) ?? null,
       }));
+    },
+
+    async listWorkOffices(): Promise<WorkOffice[]> {
+      // Active offices only (statecode 0), alphabetical. Name is what the questionnaire persists.
+      const path = `/${WORKOFFICE_SET}?$select=sprk_workofficeid,sprk_name&$filter=statecode eq 0&$orderby=sprk_name`;
+      const response = await request(path, { method: 'GET' });
+      const body = (await response.json()) as { value?: Array<Record<string, unknown>> };
+      return (body.value ?? [])
+        .map((r) => ({ id: String(r.sprk_workofficeid ?? ''), name: String(r.sprk_name ?? '') }))
+        .filter((o) => o.name.length > 0);
     },
 
     async upsertProfileByUser(systemUserId, fields): Promise<string> {

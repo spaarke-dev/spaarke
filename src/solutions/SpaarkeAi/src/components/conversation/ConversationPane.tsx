@@ -17,10 +17,17 @@
  */
 
 import * as React from "react";
-import { Button, Tooltip } from "@fluentui/react-components";
-import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
+import {
+  Button,
+  Tooltip,
+  MessageBar,
+  MessageBarBody,
+  MessageBarActions,
+} from "@fluentui/react-components";
+import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
+import { QuickStartModal } from "./QuickStartModal";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -72,7 +79,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import {
   detectReviseThisDocumentIntent,
@@ -89,6 +96,7 @@ import {
   RestoreBanners,
   RefinementChipBar,
   FilesAttachedIndicator,
+  UploadProgressIndicator,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
 
@@ -234,33 +242,43 @@ export function ConversationPane(): React.JSX.Element {
   // per-message affordance below AND the natural-language "revise this document" flow (the mount must
   // precede the revise dispatch so a document session is established — see the decorate hook). Returns
   // true when a mount was dispatched (an active source document exists), false otherwise.
+  // Mount a SPECIFIC session file into Compose via the DIRECT 'compose' widget (the `compose.upload`
+  // seed shape is consumed verbatim by ComposeDirectWidget.buildLaunchFromSeed). WorkspacePane reuses
+  // the single Compose tab per distinct file. Returns true when a mount was dispatched.
+  const mountFileInCompose = React.useCallback(
+    (sessionFileId: string, fileName?: string): boolean => {
+      const sessionId = chatSessionIdRef.current;
+      if (!sessionFileId || !sessionId) return false;
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "compose",
+        widgetData: { compose: { upload: { sessionId, sessionFileId, fileName } } },
+        displayName: "Compose",
+      } as WorkspacePaneEvent);
+      return true;
+    },
+    [dispatch]
+  );
+
   const mountActiveSourceDocInCompose = React.useCallback((): boolean => {
     const active = activeSourceDocRef.current;
-    const sessionId = chatSessionIdRef.current;
-    if (!active?.sessionFileId || !sessionId) return false;
-    // spaarkeai-compose-r2: mount Compose through the first-class DIRECT
-    // 'compose' widget (ComposeDirectWidget → ComposeWorkspace), NOT the
-    // LegalWorkspace LAYOUT door. The `compose.upload` SEED SHAPE is UNCHANGED
-    // (ComposeDirectWidget.buildLaunchFromSeed consumes it verbatim) — only the
-    // widgetType/envelope flips. This makes ComposeWorkspace mount
-    // UNCONDITIONALLY (never LegalWorkspaceApp/dashboard) with no layout-row
-    // lookup or race. WorkspacePane REUSES the single 'compose' tab (re-seeding).
-    dispatch("workspace", {
-      type: "widget_load",
-      widgetType: "compose",
-      widgetData: {
-        compose: {
-          upload: {
-            sessionId,
-            sessionFileId: active.sessionFileId,
-            fileName: active.fileName,
-          },
-        },
-      },
-      displayName: "Compose",
-    } as WorkspacePaneEvent);
-    return true;
-  }, [dispatch]);
+    if (!active?.sessionFileId) return false;
+    return mountFileInCompose(active.sessionFileId, active.fileName);
+  }, [mountFileInCompose]);
+
+  // R4-4 (UAT 2026-07-19): "Revise the file" on-demand action (replaces the auto-open-on-attach).
+  // Mounts EVERY promoted (indexed) session file into Compose — multiple files open in separate
+  // Compose tabs; the single active file falls back through mountActiveSourceDocInCompose.
+  const handleReviseInCompose = React.useCallback((): void => {
+    const promoted = promotedFileIdsByNameRef.current;
+    if (promoted.size > 0) {
+      for (const [fileName, sessionFileId] of promoted) {
+        mountFileInCompose(sessionFileId, fileName);
+      }
+      return;
+    }
+    mountActiveSourceDocInCompose();
+  }, [mountFileInCompose, mountActiveSourceDocInCompose]);
 
   // FIX #10a: the generic per-message "Open in Compose" affordance was REMOVED (owner decision — it
   // did not reliably work and was not always appropriate). Mounting now happens only via INTENTIONAL
@@ -366,6 +384,10 @@ export function ConversationPane(): React.JSX.Element {
   // here), so the SNS cards' "More" affordance reaches it through a ref
   // rather than reordering hook declarations.
   const openLibraryModalRef = React.useRef<() => void>(() => undefined);
+  // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
+  // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
+  // reach through (below) points at this modal instead of the library modal.
+  const [quickStartOpen, setQuickStartOpen] = React.useState(false);
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
@@ -375,6 +397,18 @@ export function ConversationPane(): React.JSX.Element {
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
+    // UAT 2026-07-19: the post-classify "Create a matter" chip carries the uploaded file into the
+    // wizard (parity with the text path) — read the session's active source doc.
+    getActiveSourceFile: React.useCallback(
+      () =>
+        activeSourceDocRef.current?.sessionFileId
+          ? {
+              sessionFileId: activeSourceDocRef.current.sessionFileId,
+              fileName: activeSourceDocRef.current.fileName,
+            }
+          : null,
+      []
+    ),
   });
   acceptChipsRef.current = chips.acceptChips;
 
@@ -536,11 +570,10 @@ export function ConversationPane(): React.JSX.Element {
   // per-message "Accept" routes through this to the EXISTING `usePendingRedline.accept` in the editor.
   const acceptRedlineViaBridge = useComposeRedlineAccept();
 
-  // R4 — "Insert into document". The editor's insert-suggestion handler, published by ComposeWorkspace
-  // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
-  // Assistant then omits the SprkChat `onInsertToCompose` prop so the per-message button does not
-  // render (an insert has nowhere to land). Wired to SprkChat below.
-  const insertSuggestionToCompose = useComposeInsertSuggestion();
+  // R4 — "Insert into document". The editor's insert-suggestion conduit, published by ComposeWorkspace
+  // into the cross-pane bridge. UAT 2026-07-19: the per-message insert button was removed (noise), so
+  // the conduit is no longer wired to SprkChat — kept subscribed here for a future TARGETED affordance.
+  void useComposeInsertSuggestion();
 
   // FIX #1b — the editor's Save conduit (create-on-save / save-to-matter), published by ComposeWorkspace
   // into the cross-pane bridge. Null when no live editor is registered (no Compose tab open) — the
@@ -1015,7 +1048,8 @@ export function ConversationPane(): React.JSX.Element {
             composeIngestCeremonyFiredRef.current.add(sessionFileId);
             const confirmation = buildFileConfirmationMessage([name]);
             if (confirmation !== null) {
-              injection.enqueue(makeLocalAssistantMessage(confirmation));
+              // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
+              injection.enqueue(makeFileStatusMessage(confirmation, "File attached"));
             }
             eventBatch.fireForPromotedFile(sessionFileId);
           }
@@ -1095,7 +1129,8 @@ export function ConversationPane(): React.JSX.Element {
   // ids: the SNS "More" entry is a generic library browse, not tied to a
   // specific candidate-confidence flow (mirrors useCommandRouting's
   // `openLibraryModal([])` call for the same reason).
-  openLibraryModalRef.current = () => playbookOptions.handleOpenLibraryModal([]);
+  // P1-8: the SNS/post-upload "More…" card opens Quick Start (was the retired playbook library).
+  openLibraryModalRef.current = () => setQuickStartOpen(true);
   const commands = useCommandRouting({
     bffBaseUrl,
     authenticatedFetch,
@@ -1198,29 +1233,12 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [sourceDocReadyToken, pendingReviseThisDocument, mountActiveSourceDocInCompose, injection]);
 
-  // FIX #7 (spaarkeai-compose-r2) — AUTO-LOAD an Assistant-uploaded file into Compose.
-  // Owner decision (settled): when the user uploads a file in the ASSISTANT (a chat attachment), it
-  // should open in the Compose tab automatically — no need to say "revise this document" and no chip
-  // click. When a chat upload finishes promoting, `handleSessionFileUploaded` back-fills
-  // `activeSourceDocRef` and bumps `sourceDocReadyToken`; this effect then dispatches the SAME compose
-  // upload-seed mount the "Open in Compose" / revise flows use (`mountActiveSourceDocInCompose` →
-  // `widget_load{widgetType:'compose', compose:{upload:{…}}}`), so the uploaded doc mounts in the
-  // single Compose tab (WorkspacePane reuses it + keeps it mounted-hidden per Wave A #1).
-  //
-  // Dedup by sessionFileId so repeated token bumps / re-registrations don't re-mount the same file; a
-  // genuinely new upload (new sessionFileId) mounts and the single-tab reuse handles the tab. This does
-  // NOT fight the race-safe revise buffering above: a buffered revise still fires its own mount + the
-  // document-session routing (an idempotent single-tab re-seed) — auto-load only guarantees the doc is
-  // on screen, and a subsequent "revise" still routes correctly through the doc session.
-  const autoLoadedSourceDocIdRef = React.useRef<string | null>(null);
-  React.useEffect(() => {
-    if (sourceDocReadyToken === 0) return; // no upload has back-filled a source doc yet
-    const active = activeSourceDocRef.current;
-    if (!active?.sessionFileId) return;
-    if (autoLoadedSourceDocIdRef.current === active.sessionFileId) return; // already auto-loaded this file
-    autoLoadedSourceDocIdRef.current = active.sessionFileId;
-    mountActiveSourceDocInCompose();
-  }, [sourceDocReadyToken, mountActiveSourceDocInCompose]);
+  // R4-4 (UAT 2026-07-19) — the FIX #7 AUTO-LOAD-on-attach effect was REMOVED. Owner reversed the
+  // earlier decision: attaching files should NOT auto-open Compose (uploading 2 files spawned 2 Compose
+  // tabs, which was jarring). Opening a file in Compose is now an ON-DEMAND action — the "Revise in
+  // Compose" affordance in the files tray (handleReviseInCompose) — plus the existing intentional
+  // natural-language "revise this document" flow. `sourceDocReadyToken` still drives the race-safe
+  // buffered-revise effect above; it no longer triggers an auto-mount.
 
   // ── SprkChat session callbacks ────────────────────────────────────────────
   // R7 12.3a: clear the persisted id BEFORE SprkChat creates a fresh session.
@@ -1350,6 +1368,17 @@ export function ConversationPane(): React.JSX.Element {
   // the auth guard below (Rules of Hooks / React #300 — see the transcriptFooter note above).
   const myAssistant = useMyAssistant({ authenticatedFetch, bffBaseUrl });
 
+  // MA-1 (UAT 2026-07-19): the questionnaire no longer auto-opens. When the profile is incomplete we
+  // show a dismissible "complete your profile" nudge instead; dismissal is session-scoped.
+  const [profileNudgeDismissed, setProfileNudgeDismissed] = React.useState(false);
+  const showProfileNudge =
+    myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
+
+  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
+  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
+  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
+  const [chatMessageCount, setChatMessageCount] = React.useState(0);
+
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
   // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
@@ -1364,6 +1393,13 @@ export function ConversationPane(): React.JSX.Element {
   // Welcome heading shows only with no session, no entity, and no playbook.
   const showWelcomePanel =
     chatSessionId === null && entityContext === null && playbookId === undefined;
+
+  // CHAT-4 (UAT 2026-07-19): the get-started CARDS show whenever the transcript is empty (any
+  // session state) and there's no entity/playbook focus — so a restored-but-empty session gets the
+  // suggestions instead of SprkChat's bare "No messages yet". SprkChat's built-in empty state is
+  // suppressed (hideEmptyState) while we render our own.
+  const showWelcomeCards =
+    chatMessageCount === 0 && entityContext === null && playbookId === undefined;
 
   const predefinedPrompts =
     selection.refinementPrompts.length > 0 ? selection.refinementPrompts : undefined;
@@ -1412,7 +1448,10 @@ export function ConversationPane(): React.JSX.Element {
                 WorkspacePaneMenu — a second, independent Menu trigger in this
                 rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
                 questionnaire. */}
-            <AssistantToolMenu onMyAssistant={myAssistant.openDialog} />
+            <AssistantToolMenu
+              onMyAssistant={myAssistant.openDialog}
+              highlightMyAssistant={myAssistant.needsProfile}
+            />
           </>
         }
       />
@@ -1425,12 +1464,44 @@ export function ConversationPane(): React.JSX.Element {
       )}
 
       <div className={styles.content} role="region" aria-label="AI Chat">
+        {/* MA-1 (UAT 2026-07-19): dismissible "complete your profile" nudge — replaces the old
+            jarring auto-open of the My Assistant questionnaire. Clicking "Set up" opens the dialog. */}
+        {showProfileNudge && (
+          <MessageBar intent="info" data-testid="assistant-profile-nudge">
+            <MessageBarBody>
+              Personalize your assistant — tell it your role, focus areas, and preferences so it can
+              tailor its help.
+            </MessageBarBody>
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  aria-label="Dismiss"
+                  icon={<DismissRegular />}
+                  onClick={() => setProfileNudgeDismissed(true)}
+                  data-testid="assistant-profile-nudge-dismiss"
+                />
+              }
+            >
+              <Button
+                size="small"
+                onClick={myAssistant.openDialog}
+                data-testid="assistant-profile-nudge-setup"
+              >
+                Set up
+              </Button>
+            </MessageBarActions>
+          </MessageBar>
+        )}
+
         {showWelcomePanel && <WelcomePanel />}
-        {showWelcomePanel && (
+        {showWelcomeCards && (
           <WelcomeStartCards
             onSummarize={handleWelcomeSummarize}
             onCreateMatter={handleWelcomeCreateMatter}
             onCompose={handleWelcomeCompose}
+            // R4-2 (UAT 2026-07-19): "More…" opens the Quick Start modal (same modal the ⋮ menu uses).
+            onMore={() => setQuickStartOpen(true)}
           />
         )}
 
@@ -1470,8 +1541,23 @@ export function ConversationPane(): React.JSX.Element {
             <FilesAttachedIndicator
               uploadedFileCount={attachments.uploadedFileCount}
               promotedCount={attachments.promotedCount}
+              // decision-1 (UAT 2026-07-19): give the files their own collapsible section — a
+              // dropdown lists each filename when there's more than one.
+              files={attachments.attachmentChips}
+              // R4-4 (UAT 2026-07-19): open the attached file(s) in Compose on demand (replaces the
+              // removed auto-open-on-attach). Only offered once at least one file is indexed/promoted.
+              onRevise={attachments.promotedCount > 0 ? handleReviseInCompose : undefined}
             />
           )}
+
+          {/* UP-10 (UAT 2026-07-19): live "Attaching file… / Classifying file…" progress with a
+              spinner while the composer is locked during the ingest window, so the user knows to wait. */}
+          <UploadProgressIndicator
+            attaching={attachments.isPromoting}
+            classifying={eventBatch.isEventInFlight}
+            // R4-10 (UAT 2026-07-19): "Working…" while a chip capability (e.g. Summarize) runs.
+            working={chips.dispatching}
+          />
 
           {/* FIX #1a: the post-mount DOCUMENT-LEVEL action chips (Summarize / Add to DMS / Draft
               reporting email) moved BELOW the ask message — they now render inside SprkChat's
@@ -1494,7 +1580,18 @@ export function ConversationPane(): React.JSX.Element {
               // its own `streaming`/`extracting` states; this adds the two windows it can't see — the
               // `/documents` promotion POST (attachments.isPromoting) and the Event classify SSE stream
               // (eventBatch.isEventInFlight).
-              inputBusy={attachments.isPromoting || eventBatch.isEventInFlight}
+              inputBusy={attachments.isPromoting || eventBatch.isEventInFlight || chips.dispatching}
+              // CHAT-6 (UAT 2026-07-19): the SpaarkeAi Assistant treats slash commands as an
+              // advanced affordance — hide the toolbar Prompt button (slash menu still reachable via `/`).
+              hidePromptMenu
+              // CHAT-4 (UAT 2026-07-19): we render our own WelcomeStartCards on an empty transcript,
+              // so suppress SprkChat's bare "No messages yet".
+              hideEmptyState={showWelcomeCards}
+              // CHAT-5 (UAT 2026-07-19): a taller, friendlier composer. The placeholder greets on a
+              // fresh/empty transcript and reverts to the neutral prompt once the conversation starts.
+              inputPlaceholder={chatMessageCount === 0 ? "Let's get started…" : "Type a message…"}
+              // R4-3 (UAT 2026-07-19): taller composer (~2× the prior default).
+              inputMinRows={6}
               // Click-path chips render INLINE IN THE TRANSCRIPT (G-P2 finding 1); FIX #1a adds the
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
@@ -1509,7 +1606,12 @@ export function ConversationPane(): React.JSX.Element {
               injectLocalMessage={injection.pendingInjection}
               onLocalMessageInjected={injection.handleLocalMessageInjected}
               onBeforeSendMessage={handleBeforeSendMessage}
-              onMessagesChange={commands.noteMessagesChanged}
+              onMessagesChange={(msgs) => {
+                // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle
+                // with the empty/non-empty state, then defer to the existing command-routing note.
+                setChatMessageCount(msgs.length);
+                commands.noteMessagesChanged(msgs);
+              }}
               onDecorateOutboundBody={handleDecorateOutboundBodyWithRevise}
               onPlaybookOptions={playbookOptions.handlePlaybookOptions}
               onSelectPlaybook={playbookOptions.handleSelectPlaybook}
@@ -1520,12 +1622,12 @@ export function ConversationPane(): React.JSX.Element {
               // the agent selects a `surface_launch`-disposition capability.
               onSurfaceLaunch={handleSurfaceLaunch}
               onCitations={docQaCitation.onCitations}
-              // R4 — "Insert into document": one-click insert of a completed Assistant suggestion's
-              // text into the Compose editor as a tracked change at the current selection/cursor.
-              // Passed ONLY when a live editor is registered (a Compose tab is open) so the button
-              // renders exclusively when the insert can land; routes through the bridge to
-              // ComposeWorkspace's `materializeComposeDraft` (existing redline engine).
-              onInsertToCompose={insertSuggestionToCompose ?? undefined}
+              // UAT 2026-07-19: the per-message "Insert into document" button was noise — it appeared
+              // after essentially every Assistant message and was rarely the relevant action (even the
+              // P1-3 length gate wasn't selective enough). Removed by not passing `onInsertToCompose`.
+              // `insertSuggestionToCompose` (the bridge conduit) stays available for a future TARGETED
+              // insert affordance (e.g. a dedicated "Insert" only on a genuine compose-draft message).
+              // onInsertToCompose intentionally omitted.
               // FIX #10a: the generic per-message "Open in Compose" affordance was removed —
               // `onOpenInCompose` is intentionally NOT passed (no auto-appended mount link).
               // DEF-12: per-message Accept / Reject / Try-another controls on the compose-edit
@@ -1553,6 +1655,9 @@ export function ConversationPane(): React.JSX.Element {
           </div>
         </div>
       </div>
+
+      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
+      <QuickStartModal open={quickStartOpen} onClose={() => setQuickStartOpen(false)} />
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
 
@@ -1585,9 +1690,9 @@ export function ConversationPane(): React.JSX.Element {
           onClose={myAssistant.closeDialog}
           coldStart={myAssistant.coldStart}
           practiceAreas={myAssistant.practiceAreas}
+          workOffices={myAssistant.workOffices}
           initialValues={myAssistant.initialValues}
           onSubmit={myAssistant.onSubmit}
-          onErase={myAssistant.onErase}
           loading={myAssistant.loading}
         />
       ) : null}

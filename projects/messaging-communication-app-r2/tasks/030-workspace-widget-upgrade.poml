@@ -1,0 +1,192 @@
+<task id="030" project="messaging-communication-app-r2">
+  <metadata>
+    <title>New `@spaarke/communication-components` lib + rich Pattern D workspace widget (copy `CalendarWorkspaceWidget`); upgrade `communications-list` IN PLACE (keep type string + section id); dual-deploy LegalWorkspace + SpaarkeAi</title>
+    <phase>W3 — Workspace Widget Upgrade (Surface 3) — upgrade-in-place</phase>
+    <status>not-started</status>
+    <estimated-hours>14</estimated-hours>
+    <deps>010</deps>
+    <blocks></blocks>
+    <tags>frontend, fluent-ui, spaarke-ai</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a NEW load-bearing shared library (`@spaarke/communication-components`) + a rich Pattern D workspace widget (`.tsx`/`.ts`) that replaces the thin `communications-list` surface used by BOTH LegalWorkspace and SpaarkeAi; architecture-level decisions (new-lib boundary per §11, Pattern D dual-use shape, filter-chip toolbar + card strip + embedded `<DataGrid hostFilters onRecordOpen>` + row-click modal, keep-type-string dispatch invariant); dual-deploy is the R1/prior trap (NFR-07); merge-order coordination with `spaarke-dataset-grid-framework-r2` + open PR #508. ADR-021 (Fluent v9), ADR-012 (shared lib) bind; ADR-021 dark-mode is a hard UI-test gate. FULL is non-negotiable.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript in a NEW `src/client/shared/Spaarke.Communication.Components/**` package plus two narrow edits (`register-workspace-widgets.ts`, `communications.registration.ts`); disjoint by file + language from the concurrent BFF (C#) tracks and the schema/PCF tracks. Coordinate MERGE ORDER (not concurrency) with `spaarke-dataset-grid-framework-r2` (`@spaarke/legal-workspace` extraction + section-registry) and open PR #508 (Events.Components package boundary that this task copies from) — see &lt;notes&gt;.</parallel-reason>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Upgrade the existing thin `communications-list` workspace widget to a **rich Calendar-style Pattern D widget** (FR-12). Today the widget is a bare `<DataGrid>` mounted via `DataverseEntityViewWidget` (no cards, no filter chips, no chrome). Make it a first-class dual-use widget with a filter-chip toolbar + a card strip + an embedded `<DataGrid hostFilters onRecordOpen>` + a row-click modal — copying the shape of `src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx`.
+
+    The rich widget content lives in a **NEW shared library `@spaarke/communication-components`** at `src/client/shared/Spaarke.Communication.Components/`. §11: the Events lib is entity-coupled (calendar/event semantics) and `@spaarke/ai-widgets` is a thin-generic layer — neither is the right home for rich communication widget content (investigation §4). Do NOT bloat ai-widgets or couple into the Events lib; the new lib is the cohesive home.
+
+    **Upgrade `communications-list` IN PLACE — do NOT add a second widget (NFR-05).** You MUST:
+    - **Keep the type string `communications-list`** in `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts` (the Direct/dual-use registration, ~line 733). Renaming it breaks AI-router + section dispatch.
+    - **Keep the section id `communications`** (and the `communications-list` widgetType) in `src/solutions/LegalWorkspace/src/sections/communications.registration.ts`. Point its `renderContent` at the new rich widget instead of the bare `DataverseEntityViewWidget`, preserving `configId` = `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` (the shipped "Active Communications" grid config — reuse, no second default).
+    - Register the new rich widget component through the same `registerWorkspaceWidget('communications-list', …)` call — one registration, upgraded factory, same contract `WorkspaceWidgetComponent<TData>` (`Spaarke.AI.Widgets/src/types/widget-types.ts`).
+
+    Row-click opens Layout 1 (OOB modal via `Xrm.Navigation.navigateTo` at 85% × 85%) through the DataGrid framework's `defaultRecordOpen`/`onRecordOpen` — mirror the existing behavior; do NOT re-implement modal mechanics. Advanced filter state pipes through the `<DataGrid hostFilters={…}/>` prop (`fetchXmlOverlay.ts`), exactly as `CalendarWorkspaceWidget` pipes its filter row.
+
+    **DUAL-DEPLOY (NFR-07)**: widget/shared-lib changes MUST rebuild BOTH `src/solutions/LegalWorkspace/` and `src/solutions/SpaarkeAi/`. This is the R1/prior dual-deploy trap — a change deployed to only one surface renders stale in the other.
+
+    Fluent UI v9 only (ADR-021): `@fluentui/react-components` + `makeStyles` + `tokens`; dark mode passes through the host `FluentProvider`; no hardcoded colors. No BFF changes — the widget reads via `Xrm.WebApi` through `XrmDataverseClient` (investigation §4).
+  </prompt>
+
+  <role>
+    Senior React 18/19 + TypeScript developer fluent in Fluent UI v9 (`makeStyles`/`tokens`/`FluentProvider`), the SpaarkeAi workspace-widget model (`WorkspaceWidgetComponent`, `registerWorkspaceWidget`, Pattern D dual-use), the Spaarke DataGrid framework (`<DataGrid configId hostFilters onRecordOpen>`, chip auto-derivation, `fetchXmlOverlay`), and the dual-deploy discipline for shared-lib widget changes. Familiar with `CalendarWorkspaceWidget` as the canonical Pattern D reference.
+  </role>
+
+  <goal>
+    A new `@spaarke/communication-components` shared library exists at `src/client/shared/Spaarke.Communication.Components/` exporting a rich Pattern D communications widget (filter-chip toolbar + card strip + embedded `<DataGrid configId="e1826c4c-9575-f111-ab0e-7ced8ddc4a05" hostFilters onRecordOpen>` + row-click modal), copied in shape from `CalendarWorkspaceWidget.tsx`. The existing `communications-list` Direct registration (`register-workspace-widgets.ts`) and the `communications` section registration (`communications.registration.ts`) are upgraded IN PLACE to mount it — the type string `communications-list` and section id `communications` are UNCHANGED (dispatch unbroken). Exactly ONE widget registration (no second widget). The change is dual-deployed to LegalWorkspace + SpaarkeAi. Builds + lint clean; dark-mode + semantic-token compliant (ADR-021); the widget renders in both hosts.
+  </goal>
+
+  <context>
+    <background>
+      Surface 3 of R2 upgrades the workspace widget from thin to rich. The thin `communications-list` widget already exists in both wrappers: the Direct registration (`register-workspace-widgets.ts` ~line 733) and the section shim (`communications.registration.ts`), plus `sectionRegistry.ts` line 120 + `scripts/system-layouts.json` (sortOrder 6). Today it renders a bare `<DataGrid>` via `DataverseEntityViewWidget` — no cards, no filter chips, no chrome (investigation §4). R2 makes it a first-class Pattern D dual-use widget matching the shipped Calendar widget's richness.
+
+      §11 Component Justification (concrete cost-of-doing-nothing): the NEW `@spaarke/communication-components` lib is justified because there is no cohesive home for rich communication widget content — the Events lib (`@spaarke/events-components`) is entity-coupled (calendar/event semantics) and `@spaarke/ai-widgets` is a thin-generic layer (investigation §4). Existing overlap (grep-verified): none that hosts rich comm content. Extension test: neither the Events lib nor ai-widgets can host this without either coupling comm content into calendar semantics or bloating the generic layer. Cost-of-doing-nothing: rich widget content has no cohesive home and forces coupling into the Events lib or bloats ai-widgets. The WIDGET UPGRADE itself is extend-only (no §11 justification needed) — it extends the existing `communications-list` registration in place; the ONLY new component is the lib.
+
+      NFR-05 (no duplication): MUST NOT add a second widget registration. Upgrade the existing `communications-list` in place; keep the type string + section id. The grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` is REUSED (single default) — do NOT create a colliding second `sprk_isdefault` config.
+
+      NFR-07 (dual-deploy): the R1/prior trap. Any change to a shared lib the widget lives in, or to the widget registration, requires rebuilding BOTH LegalWorkspace and SpaarkeAi. A one-surface deploy leaves the other rendering the stale widget.
+
+      Merge-order coordination (plan §3 hot-path): `spaarke-dataset-grid-framework-r2` is actively touching `@spaarke/legal-workspace` extraction + the section-registry, and open PR #508 changes the Events.Components package boundary that this task copies from. This is a MERGE-ORDER concern, not a concurrency one — run `/conflict-check` before the PR and coordinate landing order so the copied `CalendarWorkspaceWidget` shape and the section-registry edits do not diverge. See &lt;notes&gt;.
+
+      Reference the Pattern D dual-use archetype: `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (Calendar canonical). No BFF changes — the widget reads via `Xrm.WebApi` through `XrmDataverseClient` (`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`); root §10 (BFF hygiene, publish-size, CVE) does NOT apply.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Communication.Components/ (NEW lib `@spaarke/communication-components`: package.json, tsconfig.json, src/index.ts, src/widgets/CommunicationsWorkspaceWidget/*.tsx)</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx (COPY — Pattern D shape: filter-chip toolbar + card strip + `<DataGrid hostFilters onRecordsLoaded onRecordOpen>` + modal)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (EDIT — upgrade the `communications-list` Direct registration ~line 733; KEEP the type string)</file>
+      <file>src/solutions/LegalWorkspace/src/sections/communications.registration.ts (EDIT — point `renderContent` at the new rich widget; KEEP section id `communications` + widgetType `communications-list` + configId `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts (READ — `WorkspaceWidgetComponent<TData>` contract to satisfy)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/ (CONSUME — `<DataGrid configId hostFilters onRecordOpen>`; `filterChips/chipDiscovery.ts`; `fetchXmlOverlay.ts` `hostFilters`)</file>
+      <file>src/solutions/LegalWorkspace/ + src/solutions/SpaarkeAi/ (DUAL-DEPLOY — rebuild BOTH per NFR-07)</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md (READ — Pattern D dual-use archetype, Calendar canonical)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-12">Upgrade `communications-list` to the rich Pattern D widget (copy `CalendarWorkspaceWidget.tsx`) in the new `@spaarke/communication-components` lib: card strip + filter-chip toolbar + embedded `<DataGrid hostFilters onRecordOpen>` + row-click modal. Dispatch unbroken.</constraint>
+    <constraint source="NFR-05">MUST NOT add a second widget registration; upgrade the existing `communications-list` IN PLACE. MUST NOT create a second `sprk_gridconfiguration` default — reuse `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`.</constraint>
+    <constraint source="NFR-07">Dual-deploy: rebuild BOTH `src/solutions/LegalWorkspace/` AND `src/solutions/SpaarkeAi/` for the widget/shared-lib change (the R1/prior dual-deploy trap).</constraint>
+    <constraint source="project">MUST keep the widget type string `communications-list` AND the section id `communications` UNCHANGED — renaming either breaks AI-router + section dispatch.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 ONLY (`@fluentui/react-components`); `makeStyles` + `tokens`; dark mode via host `FluentProvider`; no hardcoded colors; no v8/v0.</constraint>
+    <constraint source="ADR-012">Shared-library rules — the rich widget content lives in the NEW `@spaarke/communication-components` package; context-agnostic components; export via the lib barrel; no cross-package source-path imports.</constraint>
+    <constraint source="project">§11 — the ONLY new component is the `@spaarke/communication-components` lib (Events lib entity-coupled + ai-widgets thin-generic → new lib justified, investigation §4). State the concrete failure mode (no cohesive home for rich comm content) + grep evidence in the PR. The widget upgrade itself is extend-only.</constraint>
+    <constraint source="project">Row-click reuses the DataGrid framework's `defaultRecordOpen`/`onRecordOpen` (Layout 1 OOB modal via `Xrm.Navigation.navigateTo` 85% × 85%) — do NOT re-implement modal mechanics (`docs/standards/MODAL-DECISION-CRITERIA.md`).</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — client-only TypeScript, reads via `Xrm.WebApi`/`XrmDataverseClient` (root §10 N/A). Build via `npm run build` (dev), NOT dotnet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/communications.registration.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/widget-types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D dual-use widget (Calendar canonical)" location="src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx">
+        Copy the shape: a widget that renders a filter/card strip above `<DataGrid configId hostFilters onRecordsLoaded onRecordOpen dataverseClient/>`; filter state → `HostFilterCondition[]` via `overlayHostFilters`; row-click opens the OOB modal via `defaultRecordOpen`. Satisfies `WorkspaceWidgetComponent`.
+      </pattern>
+      <pattern name="Upgrade-in-place registration (keep type string)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts">
+        The `communications-list` Direct registration (~line 733) stays a single `registerWorkspaceWidget('communications-list', …)` call — swap the lazy factory to import the new rich widget. Renaming the type string breaks dispatch (see the `documents-list`/`invoices-list` sibling comments).
+      </pattern>
+      <pattern name="Section shim points at the widget (keep section id)" location="src/solutions/LegalWorkspace/src/sections/communications.registration.ts">
+        Keep `id: 'communications'` + `widgetType: 'communications-list'` + `configId = e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; change only what `renderContent` mounts (rich widget instead of bare `DataverseEntityViewWidget`).
+      </pattern>
+      <pattern name="Fluent v9 dark-mode tokens" location=".claude/skills/fluent-v9-component/SKILL.md">
+        `makeStyles` + `tokens` only; the card strip + filter chips use semantic tokens so dark mode passes through the host `FluentProvider`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `CalendarWorkspaceWidget.tsx` (Pattern D shape), the `communications-list` Direct registration (`register-workspace-widgets.ts` ~line 733) + the `communications` section registration, `widget-types.ts` (`WorkspaceWidgetComponent<TData>`), DataGrid `chipDiscovery.ts` + `fetchXmlOverlay.ts` (`hostFilters`), and `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (Pattern D). Confirm the current thin surface (`DataverseEntityViewWidget`) and the reused configId `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`.</step>
+    <step order="2">Run `/conflict-check` and confirm merge-order with `spaarke-dataset-grid-framework-r2` (`@spaarke/legal-workspace` + section-registry) and open PR #508 (Events.Components boundary). Record the coordination decision in `current-task.md`.</step>
+    <step order="3">Scaffold the NEW lib `src/client/shared/Spaarke.Communication.Components/` (`@spaarke/communication-components`): `package.json` (mirror `Spaarke.Events.Components` package config + peer deps), `tsconfig.json`, `src/index.ts` barrel. Follow `src/client/shared/CLAUDE.md` conventions (Fluent v9, context-agnostic, JSDoc, exported types).</step>
+    <step order="4">Author the rich widget in the new lib (e.g. `src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx`) by copying `CalendarWorkspaceWidget.tsx`'s shape: a filter-chip toolbar + a card strip + embedded `<DataGrid configId="e1826c4c-9575-f111-ab0e-7ced8ddc4a05" hostFilters onRecordsLoaded onRecordOpen dataverseClient/>` + row-click modal via `defaultRecordOpen`. `makeStyles` + `tokens`; no hardcoded colors. Adapt filter facets to communications (channel/person/date/regarding); do NOT re-implement chip discovery — the framework auto-derives from the view.</step>
+    <step order="5">Export the widget from the lib barrel (`src/index.ts`). Ensure the component satisfies `WorkspaceWidgetComponent<TData>` (import the type from `@spaarke/ai-widgets`).</step>
+    <step order="6">Edit `register-workspace-widgets.ts`: upgrade the `communications-list` Direct registration (~line 733) to lazy-import the new rich widget from `@spaarke/communication-components`. KEEP the type string `communications-list` + the registration metadata (displayName, category, allowMultiple, visibility). ONE registration only — no second widget.</step>
+    <step order="7">Edit `communications.registration.ts`: keep `id: 'communications'` + `widgetType: 'communications-list'` + `configId = e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; change `renderContent` to mount the new rich widget instead of the bare `DataverseEntityViewWidget`.</step>
+    <step order="8">Build the new lib + `@spaarke/ui-components`/`@spaarke/ai-widgets` consumers: `npm run build` + `npm run lint` (use `npm install --legacy-peer-deps --no-audit --no-fund` if a fresh install is needed; NOT `npm ci`). Resolve type/lint errors. Grep-verify the type string `communications-list` and section id `communications` are unchanged and there is exactly ONE `registerWorkspaceWidget('communications-list', …)` call.</step>
+    <step order="9">DUAL-DEPLOY (NFR-07): rebuild BOTH `src/solutions/LegalWorkspace/` AND `src/solutions/SpaarkeAi/` via the `code-page-deploy` skill (use `npm install --legacy-peer-deps` per root §12). Confirm both bundles pick up the new lib. Document the two deploys in `current-task.md`.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the new lib + the two registration edits (focus: type string + section id unchanged, single registration, new-lib §11 justification concrete + grep-cited, Fluent v9 semantic tokens, `hostFilters`/`onRecordOpen` reuse not re-implemented, dual-deploy done); `adr-check` against ADR-021/ADR-012 + `spec.md` (FR-12, NFR-05, NFR-07). Address Critical + High findings.</step>
+    <step order="10">Run the UI tests (see `&lt;ui-tests&gt;`): widget renders in BOTH LegalWorkspace and SpaarkeAi; dark-mode correct; card strip + filter chips + grid + row-click modal all function; dispatch (type string) unbroken.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (030 ✅) + `current-task.md`; record decisions (new-lib name + boundary, which `CalendarWorkspaceWidget` elements were copied vs adapted, the reused configId, dual-deploy evidence, merge-order coordination outcome with dataset-grid-r2 + PR #508).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">CalendarWorkspaceWidget, both registrations, widget-types, DataGrid chipDiscovery/fetchXmlOverlay, BUILD-A-NEW-WORKSPACE-WIDGET, ADR-021/012</tool>
+    <tool name="write">New `@spaarke/communication-components` lib (package.json, tsconfig, barrel, rich widget)</tool>
+    <tool name="edit">`register-workspace-widgets.ts` + `communications.registration.ts` (upgrade in place, keep type string + section id)</tool>
+    <tool name="bash">npm run build + npm run lint + grep for the type string / single registration</tool>
+    <tool name="conflict-check">Merge-order coordination (dataset-grid-r2 + PR #508) before the PR</tool>
+    <tool name="code-page-deploy">Dual-deploy LegalWorkspace + SpaarkeAi (NFR-07)</tool>
+    <tool name="fluent-v9-component">Fluent v9 conventions for the rich widget</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/ (NEW lib: package.json, tsconfig.json, src/index.ts)</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/*.tsx (NEW — rich Pattern D widget)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (UPDATED — `communications-list` factory upgraded; type string unchanged)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/communications.registration.ts (UPDATED — `renderContent` mounts the rich widget; section id + widgetType + configId unchanged)</output>
+    <output type="docs">Dual-deploy evidence (LegalWorkspace + SpaarkeAi) + merge-order coordination note (in current-task.md / PR)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The rich `communications-list` widget renders in **LegalWorkspace** (card strip + filter-chip toolbar + embedded `<DataGrid>` + no console errors).</ui-test>
+    <ui-test>The rich `communications-list` widget renders in **SpaarkeAi** (dual-deploy — same widget, both hosts render current, not stale).</ui-test>
+    <ui-test>Dark mode (ADR-021): the widget, card strip, filter chips, and grid render correctly under a dark `FluentProvider` (semantic tokens; no hardcoded colors).</ui-test>
+    <ui-test>Filter chips auto-derive (channel/person/date/regarding) from the reused config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; applying a chip pipes through `<DataGrid hostFilters>` and filters the grid.</ui-test>
+    <ui-test>Row-click opens the OOB record modal via the framework's `defaultRecordOpen` (Layout 1, `Xrm.Navigation.navigateTo` 85% × 85%) — modal mechanics not re-implemented.</ui-test>
+    <ui-test>Dispatch unbroken: the type string `communications-list` and section id `communications` are unchanged; the section still resolves and the AI-router/section still mounts the widget.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A NEW shared library `@spaarke/communication-components` exists at `src/client/shared/Spaarke.Communication.Components/` and exports a rich Pattern D communications widget via its barrel.</criterion>
+    <criterion testable="true">The widget renders a filter-chip toolbar + a card strip + an embedded `<DataGrid configId="e1826c4c-9575-f111-ab0e-7ced8ddc4a05" hostFilters onRecordOpen>` + a row-click modal — copied in shape from `CalendarWorkspaceWidget.tsx`.</criterion>
+    <criterion testable="true">The `communications-list` Direct registration is upgraded IN PLACE — the type string `communications-list` is UNCHANGED and there is exactly ONE `registerWorkspaceWidget('communications-list', …)` call (grep-verified; no second widget — NFR-05).</criterion>
+    <criterion testable="true">The `communications` section registration keeps section id `communications` + widgetType `communications-list` + configId `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`; only `renderContent`'s mounted component changed.</criterion>
+    <criterion testable="true">The grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` is REUSED (single default); no second `sprk_gridconfiguration` default was created.</criterion>
+    <criterion testable="true">Only `@fluentui/react-components` + `makeStyles` + `tokens` used for styling; no hardcoded colors; dark mode passes through the host `FluentProvider` (ADR-021).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean across the new lib + consumers; the change is DUAL-DEPLOYED (LegalWorkspace + SpaarkeAi rebuilt — NFR-07).</criterion>
+    <criterion testable="true">UI tests pass: widget renders in BOTH hosts, dark-mode correct, chips/grid/row-modal function, dispatch (type string) unbroken.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    **MERGE-ORDER COORDINATION (binding — plan §3 hot-path).** This task edits SpaarkeAi-widget hot-path files that other active worktrees touch:
+    - `spaarke-dataset-grid-framework-r2` is extracting `@spaarke/legal-workspace` and reworking the section-registry (`communications.registration.ts` already carries dataset-grid-r2 FR-08/DEF-005 edits). Coordinate landing order so the section-registry edits do not diverge.
+    - Open PR **#508** changes the `@spaarke/events-components` (Events.Components) package boundary — the very package this task copies `CalendarWorkspaceWidget.tsx` from. If #508 lands first, re-copy from the post-#508 shape.
+    - Run `/conflict-check` at task start and before the PR; this is a MERGE-ORDER concern, not concurrency (the task is `parallel-safe: true` by file surface).
+
+    **DUAL-DEPLOY (NFR-07)** is the R1/prior trap — rebuild BOTH LegalWorkspace and SpaarkeAi. A one-surface deploy leaves the other rendering the stale thin widget.
+
+    No BFF changes — the widget reads via `Xrm.WebApi`/`XrmDataverseClient` (investigation §4). Standalone page (task 040) + grid curation (task 041) are the sibling W4 grid-half tracks; they read the same config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 (code-review + adr-check) MANDATORY. Client-only TypeScript: build via `npm run build` (NOT dotnet); no publish-size/CVE step (root §10 N/A). Run `/conflict-check` for merge-order (dataset-grid-r2 + PR #508). DUAL-DEPLOY LegalWorkspace + SpaarkeAi via `code-page-deploy` (NFR-07). Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

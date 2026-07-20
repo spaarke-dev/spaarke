@@ -1,0 +1,173 @@
+<task id="020" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Regarding-mode extension to the `CommunicationTimeline` component (`@spaarke/ui-components`): threads-as-collapsible-groups → per-thread interleaved email+chat timelines, backed by the new `by-regarding` endpoint</title>
+    <phase>W2 — Record Threads View (Surface 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <deps>010</deps>
+    <blocks>021</blocks>
+    <tags>frontend, fluent-ui, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the load-bearing shared-library `CommunicationTimeline` React component (`.tsx`/`.ts` in `@spaarke/ui-components`) with a NEW render mode that becomes the R2 record-level message surface; architecture-level decisions (regarding read model, collapsible-group state, group→thread timeline reuse, access-parity trust boundary); blocks the PCF packaging (021). ADR-021 (Fluent v9), ADR-012 (shared lib), ADR-028 (auth decoupling), NFR-03 (server-filtered, no client access logic) bind. FULL is non-negotiable.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript in `src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**` — disjoint by file + language from the concurrent BFF (C#) and schema tracks. Within W2 this is the serial root (021 packages it, 022 places it), but it runs safely alongside other waves. 023 (VisualHost config) touches no shared files.</parallel-reason>
+    <fr-refs>FR-03</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Extend the shipped `CommunicationTimeline` component (R1 task 060) in `src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/` with a **regarding mode**. Today the component renders a single thread (thread-id mode). Add a mode that takes a regarding record `(entityType, id)` and renders **all of that record's threads as collapsible groups** — each group header shows the thread name + message count; expanding a group reveals that thread's **interleaved email+chat message timeline** (the exact R1 rendering).
+
+    The regarding mode MUST (FR-03):
+    - **Take `(entityType, id)`** as input (a new prop shape / discriminated mode) instead of a single `threadId`.
+    - **Call the new `by-regarding` endpoint** (task 010): `GET /api/communications/by-regarding/{entityType}/{id}`, via the injected `authenticatedFetch` — returns all threads + messages for the record in the same DTO shape as R1 reads.
+    - **Render threads as collapsible groups** — the collapsed group shows the thread `sprk_name` + a message count; expanding renders the per-thread interleaved timeline. Default collapse/expand behavior is a design decision (state it in notes).
+    - **Interleave email + chat by timestamp** within each expanded thread — REUSE the R1 `buildTimeline`/`MessageRow`/`ChannelBadge` rendering; do NOT fork or re-implement the row/interleave/nesting engine.
+    - **NO client-side access logic** — the component renders whatever the server returns. The `by-regarding` endpoint already applies R1's impersonation + 2-rule (privacy + internal-only) filter (NFR-03). The component MUST NOT re-derive privacy, hide rows, or filter by access client-side.
+
+    All network I/O flows through the injected `authenticatedFetch` prop + the existing `communicationTimelineApi` service — add a `readByRegarding(entityType, id, {authenticatedFetch, ...})` wrapper. The component MUST NOT import `@spaarke/auth` (ADR-028 / shared-lib decoupling). Fluent UI v9 only (ADR-021): `@fluentui/react-components` + `makeStyles` + `tokens`; dark mode passes through the host `FluentProvider`; no hardcoded colors. There is NO client-side ACS SDK anywhere (R1 NFR-04 carries into R2) — the timeline reads persisted `sprk_communication` records via the BFF only.
+
+    Do NOT build the PCF wrapper here (task 021) or place it on forms (022) — this task extends the shared render engine only.
+  </prompt>
+
+  <role>
+    Senior React 18 + TypeScript developer fluent in Fluent UI v9 (`makeStyles`/`tokens`/`FluentProvider`) and the shipped `CommunicationTimeline` engine (`buildTimeline`, `MessageRow`, `ChannelBadge`, `useThreadPoll`, the reducer) + the `authenticatedFetch`-injection idiom (ADR-028 decoupling). Comfortable extending a component with a second render mode without regressing the existing thread-id mode.
+  </role>
+
+  <goal>
+    The `CommunicationTimeline` component in `@spaarke/ui-components` supports a **regarding mode** that takes `(entityType, id)`, calls the `by-regarding` endpoint (task 010) via the injected `authenticatedFetch`, and renders the record's threads as collapsible groups (name + message count) each expanding to the R1 interleaved email+chat timeline. The existing thread-id mode is unchanged. No client-side access logic (server-filtered). No `@spaarke/auth` import and no `@azure/communication-*` import (grep-verified). `npm run build` + `npm run lint` clean; dark-mode + semantic-token compliant (ADR-021).
+  </goal>
+
+  <context>
+    <background>
+      Surface 1 of R2 is the record-level regarding-mode Timeline placed on all 11 regarding-family entity forms. R1 shipped the per-thread polling Timeline; R2 adds the "all threads for THIS record, grouped" view on top of it (spec §Scope Surface 1, FR-03). The read model is the new `by-regarding` endpoint (task 010) which extends `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `ICommunicationAccessFilter` — the blessed R1 impersonation read path — and is entity-set-agnostic across all 11 families.
+
+      §11 Component Justification — this is **extend-only, no new component**. The spec explicitly lists regarding-mode Timeline (FR-03/04) as "Extend-only (no §11 justification needed): extends `CommunicationTimeline`". Existing: the R1 `CommunicationTimeline` renders a single thread. Extension: add a regarding mode that groups threads and reuses the same row/interleave engine — do NOT create a second timeline component or fork the render path. Cost-of-doing-nothing: without this mode FR-03 has no render surface and the `by-regarding` endpoint (010) has no consumer. The failure mode is a named contract failure (FR-03), not "future flexibility".
+
+      Access parity (NFR-03) is a hard trust-boundary rule: the `by-regarding` endpoint applies R1's impersonation + 2-rule (privacy + internal-only) filter server-side. The component renders what the BFF returns and MUST NOT re-derive privacy or filter rows client-side — mirroring the R1 timeline's "renders what the BFF returns" contract (`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`).
+
+      ADR-026 Path-A exception (spec §ADR Tensions / R1 precedent): R2's UI surface is the OOB main form + PCFs, not a Code Page — this component is the render engine that task 021 packages as a form-bound PCF. Cite the Path-A exception in the PR touching this UI surface.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx (EXTEND — add regarding mode branch; keep thread-id mode intact)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts (EXTEND — add regarding-mode props / discriminated mode, RegardingThreadGroup type)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.reducer.ts (EXTEND — group/expand state for regarding mode)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts (REUSE — the interleave/nesting engine per thread; do NOT fork)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx + ChannelBadge.tsx (REUSE — per-thread rows)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/ThreadGroup.tsx (NEW — collapsible group header: name + message count → expands to the per-thread timeline)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts (EXTEND — add `readByRegarding(entityType, id, {...})` over the injected authenticatedFetch)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/index.ts (UPDATE — export any new regarding-mode types)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts (READ — barrel already exports CommunicationTimeline at line ~221; add new type exports only if needed)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03">Extend `CommunicationTimeline` with a regarding mode taking `(entityType, id)`; render threads as collapsible groups (name + message count) each expanding to the interleaved email+chat timeline; call `by-regarding` (FR-01); reuse the R1 component rendering; no client-side access logic (server-filtered). Scope: the shared component only — no PCF, no form placement.</constraint>
+    <constraint source="NFR-03">Access parity — the component renders whatever the access-filtered `by-regarding` endpoint returns; it MUST NOT re-derive privacy, hide rows, or apply any access/privacy filter client-side. Scope: this component + its API wrapper.</constraint>
+    <constraint source="NFR-04">No client-side ACS SDK — the component MUST NOT import any `@azure/communication-*` package (R1 rule carried into R2). Reads persisted `sprk_communication` records via the BFF only. Grep-verified.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 ONLY (`@fluentui/react-components`); `makeStyles` + `tokens`; dark mode via host `FluentProvider`; no hardcoded colors; no v8/v0. The new group header + expand/collapse chrome use semantic tokens.</constraint>
+    <constraint source="ADR-028">Component + sub-components MUST NOT import `@spaarke/auth`. The host injects `authenticatedFetch` via props; `communicationTimelineApi.readByRegarding` forwards it.</constraint>
+    <constraint source="ADR-012">Shared-library rules — the change lives in `@spaarke/ui-components`; no fork of the timeline; reuse the existing `buildTimeline`/`MessageRow`/`ChannelBadge`; export via the lib barrel; no cross-package source-path imports.</constraint>
+    <constraint source="ADR-026">Path-A exception: this component is packaged as a form-bound PCF (task 021), NOT a Code Page. Cite the exception in the PR.</constraint>
+    <constraint source="project">§11 extend-only — do NOT create a second timeline component; reuse the R1 render engine and existing thread-id mode. State the FR-03 failure mode + "extends CommunicationTimeline, no new component" in the PR.</constraint>
+    <constraint source="project">Client-only TypeScript — NO BFF publish-size / CVE obligation (root §10 N/A). Build via `npm run build` (dev) — NOT dotnet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="R1 timeline render engine reuse" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts">
+        Per expanded thread, reuse `buildTimeline(messages)` + `MessageRow` + `ChannelBadge` to render the interleaved email+chat list. The regarding mode only adds the grouping layer above; it does not re-implement rows/interleave/nesting.
+      </pattern>
+      <pattern name="authenticatedFetch injection (ADR-028)" location="src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts">
+        Add `readByRegarding(entityType, id, {authenticatedFetch, bffBaseUrl})` alongside the existing thread-read wrappers; the component never imports `@spaarke/auth`. Mirror the existing service's typed-error contract.
+      </pattern>
+      <pattern name="Fluent v9 dark-mode tokens" location=".claude/skills/fluent-v9-component/SKILL.md">
+        `makeStyles` + `tokens` only; the collapsible group header, count badge, and expand chevron use semantic tokens so dark mode passes through the host `FluentProvider`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the shipped `CommunicationTimeline.tsx`, `.types.ts`, `.reducer.ts`, `.buildTimeline.ts`, the subcomponents, and `communicationTimelineApi.ts` to lock the existing thread-id mode contract and the reusable render engine. Read spec FR-03/FR-01, NFR-03/NFR-04, and the task-010 `by-regarding` DTO shape (same DTO as R1 reads) to fix the read model.</step>
+    <step order="2">Read ADR-021 + `fluent-v9-component/SKILL.md` for Fluent v9 conventions and `DATA-ACCESS-DECISION-CRITERIA.md` to confirm the server-filtered / no-client-access-logic boundary (NFR-03).</step>
+    <step order="3">Extend `CommunicationTimeline.types.ts`: add a discriminated mode (e.g. `mode: 'thread'` with `threadId` vs `mode: 'regarding'` with `entityType` + `id`), a `RegardingThreadGroup { threadId; name; messageCount; messages: TimelineMessage[] }` shape, and the collapse/expand state additions. Keep all existing thread-id-mode types intact.</step>
+    <step order="4">Extend `communicationTimelineApi.ts`: add `readByRegarding(entityType, id, {authenticatedFetch, bffBaseUrl})` — a thin typed wrapper over the injected `authenticatedFetch` calling `GET /api/communications/by-regarding/{entityType}/{id}`; mirror the existing wrappers' typed-error contract. NO ACS imports, NO `@spaarke/auth`.</step>
+    <step order="5">Extend `CommunicationTimeline.reducer.ts`: add group/expand state (which thread groups are expanded) and a `SET_REGARDING_GROUPS` action; keep the existing thread-id-mode actions untouched.</step>
+    <step order="6">Author `subcomponents/ThreadGroup.tsx`: a collapsible group header (thread `sprk_name` + message count, expand/collapse chevron, semantic tokens, `aria-expanded`) that, when expanded, renders the per-thread interleaved timeline by REUSING `buildTimeline` + `MessageRow` + `ChannelBadge`.</step>
+    <step order="7">Extend `CommunicationTimeline.tsx`: branch on mode. In regarding mode, call `readByRegarding`, group the returned threads, render a list of `ThreadGroup`s; in thread-id mode, keep the R1 behavior unchanged. Add `role="region"`/`aria-label` landmarks for the grouped view. Do NOT add any client-side access/privacy filtering — render exactly what the endpoint returns (NFR-03).</step>
+    <step order="8">Update `CommunicationTimeline/index.ts` to export the new regarding-mode types; confirm the shared-lib barrel (`src/components/index.ts` line ~221) still re-exports the component (add new type exports there only if they are not already carried by the wildcard).</step>
+    <step order="9">Run `npm run build` + `npm run lint` in `src/client/shared/Spaarke.UI.Components/` (use `npm install --legacy-peer-deps --no-audit --no-fund` if a fresh install is needed; NOT `npm ci`). Both MUST be clean. Grep-verify NO `@azure/communication` import and NO `@spaarke/auth` import under `CommunicationTimeline/**` + `communicationTimelineApi.ts`. Confirm the existing thread-id-mode tests still pass.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the changed files (focus: thread-id mode not regressed, no client-side access logic (NFR-03), reuse-not-fork of the render engine, no `@spaarke/auth`/ACS import, Fluent v9 semantic tokens); `adr-check` against ADR-021/ADR-028/ADR-012/ADR-026 + `spec.md` (FR-03, NFR-03, NFR-04). Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (020 ✅) + `current-task.md`; record decisions (mode-discrimination shape, default group collapse/expand behavior, group ordering, the `readByRegarding` DTO mapping, how the R1 render engine was reused).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Shipped CommunicationTimeline files + communicationTimelineApi, task-010 by-regarding DTO, ADR-021, DATA-ACCESS-DECISION-CRITERIA</tool>
+    <tool name="write">ThreadGroup.tsx sub-component; new regarding-mode types</tool>
+    <tool name="edit">CommunicationTimeline.tsx / .types.ts / .reducer.ts / index.ts; communicationTimelineApi.ts</tool>
+    <tool name="bash">npm run build + npm run lint + grep for @azure/communication and @spaarke/auth</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/ThreadGroup.tsx (NEW — collapsible group)</output>
+    <output type="code">CommunicationTimeline.types.ts (EXTENDED — discriminated mode + RegardingThreadGroup)</output>
+    <output type="code">CommunicationTimeline.reducer.ts (EXTENDED — group/expand state)</output>
+    <output type="code">CommunicationTimeline.tsx (EXTENDED — regarding-mode branch, thread-id mode unchanged)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts (EXTENDED — readByRegarding)</output>
+    <output type="code">CommunicationTimeline/index.ts (UPDATED — new type exports)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>Regarding mode: given a mocked `by-regarding` response with ≥2 threads across ≥2 months, the component renders each thread as a collapsible group showing the thread name + message count; expanding a group reveals its email+chat messages interleaved in chronological order — no console errors.</ui-test>
+    <ui-test>Dark mode (ADR-021): the group headers, count badges, expand chevrons, and expanded rows render correctly under a dark `FluentProvider` (semantic tokens; no hardcoded colors).</ui-test>
+    <ui-test>Access parity (NFR-03): when the mocked `by-regarding` response omits a private/internal-only message (server already filtered it), the component shows exactly the returned set — it performs NO client-side hiding or privacy re-derivation.</ui-test>
+    <ui-test>Thread-id mode regression: rendering the component in the original single-thread mode behaves exactly as R1 (rows interleaved, channel-badged, compose box present) — the new mode did not regress it.</ui-test>
+    <ui-test>Expand/collapse: toggling a group updates `aria-expanded` and shows/hides that thread's timeline; other groups are unaffected.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">The `CommunicationTimeline` component accepts a regarding mode taking `(entityType, id)` and renders the record's threads as collapsible groups, each header showing the thread `sprk_name` + a message count.</criterion>
+    <criterion testable="true">Expanding a group renders that thread's email + chat messages interleaved in chronological order, reusing the R1 `buildTimeline`/`MessageRow`/`ChannelBadge` engine (grep confirms reuse, not a forked copy).</criterion>
+    <criterion testable="true">Regarding mode calls `GET /api/communications/by-regarding/{entityType}/{id}` (task 010) via the injected `authenticatedFetch` through a new `communicationTimelineApi.readByRegarding` wrapper.</criterion>
+    <criterion testable="true">The component performs NO client-side access/privacy filtering — it renders exactly the access-filtered set the endpoint returns (NFR-03).</criterion>
+    <criterion testable="true">The existing thread-id mode is unchanged (its tests still pass); the regarding mode is additive.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import and no `@azure/communication-*` import anywhere under `CommunicationTimeline/**` or `communicationTimelineApi.ts` (grep-verified; ADR-028 + NFR-04).</criterion>
+    <criterion testable="true">Only `@fluentui/react-components` + `makeStyles` + `tokens` used for styling; no hardcoded colors; dark mode passes through the host `FluentProvider` (ADR-021).</criterion>
+    <criterion testable="true">`npm run build` + `npm run lint` clean in `@spaarke/ui-components`; the shared-lib barrel still exports `CommunicationTimeline` and any new regarding-mode types.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 021 packages this component (in regarding mode) as a form-bound PCF and deploys it; task 022 places that PCF on all 11 regarding-family forms. Keep the regarding-mode props prop-driven `(entityType, id, authenticatedFetch, bffBaseUrl)` so the PCF can wire them from the host record context.
+
+    The `by-regarding` endpoint (task 010) is entity-set-agnostic and access-filtered server-side — the component trusts it fully (NFR-03). Do NOT reintroduce membership-union or any client-side privacy logic (retired 2026-07-16; `../messaging-communication-app-r1/notes/access-model-decision.md`).
+
+    Polling: R2's live-update model stays BFF-polling (NFR-06 — no notification-spine dependency). Whether the regarding-mode grouped view polls (and at what cadence) is a design decision — reuse the R1 `useThreadPoll` cadence pattern if polling the grouped view; state the choice in notes. Do NOT add any push/fan-out mechanism.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 (code-review + adr-check) MANDATORY. Client-only TypeScript: build via `npm run build` (NOT dotnet); no publish-size/CVE step (root §10 N/A). Reuse the R1 render engine (no fork). Cite the ADR-026 Path-A exception in the PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

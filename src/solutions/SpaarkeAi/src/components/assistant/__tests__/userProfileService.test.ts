@@ -13,7 +13,12 @@ import {
   sanitizeFreeText,
   sanitizeOffice,
   cleanGuid,
+  encodeChipSelection,
+  decodeChipSelection,
+  PREFERENCE_CHIPS,
+  FOCUS_AREA_CHIPS,
   USERPROFILE_SET,
+  WORKOFFICE_SET,
   PRACTICEAREA_NAV_PROP,
   SYSTEMUSER_KEY_ATTR,
   type IUserProfilePort,
@@ -213,6 +218,29 @@ describe('createDataverseUserProfilePort — read / N:N / delete', () => {
     expect(calls[0].method).toBe('DELETE');
     expect(calls[0].url).toBe(`${BASE}/${USERPROFILE_SET}(${PROFILE_ID})`);
   });
+
+  it('listWorkOffices GETs active offices and maps id + name (MA-3)', async () => {
+    const { fetchImpl, calls } = makeFetch(() => ({
+      ok: true,
+      status: 200,
+      jsonBody: {
+        value: [
+          { sprk_workofficeid: 'wo-chi', sprk_name: 'Chicago' },
+          { sprk_workofficeid: 'wo-ny', sprk_name: 'New York' },
+          { sprk_workofficeid: 'wo-blank', sprk_name: '' }, // dropped (empty name)
+        ],
+      },
+    }));
+    const port = createDataverseUserProfilePort(portDeps(fetchImpl));
+    const offices = await port.listWorkOffices();
+    expect(offices).toEqual([
+      { id: 'wo-chi', name: 'Chicago' },
+      { id: 'wo-ny', name: 'New York' },
+    ]);
+    expect(calls[0].method).toBe('GET');
+    expect(calls[0].url).toContain(`/${WORKOFFICE_SET}?`);
+    expect(calls[0].url).toContain('statecode eq 0');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -223,6 +251,7 @@ function fakePort(existing: UserProfileRow | null): jest.Mocked<IUserProfilePort
   return {
     getProfileByUser: jest.fn().mockResolvedValue(existing),
     listPracticeAreas: jest.fn().mockResolvedValue([]),
+    listWorkOffices: jest.fn().mockResolvedValue([]),
     upsertProfileByUser: jest.fn().mockResolvedValue(PROFILE_ID),
     associatePracticeArea: jest.fn().mockResolvedValue(undefined),
     disassociatePracticeArea: jest.fn().mockResolvedValue(undefined),
@@ -402,5 +431,38 @@ describe('helpers', () => {
 
   it('cleanGuid strips braces and lowercases', () => {
     expect(cleanGuid('{ABCD-1234}')).toBe('abcd-1234');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Curated profile chips (MA-4)
+// ---------------------------------------------------------------------------
+
+describe('profile chips (MA-4)', () => {
+  it('encodeChipSelection joins the selected chips\' directive phrases (newline-delimited)', () => {
+    const encoded = encodeChipSelection(['concise', 'cite-sources'], PREFERENCE_CHIPS);
+    expect(encoded).toBe('Be concise and get to the point.\nAlways cite the source documents you used.');
+  });
+
+  it('encodeChipSelection ignores unknown ids', () => {
+    expect(encodeChipSelection(['concise', 'not-a-chip'], PREFERENCE_CHIPS)).toBe(
+      'Be concise and get to the point.'
+    );
+  });
+
+  it('decodeChipSelection round-trips an encoded value back to chip ids', () => {
+    const ids = ['bullets', 'flag-risks'];
+    expect(decodeChipSelection(encodeChipSelection(ids, PREFERENCE_CHIPS), PREFERENCE_CHIPS)).toEqual(ids);
+  });
+
+  it('decodeChipSelection tolerates semicolon delimiters + case + whitespace', () => {
+    const stored = 'Mergers & acquisitions ;  litigation & disputes ';
+    expect(decodeChipSelection(stored, FOCUS_AREA_CHIPS)).toEqual(['ma', 'litigation']);
+  });
+
+  it('decodeChipSelection yields no chips for legacy free text that matches no phrase', () => {
+    expect(decodeChipSelection('some bespoke note the user typed', PREFERENCE_CHIPS)).toEqual([]);
+    expect(decodeChipSelection('', PREFERENCE_CHIPS)).toEqual([]);
+    expect(decodeChipSelection(null, PREFERENCE_CHIPS)).toEqual([]);
   });
 });

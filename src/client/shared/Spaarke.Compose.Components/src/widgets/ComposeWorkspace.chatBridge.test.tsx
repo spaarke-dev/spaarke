@@ -44,16 +44,12 @@ jest.mock('@spaarke/auth', () => ({
 // ── PaneEventBus — channel-keyed usePaneEvent so we can fire BOTH 'context' + 'workspace' ─────
 type PaneHandler = (event: { type: string; [k: string]: unknown }) => void;
 const handlersByChannel: Record<string, PaneHandler> = {};
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: (channel: string, handler: PaneHandler) => {
-      handlersByChannel[channel] = handler;
-    },
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: (channel: string, handler: PaneHandler) => {
+    handlersByChannel[channel] = handler;
+  },
+}));
 function fire(channel: string, event: { type: string; [k: string]: unknown }): void {
   handlersByChannel[channel]?.(event);
 }

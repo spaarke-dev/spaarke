@@ -1,0 +1,129 @@
+<task id="023" project="messaging-communication-app-r2">
+  <metadata>
+    <title>VisualHost summary count/unread MetricCard `sprk_chartdefinition` config (optional, config-only; drill-through to Surface 1; count-only per T-1)</title>
+    <phase>W2 — Record Threads View (Surface 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <deps>010</deps>
+    <blocks></blocks>
+    <tags>dataverse, config</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config-only (a `sprk_chartdefinition` record + drill-through target) — no code, no shared-source edit, no BFF change. STANDARD rigor: authoring a Dataverse config record against an existing PCF (VisualHost) with a hard MUST-NOT boundary (T-1: count-only, no content). Step 9.5 code-review/adr-check are skipped at STANDARD, but the T-1 boundary is a closed acceptance gate.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>A `sprk_chartdefinition` config record + drill-through wiring — touches no shared source; disjoint from the component (020), PCF (021), form placement (022), and BFF/schema tracks. It is the optional parallel item in W2 (plan §6: "023 config parallel").</parallel-reason>
+    <fr-refs>FR-05</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author an **optional** `sprk_chartdefinition` config that renders a **count/unread MetricCard** on the record form via the existing VisualHost PCF (`src/client/pcf/VisualHost/`), with **drill-through to Surface 1** (the regarding-mode Timeline / threads view). This is **config-only — NO code**: a Dataverse config record consumed by the shipped VisualHost `ConfigurationLoader.ts` → `ChartRenderer.tsx`, exactly like the existing Matter Health/Budget/Tasks cards (pure config records, no code).
+
+    Requirements (FR-05):
+    - **Count-only MetricCard** — the card shows a count (e.g. thread/message count, optionally an unread count) for the record. It MUST NOT render message content, bodies, subjects, sender lists, or any message row.
+    - **Drill-through targets Surface 1** — clicking the card drills through to the record's threads view (the regarding-mode Timeline placed by task 022 / the standalone view), via VisualHost's `sprk_drillthroughtarget` → `handleExpandClick` mechanism.
+    - **T-1 boundary (MUST NOT).** VisualHost containers fetch **client-side via `context.webAPI` FetchXML**, which honors Dataverse RLS (so private threads are hidden natively) but does NOT honor the `sprk_isinternalonly` internal-only rule that the R1/R2 BFF access filter enforces. Therefore VisualHost MUST be restricted to a **count/summary metric**; **all message content renders via the BFF-backed regarding-mode Timeline (FR-03), never via VisualHost client-fetch** (spec T-1 / NFR-03 / CLAUDE.md MUST-NOT). A count is safe (aggregate, no content leak); content is not.
+    - **Optional** — this card is optional (spec Assumptions: "if a count MetricCard is deemed unnecessary at design review it may be dropped without affecting Surface 1"). If dropped, document the rationale; Surface 1 still ships via 020–022.
+
+    Do NOT build a new VisualHost visual type, a thread-preview LIST, or any content-rendering container — that is exactly what T-1 forbids. Config-only, count-only.
+  </prompt>
+
+  <role>
+    Dataverse configuration author fluent in the VisualHost PCF config model (`sprk_chartdefinition` records, `ConfigurationLoader.ts`, `ChartRenderer.tsx`, MetricCard visual type, `sprk_drillthroughtarget`) and the count-vs-content access boundary (T-1: client-fetch honors RLS but not `internal-only`). Familiar with the existing Matter Health/Budget/Tasks config-only cards as the precedent.
+  </role>
+
+  <goal>
+    An optional `sprk_chartdefinition` config record renders a count/unread MetricCard for a record via the existing VisualHost PCF, with drill-through to Surface 1's threads view. It is config-only (no code, no new visual type) and count-only (no message content) — honoring the T-1 boundary. If the card is dropped at design review, the drop rationale is documented and Surface 1 is unaffected.
+  </goal>
+
+  <context>
+    <background>
+      FR-05 offers an optional at-a-glance count card on the record form to complement Surface 1's threads view. The R2 resource investigation (§2) established that a summary count/unread MetricCard is achievable as **config-only** against the shipped VisualHost PCF (config entity `sprk_chartdefinition`; loader `ConfigurationLoader.ts`; dispatcher `ChartRenderer.tsx`; drill-through `sprk_drillthroughtarget` → `handleExpandClick` in `VisualHostRoot.tsx`), exactly as the Matter Health/Budget/Tasks cards are pure config records.
+
+      **T-1 tension (spec §ADR Tensions, path C).** VisualHost containers fetch client-side via `context.webAPI` FetchXML. That honors Dataverse RLS natively (private threads hidden) but does NOT honor `sprk_isinternalonly` — the internal-only rule the BFF access filter enforces on all R1/R2 reads (NFR-03). Rendering message CONTENT via VisualHost would bypass `internal-only`. Resolution (path C — comply): restrict VisualHost to a **count/summary** metric (aggregate, no content leak); render all content via the BFF-backed regarding-mode Timeline (FR-03). This task must stay strictly on the count side of that line. See `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` (the `Xrm.WebApi` vs BFF boundary) + investigation §2.
+
+      §11 — no new component. This reuses the shipped VisualHost PCF (0 code) via a config record; the investigation explicitly says "Do NOT rebuild a standalone Communications panel PCF — VisualHost provides config/chrome/drill/theme" and "summary count/unread MetricCard = config-only". A thread-preview LIST with drill-through would be a new self-managed visual type — out of scope and, for content, forbidden by T-1. Cost-of-doing-nothing: a nice-to-have at-a-glance metric is absent; Surface 1 still fully ships (hence "optional").
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts (READ — how a `sprk_chartdefinition` config is loaded)</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx (READ — visual-type dispatch; MetricCard case)</file>
+      <file>src/client/pcf/VisualHost/control/ (READ — VisualHostRoot drill-through: `sprk_drillthroughtarget` → `handleExpandClick`)</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md (READ — §2 VisualHost findings + T-1 tension)</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (READ — Xrm.WebApi vs BFF; the count-vs-content boundary)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-05">A `sprk_chartdefinition` config renders a count/unread MetricCard on the record form with drill-through to Surface 1; config-only (no code); count-only. Scope: one optional config record + drill-through wiring.</constraint>
+    <constraint source="T-1">MUST NOT render message content via VisualHost client-fetch — VisualHost `context.webAPI` FetchXML honors RLS but NOT `sprk_isinternalonly`. Restrict to a count/summary metric; all content renders via the BFF-backed Timeline (FR-03). Scope: this config record + any drill-through it defines.</constraint>
+    <constraint source="NFR-03">Access parity — no R2 read surface may bypass the BFF access filter for content. A count aggregate is permitted (no content leak); message bodies/subjects/senders are NOT. Scope: the card's data query stays count-only.</constraint>
+    <constraint source="project">Config-only — NO code, no new VisualHost visual type, no thread-preview LIST, no new panel PCF. Reuse the shipped VisualHost (§11). Reference the Matter Health/Budget/Tasks cards as the config precedent.</constraint>
+    <constraint source="project">Optional — may be dropped at design review with documented rationale; Surface 1 (020–022) is unaffected either way. No BFF publish-size / CVE obligation (no BFF code; root §10 N/A).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/client/pcf/VisualHost/control/services/ConfigurationLoader.ts</file>
+      <file>src/client/pcf/VisualHost/control/components/ChartRenderer.tsx</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Config-only MetricCard" location="src/client/pcf/VisualHost/control/components/ChartRenderer.tsx">
+        A count MetricCard is a pure `sprk_chartdefinition` record dispatched by `ChartRenderer` — mirror the Matter Health/Budget/Tasks cards (no code). The card's query aggregates a count for the record; it renders no message rows.
+      </pattern>
+      <pattern name="Drill-through to Surface 1" location="src/client/pcf/VisualHost/control/">
+        Set `sprk_drillthroughtarget` so `handleExpandClick` (VisualHostRoot) navigates to the record's threads view (the regarding-mode Timeline / standalone view) — the card is the entry point; content renders in the BFF-backed Timeline.
+      </pattern>
+      <pattern name="T-1 count-vs-content boundary" location="docs/standards/DATA-ACCESS-DECISION-CRITERIA.md">
+        VisualHost `context.webAPI` (client-fetch) honors RLS but not `internal-only` → counts only. Content flows through the BFF access filter (FR-03 Timeline). Keep the card's query strictly aggregate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read investigation §2 (VisualHost config model + T-1 tension), `ConfigurationLoader.ts`, `ChartRenderer.tsx` (MetricCard dispatch + drill-through), and `DATA-ACCESS-DECISION-CRITERIA.md` to lock the count-only boundary. Read spec FR-05 + the T-1 ADR-Tensions row.</step>
+    <step order="2">Define the count query: a record-scoped aggregate (e.g. count of `sprk_communication` / threads for the record, optionally an unread count) expressed as VisualHost expects (FetchXML aggregate / config fields). Confirm it returns a COUNT only — no content columns (no body/subject/sender rows). RLS hides private threads natively; the internal-only rule does not apply to a pure count.</step>
+    <step order="3">Author the `sprk_chartdefinition` config record: MetricCard visual type, the count query, a label, and `sprk_drillthroughtarget` pointing at Surface 1's threads view (the regarding-mode Timeline / standalone view). Mirror the Matter Health/Budget/Tasks config-only records.</step>
+    <step order="4">Verify (or plan owner-verify) placement: the VisualHost control hosting this config renders the count card on the record form and the drill-through navigates to the threads view. Confirm NO message content is rendered by the card (T-1). If the card is judged unnecessary at design review, document the drop rationale instead and stop — Surface 1 is unaffected.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md` (023 ✅) + `current-task.md`; record decisions (count query used, unread included Y/N, drill-through target, the T-1 count-only confirmation, or the drop rationale if dropped).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">VisualHost ConfigurationLoader + ChartRenderer + drill-through, investigation §2, DATA-ACCESS-DECISION-CRITERIA, spec FR-05/T-1</tool>
+    <tool name="dataverse-deploy">Author/deploy the `sprk_chartdefinition` count MetricCard config record + drill-through (or hand to owner)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">A `sprk_chartdefinition` count/unread MetricCard config record (config-only) with drill-through to Surface 1 — OR a documented drop rationale if judged unnecessary</output>
+    <output type="docs">T-1 count-only confirmation + count query + drill-through target recorded in current-task.md / PR</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A `sprk_chartdefinition` config record renders a count/unread MetricCard on the record form via the shipped VisualHost PCF — config-only, NO code, no new visual type (mirrors the Matter Health/Budget/Tasks cards).</criterion>
+    <criterion testable="true">The card is count-only: its query returns an aggregate count (thread/message, optionally unread); it renders NO message content (no bodies, subjects, senders, or rows) — T-1 / NFR-03 honored.</criterion>
+    <criterion testable="true">Clicking the card drills through to Surface 1's threads view (the regarding-mode Timeline / standalone view) via `sprk_drillthroughtarget`.</criterion>
+    <criterion testable="true">No thread-preview LIST, new VisualHost visual type, or new panel PCF was created; the shipped VisualHost is reused unchanged (§11).</criterion>
+    <criterion testable="true">If the optional card is dropped at design review, a drop rationale is documented and Surface 1 (tasks 020–022) is unaffected — the acceptance is satisfied either by shipping the count card or by the documented drop.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 010 (the count could read via `Xrm.WebApi` directly per VisualHost's client-fetch model; the dependency is on the threads existing + Surface 1 being the drill-through target). Blocks nothing.
+
+    The single hard rule: **count only, never content, via VisualHost** (T-1). VisualHost client-fetch honors RLS but not `sprk_isinternalonly`; a pure count aggregate is safe, message content is not. All content renders through the BFF-backed regarding-mode Timeline (FR-03) which applies the impersonation + 2-rule filter. If any temptation arises to preview thread content in the card, stop — that is exactly the boundary this task exists to hold.
+
+    This card is optional (spec Assumptions). If design review deems it unnecessary, dropping it is an acceptable outcome — Surface 1 ships via 020–022 regardless.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. STANDARD rigor — Step 9.5 quality gates skipped, but the T-1 count-only boundary is a closed acceptance gate (never render content via VisualHost). Config-only: no code, no BFF change, no publish-size/CVE (root §10 N/A). Author/deploy the `sprk_chartdefinition` record via `dataverse-deploy` or hand to the owner. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

@@ -50,6 +50,7 @@
 import * as React from "react";
 import {
   makeStyles,
+  tokens,
   Menu,
   MenuTrigger,
   MenuPopover,
@@ -58,6 +59,7 @@ import {
   MenuGroupHeader,
   Button,
   Tooltip,
+  CounterBadge,
 } from "@fluentui/react-components";
 import {
   MoreVerticalRegular,
@@ -92,6 +94,13 @@ export interface AssistantToolMenuProps {
    * `defaultMyAssistantHandler`).
    */
   onMyAssistant?: () => void;
+
+  /**
+   * MA-1 (UAT 2026-07-19): when true (profile incomplete), decorate the trigger with a small badge
+   * and mark the "My Assistant" entry so the user can find the profile setup after dismissing the
+   * inline nudge. Purely a visual hint — the menu behaviour is unchanged.
+   */
+  highlightMyAssistant?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +110,19 @@ export interface AssistantToolMenuProps {
 const useStyles = makeStyles({
   trigger: {
     minWidth: "auto",
+  },
+  triggerWrap: {
+    position: "relative",
+    display: "inline-flex",
+  },
+  badge: {
+    position: "absolute",
+    top: "2px",
+    right: "2px",
+    pointerEvents: "none",
+  },
+  menuItemBadge: {
+    marginLeft: tokens.spacingHorizontalS,
   },
 });
 
@@ -144,6 +166,7 @@ const ASSISTANT_TOOLS: readonly AssistantToolEntry[] = [
 export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
   onQuickStart,
   onMyAssistant = defaultMyAssistantHandler,
+  highlightMyAssistant = false,
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -190,15 +213,30 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
           <Tooltip content="Assistant tools" relationship="label">
             {/* P2-2 follow-up (UAT 2026-07-18): the "Tools ▾" text trigger is now an
                 icon-only vertical three-dots (⋮) button — matches the Claude-Code-style
-                icon header (History / New session / ⋮). aria-label + tooltip preserved. */}
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<MoreVerticalRegular />}
-              aria-label="Assistant tools"
-              className={styles.trigger}
-              data-testid="assistant-tool-menu-trigger"
-            />
+                icon header (History / New session / ⋮). aria-label + tooltip preserved.
+                MA-1 (UAT 2026-07-19): a small badge marks an incomplete profile. */}
+            <span className={styles.triggerWrap}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<MoreVerticalRegular />}
+                aria-label={
+                  highlightMyAssistant ? "Assistant tools (profile setup available)" : "Assistant tools"
+                }
+                className={styles.trigger}
+                data-testid="assistant-tool-menu-trigger"
+              />
+              {highlightMyAssistant ? (
+                <CounterBadge
+                  size="tiny"
+                  appearance="filled"
+                  color="danger"
+                  dot
+                  className={styles.badge}
+                  data-testid="assistant-tool-menu-badge"
+                />
+              ) : null}
+            </span>
           </Tooltip>
         </MenuTrigger>
 
@@ -213,6 +251,15 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
                 data-testid={`assistant-tool-${tool.id}`}
               >
                 {tool.label}
+                {tool.id === "my-assistant" && highlightMyAssistant ? (
+                  <CounterBadge
+                    size="small"
+                    appearance="filled"
+                    color="danger"
+                    dot
+                    className={styles.menuItemBadge}
+                  />
+                ) : null}
               </MenuItem>
             ))}
           </MenuList>

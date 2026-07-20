@@ -168,8 +168,11 @@ interface ToolDescriptor {
 
 const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
   {
-    id: 'quick-start',
-    label: 'Quick Start',
+    // R6 Pillar 6c / task 095 — Claude-Code-like trace of the agent's tool calls,
+    // knowledge retrievals, playbook node executions, and routing decisions. This is
+    // the AT-REST default (decision-1, 2026-07-19 — "quick-start" was removed).
+    id: 'execution-trace',
+    label: 'Execution Trace',
   },
   {
     id: 'semantic-search',
@@ -180,15 +183,6 @@ const CONTEXT_TOOLS: readonly ToolDescriptor[] = [
     // shell. The widget renders inline in the context pane when selected.
     id: 'pinned-memory',
     label: 'Pinned Memory',
-  },
-  {
-    // R6 Pillar 6c / task 095 — Claude-Code-like trace of the agent's
-    // tool calls, knowledge retrievals, playbook node executions, and
-    // routing decisions. Subscribes to the existing `context` PaneEventBus
-    // channel; populated when emissions reach the bus (full SSE bridge
-    // tracked separately).
-    id: 'execution-trace',
-    label: 'Execution Trace',
   },
 ];
 

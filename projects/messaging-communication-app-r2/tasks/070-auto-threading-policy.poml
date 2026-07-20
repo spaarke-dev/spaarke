@@ -1,0 +1,163 @@
+<task id="070" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Auto-threading policy — 3-tier `IThreadResolver` (subject → per-record default → per-user master) + `default-thread` marker; characterization-test existing flows first</title>
+    <phase>W7 — Auto-Threading + Thread Naming</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <deps>002</deps>
+    <blocks>071</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits shared `Services/Communication/ThreadResolver.cs` (the R1 resolver email-communication-solution-r4 + messaging-r1 shipped) on the persist/resolve path invoked by BOTH inbound capture AND outbound send. Touches `.cs`; tags include `bff-api`/`communication`; the highest-risk shared-code edit in R2. FULL protocol + Step 9.5 gates required. `parallel-safe: false` — serializes the W7 shared-resolver edit; never concurrent with 050 or any other BFF writer.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Communication/ThreadResolver.cs` on the persist/resolve path. `parallel-safe: false` serializes the shared-resolver edit within W7 (071 starts only after this lands) and MUST NOT run concurrently with 050 (participant write on the same shared area) or any other BFF writer. `/conflict-check` before the PR.</parallel-reason>
+    <fr-refs>FR-09, NFR-01, NFR-02, NFR-03</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Extend the shared **`IThreadResolver`** with a **3-tier auto-threading policy** so a persisted message NEVER orphans (returns null with no thread). Today the resolver JOINs an existing thread by the per-channel key or CREATEs a record-anchored/direct thread; when there is no groupable key (e.g. an unassociated chat message, or an outbound message with neither subject nor ancestry) it SKIPs and returns null — the message persists WITHOUT a `sprk_communicationthread`. FR-09 closes that gap with a strict fallback ladder:
+
+    1. **Tier 1 — subject / conversation thread.** The existing behavior: JOIN by the per-channel thread key (email = `sprk_inreplyto` ancestry root; `Message` = ACS `ChatThreadId`), or CREATE a record-anchored / direct thread when a groupable key + subject exist. Unchanged for the paths that already resolve.
+    2. **Tier 2 — per-record default thread (ONE per regarding record).** When Tier 1 cannot resolve but the message HAS a resolved regarding (the ADR-024 regarding family already read by `ReadRegardingAnchorAsync`), find-or-create the SINGLE default thread for that record (marked via the new `default-thread` marker from task 002) and join it. Created **lazily** — only the first orphan for a record creates it; subsequent orphans for the same record join the same default thread.
+    3. **Tier 3 — per-user master catch-all.** When the message has NO resolvable regarding, find-or-create the per-user master thread (one per owning user) and join it. Guarantees a non-null thread for every message.
+
+    Add the `default-thread` marker read/write against the task-002 schema (a boolean/flag on `sprk_communicationthread` distinguishing an auto-created default/master catch-all from a normal conversation thread) so the per-record default and per-user master are found-or-created idempotently (never duplicated).
+
+    Edit `src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs` + `IThreadResolver.cs`. **CRITICAL — this EDITS shared code.** BEFORE extending, author/run **characterization tests** pinning the CURRENT resolver behavior on the existing email + messaging thread-resolution flows (Tier-1 JOIN, record-anchored CREATE, the SKIP→null path, and NFR-02 non-fatal swallow) and confirm they are GREEN. Keep them green after the extension (only the former SKIP→null cases now fall through to Tier 2/3). Assignment stays **best-effort / non-fatal** (NFR-02) and **point-forward** (no historical backfill). `parallel-safe: false`; run `/conflict-check` before the PR.
+  </prompt>
+
+  <role>
+    Spaarke BFF architect for the Communication subsystem, authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-046 (channel seams / no second regarding mechanism), ADR-024 (polymorphic regarding family — the thread anchor, reused not re-invented), ADR-032 (Null-Object / symmetric registration for any feature-gated part), ADR-038 (integration-heavy testing; characterization before extending shared code), ADR-028 (impersonation read path unchanged), §10 BFF Hygiene, §11 Component Justification, and `.claude/constraints/bff-extensions.md`. You treat the shipped R1 resolver as a contract to preserve, extending only the SKIP→null fall-through into the Tier-2/Tier-3 ladder.
+  </role>
+
+  <goal>
+    `ThreadResolver` guarantees a **non-null thread for every inbound/outbound message** across a 3-tier ladder — Tier 1 (subject/conversation JOIN or record-anchored CREATE, unchanged), Tier 2 (per-record default thread, one per record, created lazily), Tier 3 (per-user master catch-all). The `default-thread` marker (task 002) makes the per-record default + per-user master find-or-create idempotent. Existing email + messaging resolution behaviors are unchanged — characterization tests written FIRST and GREEN before and after. Assignment is point-forward and best-effort/non-fatal (NFR-02). Build clean; publish-size (≈0 delta vs ~46.99 MB) + CVE + bff-extensions Placement Justification reported; Step 9.5 FULL gates run; `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      R1 shipped `IThreadResolver` (`Services/Communication/IThreadResolver.cs`) + `ThreadResolver` (`Services/Communication/ThreadResolver.cs`): a direction-symmetric, channel-agnostic find-or-create that JOINs an existing `sprk_communicationthread` by the per-channel key or CREATEs a thin thread anchored to the message's ADR-024 regarding (`ReadRegardingAnchorAsync` at ~line 128). It already returns `Guid?` and is best-effort/non-fatal (NFR-02 — logs + swallows, returns null). The `BuildTopic` gap (~line 175) is task 071. The current SKIP path (`resolution.CreateWhenAbsent == false`, ~line 66) returns null — those messages orphan. Task 002 adds the `default-thread` marker (+ typed lookups + naming-edited marker) to `sprk_communicationthread`; this task consumes the `default-thread` marker.
+
+      **Component Justification (§11) for the auto-vs default-thread markers + the tiered policy:**
+      1. **Existing** — What does it overlap with? `ThreadResolver` already find-or-creates threads and reads the message's regarding; there is NO existing per-record-default or per-user-master concept, and no marker distinguishing an auto-created catch-all from a conversation thread (verify by grep before claiming none — `sprk_communicationthread` has `sprk_name`/`sprk_threadtype`/`sprk_privacystate`/denormalized regarding text only).
+      2. **Extension** — Can we extend instead of adding? YES — the policy is a fall-through EXTENSION of the existing resolver's SKIP path, not a new service; the ONLY new surface is the `default-thread` marker field (task 002) + the two find-or-create-default helpers. No new interface, no new DI graph.
+      3. **Cost-of-doing-nothing (concrete failure)** — Without the ladder, messages with no groupable key + no subject orphan (`sprk_communicationthread` null): they never appear in the `by-regarding` threads view (FR-01/FR-03), the participant `participant=` facet still finds them but the record threads view drops them, and Success Criterion 5 ("New messages always land in a sensible thread") fails outright. That is a named contract failure, not "future flexibility."
+
+      **Scope discipline:** extend the resolver's fall-through + add the marker read/write. Do NOT rewrite the Tier-1 JOIN/CREATE, the normalized envelope, the channel key strategies, or the regarding model. Do NOT add a second regarding mechanism (ADR-046/ADR-024) — Tier 2 reuses the SAME `ReadRegardingAnchorAsync` regarding. Do NOT backfill historical messages (point-forward). Do NOT touch the impersonation read path (ADR-028) — this is write/resolve-side only.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Threads/ (IThreadKeyStrategy per-channel strategies)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (inbound call site)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (outbound call site)</file>
+      <file>projects/messaging-communication-app-r2/tasks/002-schema-thread-regarding-lookups.poml (default-thread marker source schema)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (existing ThreadResolver tests — the characterization baseline)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-09">3-tier `IThreadResolver` — subject/conversation thread → per-record default thread (ONE per record, lazy) → per-user master catch-all; add a `default-thread` marker. Every inbound/outbound message resolves to a non-null thread; per-record default created lazily; master is per-user; the policy is a resolver change (no new access path).</constraint>
+    <constraint source="project-CRITICAL">This EDITS shared `Services/Communication/ThreadResolver.cs`. Author/run characterization tests pinning the CURRENT email + messaging resolution behavior (Tier-1 JOIN, record-anchored CREATE, SKIP→null, NFR-02 swallow) and confirm GREEN BEFORE extending; keep GREEN after. No historical backfill (point-forward).</constraint>
+    <constraint source="ADR-024 / ADR-046">Tier 2's per-record default reuses the SAME ADR-024 regarding (`ReadRegardingAnchorAsync`); MUST NOT add a second regarding mechanism. No CommunicationConnections / Field Mapping Framework for the thread anchor.</constraint>
+    <constraint source="NFR-02">Thread assignment stays best-effort / non-fatal — a resolve/create failure MUST NOT fail the send or inbound-capture path (log + continue; the message still persists, worst case without `sprk_communicationthread`).</constraint>
+    <constraint source="NFR-04">The `default-thread` marker is an ADDITIVE field (task 002). MUST NOT retype the existing Text `sprk_regardingrecordtype`; MUST NOT alter existing thread fields.</constraint>
+    <constraint source="NFR-03 / ADR-028">Write/resolve-side only. MUST NOT touch the impersonation read path, add a second access mechanism, or reintroduce membership-union on reads (retired 2026-07-16).</constraint>
+    <constraint source="ADR-032">If any tier is feature-gated, use the Null-Object kill-switch + symmetric registration; otherwise register unconditionally via the existing `CommunicationModule`.</constraint>
+    <constraint source="ADR-038">Integration-heavy; characterization tests for the frozen resolver FIRST; unit/seam coverage of all 3 tiers. No `Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null-check tests; boundary mocks only.</constraint>
+    <constraint source="project">`parallel-safe: false` — serializes the W7 shared-resolver edit; never concurrent with 050 or any other BFF writer. Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path).</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~46.99 MB baseline (expect ≈0, no new package); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing find-or-create + non-fatal swallow" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs">
+        `ResolveAndAssignThreadAsync` (line 40) already JOINs/CREATEs/SKIPs and swallows exceptions (NFR-02, line 84). Extend the SKIP branch (line 66) into the Tier-2/Tier-3 ladder; do not touch the JOIN/CREATE branches.
+      </pattern>
+      <pattern name="Regarding anchor reuse (no second mechanism)" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs">
+        `ReadRegardingAnchorAsync` (line 128) already reads the ADR-024 regarding (denormalized pointer, falling back to typed `sprk_regarding*` via `RegardingFieldMap.All`). Tier 2 reuses this exact result to key the per-record default thread — no new regarding read.
+      </pattern>
+      <pattern name="Idempotent find-or-create via marker" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs">
+        Mirror the CREATE shape (`CreateThreadAsync`, line 95) for the default/master threads, stamping the task-002 `default-thread` marker so a query on (marker + regarding record) / (marker + owning user) finds the single existing default before creating — never duplicates.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `ThreadResolver.cs` (JOIN/CREATE/SKIP branches, `ReadRegardingAnchorAsync`, `CreateThreadAsync`, the NFR-02 swallow), `IThreadResolver.cs`, the per-channel `IThreadKeyStrategy` impls, and both call sites (`IncomingCommunicationProcessor` inbound, `CommunicationService` outbound). Read task 002's `default-thread` marker schema (exact field name + type).</step>
+    <step order="2">Read `.claude/constraints/bff-extensions.md` §F + root §11 Component Justification + ADR-024/ADR-046 (no second regarding mechanism) + ADR-028 (read path untouched) before defining the ladder.</step>
+    <step order="3">**CHARACTERIZATION FIRST (shared-code safety gate).** Author/confirm characterization tests pinning CURRENT resolver behavior: (a) Tier-1 JOIN by channel key, (b) record-anchored CREATE, (c) the SKIP→null path (no groupable key), (d) NFR-02 non-fatal swallow. Run them; confirm GREEN. Do NOT edit `ThreadResolver.cs` until these are green. Record the baseline in `current-task.md`.</step>
+    <step order="4">Define the Tier-2/Tier-3 helpers: `FindOrCreatePerRecordDefaultAsync(anchor)` (query `sprk_communicationthread` where `default-thread` marker set AND regarding = this record → join, else create + mark) and `FindOrCreatePerUserMasterAsync(ownerId)` (query where `default-thread` marker set AND owner = this user → join, else create + mark). Both lazy + idempotent via the task-002 marker.</step>
+    <step order="5">Extend `ResolveAndAssignThreadAsync`: at the current SKIP branch (line ~66), instead of returning null, fall through — if `ReadRegardingAnchorAsync` yields a regarding, use Tier 2 (per-record default); else use Tier 3 (per-user master). Assign the resolved thread. Tier 1 JOIN/CREATE remains first and unchanged.</step>
+    <step order="6">Ensure idempotency: Tier 2 creates AT MOST ONE default thread per regarding record (concurrent orphans for the same record must not create duplicates — query-before-create keyed on marker + regarding); Tier 3 AT MOST ONE master per owning user. Document the concurrency assumption in a code comment.</step>
+    <step order="7">Keep the whole ladder inside the existing NFR-02 try/catch — a Tier-2/Tier-3 failure logs + returns null (message persists without a thread) rather than throwing to the caller. Confirm the marker write is additive (NFR-04) and touches no existing thread field.</step>
+    <step order="8">Confirm DI: the resolver is already registered via `CommunicationModule`; no new registration needed unless a tier is feature-gated (then ADR-032 Null-Object + symmetric registration). State which.</step>
+    <step order="9">Write the extension tests: (a) a message with a groupable key still JOINs Tier 1 (unchanged); (b) an orphan WITH a regarding lands in the per-record default; a SECOND orphan for the same record joins the SAME default (lazy + idempotent); (c) an orphan with NO regarding lands in the per-user master; a second such orphan for the same user joins the SAME master; (d) every path returns a non-null thread; (e) a simulated Tier-2/Tier-3 failure is non-fatal (NFR-02). RE-RUN the Step-3 characterization tests — confirm STILL GREEN.</step>
+    <step order="9.1">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-r2-070-publish/`; report compressed size + delta vs ~46.99 MB baseline. Expected ≈ 0 (no new package).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates (REQUIRED — shared-path edit): `code-review` on the diff (focus: Tier-1 behavior preserved, NFR-02 non-fatal, ADR-024/ADR-046 no second mechanism, idempotent lazy creation, §11 justification, read path untouched); `adr-check` against `spec.md`. Address Critical findings; cite bff-extensions Placement Justification. Per root §6.5, surface any ADR tension rather than silently complying.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path — coordinate with 050 which edits the same shared area; they are `parallel-safe: false` and must not overlap). Then update `tasks/TASK-INDEX.md` (070 ✅) + reset `current-task.md`; record decisions (ladder shape, marker field name, lazy-idempotency approach, characterization-test locations).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect resolver, call sites, channel strategies, task-002 marker schema</tool>
+    <tool name="edit">Extend `ThreadResolver.cs` (+ `IThreadResolver.cs` if the contract widens); tests</tool>
+    <tool name="bash">Characterization tests, build, extension tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5) — REQUIRED (shared-path edit)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10) — coordinate with 050</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (UPDATED — Tier-2/Tier-3 fall-through + per-record-default / per-user-master helpers + `default-thread` marker read/write)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs (UPDATED only if the contract widens — otherwise unchanged)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (characterization tests for existing resolver flows + 3-tier extension tests)</output>
+    <output type="docs">PR description with §11 Component Justification (Success Criterion 5 failure mode) + bff-extensions Placement Justification + publish-size delta + CVE result + "characterization tests green" statement</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every inbound AND outbound message resolves to a NON-NULL thread — Tier 1 (subject/conversation), Tier 2 (per-record default), or Tier 3 (per-user master); each tier is a separately testable case.</criterion>
+    <criterion testable="true">Tier 2 creates the per-record default thread LAZILY (first orphan for a record creates it) and ONE per record (a second orphan for the same record joins the same default — verified by test, no duplicate).</criterion>
+    <criterion testable="true">Tier 3 creates the per-user master catch-all ONE per owning user (a second no-regarding orphan for the same user joins the same master — verified by test).</criterion>
+    <criterion testable="true">The `default-thread` marker (task 002) distinguishes auto-created default/master threads from conversation threads and keys the idempotent find-or-create; the write is additive (NFR-04, no existing field retyped).</criterion>
+    <criterion testable="true">**Existing email + messaging resolution flows continue to pass (characterization tests green)** — Tier-1 JOIN, record-anchored CREATE, and the NFR-02 non-fatal swallow are unchanged before and after; only the former SKIP→null cases now fall through to Tier 2/3.</criterion>
+    <criterion testable="true">Assignment is best-effort/non-fatal (NFR-02): a simulated Tier-2/Tier-3 failure does NOT fail send/capture; no second regarding mechanism introduced (ADR-024/ADR-046, grep/diff-verifiable); the impersonation read path is untouched (ADR-028).</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈ 0 vs ~46.99 MB; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean before PR.</criterion>
+    <criterion testable="true">NEGATIVE: no historical backfill introduced (point-forward only — pre-existing orphaned messages are NOT reassigned); no new access path / membership-union added; no new NuGet package.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 002 (the `default-thread` marker + thread schema deltas). Blocks 071 (naming re-derive on the same file — serialized after this lands). This is the highest-risk shared-code edit in R2 alongside 050 (participant write): both touch shared `Services/Communication/` and are `parallel-safe: false`; never run them concurrently.
+
+    The characterization-first discipline is non-negotiable — if you cannot get the existing resolver tests green BEFORE editing, STOP and escalate (root §6) rather than editing blind. If following ADR-024/ADR-046 strictly seems to force a worse outcome, surface it via the §6.5 ADR-conflict protocol; do not silently deviate.
+
+    Point-forward only: pre-existing orphaned messages stay ungrouped until an optional backfill (deferred, out of R2). Do not build backfill.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (shared-path edit). Characterization tests for the existing resolver flows MUST be green BEFORE editing `ThreadResolver.cs` (Step 3) and after (Step 9). Per root §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (Success Criterion 5 failure mode) in the PR. Run `/conflict-check` before the PR (coordinate with 050). `parallel-safe: false` — serializes the W7 shared-resolver edit. Model tier `opus` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

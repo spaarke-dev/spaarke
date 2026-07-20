@@ -66,7 +66,7 @@ These are the R3 MUST/MUST-NOT rules (from spec §Technical Constraints + design
 - ✅ **MUST** derive dirty-save output from the retained load-time original (FR-01); **MUST NOT** reconstruct the whole doc from TipTap (`docx.js` dropped from export).
 - ✅ **MUST** exclude SkiaSharp assets when adding Docxodus; **MUST NOT** invoke Docxodus `HtmlToWml` / `FormattingAssembler` (re-pulls SkiaSharp).
 - ✅ **MUST** anchor primarily by `w14:paraId`; **MUST** retain `AnnotationReanchorService` fuzzy match as the cross-Word-session fallback (Word regenerates paraIds on external edits).
-- ✅ **MUST** derive E3 confidence server-side from grounding; **MUST NOT** emit a false-precision numeric self-report or auto-accept low-confidence edits.
+- ✅ **MUST** derive the E3 confidence band **client-side at render** from grounding evidence + live-doc resolvability (§6.5 Path B, 2026-07-18 — supersedes "server-side"; the band/offsets are client-derived VIEWS of the opaque payload, keeping the AI ledger path envelope-only per ADR-013/040 — see [`docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`](../../docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md)); **MUST NOT** emit a false-precision numeric self-report, treat it as a model self-report, or auto-accept low-confidence edits.
 - ❌ **MUST NOT** add any TipTap product feature (paid or unpaid) or any AGPL code. MIT base + `@tiptap/extension-*` only (verify never `@tiptap-pro/*`).
 - ❌ **MUST NOT** add a new AI dispatch endpoint (ADR-039) or new/changed AI catalog rows (engine frozen).
 - ✅ **MUST NOT** inject AI internals into `Services/Compose/` (ADR-013 Tier-1 NetArchTest); **MUST NOT** leak `Microsoft.Graph` types above `SpeFileStore` (ADR-007).
@@ -87,7 +87,7 @@ If a new ADR conflict surfaces during execution, invoke the **root CLAUDE.md §6
 Per [`projects/INDEX.md`](../INDEX.md), R3's BFF `Services/Compose/` surface overlaps active peers:
 
 - **`spaarkeai-compose-r2`** — direct predecessor; R3 extends its merged seams. ✅ **Confirmed completed/closed + on master (owner, 2026-07-16)** — the E1-cutover (Phase 2) coordination gate is CLEARED.
-- **`spaarke-ai-architecture-redesign-r2`** — sole owner of `Services/Ai/` internals. R3's E3 is server-derived + additive on `ComposeDraftPayload` — **consume `PublicContracts` seams, NO fork of `Services/Ai/`.**
+- **`spaarke-ai-architecture-redesign-r2`** — sole owner of `Services/Ai/` internals. R3's E3 confidence band is **client-derived at render** (no server band; the AI ledger path stays envelope-only per ADR-013/040 — §6.5 Path B) — **NO fork of `Services/Ai/`; consume `PublicContracts` seams only if a server touch is ever needed.**
 
 Run `/conflict-check` before opening any BFF PR.
 

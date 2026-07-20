@@ -1,18 +1,20 @@
 /**
  * redlineDocxAnnotations.test.ts — redline → Word save-fidelity bridge (UAT-R7 #2/#3/#4).
  *
- * Covers the two PURE functions that make a redlined Save persist as NATIVE Word tracked-changes:
+ * Covers the PURE function that makes a redlined Save persist as NATIVE Word tracked-changes:
  *   - `redlineMarksToDocxAnnotations` (useComposeWordShuttle) — maps the editor's PENDING
  *     insertion/deletion marks → DocxAnnotationInput[] the BFF DocxAnnotationWriter renders as
  *     w:ins/w:del. This is the producer the redline marks (usePendingRedline) never had.
- *   - `buildRejectBaselineJson` (docxBridge) — reduces the doc to its reject-state BASELINE (drop
- *     proposed insertions, keep struck originals as plain text) so the annotations re-apply cleanly.
  *
- * Both are pure tree transforms — no editor, no docx packer — so these are fast domain tests.
+ * (R3 task 027: the reject-state BASELINE reduction — formerly `buildRejectBaselineJson` — is now an
+ * internal step of `collectEditedParagraphs`/`buildContentModel`; its behavior is covered by
+ * `docxBridge.contentModel.test.ts` through the real editor surface.)
+ *
+ * A pure tree transform — no editor, no docx packer — so these are fast domain tests.
  */
 
 import { redlineMarksToDocxAnnotations, DocxTrackChangeKind } from './useComposeWordShuttle';
-import { buildRejectBaselineJson, type TipTapNode } from '../utils/docxBridge';
+import type { TipTapNode } from '../utils/docxBridge';
 
 /** A TipTap text node carrying zero or more redline marks. */
 function text(value: string, marks: Array<{ type: string; ledgerRef?: string; binding?: string }> = []): TipTapNode {
@@ -113,45 +115,5 @@ describe('redlineMarksToDocxAnnotations — pending redline marks → DocxAnnota
   it('ignores plain text and marks without a ledgerRef (returns empty for a clean doc)', () => {
     const json = doc(para(text('Nothing tracked here.'), text('bold', [{ type: 'bold' }])));
     expect(redlineMarksToDocxAnnotations(json, AUTHOR, DATE)).toEqual([]);
-  });
-});
-
-describe('buildRejectBaselineJson — reject-state baseline for the Save annotation path', () => {
-  it('drops proposed-insertion text and keeps struck-original text as plain text', () => {
-    const json = doc(
-      para(
-        text('The Supplier shall '),
-        text('indemnify', [{ type: 'deletion', ledgerRef: 'b1@t1', binding: 'b1' }]),
-        text('defend', [{ type: 'insertion', ledgerRef: 'b1@t1', binding: 'b1' }]),
-        text(' the Customer.')
-      )
-    );
-
-    const baseline = buildRejectBaselineJson(json);
-    const runs = baseline.content![0].content!;
-
-    // The insertion ("defend") is gone; the deletion original ("indemnify") stays, with its redline
-    // mark stripped so it serializes as ordinary text.
-    const texts = runs.map(r => r.text);
-    expect(texts).toEqual(['The Supplier shall ', 'indemnify', ' the Customer.']);
-    const struck = runs.find(r => r.text === 'indemnify')!;
-    expect(struck.marks ?? []).toEqual([]);
-  });
-
-  it('preserves non-redline marks (e.g. bold) untouched', () => {
-    const json = doc(para(text('kept', [{ type: 'bold' }]), text('gone', [{ type: 'insertion', ledgerRef: 'x@t1' }])));
-
-    const baseline = buildRejectBaselineJson(json);
-    const runs = baseline.content![0].content!;
-
-    expect(runs.map(r => r.text)).toEqual(['kept']);
-    expect(runs[0].marks).toEqual([{ type: 'bold', attrs: { ledgerRef: undefined, binding: undefined } }]);
-  });
-
-  it('does not mutate the input tree', () => {
-    const json = doc(para(text('gone', [{ type: 'insertion', ledgerRef: 'x@t1' }])));
-    const snapshot = JSON.stringify(json);
-    buildRejectBaselineJson(json);
-    expect(JSON.stringify(json)).toEqual(snapshot);
   });
 });

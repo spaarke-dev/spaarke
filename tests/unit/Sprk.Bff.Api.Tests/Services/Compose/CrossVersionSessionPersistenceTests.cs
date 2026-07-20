@@ -172,6 +172,9 @@ public sealed class CrossVersionSessionPersistenceTests
 
         _spe.Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), DriveId, DocumentSpeId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(new byte[] { 0x50, 0x4B, 0x03, 0x04 }));
+        // FR-06 (task 027): LoadAsync resolves the load-time version id best-effort.
+        _spe.Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), DriveId, DocumentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-1");
     }
 
     // ── Acceptance #2: a DOCX version change (new SPE ETag — simulating a Word save producing a

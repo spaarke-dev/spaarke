@@ -1,8 +1,120 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-17 (context-handoff — 012+020 COMPLETE & committed; task 021 handoff for fresh session)
+> **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+## ▶️ RESUME HERE — R3 DEPLOYED to spaarkedev1; UAT found 3 bugs + 1 UX ask (2026-07-19). FIX NEXT.
+
+**All implementation + the full deploy are DONE.** BFF `spaarke-bff-dev` (hash-verified, healthz green, compose routes 401) + client `sprk_spaarkeai` (published) are LIVE on spaarkedev1. Worktree synced to master (`93fb2d31f`), 0 behind, NOT merged to master (owner's call). Tasks 025/081 ✅.
+
+**⚠️ FIRST BROWSER UAT SURFACED REAL BUGS — full detail + triage in [`notes/uat-feedback-2026-07-19.md`](notes/uat-feedback-2026-07-19.md). Fix order (all CLIENT-side `Spaarke.Compose.Components`; BFF unchanged; re-deploy `sprk_spaarkeai` after):**
+- **P1 — `insertBefore` DOM crash → "Compose failed to load"** on mount / clicking A (styles, 043) or Comments (044). **Leading cause:** the client-wire fix (`8f2cec4a6`) made `importedRevisions`/`importedComments` LIVE, so `applyImportedRevisions`/`applyImportedCommentAnchors` now run at mount and insert a mark at an INVALID position → `insertBefore` throws. Headless tests are green (real-DOM-only). Fix: bounds-check + per-mark try-catch-skip in `importedRevisions.ts`/`importedComments.ts`; don't crash the mount on one unplaceable mark. (The amber "target text not found" banner is FR-19 working, NOT a bug.)
+- **P2 — Save: "content is required and must be non-empty"** on a born-in-editor AI-drafted doc. `triggerSave` should send `{contentModel}` (create-on-save). Trace `ComposeWorkspace.triggerSave` 4-case classification for a workspace-tab AI draft — likely mis-classified so it sends neither content nor contentModel.
+- **P3 — Word "Open in Web"/"Open in Desktop" not activated** — likely gated on a saved doc (blocked by P2) or a wiring gap. Re-check after P2.
+- **UX-1 — add "Save" to the Word dropdown** (duplicate of the toolbar save; users look there). Small `ComposeFormatToolbar.tsx` add.
+
+**After UAT fixes:** re-build + re-deploy `sprk_spaarkeai` (BFF unchanged), re-UAT (082), then 090 wrap-up (code-review, adr-check, /test-diet, lessons-learned).
+
+### ⬇️ (prior) ALL IMPLEMENTATION COMPLETE (2026-07-19)
+
+**Every implementation FR task is done, committed, and pushed to `work/spaarkeai-compose-r3` (0 behind master; nothing merged to master — owner's call).** Remaining: 080 (verify wrap — runnable), 025/081 (deploys — user-gated + worktree-sync-first per memory `bff-deploy-sync-worktree-first`), 082 (UAT — needs deploy), 090 (wrap-up).
+
+**Phase status:** E1 (022✅/023✅/026✅/027✅/024 seam✅) · E2 (010/011/012✅ + now LIVE via the ComposeWorkspace wire) · E3 (030 resolved-by-removal / 031✅ / 032✅) · Toolset (040/041/042/043/044✅) · Import (050/051/052✅ + client wire✅). Confidence band + offsets = CLIENT-derived (§6.5 Path B; `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
+
+**Key session commits (2026-07-18→19):** 8-task parallel wave; `--runInBand` flake fix (stale `{virtual:true}` mocks); client-derive decision + docs + dead-code removal; 031 (`27250769b`), 032 (`f867c8a67`, +XSS hardening); import 050 (`bddc16d04`) / 051 (`597da2465`) / 052 (`0e782cec2`, seam caught a real wire-drop bug) + client wire (`8f2cec4a6`). BFF Compose **456✅**; client jest **341✅** parallel AND `--runInBand`.
+
+**Two tracked follow-ups (documented, non-blocking):** 043 custom-style-name server pre-parse; 044 comment-thread live save-flow annotation wiring. FR-16 numeric offsets deferred (no consumer; §11).
+
+### ⬇️ (prior) parallel wave COMPLETE (2026-07-18)
+
+**PARALLEL WAVE DONE + COMMITTED (2026-07-18, autonomous). 8 tasks landed, 8 clean local commits, ZERO pushes.**
+
+| Task | State | Commit | Verify |
+|---|---|---|---|
+| 024 E1 fidelity seam | ✅ | `11696f4ac` | Compose 465✅ (BFF) |
+| 030 E3 confidence-band | 🔄 **foundation** (live-wiring → 031) | `11696f4ac` | 14 unit+3 seam, ADR013 2/2 |
+| 040 find/replace FR-17 | ✅ | `105f8c521` | client jest |
+| 044 comment-thread FR-23 | ✅ | `62cb980f7` | client jest |
+| 042 toolbar/bubble/banner FR-19/20/21 | ✅ | `00490f5ca` | client jest |
+| 043 styles pane FR-22 | ✅ (built-in styles only; custom-style-name pre-parse = follow-up) | `4564d5102` | client jest |
+| 041 basic tables FR-18 | ✅ (toolbar affordance; table family already present) | `1b3690ecf` | client jest |
+
+**AUTHORITATIVE client verify: `npx jest` (parallel, CI-equivalent) = 286/286 ✅, 33/33 suites.** BFF Compose = 465/465 ✅ (024+030).
+
+**✅ RESOLVED 2026-07-18 — `--runInBand` flake FIXED** (commits `2ce008332` + `88c551d09`). Root cause (NOT this wave): 11 Compose test files mocked `@spaarke/ai-widgets/events` with `{ virtual: true }`. That flag predates the task-111 jest.config `moduleNameMapper` that maps the subpath to the real source; a virtual mock is keyed to the raw specifier (not the resolved path), so under `--runInBand`'s shared module registry it gets bypassed once a sibling suite loads the real events module → the real `useDispatchPaneEvent` runs with no `PaneEventBusProvider` → throws. Non-deterministic (0→41 failures) because it depends on cross-suite load order; invisible under parallel workers (fresh registry per worker) — which is why CI stayed green. **Fix:** dropped `{ virtual: true }` from all 11 mocks (factories unchanged) + scrubbed stale comments. **Verify:** `--runInBand` now 286/286 on 6 consecutive runs (was ~2/5 failing); parallel 286/286. Test-only, no production/BFF/deploy.
+
+**RESIDUALS folded forward:**
+- **Task 031** now also carries **030's live band-wiring** (server derive in `ChatEndpoints.GetComposeOutputsAsync` + mirror into the real `ComposeDraftPayload` in `ComposeEditor.tsx` + a LIVE seam assertion) — see 030/031 rows in TASK-INDEX.
+- **043 follow-up:** server-side OOXML style-name pre-parse (task-010 paraId pattern) to surface true custom named styles (e.g. "Recital") + `rStyle` character styles.
+- **044 follow-up:** wire `composeCommentThreadsToDocxAnnotations()` into the live `ComposeWorkspace.triggerSave` annotation flow.
+
+**⚠️ BFF DEPLOY DIRECTIVE (owner 2026-07-18, memory `bff-deploy-sync-worktree-first`):** before ANY `Sprk.Bff.Api` deploy from this worktree (025/081), FIRST sync `origin/master` in → rebuild → re-run publish-size/CVE on the synced tree → then deploy. Do not deploy a stale worktree.
+
+**REMAINING TASK GRAPH:** E1 → 025 (deploy, deps 024✅ — but see deploy directive). E3 → 031 (deps 030🔄 met; carries 030 live-wiring) → 032. Import → 050/051/052 (dep 022✅/044✅). Wrap → 080/081/082/090. Client toolset wave (040/041/042/043/044) DONE.
+
+### ⬇️ (superseded) parallel wave in flight — client lane 044→042→043→041 + E3 030 residual
+
+**AUTONOMOUS PARALLEL ORCHESTRATION (2026-07-18).** Owner asked to run task 024 + task-execute other tasks in parallel, autonomously. Lanes: server-test + server-contract (both drained) + a SERIAL client lane (all W4 toolset tasks mount into the single `ComposeEditor.tsx`, so they cannot run concurrently — one at a time). Sub-agents run `task-execute` FULL rigor but do NOT touch `.claude/`, git, or the trackers — the MAIN SESSION owns commits + `TASK-INDEX.md`/`current-task.md` (avoids concurrent-write conflicts).
+
+**DONE + COMMITTED this wave:**
+- **024** (E1 fidelity seam) ✅ — `11696f4ac`. NEW `tests/integration/seam/Ai/ComposeFidelitySeamTests.cs` (2 tests): loaded byte-identity + born-in-editor numbering golden-file. Compose 465✅.
+- **030** (E3 confidence-band) 🔄 FOUNDATION committed `11696f4ac`. Derivation engine + additive contract + client-mirror fragment + 14 unit/3 seam tests. **LIVE-WIRING RESIDUAL folded into task 031** (grep-verified §6.5 Path-C: `ComposeService.cs` never touches `ComposeDraftPayload`; live path is `ChatEndpoints.GetComposeOutputsAsync`, payload stored opaque → `DeriveConfidenceBand` not yet invoked live; the real client `ComposeDraftPayload` lives in `ComposeEditor.tsx` not `compose-contracts.ts`).
+- **040** (find/replace FR-17) ✅ — `105f8c521`. Mark-safe (nodesBetween union, avoids `marksAcross` drop). jest 230/230.
+
+**IN FLIGHT:** **044** (comment-thread UI) — client lane, running as delegated agent on top of 040's committed `ComposeEditor.tsx`.
+
+**CLIENT LANE QUEUE (serial, launch next as ComposeEditor.tsx frees):** 044 → 042 (toolbar/bubble/warning) → 043 (styles pane) → 041 (basic tables, deps 011✅). Per client task: verify tsc+jest, commit its files + flip TASK-INDEX row, then launch the next.
+
+**TASK 031 now carries 030's live-wiring** (server derive in `GetComposeOutputsAsync` + mirror into the real `ComposeDraftPayload` in `ComposeEditor.tsx` + a LIVE seam assertion). 031 deps 030 (🔄 foundation met).
+
+**⚠️ BFF DEPLOY DIRECTIVE (owner 2026-07-18, memory `bff-deploy-sync-worktree-first`):** before ANY `Sprk.Bff.Api` deploy from this worktree (tasks 025/081), FIRST sync `origin/master` into the worktree so all other projects' merged changes ship. Do not deploy a stale worktree.
+
+**Pushes NOT done** — local commits only; owner batches pushes/deploys.
+
+### ⬇️ (prior) `work on task 024` (E1 seam) — tasks 022/023/026/027 all ✅ DONE
+
+**Task 027 ✅ COMPLETE (2026-07-18) — the client no longer authors `.docx` bytes.** Server half `ff9576278`; client half this session. `docx.js` (`tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`) + the `docx` npm dependency REMOVED. `docxBridge` now exposes `captureParaIdSnapshot`/`collectEditedParagraphs`(reject-state diff)/`buildContentModel`; `ComposeEditor` handle exposes `collectEditedParagraphs`/`buildContentModel`/`getRedlineAnnotations` + captures the load-time snapshot after `stampParaIds`; `triggerSave` sends the 4-case structured payload (loaded+dirty→`{editedParagraphs, baselineVersionId, content?}` / loaded+clean→`{content}` / born-in-editor→`{contentModel}` / unedited-browse-local→`{content}`; annotations ride every case); `versionId` threaded through workspace state (Load response → state → save). Client **205✅** (NEW `docxBridge.contentModel.test.ts`; fixed `dirtyOnMount`/`referenceOnly` mocks + `redlineDocxAnnotations` reject-state block moved); tsc clean. **Known E1 limitation (inherited from 022, documented):** a brand-new/split paraId is NOT emitted as an EditedParagraph (the synthesizer fails-fast on an unmatched paraId) — structural insert/split/delete is a future synthesizer extension.
+
+**Next = task 024 (E1 through-the-wire seam — NFR-06).** WebApplicationFactory slices: (a) loaded-doc dirty save preserves untouched OOXML BYTE-IDENTICAL + edited paras carry `w:ins`/`w:del`; (b) born-in-editor render round-trips + numbering GOLDEN-FILE (1/1.1/1.1.1 style-linked abstractNum) + survives a later tracked edit. deps 022,023,026,027 — ALL MET. Rigor FULL · sonnet · xhigh · tests. Then 025 (deploy+smoke). E3 (030-032), Toolset (040-044), Import (050-052) are independent/parallelizable.
+
+### ⬇️ (prior) 027 server-half handoff — kept for reference
+
+**Task 027 SERVER HALF ✅ DONE (2026-07-18, committed `ff9576278`, pushed).** The BFF wire contract for the client cutover is complete:
+- **SPE facade** `GetCurrentVersionIdAsUserAsync` (OBO `.../versions` → newest id) on `ISpeFileOperations`/`SpeFileStore`/`DriveItemOperations` (ADR-007). `LoadAsync` captures it best-effort → `LoadComposeDocumentResult.VersionId` + Load wire response `versionId` (FR-06 022-completion).
+- **Save wire contract**: `SaveComposeDocumentBody.content` now OPTIONAL; added `baselineVersionId`, `editedParagraphs`, `contentModel`. Both save endpoints relax the content-required guard (replace: content OR {baselineVersionId+editedParagraphs}; create-on-save: content OR contentModel) + map through to `SaveComposeDocumentRequest`. `ComposeContentModel` enums `[JsonStringEnumConverter]` (string kind/alignment over the wire). Additive/backward-compatible. Compose unit 252✅ + contract 85✅; BFF builds clean.
+
+**027 CLIENT HALF — REMAINING (the irreversible docx.js removal).** Files: `utils/docxBridge.ts` (remove `tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson`; add `captureParaIdSnapshot`, `collectEditedParagraphs`, `buildContentModel`), `widgets/ComposeEditor.tsx` (handle: replace `serialize`/`serializeForSave` with `collectEditedParagraphs`/`buildContentModel`; capture load-time text-by-paraId snapshot right after `stampParaIds` at ~:1169; update `ComposeEditorHandle` iface at :445), `widgets/ComposeWorkspace.tsx` (`triggerSave` ~:910-1040 → 4-case), `index.ts:183` (drop `tipTapToDocxBytes` export, add helpers), `types/compose-contracts.ts` (mirror `ComposeEditedParagraph`/`ComposeContentModel`/`versionId`), + ~11 coupled client tests.
+
+**⚠️ KEY DESIGN CONSIDERATION for the client (surfaced 2026-07-18, do NOT lose):** `collectEditedParagraphs` must diff each paragraph's **REJECT-STATE settled text** (accepted edits baked in, PENDING AI-redline insertion text dropped, pending-deletion text kept) against the load-time snapshot — NOT the raw `textContent`. Otherwise a pending redline gets BOTH baked into the synthesizer delta (via EditedParagraphs) AND sent as a `redlineMarksToDocxAnnotations` annotation → double-application. The old `buildRejectBaselineJson` per-node logic (drop insertion-marked, strip redline marks) MOVES INTO the per-paragraph text extraction for `collectEditedParagraphs`. The 4 triggerSave cases: loaded+dirty → `{ editedParagraphs, baselineVersionId, content?(retained fast-path), annotations }` (replace); loaded+clean → `{ content: byte-identical retained, annotations? }` (replace); born-in-editor (AI-draft/blank/edited-browse-local) → `{ contentModel, annotations? }` (create-on-save); unedited browse-local → `{ content: byte-identical }` (create-on-save, preserves FR-06a). Pending redlines still → `annotations` via `redlineMarksToDocxAnnotations(editor.getJSON())`; the reject-baseline is now server-composed (task 023), so the client sends structured content + annotations, never a reconstruction.
+
+### (prior) Task 023 ✅ DONE (2026-07-18). FR-04 AI-redline composition VERIFIED + TESTED. No production change — the composition was already correct in `SaveAsync` (`ResolveSaveBaselineAsync` baseline/render → `EditedParagraphs` synthesizer delta → `Annotations` via the unchanged `DocxAnnotationWriter`). NEW `ComposeServiceAnnotationCompositionTests` (3): (a) annotations-only persist native `w:ins`/`w:del`/`w:comment` on the retained original; (b) annotations + direct-typing delta compose without corrupting either (edit on para B, annotation on para C, para A clean); (c) annotations decorate the 026 born-in-editor render — all OpenXML schema-valid. Compose **252✅**; ADR013_ComposeFacade PASS; publish/CVE unchanged (no src delta).
+
+**Next = task 027 (CLIENT content-model cutover — drop docx.js).** deps 022✅,023✅,026✅ all met. Remove `tipTapToDocxBytes`/`tipTapJsonToDocxBytes`/`buildRejectBaselineJson` from `docxBridge.ts` + `index.ts:183`; add load-time text-by-paraId snapshot + `collectEditedParagraphs()` + `buildContentModel()`; rewrite `triggerSave` (4-case: dirty→EditedParagraphs+versionId / clean→byte-identical Content / born-in-editor→ContentModel / AI→annotations); fix ~11 client test files. Rigor FULL · opus · xhigh · client (`Spaarke.Compose.Components`). **Also open (022 completion, do WITH 027)**: `LoadAsync` must capture+return `VersionId` (FR-06 re-fetch source — 027's dirty-save path needs it; today Load returns only ETag).
+
+### (prior) Task 026 ✅ DONE (2026-07-18, committed bd15cae77, pushed). `ComposeDocumentRenderer` (server-side born-in-editor OOXML authoring) built + wired + tested. Files: NEW `Services/Compose/ComposeDocumentRenderer.cs` + `ComposeContentModel.cs`; MOD `ComposeService.cs` (`_documentRenderer` field/ctor + `ResolveSaveBaselineAsync` branch (a0)), `IComposeService.cs` (`SaveComposeDocumentRequest.ContentModel`), `ComposeModule.cs` (DI singleton); NEW tests `ComposeDocumentRendererTests.cs` (12) + `ComposeServiceBornInEditorSaveTests.cs` (1). **Verify**: Compose suite **249✅** (+13); ADR013_ComposeFacade PASS (ADR007 pre-existing RED = Communication-only, not us); publish **45.69 MB** compressed incl PDBs (−0.31 vs 46.00; 0 pkg delta); CVE clean; OpenXML schema-valid (Office2019 validator green — caught+fixed 4 ordering bugs: tblGrid, tblBorders order, keepNext-before-numPr, nsid-before-multiLevelType); dup-client-paraId re-mint (code-review-found correctness fix). §9.5 gates PASS.
+
+**Downstream order**: 023 (AI redlines/comments compose on the SERVER-AUTHORED baseline — verify+wire `DocxAnnotationWriter` over both the 022 delta AND the 026 render; deps 022✅ met) → 027 (client content-model cutover, drop docx.js; deps 022,023,026 — 026 now ✅) → 024 (seam: loaded byte-identity + born-in-editor numbering golden-file). **Also open (022 completion, before/with 027)**: `LoadAsync` must capture+return `VersionId` (FR-06 re-fetch source — today returns only ETag).
+
+**Uncommitted**: task 026 (8 files: 2 new src, 3 mod src, 2 new tests, + current-task/POML/TASK-INDEX). 5 prior LOCAL commits unpushed (`3a5505c5e`…`5d9d535c2`). Commit 026 when ready; owner batches pushes.
+
+### ⬇️ (prior) RESUME block — task 026 (now complete) — kept for reference
+The POML [`tasks/026-compose-document-renderer.poml`](tasks/026-compose-document-renderer.poml) is self-contained (reuse anchors, numbering recipe, file:line seams, acceptance criteria + numbering golden-file). Rigor FULL · opus · xhigh · parallel-safe=false (Services/Compose).
+
+**Five de-risking facts from the 2026-07-18 investigation (not all in the POML):**
+1. **Reuse anchor**: `Services/Ai/Export/DocxExportService.cs` is the ONLY from-scratch authoring precedent — `WordprocessingDocument.Create` (:55), `CreateStyledTable`/`CreateTableCell` (:412-486), `AddStyleDefinitions`/`CreateStyle` (:134-176), `SanitizeText` (:557). Reuse the patterns; its numbering is FAKE (literal "1. " text) — do NOT copy that.
+2. **The one greenfield = multi-level numbering** — ZERO `NumberingDefinitionsPart` authoring exists anywhere in `src/server/`. Recipe + pitfalls (style-linked not direct `numId`; `%N` lvlText; `isLgl`; `lvlRestart`) in FR-27 + the 026 POML + researcher memo `.claude/agent-memory/researcher/server-docx-authoring-numbering-2026-07-18.md`.
+3. **Fidelity target fixture**: `tests/unit/Sprk.Bff.Api.Tests/Fixtures/Compose/RealTemplates/commonpaper-cloud-service-agreement.docx` (9-level numbering, 345 paras, 395 paraIds, 6 tables) — UNZIP it to study its real `numbering.xml`/`styles.xml`.
+4. **paraId mint**: apply `ParaIdPreParser`'s scheme (`RandomNumberGenerator.GetInt32(1,int.MaxValue).ToString("X8")`, `0<x<0x80000000`, dedup) at BUILD time — set `Paragraph.ParagraphId` on every emitted `w:p` incl. table cells.
+5. **Render seam**: `ComposeService.SaveAsync` / `ResolveSaveBaselineAsync` create-path (add `ComposeContentModel? ContentModel` to `SaveComposeDocumentRequest`, additive; branch to the renderer before `UploadSmallAsUserAsync` :444). OpenXML SDK 3.5.1, no new NuGet.
+
+**Also open (task 022 completion, do alongside or before 027)**: `LoadAsync` must capture+return `VersionId` (today returns only ETag — the FR-06 re-fetch branch I wired in Increment A has no source yet). See FR-06.
+
+**Uncommitted/unpushed state**: tree CLEAN. 4 LOCAL commits not pushed to origin (`3a5505c5e`, `ce50c9877`, `a2773e0dc`, `4b7887a0b`) — all safe in this worktree; push when ready (owner batches pushes). Do NOT re-open the committed server inversion (`ce50c9877`).
+
+**Downstream order**: 026 → 023 (AI-redline compose on authored baseline) → 027 (client content-model cutover: drop docx.js) → 024 (seam: loaded byte-identity + born-in-editor numbering golden). 020/021 superseded; 001 reversed.
+
+---
 
 ---
 
@@ -10,10 +122,42 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Option C ADOPTED (§6.5 owner-approved) — E1 redline engine built + Docxodus fully removed. NFR-09 gate ✅ PASS. |
-| **Step** | Phase 1 COMPLETE (synthesizer + cleanup + design/spec amend). Phase 2 = the rest of task 022 (SaveAsync wiring). |
-| **Status** | Foundation done, committed. Task 022 UNBLOCKED + re-scoped. |
-| **Next Action** | **Task 022 Phase 2** (the E1 cutover wiring, own turn — FULL·opus·xhigh): invert `ComposeService.SaveAsync` to call `ComposeParagraphRedlineSynthesizer` on the resolved baseline (FR-06: versionId primary / client-bytes fast-path / Redis fallback via task-002 `DownloadFileVersionAsUserAsync`); **FR-05** format-change handling in the synthesizer (compare run props → rPrChange); client: drop `tipTapJsonToDocxBytes`/`tipTapToDocxBytes` from docxBridge.ts + `ComposeWorkspace.triggerSave` sends versionId + paraId-keyed edits; **NFR-06** through-the-wire seam slice test. |
+| **Task** | E1 RE-ARCHITECTED (owner-approved 2026-07-18): the SERVER owns all `.docx` authoring; the client never authors bytes. 022 Increment A (server SaveAsync inversion) DONE `ce50c9877`. Plan re-authored: NEW 026 (renderer) + 027 (client cutover). |
+| **Step** | Re-architecture investigation (5 streams: content model, creation flow, server OOXML, task graph, external practices) COMPLETE → design/spec/tasks updated. Ready to execute 026. |
+| **Status** | Re-plan committed. Task 022 server half done; the born-in-editor gap is now a first-class FR (FR-01a) + task (026), not a blocker. |
+| **Next Action** | Execute **task 026** (`ComposeDocumentRenderer` — server-side born-in-editor OOXML authoring: styles + style-linked multi-level numbering + tables + paraId). Then 023 (AI-redline compose) → 027 (client cutover) → 024 (seam). |
+
+### ✅ E1 RE-ARCHITECTURE (2026-07-18, owner-approved) — server owns all `.docx` authoring
+Investigation (5 parallel streams) validated the architecture against Harvey (leading legal-AI drafter): **deterministic server-side OOXML authoring, LLM/editor confined to text; client JS exporters are generators, not fidelity round-trippers.** Two server engines: `ComposeParagraphRedlineSynthesizer` (delta onto retained original — loaded-doc edit, BUILT) + NEW `ComposeDocumentRenderer` (from-scratch high-fidelity render — born-in-editor/AI-drafted/blank, styles + **style-linked multi-level numbering** + tables + minted paraId). The client (027) sends a paraId-keyed content model, never `docx.js` bytes. **Artifacts updated**: spec (NEW FR-01a born-in-editor creation + FR-27 numbering fidelity; FR-01 scoped; MUST-rules; Out-of-Scope numbering reconciled); design (NEW §4.4 + §10 reuse row + §11 ADR-039-non-conflict + §12 publish reconcile); TASK-INDEX (022 split; NEW 026/027; deps/waves; 27→29 tasks); 022/023/024 POML amendment banners; plan + design Docxodus→Option C reconcile. **Key finding folded in**: `LoadAsync` never captures `VersionId` (FR-06 re-fetch source) → task 022 completion item. Numbering = the one greenfield (zero `NumberingDefinitionsPart` authoring server-wide); recipe + pitfalls (lvlRestart, style-linked-vs-direct double-numbering) captured in task 026 + FR-27.
+
+### Superseded escalation (2026-07-18, now RESOLVED by the re-architecture) — kept for reference below.
+
+### ✅ Task 022 Increment A COMPLETE (2026-07-18, commit ce50c9877)
+Server E1 inversion — `ComposeService.SaveAsync` now derives a dirty save as a DELTA onto the retained load-time original: **(1)** `ResolveSaveBaselineAsync` — `request.Content` same-session fast-path (retained ORIGINAL, not a reconstruction) → else re-fetch the load-time SPE version by `BaselineVersionId` via task-002 `DownloadFileVersionAsUserAsync` (behind SpeFileStore, ADR-007); no reconstruction fallback (FR-01). **(2)** synthesize `EditedParagraphs` (paraId-keyed) via `ComposeParagraphRedlineSynthesizer`, author from OBO identity. **(3)** `Annotations` via `DocxAnnotationWriter` (unchanged; task 023). Contract: `+BaselineVersionId +EditedParagraphs`, `Content` demoted required→optional. Synthesizer injected (optional ctor param, DI singleton already registered). **Additive-safe**: 4 existing FR-06a fidelity tests still green. NEW `ComposeServiceDeltaSaveTests` (3). Compose suite 235✅; ADR013_ComposeFacade✅; publish 46.00 MB compressed incl PDBs (+0.65 vs 45.35; 0 pkg; 0 CVE). **Redis Tier-3 baseline fallback DEFERRED** (§6.5 Path-A scoping — versionId fetch discharges FR-06; Redis needs a Load-path write, out of 022 file scope).
+
+### ⛔ Task 022 Increment B (client docx.js removal) — §6.5 ESCALATION OPEN (2026-07-18)
+Removing `tipTapToDocxBytes`/`tipTapJsonToDocxBytes` **wholesale** (POML step 3 + design §133 "drop docx.js entirely") conflicts with two realities the design does not resolve:
+1. **Born-in-editor baseline gap**: an AI-drafted / blank-new doc (DEF-08 `initialHtml` seed, `docxBytes=null`) has NO retained load-time original to delta against. Removing the serializer breaks its save; R3 has no server-side HTML→docx materialization (ADR-039 blocks new AI dispatch). FR-01 "never reconstruct" logically applies only to docs that HAVE an original.
+2. **AI-redline reject-baseline coupling**: `ComposeEditor.serializeForSave` builds its reject-baseline via `tipTapJsonToDocxBytes(buildRejectBaselineJson)` — that rewire onto the Option C baseline is explicitly **task 023's** charter (FR-04 AI redlines onto Option C baseline).
+**Recommended (owner to ratify)**: §6.5 Path A — scope the removal to the *dirty-edit-of-a-loaded-doc* path (the real FR-01 fidelity target); **retain `tipTapToDocxBytes` NARROWLY** as the born-in-editor serializer with a documented rationale (no original ⇒ reconstruction is the only option and is not a fidelity regression). Tensions with the "no residual" Option-C directive → owner call required. Client work after decision: load-time text-by-paraId snapshot at `stampParaIds` time → `collectEditedParagraphs()` handle (dirty paras by paraId) → `triggerSave` sends `BaselineVersionId`+`EditedParagraphs` (dirty-loaded path) / `Content` byte-identical (clean) / retained serializer (born-in-editor). Fix ~5 client test files mocking `tipTapToDocxBytes`.
+
+### Superseded handoff (pre-Increment-A) — kept for reference below.
+
+### Handoff Notes — Task 022 (E1 SaveAsync cutover, Option C) — SCOPED, NOT STARTED (fresh session recommended — irreversible cutover on 1747-LoC file)
+
+**Rigor**: FULL · opus @ xhigh · **prescriptive** (irreversible save-path inversion — deviations escalate §6). Deps 002✅ 003✅(gate PASS) + Option C engine ✅. Hot-path: Services/Compose + client — `/conflict-check` before the BFF PR (R3 #656 now merged to master; re-open a fresh PR for 022).
+
+**Current model** (the lossy path to invert): client reconstructs whole `.docx` via `tipTapToDocxBytes` → `request.Content` → `SaveAsync` (`ComposeService.cs:340`) treats it as an OPAQUE baseline + applies `request.Annotations` (AI redlines via `DocxAnnotationWriter`, at `ComposeService.cs:378-384`) → persists (transient-create Fork B at ~403; replace path below).
+
+**Target model (FR-01/02/06 + Option C)**:
+1. **Contract** (`IComposeService.cs:393` `SaveComposeDocumentRequest`): ADD `string? BaselineVersionId` (load-time SPE version — Load already captures it: `ComposeService.cs:564` `VersionId = saved.Id`, surfaced on `LoadComposeDocumentResult`) + `IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs` (paraId-keyed). DEMOTE `Content` to an OPTIONAL same-session fast-path (still `required`? → make nullable; a dirty save now sends edits + versionId, not full bytes). Keep `Annotations` unchanged.
+2. **SaveAsync inversion**: resolve baseline = (a) `request.Content` if present (same-session fast-path) → (b) else fetch load-time version by `BaselineVersionId` via task-002 `SpeFileStore.DownloadFileVersionAsUserAsync` (ADR-007 — stays behind the facade) → (c) else size-capped Redis Tier-3 (ADR-009/015). If none resolvable → clear error, do NOT fall back to a reconstruction. Then: `redline = _synthesizer.SynthesizeRedline(baseline, request.EditedParagraphs, author, ts)` → then the EXISTING `Annotations` apply (`_annotationWriter.Annotate`) on top → persist via If-Match (unchanged). **Clean-save passthrough (no edits, no annotations) stays byte-identical — FR-06a (`ComposeServiceUploadFidelityTests`).**
+3. **FR-05 format-change**: `ComposeEditedParagraph(ParaId, NewText)` is plain-text only → to emit `rPr/pPrChange` the payload must carry the edited paragraph's run FORMATTING (not just text). Options: (a) extend the DTO to a formatted fragment (runs+marks) and have the synthesizer diff run-props → emit `rPrChange`; (b) fold FR-05 into task 032 (formatted AI insertions / FR-15) which already owns run-formatting on the wire. DECIDE at design time; simplest MVP = text-diff now (FR-05 as a fast-follow).
+4. **Client**: remove `tipTapToDocxBytes` (`docxBridge.ts:215`) + `tipTapJsonToDocxBytes` (`:278`) from the export + `index.ts:183` export; rewrite `ComposeWorkspace.triggerSave` to send `BaselineVersionId` (from Load state) + paraId-keyed `EditedParagraphs` (the editor already carries paraIds per task 011 — collect dirty paragraphs' {paraId, text}) instead of reconstructed bytes. Keep the clean-save `state.docxBytes` passthrough. Fetches via `@spaarke/auth`.
+5. **NFR-06 seam**: `tests/integration/seam/**` WebApplicationFactory — load → edit paragraphs → save → reload; assert untouched paragraphs' OOXML preserved (paraId + tables) + edited paragraphs carry `w:ins`/`w:del`. Also discharges the task-002 versionId-baseline seam.
+6. Publish-size + CVE + ADR013/ADR007 checks; §10 Placement Justification + Path B supersession note in the PR.
+
+**Reuse**: `ComposeParagraphRedlineSynthesizer` (built), `ComposeParaIdSpliceMap`, task-002 `DownloadFileVersionAsUserAsync`, `DocxAnnotationWriter` (Annotations path). **Resume**: `work on task 022` in a FRESH session.
 
 ### ✅ Option C foundation + residual cleanup COMPLETE (2026-07-17)
 NEW `ComposeParagraphRedlineSynthesizer` (word-level LCS diff per paraId-keyed edited paragraph → native w:ins/w:del in place on the retained original; preserves paraId+tables+structure by construction; reuses `ComposeParaIdSpliceMap`; fail-fast on unmatched/dup paraId). **Removed (no tech debt):** `ComposeRedlineComparerService`+tests (task 021), `ComposeParagraphSpliceService`+tests (task 020), OptionC spike test, **Docxodus package + SkiaSharp exclusion** (task 001 reversed), all stale WmlComparer doc-comments. DI updated. NFR-09 harness repointed → **gate PASS** (345/345 paraIds + 6/6 tables on real CSA). Compose suite 424✅; ADR013_ComposeFacade PASS; publish **45.35 MB** (−0.59 vs 45.94, Docxodus gone); no Docxodus/SkiaSharp in output. design.md §4 + spec.md FR-02/03/05/07 + scope amended (§6.5). Kept: ComposeParaIdSpliceMap, ParaIdPreParser, AnnotationReanchorService, DocxAnnotationWriter/Reader.
@@ -69,12 +213,16 @@ All six pre-spec spikes (S1/S1b/S2/S3/S4/S5) passed — no design pivots. The fi
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 027 → ✅ COMPLETE (next: 024) |
+| **Task File** | [`tasks/027-client-content-model-cutover.poml`](tasks/027-client-content-model-cutover.poml) |
+| **Title** | FR-01 — client content-model cutover (drop docx.js) + FR-06 VersionId |
+| **Phase** | 2 E1 |
+| **Status** | ✅ completed 2026-07-18 (FULL · opus · xhigh). Server `ff9576278` + client this session; client 205✅, server Compose 252✅/contract 85✅, docx dep removed. E1 quartet (022/023/026/027) all done. |
+| **Started** | 2026-07-18 |
+
+**Placement Justification (§10 BFF hygiene)**: (1) Existing — overlaps `DocxExportService` (AI-analysis export, `Services/Ai/Export`, numbering is FAKE literal text) + `ComposeParagraphRedlineSynthesizer` (edit path, deltas onto a retained original). (2) Extension — can't extend either: DocxExportService is an AI-domain concern behind the ADR-013 boundary with fake numbering; the synthesizer requires a retained original a born-in-editor doc lacks. NEW pure engine in `Services/Compose` justified. (3) Cost-of-doing-nothing — without it an AI-drafted legal doc is saved by the lossy client `docx.js`, flattening 1/1.1/1.1.1 clause numbering + real styles into literal "1." text runs that later tracked-change edits corrupt. Pure (`ComposeContentModel` in / `byte[]` out), no AI, no Graph, no new NuGet. ADR-039 non-conflict (deterministic OOXML authoring, not AI dispatch — design §11).
+
+**CSA numbering study (Step 0 done)**: the style-link mechanism = ONE `abstractNum` (multilevel, 9 levels ilvl 0-8), each level carries BOTH `<w:pStyle w:val="HeadingN"/>` AND a `%N` `lvlText` cascade; ONE `w:num`→that abstractNum; each `HeadingN` **paragraph style** carries `<w:pPr><w:numPr><w:ilvl/><w:numId/></w:numPr></w:pPr>`; body paragraphs use ONLY `<w:pStyle val="HeadingN"/>` (no direct paragraph numId) → no double-numbering. Ordered/bullet lists = `ListParagraph` + DIRECT `numPr` (ListParagraph carries no style numId, so a direct numPr is not double-numbering); ordered restart = fresh `w:num` with `<w:lvlOverride><w:startOverride val="1"/></w:lvlOverride>`.
 
 ---
 

@@ -1,0 +1,169 @@
+<task id="021" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Regarding-mode `CommunicationTimeline` PCF variant (mirror R1 Timeline PCF + a regarding-resolution path; bound `anchorField`) + production build + solution pack</title>
+    <phase>W2 — Record Threads View (Surface 1)</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <deps>020</deps>
+    <blocks>022</blocks>
+    <tags>pcf, deploy, e2e-test</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Packages the extended shared component as a form-bound PCF (React 16/17 platform libraries per ADR-022) with a NEW regarding-resolution path (resolve the host record's `(entityType, id)`); produces a production build + solution ZIP for form placement — a host-affecting deliverable with prescriptive build/pack steps; touches `.ts` PCF code + manifest + solution. ADR-022 (platform libs), ADR-006 (PCF for form binding), ADR-026 (Path-A exception), ADR-028 (auth at boundary) bind; the bound-`anchorField` rule is a hard MUST (R1 lesson); UI tests gate the render. FULL required.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New/variant PCF folder + its own solution ZIP under `src/client/pcf/` — disjoint from the 023 config and the BFF/schema tracks. Depends only on 020 (the component it wraps). This task builds + packs; it does not concurrently edit shared code.</parallel-reason>
+    <fr-refs>FR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Package the regarding-mode `CommunicationTimeline` component (task 020) as a **form-bound PCF variant** that resolves the host record's `(entityType, id)` and renders the record's threads-as-groups view. Mirror the R1 `CommunicationTimeline` PCF (`src/client/pcf/CommunicationTimeline/`) — its manifest, `index.ts`, auth-init, and solution structure — adding only the **regarding-resolution path**.
+
+    Requirements:
+    - **Mirror the R1 Timeline PCF** structure. Either add a regarding-mode variant control or a mode switch on the existing packaging pattern (state which in notes) — reuse the R1 `authInit.ts` / `hostContext.ts` / App/Host wiring; do NOT invent a new PCF pattern (§11).
+    - **Regarding-resolution path** — resolve the **host record's `(entityType, id)`** from the PCF page context (`context.mode.contextInfo` / `context.page` entity name + record id) and pass `mode='regarding'` + `entityType` + `id` to the shared component. This is the one net-new bit vs R1's thread-id resolution.
+    - **MUST declare a bound `anchorField` property** — a model-driven-app code component only appears in the form component library if it binds a field (or a dataset). R1 learned this the hard way and now binds the primary Name (`sprk_name`) as a form anchor while reading the record from context. Mirror that exactly: bind `anchorField` to the host record's primary Name; the control reads `(entityType, id)` from context, not from the bound value. Cite the R1 lesson (documented in the R1 Timeline PCF `ControlManifest.Input.xml`).
+    - **React 16/17 platform libraries** (ADR-022) — declare React/Fluent as platform libraries (mirror R1: `React 16.14.0`, `Fluent 9.46.2`); MUST NOT bundle React 18; the mounted tree must be 16/17-compatible.
+    - **`@spaarke/auth` at the PCF boundary only** — build the `authenticatedFetch` from the Spaarke PCF auth pattern (`authInit.ts`) at the boundary; the shared component never imports `@spaarke/auth` (ADR-028).
+    - **No client-side ACS SDK** — the produced bundle MUST NOT contain any `@azure/communication-*` dependency (NFR-04).
+    - **Build + pack** — `npm run build:prod` (NOT `npm run build` — AP-1 / root §12), then pack the solution ZIP. **`pac import` is DEFERRED to the owner** — this task produces + validates a build + solution ZIP; task 022 does the 11-form placement/import (or the owner runs it). Document the split.
+    - **UI tests** — verify the control renders the regarding-mode grouped view on a form without console errors, is dark-mode correct, and reflects the record's threads.
+
+    Do NOT place the control on the 11 forms here (task 022) — this task produces the buildable + packable PCF variant.
+  </prompt>
+
+  <role>
+    Spaarke PCF engineer fluent in the virtual/React PCF pattern, ADR-022 platform libraries (React 16/17), the R1 `CommunicationTimeline` PCF packaging (`authInit.ts` boundary, platform-library manifest, solution ZIP), and resolving the host record `(entityType, id)` from PCF page context. Familiar with the bound-`anchorField` form-component-library requirement (R1 lesson).
+  </role>
+
+  <goal>
+    A regarding-mode `CommunicationTimeline` PCF exists under `src/client/pcf/CommunicationTimeline/`, mounts the shared component in regarding mode, resolves the host record's `(entityType, id)` from PCF context, declares a bound `anchorField` (primary Name) + platform-library React 16/17 (ADR-022), consumes `@spaarke/auth` at the boundary only (ADR-028), builds clean via `npm run build:prod`, and is packed into a solution ZIP. The bundle contains no ACS SDK (NFR-04). UI tests confirm it renders the grouped regarding view without console errors and is dark-mode correct. `pac import` + 11-form placement is deferred to task 022 / the owner.
+  </goal>
+
+  <context>
+    <background>
+      ADR-026 Path-A exception (R1 precedent, carried into R2): R2's message surface is the OOB main form + PCFs — NOT a Code Page. A form-bound PCF is within ADR-006 (PCF for form binding). This task realizes the regarding-mode viewer as a form-bound PCF; cite the Path-A exception in the PR.
+
+      §11 Component Justification — this is a PCF **variant of** the R1 Timeline PCF, not a new pattern. Existing: the R1 `CommunicationTimeline` PCF binds a single thread. Extension: the same packaging + auth boundary + platform libs, with a regarding-resolution path resolving `(entityType, id)` from context and mounting the shared component in regarding mode. Cost-of-doing-nothing: without a form host, FR-04's "regarding-mode Timeline on the record form" has no delivery vehicle. Reuse the R1 PCF's `authInit.ts` / `hostContext.ts` / manifest / solution rather than inventing packaging.
+
+      **Bound `anchorField` (MUST — R1 lesson).** The R1 Timeline PCF `ControlManifest.Input.xml` documents it explicitly: a code component only appears in the form component library if it declares a bound field or a dataset. R1 binds the primary `sprk_name` as a form anchor and reads the record from `context`, not from the bound value. R2's regarding-mode variant MUST do the same — bind `anchorField` to the host record's primary Name so the control is placeable on all 11 forms; resolve `(entityType, id)` from context. (spec FR-04 acceptance + CLAUDE.md MUST rule.)
+
+      ADR-022 boundary: the shared component (020) is authored React-18-friendly for the lib, but PCFs run on the platform React (16/17). The variant must declare platform libraries (mirror R1: React 16.14.0, Fluent 9.46.2) and the mounted tree must be 16/17-safe. If a React-18-only API slipped into 020, fix it in the shared lib (coordinate with 020) — do NOT fork the component into the PCF.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/ControlManifest.Input.xml (READ/MIRROR — R1 manifest: bound `anchorField`, platform libraries, feature-usage)</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/index.ts (READ/MIRROR — init/updateView/destroy, mount)</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/authInit.ts + hostContext.ts (REUSE — @spaarke/auth boundary + host record context)</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/CommunicationTimelineApp.tsx + CommunicationTimelineHost.tsx (READ/MIRROR — mount the shared component with props)</file>
+      <file>src/client/pcf/CommunicationTimeline/Solution/ (READ/MIRROR — solution project + ZIP layout)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/ (CONSUME — regarding-mode props from task 020)</file>
+      <file>src/client/pcf/CLAUDE.md (READ — PCF module rules)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (READ — build/pack/deploy workflow)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-04">A form-bound PCF variant mirrors the R1 Timeline PCF + a regarding-resolution path; resolves the host record's `(entityType, id)`; renders FR-03 (grouped regarding view); declares a bound `anchorField`. Scope: build + pack the variant; form placement on all 11 is task 022.</constraint>
+    <constraint source="ADR-022">PCF uses React 16/17 PLATFORM libraries (mirror R1: React 16.14.0, Fluent 9.46.2) — MUST NOT bundle React 18; the mounted tree is 16/17-compatible.</constraint>
+    <constraint source="ADR-006">PCF is for form binding — the control binds the host record via `anchorField` (primary Name) and resolves `(entityType, id)` from context.</constraint>
+    <constraint source="ADR-026">Path-A exception — OOB form + PCF, NOT a Code Page. Cite in the PR.</constraint>
+    <constraint source="ADR-028">`@spaarke/auth` is consumed at the PCF boundary only (reuse R1 `authInit.ts`); the shared component never imports it.</constraint>
+    <constraint source="NFR-04">The packaged bundle MUST NOT contain any `@azure/communication-*` dependency; grep/inspect the bundle.</constraint>
+    <constraint source="project">MUST declare a bound `anchorField` property (primary Name) — a code component without a bound field/dataset is hidden from the form component library (R1 lesson; cite the R1 manifest note). Scope: this variant's manifest.</constraint>
+    <constraint source="project">Build with `npm run build:prod` (NOT `npm run build` — AP-1 / root §12). Pack the solution ZIP; `pac import` is DEFERRED to the owner / task 022 (document the split).</constraint>
+    <constraint source="project">Reuse the R1 `CommunicationTimeline` PCF packaging + auth boundary; do not invent a new pattern (§11). No BFF publish-size / CVE obligation — client + pack only (root §10 N/A).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/index.ts</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/authInit.ts</file>
+      <file>src/client/pcf/CommunicationTimeline/CommunicationTimeline/hostContext.ts</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="R1 Timeline PCF mirror" location="src/client/pcf/CommunicationTimeline/CommunicationTimeline/">
+        Mirror `index.ts` (init/updateView/destroy), `authInit.ts` (@spaarke/auth boundary building `authenticatedFetch`), `hostContext.ts` (host record context), and the App/Host mount. Add only the regarding-resolution path + `mode='regarding'` mount.
+      </pattern>
+      <pattern name="Bound anchorField (R1 lesson)" location="src/client/pcf/CommunicationTimeline/CommunicationTimeline/ControlManifest.Input.xml">
+        Declare `&lt;property name="anchorField" ... of-type="SingleLine.Text" usage="bound" required="true" /&gt;` bound to the primary Name; read `(entityType, id)` from context. Without a bound field/dataset the control is hidden from the form component library.
+      </pattern>
+      <pattern name="ADR-022 platform libraries" location=".claude/adr/ADR-022-pcf-platform-libraries.md">
+        Declare React/Fluent as platform libraries (React 16.14.0, Fluent 9.46.2 per R1); do not bundle React 18. The mounted tree must be 16/17-compatible.
+      </pattern>
+      <pattern name="Build + pack (defer import)" location=".claude/skills/pcf-deploy/SKILL.md">
+        `npm run build:prod` → pack the solution ZIP. `pac import` deferred to the owner / task 022.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the R1 `CommunicationTimeline` PCF (`ControlManifest.Input.xml`, `index.ts`, `authInit.ts`, `hostContext.ts`, App/Host, `Solution/`), `src/client/pcf/CLAUDE.md`, `PCF-DEPLOYMENT-GUIDE.md`, and ADR-022/ADR-006. Confirm the task-020 regarding-mode props contract `(mode, entityType, id, authenticatedFetch, bffBaseUrl)`.</step>
+    <step order="2">Decide + document (notes): regarding-mode as a mode switch on the existing control vs a distinct variant control. Scaffold accordingly, mirroring R1's manifest — declare the bound `anchorField` (primary Name), platform libraries (React 16.14.0, Fluent 9.46.2), and the same feature-usage (WebAPI/Utility/Navigation) + input props (apiBaseUrl/tenantId/clientAppId/bffAppId).</step>
+    <step order="3">Implement the regarding-resolution path in `index.ts`/host: resolve the host record's `(entityType, id)` from PCF page context (entity logical name + record id), build `authenticatedFetch` via the R1 `authInit.ts` boundary, read `bffBaseUrl`/config, and mount `&lt;CommunicationTimeline mode="regarding" entityType id authenticatedFetch bffBaseUrl /&gt;` via the platform React.</step>
+    <step order="4">Verify React 16/17 compatibility of the mounted tree: run the PCF build; if a React-18-only API from 020 breaks under platform React, coordinate a shared-lib fix (do NOT fork). Grep the produced bundle for `@azure/communication` — MUST be absent (NFR-04) — and for `@spaarke/auth` inside the shared-component chunk — MUST be absent (only the PCF boundary imports it).</step>
+    <step order="5">Run `npm run build:prod` in the control folder (NOT `npm run build` — AP-1). Resolve any manifest/type errors.</step>
+    <step order="6">Pack the solution ZIP (mirror the R1 `Solution/` layout). Do NOT run `pac import` — record that the 11-form placement/import is deferred to task 022 / the owner. Validate the ZIP is well-formed.</step>
+    <step order="7">Run UI tests via the `ui-test` skill against the built control (harness or a representative form if available): renders the regarding-mode grouped view without console errors; dark-mode correct; shows the record's threads-as-groups. (Full 11-form smoke is task 022.)</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the PCF variant + manifest (focus: bound `anchorField` declared, platform libraries declared / no React 18 bundled, no ACS SDK in the bundle, `@spaarke/auth` at the boundary only, regarding-resolution reads context correctly); `adr-check` against ADR-022/ADR-006/ADR-026/ADR-028 + `spec.md` (FR-04, NFR-04). Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (021 ✅) + `current-task.md`; record decisions (variant-vs-mode-switch choice, `(entityType, id)` resolution path, `anchorField` binding, platform-library versions, bundle grep evidence, UI-test evidence, the packaging-vs-import split handed to 022/owner).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">R1 Timeline PCF (manifest/index/authInit/hostContext/Solution), PCF CLAUDE.md, PCF-DEPLOYMENT-GUIDE, ADR-022/006/028, task-020 props</tool>
+    <tool name="write">PCF variant index/host + ControlManifest + solution files</tool>
+    <tool name="bash">npm run build:prod + pack solution ZIP + bundle grep for @azure/communication and @spaarke/auth</tool>
+    <tool name="ui-test">Render/dark-mode verification of the grouped regarding view</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationTimeline/ regarding-mode variant: index/host wiring (mounts the shared component in regarding mode)</output>
+    <output type="code">ControlManifest.Input.xml (bound `anchorField`, platform libraries React 16/17, regarding-resolution)</output>
+    <output type="code">Solution project + packed solution ZIP (NEW — import deferred to task 022 / owner)</output>
+    <output type="docs">Build + pack record: bundle grep evidence + UI-test evidence + the packaging-vs-import split (in current-task.md / PR)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The control renders the regarding-mode grouped view (threads-as-collapsible-groups) with NO console errors (verified via the `ui-test` skill against the built control / harness).</ui-test>
+    <ui-test>Dark mode (ADR-021): the grouped view, group headers, and count badges render correctly when the model-driven app is in dark theme (Fluent v9 tokens pass through).</ui-test>
+    <ui-test>The control resolves the host record's `(entityType, id)` from context and shows that record's threads-as-groups (not a single-thread view).</ui-test>
+    <ui-test>Bound-field placement: the control is selectable in the form component library because it declares a bound `anchorField` (a control with no bound field/dataset would be hidden).</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A regarding-mode `CommunicationTimeline` PCF exists under `src/client/pcf/CommunicationTimeline/`, mounts the shared component in regarding mode, and resolves the host record's `(entityType, id)` from PCF context.</criterion>
+    <criterion testable="true">The manifest declares a bound `anchorField` property (primary Name) so the control appears in the form component library (R1 lesson cited).</criterion>
+    <criterion testable="true">The manifest declares React 16/17 platform libraries (mirror R1); React 18 is NOT bundled (ADR-022).</criterion>
+    <criterion testable="true">The produced bundle contains NO `@azure/communication-*` dependency (NFR-04, grep/inspect-verified); `@spaarke/auth` appears only at the PCF boundary, not inside the shared-component chunk (ADR-028).</criterion>
+    <criterion testable="true">`npm run build:prod` builds clean; a solution ZIP is packed; `pac import` / 11-form placement is explicitly deferred to task 022 / the owner (documented, NOT run here).</criterion>
+    <criterion testable="true">UI tests pass: renders the grouped regarding view without console errors, dark-mode correct, resolves the host record.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 020 (the regarding-mode component). Blocks task 022 (11-form placement). This task deliberately stops at build + pack; the `pac import` + placement on all 11 forms is task 022 (or owner-run) — mirror how email-r4/R1 split packaging from owner-run import when the environment auth/import cannot complete in-session. The build + bound-`anchorField` + platform-libs + no-ACS-SDK checks MUST all pass here regardless of the import split.
+
+    If a React-18-only API from task 020 breaks under platform React 16/17, fix it in the shared lib (coordinate with 020) — do NOT fork the component into the PCF (ADR-012 / §11).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Build via `npm run build:prod` (NOT `npm run build` — AP-1); pack via the `pcf-deploy` skill's pack step; `pac import` deferred to task 022 / owner. Verify via `ui-test`. No BFF publish-size/CVE (root §10 N/A). Cite the ADR-026 Path-A exception in the PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

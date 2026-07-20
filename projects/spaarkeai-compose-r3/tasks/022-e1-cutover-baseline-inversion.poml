@@ -9,13 +9,30 @@
     <effort>xhigh</effort>
     <parallel-group>W2-E1</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <deps>002,003,020,021</deps>
-    <tags>bff-api,frontend,docx,spe</tags>
+    <deps>002,003</deps>
+    <tags>bff-api,docx,spe</tags>
     <estimated-effort>4-5 days</estimated-effort>
     <assigned>unassigned</assigned>
     <started></started>
     <completed></completed>
   </metadata>
+
+  <amendment date="2026-07-18" by="spaarkeai-compose-r3 re-architecture">
+    SCOPE SPLIT + Option C. This task is now SERVER-ONLY (the E1 SaveAsync inversion). Two changes vs the
+    original prose below:
+    (1) DEPS 020,021 DROPPED (superseded — the splice+Docxodus-WmlComparer model was replaced by
+        `ComposeParagraphRedlineSynthesizer`, Option C, design §4.2). Read "drive the splice (020) + comparer
+        (021)" below as "drive `ComposeParagraphRedlineSynthesizer`."
+    (2) The CLIENT half (drop `docx.js` / `tipTapToDocxBytes`, rewrite `triggerSave`) is SPLIT OUT to the new
+        task 027 (client content-model cutover), and born-in-editor authoring to the new task 026
+        (`ComposeDocumentRenderer`). This task's client steps (3-4) are SUPERSEDED by 027.
+    STATUS: Increment A (server `SaveAsync` inversion — `ResolveSaveBaselineAsync` + synthesizer wiring +
+    contract `+BaselineVersionId +EditedParagraphs`, Content demoted) COMMITTED `ce50c9877`; Compose suite
+    235 green. REMAINING for this task: (a) `LoadAsync` must CAPTURE + return `VersionId` (today it returns
+    only ETag — the FR-06 re-fetch-by-versionId branch has no source; add `VersionId` to
+    `LoadComposeDocumentResult` + project it in the Load endpoint), and (b) the Redis Tier-3 baseline-cache
+    decision (currently deferred — the versionId fetch discharges FR-06; ratify defer or implement).
+  </amendment>
 
   <prompt>
     THE KEYSTONE CUTOVER (FR-01). Invert the dirty-save baseline: on a dirty save the persisted

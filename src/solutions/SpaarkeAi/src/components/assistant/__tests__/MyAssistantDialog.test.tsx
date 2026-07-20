@@ -1,13 +1,14 @@
 /**
- * MyAssistantDialog.test.tsx — task 042 questionnaire UI (FR-F3 / FR-E1 / F5).
+ * MyAssistantDialog.test.tsx — task 042 questionnaire UI (FR-F3 / FR-E1), UAT 2026-07-19 MA cluster.
  *
- * Component tests (ADR-038): rendering, cold-start banner, submit payload, erasure confirm flow, and
- * dark-mode render. No DI/ctor/null tests; no HttpMessageHandler mocks (frontend component).
+ * Component tests (ADR-038): rendering, cold-start banner, chip-based submit payload (MA-4), work-office
+ * dropdown (MA-3), removed "Clear my profile" affordance (MA-2), and dark-mode render. No DI/ctor/null
+ * tests; no HttpMessageHandler mocks (frontend component).
  */
 
 import '@testing-library/jest-dom';
 import * as React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   FluentProvider,
@@ -17,12 +18,26 @@ import {
 } from '@fluentui/react-components';
 
 import { MyAssistantDialog, type MyAssistantDialogProps } from '../MyAssistantDialog';
-import type { PracticeArea } from '../userProfileService';
+import {
+  encodeChipSelection,
+  PREFERENCE_CHIPS,
+  FOCUS_AREA_CHIPS,
+  type PracticeArea,
+  type WorkOffice,
+} from '../userProfileService';
 
 const PRACTICE_AREAS: PracticeArea[] = [
   { id: 'pa-1', name: 'Appellate', code: 'APPL' },
   { id: 'pa-2', name: 'Mergers & Acquisitions', code: 'MA' },
 ];
+
+const WORK_OFFICES: WorkOffice[] = [
+  { id: 'wo-chi', name: 'Chicago' },
+  { id: 'wo-ny', name: 'New York' },
+];
+
+const CONCISE_PHRASE = PREFERENCE_CHIPS.find((c) => c.id === 'concise')!.phrase;
+const LITIGATION_PHRASE = FOCUS_AREA_CHIPS.find((c) => c.id === 'litigation')!.phrase;
 
 beforeAll(() => {
   // Fluent v9 Dropdown/MessageBar reflow need ResizeObserver, which jsdom lacks.
@@ -38,16 +53,15 @@ beforeAll(() => {
 
 function renderDialog(overrides: Partial<MyAssistantDialogProps> = {}, theme: Theme = webLightTheme) {
   const onSubmit = overrides.onSubmit ?? jest.fn().mockResolvedValue(undefined);
-  const onErase = overrides.onErase ?? jest.fn().mockResolvedValue(undefined);
   const onClose = overrides.onClose ?? jest.fn();
   const props: MyAssistantDialogProps = {
     open: true,
     onClose,
     coldStart: false,
     practiceAreas: PRACTICE_AREAS,
+    workOffices: WORK_OFFICES,
     initialValues: {},
     onSubmit,
-    onErase,
     loading: false,
     ...overrides,
   };
@@ -56,18 +70,29 @@ function renderDialog(overrides: Partial<MyAssistantDialogProps> = {}, theme: Th
       <MyAssistantDialog {...props} />
     </FluentProvider>
   );
-  return { ...utils, onSubmit, onErase, onClose };
+  return { ...utils, onSubmit, onClose };
 }
 
 describe('MyAssistantDialog', () => {
-  it('renders the questionnaire fields when open', () => {
+  // The questionnaire is a 3-step wizard — advance through steps via "Next".
+  const goNext = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(screen.getByTestId('my-assistant-next'));
+
+  it('renders the wizard fields across its three steps (via Next)', async () => {
+    const user = userEvent.setup();
     renderDialog();
+    // Step 1 — role + primary work location (now a dropdown).
     expect(screen.getByTestId('my-assistant-dialog')).toBeInTheDocument();
     expect(screen.getByTestId('my-assistant-role')).toBeInTheDocument();
-    expect(screen.getByTestId('my-assistant-practice-areas')).toBeInTheDocument();
-    expect(screen.getByTestId('my-assistant-focus')).toBeInTheDocument();
     expect(screen.getByTestId('my-assistant-office')).toBeInTheDocument();
-    expect(screen.getByTestId('my-assistant-preferences')).toBeInTheDocument();
+    // Step 2 — practice areas + focus-area chips (MA-4).
+    await goNext(user);
+    expect(screen.getByTestId('my-assistant-practice-areas')).toBeInTheDocument();
+    expect(screen.getByTestId('my-assistant-focus-chips')).toBeInTheDocument();
+    // Step 3 — preference chips + Save.
+    await goNext(user);
+    expect(screen.getByTestId('my-assistant-preferences-chips')).toBeInTheDocument();
+    expect(screen.getByTestId('my-assistant-save')).toBeInTheDocument();
   });
 
   it('is not rendered when closed', () => {
@@ -85,82 +110,100 @@ describe('MyAssistantDialog', () => {
     expect(screen.queryByTestId('my-assistant-coldstart')).not.toBeInTheDocument();
   });
 
-  it('submits the prefilled + edited values and closes', async () => {
+  it('submits the prefilled values unchanged — chips + office round-trip (MA-3/MA-4)', async () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const focusEncoded = encodeChipSelection(['ma'], FOCUS_AREA_CHIPS);
+    const prefEncoded = encodeChipSelection(['concise'], PREFERENCE_CHIPS);
     const { onClose } = renderDialog({
       onSubmit,
       initialValues: {
         primaryRole: 100000001,
         practiceAreaIds: ['pa-2'],
-        focusAreas: 'M&A',
-        officeLocation: 'London',
-        assistantPreferences: 'Concise',
+        focusAreas: focusEncoded,
+        officeLocation: 'Chicago',
+        assistantPreferences: prefEncoded,
       },
     });
 
+    // Save lives on the final step — advance through the wizard first.
+    await goNext(user);
+    await goNext(user);
     await user.click(screen.getByTestId('my-assistant-save'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    // Submits the prefilled profile values (role, practice areas, and free-text) unchanged.
     expect(onSubmit).toHaveBeenCalledWith({
       primaryRole: 100000001,
       practiceAreaIds: ['pa-2'],
-      focusAreas: 'M&A',
-      officeLocation: 'London',
-      assistantPreferences: 'Concise',
+      focusAreas: focusEncoded,
+      officeLocation: 'Chicago',
+      assistantPreferences: prefEncoded,
     });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it('flows an edited free-text field into the submit payload', async () => {
+  it('toggling a preference chip flows its directive phrase into the submit payload (MA-4)', async () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn().mockResolvedValue(undefined);
-    renderDialog({ onSubmit, initialValues: { focusAreas: '' } });
+    renderDialog({ onSubmit, initialValues: {} });
 
-    // Synchronous change event — deterministic for a controlled textarea (no keystroke batching).
-    fireEvent.change(screen.getByTestId('my-assistant-focus'), {
-      target: { value: 'Securities litigation' },
-    });
+    // Preferences chips are on step 3.
+    await goNext(user);
+    await goNext(user);
+    await user.click(screen.getByTestId('my-assistant-preferences-concise'));
     await user.click(screen.getByTestId('my-assistant-save'));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].focusAreas).toBe('Securities litigation');
+    expect(onSubmit.mock.calls[0][0].assistantPreferences).toBe(CONCISE_PHRASE);
+  });
+
+  it('toggling a focus chip flows its phrase into the submit payload (MA-4)', async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    renderDialog({ onSubmit, initialValues: {} });
+
+    // Focus chips are on step 2.
+    await goNext(user);
+    await user.click(screen.getByTestId('my-assistant-focus-litigation'));
+    await goNext(user);
+    await user.click(screen.getByTestId('my-assistant-save'));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0].focusAreas).toBe(LITIGATION_PHRASE);
+  });
+
+  it('renders the primary work location as a combobox (MA-3), not a free-text input', () => {
+    renderDialog();
+    const office = screen.getByTestId('my-assistant-office');
+    // Fluent v9 Dropdown renders a combobox role (the old field was a textbox Input).
+    expect(office.getAttribute('role')).toBe('combobox');
+  });
+
+  it('no longer renders the "Clear my profile" erase affordance (MA-2)', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await goNext(user);
+    await goNext(user);
+    expect(screen.queryByTestId('my-assistant-erase')).not.toBeInTheDocument();
   });
 
   it('surfaces an inline error when the save rejects (does not close)', async () => {
     const user = userEvent.setup();
     const onSubmit = jest.fn().mockRejectedValue(new Error('Dataverse 500'));
     const { onClose } = renderDialog({ onSubmit });
+    await goNext(user);
+    await goNext(user);
     await user.click(screen.getByTestId('my-assistant-save'));
     await waitFor(() => expect(screen.getByTestId('my-assistant-error')).toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('erasure is a two-step confirm before calling onErase (F5)', async () => {
+  it('renders under the dark theme (ADR-021 semantic tokens adapt)', async () => {
     const user = userEvent.setup();
-    const onErase = jest.fn().mockResolvedValue(undefined);
-    renderDialog({ onErase });
-
-    // Step 1: click "Clear my profile" → confirm banner appears, onErase NOT yet called.
-    await user.click(screen.getByTestId('my-assistant-erase'));
-    expect(screen.getByTestId('my-assistant-erase-confirm')).toBeInTheDocument();
-    expect(onErase).not.toHaveBeenCalled();
-
-    // Step 2: click "Confirm delete" → onErase fires.
-    await user.click(screen.getByTestId('my-assistant-erase-confirm-btn'));
-    await waitFor(() => expect(onErase).toHaveBeenCalledTimes(1));
-  });
-
-  it('omits the erasure affordance when onErase is not provided', () => {
-    renderDialog({ onErase: undefined });
-    expect(screen.queryByTestId('my-assistant-erase')).not.toBeInTheDocument();
-  });
-
-  it('renders under the dark theme (ADR-021 semantic tokens adapt)', () => {
     renderDialog({ coldStart: true }, webDarkTheme);
-    // Renders without throwing under dark theme; tokens resolve via the host FluentProvider.
     expect(screen.getByTestId('my-assistant-dialog')).toBeInTheDocument();
+    await goNext(user);
+    await goNext(user);
     expect(screen.getByTestId('my-assistant-save')).toBeInTheDocument();
   });
 });

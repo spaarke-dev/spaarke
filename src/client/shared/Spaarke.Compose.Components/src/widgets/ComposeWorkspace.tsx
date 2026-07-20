@@ -132,6 +132,9 @@ import type {
   AnchoredAnnotation,
   DefinedTerm,
   ComposeActionHistoryEntry,
+  ParaIdMapEntry,
+  ImportedRevision,
+  ImportedComment,
 } from '../types/compose-contracts';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
@@ -645,6 +648,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // NOT as a JSON array of numbers. Decode with atob() below.
           content: string;
           eTag?: string;
+          // R3 FR-06 (task 027): the load-time SPE version id — carried back as `baselineVersionId` on a
+          // dirty-loaded save so the server can re-fetch this baseline without the client bytes.
+          versionId?: string;
           fileName?: string;
           size: number;
           correlationId?: string;
@@ -654,6 +660,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           anchoredAnnotations?: AnchoredAnnotation[];
           definedTermsTracking?: DefinedTerm[];
           actionHistory?: ComposeActionHistoryEntry[];
+          // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): the server pre-parse paraId map +
+          // recovered Word revisions/comments the BFF Load response now projects (ComposeEndpoints.cs
+          // `LoadComposeDocumentResponse`). Parsed defensively (optional) so an older BFF that
+          // predates the wiring still loads — `loadSucceeded` normalizes an omitted field to `[]`.
+          paraIdMap?: ParaIdMapEntry[];
+          importedRevisions?: ImportedRevision[];
+          importedComments?: ImportedComment[];
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -671,13 +684,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // gap 4.3: mark the just-hydrated collections as server-synced so the persist effect below
         // does NOT write them straight back — only a subsequent LOCAL mutation persists.
         syncedAnnotationsRef.current = annotationsSnapshot(hydratedAnnotations, hydratedDefinedTerms);
+        // task 052 fast-follow: same Array.isArray defensive-parse convention as the three
+        // collections above — an omitted OR malformed (non-array) field degrades to `[]` rather
+        // than forwarding a non-array value through the atomic `loadSucceeded` mount contract.
+        const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
+        const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
+        const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
           etag: payload.eTag ?? null,
+          versionId: payload.versionId ?? null,
           sessionId: payload.sessionId ?? '',
           sprkDocumentId: payload.documentRecordId,
           fileName: payload.fileName,
+          // Set ATOMICALLY with docxBytes (the ComposeEditor mount contract).
+          paraIdMap: hydratedParaIdMap,
+          importedRevisions: hydratedImportedRevisions,
+          importedComments: hydratedImportedComments,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -916,6 +940,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // absence of a real speDriveItemId (mountTransient sets it to '').
     const isTransientCreate = !state.documentRef.speDriveItemId;
     const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+    // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
+    // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
+    // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
+    // replace-path save + baseline re-fetch must target.
+    const saveDriveId = state.documentRef.driveId ?? effectiveDriveId;
 
     if (!bffBaseUrl || !tenantId) {
       dispatch({
@@ -937,7 +966,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         });
         return;
       }
-    } else if (!effectiveDriveId) {
+    } else if (!saveDriveId) {
       dispatch({
         kind: 'saveFailed',
         errorMessage: 'Cannot save — SPE drive configuration missing.',
@@ -947,91 +976,84 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     dispatch({ kind: 'requestSave' });
     try {
-      // FR-06a (task 015) upload fidelity branch: an UNEDITED mount must persist the
-      // pristine ORIGINAL bytes byte-identical — avoiding the lossy mammoth
-      // `docxToTipTapHtml` -> `tipTapToDocxBytes` round-trip for a file the user never
-      // touched. `editorRef.current.isDirty()` is the editor's OWN authoritative dirty
-      // flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time — this is
-      // deliberately NOT the local `isDirty` React state above (which only gates the
-      // toolbar button's enabled/disabled visual and can lag behind an in-flight
-      // mammoth import; see DEF-01). `state.docxBytes` is the retained ORIGINAL mount
-      // bytes: set once by the `loadSucceeded`/`mountTransient` reducer actions (see
-      // ComposeWorkspace.types.ts) and never mutated by any other action for the life
-      // of the mount, so it is still the pristine upload/load payload at Save time.
-      // Only a genuinely dirty editor (or the defensive fallback when, unexpectedly,
-      // no original bytes were retained) pays the regeneration cost via the EXISTING
-      // `tipTapToDocxBytes` path — that path is otherwise unchanged.
+      // R3 FR-01 (task 027): the client STOPS authoring `.docx` bytes. It sends a STRUCTURED, paraId-
+      // keyed payload and the SERVER authors the bytes — delta-onto-original for a loaded doc, full
+      // render for a born-in-editor doc. `editorRef.current.isDirty()` is the editor's OWN authoritative
+      // dirty flag (ComposeEditor's internal `dirtyRef`), read fresh at Save time (NOT the local `isDirty`
+      // React state, which only gates the toolbar button and can lag an in-flight import). `state.docxBytes`
+      // is the retained ORIGINAL mount bytes — the ONLY bytes the client ever sends (byte-identical
+      // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
-      // UAT-R7 #2/#3/#4 — redline→Word save fidelity. When the editor holds PENDING redlines OR the
-      // session has anchored COMMENT annotations (DEF-13 edit-reason / DEF-11 review flags), Save
-      // must NOT go through the mark-blind `serialize()` (which flattens insertion/deletion marks to
-      // plain body text and drops comments). Instead send a clean BASELINE (pending redlines reduced
-      // to their reject-state text; accepted edits already baked in) + a structured annotation list;
-      // the BFF re-applies them as native w:ins/w:del/w:comment via DocxAnnotationWriter.
-      // This is also the #3 dirty-flag fix: any accept/reject/redline/comment op forces the
-      // annotation path, so accepted edits are never discarded in favor of pristine original bytes.
-      // `?.()` guards an older mounted editor build without the redline-save handle (defensive,
-      // mirroring the materializeComposeDraft guard) — it degrades to the plain serialize path.
+      // Pending AI redlines (task 023) → native-markup annotations the SERVER composes onto the authored
+      // baseline (replaces the old client reject-baseline reconstruction). Combined with the session's
+      // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
       const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
-      const needsAnnotationSave =
-        (hasRedlines || commentAnnotations.length > 0) && typeof editorRef.current.serializeForSave === 'function';
+      const redlineAnnotations =
+        hasRedlines && typeof editorRef.current.getRedlineAnnotations === 'function'
+          ? editorRef.current.getRedlineAnnotations()
+          : [];
+      // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
+      // so concat order only affects the ins/del sequence the bridge already ordered correctly.
+      const saveAnnotations: DocxAnnotationInput[] = [...redlineAnnotations, ...commentAnnotations];
 
-      let bytes: ArrayBuffer;
-      let saveAnnotations: DocxAnnotationInput[] = [];
-      if (needsAnnotationSave) {
-        const forSave = await editorRef.current.serializeForSave();
-        bytes = forSave.baselineBytes;
-        // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes
-        // regardless of list order (EDGE-1), so the concat order only affects the ins/del sequence
-        // the bridge already ordered correctly (Insertion-before-Deletion per pair).
-        saveAnnotations = [...forSave.redlineAnnotations, ...commentAnnotations];
-      } else {
-        // FR-06a fidelity (no redlines, no comments): an unedited mount persists the pristine
-        // ORIGINAL bytes byte-identical; a genuinely dirty editor (or a defensive missing-original)
-        // regenerates via the EXISTING tipTapToDocxBytes path.
-        bytes = editorIsDirty || !state.docxBytes ? await editorRef.current.serialize() : state.docxBytes;
-      }
+      // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
+      // iterate (not spread) to avoid a call-stack overflow on large documents.
+      const encodeRetained = (buf: ArrayBuffer): string => {
+        const view = new Uint8Array(buf);
+        let binary = '';
+        for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
+        return btoa(binary);
+      };
 
-      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no
-      // drive-item yet) and sends `containerId`; the replace route carries the SPE id + driveId.
-      // Both hit ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
+      // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
+      // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
+      // ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
       const url = isTransientCreate
         ? `${bffBaseUrl}/api/compose/documents/create-on-save`
         : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
-      // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
-      // base64 strings, NOT from JSON number arrays. Iterate rather than
-      // spread to avoid call-stack overflow on large documents.
-      const view = new Uint8Array(bytes);
-      let binary = '';
-      for (let i = 0; i < view.length; i++) {
-        binary += String.fromCharCode(view[i]);
+      // Four structured cases (the client authors NO bytes):
+      //  1. Loaded + dirty       → { editedParagraphs, baselineVersionId, content?(retained fast-path) }
+      //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
+      //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
+      //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
+      // AI redlines/comments ride `annotations` in every case.
+      let requestBody: Record<string, unknown>;
+      if (isTransientCreate) {
+        // A born-in-editor create-on-save: an AI-draft/blank/EDITED mount RENDERS from the content model;
+        // an UNEDITED browse-local mount with retained bytes persists them byte-identical (FR-06a).
+        const bornInEditorRender = editorIsDirty || !state.docxBytes;
+        requestBody = {
+          containerId: saveContainerId,
+          tenantId,
+          sessionId: state.sessionId,
+          displayName: state.documentRef.fileName ?? null,
+          annotations: saveAnnotations,
+          ...(bornInEditorRender
+            ? { contentModel: editorRef.current.buildContentModel() }
+            : { content: encodeRetained(state.docxBytes!) }),
+        };
+      } else {
+        requestBody = {
+          // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
+          // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
+          // target the correct drive.
+          driveId: saveDriveId,
+          tenantId,
+          sessionId: state.sessionId,
+          documentRecordId: state.documentRef.sprkDocumentId ?? null,
+          displayName: state.documentRef.fileName ?? null,
+          annotations: saveAnnotations,
+          // The load-time version id lets the server re-fetch the baseline even without the client bytes.
+          baselineVersionId: state.versionId ?? undefined,
+          // Same-session fast-path: still holding the retained original → send it (byte-identical).
+          content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+          // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
+          editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
+        };
       }
-      const base64Content = btoa(binary);
-
-      // UAT-R7 #2/#3/#4: carry the redline + comment annotations so the BFF re-applies them onto the
-      // baseline as native Word markup. Empty on a plain no-redline Save → the server persists the
-      // baseline unchanged (FR-06a byte fidelity preserved).
-      const requestBody = isTransientCreate
-        ? {
-            containerId: saveContainerId,
-            tenantId,
-            sessionId: state.sessionId,
-            content: base64Content,
-            displayName: state.documentRef.fileName ?? null,
-            annotations: saveAnnotations,
-          }
-        : {
-            driveId: effectiveDriveId,
-            tenantId,
-            sessionId: state.sessionId,
-            content: base64Content,
-            documentRecordId: state.documentRef.sprkDocumentId ?? null,
-            displayName: state.documentRef.fileName ?? null,
-            annotations: saveAnnotations,
-          };
 
       const response = await authenticatedFetch(url, {
         method: 'POST',
@@ -1069,6 +1091,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // established field (the `sprk_documentid`); `documentId` is read defensively in case the
         // sibling BFF change names it that. Either drives the Saved ✓ banner's "Open preview" link.
         documentId?: string;
+        // UAT 2026-07-19 P2: driveId + versionId of the just-saved SPE version. Retained via
+        // saveSucceeded so a subsequent replace-path save of a born-in-editor doc (no retained
+        // bytes) resolves its baseline by re-fetching this version. Optional (older BFF omits them).
+        driveId?: string;
+        versionId?: string;
         eTag?: string;
         size: number;
         wasPromotedThisSave: boolean;
@@ -1095,6 +1122,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // Save on this mount takes the replace path (no longer transient).
         documentSpeId: payload.documentSpeId,
         etag: payload.eTag ?? null,
+        // UAT 2026-07-19 P2: retain the just-saved drive id + version id so the replace-path second
+        // save of a born-in-editor doc can resolve its baseline (server re-fetch by versionId).
+        driveId: payload.driveId,
+        versionId: payload.versionId,
       });
       // Clear the local dirty flag so the Save button disables until the
       // next edit. ComposeEditor's internal dirtyRef also resets on the
@@ -2133,6 +2164,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               ref={editorRef}
               docxBytes={state.docxBytes}
               initialHtml={state.seedHtml}
+              // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): set atomically alongside docxBytes
+              // per ComposeEditor's mount contract (JSDoc on these props) — sourced from the
+              // stored-document Load response; `[]` for every other mount door.
+              paraIdMap={state.paraIdMap}
+              importedRevisions={state.importedRevisions}
+              importedComments={state.importedComments}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}

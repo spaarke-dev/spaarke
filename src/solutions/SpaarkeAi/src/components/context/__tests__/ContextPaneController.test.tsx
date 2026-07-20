@@ -36,6 +36,17 @@ import { ContextPaneController } from '../ContextPaneController';
 import type { ShellStageContextValue } from '../../shell/ThreePaneShell';
 import { ShellStageContext } from '../../shell/ThreePaneShell';
 
+// decision-1 (2026-07-19): the Context pane now defaults to the execution-trace view. ComposeTraceHost
+// calls useAiSession(), which THROWS outside an AiSessionProvider (which these provider-less unit tests
+// don't mount). Stub it so the default render is inert here — production always wraps the shell in
+// AiSessionProvider. The `context-pane-execution-trace` testid lives on ContextPaneController's own
+// wrapper div, so the assertions below still hold.
+jest.mock('../ComposeTraceHost', () => ({
+  __esModule: true,
+  ComposeTraceHost: () => <div data-testid="compose-trace-host-stub">trace</div>,
+  default: () => <div data-testid="compose-trace-host-stub">trace</div>,
+}));
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
@@ -156,35 +167,38 @@ describe('ContextPaneController — shell stage defaults', () => {
   // 'quick-start' tool selection. Updated to assert the current, real,
   // intentionally-shipped default rather than the superseded behavior.
 
-  it('shows the Quick Start empty state on welcome stage', () => {
+  // decision-1 (2026-07-19): the AT-REST default is now the execution-trace ("what's happening") view
+  // on EVERY shell stage until a context_update resolves a real server widget. (Was GetStartedCardsWidget
+  // "Quick Start", now removed.)
+  it('shows the execution-trace view on welcome stage', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "welcome" });
 
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
-    expect(screen.getByText('Quick Start')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
+    expect(screen.queryByTestId('context-pane-welcome')).not.toBeInTheDocument();
   });
 
-  it('shows Quick Start (not the idle stage spinner) on loading stage before any context_update', () => {
+  it('shows execution-trace (not the idle stage spinner) on loading stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "loading" });
 
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
     expect(screen.queryByText('Gathering context...')).not.toBeInTheDocument();
   });
 
-  it('shows Quick Start (not sources-empty) on active-chat stage before any context_update', () => {
+  it('shows execution-trace (not sources-empty) on active-chat stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "active-chat" });
 
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
     expect(screen.queryByTestId('context-pane-sources-empty')).not.toBeInTheDocument();
   });
 
-  it('shows Quick Start (not related-empty) on review stage before any context_update', () => {
+  it('shows execution-trace (not related-empty) on review stage before any context_update', () => {
     const bus = new PaneEventBus();
     renderController(bus, { currentStage: "review" });
 
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
     expect(screen.queryByTestId('context-pane-related-empty')).not.toBeInTheDocument();
   });
 });
@@ -315,7 +329,7 @@ describe('ContextPaneController — unknown widget type (null from registry)', (
 
     // During resolution, isResolving=true → should show resolving spinner
     // After resolution with null → isResolving=false, no active widget
-    // → Quick Start's at-rest default renders (task 095/099/101 — see the
+    // → the execution-trace at-rest default renders (decision-1 — see the
     // "shell stage defaults" describe block above for why this supersedes
     // the old per-stage sources-empty state).
     await waitFor(() => {
@@ -323,8 +337,8 @@ describe('ContextPaneController — unknown widget type (null from registry)', (
       expect(screen.getByTestId('context-pane-controller')).toBeInTheDocument();
     });
 
-    // Quick Start reappears after null resolution (no active widget)
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    // The execution-trace default reappears after null resolution (no active widget)
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
   });
 
   it('does not throw when registry returns null for unknown contextType', async () => {
@@ -453,10 +467,10 @@ describe('ContextPaneController — stage_change event', () => {
       expect(screen.queryByTestId('entity-info-widget')).not.toBeInTheDocument();
     });
 
-    // Reverts to Quick Start's at-rest default (task 095/099/101 — see the
+    // Reverts to the execution-trace at-rest default (decision-1 — see the
     // "shell stage defaults" describe block above for why this supersedes
     // the old per-stage sources-empty state).
-    expect(screen.getByTestId('context-pane-welcome')).toBeInTheDocument();
+    expect(screen.getByTestId('context-pane-execution-trace')).toBeInTheDocument();
   });
 });
 

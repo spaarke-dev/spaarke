@@ -32,13 +32,9 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 // PaneEventBus dispatch — ComposeEditor calls useDispatchPaneEvent() directly; return a no-op.
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+}));
 
 // BubbleMenu wraps tippy.js (ESM) and needs a real DOM range — passthrough-render its children.
 jest.mock('@tiptap/react', () => {
