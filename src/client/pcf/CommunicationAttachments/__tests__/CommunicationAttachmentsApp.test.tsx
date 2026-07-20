@@ -34,9 +34,24 @@ function makeContext(entities: any[]): any {
 }
 
 const rows = [
-  { sprk_communicationattachmentid: '1', sprk_name: 'Report.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-1' },
-  { sprk_communicationattachmentid: '2', sprk_name: 'Inline.png', sprk_attachmenttype: AttachmentType.InlineImage, [DOC]: 'doc-2' },
-  { sprk_communicationattachmentid: '3', sprk_name: 'Thread.eml', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-3' },
+  {
+    sprk_communicationattachmentid: '1',
+    sprk_name: 'Report.pdf',
+    sprk_attachmenttype: AttachmentType.File,
+    [DOC]: 'doc-1',
+  },
+  {
+    sprk_communicationattachmentid: '2',
+    sprk_name: 'Inline.png',
+    sprk_attachmenttype: AttachmentType.InlineImage,
+    [DOC]: 'doc-2',
+  },
+  {
+    sprk_communicationattachmentid: '3',
+    sprk_name: 'Thread.eml',
+    sprk_attachmenttype: AttachmentType.File,
+    [DOC]: 'doc-3',
+  },
 ];
 
 const renderApp = (context: unknown) =>

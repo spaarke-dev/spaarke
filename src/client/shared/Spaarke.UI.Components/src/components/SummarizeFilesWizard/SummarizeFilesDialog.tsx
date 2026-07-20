@@ -478,11 +478,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         completedActions.push('Email sent');
       } catch (err) {
         const detail =
-          err instanceof SendCommunicationError
-            ? err.detail
-            : err instanceof Error
-              ? err.message
-              : 'Unknown error';
+          err instanceof SendCommunicationError ? err.detail : err instanceof Error ? err.message : 'Unknown error';
         warnings.push(`Email failed: ${detail}`);
       }
     }
