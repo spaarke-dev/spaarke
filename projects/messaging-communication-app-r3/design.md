@@ -202,6 +202,23 @@ Benchmarked against Teams, Gmail, Outlook conversation view, and Front (shared i
 | Accessibility (keyboard, ARIA, SR) | ✅ required (Fluent v9 + ADR) |
 | Long-thread performance (virtualization/paging) | **Flag** — existing scan bounds; add windowing if threads get large |
 
+### 10.1 v1 must-haves — confirmed with owner (2026-07-20)
+
+| Feature | Decision | Cost |
+|---|---|---|
+| **Global keyword search** | Lean on **Dataverse Search** — add `sprk_communication` (subject/body/from/to) to the search index; security-trimmed (aligns with privilege). Results open the record; deep-link into the conversation is a fast-follow. **No custom search infra.** | Low (config) |
+| **Read/unread state** | Add a per-user **last-seen marker** per thread + mark-read/unread/mark-all-read. R2 flagged the backing field is missing — without it, unread badges are cosmetic. | S–M |
+| **Attachments** | Open/preview/download from a message (SPE-backed) + attach-on-compose. | M |
+| **Privilege / privacy accuracy** | Surface `isPrivate` / `isInternalOnly` / `privilegeClassification`; the participant/recipient display MUST reflect actual permitted recipients — never imply someone received/saw a restricted comm. Access already impersonation + filter-based. | S — correctness-critical |
+| **New-communication awareness** | Wire the **notification spine** `communication-arrived` (already reserved by R2) as the **awareness layer** → unread badge + toast; conversation content stays BFF-polling. Verify the spine's producer/consumer contract at spec time. | S–M (consume existing engine) |
+| **Thread lifecycle** | Archive/close, pin/favorite, mute. | M |
+| **Accessibility + empty/loading/error** | Shippability floor (keyboard, ARIA, SR, states). Lower priority than the above but required. | S (ongoing) |
+
+**Fast-follow (post-v1):** reactions + flag/follow-up · drafts view · signatures/send-as · canned replies · grid bulk actions · long-thread virtualization · in-widget search deep-linking into the conversation.
+**Explicitly out:** semantic find-similar (AI project) · @mentions / presence / typing / read-receipts (transport doesn't provide).
+
+> **Scope note:** global search (Dataverse Search) and new-comm awareness (notification spine) lean on **existing platform capabilities** — they reduce build, not add it.
+
 ---
 
 ## 11. Phased plan (proposed)
@@ -240,4 +257,3 @@ Benchmarked against Teams, Gmail, Outlook conversation view, and Front (shared i
 - **R2 schema apply-pending** — confirm task 003 (participant junction) is live before P1.
 - **Shared-component blast radius** — extending `CommunicationTimeline`/`SendEmailDialog` touches surfaces R2/R4 ship; characterize existing behavior before extending (ADR-038).
 - **Bubble semantics** — "mine vs theirs" needs reliable sender identity (backend (c)); avoid brittle email-string matching.
-```
