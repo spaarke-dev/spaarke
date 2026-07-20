@@ -26,7 +26,7 @@
 | 027 | Add app-only external document download endpoint | 2 | FULL | sonnet/**xhigh** | 021,023 | ✗ (shares ExternalProjectDataEndpoints) | ✅ |
 | 028 | Point external-spa at the CIAM authority | 2 | FULL | sonnet/high | 020 | ✗ (SPA auth config) | ✅ |
 | 029 | Core-user "Invite to Secure Workspace" trigger | 2 | FULL | sonnet/high | 025 | ✗ (new command + wiring) | ✅ |
-| 030 | Unit tests for CIAM external-access surface | 2 | FULL (TEST) | sonnet/high | 020,021,022,023,025,026,027 | ✗ (spans files) | 🔲 |
+| 030 | Unit tests for CIAM external-access surface | 2 | FULL (TEST) | sonnet/high | 020,021,022,023,025,026,027 | ✗ (spans files) | ✅ |
 | 031 | Deploy BFF + verify publish size & CVE | 2 | STANDARD | sonnet/high | 030 | ✗ (deploy gate) | 🔲 |
 | 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | 🔲 |
 | 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔲 |

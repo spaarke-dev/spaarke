@@ -54,7 +54,7 @@ public class ExternalParticipationService
     /// <summary>
     /// Gets active participations for a Contact. Checks Redis cache first, falls back to Dataverse.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
+    public virtual async Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
         Guid contactId,
         CancellationToken ct = default)
     {
@@ -121,7 +121,7 @@ public class ExternalParticipationService
     /// <param name="oid">The CIAM token's stable object id (immutable directory key). May be null on a
     /// non-CIAM/transitional email-only token.</param>
     /// <param name="email">The caller's email/UPN claim (first-login fallback). May be null.</param>
-    public async Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
+    public virtual async Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
     {
         // 1. Stable-oid resolution — authoritative once bound.
         if (!string.IsNullOrEmpty(oid))

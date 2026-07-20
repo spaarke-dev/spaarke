@@ -194,7 +194,7 @@ public static class ExternalProjectDataEndpoints
         HttpContext httpContext,
         ExternalDataService dataService,
         IDocumentStorageResolver storageResolver,
-        SpeFileStore fileStore,
+        ISpeFileOperations fileStore,
         ILogger<Program> logger,
         CancellationToken ct)
     {

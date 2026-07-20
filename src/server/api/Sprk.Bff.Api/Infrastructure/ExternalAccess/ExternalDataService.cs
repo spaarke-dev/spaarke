@@ -205,7 +205,7 @@ public class ExternalDataService
     /// resolution or Graph content read. App-only Dataverse read; returns (null, null) when the
     /// document does not exist. Does NOT expose any Graph pointer (driveId/itemId).
     /// </summary>
-    public async Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(
+    public virtual async Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(
         Guid documentId, CancellationToken ct = default)
     {
         var select = "sprk_documentname,_sprk_project_value";

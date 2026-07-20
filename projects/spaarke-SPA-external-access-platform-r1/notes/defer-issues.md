@@ -36,7 +36,30 @@
 - **Owner action**: portal/CLI in the CIAM tenant (cannot be minted headlessly — CIAM Graph/ad ops
   require interactive admin, same limitation as 001/002).
 
-## DI-028-02 — external-spa does not build in this worktree (pre-existing, blocks task 014)
+## DI-028-02 — external-spa does not build in this worktree — ✅ RESOLVED 2026-07-20
+
+- **RESOLVED 2026-07-20** (alongside task 030). Fix confined to `src/client/external-spa/**` (no shared-lib
+  change — the shared `@spaarke/ui-components` is consumed **from source** via the vite alias + tsconfig paths).
+  Independently verified: `npx tsc --noEmit` exit 0; `npx vite build` succeeds (emits `dist/assets/app.js`,
+  1.07 MB / 291 KB gzip). Changes:
+  - `tsconfig.json` — `paths` `@spaarke/ui-components` depth `../../shared` → `../shared` (was one level too deep).
+  - `package.json` — dep `file:../../shared` → `file:../shared`; added `@microsoft/applicationinsights-web ^3.3.0`
+    (transitive dep the shared source imports; absent from external-spa's tree). `package-lock.json` regenerated
+    via `npm install --legacy-peer-deps --no-audit --no-fund` (re-links the shared symlink).
+  - `src/App.tsx` — the ROOT cause beyond the path fix: a **bare barrel import** (`export *`) made tsc deep-check
+    the ENTIRE shared lib under external-spa's stricter `noUnusedLocals`/`noUnusedParameters` (shared's tsconfig
+    has these `false`; every other consumer points tsc at built `dist/index.d.ts` which `skipLibCheck` skips, but
+    no `dist` exists). Narrowed to the self-contained subpath `@spaarke/ui-components/utils/themeStorage`.
+  - Six components (SectionCard/AiToolbar/DocumentLibrary/EventsCalendar/SemanticSearch/SmartTodo) — the
+    `Type 'string' is not assignable to type 'undefined'` errors were a REAL (non-path) fix: Griffel types the
+    CSS border *longhands* as `never`; replaced with `shorthands.border(...)`/`shorthands.borderColor(...)`.
+  - `InviteUserDialog.tsx` — DTO drift from B2B removal (025/029): removed `invitationCode`/`expiryDate` display
+    (fields no longer on `InviteUserResponse`), replaced with a CIAM onboarding-sent confirmation (no invite code
+    in the broker-only model). Reviewed + approved.
+  - Removed genuinely-unused imports across DocumentUploadPage/ProjectPage/WorkspaceHomePage; added ambient stub
+    `src/types/sdap-client.d.ts` for `@spaarke/sdap-client`.
+  - **Unblocks tasks 011/012/014** (external-spa now builds). `config.ts` + `auth/msal-config.ts` (task-028
+    deliverables — sessionStorage per-tab isolation, CIAM `knownAuthorities`) untouched.
 
 - **Discovered**: 2026-07-19 (task 028; pre-dates this task — reproduces on clean HEAD).
 - **Concrete failing behavior**: `npx tsc --noEmit` reports ~48 errors and `vite build` fails, all
@@ -54,6 +77,37 @@
   exports are resolved (monorepo linkage; CLAUDE.md notes Vite-solution `npm ci` fragility).
 - **Owner action**: address as part of task 014 (Phase 1) — build/link the shared lib, resolve the
   appinsights import, clean the pre-existing page-level type errors. Not in 028 scope (auth config only).
+
+## DI-030-01 — two 030 acceptance sub-criteria need live CIAM+Dataverse E2E (documented §6.5 Path-A deviation)
+
+- **Discovered**: 2026-07-20 (task 030).
+- **Delivered (in-process, KEEP path `tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs`)**:
+  6 tests / 7 cases, all pass. Covers POML criteria 2 (provisioner idempotency), 4 (grant writes
+  `sprk_externalrecordaccess` + invalidates cache + no synthetic SPE), 5 (download authz-before-stream
+  POSITIVE + NEGATIVE — the NFR-03 centerpiece: 403 with `IDocumentStorageResolver.GetSpePointersAsync`
+  AND `ISpeFileOperations.DownloadFileAsync` asserted `Times.Never`), 6 (no banned shapes), 7 (all pass),
+  and criterion 1's unauthenticated→401 (CiamExternal policy).
+- **Concrete gap (2 sub-criteria)**:
+  1. **Criterion 1 "invalid-*issuer* → 401" (real JWT validation)**: the fixture replaces the real "Ciam"
+     JwtBearer scheme with a fake handler (real JWT issuer/signature validation needs live OIDC metadata +
+     signing keys). The *policy* behavior (unauthenticated → 401) is tested; genuine invalid-issuer rejection
+     is a live-token property.
+  2. **Criterion 3 "oid match resolves; email mismatch denied when oid bound" (real resolution logic)**: the
+     fixture *controls* `ExternalParticipationService.ResolveExternalContactAsync` via the virtual seam (to
+     drive the download authz scenarios), so it does not exercise the REAL oid/email decision logic. That logic
+     lives in raw-`HttpClient`→Dataverse calls — mocking that boundary is B1-banned (`Mock<HttpMessageHandler>`)
+     and there is no live CIAM/Dataverse test tenant in-session.
+- **Why Path-A (not a silent skip)**: both properties are genuinely un-testable in-process under ADR-038 bans
+  without live infra; they belong to the already-planned **live-E2E Phase-2 spike** (non-blocking per spec —
+  "the architecture is already GREEN"). Writing an in-process test for them would be false-green.
+- **Owner action (at the live-E2E spike / task 040 parity)**: assert (a) a token with a wrong issuer is 401 on
+  `/api/v1/external/*`, and (b) an oid-bound Contact is not hijacked by a mismatched-email token. Real CIAM
+  sign-in + Dataverse tenant required.
+- **Production test seams added by 030 (backward-compatible, additive)**: `virtual` on
+  `ExternalParticipationService.{ResolveExternalContactAsync,GetParticipationsAsync}`,
+  `ExternalDataService.GetDocumentProjectAndNameAsync`, and `DataverseWebApiClient.{RetrieveAsync,CreateAsync,
+  UpdateAsync,QueryAsync}`; download endpoint injects `ISpeFileOperations` (existing interface) instead of
+  concrete `SpeFileStore`. No new interfaces, no new runtime surface, zero publish-size delta.
 
 ## DI-025-01 — CIAM provisioner partial-failure hardening (create-ok / persist-fail window)
 
