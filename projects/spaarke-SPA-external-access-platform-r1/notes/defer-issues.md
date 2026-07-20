@@ -1,0 +1,49 @@
+# Deferrals & Issues — spaarke-SPA-external-access-platform-r1
+
+> Source of truth for deferred work + newly-discovered issues (per project CLAUDE.md
+> "Deferrals & Issues" section). Every entry names a concrete failing behavior/contract (§11).
+
+---
+
+## DI-028-01 — CIAM SPA + BFF-API app registrations (ops prerequisite for live external auth)
+
+- **Discovered**: 2026-07-19 (task 028).
+- **Concrete failing behavior**: The external SPA is now config-pointed at the CIAM authority, but
+  the CIAM tenant (`spaarkeextid`, 7052feba-…) currently contains ONLY the `ciam_graph_provisioner`
+  app (e63e6eb1-…). There is **no SPA public-client app** and **no BFF-API app** registered in the
+  CIAM tenant. Until both exist, a real CIAM login cannot mint a token, and the BFF `Ciam` scheme
+  (task 020) has no real `Ciam:ClientId`/`Ciam:Audience` to validate against. `.env.development`
+  carries `TODO_CIAM_SPA_CLIENT_ID` / `api://TODO_CIAM_BFF_API_APP_ID/SDAP.Access` markers, and the
+  BFF `Ciam` config still uses `#{CIAM_API_APP_ID}#` / `#{CIAM_API_AUDIENCE}#` placeholders.
+- **Needed (portal/CLI ops in the CIAM tenant — same class as tasks 001/002)**:
+  1. Register a **SPA public-client** app in the CIAM tenant; add the SWA + `http://localhost:3000`
+     redirect URIs (SPA platform). Record its client id → `VITE_MSAL_CLIENT_ID` / pipeline var
+     `MSAL_CLIENT_ID`, and `VITE_MSAL_AUTHORITY` (already set).
+  2. Register a **BFF-API** app in the CIAM tenant; Expose an API → scope (e.g. `SDAP.Access`);
+     record `api://{app-id}/SDAP.Access` → `VITE_MSAL_BFF_SCOPE` / `MSAL_BFF_SCOPE`, and set the
+     BFF `Ciam:ClientId` + `Ciam:Audience` (task 020 placeholders) to this app.
+  3. Grant the SPA app delegated permission to the BFF-API scope (+ admin consent).
+  4. Associate the SPA app with the `SpaarkeExternalSignIn` user flow (resources.yaml line 172).
+- **Blocks**: live CIAM E2E (deferred Phase-2 spike — non-blocking per spec), task 014 parity test,
+  task 031 deploy substitution values.
+- **Owner action**: portal/CLI in the CIAM tenant (cannot be minted headlessly — CIAM Graph/ad ops
+  require interactive admin, same limitation as 001/002).
+
+## DI-028-02 — external-spa does not build in this worktree (pre-existing, blocks task 014)
+
+- **Discovered**: 2026-07-19 (task 028; pre-dates this task — reproduces on clean HEAD).
+- **Concrete failing behavior**: `npx tsc --noEmit` reports ~48 errors and `vite build` fails, all
+  OUTSIDE the auth-config scope of task 028:
+  - `vite build` → Rollup cannot resolve `@microsoft/applicationinsights-web` imported by the shared
+    `Spaarke.UI.Components/src/services/AppInsightsService.ts` (workspace dep not installed/linked).
+  - `tsc` → missing `@spaarke/ui-components/components/{Wizard,FileUpload,PlaybookLibraryShell}` and
+    `@spaarke/ui-components/utils/adapters/*` subpath declarations (shared lib not built/linked), plus
+    unused-import / implicit-any lint-level errors in `DocumentUploadPage.tsx`, `PlaybookLibraryPage.tsx`,
+    `ProjectPage.tsx`, `WorkspaceHomePage.tsx`, `SmartTodo.tsx`.
+  - (Fixed in 028 because the file was in scope: `msal-config.ts` `storeAuthStateInCookie` — invalid in
+    `@azure/msal-browser@^5.5.0` `CacheOptions`; removed.)
+- **Impact**: task 014 (deploy external-spa to SWA + verify parity) cannot produce a build until the
+  shared `@spaarke/ui-components` is built/linked in this worktree and the appinsights dep + subpath
+  exports are resolved (monorepo linkage; CLAUDE.md notes Vite-solution `npm ci` fragility).
+- **Owner action**: address as part of task 014 (Phase 1) — build/link the shared lib, resolve the
+  appinsights import, clean the pre-existing page-level type errors. Not in 028 scope (auth config only).

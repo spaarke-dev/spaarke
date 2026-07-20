@@ -3,7 +3,8 @@
     <title>Point the external-spa at the CIAM authority</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE (config deliverable). Repointed the external-spa MSAL config at the CIAM authority, config-driven: added VITE_MSAL_AUTHORITY (full CIAM authority URL) → config.ts MSAL_AUTHORITY; msal-config.ts authority = MSAL_AUTHORITY + knownAuthorities=[new URL(authority).host] (required for *.ciamlogin.com). Preserved cacheLocation:'sessionStorage' (documented ADR-028 exception) + direct PublicClientApplication — NO @spaarke/auth, NO localStorage for tokens (verified via grep: @spaarke/auth appears only in explanatory comments; localStorage only powers the dark-mode theme toggle). Updated .env.development (CIAM authority + tenant real; SPA client-id/scope = TODO markers pending CIAM app regs), .env.production (#{MSAL_AUTHORITY}# added), .env.example. Fixed a pre-existing type error in scope: removed storeAuthStateInCookie (invalid in @azure/msal-browser@^5.5.0 CacheOptions). My auth/config files type-check clean (verified). Acceptance 1-4 met at config level; #5 (dark-mode UI) deferred (no --chrome). TWO follow-ups filed in notes/defer-issues.md: DI-028-01 (CIAM SPA + BFF-API app registrations — ops prerequisite for live auth, cannot mint headlessly), DI-028-02 (pre-existing external-spa build breakage: @spaarke/ui-components subpaths + appinsights unresolved — blocks task 014, out of 028 scope). Live CIAM login is the deferred Phase-2 E2E per spec (non-blocking).</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>SPA auth configuration change on the external identity surface (tags: auth)</rigor-reason>
     <model-tier>sonnet</model-tier>
