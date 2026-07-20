@@ -9,11 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | W9 post-UAT remediation (owner: deliver all 4 defects in-project, no deferral) |
-| **Active** | Task **092** (#4 faithful .eml + #5 on-demand profile enqueue) — starting implementation |
-| **Just done** | Task **091** (#7 body/attachment reference extraction) — code + tests committed `d6d03f6cb`; 511 Comm tests green; publish 45.68MB (+0.38, ≤60); 0 HIGH CVE. **Step 9.5 code-review+adr-check running in subagent** — read its verdict, apply any must-fix, then mark 091 ✅ in TASK-INDEX. |
-| **Next after 092** | Task **093** (#2 Communication Attachments preview PCF) |
-| **Then** | Deploy remediated BFF (merge origin/master first per DEPLOYMENT-CHECKLIST), owner UAT re-verify incl. D-1 fresh email; then 090 wrap-up |
+| **Phase** | W9 post-UAT remediation — **ALL 4 DEFECTS FIXED/BUILT + committed** (091/092/093, all gates clean). Awaiting owner go-ahead on DEPLOY. |
+| **Active** | **DEPLOY** the remediated BFF + hand off PCF/UAT remainder. NOT started (needs owner OK — merge origin/master 25 commits + App Service deploy is outward-facing). |
+| **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 empty-message-id hardening); 093 #2 PCF `2d56cf8e0`. Bookkeeping `29f6a619c`/`c5e2edc75`/`6e1813d95`. |
+| **Deploy plan** | (1) `git merge origin/master` into worktree (resolve conflicts), (2) build+`dotnet test --filter Communication` green, (3) §10 publish-size+CVE, (4) `/merge-to-master` (protected → auto-merge PR), (5) App Service deploy `spaarke-bff-dev` + healthz. THEN owner: import `CommunicationAttachmentsSolution_v1.0.0.zip` + swap OOB subgrid; UAT re-verify (D-1 fresh email proves #5 auto-profile + webhook-KV; #7 subject-PAT/body-REAL→Ambiguous; #4 open archived .eml). |
 
 ### W9 remediation tasks (POMLs + decisions locked)
 - **091** #7 — Suggest-only (body refs never auto-file; email-1 → Ambiguous). ✅ implemented (gate pending).
