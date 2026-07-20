@@ -5,7 +5,14 @@
 
 ---
 
-## DI-028-01 — CIAM SPA + BFF-API app registrations (ops prerequisite for live external auth)
+## DI-028-01 — CIAM SPA + BFF-API app registrations (ops prerequisite for live external auth) — ✅ RESOLVED 2026-07-20
+
+- **RESOLVED 2026-07-20**: Owner registered both apps in the CIAM tenant + granted the KV role:
+  - **Spaarke External BFF API** `4a4d5126-91b0-4865-8e3a-134b7209013e` — exposes scope `SDAP.Access` (App ID URI `api://4a4d5126-…`). → BFF `Ciam:ClientId` + `Ciam:Audience`; `VITE_MSAL_BFF_SCOPE`.
+  - **Spaarke External Workspace SPA** `bd57e54e-b339-4500-b55c-e451009fd907` — SPA platform; SDAP.Access + Graph User.Read granted + admin-consented; added to `SpaarkeExternalSignIn` user flow. → `VITE_MSAL_CLIENT_ID`.
+  - BFF managed identity granted **Key Vault Secrets User** on `spaarke-spekvcert` (unblocks the task-022 cert load for 031).
+  - Wired into repo 2026-07-20: `.env.development`, `config/environments.json` (dev.ciam.spaClientId/bffApiClientId/bffApiScope + deploy-substitution mapping), `config/spaarke-resources.yaml` (external_identity.app_registrations.bff_api + .spa_client).
+  - REMAINING (verify at deploy): the deploy pipeline must substitute the BFF `#{CIAM_*}#` placeholders from the mapping recorded in `environments.json` dev.ciam; confirm the v2 `aud` (client-id GUID vs `api://…`) against a live token. Live E2E sign-in is the deferred Phase-2 spike.
 
 - **Discovered**: 2026-07-19 (task 028).
 - **Concrete failing behavior**: The external SPA is now config-pointed at the CIAM authority, but

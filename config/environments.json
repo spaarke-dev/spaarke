@@ -49,8 +49,12 @@
         "domain": "spaarkeextid.onmicrosoft.com",
         "authority": "https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131",
         "authorityHost": "spaarkeextid.ciamlogin.com",
+        "subdomain": "spaarkeextid",
         "graphProvisionerClientId": "e63e6eb1-be25-4214-80a8-a6d609034bb9",
-        "$comment": "Entra External ID (CIAM) external tenant for the external Secure Project Workspace (task 001). Non-secret identifiers only (NFR-06). Sign-up user flow 'SpaarkeExternalSignIn' (046a0529-1fb5-45d2-a91f-65a3b3ccdc64) created with isSignUpAllowed=false — DONE 2026-07-19 via Graph (admin-initiated-only, R1). PENDING: SSPR Email OTP (enable in Entra admin center > Protection > Authentication methods) to unlock 'Forgot password' self-set."
+        "spaClientId": "bd57e54e-b339-4500-b55c-e451009fd907",
+        "bffApiClientId": "4a4d5126-91b0-4865-8e3a-134b7209013e",
+        "bffApiScope": "api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access",
+        "$comment": "Entra External ID (CIAM) external tenant for the external Secure Project Workspace (task 001). Non-secret identifiers only (NFR-06). Sign-up user flow 'SpaarkeExternalSignIn' (046a0529-1fb5-45d2-a91f-65a3b3ccdc64) created with isSignUpAllowed=false — DONE 2026-07-19 via Graph (admin-initiated-only, R1). App registrations DONE 2026-07-20 (DI-028-01): Spaarke External Workspace SPA (spaClientId) + Spaarke External BFF API (bffApiClientId, exposes SDAP.Access; SPA granted+consented). BFF deploy-substitution mapping — CIAM_SUBDOMAIN=spaarkeextid, CIAM_TENANT_ID=7052feba-..., CIAM_API_APP_ID=Ciam:ClientId=bffApiClientId, CIAM_API_AUDIENCE=Ciam:Audience=bffApiClientId (v2 aud=client-id GUID; if token validation rejects, switch to api://{bffApiClientId} — known v2-audience caveat), CIAM_DOMAIN=spaarkeextid.onmicrosoft.com, CIAM_GRAPH_PROVISIONER_APP_ID=e63e6eb1-..., CIAM_GRAPH_PROVISIONER_CERT_NAME=ciam-graph-provisioner-cert, EXTERNAL_SPA_PORTAL_URL=https://green-dune-0c4f1221e.7.azurestaticapps.net. PENDING: confirm SSPR Email OTP enabled (Entra > Protection > Authentication methods)."
       },
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,

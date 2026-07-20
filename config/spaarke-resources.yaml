@@ -196,6 +196,37 @@ external_identity:
         created: 2026-07-19
         history:
           - 2026-07-19: Registered single-tenant in the CIAM tenant; User.ReadWrite.All admin-consented (task 002).
+    bff_api:
+      app_name: Spaarke External BFF API
+      client_id: 4a4d5126-91b0-4865-8e3a-134b7209013e
+      home_tenant_ref: external_identity.ciam_tenant # lives IN the CIAM tenant (single-tenant)
+      sign_in_audience: AzureADMyOrg
+      exposed_scopes:
+        - SDAP.Access # Application ID URI api://4a4d5126-91b0-4865-8e3a-134b7209013e; the BFF "Ciam" scheme validates aud against this app (task 020)
+      purpose: The CIAM-tenant API app that external SPA access tokens are audienced to; the BFF's second "Ciam" JwtBearer scheme (task 020) validates these tokens. Maps to BFF Ciam:ClientId + Ciam:Audience and to VITE_MSAL_BFF_SCOPE.
+      _meta:
+        status: active
+        created: 2026-07-20
+        history:
+          - 2026-07-20: Registered in the CIAM tenant + exposed scope SDAP.Access (DI-028-01, external-access-platform-r1).
+    spa_client:
+      app_name: Spaarke External Workspace SPA
+      client_id: bd57e54e-b339-4500-b55c-e451009fd907
+      home_tenant_ref: external_identity.ciam_tenant # lives IN the CIAM tenant (single-tenant)
+      sign_in_audience: AzureADMyOrg
+      platform: spa # SPA (auth-code + PKCE); public client, no credential
+      redirect_uris:
+        - https://green-dune-0c4f1221e.7.azurestaticapps.net # dev SWA origin
+        - http://localhost:3000 # local dev
+      delegated_permissions:
+        - Microsoft Graph User.Read (admin-consented)
+        - Spaarke External BFF API SDAP.Access (admin-consented) # associated with user flow SpaarkeExternalSignIn
+      purpose: The external Secure Project Workspace SPA public-client the external SPA (src/client/external-spa) authenticates against. Maps to VITE_MSAL_CLIENT_ID.
+      _meta:
+        status: active
+        created: 2026-07-20
+        history:
+          - 2026-07-20: Registered in the CIAM tenant (SPA platform) + SDAP.Access granted/consented + added to SpaarkeExternalSignIn user flow (DI-028-01, external-access-platform-r1).
 
 # ============================================================================
 # SharePoint Embedded (tenant-level, region eastus)
