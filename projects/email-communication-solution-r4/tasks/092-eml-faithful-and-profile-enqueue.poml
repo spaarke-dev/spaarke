@@ -2,7 +2,7 @@
   <metadata>
     <title>Archive: faithful .eml (embed attachments) + on-demand Document-Profile enqueue + display-name/content-type (UAT #4, #5)</title>
     <phase>Wave 9 — Post-UAT remediation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <dependencies>044</dependencies>
     <blocks>—</blocks>
