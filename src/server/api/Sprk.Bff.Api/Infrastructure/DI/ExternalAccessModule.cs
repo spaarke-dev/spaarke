@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -57,6 +58,10 @@ public static class ExternalAccessModule
         // certificate from Key Vault, and the resilient "GraphApiClient" HttpClient (GraphModule).
         // ADR-028 A1: app-only client-credentials against the CIAM authority — never OBO (broker-only).
         services.AddSingleton<CiamGraphClientFactory>();
+
+        // Admin-initiated CIAM user provisioner (task 025). Creates CIAM local accounts via the
+        // cross-tenant client above; reuses PasswordGenerator (RegistrationModule). Singleton per ADR-010.
+        services.AddSingleton<CiamUserProvisioningService>();
 
         return services;
     }

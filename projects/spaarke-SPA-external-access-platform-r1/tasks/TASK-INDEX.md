@@ -21,7 +21,7 @@
 | 022 | Build cross-tenant CIAM Graph client | 2 | FULL | **opus**/high | 002 | ✗ (new client + DI) | ✅ |
 | 023 | Resolve Contact by CIAM `oid` | 2 | FULL | **opus**/high | 004,020 | ✗ (shares filter/participation) | ✅ |
 | 024 | Add CIAM onboarding email template + method | 2 | STANDARD | sonnet/high | none | ✓ Group B | ✅ |
-| 025 | Implement admin-initiated CIAM provisioner | 2 | FULL | **opus**/**xhigh** | 022,004,024 | ✗ (multi-file wiring) | 🔲 |
+| 025 | Implement admin-initiated CIAM provisioner | 2 | FULL | **opus**/**xhigh** | 022,004,024 | ✗ (multi-file wiring) | ✅ |
 | 026 | Remove vestigial synthetic SPE container grant | 2 | FULL | sonnet/high | none | ✗ (shares GrantEndpoint) | ✅ |
 | 027 | Add app-only external document download endpoint | 2 | FULL | sonnet/**xhigh** | 021,023 | ✗ (shares ExternalProjectDataEndpoints) | 🔲 |
 | 028 | Point external-spa at the CIAM authority | 2 | FULL | sonnet/high | 020 | ✗ (SPA auth config) | ✅ |

@@ -1,24 +1,27 @@
 using System.Text.Json.Serialization;
-using Microsoft.Graph.Models;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
-using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
 /// <summary>
 /// POST /api/v1/external-access/invite
 ///
-/// Invites an external user to a Secure Project by:
-///   1. Creating or resolving the Contact in Dataverse by email.
-///   2. Sending an Azure AD B2B guest invitation via Microsoft Graph.
-///   3. Returning the Contact ID and invitation redemption URL.
+/// Admin-initiated onboarding of an external user to the Secure Project Workspace (ADR-028
+/// Amendment A1 — broker-only). Replaces the former Entra B2B guest invitation with Entra External
+/// ID (CIAM) account creation:
+///   1. Create or resolve the Contact in Dataverse by email (reads its sprk_externalobjectid).
+///   2. Idempotency gate: if the Contact already has an oid bound, SKIP account creation.
+///   3. Otherwise create a CIAM local email account (task 022 cross-tenant Graph client),
+///      persist the returned oid to Contact.sprk_externalobjectid, and send the onboarding email.
 ///
-/// The caller should then call POST /grant to create the sprk_externalrecordaccess record.
+/// The caller then calls POST /grant to create the sprk_externalrecordaccess record.
 ///
-/// Prerequisites:
-///   - The managed identity must have the "User.Invite.All" Microsoft Graph permission.
+/// NO workforce Entra B2B guest is created, and the external user's token is never exchanged
+/// downstream (broker-only). The temporary password is delivered via SSPR "Forgot password" — it
+/// is never returned to the caller.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
@@ -27,7 +30,6 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class InviteExternalUserEndpoint
 {
     private const string ContactEntitySet = "contacts";
-    private const string RedirectUrl = "https://myapplications.microsoft.com";
 
     /// <summary>
     /// Registers the invite endpoint on the external-access group.
@@ -36,11 +38,12 @@ public static class InviteExternalUserEndpoint
     {
         group.MapPost("/invite", InviteExternalUserAsync)
             .WithName("InviteExternalUser")
-            .WithSummary("Invite an external user to a Secure Project via Azure AD B2B")
+            .WithSummary("Onboard an external user to a Secure Project via Entra External ID (CIAM)")
             .WithDescription(
-                "Creates or resolves a Dataverse Contact by email, then sends an Azure AD B2B guest invitation. " +
-                "Returns the Contact ID and invitation redemption URL. " +
-                "Call POST /grant separately to create the access record.")
+                "Creates or resolves a Dataverse Contact by email, then — if not already provisioned — " +
+                "creates a CIAM local account, persists the oid to sprk_externalobjectid, and sends the " +
+                "onboarding email. Idempotent: re-invoking a Contact that already has an oid creates no " +
+                "second account. Call POST /grant separately to create the access record.")
             .Produces<InviteExternalUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -57,7 +60,9 @@ public static class InviteExternalUserEndpoint
     private static async Task<IResult> InviteExternalUserAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
-        IGraphClientFactory graphClientFactory,
+        CiamUserProvisioningService ciamProvisioner,
+        RegistrationEmailService emailService,
+        IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -70,11 +75,11 @@ public static class InviteExternalUserEndpoint
             return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
 
         logger.LogInformation(
-            "[EXT-INVITE] Inviting external user {Email} to Project {ProjectId}",
+            "[EXT-INVITE] Onboarding external user {Email} to Project {ProjectId}",
             request.Email, request.ProjectId);
 
-        // ── Step 1: Create or resolve Contact in Dataverse ────────────────────
-        var contactId = await ResolveOrCreateContactAsync(dataverseClient, request, logger, ct);
+        // ── Step 1: Create or resolve Contact (and read any existing oid binding) ──
+        var (contactId, existingOid) = await ResolveOrCreateContactAsync(dataverseClient, request, logger, ct);
         if (contactId == Guid.Empty)
         {
             return Results.Problem(
@@ -84,23 +89,71 @@ public static class InviteExternalUserEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        // ── Step 2: Send Azure AD B2B invitation via Microsoft Graph ──────────
-        // Requires: User.Invite.All application permission on the managed identity.
-        var (inviteRedeemUrl, status) = await SendB2BInvitationAsync(
-            graphClientFactory, request.Email, request.FirstName, request.LastName, logger, ct);
+        var portalUrl = configuration["ExternalAccess:PortalUrl"]
+            ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
+
+        // ── Step 2: Idempotency gate ──────────────────────────────────────────
+        // If the Contact already has an oid bound, the CIAM account already exists — do NOT create
+        // a second account (and do not re-send the onboarding email).
+        if (!string.IsNullOrWhiteSpace(existingOid))
+        {
+            logger.LogInformation(
+                "[EXT-INVITE] Contact {ContactId} ({Email}) already has an oid bound — skipping CIAM account creation (idempotent).",
+                contactId, request.Email);
+            return TypedResults.Ok(new InviteExternalUserResponse(contactId, portalUrl, "AlreadyProvisioned"));
+        }
+
+        // ── Step 3: Create the CIAM local account (broker-only; no B2B guest) ─────
+        string oid;
+        try
+        {
+            oid = await ciamProvisioner.CreateCiamUserAsync(request.Email, request.FirstName, request.LastName, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[EXT-INVITE] Failed to create CIAM account for {Email}", request.Email);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "Failed to create the external identity.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+        }
+
+        // ── Step 4: Persist the oid to Contact.sprk_externalobjectid ──────────
+        await dataverseClient.UpdateAsync(
+            ContactEntitySet,
+            contactId,
+            new Dictionary<string, object?> { ["sprk_externalobjectid"] = oid },
+            ct);
+
+        // ── Step 5: Send the onboarding email (task 024) ──────────────────────
+        // portalUrl is inserted un-encoded into the template — it MUST be trusted server config.
+        try
+        {
+            await emailService.SendCiamOnboardingEmailAsync(request.Email, request.FirstName ?? string.Empty, portalUrl, ct);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: the account + oid are persisted. Admin can re-send onboarding out-of-band.
+            logger.LogWarning(ex, "[EXT-INVITE] CIAM account created for {Email} but onboarding email failed to send.", request.Email);
+        }
 
         logger.LogInformation(
-            "[EXT-INVITE] B2B invitation sent to {Email} — Status: {Status}, Contact: {ContactId}",
-            request.Email, status, contactId);
+            "[EXT-INVITE] Provisioned CIAM user {Oid} for {Email} — Contact: {ContactId}",
+            oid, request.Email, contactId);
 
-        return TypedResults.Ok(new InviteExternalUserResponse(contactId, inviteRedeemUrl, status));
+        return TypedResults.Ok(new InviteExternalUserResponse(contactId, portalUrl, "Provisioned"));
     }
 
     // =========================================================================
     // Helpers
     // =========================================================================
 
-    private static async Task<Guid> ResolveOrCreateContactAsync(
+    /// <summary>
+    /// Resolves the Contact by email (reading its current oid binding) or creates a new one.
+    /// Returns (Guid.Empty, null) on failure.
+    /// </summary>
+    private static async Task<(Guid ContactId, string? ExistingOid)> ResolveOrCreateContactAsync(
         DataverseWebApiClient dataverseClient,
         InviteExternalUserRequest request,
         ILogger logger,
@@ -108,19 +161,19 @@ public static class InviteExternalUserEndpoint
     {
         try
         {
-            // Check if Contact already exists by email
+            // Check if Contact already exists by email (and read any existing oid binding).
             var existing = await dataverseClient.QueryAsync<ContactRow>(
                 ContactEntitySet,
-                filter: $"emailaddress1 eq '{Uri.EscapeDataString(request.Email)}'",
-                select: "contactid",
+                filter: $"emailaddress1 eq '{request.Email.Replace("'", "''")}'",
+                select: "contactid,sprk_externalobjectid",
                 top: 1,
                 cancellationToken: ct);
 
             if (existing.Count > 0)
             {
-                logger.LogDebug("[EXT-INVITE] Found existing Contact {ContactId} for email {Email}",
-                    existing[0].contactid, request.Email);
-                return existing[0].contactid;
+                logger.LogDebug("[EXT-INVITE] Found existing Contact {ContactId} for email {Email} (oid bound: {Bound})",
+                    existing[0].contactid, request.Email, !string.IsNullOrWhiteSpace(existing[0].sprk_externalobjectid));
+                return (existing[0].contactid, existing[0].sprk_externalobjectid);
             }
 
             // Create new Contact
@@ -135,53 +188,12 @@ public static class InviteExternalUserEndpoint
             logger.LogInformation("[EXT-INVITE] Created new Contact {ContactId} for email {Email}",
                 newContactId, request.Email);
 
-            return newContactId;
+            return (newContactId, null);
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "[EXT-INVITE] Failed to resolve or create Contact for email {Email}", request.Email);
-            return Guid.Empty;
-        }
-    }
-
-    private static async Task<(string redeemUrl, string status)> SendB2BInvitationAsync(
-        IGraphClientFactory graphClientFactory,
-        string email,
-        string? firstName,
-        string? lastName,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        try
-        {
-            var graphClient = graphClientFactory.ForApp();
-            var displayName = string.Join(" ", new[] { firstName, lastName }.Where(s => !string.IsNullOrEmpty(s)));
-
-            var invitation = await graphClient.Invitations.PostAsync(new Invitation
-            {
-                InvitedUserEmailAddress = email,
-                InviteRedirectUrl = RedirectUrl,
-                SendInvitationMessage = true,
-                InvitedUserDisplayName = string.IsNullOrEmpty(displayName) ? null : displayName,
-                InvitedUserMessageInfo = new InvitedUserMessageInfo
-                {
-                    CustomizedMessageBody =
-                        "You have been granted access to a Secure Project workspace. " +
-                        "Please accept this invitation to continue."
-                }
-            }, cancellationToken: ct);
-
-            return (
-                invitation?.InviteRedeemUrl ?? string.Empty,
-                invitation?.Status ?? "Unknown"
-            );
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal: Contact was created, but invitation failed.
-            // Admin can resend manually. Return empty redeemUrl with error status.
-            logger.LogError(ex, "[EXT-INVITE] Failed to send B2B invitation to {Email}", email);
-            return (string.Empty, "Error");
+            return (Guid.Empty, null);
         }
     }
 
@@ -191,5 +203,8 @@ public static class InviteExternalUserEndpoint
     {
         [JsonPropertyName("contactid")]
         public Guid contactid { get; set; }
+
+        [JsonPropertyName("sprk_externalobjectid")]
+        public string? sprk_externalobjectid { get; set; }
     }
 }

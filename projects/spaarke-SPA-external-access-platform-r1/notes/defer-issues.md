@@ -47,3 +47,20 @@
   exports are resolved (monorepo linkage; CLAUDE.md notes Vite-solution `npm ci` fragility).
 - **Owner action**: address as part of task 014 (Phase 1) — build/link the shared lib, resolve the
   appinsights import, clean the pre-existing page-level type errors. Not in 028 scope (auth config only).
+
+## DI-025-01 — CIAM provisioner partial-failure hardening (create-ok / persist-fail window)
+
+- **Discovered**: 2026-07-19 (task 025).
+- **Concrete failing behavior**: In `InviteExternalUserEndpoint`, if `CreateCiamUserAsync` succeeds but
+  the subsequent `UpdateAsync` (persist oid to `Contact.sprk_externalobjectid`) fails, the CIAM account
+  exists but no oid is bound to the Contact. The request returns 500 (oid IS logged for manual recovery).
+  A re-invoke sees `existingOid == null` and attempts a second `POST /users` for the same email identity
+  — which the CIAM tenant REJECTS as a duplicate identity (409), so no duplicate account is created, but
+  the flow is stuck at 500 until an operator manually binds the logged oid. Also: the onboarding email is
+  skipped on the idempotent (already-provisioned) path, so a first-attempt email-send failure cannot be
+  retried via re-invoke.
+- **Safe today**: no duplicate CIAM account is ever created (unique email identity + idempotency gate);
+  the window is a narrow Dataverse-PATCH failure and the oid is logged.
+- **Hardening (post-R1)**: on `POST /users` conflict, look up the existing CIAM user by email identity to
+  recover its oid and continue (persist + email) — makes the flow self-healing. Consider an optional
+  "resend onboarding" affordance for the already-provisioned path. Out of 025's prescriptive scope.
