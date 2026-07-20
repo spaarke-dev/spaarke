@@ -2,7 +2,7 @@
   <metadata>
     <title>BFF filtered communication query endpoint (thread/regarding/channel/date facets; participant= stubbed until W5 per FR-02)</title>
     <phase>W1 — BFF Reads (CC-3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <deps>002</deps>
     <blocks>051,080</blocks>

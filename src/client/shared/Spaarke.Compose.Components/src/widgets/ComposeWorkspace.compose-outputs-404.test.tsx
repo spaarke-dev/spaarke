@@ -57,14 +57,10 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 jest.mock('./hooks', () => ({
   useComposeBroadcastChannel: () => ({ postFocusMe: jest.fn(), postForceClosed: jest.fn() }),

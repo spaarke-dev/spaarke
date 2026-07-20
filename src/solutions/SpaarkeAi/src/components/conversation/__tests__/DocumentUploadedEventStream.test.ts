@@ -40,6 +40,8 @@ import {
   formatClassificationMessage,
   formatEventOutputMarkdown,
   formatNoticeMessage,
+  isCorrespondenceDraft,
+  buildCorrespondenceComposeHtml,
   type DocumentUploadedEventHandlers,
 } from '../DocumentUploadedEventStream';
 
@@ -340,6 +342,30 @@ describe('formatters (pure)', () => {
     expect(md).toContain('We accept clauses 1–3.');
     expect(md).toContain('**Suggested recipients:** counsel@acme.com, Jane Roe');
     expect(md).toContain('**Sources:** NDA v3, Engagement letter');
+  });
+
+  it('buildCorrespondenceComposeHtml folds subject/recipients/sources into seed HTML (owner: route to Compose)', () => {
+    const html = buildCorrespondenceComposeHtml({
+      subject: 'Re: NDA',
+      body: 'Para one.\n\nPara two with <angle> chars.',
+      recipients_suggestion: ['counsel@acme.com'],
+      cited_refs: ['NDA v3'],
+    });
+    expect(html).toContain('<strong>Subject:</strong> Re: NDA');
+    expect(html).toContain('<strong>To:</strong> counsel@acme.com');
+    // Body flows through assistantTextToDraftHtml — paragraph-wrapped + HTML-escaped.
+    expect(html).toContain('<p>Para one.</p>');
+    expect(html).toContain('&lt;angle&gt;');
+    expect(html).toContain('<em>Sources: NDA v3</em>');
+  });
+
+  it('isCorrespondenceDraft matches the draft shape but not summary/plain payloads', () => {
+    expect(isCorrespondenceDraft({ subject: 'Hi', body: 'note' })).toBe(true);
+    expect(isCorrespondenceDraft({ body: 'note', cited_refs: [] })).toBe(true);
+    expect(isCorrespondenceDraft({ summary: 'A summary.' })).toBe(false);
+    expect(isCorrespondenceDraft({ body: 'note' })).toBe(false); // body alone isn't enough
+    expect(isCorrespondenceDraft('plain string')).toBe(false);
+    expect(isCorrespondenceDraft(null)).toBe(false);
   });
 
   it('formatEventOutputMarkdown treats a body-only correspondence payload as a draft, and does not hijack summary shapes', () => {

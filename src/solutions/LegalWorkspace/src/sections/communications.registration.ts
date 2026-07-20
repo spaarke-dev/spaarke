@@ -2,17 +2,29 @@
  * communications.registration.ts — SectionRegistration for the Communications workspace section.
  *
  * ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): fifth Dataverse-entity-view
- * section sharing `<DataverseEntityViewWidget>` with documents/matters/projects/
- * invoices/workAssignments. Wraps a Spaarke DataGrid pointed at an operator-
- * created `sprk_gridconfiguration` row for the `sprk_communication` entity.
+ * section, originally sharing `<DataverseEntityViewWidget>` with documents/
+ * matters/projects/invoices/workAssignments.
+ *
+ * messaging-communication-app-r2 task 030 (FR-12, 2026-07-19): UPGRADED IN
+ * PLACE — `renderContent` now mounts the rich Pattern D
+ * `CommunicationsWorkspaceWidget` (filter-chip toolbar + card strip + embedded
+ * DataGrid) from the NEW shared lib `@spaarke/communication-components`,
+ * instead of the bare `DataverseEntityViewWidget`. Section id
+ * (`communications`), `widgetType` (`communications-list`), and the reused
+ * `sprk_gridconfiguration` GUID are UNCHANGED (NFR-05 — single default, no
+ * second widget/config). Per-instance `pageSize`/`availableViews` overrides
+ * are no longer forwarded here — the rich widget owns its own grid wiring
+ * (channel + date filter chips compose with the framework's own config-driven
+ * chip/view resolution); a future task can re-add override plumbing to
+ * `CommunicationsWorkspaceWidgetProps` if a per-instance need arises.
  *
  * Pattern D (dual-use): also registered as Direct widget `communications-list`
  * in `@spaarke/ai-widgets/widgets/workspace/register-workspace-widgets.ts`.
  *
  * Row-click behavior: Layout 1 (OOB modal via `Xrm.Navigation.navigateTo` at
  * 85% × 85%) via the DataGrid framework's `defaultRecordOpen` — unified in
- * Phase 1 (task 002) per FR-03/FR-20. `configjson.rowOpen.formId` is intentionally
- * omitted so the user's default `sprk_communication` main form opens (per FR-11).
+ * Phase 1 (task 002) per FR-03/FR-20; `CommunicationsWorkspaceWidget` does not
+ * override it (see that file's module docblock).
  *
  * Standards: ADR-012 (shared lib widget), ADR-021 (Fluent v9), ADR-022 (React 19),
  *            ADR-028 (Xrm.WebApi — no token snapshots).
@@ -25,12 +37,13 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { DataverseEntityViewWidget } from "@spaarke/ai-widgets/widgets/workspace/DataverseEntityViewWidget";
+import { CommunicationsWorkspaceWidget } from "@spaarke/communication-components";
 
 /**
  * GUID of the `sprk_gridconfiguration` Dataverse row for the Communications view.
  * Created 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 task 010; see
  * `projects/ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md`.
+ * REUSED (not cloned) by messaging-communication-app-r2 task 030 — NFR-05.
  */
 // spaarkedev1 sprk_gridconfiguration: 'Active Communications (Workspace)' (created 2026-07-01)
 const COMMUNICATIONS_CONFIG_ID = "e1826c4c-9575-f111-ab0e-7ced8ddc4a05";
@@ -51,27 +64,19 @@ export const communicationsRegistration: SectionRegistration = {
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     // spaarke-dataset-grid-framework-r2 DEF-005 / DEF-005b+c (2026-07-02, FR-03
-    // end-to-end wiring): honor per-instance overrides from the LayoutJsonRow
-    // SectionInstance. Bare-string entries + omitted overrides fall through to
-    // the baked-in default configId / config-record / framework defaults.
-    // Widget forwards to `<DataGrid />` which delegates precedence to
-    // `resolveEffectivePageSize` + `resolveEffectiveAvailableViews`.
+    // end-to-end wiring): honor a per-instance configId override from the
+    // LayoutJsonRow SectionInstance. Bare-string entries + omitted overrides
+    // fall through to the baked-in default configId.
     const effectiveConfigId =
       context.sectionInstance?.configIdOverride ?? COMMUNICATIONS_CONFIG_ID;
-    const instanceOverrides = context.sectionInstance?.overrides;
     return {
       id: "communications",
       type: "content",
       title: "Communications",
       style: { overflow: "hidden" },
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: {
-            configId: effectiveConfigId,
-            pageSize: instanceOverrides?.pageSize,
-            availableViews: instanceOverrides?.availableViews,
-          },
-          widgetType: "communications-list",
+        React.createElement(CommunicationsWorkspaceWidget, {
+          configId: effectiveConfigId,
         }),
     };
   },

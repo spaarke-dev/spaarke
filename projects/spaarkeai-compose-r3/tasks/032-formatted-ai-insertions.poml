@@ -2,20 +2,38 @@
   <metadata>
     <title>FR-15 formatted AI insertions — enrich `new_text` to carry marks + `buildInsertionHtml`</title>
     <phase>3 E3</phase>
-    <gate>blocked</gate>
+    <gate>startable</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
     <parallel-group>W3-E3</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>030</deps>
-    <tags>frontend,tiptap,api</tags>
+    <deps>none</deps>
+    <tags>frontend,tiptap</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
     <started></started>
     <completed></completed>
   </metadata>
+
+  <amendment date="2026-07-19" by="spaarkeai-compose-r3 client-derive alignment">
+    SCOPED CLIENT-ONLY per the compose-redline architecture decision
+    ([`docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`]; §6.5 Path B). Two changes to the body below:
+    (1) **NO server `ComposeDraftPayload` record change.** That record is NOT live-parsed — the AI ledger
+        path ships the compose payload OPAQUE (`OutputRouter`/`ChatEndpoints` never parse it) and the
+        CLIENT renders `new_text` via `buildInsertionHtml`; the engine is frozen (ADR-039 — no new JPS
+        output field). So the "mirror-first server edit" is DROPPED — do NOT modify `ComposeDraftDisposition.cs`.
+    (2) **Formatting travels INLINE inside `new_text`** (a lightweight HTML / inline-markup string the
+        client parses), NOT a new structured-runs field. `buildInsertionHtml` (`usePendingRedline.ts`)
+        parses the inline formatting and emits bold/italic StarterKit (MIT) marks. Backward-compatible:
+        a plain-string `new_text` (no markup) still round-trips unchanged.
+    Net: CLIENT-ONLY (`usePendingRedline.ts` `buildInsertionHtml` + the `compose-contracts.ts` type
+    comment) — no BFF change, no deploy, no through-the-wire seam (DoD = a client render test). The
+    mark/range apply layer (`usePendingRedline.ts` ~461-465) stays UNTOUCHED (S5). The task-030 dep is
+    dropped (030's server fields were removed; 032 is independent). SECURITY: sanitize the inline markup
+    — allow ONLY bold/italic (and underline if present); never inject arbitrary HTML into the editor.
+  </amendment>
 
   <prompt>
     Implement FR-15 (S5/D4): enrich `ComposeDraftPayload.new_text` from a plain string into a

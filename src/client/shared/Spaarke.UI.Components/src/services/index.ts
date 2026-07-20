@@ -186,6 +186,7 @@ export type {
 export {
   readThread,
   getUnreadCount,
+  readByRegarding,
   sendTimelineMessage,
   CommunicationTimelineReadError,
 } from './communicationTimelineApi';
@@ -194,6 +195,7 @@ export type {
   IThreadMessageDto,
   IThreadReadResultDto,
   IUnreadCountResultDto,
+  IRegardingReadResultDto,
   ICommunicationTimelineApiClientOptions,
   IReadThreadOptions,
   IGetUnreadCountOptions,

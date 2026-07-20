@@ -35,6 +35,10 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // standalone EventsPage code page AND the Calendar workspace widget
     // (task 115). Wiring done here so task 115 can immediately import.
     path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // messaging-communication-app-r2 task 030 (2026-07-19): @spaarke/communication-components
+    // hosts the rich Pattern D CommunicationsWorkspaceWidget — DUAL-DEPLOY
+    // consumer (NFR-07), mirrors the events-components entry above.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
     // R4 task 020 (2026-06-10): @spaarke/smart-todo-components hoist for the
     // LegalWorkspace todo section + future SpaarkeAi Direct widget (Pattern D).
     path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
@@ -119,6 +123,10 @@ export default defineConfig({
         // @spaarke/events-components alias (Calendar widget — task 115).
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // messaging-communication-app-r2 task 030 (2026-07-19): transpile
+        // Spaarke.Communication.Components source (DUAL-DEPLOY consumer, NFR-07).
+        path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src/**/*.ts"),
         // R4 task 020 (2026-06-10): transpile Spaarke.SmartTodo.Components source.
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.ts"),
@@ -173,6 +181,12 @@ export default defineConfig({
       // immediately without further vite/tsconfig plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // messaging-communication-app-r2 task 030 (2026-07-19): @spaarke/communication-components
+      // hosts CommunicationsWorkspaceWidget, consumed here transitively via
+      // the aliased LegalWorkspace section shim (communications.registration.ts)
+      // — DUAL-DEPLOY consumer (NFR-07).
+      "@spaarke/communication-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
+      "@spaarke/communication-components": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
       // R4 task 020 (2026-06-10): @spaarke/smart-todo-components consumed by the
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),

@@ -48,6 +48,7 @@
  */
 
 import { readSseStream, parseSseEvent } from '@spaarke/ui-components';
+import { assistantTextToDraftHtml, escapeHtml } from './assistantDraftHtml';
 
 // ---------------------------------------------------------------------------
 // Wire shapes (BFF EventRuleSseContract.cs records, serialized camelCase)
@@ -217,23 +218,32 @@ function toDisplayList(value: unknown): string[] {
 }
 
 /**
- * Draft-a-response (draft-correspondence) renderer (UAT 2026-07-19). Detects the
- * `{subject, body, recipients_suggestion?, cited_refs?}` shape produced by the
- * draft-correspondence capability and renders it as a readable draft instead of a
- * raw JSON dump. Returns null when the payload is NOT a correspondence draft (so
- * the caller falls through to its other branches). Grounded — every line comes
- * straight from the stored payload; no invented prose (ADR-039).
+ * True when a payload is a draft-correspondence result: a `{subject, body, recipients_suggestion?,
+ * cited_refs?}` shape (a body plus at least one correspondence-specific field). Kept narrow so it
+ * doesn't match generic tldr/summary payloads. Shared by the readable renderer + the Compose route.
  */
-export function formatCorrespondenceDraft(record: Record<string, unknown>): string | null {
+export function isCorrespondenceDraft(payload: unknown): payload is Record<string, unknown> {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
   const body = typeof record.body === 'string' ? record.body.trim() : '';
   const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
-  // The correspondence shape is defined by a body plus at least one of the
-  // correspondence-specific fields — this avoids matching generic summary payloads.
   const hasCorrespondenceField =
     'recipients_suggestion' in record || 'cited_refs' in record || subject.length > 0;
-  if (body.length === 0 || !hasCorrespondenceField) {
+  return body.length > 0 && hasCorrespondenceField;
+}
+
+/**
+ * Draft-a-response (draft-correspondence) renderer (UAT 2026-07-19). Renders the
+ * `{subject, body, recipients_suggestion?, cited_refs?}` shape as a readable draft instead of a raw
+ * JSON dump. Returns null when the payload is NOT a correspondence draft (so the caller falls through
+ * to its other branches). Grounded — every line comes straight from the stored payload (ADR-039).
+ */
+export function formatCorrespondenceDraft(record: Record<string, unknown>): string | null {
+  if (!isCorrespondenceDraft(record)) {
     return null;
   }
+  const body = (record.body as string).trim();
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
 
   const recipients = toDisplayList(record.recipients_suggestion);
   const citedRefs = toDisplayList(record.cited_refs);
@@ -250,6 +260,34 @@ export function formatCorrespondenceDraft(record: Record<string, unknown>): stri
     parts.push(`**Sources:** ${citedRefs.join(', ')}`);
   }
   return parts.join('\n\n');
+}
+
+/**
+ * Build the seed HTML for a Compose draft from a draft-correspondence payload (UAT 2026-07-19 —
+ * owner: "a Compose tab with the drafted response"). The Compose editor is a document-BODY editor
+ * with no subject/recipients fields, so the subject + suggested recipients + sources are folded into
+ * the body as small header/footer lines; the body itself flows through `assistantTextToDraftHtml`
+ * (paragraph-wrapped, HTML-escaped — never injects markup). Caller passes the result as
+ * `widget_load` → `widgetData.compose.draft.html`.
+ */
+export function buildCorrespondenceComposeHtml(record: Record<string, unknown>): string {
+  const subject = typeof record.subject === 'string' ? record.subject.trim() : '';
+  const body = typeof record.body === 'string' ? record.body : '';
+  const recipients = toDisplayList(record.recipients_suggestion);
+  const citedRefs = toDisplayList(record.cited_refs);
+
+  const parts: string[] = [];
+  if (subject.length > 0) {
+    parts.push(`<p><strong>Subject:</strong> ${escapeHtml(subject)}</p>`);
+  }
+  if (recipients.length > 0) {
+    parts.push(`<p><strong>To:</strong> ${escapeHtml(recipients.join(', '))}</p>`);
+  }
+  parts.push(assistantTextToDraftHtml(body));
+  if (citedRefs.length > 0) {
+    parts.push(`<p><em>Sources: ${escapeHtml(citedRefs.join(', '))}</em></p>`);
+  }
+  return parts.join('');
 }
 
 /**

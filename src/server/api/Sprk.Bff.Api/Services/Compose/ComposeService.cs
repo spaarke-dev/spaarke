@@ -124,6 +124,27 @@ public class ComposeService : IComposeService
     // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
     // Stateless + thread-safe — a default construction is functionally identical to the DI singleton.
     private readonly ParaIdPreParser _paraIdPreParser;
+    // FR-01/FR-03/FR-07 (task 022, E1 — Option C, design §4.2): the retained-original REDLINE SYNTHESIZER.
+    // On a dirty save it rewrites ONLY the client's edited paragraphs (paraId-keyed) in the resolved
+    // baseline as native w:ins/w:del, preserving every untouched paragraph + all structure — the "delta
+    // onto the retained original" that replaces the R2 whole-document reconstruction. Optional + defaults
+    // to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
+    // resolves the registered singleton (ComposeModule) in every host.
+    private readonly ComposeParagraphRedlineSynthesizer _redlineSynthesizer;
+    // FR-01a (task 026, E1 born-in-editor): the from-scratch high-fidelity OOXML AUTHORING engine. On a
+    // born-in-editor save (request.ContentModel present — an AI-drafted/blank/browse-local doc with no
+    // retained original), it renders the .docx server-side (real styles + style-linked multi-level numbering
+    // + tables + minted paraId) — the deterministic replacement for the removed client docx.js exporter.
+    // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile
+    // unchanged; DI resolves the registered singleton (ComposeModule) in every host.
+    private readonly ComposeDocumentRenderer _documentRenderer;
+    // FR-24 (task 050, import round-trip): the EXISTING read-direction OOXML annotation parser, REUSED
+    // VERBATIM. On Load it recovers every native w:ins/w:del (any authorship) so the client can render them
+    // as first-class tracked changes instead of the mammoth-flattened prose (design §7). Pure byte[]-in /
+    // record-out — no Microsoft.Graph type (ADR-007), no AI-internal type (ADR-013); the SPE download stays
+    // behind the SpeFileStore facade. Optional + defaults to a fresh instance (stateless, thread-safe) so
+    // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
+    private readonly DocxAnnotationReader _annotationReader;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -137,7 +158,10 @@ public class ComposeService : IComposeService
         IServiceScopeFactory? scopeFactory = null,
         IHostApplicationLifetime? appLifetime = null,
         IComposeMemoryCapture? memoryCapture = null,
-        ParaIdPreParser? paraIdPreParser = null)
+        ParaIdPreParser? paraIdPreParser = null,
+        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
+        ComposeDocumentRenderer? documentRenderer = null,
+        DocxAnnotationReader? annotationReader = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -148,6 +172,11 @@ public class ComposeService : IComposeService
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
+        _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
+        _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
+        // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
+        // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
+        _annotationReader = annotationReader ?? new DocxAnnotationReader();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -232,6 +261,78 @@ public class ComposeService : IComposeService
             paraIdMap = Array.Empty<ParaIdMapEntry>();
         }
 
+        // FR-24/FR-25 (task 050 + task 051, import round-trip): run the EXISTING DocxAnnotationReader ONCE
+        // on the SAME load-time bytes, alongside the paraId pre-parse + the (client-side) mammoth convert —
+        // which FLATTENS w:ins/w:del to prose AND drops comment anchors before the editor sees them
+        // (docxBridge.ts). A single Read() call (NFR-08 — same single-pass rationale as the paraId pre-parse
+        // above) projects BOTH RecoveredRevision (FR-24) and RecoveredComment (FR-25) onto the Load response,
+        // each WITH the E2 w14:paraId of its containing paragraph (resolved from the paraIdMap above by the
+        // reader's document-order ParagraphHint — both walk body.Descendants<Paragraph>() so the indices
+        // align). Revisions render as first-class accept/reject-able insertion/deletion marks; comments group
+        // by shared anchorText into FR-23 comment threads (design §7). REUSE ONLY — the reader is unmodified.
+        // Best-effort + empty (NOT null): a malformed/unreadable source degrades to no imported
+        // revisions/comments and NEVER fails Load, matching the paraId pre-parse contract above (the client
+        // still edits the doc).
+        IReadOnlyList<ImportedRevision> importedRevisions;
+        IReadOnlyList<ImportedComment> importedComments;
+        try
+        {
+            var recovered = _annotationReader.Read(content.ToArray());
+
+            importedRevisions = recovered.Revisions.Count == 0
+                ? Array.Empty<ImportedRevision>()
+                : recovered.Revisions
+                    .Select(r => new ImportedRevision(
+                        Kind: r.Kind,
+                        Id: r.Id,
+                        Author: r.Author,
+                        Date: r.Date,
+                        Text: r.Text,
+                        AnchorText: r.AnchorText,
+                        ParagraphHint: r.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, r.ParagraphHint)))
+                    .ToList();
+
+            importedComments = recovered.Comments.Count == 0
+                ? Array.Empty<ImportedComment>()
+                : recovered.Comments
+                    .Select(c => new ImportedComment(
+                        Id: c.Id,
+                        Author: c.Author,
+                        Date: c.Date,
+                        CommentText: c.CommentText,
+                        AnchorText: c.AnchorText,
+                        ParagraphHint: c.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, c.ParagraphHint)))
+                    .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: existing-annotation read failed for drive={DriveId} item={DocumentSpeId}; returning no imported revisions/comments",
+                request.DriveId, request.DocumentSpeId);
+            importedRevisions = Array.Empty<ImportedRevision>();
+            importedComments = Array.Empty<ImportedComment>();
+        }
+
+        // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
+        // holds the client bytes (e.g. after a page refresh) can re-fetch THIS baseline by versionId
+        // (DownloadFileVersionAsUserAsync). Best-effort behind the SpeFileStore facade (ADR-007) — a null
+        // (no version history / lookup unavailable) never fails Load; the client then relies on the
+        // retained-bytes Content fast-path.
+        string? versionId = null;
+        try
+        {
+            versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
+                request.DriveId, request.DocumentSpeId);
+        }
+
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
         //    bind to sprk_documentid; for Path B continuation, bind to the SPE drive-item id.
         var bindingId = request.DocumentRecordId.HasValue
@@ -286,13 +387,43 @@ public class ComposeService : IComposeService
             DocumentRecordId = request.DocumentRecordId,
             Content = content,
             ETag = metadata.ETag,
+            VersionId = versionId,
             FileName = metadata.Name,
             Size = metadata.Size,
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
             ActionHistory = actionHistory,
             ParaIdMap = paraIdMap,
+            ImportedRevisions = importedRevisions,
+            ImportedComments = importedComments,
         };
+    }
+
+    /// <summary>
+    /// FR-24 (task 050): resolves the E2 <c>w14:paraId</c> for a recovered revision's document-order
+    /// paragraph index (<see cref="RecoveredRevision.ParagraphHint"/>) from the Load-time
+    /// <paramref name="paraIdMap"/>. Both the reader and <see cref="ParaIdPreParser"/> enumerate
+    /// <c>body.Descendants&lt;Paragraph&gt;()</c> (recursive, document-ordered, incl. table-cell +
+    /// nested-table paragraphs), so the hint index maps directly to <see cref="ParaIdMapEntry.Index"/>.
+    /// Returns <c>null</c> when the hint is out of range (e.g. <c>-1</c> for a revision whose paragraph
+    /// could not be located) — the client then falls back to fuzzy anchoring (anchorText + hint).
+    /// </summary>
+    private static string? ResolveParaIdForHint(IReadOnlyList<ParaIdMapEntry> paraIdMap, int paragraphHint)
+    {
+        if (paragraphHint < 0)
+        {
+            return null;
+        }
+
+        foreach (var entry in paraIdMap)
+        {
+            if (entry.Index == paragraphHint)
+            {
+                return entry.ParaId;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -344,37 +475,54 @@ public class ComposeService : IComposeService
     {
         // SessionId is OPTIONAL (task 110): the Browse/local-file first Save legitimately has no
         // chat session. The FR-07 rebind this would drive is skipped below when SessionId is
-        // absent (empty/whitespace). TenantId + Content remain hard preconditions.
+        // absent (empty/whitespace). TenantId remains a hard precondition; the baseline must be
+        // RESOLVABLE (see ResolveSaveBaselineAsync) — it need not arrive as Content bytes.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-        if (request.Content.IsEmpty)
-            throw new ArgumentException("Content is required and must be non-empty.", nameof(request));
 
         // ────────────────────────────────────────────────────────────────────────────
-        // FR-06a upload fidelity (task 015) + REDLINE/COMMENT fidelity (UAT-R7 #2/#3/#4):
-        // the choice between the pristine ORIGINAL upload bytes and the tipTapToDocxBytes-
-        // regenerated bytes is made by the CALLER (ComposeWorkspace.tsx triggerSave), keyed off
-        // the editor's own dirty flag — an unedited mount sends the retained original bytes
-        // byte-identical; an edited mount sends the regenerated .docx. SaveAsync treats
-        // request.Content as an OPAQUE, already-decided BASELINE byte payload and MUST NOT
-        // re-encode/re-wrap it.
+        // E1 KEYSTONE (FR-01/FR-06, task 022, Option C — design §4.2, §8): the persisted document is a
+        // DELTA onto the retained LOAD-TIME ORIGINAL OOXML, never a TipTap reconstruction (docx.js is
+        // dropped from the client export path). Three-part derivation, in order:
         //
-        // The ONE deliberate transform (UAT-R7 #2/#3/#4, owner-approved): when request.Annotations
-        // is non-empty, the caller's Content is a clean BASELINE (pending redlines reduced to their
-        // reject-state text; accepted edits already baked in) and this method re-applies the pending
-        // track-changes + comments as NATIVE OOXML (w:ins/w:del/w:comment) via the SAME proven
-        // DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — BEFORE any SPE write. This
-        // fixes the flatten-to-plain-text defect where the client docx writer, which has no
-        // track-change branch, wrote both original + AI text as plain body text. An EMPTY/null
-        // annotation list persists the baseline byte-identical (a plain no-redline Save is unchanged;
-        // the FR-06a byte-identity invariant still holds — see ComposeServiceUploadFidelityTests.cs).
-        // The render is pure/in-memory; a bad batch (malformed / target-not-found) throws
-        // DocxAnnotationException BEFORE the write, so no partial SPE version can land.
+        //   1. Resolve the BASELINE = the retained original bytes (FR-06):
+        //        (a) request.Content — the same-session fast-path (the client still holds the pristine
+        //            mount payload state.docxBytes; it is the ORIGINAL, not a reconstruction), else
+        //        (b) re-fetch the load-time SPE version by request.BaselineVersionId (task 002 —
+        //            DownloadFileVersionAsUserAsync, behind the SpeFileStore facade; ADR-007). A save
+        //            after a page refresh (client bytes gone) still lands the delta on the correct version.
+        //      A create-on-save (no DocumentSpeId) always supplies Content as the document bytes.
+        //
+        //   2. Synthesize the USER's paragraph text-edits (request.EditedParagraphs, paraId-keyed) as a
+        //      word-level w:ins/w:del delta ONTO the baseline via ComposeParagraphRedlineSynthesizer —
+        //      rewriting ONLY the edited paragraphs, preserving every untouched paragraph + all structure
+        //      by construction (Option C; replaces the retired R2 whole-document reconstruction). An empty
+        //      edit list is a structural round-trip (no revisions) → a clean Save stays byte-identical.
+        //
+        //   3. Apply AI redlines/comments (request.Annotations) as NATIVE OOXML (w:ins/w:del/w:comment)
+        //      via the SAME DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — UNCHANGED
+        //      (UAT-R7 #2/#3/#4; task 023 verifies the AI-redline-onto-Option-C-baseline composition).
+        //
+        // All three transforms are pure/in-memory BEFORE any SPE write, so a bad edit (unmatched paraId →
+        // ComposeRedlineException) or bad annotation batch (DocxAnnotationException) throws before the
+        // write — no partial SPE version can land. A no-edit, no-annotation Save persists the baseline
+        // byte-identical (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
-        byte[] contentToPersist = request.Content.ToArray();
+        byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (request.EditedParagraphs is { Count: > 0 })
+        {
+            _logger.LogInformation(
+                "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
+                request.EditedParagraphs.Count, request.SessionId);
+            contentToPersist = _redlineSynthesizer.SynthesizeRedline(
+                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt);
+        }
+
         if (request.Annotations is { Count: > 0 })
         {
             _logger.LogInformation(
@@ -567,6 +715,106 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
         };
+    }
+
+    /// <summary>
+    /// E1 baseline resolution (FR-06, task 022, Option C — design §4.3): returns the retained LOAD-TIME
+    /// ORIGINAL bytes the save delta applies onto. Resolution order:
+    /// <list type="number">
+    /// <item><b>Same-session fast-path</b> — <see cref="SaveComposeDocumentRequest.Content"/> when present:
+    /// the client still holds the pristine mount payload (<c>state.docxBytes</c>, the ORIGINAL — never a
+    /// reconstruction). Also the create-on-save document bytes.</item>
+    /// <item><b>FR-06 primary</b> — re-fetch the load-time SPE version by
+    /// <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> via
+    /// <c>ISpeFileOperations.DownloadFileVersionAsUserAsync</c> (task 002; behind the <c>SpeFileStore</c>
+    /// facade — ADR-007). Covers a save after the client lost its in-memory bytes (page refresh); the
+    /// load-time version stays addressable even after later dirty saves advance the CURRENT version.</item>
+    /// </list>
+    /// A dirty save NEVER falls back to a client reconstruction (FR-01) — an unresolvable baseline is a
+    /// clear error, not a lossy rebuild.
+    /// <para>
+    /// <b>Tier-3 Redis fallback (design §4.3, deferred — §6.5 Path-A scoping)</b>: the size-capped Redis
+    /// cache of the load-time original is an OPTIMIZATION to avoid the SPE re-fetch, not a correctness
+    /// requirement — the <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> fetch already
+    /// discharges FR-06 baseline retrieval. Populating it requires a Load-path write (out of task-022's
+    /// file scope; Load is task 010/024). Deferred to keep this cutover to the SaveAsync inversion; the
+    /// fast-path + versionId cover every real save case.
+    /// </para>
+    /// </summary>
+    private async Task<byte[]> ResolveSaveBaselineAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // (a0) BORN-IN-EDITOR (FR-01a, task 026): a document authored IN the editor (AI-drafted / blank /
+        //      browse-local) has NO retained original — its client CONTENT MODEL is the authoring source.
+        //      Render the high-fidelity .docx server-side (real styles + style-linked multi-level numbering +
+        //      native tables + minted w14:paraId) — the deterministic replacement for the removed client
+        //      docx.js exporter (task 027). This is NOT an AI dispatch (ADR-039 complied — design §11). No
+        //      EditedParagraphs/Annotations layer onto it (the whole document is authored here); the rendered
+        //      bytes ARE contentToPersist. Checked FIRST: ContentModel is mutually exclusive with Content /
+        //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
+        if (request.ContentModel is not null)
+        {
+            return _documentRenderer.SynthesizeDocument(request.ContentModel, ResolveRevisionAuthor(httpContext));
+        }
+
+        // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
+        if (!request.Content.IsEmpty)
+        {
+            return request.Content.ToArray();
+        }
+
+        // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
+        //     SpeFileStore facade (ADR-007 — no Microsoft.Graph type crosses into Services/Compose).
+        if (!string.IsNullOrWhiteSpace(request.BaselineVersionId)
+            && !string.IsNullOrWhiteSpace(request.DriveId)
+            && !string.IsNullOrWhiteSpace(request.DocumentSpeId))
+        {
+            var stream = await _spe.DownloadFileVersionAsUserAsync(
+                    httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (stream is not null)
+            {
+                await using (stream.ConfigureAwait(false))
+                {
+                    using var buffer = new MemoryStream();
+                    await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    return buffer.ToArray();
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
+                $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
+                "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
+        }
+
+        // No baseline resolvable. A dirty save NEVER falls back to a client reconstruction (FR-01).
+        throw new ArgumentException(
+            "Compose save: no baseline could be resolved — supply the retained original bytes (Content) for " +
+            "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
+            "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
+            nameof(request));
+    }
+
+    /// <summary>
+    /// Resolves the tracked-change revision AUTHOR for a synthesized redline (task 022) from the caller's
+    /// OBO identity — the acting user's display name (<c>name</c> / <see cref="ClaimTypes.Name"/> /
+    /// <c>preferred_username</c>), so Word attributes the user's own direct-typing edits to the user.
+    /// Falls back to a stable product label when no name claim is present (never empty — the synthesizer
+    /// requires a non-whitespace author).
+    /// </summary>
+    private static string ResolveRevisionAuthor(HttpContext httpContext)
+    {
+        var user = httpContext.User;
+        var name = user?.FindFirst("name")?.Value
+            ?? user?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? user?.FindFirst("preferred_username")?.Value
+            ?? user?.Identity?.Name;
+
+        return string.IsNullOrWhiteSpace(name) ? "Spaarke Compose" : name!.Trim();
     }
 
     /// <summary>

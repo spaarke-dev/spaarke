@@ -2,7 +2,7 @@
   <metadata>
     <title>Vertical-slice seam tests: `by-regarding` + filtered `query` + `participant=` facet + auto-threading 3 tiers; 11-entity pass; access-parity negatives; preserve email/messaging characterization</title>
     <phase>W8 — Tests + Docs + Wrap</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>10</estimated-hours>
     <deps>010, 011, 022, 050, 051, 070</deps>
     <blocks></blocks>
@@ -145,6 +145,12 @@
     TEST-MODIFYING rigor (root §8 override row) — Step 9.5 code-review + adr-check are UNCONDITIONAL. Depends on the shipped R2 spine (010/011/022/050/051/070) so the seams are real. The access-parity negatives + no-membership-union regression guard are the NFR-03 load-bearing obligation — they are security-sensitive and mandatory.
 
     Feed task 090's `/test-diet`: as you add tests, note which are MAINTAIN-class (seam + characterization + access-parity → KEEP) vs any scaffolding, so project-close reconciliation is straightforward.
+
+    **COMPLETED 2026-07-19.** New `tests/integration/seam/Communication/CommunicationWorkspaceReadSeamTests.cs` (17 tests) EXTENDS the R1 seam harness (§11 — no parallel harness). Reuse-first: closed 5 composition gaps the existing unit + seam suites did NOT cover (full 11-entity by-regarding matrix; all-5-facets-composed filtered query; filtered-query generic private-thread-hidden; auto-threading 3-tier ladder composed with the REAL `MessagingThreadKeyStrategy` — not the stub `ThreadResolverTests` uses; a structural no-membership-union regression guard). Full detail + reuse-vs-new table: `notes/080-seam-coverage-map.md`.
+
+    Step 9.5 `code-review` caught a real defect in the first draft: the 11-entity theory derived BOTH input and expected value from `RegardingFieldMap.All` at test time, making it a tautology (ADR-038 §7 B6 mirror-test risk) for the 7 families beyond the 4 the unit suite already hand-codes. Fixed by hard-coding the literal 11-family table (mirroring the existing unit test's precedent) + adding a companion sync-check fact against `RegardingFieldMap.All` for two-way protection.
+
+    Gates: `dotnet test --filter ~Communication` → 584 pass/8 skip/0 fail (592 total, incl. the 17 new). Full-solution `dotnet test` → 8654 pass/101 skip/0 fail (8755 total) — zero regressions. Banned-pattern grep clean. code-review + adr-check: 0 Critical/Violation on ADR-038/ADR-028/ADR-034-path-C. Publish-size/CVE N/A (test-only, no `src/` touch). Live Dataverse verification DEFERRED (MCP unavailable this session, consistent with every prior R2 task) — owner live-verifies once tasks 002/003 schema deltas are applied.
   </notes>
 
   <execution>

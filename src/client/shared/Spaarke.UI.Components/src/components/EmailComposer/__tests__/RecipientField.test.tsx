@@ -167,4 +167,43 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     await new Promise(r => setTimeout(r, 350));
     expect(onSearch).not.toHaveBeenCalled();
   });
+
+  it('surfaces the resolved entityType onto IRecipient (task 060, FR-10)', async () => {
+    const onSearch = jest
+      .fn()
+      .mockResolvedValue([{ id: 'contact-1', name: 'Erin Example (erin@example.com)', entityType: 'contact' }]);
+    const onChangeSpy = jest.fn();
+    renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'erin' } });
+    const option = await screen.findByRole('option', { name: /Erin Example/ }, { timeout: 2000 });
+    fireEvent.click(option);
+
+    await waitFor(() =>
+      expect(onChangeSpy).toHaveBeenCalledWith([
+        expect.objectContaining({
+          email: 'erin@example.com',
+          resolved: true,
+          sourceId: 'contact-1',
+          entityType: 'contact',
+        }),
+      ])
+    );
+  });
+
+  it('leaves entityType undefined when the search result does not carry one (backward compatibility)', async () => {
+    const onSearch = jest.fn().mockResolvedValue([{ id: 'user-1', name: 'Erin Example (erin@example.com)' }]);
+    const onChangeSpy = jest.fn();
+    renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'erin' } });
+    const option = await screen.findByRole('option', { name: /Erin Example/ }, { timeout: 2000 });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(onChangeSpy).toHaveBeenCalled());
+    const [[recipients]] = onChangeSpy.mock.calls;
+    expect(recipients[0].entityType).toBeUndefined();
+  });
 });

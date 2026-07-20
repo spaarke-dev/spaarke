@@ -80,21 +80,28 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, mergeClasses, tokens, Spinner, Text, Button } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip, Badge } from '@fluentui/react-components';
 import {
   ArrowDown20Regular,
   Checkmark16Regular,
+  CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
+  TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
+import { ComposeFindReplace } from './ComposeFindReplace';
+import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
+import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
-import { usePendingRedline, type MaterializeStatus } from './hooks/usePendingRedline';
+import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
+import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
+import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -104,14 +111,21 @@ import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widget
 
 import {
   docxToTipTapHtml,
-  tipTapToDocxBytes,
-  tipTapJsonToDocxBytes,
-  buildRejectBaselineJson,
   stampParaIds,
-  type TipTapNode,
+  captureParaIdSnapshot,
+  collectEditedParagraphs,
+  buildContentModel,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
-import type { ParaIdMapEntry } from '../types/compose-contracts';
+import { applyImportedRevisions } from './importedRevisions';
+import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
+import type {
+  ParaIdMapEntry,
+  ComposeEditedParagraph,
+  ComposeContentModel,
+  ImportedRevision,
+  ImportedComment,
+} from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
 
@@ -218,6 +232,20 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
  * structurally different kind of extension (plugin-only, no schema mark).
  */
 const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
+
+/**
+ * FR-17 in-editor find/replace (task 040) — another single ProseMirror VIEW-DECORATION plugin (NOT
+ * a Mark, same rationale as {@link COMPOSE_R2_QA_HIGHLIGHT}: find highlighting never appears in
+ * `editor.getHTML()`/`getJSON()` and never serializes to DOCX). Kept as its own additive array for
+ * the same structural reason — a plugin-only extension, no schema mark.
+ */
+const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
+
+// R3 FR-22 styles pane (task 043) — the `pStyle` hidden node attribute extension
+// (`COMPOSE_R3_STYLES`, imported above from `./hooks/useComposeDocumentStyles`) is factored into the
+// hook file alongside the hook that reads/applies it (same file-organization precedent as
+// `COMPOSE_R3_FIND_REPLACE` above: schema + hook co-located). Registered additively below, same as
+// every other array here — never mutates the LOCKED Spike #1 list.
 
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
@@ -346,8 +374,8 @@ export interface ComposeEditorProps {
    * body already IS the editor content (no docx round-trip). Rendered once on mount as a
    * TRANSIENT working draft (reported dirty so create-on-save first Save is reachable), then the
    * editor owns subsequent edits. Mutually exclusive with `docxBytes` (a draft seed sets
-   * `docxBytes` null). Save serializes the editor content via `tipTapToDocxBytes` exactly as for a
-   * docx mount.
+   * `docxBytes` null). R3 task 027: Save sends the paraId-keyed `ComposeContentModel`
+   * (`buildContentModel`) and the SERVER renders the `.docx` — the client authors no bytes.
    */
   initialHtml?: string | null;
 
@@ -362,6 +390,32 @@ export interface ComposeEditorProps {
    * only (Tier 1 safe).
    */
   paraIdMap?: readonly ParaIdMapEntry[];
+
+  /**
+   * FR-24 (spaarkeai-compose-r3 task 050, import round-trip) — the existing Word revisions
+   * (`w:ins`/`w:del`, any authorship) recovered server-side on Load and projected onto the Load
+   * response (`ImportedRevision[]`), in document order. On a `docxBytes` mount these are rendered as
+   * first-class, author/date-attributed, accept/reject-able insertion/deletion marks anchored by
+   * `paraId` (see {@link applyImportedRevisions}) — instead of the mammoth-flattened prose the editor
+   * would otherwise show. Absent/empty for an AI-drafted seed (`initialHtml`) or a document with no
+   * existing revisions. Set atomically with `docxBytes` + `paraIdMap` by the host (same mount contract).
+   * Privacy: `text`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  importedRevisions?: readonly ImportedRevision[];
+
+  /**
+   * FR-25 (spaarkeai-compose-r3 task 051, import round-trip) — the existing Word comments
+   * (`w:comment`, any authorship) recovered server-side on Load and projected onto the Load response
+   * (`ImportedComment[]`), in document order. Grouped by shared `anchorText` into FR-23 comment
+   * threads (first comment on a span = thread root, the rest = flat replies — see
+   * {@link groupImportedComments}) and rendered via the `ComposeCommentThread` panel (task 044),
+   * anchored by `paraId` (see {@link applyImportedCommentAnchors}) — instead of the comments the
+   * mammoth convert would otherwise silently drop. Absent/empty for an AI-drafted seed (`initialHtml`)
+   * or a document with no existing comments. Set atomically with `docxBytes` + `paraIdMap` by the host
+   * (same mount contract as `importedRevisions`).
+   * Privacy: `commentText`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  importedComments?: readonly ImportedComment[];
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -437,6 +491,13 @@ export interface ComposeEditorProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+
+  /**
+   * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
+   * via the comment-thread panel. Resolved by the host (no network call happens here — ADR-028);
+   * defaults to `'You'` when omitted (standalone/library mounts).
+   */
+  commentAuthor?: string;
 }
 
 /**
@@ -444,28 +505,28 @@ export interface ComposeEditorProps {
  */
 export interface ComposeEditorHandle {
   /**
-   * Serialize current editor state to DOCX bytes (for SPE upload).
-   *
-   * Lazy-loads `docx` on first call. Round-trip fidelity per Spike #1 §3
-   * inventory ("Preserved" rows survive; "Degraded" rows survive with
-   * documented loss).
-   *
-   * @returns ArrayBuffer of DOCX bytes ready for upload.
-   * @throws  Error if no editor is mounted or if docx packing fails.
+   * R3 FR-01 (task 027): the paragraphs the user CHANGED since load, each keyed by its `w14:paraId`
+   * with its new REJECT-STATE settled text (pending AI redlines excluded — those ride
+   * {@link getRedlineAnnotations}). The host sends these on a dirty save of a LOADED doc; the server
+   * synthesizes the tracked-change delta onto the retained original. Resets the dirty flag. The client
+   * NEVER authors `.docx` bytes — this replaced the removed `serialize()`.
    */
-  serialize(): Promise<ArrayBuffer>;
+  collectEditedParagraphs(): ComposeEditedParagraph[];
 
   /**
-   * Redline → Word save fidelity (UAT-R7 #2/#3/#4). Serialize a clean BASELINE `.docx` (the
-   * document as if every PENDING redline were REJECTED — proposed insertions dropped, struck
-   * originals kept as normal text — with ACCEPTED edits already committed) AND the
-   * redline→annotation bridge ({@link DocxAnnotationInput}[]) mapping the current pending
-   * insertion/deletion marks. The host sends both to the BFF Save endpoint, which re-applies the
-   * annotations as NATIVE `w:ins`/`w:del` via `DocxAnnotationWriter`. This replaces the mark-blind
-   * `serialize()` for a redlined Save (which flattened both original + AI text to plain body text).
-   * Resets the dirty flag on success like {@link serialize}.
+   * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
+   * (AI-drafted / blank / browse-local). The host sends it to create-on-save; the server RENDERS the
+   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
    */
-  serializeForSave(): Promise<{ baselineBytes: ArrayBuffer; redlineAnnotations: DocxAnnotationInput[] }>;
+  buildContentModel(): ComposeContentModel;
+
+  /**
+   * R3 FR-04 (task 027): the current PENDING AI redlines mapped to {@link DocxAnnotationInput}[] (native
+   * `w:ins`/`w:del`). The host appends these to the save `annotations` list; the server composes them
+   * onto the authored baseline via `DocxAnnotationWriter` (task 023). Does NOT reset the dirty flag
+   * (redlines are separate from settled-text edits). Empty when there are no pending redlines.
+   */
+  getRedlineAnnotations(): DocxAnnotationInput[];
 
   /** True when the editor currently holds one or more PENDING redlines (drives the Save path). */
   hasPendingRedlines(): boolean;
@@ -656,6 +717,22 @@ const useStyles = makeStyles({
       borderRadius: tokens.borderRadiusSmall,
       transition: 'background-color 0.2s ease-out',
     },
+    // FR-17 find/replace (task 040) — a ProseMirror view decoration (see
+    // ComposeFindReplaceExtension in useComposeFindReplace.ts), NOT a doc Mark: highlighting never
+    // serializes to DOCX. Two tiers: every match gets a subtle highlight; the current
+    // (prev/next-navigated) match gets a stronger brand-colored one so it's visually distinct.
+    // Semantic tokens only (ADR-021 dark-mode-correct).
+    '& .compose-find-match': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      borderRadius: tokens.borderRadiusSmall,
+    },
+    '& .compose-find-match-current': {
+      backgroundColor: tokens.colorBrandBackground2,
+      borderRadius: tokens.borderRadiusSmall,
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+    },
   },
   loadingState: {
     display: 'flex',
@@ -740,16 +817,62 @@ const useStyles = makeStyles({
     zIndex: 2,
     boxShadow: tokens.shadow16,
   },
-  // DEF-12 — label inside the per-change on-click accept/reject popover (task 033/FR-16 rationale
-  // shown truncated, Tier-3-safe). Semantic tokens only (ADR-021 dark-mode-correct). The former
-  // fixed `redlineControls`/`redlineItem` bar styles were removed with the bar itself.
-  redlineLabel: {
-    flex: 1,
-    minWidth: 0,
+  // FR-23 (task 044) — floating "Comments" panel toggle, pinned top-right of the editor scroll
+  // region (the top-center/bottom-center positions are taken by the format toolbar / scroll FAB).
+  // Semantic tokens only (ADR-021 dark-mode-correct); mirrors `scrollDownFab`'s elevated-FAB treatment.
+  commentsToggleFab: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    right: tokens.spacingHorizontalM,
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
+  },
+  // FR-22 (task 043) — floating "Styles" pane toggle, pinned top-LEFT of the editor scroll region
+  // (the top-right corner is taken by `commentsToggleFab`). Semantic tokens only (ADR-021
+  // dark-mode-correct); mirrors `commentsToggleFab`'s elevated-FAB treatment.
+  stylesToggleFab: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    left: tokens.spacingHorizontalM,
+    zIndex: 2,
+    boxShadow: tokens.shadow16,
+  },
+  // FR-14 (task 031) — rationale-first popover restructure: the rationale is the visual HEADLINE
+  // (bold, full foreground weight), the confidence band a SECONDARY row underneath (design §6.2 —
+  // never a numeric score; coarse band only). Semantic tokens only (ADR-021 dark-mode-correct).
+  redlineHeadline: {
+    display: 'block',
+    width: '100%',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-    color: tokens.colorNeutralForeground2,
+    color: tokens.colorNeutralForeground1,
+  },
+  redlineSecondaryRow: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+  },
+  // The explicit-review affordance a low-band redline carries (design §6.2 anti-rubber-stamp —
+  // never pre-selected/auto-accepted; each low-band edit surfaces this cue).
+  redlineNeedsReview: {
+    color: tokens.colorStatusWarningForeground1,
+  },
+  // FR-14 (task 031) — the pending-redlines summary bar: count + "Accept all" (excludes low-band by
+  // construction) + the SEPARATE, always-explicit "include low-confidence" action (design §6.2 —
+  // accept-all MUST NOT silently include low-band edits; including them is a deliberate second click).
+  redlineSummaryBar: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    padding: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground1,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  redlineSummaryText: {
+    flex: 1,
+    minWidth: 0,
   },
   redlineError: {
     display: 'flex',
@@ -782,6 +905,36 @@ function redlineLabelText(rationale: string | undefined, ledgerRef: string): str
   const base = rationale && rationale.trim().length > 0 ? rationale.trim() : 'Suggested edit';
   const label = base.length > 80 ? `${base.slice(0, 80)}…` : base;
   return `${label} (${ledgerRef})`;
+}
+
+/**
+ * FR-14 (task 031) — coarse, qualitative confidence label for the SECONDARY band badge (design §6.2
+ * anti-false-precision: NEVER a numeric/percentage score). Mirrors {@link deriveConfidenceBand}'s
+ * three-value output verbatim.
+ */
+function confidenceBandLabel(band: ConfidenceBand): string {
+  switch (band) {
+    case 'high':
+      return 'High confidence';
+    case 'medium':
+      return 'Medium confidence';
+    case 'low':
+    default:
+      return 'Low confidence';
+  }
+}
+
+/** Fluent v9 semantic `Badge` color per band (design tokens under the hood — no hard-coded hex, ADR-021). */
+function confidenceBandColor(band: ConfidenceBand): 'success' | 'informative' | 'warning' {
+  switch (band) {
+    case 'high':
+      return 'success';
+    case 'medium':
+      return 'informative';
+    case 'low':
+    default:
+      return 'warning';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -924,6 +1077,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       docxBytes,
       initialHtml,
       paraIdMap,
+      importedRevisions,
+      importedComments,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -939,6 +1094,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      commentAuthor = 'You',
     } = props;
 
     const styles = useStyles();
@@ -946,6 +1102,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+    // R3 FR-01 (task 027): the LOAD-TIME `{ paraId → reject-state text }` snapshot, captured right after
+    // stampParaIds (and after a born-in-editor seed). `collectEditedParagraphs()` diffs the live doc
+    // against it to find the dirty paragraphs the server deltas onto the retained original.
+    const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
@@ -967,6 +1127,36 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // is NO selection (a caret / point-insertion), per task 111 requirement 2.
     const [contextMenuAnchor, setContextMenuAnchor] = React.useState<{ x: number; y: number } | null>(null);
     const contextMenuRef = React.useRef<HTMLDivElement | null>(null);
+
+    // ----- Task 040 — FR-17 in-editor find/replace panel toggle ------------
+    // Ctrl/Cmd+F (intercepted below via editorProps.handleKeyDown, overriding the browser's native
+    // find) opens the panel; the panel's own Escape handling (ComposeFindReplace.tsx) closes it and
+    // clears the search state/highlight. Mounted between the format toolbar and the AI BubbleMenu —
+    // see the render section below.
+    const [findReplaceOpen, setFindReplaceOpen] = React.useState<boolean>(false);
+
+    // ----- Task 044 — FR-23 comment-thread panel toggle + "create on selection" capture -----------
+    // The panel toggle button lives in this file (see the render section below) rather than the
+    // format toolbar (out of this task's file scope — additive-only). Opening the panel captures the
+    // CURRENT selection range + preview text BEFORE focus moves into the panel's composer textbox
+    // (mirrors the redline/context-menu popups' click-time capture above); a collapsed selection
+    // yields `null` and the panel shows a "select text" hint instead of guessing an anchor.
+    const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
+    const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
+
+    // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
+    // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
+    // `initialThreads` prop at ITS OWN first render — before the docx-mount effect below (which applies
+    // the visual anchor mark) has had a chance to run. See importedComments.ts file header for the
+    // two-concerns split. Recomputed only when the host supplies a new `importedComments` reference
+    // (set atomically with `docxBytes` on a fresh mount, per the prop's own contract).
+    const initialCommentThreads = React.useMemo(() => groupImportedComments(importedComments), [importedComments]);
+
+    // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
+    // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
+    // state; the two panels are never coupled). Its FAB is pinned to the OPPOSITE (top-left) corner of
+    // the editor scroll region — see `stylesToggleFab` — so it never collides with `commentsToggleFab`.
+    const [stylesOpen, setStylesOpen] = React.useState<boolean>(false);
 
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
@@ -1048,7 +1238,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) + the R3 paraId identity
       // extension (task 011) — the locked list itself is unchanged (spread, not mutated), honoring
       // the "do not touch the locked list" constraint.
-      extensions: [...LOCKED_EXTENSIONS, ...COMPOSE_R2_MARKS, ...COMPOSE_R2_QA_HIGHLIGHT, ...COMPOSE_R3_PARAID],
+      extensions: [
+        ...LOCKED_EXTENSIONS,
+        ...COMPOSE_R2_MARKS,
+        ...COMPOSE_R2_QA_HIGHLIGHT,
+        ...COMPOSE_R3_PARAID,
+        ...COMPOSE_R3_FIND_REPLACE,
+        ...COMPOSE_R3_STYLES,
+      ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
       // styling on `.ProseMirror` lives in useStyles above.
@@ -1100,6 +1297,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             return false;
           },
         },
+        // Task 040 (FR-17) — Ctrl/Cmd+F opens the find/replace panel INSTEAD of the browser's native
+        // page-find (which would search the whole page's rendered text, not just this document, and
+        // cannot see ProseMirror decorations). Escape while the panel is open closes it; the panel
+        // itself also handles Escape when focus is inside one of its fields (ComposeFindReplace.tsx) —
+        // this top-level handler is the fallback for when focus is still in the editor body.
+        handleKeyDown: (_view, event) => {
+          const isFindShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f';
+          if (isFindShortcut) {
+            event.preventDefault();
+            setFindReplaceOpen(true);
+            return true;
+          }
+          if (event.key === 'Escape' && findReplaceOpen) {
+            setFindReplaceOpen(false);
+            return true;
+          }
+          return false;
+        },
       },
       onUpdate: () => {
         if (!dirtyRef.current) {
@@ -1122,12 +1337,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // Saves the pristine draft). Mirrors the transient-mount dirty semantics below.
         if (initialHtml && initialHtml.length > 0) {
           editor.commands.setContent(initialHtml);
+          // Born-in-editor seed: capture a snapshot so an edit-then-save can still diff (though a born-in-
+          // editor save normally sends the full content model, not edited-paragraph deltas).
+          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
           dirtyRef.current = false;
           onDirtyChange?.(true);
           return;
         }
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
+        paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
         dirtyRef.current = false;
         onDirtyChange?.(false);
         return;
@@ -1167,6 +1386,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // server-owned (the paraId extension's own minting only fills ids the server did
           // not supply + re-mints on split). No-op when the map is absent (empty stamp).
           stampParaIds(editor, paraIdMap);
+          // FR-24 (task 050, import round-trip): render the EXISTING Word revisions (recovered server-side
+          // by DocxAnnotationReader, projected onto the Load response) as first-class insertion/deletion
+          // marks — instead of the mammoth-flattened prose. Applied AFTER stampParaIds so paraId anchoring
+          // is exact, and BEFORE captureParaIdSnapshot so an imported revision's marks are folded into the
+          // load-time reject-state baseline (an untouched imported revision then reads as NOT edited on the
+          // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
+          // and the dirty flag is reset just below, so this render is not a user edit.
+          applyImportedRevisions(editor, importedRevisions);
+          // FR-25 (task 051, import round-trip): anchor each imported comment thread's root span with the
+          // visible commentAnchor mark (the SAME mark a user's own "create thread" gesture applies), keyed
+          // by the same thread id `initialCommentThreads` (above) used to seed the FR-23 panel. Applied
+          // AFTER stampParaIds (exact paraId anchoring) and BEFORE captureParaIdSnapshot, mirroring
+          // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
+          // reject-state baseline, not read as a user edit on the next save.
+          applyImportedCommentAnchors(editor, importedComments);
+          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
+          // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
+          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
           dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
           onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
@@ -1205,6 +1442,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // `paraIdMap` is likewise read-but-not-a-dep for the same reason: the host sets it
       // atomically with `docxBytes` per mount, so the captured value is the map for THESE
       // bytes; adding it as a dep would risk a re-import (edit clobber) on an identity change.
+      // `importedRevisions` (FR-24, task 050) follows the identical mount contract — set atomically
+      // with `docxBytes` + `paraIdMap`, read here but intentionally not a dep for the same reason.
+      // `importedComments` (FR-25, task 051) follows the identical mount contract for the SAME reason —
+      // only the mark-application side is read here; `initialCommentThreads` (the panel-seeding half) is
+      // a separate useMemo above, correctly reactive to `importedComments` on its own.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 
@@ -1215,8 +1457,47 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
     const redline = usePendingRedline(editor);
 
+    // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
+    // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
+    // §6.2). Splitting the pending set here — rather than inside usePendingRedline's accept/reject
+    // (the mark/range apply layer, left untouched) — keeps the gating a UI/selection-layer concern:
+    // `acceptAllEligible` is what the primary "Accept all" button commits; `lowBandPending` is NEVER
+    // touched by it and only moves on the SEPARATE, always-visible "include low-confidence" action.
+    const acceptAllEligible = React.useMemo(
+      () => redline.pending.filter(p => p.confidenceBand !== 'low'),
+      [redline.pending]
+    );
+    const lowBandPending = React.useMemo(
+      () => redline.pending.filter(p => p.confidenceBand === 'low'),
+      [redline.pending]
+    );
+    const handleAcceptAllExcludingLowBand = React.useCallback(() => {
+      for (const p of acceptAllEligible) redline.accept(p.ledgerRef);
+    }, [acceptAllEligible, redline]);
+    const handleIncludeLowBandInAcceptAll = React.useCallback(() => {
+      // The deliberate SECOND action (design §6.2) — never bundled into handleAcceptAllExcludingLowBand.
+      for (const p of lowBandPending) redline.accept(p.ledgerRef);
+    }, [lowBandPending, redline]);
+
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
+
+    // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
+    // Toggling OPEN captures the editor's live selection at click time (see the state declaration
+    // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
+    // stays mounted, its `open` prop only gates its own render, mirroring ComposeFindReplace).
+    const handleToggleComments = React.useCallback((): void => {
+      setCommentsOpen(prevOpen => {
+        const next = !prevOpen;
+        if (next && editor) {
+          const { from, to } = editor.state.selection;
+          setPendingCommentRange(
+            from === to ? null : { from, to, preview: editor.state.doc.textBetween(from, to, ' ') }
+          );
+        }
+        return next;
+      });
+    }, [editor]);
 
     // ----- FIX #9 — track whether the editor surface has more content below ---
     // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
@@ -1249,31 +1530,32 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useImperativeHandle(
       ref,
       (): ComposeEditorHandle => ({
-        serialize: async () => {
+        // R3 FR-01 (task 027): the paraId-keyed dirty-paragraph deltas (reject-state text) for a loaded
+        // doc. The server synthesizes the tracked change onto the retained original — the client authors
+        // no bytes. Resets the dirty flag (host collects then saves; the doc is clean after).
+        collectEditedParagraphs: () => {
           if (!editor) {
-            throw new Error('ComposeEditor: cannot serialize — editor not mounted');
+            throw new Error('ComposeEditor: cannot collect edited paragraphs — editor not mounted');
           }
-          const bytes = await tipTapToDocxBytes(editor);
-          // Successful serialize resets the dirty flag (host typically calls
-          // serialize() then uploads; after upload completes, the doc is clean).
+          const edited = collectEditedParagraphs(editor, paraIdSnapshotRef.current);
           dirtyRef.current = false;
           onDirtyChange?.(false);
-          return bytes;
+          return edited;
         },
-        // UAT-R7 #2/#3/#4 — baseline (reject-state) bytes + the redline→annotation bridge. The BFF
-        // re-applies the annotations as native w:ins/w:del so pending redlines save as real Word
-        // tracked-changes instead of the mark-blind flatten `serialize()` produced.
-        serializeForSave: async () => {
+        // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
+        buildContentModel: () => {
           if (!editor) {
-            throw new Error('ComposeEditor: cannot serialize for save — editor not mounted');
+            throw new Error('ComposeEditor: cannot build content model — editor not mounted');
           }
-          const json = editor.getJSON();
-          const redlineAnnotations = redlineMarksToDocxAnnotations(json, 'Spaarke Assistant', new Date().toISOString());
-          const baselineBytes = await tipTapJsonToDocxBytes(buildRejectBaselineJson(json as TipTapNode));
+          const model = buildContentModel(editor);
           dirtyRef.current = false;
           onDirtyChange?.(false);
-          return { baselineBytes, redlineAnnotations };
+          return model;
         },
+        // R3 FR-04 (task 027): pending AI redlines → native-markup annotations the server composes onto
+        // the authored baseline (task 023). Does NOT reset dirty (separate from settled-text edits).
+        getRedlineAnnotations: () =>
+          editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
@@ -1370,32 +1652,53 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           canSave={canSave}
           isSaving={isSaving}
         />
-        {editor ? (
-          <BubbleMenu
-            editor={editor}
-            tippyOptions={{ duration: 100, placement: 'top' }}
-            className={styles.aiBubbleWrap}
-          >
-            {/* ===================================================================
-                AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
-                (UAT-R2 layout fix): the sibling formatting Toolbar that used to
-                render here was REMOVED (task 111) — ComposeAiToolbar is now the
-                popup's ONLY content, owning its own single Toolbar (no orphaned
-                divider, no double-Toolbar padding). Task 031 (custom marks)
-                edits AFTER this block — keep this region self-contained so that
-                follow-on edits stay a clean insertion.
-                =================================================================== */}
-            <ComposeAiToolbar
-              editor={editor}
-              documentRef={documentRef}
-              sessionId={sessionId}
-              bffBaseUrl={bffBaseUrl}
-              dispatch={dispatch}
-              enqueueComposeAction={enqueueComposeAction}
-            />
-            {/* =================== END AI TOOLBAR MOUNT (task 030) =================== */}
-          </BubbleMenu>
-        ) : null}
+        {/* ===================================================================
+            FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
+            inside the editor (see editorProps.handleKeyDown above) and dismissed
+            by Escape or its own close button; closing clears the search state +
+            highlight decoration (never leaves a stale highlight behind).
+            =================================================================== */}
+        <ComposeFindReplace editor={editor} open={findReplaceOpen} onClose={() => setFindReplaceOpen(false)} />
+        {/* ===================================================================
+            FR-23 comment-thread panel — task 044. Toggled by the floating
+            "Comments" button pinned to the editor scroll region (see below);
+            dismissed by its own close button. `pendingCommentRange` is captured
+            at toggle-open time (see handleToggleComments above) so the "new
+            comment" composer anchors to the selection the user had BEFORE
+            focus moved into this panel, not whatever the live selection is by
+            the time they finish typing.
+            =================================================================== */}
+        <ComposeCommentThread
+          editor={editor}
+          open={commentsOpen}
+          onClose={() => setCommentsOpen(false)}
+          author={commentAuthor}
+          pendingRange={pendingCommentRange}
+          onThreadCreated={() => setPendingCommentRange(null)}
+          initialThreads={initialCommentThreads}
+        />
+        {/* ===================================================================
+            FR-22 styles pane — task 043. Lists the loaded document's EXISTING paragraph styles and
+            applies a chosen one to the current selection. Toggled by the floating "Styles" button
+            pinned top-left of the editor scroll region (see below); dismissed by its own close
+            button. SCOPE GUARD: apply-existing-only — no create/rename/delete/manage affordance
+            anywhere in the pane (see ComposeStylesPane.tsx file-level JSDoc).
+            =================================================================== */}
+        <ComposeStylesPane editor={editor} open={stylesOpen} onClose={() => setStylesOpen(false)} />
+        {/* NOTE (UAT 2026-07-19 P1 fix): the AI-actions <BubbleMenu> was RELOCATED to be
+            the LAST child of this container (see just before the container's closing tag
+            below). Rationale: TipTap's BubbleMenu plugin calls `this.element.remove()` on
+            mount, detaching its wrapper <div> from the DOM while React's fiber still records
+            it as a live child. When ANY earlier conditional sibling (the Comments/Styles
+            panes, the redline banners, the context-menu popup, the importing spinner)
+            toggled null→<div>, React's getHostSibling resolved its insert-anchor to that
+            detached node and called `container.insertBefore(newNode, detachedBubbleDiv)` —
+            which throws "Failed to execute 'insertBefore' … not a child of this node" and
+            trips the WidgetErrorBoundary ("Compose failed to load"). Making the BubbleMenu
+            the LAST child means every conditional sibling anchors on `editorScrollWrap`
+            (always mounted, never detached) instead. tippy positions the popup via popper
+            relative to the selection, so its position in the React child order is purely
+            structural and has no visual effect. */}
 
         {/* ===================================================================
             TASK 111 requirement 2 — right-click (context-menu) AI-toolbar
@@ -1458,6 +1761,42 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           </div>
         ) : null}
         {/* ===================================================================
+            FR-14 (task 031) — pending-redlines summary bar: count + "Accept
+            all" (built ONLY from acceptAllEligible — low-band items are never
+            in that set, so this button structurally cannot include them) + the
+            SEPARATE, always-explicit "include low-confidence" action (design
+            §6.2 anti-rubber-stamp — a deliberate second click, never a silent
+            inclusion). Semantic tokens only (ADR-021 dark-mode-correct).
+            =================================================================== */}
+        {redline.pending.length > 0 ? (
+          <div className={styles.redlineSummaryBar} role="status" data-testid="compose-redline-summary">
+            <Text size={200} className={styles.redlineSummaryText}>
+              {redline.pending.length} suggested edit{redline.pending.length === 1 ? '' : 's'} pending
+              {lowBandPending.length > 0 ? ` — ${lowBandPending.length} low-confidence, needs review` : ''}
+            </Text>
+            {acceptAllEligible.length > 0 ? (
+              <Button
+                size="small"
+                appearance="primary"
+                onClick={handleAcceptAllExcludingLowBand}
+                data-testid="compose-redline-accept-all"
+              >
+                Accept all ({acceptAllEligible.length})
+              </Button>
+            ) : null}
+            {lowBandPending.length > 0 ? (
+              <Button
+                size="small"
+                appearance="subtle"
+                onClick={handleIncludeLowBandInAcceptAll}
+                data-testid="compose-redline-accept-all-include-low"
+              >
+                Also accept {lowBandPending.length} low-confidence edit{lowBandPending.length === 1 ? '' : 's'}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {/* ===================================================================
             DEF-12 — per-change on-click accept/reject POPOVER. Replaces the
             removed fixed `compose-redline-controls` bar (the primary control is
             now the Assistant confirmation message). Opens at the click point on
@@ -1465,10 +1804,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             usePendingRedline.accept/reject handlers, scoped to the clicked
             change's ledgerRef. Reuses `styles.bubbleMenu`'s dark-mode-correct
             treatment (semantic tokens; ADR-021).
+            FR-14 (task 031) — RESTRUCTURED so the cited rationale is the
+            visual HEADLINE (primary trust cue, design §6.2) and the derived
+            `confidenceBand` renders as a SECONDARY coarse badge underneath —
+            never a numeric/percentage score. A low-band redline additionally
+            carries an explicit "Needs review" cue and its Accept button is
+            demoted from `primary` to `secondary` appearance (never visually
+            pushed as the default fast action) — the per-edit explicit-review
+            affordance design §6.2 requires; it does NOT block the click, an
+            explicit single-item accept is still the user's call.
             =================================================================== */}
         {redlineClickAnchor
           ? (() => {
               const clicked = redline.pending.find(p => p.ledgerRef === redlineClickAnchor.ledgerRef);
+              const isLowBand = clicked?.confidenceBand === 'low';
               return (
                 <div
                   ref={redlinePopoverRef}
@@ -1479,14 +1828,36 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                   data-testid="compose-redline-onclick"
                   data-ledger-ref={redlineClickAnchor.ledgerRef}
                 >
-                  {clicked?.rationale ? (
-                    <Text size={200} className={styles.redlineLabel} title={clicked.rationale}>
-                      {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
-                    </Text>
+                  {clicked ? (
+                    <>
+                      <Text
+                        size={300}
+                        weight="semibold"
+                        className={styles.redlineHeadline}
+                        title={clicked.rationale}
+                        data-testid="compose-redline-rationale"
+                      >
+                        {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
+                      </Text>
+                      <div className={styles.redlineSecondaryRow} data-testid="compose-redline-confidence-band">
+                        <Badge size="small" appearance="tint" color={confidenceBandColor(clicked.confidenceBand)}>
+                          {confidenceBandLabel(clicked.confidenceBand)}
+                        </Badge>
+                        {isLowBand ? (
+                          <Text
+                            size={100}
+                            className={styles.redlineNeedsReview}
+                            data-testid="compose-redline-needs-review"
+                          >
+                            Needs review before accepting
+                          </Text>
+                        ) : null}
+                      </div>
+                    </>
                   ) : null}
                   <Button
                     size="small"
-                    appearance="primary"
+                    appearance={isLowBand ? 'secondary' : 'primary'}
                     icon={<Checkmark16Regular />}
                     onClick={() => {
                       redline.accept(redlineClickAnchor.ledgerRef);
@@ -1527,6 +1898,34 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
             <EditorContent editor={editor} />
           </div>
+          {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
+          <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
+            <Button
+              appearance={commentsOpen ? 'primary' : 'secondary'}
+              shape="circular"
+              size="large"
+              className={styles.commentsToggleFab}
+              icon={<CommentMultiple20Regular />}
+              aria-label="Toggle comments panel"
+              aria-pressed={commentsOpen}
+              onClick={handleToggleComments}
+              data-testid="compose-comments-toggle"
+            />
+          </Tooltip>
+          {/* FR-22 (task 043) — "Styles" pane toggle, pinned top-left (see `stylesToggleFab`). */}
+          <Tooltip content={stylesOpen ? 'Hide styles' : 'Show styles'} relationship="description" withArrow>
+            <Button
+              appearance={stylesOpen ? 'primary' : 'secondary'}
+              shape="circular"
+              size="large"
+              className={styles.stylesToggleFab}
+              icon={<TextEditStyle20Regular />}
+              aria-label="Toggle styles pane"
+              aria-pressed={stylesOpen}
+              onClick={() => setStylesOpen(prev => !prev)}
+              data-testid="compose-styles-toggle"
+            />
+          </Tooltip>
           {showScrollDown ? (
             <Button
               appearance="primary"
@@ -1540,6 +1939,35 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             />
           ) : null}
         </div>
+
+        {/* ===================================================================
+            AI-actions <BubbleMenu> — RELOCATED here (UAT 2026-07-19 P1 fix) to be
+            the LAST child of the container. See the NOTE where ComposeStylesPane is
+            rendered above for the full insertBefore-crash rationale. tippy detaches
+            this wrapper on mount and positions it relative to the selection, so its
+            place in the child order is structural only (no visual effect).
+
+            AI TOOLBAR MOUNT — task 030 (FR-14), AI-actions-ONLY per task 111
+            (UAT-R2 layout fix): the sibling formatting Toolbar that used to render
+            here was REMOVED (task 111) — ComposeAiToolbar is now the popup's ONLY
+            content, owning its own single Toolbar.
+            =================================================================== */}
+        {editor ? (
+          <BubbleMenu
+            editor={editor}
+            tippyOptions={{ duration: 100, placement: 'top' }}
+            className={styles.aiBubbleWrap}
+          >
+            <ComposeAiToolbar
+              editor={editor}
+              documentRef={documentRef}
+              sessionId={sessionId}
+              bffBaseUrl={bffBaseUrl}
+              dispatch={dispatch}
+              enqueueComposeAction={enqueueComposeAction}
+            />
+          </BubbleMenu>
+        ) : null}
       </div>
     );
   }

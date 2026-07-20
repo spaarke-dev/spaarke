@@ -43,6 +43,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly NotificationService _notificationService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationOptions _options;
     private readonly ITextExtractor _textExtractor;
     private readonly AttachmentMatchOptions _attachmentMatchOptions;
@@ -76,7 +77,8 @@ public sealed class IncomingCommunicationProcessor
         IOptions<AttachmentMatchOptions> attachmentMatchOptions,
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger,
-        IThreadResolver? threadResolver = null)
+        IThreadResolver? threadResolver = null,
+        CommunicationParticipantIndexer? participantIndexer = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -92,6 +94,7 @@ public sealed class IncomingCommunicationProcessor
         _notificationService = notificationService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
+        _participantIndexer = participantIndexer;
         _options = options.Value;
         _textExtractor = textExtractor;
         _attachmentMatchOptions = attachmentMatchOptions.Value;
@@ -315,6 +318,25 @@ public sealed class IncomingCommunicationProcessor
                     "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
                     communicationId, graphMessageId);
             }
+        }
+
+        // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
+        // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
+        // participant= facet (task 051) surfaces this message's parties (resolved persons + unresolved external
+        // addresses, Q-D). Reuses the SAME normalized envelope built at the boundary above and the SAME
+        // email→contact resolver ParticipantCorrelationRung uses (no second resolver). The indexer never throws —
+        // a junction-write failure MUST NOT drop the already-captured message (the record already exists).
+        if (_participantIndexer is not null)
+        {
+            await _participantIndexer.WriteParticipantsAsync(
+                communicationId,
+                new CommunicationParticipantSet
+                {
+                    FromAddress = envelope.From,
+                    To = envelope.To,
+                    Cc = envelope.Cc,
+                },
+                ct);
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────

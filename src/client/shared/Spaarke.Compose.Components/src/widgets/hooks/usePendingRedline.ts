@@ -30,6 +30,13 @@
  * pending redline in document state; the true ledger-supersession WRITE for undo/replace is FR-17
  * / task 034, which builds on this hook.
  *
+ * FR-15 formatted AI insertions (task 032, client-only per §6.5 Path B amendment): `buildInsertionHtml`
+ * parses a lightweight, SANITIZED inline-markup subset (bold/italic/underline) out of `new_text` so an
+ * AI-*inserted* suggestion that should be formatted actually renders formatted, instead of flattening
+ * to plain text. See {@link sanitizeInlineMarkup} for the allow-list + security rationale. This is a
+ * CLIENT-render-only enrichment — no server `ComposeDraftPayload` change (the compose ledger payload
+ * ships opaque end-to-end per `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`).
+ *
  * @see ./ ../marks/InsertionMark.ts · ../marks/DeletionMark.ts (task 031 rendering primitives)
  * @see ../ComposeEditor.tsx (imperative handle: materializePendingRedline)
  * @see projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md §1
@@ -41,6 +48,35 @@ import type { ComposeDraftPayload, ComposeDraftProvenance } from '../ComposeEdit
 
 /** How the client resolves `target_text` in the document (adeu `match_mode`, Spike 2). */
 export type RedlineMatchMode = 'strict' | 'first' | 'all';
+
+/**
+ * FR-13 (spaarkeai-compose-r3 task 031, amendment 2026-07-18 §6.5 Path B) — coarse, qualitative
+ * confidence cue for a pending redline. NEVER a numeric/percentage score (design §6.2 anti-false-
+ * precision; ADR-039). Rendered as a SECONDARY badge behind the rationale (the primary trust cue).
+ */
+export type ConfidenceBand = 'high' | 'medium' | 'low';
+
+/**
+ * FR-13 (client-derived) — deterministic confidence-band derivation, ported from the retired server
+ * `ComposeDraftDisposition.DeriveConfidenceBand` (task 030, removed per §6.5 Path B / commit
+ * `675d2d161`). Same both/one/neither truth table as the server version, over two grounding signals:
+ *
+ *  - `hasSources` — the payload cited grounding sources (`sources` non-empty).
+ *  - `targetResolves` — the redline's target anchor actually resolves against the LIVE editor
+ *    document RIGHT NOW (stronger than the retired server check, which could only see a match_mode
+ *    "claim" — the server never had the live document; the client does, so it verifies for real).
+ *
+ * `high` when BOTH signals hold, `medium` when exactly one holds, `low` when neither holds. A pure
+ * function over these two booleans — NOT a model self-report, and structurally incapable of reading
+ * any `confidence_band` value a hostile/buggy model payload might smuggle in (this function never
+ * sees the raw payload, only the two derived signals `usePendingRedline` computes from real grounding
+ * evidence + a real live-document resolution check).
+ */
+export function deriveConfidenceBand(hasSources: boolean, targetResolves: boolean): ConfidenceBand {
+  if (hasSources && targetResolves) return 'high';
+  if (hasSources || targetResolves) return 'medium';
+  return 'low';
+}
 
 /** A resolved document range in ProseMirror positions. */
 export interface RedlineSpan {
@@ -75,6 +111,18 @@ export interface PendingRedline {
   rationale?: string;
   /** True when the suggestion replaced existing text (has a deletion half); false for a pure insertion. */
   hasDeletion: boolean;
+  /**
+   * FR-13 (client-derived, §6.5 Path B) — coarse confidence cue, secondary to the rationale.
+   * See {@link deriveConfidenceBand}. Recomputed REACTIVELY as the document changes (a target the
+   * user deletes outside accept/reject drops this redline out of the live-resolves signal).
+   */
+  confidenceBand: ConfidenceBand;
+  /**
+   * Whether the source payload cited grounding sources at materialize time (retained, alongside the
+   * live doc, to support the reactive {@link confidenceBand} recompute — `sources` is a durable payload
+   * field, so this half of the signal never changes after materialize; only `targetResolves` does).
+   */
+  hasSources: boolean;
 }
 
 /** Surfaced when a `target_text` cannot be resolved to a unique span — FR-19 "do not guess" rule. */
@@ -309,9 +357,98 @@ function collectMatchingRanges(
   return ranges;
 }
 
-/** An insertion `<span>` that parses back to InsertionMark with provenance (task 031 parseHTML). */
-function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: string): string {
-  const body = escapeHtml(newText).replace(/\r?\n/g, '<br>');
+/**
+ * FR-15 (task 032, client-only per §6.5 Path B amendment — see
+ * `docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md`) — the whitelist of inline formatting tags an
+ * AI-authored `new_text` may carry inline. Keys are the bare tag NAMES this sanitizer recognizes as
+ * open/close tags (case-insensitive, NO attributes); values are the canonical tag emitted (`b`→`strong`,
+ * `i`→`em` — StarterKit's Bold/Italic marks accept either spelling on parse, so canonicalizing keeps
+ * the emitted fragment deterministic). `u` rides through as-is (the editor's `Underline` extension,
+ * `@tiptap/extension-underline`, MIT — already LOCKED_EXTENSIONS in `ComposeEditor.tsx`).
+ */
+const ALLOWED_INLINE_TAGS: Readonly<Record<string, string>> = {
+  strong: 'strong',
+  b: 'strong',
+  em: 'em',
+  i: 'em',
+  u: 'u',
+};
+
+/**
+ * FR-15 sanitizing inline-markup parser (task 032). An AI-authored `new_text` may carry a lightweight
+ * inline-markup subset — bare `<strong>`/`<b>`, `<em>`/`<i>`, `<u>` open/close tags, NO attributes — so
+ * a suggestion that should render bold/italic/underline actually does once inserted, instead of being
+ * flattened to plain text (the FR-15 gap this task closes).
+ *
+ * SECURITY: this is an ALLOW-list, not a deny-list. Every `<...>` sequence that is not an EXACT,
+ * attribute-free match against {@link ALLOWED_INLINE_TAGS} — an unknown tag, `<script>`, `<a href="…">`
+ * (the editor's `Link` extension IS loaded in `ComposeEditor.tsx`, so an unsanitized anchor would parse
+ * into a REAL link mark with an attacker-controlled `href`), an allowed tag name carrying an attribute
+ * (e.g. `<strong onclick="…">`), or a stray/mismatched closing tag — is treated as inert literal text
+ * and HTML-escaped via {@link escapeHtml}. It can therefore NEVER reach the editor's HTML parser as
+ * markup, regardless of how the surrounding characters are crafted (no tag-splitting / nesting trick
+ * can smuggle a non-whitelisted element through, because only an exact whitelisted match is ever
+ * emitted as a real tag). A plain string with no recognized tags round-trips byte-for-byte through
+ * {@link escapeHtml} — identical output to the pre-032 behavior (backward compatible). Unclosed
+ * allowed tags at the end of the string are auto-closed (reverse nesting order) so the emitted
+ * fragment is always well-formed HTML.
+ *
+ * Deliberately a tiny hand-rolled whitelist, not a general HTML sanitizer/parser dependency — NFR-03
+ * (MIT TipTap base only) disfavors a new dependency for a 5-tag allow-list this narrow.
+ *
+ * Exported for direct unit testing.
+ */
+export function sanitizeInlineMarkup(text: string): string {
+  const TAG_RE = /<(\/?)([a-zA-Z][a-zA-Z0-9]*)\s*\/?>/g;
+  let out = '';
+  let lastIndex = 0;
+  const openStack: string[] = [];
+  let match: RegExpExecArray | null;
+
+  while ((match = TAG_RE.exec(text)) !== null) {
+    const [full, closing, rawName] = match;
+    const canonical = ALLOWED_INLINE_TAGS[rawName.toLowerCase()];
+
+    // Emit the text run before this tag, escaped.
+    out += escapeHtml(text.slice(lastIndex, match.index));
+    lastIndex = match.index + full.length;
+
+    if (!canonical) {
+      // Unknown tag, or a disallowed tag (script/a/img/on*-bearing/…) — inert literal text, never markup.
+      out += escapeHtml(full);
+      continue;
+    }
+
+    if (closing) {
+      const stackIdx = openStack.lastIndexOf(canonical);
+      if (stackIdx === -1) {
+        // Stray closing tag with no matching open — literal text; never desyncs well-formedness.
+        out += escapeHtml(full);
+        continue;
+      }
+      // Close every tag opened after the matched one too, keeping the emitted fragment well-nested.
+      while (openStack.length > stackIdx) out += `</${openStack.pop()}>`;
+    } else {
+      openStack.push(canonical);
+      out += `<${canonical}>`;
+    }
+  }
+
+  out += escapeHtml(text.slice(lastIndex));
+  // Auto-close any tags left open at the end of the string.
+  while (openStack.length > 0) out += `</${openStack.pop()}>`;
+  return out;
+}
+
+/**
+ * An insertion `<span>` that parses back to InsertionMark with provenance (task 031 parseHTML).
+ * FR-15 (task 032): `newText` may carry the {@link sanitizeInlineMarkup} inline-formatting subset
+ * (bold/italic/underline) so an AI-inserted redline renders formatted instead of flattened to plain
+ * text — sanitized so no disallowed markup (script, anchors, event handlers, unknown tags) ever
+ * reaches the editor. Exported for direct unit testing.
+ */
+export function buildInsertionHtml(newText: string, bindingId: string, ledgerRef: string): string {
+  const body = sanitizeInlineMarkup(newText).replace(/\r?\n/g, '<br>');
   return (
     `<span data-compose-mark="${INSERTION}" ` +
     `data-binding="${escapeAttr(bindingId)}" ` +
@@ -377,6 +514,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       if (!editor) return 'noop';
       const { ledgerRef, bindingId, turn } = provenance;
       const newText = payload?.new_text ?? '';
+      // FR-13 (client-derived, §6.5 Path B) — grounding signal 1: the payload cites sources. Durable
+      // payload field; does not change after materialize (only the live-doc resolve signal does).
+      const hasSources = Array.isArray(payload?.sources) && payload.sources.length > 0;
 
       // Idempotent: a re-signal for content already rendered (e.g. a duplicate Flow-5 event) is a no-op.
       if (isPresent(editor, ledgerRef)) {
@@ -385,12 +525,21 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         // the doc still holds a deletion mark for this ledgerRef. Hardcoding false mislabeled every
         // strike+replace redline as insertion-only.
         const reconstructedHasDeletion = collectMarkedRanges(editor, DELETION, ledgerRef).length > 0;
+        const reconstructedHasSources = hasSources;
         setPending(prev =>
           prev.some(p => p.ledgerRef === ledgerRef)
             ? prev
             : [
                 ...prev,
-                { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: reconstructedHasDeletion },
+                {
+                  ledgerRef,
+                  bindingId,
+                  turn,
+                  rationale: payload?.rationale,
+                  hasDeletion: reconstructedHasDeletion,
+                  hasSources: reconstructedHasSources,
+                  confidenceBand: deriveConfidenceBand(reconstructedHasSources, reconstructedHasDeletion),
+                },
               ]
         );
         return 'already_present';
@@ -496,7 +645,18 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
       setError(null);
       setPending(prev => {
         const kept = prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef));
-        return [...kept, { ledgerRef, bindingId, turn, rationale: payload?.rationale, hasDeletion }];
+        return [
+          ...kept,
+          {
+            ledgerRef,
+            bindingId,
+            turn,
+            rationale: payload?.rationale,
+            hasDeletion,
+            hasSources,
+            confidenceBand: deriveConfidenceBand(hasSources, hasDeletion),
+          },
+        ];
       });
       return 'applied';
     },
@@ -528,6 +688,9 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         const subRef = `${baseRef}#${i}`;
         const newText = payload?.new_text ?? '';
         const targetText = payload?.target_text ?? '';
+        // FR-13 (client-derived, §6.5 Path B) — per-edit grounding signal 1 (each change-list entry
+        // is its own PendingRedline with its own confidence band).
+        const editHasSources = Array.isArray(payload?.sources) && payload.sources.length > 0;
 
         if (targetText.length === 0) {
           // Insertion-style edit (no target) — insert at the current caret as a pending insertion.
@@ -537,7 +700,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
           }
           const insertionHtml = buildInsertionHtml(newText, bindingId, subRef);
           editor.chain().insertContentAt(editor.state.selection.to, insertionHtml).run();
-          newPending.push({ ledgerRef: subRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: false });
+          newPending.push({
+            ledgerRef: subRef,
+            bindingId,
+            turn,
+            rationale: payload?.rationale,
+            hasDeletion: false,
+            hasSources: editHasSources,
+            confidenceBand: deriveConfidenceBand(editHasSources, false),
+          });
           statuses.push('applied');
           return;
         }
@@ -565,7 +736,15 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         const insertPoints = resolved.spans.map(s => s.to).sort((a, b) => b - a);
         for (const at of insertPoints) chain = chain.insertContentAt(at, insertionHtml);
         chain.run();
-        newPending.push({ ledgerRef: subRef, bindingId, turn, rationale: payload?.rationale, hasDeletion: true });
+        newPending.push({
+          ledgerRef: subRef,
+          bindingId,
+          turn,
+          rationale: payload?.rationale,
+          hasDeletion: true,
+          hasSources: editHasSources,
+          confidenceBand: deriveConfidenceBand(editHasSources, true),
+        });
         statuses.push('applied');
       });
 
@@ -610,6 +789,37 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
     },
     [editor]
   );
+
+  // FR-13 (client-derived confidence band, §6.5 Path B) — REACTIVE recompute. `deriveConfidenceBand`'s
+  // second signal (does the target still resolve?) is a live-document fact, so it can go stale the
+  // instant the user edits the doc OUTSIDE accept/reject (e.g. manually deleting a redline's struck
+  // original). Re-derive every pending item's band on every editor transaction against the CURRENT
+  // doc state; `pendingRef` lets the listener stay registered once per editor instance instead of
+  // re-subscribing on every `pending` change (mirrors the FIX #9 scroll-measure effect's `editor.on`
+  // pattern above). A no-op update (no band actually changed) skips the `setPending` call.
+  const pendingRef = React.useRef(pending);
+  pendingRef.current = pending;
+
+  React.useEffect(() => {
+    if (!editor) return undefined;
+    const recomputeConfidenceBands = (): void => {
+      const current = pendingRef.current;
+      if (current.length === 0) return;
+      let changed = false;
+      const next = current.map(p => {
+        const targetResolves = collectMarkedRanges(editor, DELETION, p.ledgerRef).length > 0;
+        const band = deriveConfidenceBand(p.hasSources, targetResolves);
+        if (band === p.confidenceBand) return p;
+        changed = true;
+        return { ...p, confidenceBand: band };
+      });
+      if (changed) setPending(next);
+    };
+    editor.on('update', recomputeConfidenceBands);
+    return () => {
+      editor.off('update', recomputeConfidenceBands);
+    };
+  }, [editor]);
 
   // Memoize the result object so consumers (ComposeEditor's useImperativeHandle keys on `redline`)
   // get a STABLE reference across renders that don't change the underlying values — without this the

@@ -38,14 +38,10 @@ jest.mock('@spaarke/auth', () => ({
 }));
 
 // ── PaneEventBus — inert (this test drives bridge handlers directly) ─────────
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 // ── Bridge — capture the Save / Accept / Insert handlers ComposeWorkspace registers ──────────
 const registerActiveDocumentSpy = jest.fn();

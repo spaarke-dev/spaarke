@@ -40,7 +40,17 @@
  */
 
 import type { Editor } from '@tiptap/core';
-import type { ParaIdMapEntry } from '../types/compose-contracts';
+import type {
+  ParaIdMapEntry,
+  ComposeEditedParagraph,
+  ComposeContentModel,
+  ComposeContentBlock,
+  ComposeInlineRun,
+  ComposeTable,
+  ComposeTableRow,
+  ComposeTableCell,
+  ComposeAlignment,
+} from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -187,38 +197,16 @@ export function stampParaIds(editor: Editor, map: readonly ParaIdMapEntry[] | un
 }
 
 // ---------------------------------------------------------------------------
-// Export path: TipTap state → DOCX bytes (via docx)
+// Export path (R3 FR-01/FR-01a, task 027): the client sends a STRUCTURED,
+// paraId-keyed content model — it never authors `.docx` bytes. `docx.js` is
+// removed; the SERVER owns all authoring (delta-onto-original via the
+// synthesizer for loaded docs, full render via ComposeDocumentRenderer for
+// born-in-editor docs).
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a TipTap editor's current state to DOCX bytes.
- *
- * Lazy-loads `docx` on first call. Round-trip fidelity is governed by the
- * Spike #1 OOB subset — anything in the OOB inventory's "Preserved" rows
- * survives; "Degraded" rows survive with documented loss.
- *
- * Implementation: pulls the TipTap JSON document via `editor.getJSON()` and
- * walks the node tree, mapping each ProseMirror node to its docx equivalent
- * (Paragraph, Heading, Table, TextRun with marks). This is intentionally
- * a focused converter for the OOB subset — NOT a general ProseMirror-to-docx
- * library.
- *
- * The conversion strategy mirrors the locked Spike #1 reference at
- * `notes/spikes/spike-1-prototype/src/exportDocx.ts` but is re-authored here
- * for production conventions (typed nodes, error handling, ArrayBuffer
- * return type, dynamic-import-friendly destructuring).
- *
- * @param editor  Live TipTap Editor instance (from `useEditor`)
- * @returns       DOCX bytes ready for upload to SPE / BFF save endpoint
- * @throws        Error if the editor JSON is malformed or docx Packer fails
- */
-export async function tipTapToDocxBytes(editor: Editor): Promise<ArrayBuffer> {
-  return tipTapJsonToDocxBytes(editor.getJSON() as TipTapNode);
-}
-
-/**
- * TipTap JSON node shape (subset — covers OOB extensions in scope). Exported so the redline→Word
- * save-fidelity path (UAT-R7 #2/#3/#4) can build a BASELINE document tree without a live editor.
+ * TipTap JSON node shape (subset — covers the OOB extensions in scope). Retained for the paraId
+ * snapshot / edited-paragraph / content-model helpers below (all operate on `editor.getJSON()`).
  */
 export type TipTapNode = {
   type?: string;
@@ -228,189 +216,196 @@ export type TipTapNode = {
   marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
 };
 
+/** The paraId-bearing block node types (mirror `PARAID_NODE_TYPES` / the server's `<w:p>` count). */
+const BLOCK_NODE_TYPES = new Set(['paragraph', 'heading']);
+
 /**
- * Build the REJECT-STATE BASELINE of a TipTap doc for redline→Word save fidelity (UAT-R7 #2/#3/#4).
- *
- * The Compose editor renders pending AI redlines as {@link ../widgets/marks/InsertionMark insertion}
- * / {@link ../widgets/marks/DeletionMark deletion} marks. A plain `tipTapToDocxBytes` flattens BOTH
- * halves to plain body text (it has no track-change branch), so the saved `.docx` ends up carrying
- * the original AND the AI text as ordinary text. Instead, Save sends a clean baseline (this) + a
- * structured annotation list, and the BFF re-applies the redlines as NATIVE `w:ins`/`w:del`/
- * `w:comment` via `DocxAnnotationWriter`.
- *
- * The baseline is the document as if every PENDING redline were REJECTED:
- *  - text carrying the `insertion` mark (the proposed new text) is DROPPED;
- *  - text carrying the `deletion` mark (the original) is KEPT, with the redline/comment marks
- *    stripped so it serializes as ordinary text;
- *  - ACCEPTED edits are already committed in the doc (accept unsets the marks → normal text), so
- *    they flow through untouched.
- *
- * Returns a new tree (the input is not mutated).
+ * The REJECT-STATE settled text of a block node's inline content — the text as if every PENDING AI
+ * redline were REJECTED: text carrying an `insertion` mark (a proposed insert) is DROPPED; all other
+ * text (original, accepted edits — accept unsets the marks → normal text — and deletion-marked
+ * originals) is KEPT. This is the same reduction the retired `buildRejectBaselineJson` did, applied
+ * per-paragraph: it is what a dirty-save delta must diff against so a pending redline is NOT baked
+ * into the synthesizer delta (it rides the `annotations` list instead — the server composes it, task 023).
  */
-export function buildRejectBaselineJson(node: TipTapNode): TipTapNode {
-  const REDLINE_MARKS = new Set(['insertion', 'deletion', 'commentAnchor']);
-
-  const transform = (n: TipTapNode): TipTapNode | null => {
-    // Drop proposed-insertion text entirely (reject = it was never there).
-    if (n.type === 'text' && (n.marks?.some(m => m.type === 'insertion') ?? false)) {
-      return null;
+function rejectStateText(block: TipTapNode): string {
+  let out = '';
+  const walk = (n: TipTapNode): void => {
+    if (n.type === 'text') {
+      const isPendingInsert = n.marks?.some(m => m.type === 'insertion') ?? false;
+      if (!isPendingInsert && n.text) out += n.text;
+      return;
     }
-    const next: TipTapNode = { ...n };
-    if (n.marks) {
-      const kept = n.marks.filter(m => !REDLINE_MARKS.has(m.type));
-      if (kept.length > 0) next.marks = kept;
-      else delete next.marks;
+    if (n.type === 'hardBreak') {
+      out += '\n';
+      return;
     }
-    if (n.content) {
-      next.content = n.content.map(transform).filter((c): c is TipTapNode => c !== null);
-    }
-    return next;
+    (n.content ?? []).forEach(walk);
   };
+  (block.content ?? []).forEach(walk);
+  return out;
+}
 
-  return transform(node) ?? { type: 'doc', content: [] };
+/** Visit every paraId-bearing block (paragraph/heading), descending into lists + table cells (server parity). */
+function forEachBlock(node: TipTapNode, fn: (block: TipTapNode) => void): void {
+  if (node.type && BLOCK_NODE_TYPES.has(node.type)) {
+    fn(node);
+    return; // don't descend into a block's own inline content
+  }
+  (node.content ?? []).forEach(child => forEachBlock(child, fn));
 }
 
 /**
- * Serialize a TipTap JSON document tree (not a live editor) to DOCX bytes. This is the JSON-in core
- * of {@link tipTapToDocxBytes}; the redline save path calls it with a {@link buildRejectBaselineJson}
- * baseline. Fidelity is governed by the same Spike #1 OOB subset.
+ * Capture the LOAD-TIME `{ paraId → reject-state text }` snapshot for the editor, in document order.
+ * Call immediately after {@link stampParaIds} on a load (or after a born-in-editor seed's setContent):
+ * {@link collectEditedParagraphs} diffs the current doc against this to find the dirty paragraphs.
  */
-export async function tipTapJsonToDocxBytes(json: TipTapNode): Promise<ArrayBuffer> {
-  // Lazy-load docx (MIT). Pure-JS pack; ~90 KB minified-gzipped.
-  const docxModule = await import('docx');
-  const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    HeadingLevel,
-    Table: DocxTable,
-    TableRow: DocxRow,
-    TableCell: DocxCell,
-    AlignmentType,
-  } = docxModule;
+export function captureParaIdSnapshot(editor: Editor): Map<string, string> {
+  const snapshot = new Map<string, string>();
+  forEachBlock(editor.getJSON() as TipTapNode, block => {
+    const paraId = block.attrs?.paraId as string | undefined;
+    if (paraId) snapshot.set(paraId, rejectStateText(block));
+  });
+  return snapshot;
+}
 
-  const headingMap: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
-    1: HeadingLevel.HEADING_1,
-    2: HeadingLevel.HEADING_2,
-    3: HeadingLevel.HEADING_3,
-    4: HeadingLevel.HEADING_4,
-    5: HeadingLevel.HEADING_5,
-    6: HeadingLevel.HEADING_6,
-  };
+/**
+ * The paragraphs the user CHANGED since load (FR-01), each keyed by its `w14:paraId` with its new
+ * reject-state settled text. Diffs the current doc against the load-time {@link captureParaIdSnapshot}
+ * snapshot. Emits ONLY paragraphs that EXISTED at load (present in the snapshot) whose settled text
+ * changed — the server synthesizer edits matched paragraphs in place and fails fast on a paraId the
+ * retained original lacks, so a brand-new paraId (a split/insert) is intentionally NOT emitted here
+ * (structural insert/split/delete is out of the E1 delta scope — a future synthesizer extension).
+ * Unchanged paragraphs are omitted (sending them would needlessly rewrite their run structure).
+ */
+export function collectEditedParagraphs(
+  editor: Editor,
+  snapshot: ReadonlyMap<string, string>
+): ComposeEditedParagraph[] {
+  const edited: ComposeEditedParagraph[] = [];
+  forEachBlock(editor.getJSON() as TipTapNode, block => {
+    const paraId = block.attrs?.paraId as string | undefined;
+    if (!paraId) return;
+    const original = snapshot.get(paraId);
+    if (original === undefined) return; // new paraId (split/insert) — out of E1 delta scope
+    const current = rejectStateText(block);
+    if (current !== original) {
+      edited.push({ paraId, text: current });
+    }
+  });
+  return edited;
+}
 
-  function alignmentFor(attrs?: Record<string, unknown>) {
-    const a = attrs?.textAlign as string | undefined;
-    if (a === 'center') return AlignmentType.CENTER;
-    if (a === 'right') return AlignmentType.RIGHT;
-    if (a === 'justify') return AlignmentType.JUSTIFIED;
-    return AlignmentType.LEFT;
+/**
+ * Build the full paraId-keyed {@link ComposeContentModel} from the editor for a BORN-IN-EDITOR save
+ * (FR-01a) — the server renders it into a high-fidelity `.docx`. Mirrors the server model: paragraphs /
+ * headings (with level) / list items (flattened from bulletList/orderedList with nesting depth) /
+ * native tables, each block carrying its `paraId` + inline runs (bold/italic/underline). Pending-insert
+ * text is excluded (reject-state parity) — a born-in-editor draft normally has no redlines.
+ */
+export function buildContentModel(editor: Editor): ComposeContentModel {
+  const blocks: ComposeContentBlock[] = [];
+  for (const node of (editor.getJSON() as TipTapNode).content ?? []) {
+    appendContentBlocks(node, blocks, 0);
   }
+  return { blocks };
+}
 
-  function textRunsFromInline(nodes: TipTapNode[] | undefined): InstanceType<typeof TextRun>[] {
-    if (!nodes) return [];
-    const runs: InstanceType<typeof TextRun>[] = [];
-    for (const n of nodes) {
-      if (n.type === 'text' && n.text) {
-        const marks = new Set(n.marks?.map(m => m.type) ?? []);
-        runs.push(
-          new TextRun({
-            text: n.text,
-            bold: marks.has('bold'),
-            italics: marks.has('italic'),
-            strike: marks.has('strike'),
-            underline: marks.has('underline') ? {} : undefined,
-          })
-        );
-      } else if (n.type === 'hardBreak') {
-        runs.push(new TextRun({ text: '', break: 1 }));
-      }
-      // Link marks: `docx` exposes ExternalHyperlink; deliberately omitted for
-      // R1 scope to keep the converter focused — preserved as plain text per
-      // spike §3.2 row 14 "Preserved (basic)" carve-out.
-    }
-    return runs;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function paragraphsFromNode(node: TipTapNode): any[] {
-    if (node.type === 'paragraph') {
-      return [
-        new Paragraph({
-          alignment: alignmentFor(node.attrs),
-          children: textRunsFromInline(node.content),
-        }),
-      ];
-    }
-    if (node.type === 'heading') {
-      const lvl = (node.attrs?.level as number | undefined) ?? 1;
-      return [
-        new Paragraph({
-          heading: headingMap[lvl] ?? HeadingLevel.HEADING_1,
-          alignment: alignmentFor(node.attrs),
-          children: textRunsFromInline(node.content),
-        }),
-      ];
-    }
-    if (node.type === 'bulletList' || node.type === 'orderedList') {
-      // Visual nested-list preservation; semantic numbering refs lost
-      // (spike §3.2 row 8 "Degraded" — most consequential R1 limitation).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items: any[] = [];
+function appendContentBlocks(node: TipTapNode, out: ComposeContentBlock[], listDepth: number): void {
+  switch (node.type) {
+    case 'paragraph':
+      out.push({ kind: 'Paragraph', paraId: paraIdOf(node), runs: runsOf(node), alignment: alignmentOf(node) });
+      break;
+    case 'heading':
+      out.push({
+        kind: 'Heading',
+        level: (node.attrs?.level as number | undefined) ?? 1,
+        paraId: paraIdOf(node),
+        runs: runsOf(node),
+        alignment: alignmentOf(node),
+      });
+      break;
+    case 'bulletList':
+    case 'orderedList': {
+      const ordered = node.type === 'orderedList';
+      let firstItem = true;
       for (const item of node.content ?? []) {
-        if (item.type === 'listItem') {
-          for (const child of item.content ?? []) {
-            items.push(...paragraphsFromNode(child));
+        if (item.type !== 'listItem') continue;
+        for (const child of item.content ?? []) {
+          if (child.type === 'paragraph' || child.type === 'heading') {
+            out.push({
+              kind: 'ListItem',
+              level: listDepth,
+              ordered,
+              // A top-level ordered list restarts numbering at 1 on its first item.
+              startsNewList: ordered && firstItem && listDepth === 0,
+              paraId: paraIdOf(child),
+              runs: runsOf(child),
+            });
+            firstItem = false;
+          } else if (child.type === 'bulletList' || child.type === 'orderedList') {
+            appendContentBlocks(child, out, listDepth + 1);
           }
         }
       }
-      return items;
+      break;
     }
-    if (node.type === 'blockquote') {
-      return (node.content ?? []).flatMap(paragraphsFromNode);
-    }
-    if (node.type === 'horizontalRule') {
-      return [new Paragraph({ text: '—' })]; // em-dash visual approximation
-    }
-    if (node.type === 'taskList' || node.type === 'taskItem') {
-      // Task lists: docx has no native checkbox content control in this lib;
-      // convert items to paragraphs with a leading bullet character.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items: any[] = [];
-      for (const child of node.content ?? []) {
-        items.push(...paragraphsFromNode(child));
-      }
-      return items;
-    }
-    return [];
+    case 'table':
+      out.push({ kind: 'Table', table: tableOf(node) });
+      break;
+    default:
+      // blockquote / other containers → flatten their block children (best-effort).
+      for (const child of node.content ?? []) appendContentBlocks(child, out, listDepth);
   }
+}
 
-  function tableFromNode(node: TipTapNode) {
-    const rows: InstanceType<typeof DocxRow>[] = [];
-    for (const row of node.content ?? []) {
-      if (row.type === 'tableRow') {
-        const cells: InstanceType<typeof DocxCell>[] = [];
-        for (const cell of row.content ?? []) {
-          const ps = (cell.content ?? []).flatMap(paragraphsFromNode);
-          cells.push(new DocxCell({ children: ps.length ? ps : [new Paragraph('')] }));
-        }
-        rows.push(new DocxRow({ children: cells }));
-      }
-    }
-    return new DocxTable({ rows });
+function runsOf(block: TipTapNode): ComposeInlineRun[] {
+  const runs: ComposeInlineRun[] = [];
+  for (const n of block.content ?? []) {
+    if (n.type !== 'text' || !n.text) continue;
+    const marks = new Set((n.marks ?? []).map(m => m.type));
+    if (marks.has('insertion')) continue; // reject-state parity: pending insert excluded
+    runs.push({
+      text: n.text,
+      bold: marks.has('bold') || undefined,
+      italic: marks.has('italic') || undefined,
+      underline: marks.has('underline') || undefined,
+    });
   }
+  return runs;
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const children: any[] = [];
-  for (const node of json.content ?? []) {
-    if (node.type === 'table') {
-      children.push(tableFromNode(node));
-    } else {
-      children.push(...paragraphsFromNode(node));
+function tableOf(node: TipTapNode): ComposeTable {
+  const rows: ComposeTableRow[] = [];
+  for (const row of node.content ?? []) {
+    if (row.type !== 'tableRow') continue;
+    const cells: ComposeTableCell[] = [];
+    for (const cell of row.content ?? []) {
+      const isHeader = cell.type === 'tableHeader';
+      const cellBlocks: ComposeContentBlock[] = [];
+      for (const child of cell.content ?? []) appendContentBlocks(child, cellBlocks, 0);
+      cells.push({ blocks: cellBlocks, isHeader: isHeader || undefined });
     }
+    rows.push({ cells });
   }
+  return { rows };
+}
 
-  const doc = new Document({ sections: [{ children }] });
-  const blob = await Packer.toBlob(doc);
-  return blob.arrayBuffer();
+function paraIdOf(node: TipTapNode): string | undefined {
+  const paraId = node.attrs?.paraId;
+  return typeof paraId === 'string' && paraId.length > 0 ? paraId : undefined;
+}
+
+function alignmentOf(node: TipTapNode): ComposeAlignment | undefined {
+  switch (node.attrs?.textAlign as string | undefined) {
+    case 'left':
+      return 'Left';
+    case 'center':
+      return 'Center';
+    case 'right':
+      return 'Right';
+    case 'justify':
+      return 'Justify';
+    default:
+      return undefined; // inherit the style default (server maps undefined → Default)
+  }
 }

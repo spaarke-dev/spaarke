@@ -1,0 +1,4 @@
+{
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
+}

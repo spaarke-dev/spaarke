@@ -38,6 +38,7 @@
   },
   "dependencies": {
     "@spaarke/ai-outputs": "file:../Spaarke.AI.Outputs",
+    "@spaarke/communication-components": "file:../Spaarke.Communication.Components",
     "@spaarke/ui-components": "file:../Spaarke.UI.Components"
   },
   "devDependencies": {

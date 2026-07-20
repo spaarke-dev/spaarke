@@ -2,7 +2,7 @@
   <metadata>
     <title>Phase-0 audit (spike): live `sprk_communicationthread`/`sprk_communication` schema; confirm category/tags absent (Q2); verify email-r4 `Services/Communication` merged state; plan `sprk_role` choice-integers</title>
     <phase>W0 — Schema + Foundation + ADR</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <deps>none</deps>
     <blocks>002, 003</blocks>

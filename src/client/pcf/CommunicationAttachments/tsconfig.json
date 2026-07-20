@@ -1,0 +1,23 @@
+{
+  "extends": "./node_modules/pcf-scripts/tsconfig_base.json",
+  "compilerOptions": {
+    "outDir": "./out",
+    "typeRoots": ["node_modules/@types"],
+    "jsx": "react",
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
+    }
+  },
+  "exclude": [
+    "node_modules",
+    "out",
+    "__tests__",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
+}

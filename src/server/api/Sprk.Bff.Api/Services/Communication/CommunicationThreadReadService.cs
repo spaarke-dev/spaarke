@@ -6,6 +6,7 @@ using Microsoft.Xrm.Sdk;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Engine;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -34,6 +35,11 @@ public sealed class CommunicationThreadReadService
     // OData entity SET (collection) names — regular +s pluralization.
     private const string CommunicationSet = "sprk_communications";
     private const string CommunicationAttachmentSet = "sprk_communicationattachments";
+    private const string ThreadSet = "sprk_communicationthreads"; // by-regarding thread query (R2 task 010)
+
+    // sprk_communicationthread columns (R2 tasks 010/002).
+    private const string ThreadPkField = "sprk_communicationthreadid";
+    private const string ThreadNameField = "sprk_name";
 
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
@@ -58,6 +64,18 @@ public sealed class CommunicationThreadReadService
     private const int DefaultPageSize = 100;
     private const int MaxPageSize = 200;
     private const int MaxUnreadScan = 500; // bound the unread projection scan (NFR-07)
+    private const int MaxThreads = 200;         // bound the by-regarding thread fan (R2 task 010)
+    private const int MaxRegardingScan = 500;   // bound the by-regarding message scan across threads (R2 task 010)
+    private const int MaxQueryScan = 200;       // bound the filtered-query message scan (R2 task 011)
+
+    // sprk_communicationparticipant junction (R2 tasks 003/050/051) — the `participant=` facet join.
+    private const string ParticipantSet = "sprk_communicationparticipants";
+    private const string ParticipantCommunicationValue = "_sprk_communication_value";
+    private const string ParticipantSystemUserValue = "_sprk_systemuser_value";
+    private const string ParticipantContactValue = "_sprk_contact_value";
+    private const string ParticipantAddressTextField = "sprk_addresstext";
+    private const int MaxParticipantScan = 500;          // bound the junction candidate-id scan (R2 task 051)
+    private const int MaxParticipantAddressLength = 400; // matches sprk_addresstext Text(400) field max length
 
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICommunicationAccessFilter _accessFilter;
@@ -139,7 +157,7 @@ public sealed class CommunicationThreadReadService
             "[THREAD-READ] thread={ThreadId} caller={Caller} returned={Returned} (impersonated={Impersonated}, hidden-internal-only={Hidden})",
             threadId, callerSystemUserId, messages.Count, rows.Count, rows.Count - messages.Count);
 
-        return new ThreadReadResult(threadId, messages, messages.Count);
+        return new ThreadReadResult(ThreadId: threadId, Name: null, Messages: messages, Count: messages.Count);
     }
 
     /// <summary>
@@ -175,6 +193,315 @@ public sealed class CommunicationThreadReadService
 
         return new UnreadCountResult(threadId, since, unread);
     }
+
+    // ── by-regarding read (R2 task 010 / FR-01) ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns ALL of a regarding record's threads + their access-filtered messages, in the R1 per-thread DTO
+    /// shape (<see cref="RegardingReadResult"/> → <see cref="ThreadReadResult"/> → <see cref="ThreadMessageDto"/>).
+    /// Entity-set-agnostic across all 11 ADR-024 regarding families: <paramref name="entityType"/> selects the typed
+    /// thread-regarding lookup via <see cref="RegardingFieldMap"/> (the ONLY per-family difference); the message fetch
+    /// (<c>or</c>-filter on thread id) + the shared <see cref="ICommunicationAccessFilter"/> are identical for every
+    /// family. Both queries run IMPERSONATED (Dataverse row-level security is native) and the messages then pass
+    /// through the SAME internal-only/privilege filter the R1 thread-read composes — no second/divergent filter, no
+    /// membership-union (retired 2026-07-16). A private thread the caller has no grant for is absent from the
+    /// impersonated thread set; an internal-only message the caller may not see is dropped by the filter (NFR-03).
+    /// A bad <paramref name="entityType"/> is a 400 ProblemDetails (ADR-019); an empty regarding yields an empty result.
+    /// </summary>
+    public async Task<RegardingReadResult> ReadByRegardingAsync(
+        string entityType,
+        Guid recordId,
+        ClaimsPrincipal? caller,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entityType))
+            throw BadRequest("A regarding entity type is required.");
+
+        var regardingField = RegardingFieldMap.FieldFor(entityType);
+        if (regardingField is null)
+            throw BadRequest($"'{entityType}' is not a supported regarding entity type (ADR-024 family).");
+
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+
+        // 1) Impersonated thread query by the typed regarding lookup (entity-set-agnostic; task 002 lookups).
+        var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField });
+        var threadOData =
+            $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId}" +
+            $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
+        var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
+
+        var threads = threadRows
+            .Select(r => (Id: TryGuid(r, ThreadPkField) ?? Guid.Empty, Name: TryString(r, ThreadNameField)))
+            .Where(t => t.Id != Guid.Empty)
+            .ToList();
+
+        if (threads.Count == 0)
+        {
+            _logger.LogDebug(
+                "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads=0 (no visible threads)",
+                entityType, recordId, callerSystemUserId);
+            return new RegardingReadResult(entityType, recordId, Array.Empty<ThreadReadResult>(), 0, 0);
+        }
+
+        // 2) Impersonated message query across those threads (or-filter on thread id) + shared access filter.
+        var orClause = string.Join(" or ", threads.Select(t => $"{ThreadLookupValue} eq {t.Id}"));
+        var visible = await QueryVisibleMessagesAsync($"({orClause})", MaxRegardingScan, callerSystemUserId, ct);
+
+        // 3) Group the access-filtered messages by thread (query order = createdon asc is preserved).
+        var byThread = visible
+            .GroupBy(v => v.ThreadId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<ThreadMessageDto>)g.Select(v => v.Dto).ToList());
+
+        var threadResults = threads
+            .Select(t =>
+            {
+                var msgs = byThread.TryGetValue(t.Id, out var list) ? list : Array.Empty<ThreadMessageDto>();
+                return new ThreadReadResult(ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count);
+            })
+            .ToList();
+
+        var messageCount = threadResults.Sum(t => t.Count);
+        _logger.LogDebug(
+            "[BY-REGARDING] {EntityType}={RecordId} caller={Caller} threads={Threads} messages={Messages}",
+            entityType, recordId, callerSystemUserId, threadResults.Count, messageCount);
+
+        return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
+    }
+
+    // ── filtered query (R2 task 011 / FR-02) ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a flat, access-filtered communication list matching the thread/regarding/channel/date facets, in the
+    /// R1 <see cref="ThreadMessageDto"/> shape. Every facet composes onto the SAME impersonation read path +
+    /// <see cref="ICommunicationAccessFilter"/> as <see cref="ReadByRegardingAsync"/> — no second filter, no
+    /// membership-union (NFR-03). Facet → column: <c>thread</c> → <c>_sprk_communicationthread_value</c>;
+    /// <c>regarding</c> (<c>{entityType}:{guid}</c>) → the typed <see cref="RegardingFieldMap"/> lookup;
+    /// <c>channel</c> → <c>sprk_communicationtype</c>; <c>from</c>/<c>to</c> → <c>sprk_sentat</c> range.
+    /// <para><b><c>participant</c> (R2 task 051)</b> joins the <c>sprk_communicationparticipant</c> junction (003,
+    /// populated at message grain by 050) to find the messages where the given person/address participates in ANY
+    /// role (From/To/Cc/Bcc). A GUID value matches the junction's typed <c>sprk_systemuser</c>/<c>sprk_contact</c>
+    /// lookups — exact, FK-backed, role-precise (NOT a <c>sprk_from/to/cc</c> text-LIKE scan). A non-GUID value is
+    /// matched as an unresolved external address via an EXACT-equality clause on the junction's dedicated
+    /// <c>sprk_addresstext</c> column (still not a LIKE scan of the message text fields). The junction match only
+    /// yields CANDIDATE message ids — those ids are then run through the SAME impersonated
+    /// <c>sprk_communication</c> read + <see cref="ICommunicationAccessFilter"/> as every other facet
+    /// (<see cref="QueryVisibleMessagesAsync"/>), so a candidate the caller cannot see is silently absent from the
+    /// final result (no second/divergent access mechanism, no leak — NFR-03). No match at all degrades to an
+    /// always-false clause rather than an error, so <c>participant=</c> composes as AND with the other facets like
+    /// any other facet.</para>
+    /// Graceful degradation (ADR-019): a malformed thread/regarding/channel/date/participant, an unknown regarding
+    /// entity type, or no facet at all is a 400 ProblemDetails — never a 500 and never an unfiltered dump.
+    /// </summary>
+    public async Task<CommunicationQueryResult> QueryCommunicationsAsync(
+        string? thread,
+        string? regarding,
+        string? channel,
+        string? from,
+        string? to,
+        string? participant,
+        ClaimsPrincipal? caller,
+        CancellationToken ct)
+    {
+        var clauses = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(thread))
+        {
+            if (!Guid.TryParse(thread, out var threadId) || threadId == Guid.Empty)
+                throw BadRequest("'thread' must be a communication-thread GUID.");
+            clauses.Add($"{ThreadLookupValue} eq {threadId}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(regarding))
+            clauses.Add(BuildRegardingClause(regarding));
+
+        if (!string.IsNullOrWhiteSpace(channel))
+        {
+            if (!int.TryParse(channel, NumberStyles.Integer, CultureInfo.InvariantCulture, out var channelValue))
+                throw BadRequest("'channel' must be an sprk_communicationtype option-set integer.");
+            clauses.Add($"{TypeField} eq {channelValue}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!TryParseIso(from, out var fromValue))
+                throw BadRequest("'from' must be an ISO-8601 timestamp (e.g. 2026-07-19T00:00:00Z).");
+            clauses.Add($"{SentAtField} ge {FormatOData(fromValue)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            if (!TryParseIso(to, out var toValue))
+                throw BadRequest("'to' must be an ISO-8601 timestamp (e.g. 2026-07-19T23:59:59Z).");
+            clauses.Add($"{SentAtField} le {FormatOData(toValue)}");
+        }
+
+        // No facet at all → 400 (never an unfiltered dump of every communication the caller can see).
+        if (clauses.Count == 0 && string.IsNullOrWhiteSpace(participant))
+            throw BadRequest("At least one filter is required (thread, regarding, channel, from, to, or participant).");
+
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+
+        if (!string.IsNullOrWhiteSpace(participant))
+            clauses.Add(await BuildParticipantClauseAsync(participant, callerSystemUserId, ct));
+
+        var filter = string.Join(" and ", clauses);
+        var visible = await QueryVisibleMessagesAsync(filter, MaxQueryScan, callerSystemUserId, ct);
+        var messages = visible.Select(v => v.Dto).ToList();
+
+        _logger.LogDebug(
+            "[COMM-QUERY] caller={Caller} facets=[{Facets}] returned={Returned}",
+            callerSystemUserId, string.Join(',', clauses), messages.Count);
+
+        return new CommunicationQueryResult(messages, messages.Count);
+    }
+
+    /// <summary>
+    /// Parses a <c>regarding={entityType}:{guid}</c> facet into a typed <see cref="RegardingFieldMap"/> lookup clause
+    /// on <c>sprk_communication</c> (entity-set-agnostic). A malformed shape or an unmapped entity type is a 400.
+    /// </summary>
+    private static string BuildRegardingClause(string regarding)
+    {
+        var separator = regarding.IndexOf(':');
+        if (separator <= 0 || separator == regarding.Length - 1)
+            throw BadRequest("'regarding' must be '{entityType}:{guid}' (e.g. sprk_matter:<guid>).");
+
+        var entityType = regarding[..separator].Trim();
+        var idText = regarding[(separator + 1)..].Trim();
+
+        var regardingField = RegardingFieldMap.FieldFor(entityType);
+        if (regardingField is null)
+            throw BadRequest($"'{entityType}' is not a supported regarding entity type (ADR-024 family).");
+
+        if (!Guid.TryParse(idText, out var recordId) || recordId == Guid.Empty)
+            throw BadRequest("'regarding' record id must be a GUID.");
+
+        return $"_{regardingField}_value eq {recordId}";
+    }
+
+    /// <summary>
+    /// Resolves <c>participant={personId|address}</c> (R2 task 051) into an OData clause over
+    /// <c>sprk_communication</c>'s primary key. Joins the <c>sprk_communicationparticipant</c> junction — using the
+    /// SAME impersonated <see cref="IImpersonatedCommunicationQuery"/> seam as every other facet, so no second
+    /// access mechanism is introduced — to find the candidate message ids, then builds an OR-of-ids clause over
+    /// <see cref="PkField"/>. This is deliberately NOT the access gate: the junction is a thin, exact-match lookup
+    /// (typed FK for a resolved person; exact-equality on <see cref="ParticipantAddressTextField"/> for an
+    /// unresolved external address — never a text-LIKE scan of <c>sprk_from/to/cc</c>). The REAL gate remains
+    /// <see cref="QueryVisibleMessagesAsync"/>'s impersonated <c>sprk_communication</c> read + the shared
+    /// <see cref="ICommunicationAccessFilter"/> — a candidate id the caller cannot see there is silently dropped
+    /// (no leak). A malformed value (not a GUID and too long to be an address) is a 400; no candidate match
+    /// degrades to an always-false clause so the caller sees an empty result, never an error.
+    /// </summary>
+    private async Task<string> BuildParticipantClauseAsync(string participant, Guid callerSystemUserId, CancellationToken ct)
+    {
+        var trimmed = participant.Trim();
+
+        string junctionFilter;
+        if (Guid.TryParse(trimmed, out var personId))
+        {
+            if (personId == Guid.Empty)
+                throw BadRequest("'participant' must be a non-empty systemuser/contact GUID, or an address.");
+
+            // Resolved-person case: role-exact, FK-backed — match either typed lookup, in ANY role.
+            junctionFilter = $"({ParticipantSystemUserValue} eq {personId} or {ParticipantContactValue} eq {personId})";
+        }
+        else
+        {
+            if (trimmed.Length > MaxParticipantAddressLength)
+                throw BadRequest($"'participant' address must be at most {MaxParticipantAddressLength} characters.");
+
+            // Unresolved-address case: EXACT equality on the junction's dedicated address column (Q-D) — never a
+            // text-LIKE scan of sprk_from/to/cc on the message itself.
+            junctionFilter = $"{ParticipantAddressTextField} eq '{EscapeODataString(trimmed)}'";
+        }
+
+        var odata = $"$select={ParticipantCommunicationValue}&$filter={junctionFilter}&$top={MaxParticipantScan}";
+        var rows = await _query.QueryAsync(ParticipantSet, odata, callerSystemUserId, ct);
+
+        var messageIds = rows
+            .Select(r => TryGuid(r, ParticipantCommunicationValue))
+            .Where(id => id is { } g && g != Guid.Empty)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        if (messageIds.Count == 0)
+        {
+            // No participant match — an always-false clause so the AND-composed result is gracefully empty
+            // (never an error, never silently ignored as "no filter").
+            return $"{PkField} eq {Guid.Empty}";
+        }
+
+        return "(" + string.Join(" or ", messageIds.Select(id => $"{PkField} eq {id}")) + ")";
+    }
+
+    private static string EscapeODataString(string value) => value.Replace("'", "''");
+
+    // ── shared read pipeline (impersonated query → shared access filter → DTO, with attachments) ──────
+
+    /// <summary>
+    /// Runs <paramref name="odataFilter"/> against <c>sprk_communication</c> IMPERSONATED, applies the SHARED
+    /// <see cref="ICommunicationAccessFilter"/> (internal-only + privilege), loads attachments in ONE bulk
+    /// impersonated query for the visible page, and projects each visible row into a <see cref="ThreadMessageDto"/>
+    /// tagged with its owning thread id. This is the single pipeline both the by-regarding read (010) and the
+    /// filtered query (011) compose onto — there is exactly ONE access filter and ONE impersonation seam.
+    /// </summary>
+    private async Task<IReadOnlyList<VisibleMessage>> QueryVisibleMessagesAsync(
+        string odataFilter,
+        int top,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var select = string.Join(',', new[]
+        {
+            PkField, BodyField, BodyFormatField, TypeField, FromField,
+            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, ThreadLookupValue,
+        });
+        var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
+        var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
+
+        var parsed = rows.Select(ParseMessageRow).ToList();
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
+
+        var byId = parsed.ToDictionary(p => p.MessageId);
+        var visible = filtered.Decisions
+            .Where(d => d.Decision.IsVisible)
+            .Select(d => (Parsed: byId[d.Message.Id], d.Decision))
+            .ToList();
+
+        var attachmentsByMessage = await LoadAttachmentsAsync(
+            visible.Select(v => v.Parsed.MessageId).ToList(), callerSystemUserId, ct);
+
+        return visible
+            .Select(v => new VisibleMessage(v.Parsed.ThreadId, BuildDto(v.Parsed, v.Decision, attachmentsByMessage)))
+            .ToList();
+    }
+
+    private static ThreadMessageDto BuildDto(
+        ParsedMessage parsed,
+        CommunicationAccessDecision decision,
+        IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>> attachmentsByMessage)
+        => new(
+            MessageId: parsed.MessageId,
+            Body: parsed.Body,
+            BodyFormat: parsed.BodyFormat,
+            CommunicationType: parsed.CommunicationType,
+            From: parsed.From,
+            SentAt: parsed.SentAt,
+            CreatedOn: parsed.CreatedOn,
+            InReplyTo: parsed.InReplyTo,
+            Privilege: (int)decision.Privilege,
+            Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
+                ? atts
+                : Array.Empty<ThreadAttachmentRef>());
+
+    private sealed record VisibleMessage(Guid ThreadId, ThreadMessageDto Dto);
+
+    private static SdapProblemException BadRequest(string detail) =>
+        new(code: "VALIDATION_ERROR", title: "Validation Error", detail: detail, statusCode: 400);
+
+    private static bool TryParseIso(string value, out DateTimeOffset parsed) =>
+        DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out parsed);
 
     // ── caller resolution (fail-closed) ─────────────────────────────────────────────────────────────
 
@@ -264,6 +591,7 @@ public sealed class CommunicationThreadReadService
         return new ParsedMessage
         {
             MessageId = messageId,
+            ThreadId = TryGuid(row, ThreadLookupValue) ?? Guid.Empty,
             Body = TryString(row, BodyField),
             BodyFormat = TryInt(row, BodyFormatField),
             CommunicationType = TryInt(row, TypeField),
@@ -278,6 +606,7 @@ public sealed class CommunicationThreadReadService
     private sealed class ParsedMessage
     {
         public required Guid MessageId { get; init; }
+        public Guid ThreadId { get; init; }
         public string? Body { get; init; }
         public int? BodyFormat { get; init; }
         public int? CommunicationType { get; init; }

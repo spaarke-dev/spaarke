@@ -106,6 +106,7 @@ All four "BFF" answers → BFF. Three or four "Separate" answers + concrete just
 | [ADR-015](ADR-015-ai-data-governance.md) | Data governance |
 | [ADR-016](ADR-016-ai-rate-limits.md) | Rate limits |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF publish hygiene — codifies publish-debt prevention (linux-x64 framework-dependent, sourcemap exclusion, transitive CVE override pattern, size baseline). Does NOT bind extraction policy — that's this ADR. |
+| [Compose redline derived-views](../../docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md) | Worked example of envelope-only ownership: `OutputRouter`/`ChatEndpoints` store + ship the compose payload opaquely and never parse it; all redline views (visual diff, `confidence_band`, offsets) derive client-side at render. |
 
 ---
 

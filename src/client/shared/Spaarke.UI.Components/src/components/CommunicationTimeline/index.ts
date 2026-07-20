@@ -23,6 +23,11 @@ export type {
   CommunicationTimelinePrefill,
   QuoteIntoEmailPayload,
   CommunicationTimelineProps,
+  // R2 task 020 (FR-03) — regarding mode
+  CommunicationTimelineBaseProps,
+  CommunicationTimelineThreadModeProps,
+  CommunicationTimelineRegardingModeProps,
+  RegardingThreadGroup,
 } from './CommunicationTimeline.types';
 export {
   COMMUNICATION_TYPE_EMAIL,
@@ -32,20 +37,32 @@ export {
 } from './CommunicationTimeline.types';
 
 // Reducer + state (exported for task 080 unit tests / advanced composition)
-export { communicationTimelineReducer, initialTimelineState } from './CommunicationTimeline.reducer';
+export {
+  communicationTimelineReducer,
+  initialTimelineState,
+  initialRegardingState,
+} from './CommunicationTimeline.reducer';
 export type {
   CommunicationTimelineState,
   CommunicationTimelineStatus,
   CommunicationTimelineAction,
+  CommunicationTimelineRegardingState,
 } from './CommunicationTimeline.reducer';
 
 // Pure ordering/nesting + DTO-mapping helpers (task 080 unit-tests these directly)
-export { buildTimeline, mapThreadMessageDtoToTimelineMessage } from './CommunicationTimeline.buildTimeline';
+export {
+  buildTimeline,
+  mapThreadMessageDtoToTimelineMessage,
+  mapRegardingReadResultToGroups,
+} from './CommunicationTimeline.buildTimeline';
 export type { TimelineEntry } from './CommunicationTimeline.buildTimeline';
 
-// Poll hook
+// Poll hooks
 export { useThreadPoll } from './hooks/useThreadPoll';
 export type { UseThreadPollOptions, UseThreadPollResult } from './hooks/useThreadPoll';
+
+export { useRegardingPoll } from './hooks/useRegardingPoll';
+export type { UseRegardingPollOptions, UseRegardingPollResult } from './hooks/useRegardingPoll';
 
 // Sub-components (exported for advanced/direct composition)
 export { ChannelBadge } from './subcomponents/ChannelBadge';
@@ -59,3 +76,6 @@ export type { IMessageRowProps } from './subcomponents/MessageRow';
 
 export { TimelineComposeBox } from './subcomponents/TimelineComposeBox';
 export type { ITimelineComposeBoxProps, ITimelineSendPayload } from './subcomponents/TimelineComposeBox';
+
+export { ThreadGroup } from './subcomponents/ThreadGroup';
+export type { IThreadGroupProps } from './subcomponents/ThreadGroup';

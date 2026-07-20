@@ -1,0 +1,82 @@
+<task id="092" project="email-communication-solution-r4">
+  <metadata>
+    <title>Archive: faithful .eml (embed attachments) + on-demand Document-Profile enqueue + display-name/content-type (UAT #4, #5)</title>
+    <phase>Wave 9 — Post-UAT remediation</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>044</dependencies>
+    <blocks>—</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the archive path (SPE upload + Document creation + AI-analysis enqueue); BFF-touching; data-integrity of the archived artifact. Code-review + adr-check mandatory.</rigor-reason>
+    <parallel-group>W9-bff</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-06, FR-07</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Two UAT findings on the archive path (`notes/UAT-DEFECTS.md` #4, #5). The .eml GENERATION itself is valid
+    (MimeKit, filename carries `.eml`, SPE path ends in `.eml`). The defects are in the wrapper + pipeline:
+
+    #4 — the archived `.eml` is NOT a faithful original and is hard to open:
+      (a) `ArchiveToSpeAsync` calls `GenerateEml(request, partialResponse)` WITHOUT attachments
+          (`CommunicationService.cs:1781-1782`) — so the .eml is body-only. OWNER DECISION (2026-07-20): EMBED
+          attachments so opening the .eml reproduces the original email (attachments intact), WHILE still
+          archiving each attachment as a separate `sprk_document` (both — the separate Docs are unchanged).
+      (b) the archive `sprk_document` display name is `"Archived: {subject}"` with NO extension
+          (`CommunicationService.cs:1803`) — owner "doesn't see the .eml extension". Give the display name the
+          `.eml` filename (or append the extension) so it reads as an email file.
+      (c) the SPE upload does not set a content-type; ensure the archived object is served as `message/rfc822`
+          (Graph infers from the `.eml` path, but make it explicit/verified so download opens in Outlook).
+
+    #5 — Document Profile (AI enrichment playbook "Document Profile", job `AppOnlyDocumentAnalysis`) is wired on
+    the auto-inbound (`IncomingCommunicationProcessor.cs:775,889`) and outbound-send
+    (`CommunicationService.cs:1100,1396`) archive paths, BUT the on-demand "Save to SharePoint" path
+    (`ArchiveExistingAsync`) creates the .eml Document at `CommunicationService.cs:195` and does NOT enqueue
+    profiling (attachments on that path DO — `ArchiveExistingAttachmentsAsync`). Add the missing
+    `EnqueueDocumentAnalysisAsync(archiveDocumentId, …)` for the .eml, mirroring `SendAsync` (1097-1100). This is
+    NOT a task-007 regression (007 is not-started; the retired OOB path never owned profiling). NOTE: the reason
+    received emails showed no profile in UAT was that the archive itself was 403-broken until 2026-07-19 (fixed) —
+    the enqueue is best-effort and had no file to read; the auto path must be RE-VERIFIED via a fresh inbound
+    email (UAT D-1), not assumed broken.
+  </prompt>
+
+  <goal>
+    The archived .eml is a faithful, openable original (body + embedded attachments) named with a `.eml`
+    extension and served as `message/rfc822`; and every archive path — auto-inbound, outbound-send, AND on-demand
+    "Save to SharePoint" — enqueues Document Profile for the .eml Document. Attachments remain separately archived
+    as `sprk_document` records.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ArchiveToSpeAsync` generates the .eml WITH its attachments embedded (calls the 3-arg `GenerateEml(request, response, attachments)` with the communication's attachment bytes fetched from SPE via each attachment's `sprk_graphdriveid`/`sprk_graphitemid`).</criterion>
+    <criterion testable="true">Separate per-attachment `sprk_document` archival is UNCHANGED (both the embedded-in-.eml copy and the standalone Documents exist).</criterion>
+    <criterion testable="true">The archive `sprk_document` display name (`sprk_documentname`) carries the `.eml` extension (e.g. the `emlResult.FileName`), not `"Archived: {subject}"` bare.</criterion>
+    <criterion testable="true">The SPE upload results in an object whose content-type is `message/rfc822` (explicit on upload or verified as inferred from the `.eml` path).</criterion>
+    <criterion testable="true">`ArchiveExistingAsync` enqueues `EnqueueDocumentAnalysisAsync` for the archive .eml Document immediately after `ArchiveToSpeAsync` (parity with `SendAsync`), best-effort/non-fatal.</criterion>
+    <criterion testable="true">Idempotency preserved: a re-archive of an already-archived communication still returns `AlreadyArchived` without duplicating the .eml Document or re-embedding.</criterion>
+    <criterion testable="true">Unit tests (ADR-038 KEEP-path, boundary mocks only): (i) .eml embeds N attachments when the communication has N; (ii) on-demand archive enqueues profiling for the .eml; (iii) display name carries `.eml`.</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication test suite green; new tests pass.</criterion>
+    <criterion testable="true">§10: publish-size measured + reported (delta vs ~45.30MB incl-PDBs, ≤60MB); no NEW High CVE; Placement Justification stated (modifies existing archive path; no new service).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>SPE access ONLY via `SpeFileStore`/`UploadSessionManager` facade (ADR-007). Fetch attachment bytes through the facade, not a raw Graph client.</constraint>
+    <constraint>Attachment embedding must be best-effort per attachment (NFR-06): a single attachment that fails to download is logged and skipped; the .eml still archives with the body + the attachments that succeeded, and the send/receive flow never fails on it.</constraint>
+    <constraint>Do NOT change the outbound-send or auto-inbound profiling enqueues that already work — only ADD the missing on-demand enqueue and the attachment-embedding.</constraint>
+    <constraint>Keep the idempotency contract (`FindExistingArchiveDocumentAsync`) intact.</constraint>
+    <constraint>Do NOT introduce a new job type or service — reuse `EnqueueDocumentAnalysisAsync` / `AppOnlyDocumentAnalysis` (root §11).</constraint>
+  </constraints>
+
+  <notes>
+    The "open" experience (inline preview vs download/open-in-Outlook) is partly client-side; Graph inline
+    preview cannot render `message/rfc822`, so the correct UX for a `.eml` Document is download / open-in-Outlook.
+    If the archive Document's open action is surfaced by task 093's attachment PCF or the OOB form, ensure `.eml`
+    documents route to download rather than inline preview (coordinate with 093). Server-side scope here is the
+    faithful artifact + correct naming/content-type + profiling enqueue.
+    Post-fix UAT: owner sends one fresh inbound email (D-1) and confirms the archived .eml Document acquires
+    Document-Profile fields (proves the auto path end-to-end now that archive is un-broken).
+  </notes>
+</task>

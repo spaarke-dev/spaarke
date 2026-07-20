@@ -2,7 +2,7 @@
   <metadata>
     <title>Regarding-mode `CommunicationTimeline` PCF variant (mirror R1 Timeline PCF + a regarding-resolution path; bound `anchorField`) + production build + solution pack</title>
     <phase>W2 — Record Threads View (Surface 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>10</estimated-hours>
     <deps>020</deps>
     <blocks>022</blocks>
@@ -166,4 +166,35 @@
       Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Build via `npm run build:prod` (NOT `npm run build` — AP-1); pack via the `pcf-deploy` skill's pack step; `pac import` deferred to task 022 / owner. Verify via `ui-test`. No BFF publish-size/CVE (root §10 N/A). Cite the ADR-026 Path-A exception in the PR. Dispatch at model-tier `sonnet` @ effort `high`.
     </protocol>
   </execution>
+
+  <completion-notes date="2026-07-19">
+    Decision: NEW sibling PCF `src/client/pcf/CommunicationTimelineRegarding/` (variant folder), not a mode-switch
+    on the deployed R1 `CommunicationTimeline` control — avoids regression risk on R1's live
+    `sprk_communication`/`sprk_communicationthread` placements; the 11 regarding-family host entities are disjoint
+    from R1's placements. Control `Spaarke.Controls.CommunicationTimelineRegarding` v1.0.0.
+
+    Mirrors R1's virtual-ReactControl packaging exactly (index.ts/authInit.ts/Host.tsx/App.tsx/Solution/). Net-new:
+    `hostContext.ts`'s `resolveRegardingContext(hostEntityName, hostRecordId)` reads `(entityType, id)` straight off
+    the Xrm page context (no lookup indirection — the host record IS the regarding target), validated against an
+    11-entity allowlist mirroring `RegardingFieldMap.All`.
+
+    Manifest: bound `anchorField` (primary Name, usage="bound" required="true", R1 lesson cited) + React
+    16.14.0/Fluent 9.46.2 platform libraries; no apostrophes in description-key (grep-verified). `@spaarke/auth`
+    only in authInit.ts + App boundary (grep-confirmed absent from the shared CommunicationTimeline.tsx source).
+    Mounts `&lt;CommunicationTimeline mode="regarding" entityType id authenticatedFetch bffBaseUrl pollIntervalMs /&gt;`
+    — no `threadId` (discriminated union from task 020).
+
+    Verification: 16/16 new Jest tests green; `npm run build:prod` clean (2.35 MiB bundle, matches R1's own
+    committed 2.45 MB precedent — both dominated by @spaarke/auth's bundled msal-browser); solution ZIP packed +
+    entry-verified (6 well-formed lowercase entries); grep-verified zero `@azure/communication-*` in the bundle
+    (NFR-04). Self-executed code-review + adr-check (ADR-006/021/022/026/028): 0 Critical/Warning findings; 2
+    Suggestion-level notes on R1-boilerplate duplication, explicitly sanctioned by "mirror R1, do not invent a new
+    pattern."
+
+    UI-test (Step 9.7) SKIPPED — no `--chrome` session / no live Dataverse env this session; substituted with
+    jest + bundle + manifest evidence (mirrors 010/011/070's build-and-defer-live precedent).
+
+    `pac import` DEFERRED to task 022 / owner (out of this task's scope). ZIP:
+    `src/client/pcf/CommunicationTimelineRegarding/Solution/bin/CommunicationTimelineRegardingSolution_v1.0.0.zip`.
+  </completion-notes>
 </task>

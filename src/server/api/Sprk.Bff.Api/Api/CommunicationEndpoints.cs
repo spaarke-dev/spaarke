@@ -111,6 +111,34 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
+        // messages for the record-level regarding-mode Timeline (R2 task 010 / FR-01, Surface 1). Entity-set-agnostic
+        // across all 11 ADR-024 regarding families (matter, contact, …). Impersonated (Dataverse row-level security)
+        // + the SAME internal-only/privilege access filter as the thread-read — private/internal-only content never
+        // leaks (NFR-03). A bad entityType → 400 ProblemDetails (ADR-019). Same DTO shape as the R1 thread-read.
+        group.MapGet("/by-regarding/{entityType}/{id:guid}", GetCommunicationsByRegardingAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetCommunicationsByRegarding")
+            .WithDescription("Read ALL of a regarding record's threads + messages for the regarding-mode Timeline (access-filtered; impersonated; entity-set-agnostic across the 11 ADR-024 families).")
+            .Produces<RegardingReadResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // GET /api/communications?thread=&regarding=&channel=&from=&to=&participant= — filtered cross-record
+        // communication query (R2 task 011 / FR-02; `participant=` wired in task 051) backing the global grid +
+        // workspace widget. thread/regarding/channel/date/participant facets all compose onto the SAME
+        // impersonation read path + access filter (NFR-03). `participant=` joins the sprk_communicationparticipant
+        // junction (003/050) on its typed person lookups (role-exact, FK-backed) or, for an unresolved external
+        // party, an exact match on its address column — never a text-LIKE scan. Unknown/empty/malformed filters
+        // degrade gracefully to a 400 ProblemDetails (ADR-019) — never a 500, never an unfiltered dump.
+        group.MapGet("/", QueryCommunicationsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("QueryCommunications")
+            .WithDescription("Filtered cross-record communication query (thread/regarding/channel/date/participant facets; access-filtered; impersonated).")
+            .Produces<CommunicationQueryResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ArchiveCommunication")
@@ -474,6 +502,44 @@ public static class CommunicationEndpoints
         }
 
         return parsed;
+    }
+
+    /// <summary>
+    /// By-regarding read for the regarding-mode Timeline (R2 task 010 / FR-01). Resolves the caller server-side
+    /// (never client-supplied) and delegates to the impersonated, access-filtered by-regarding read. An unsupported
+    /// <paramref name="entityType"/> is a 400 ProblemDetails (ADR-019).
+    /// </summary>
+    private static async Task<IResult> GetCommunicationsByRegardingAsync(
+        string entityType,
+        Guid id,
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await readService.ReadByRegardingAsync(entityType, id, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Filtered cross-record communication query (R2 task 011 / FR-02; `participant` wired in task 051). Resolves
+    /// the caller server-side and delegates to the impersonated, access-filtered query. thread/regarding/channel/
+    /// date/participant facets are all composed onto the shared read path; malformed/empty filters return a 400
+    /// ProblemDetails (ADR-019 graceful degradation).
+    /// </summary>
+    private static async Task<IResult> QueryCommunicationsAsync(
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? thread,
+        [FromQuery] string? regarding,
+        [FromQuery] string? channel,
+        [FromQuery] string? from,
+        [FromQuery] string? to,
+        [FromQuery] string? participant,
+        CancellationToken ct)
+    {
+        var result = await readService.QueryCommunicationsAsync(
+            thread, regarding, channel, from, to, participant, context.User, ct);
+        return TypedResults.Ok(result);
     }
 
     /// <summary>

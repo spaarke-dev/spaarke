@@ -29,6 +29,11 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // Tasks components. LegalWorkspace consumes them when task 115 adds a
     // Calendar section factory to its section registry.
     path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+    // messaging-communication-app-r2 task 030 (2026-07-19): @spaarke/communication-components
+    // hosts the rich Pattern D CommunicationsWorkspaceWidget consumed by
+    // sections/communications.registration.ts (upgrade-in-place, keeps the
+    // section id + widgetType unchanged). Mirrors the events-components entry above.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
     // R4 task 051 (C-3, 2026-05-26): @spaarke/ai-widgets hosts the
     // consolidated `useWorkspaceLayouts` hook (formerly duplicated in
     // LegalWorkspace + SpaarkeAi). LW's local hook is now a thin adapter.
@@ -100,6 +105,11 @@ export default defineConfig({
         // Task 114 (2026-05-22): transpile Events components source.
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src/**/*.ts"),
+        // messaging-communication-app-r2 task 030 (2026-07-19): transpile
+        // Spaarke.Communication.Components source (consumed by
+        // sections/communications.registration.ts).
+        path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src/**/*.ts"),
         // R4 task 051 (C-3, 2026-05-26): transpile AI widgets source (only
         // `hooks/useWorkspaceLayouts.ts` is consumed by LW today, but
         // include the whole tree so future shared-lib consumption works
@@ -128,6 +138,11 @@ export default defineConfig({
       // without further plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // messaging-communication-app-r2 task 030 (2026-07-19): pre-wired so the
+      // upgraded `communications.registration.ts` shim can import
+      // CommunicationsWorkspaceWidget from @spaarke/communication-components.
+      "@spaarke/communication-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
+      "@spaarke/communication-components": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
       // R4 task 051 (C-3, 2026-05-26): aliased to source so the LegalWorkspace
       // adapter `hooks/useWorkspaceLayouts.ts` can import the consolidated
       // hook from `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts`

@@ -2,7 +2,7 @@
   <metadata>
     <title>Compose-form enrichment — Subject/topic + structured To/Cc/Bcc recipient picker (reuse `RecipientField`) feeding the participant index</title>
     <phase>W6 — Compose-Form Enrichment (CC-5)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>7</estimated-hours>
     <deps>050</deps>
     <blocks></blocks>
@@ -132,6 +132,14 @@
 
   <notes>
     Depends on 050 for the participant-contract shape (what resolved record id + entity type the picker must emit so the write can set the correct typed lookup and role). No BFF change here — the send path DTO already supports Subject/Cc/Bcc (`CommunicationService.cs` reads `sprk_subject`/`sprk_cc`; falls back to "(No Subject)"). Watch the dual-consumer surface: `RecipientField` is shared with `EmailComposer` — extend the contract additively so email compose is not broken. `parallel-safe:true` (client file surface disjoint from BFF/widget).
+
+    COMPLETED 2026-07-19. `TimelineComposeBox.tsx`: added a required Subject `Field`+`Input` (populates `sprk_subject` + drives the server-derived `sprk_name`; gates Send alongside To/Body — no message can persist "(No Subject)") and Cc/Bcc via 2 additional `RecipientField` rows (3 total: To/Cc/Bcc, all reused, none cloned). `ITimelineSendPayload` extended with `subject: string` (required) + `cc?`/`bcc?: string[]`. `CommunicationTimeline.tsx` `handleSend` threads `payload.subject`/`cc`/`bcc` into `sendTimelineMessage`, replacing the old `Re: conversation {threadId}` filler subject.
+
+    Recipient contract extension (feeds task-050 participant index at capture): `ILookupItem.entityType?: 'contact'|'systemuser'` — additive, tagged at the source in `userLookup.ts`'s `searchUsersAsLookup` ('systemuser') / `searchContactsAsLookup` ('contact') / `searchUsersAndContacts` (preserved through merge+de-dupe). `RecipientField.handleSelectResult` surfaces `item.entityType` onto the created `IRecipient.entityType` (also additive on `EmailComposer.types.ts`). Mechanism: the BFF `SendCommunicationRequest`/`CommunicationParticipantSet` only carry To/Cc/Bcc as email-address arrays (no client-supplied resolved-id field exists, and none was added — out of scope per this task's "do not change the BFF send path" constraint) — so a resolved pick's VALUE is what actually reaches the wire; what `entityType` buys is (a) an accurate, directory-matched email address (vs. a hand-typed one that may not match Dataverse exactly), which is what lets task 050's `CommunicationParticipantIndexer` resolve it via `QueryContactByEmailAsync` into a typed junction row instead of an unresolved-address row, and (b) a client-side signal the UI itself can use later. Free-text remains a fully-supported fallback (unresolved participant row, Q-D).
+
+    `onSearchRecipients` is still intentionally NOT wired at the `CommunicationTimeline` PCF layer (pre-existing, documented "task 061 spec §5, HARD RULE 5" boundary, out of this shared-lib-only task's scope) — so in the live PCF today every recipient is free-text until that wiring lands; the resolved-path code is verified via unit tests injecting a mock `onSearchRecipients`.
+
+    Verification: shared-lib `tsc` build clean; scoped + full-package `npm run lint` clean (same 2 pre-existing unrelated `DataGrid/HeaderCellContent.tsx` errors, untouched); consuming `CommunicationTimeline` PCF `npm run build:prod` clean (2.35 MiB, standard bundle-size warning only — required `npm install --legacy-peer-deps --no-audit --no-fund` first, deps were not yet installed in this worktree). Tests: new `TimelineComposeBox.test.tsx` (7 tests), new `userLookup.entityType.test.ts` (3 tests), 2 new + all existing cases in `RecipientField.test.tsx` (dual-consumer regression) — 13 suites / 161 tests pass, 0 regressions. code-review + adr-check (self-executed, Step 9.5): 0 Critical/Violation across ADR-021/ADR-028/ADR-022/§11; 2 non-blocking Suggestions (no `CommunicationTimeline.tsx` full-component test existed before or after this task — pre-existing gap; Subject error uses the same shared `error` string as To/Body rather than per-field `validationState`, consistent with this component's existing minimal-validation design).
   </notes>
 
   <execution>

@@ -2,7 +2,7 @@
   <metadata>
     <title>Regarding-mode extension to the `CommunicationTimeline` component (`@spaarke/ui-components`): threads-as-collapsible-groups → per-thread interleaved email+chat timelines, backed by the new `by-regarding` endpoint</title>
     <phase>W2 — Record Threads View (Surface 1)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <deps>010</deps>
     <blocks>021</blocks>
@@ -162,6 +162,19 @@
     The `by-regarding` endpoint (task 010) is entity-set-agnostic and access-filtered server-side — the component trusts it fully (NFR-03). Do NOT reintroduce membership-union or any client-side privacy logic (retired 2026-07-16; `../messaging-communication-app-r1/notes/access-model-decision.md`).
 
     Polling: R2's live-update model stays BFF-polling (NFR-06 — no notification-spine dependency). Whether the regarding-mode grouped view polls (and at what cadence) is a design decision — reuse the R1 `useThreadPoll` cadence pattern if polling the grouped view; state the choice in notes. Do NOT add any push/fan-out mechanism.
+
+    <!-- COMPLETION NOTES (2026-07-19) -->
+    **Cross-task contract gap found + fixed**: reading `CommunicationThreadReadService.ReadByRegardingAsync` (task 010) showed the service already queries the thread's `sprk_name` (`ThreadNameField`) but discarded it before constructing `ThreadReadResult` — that DTO only carried `ThreadId`/`Messages`/`Count`. FR-03's acceptance criterion ("group header shows the thread `sprk_name`") could not be met without it. Fix (additive, non-breaking): added `string? Name` to `ThreadReadResult` (`CommunicationThreadReadModels.cs`), populated in `ReadByRegardingAsync` (`t.Name`) and left `null` at the R1 per-thread `ReadThreadAsync` call site (that surface is placed on the thread form, which already shows the name via the record header — fetching it there would be redundant). Added 2 assertions to the existing `CommunicationByRegardingReadTests.cs` tests. BFF `dotnet build` clean; 34/34 Communication read-service tests green. This was the smallest fix that closed the gap — no new endpoint/DI/package, so BFF publish-size/CVE checklist is not materially implicated, but flagging here per CLAUDE.md §10 bullet 6 (tests updated) since `Services/Communication/` was touched.
+
+    **Design decisions recorded**:
+    - **Mode discrimination**: `CommunicationTimelineProps` is now `CommunicationTimelineThreadModeProps | CommunicationTimelineRegardingModeProps`, discriminated on `mode` (`mode?: 'thread'` default vs `mode: 'regarding'`). Existing call sites that never set `mode` keep compiling/behaving unchanged (verified: `tsc` build clean, all prior tests pass).
+    - **Compose box**: regarding mode is READ-ONLY — no compose/send box. Composing happens inside a specific thread (thread-id mode / task 021's PCF); the grouped view's job is discovery/organization across threads (FR-03), not sending — avoids a second compose surface (§11).
+    - **Default expand/collapse**: all groups start COLLAPSED. Host can override via `defaultExpandedThreadIds?: string[]` prop (applied only on the first successful load — a later poll re-fetch never stomps the user's own toggles, per the reducer's `isFirstLoad` guard).
+    - **Group ordering**: newest-activity-first (by each group's latest message `sentOn ?? createdOn`), not the server's construction order (thread `createdon asc`) — a record's most recently active thread is what a user opening the record almost always wants. Presentational only, not an access decision (NFR-03 unaffected).
+    - **Polling**: regarding mode DOES poll, via a new `useRegardingPoll` hook mirroring `useThreadPoll`'s cadence/visibility-pause/overlap-guard idiom, default `pollIntervalMs=5000` (prop-overridable). The `by-regarding` endpoint has no `since`/incremental mode, so every tick re-fetches the full record snapshot and replaces `groups` wholesale; `expandedThreadIds` persists across refetches independently.
+    - **Reuse, not fork**: `ThreadGroup.tsx`'s expanded body calls `buildTimeline(group.messages)` then renders `MessageRow`/`ChannelBadge` — the exact R1 engine. New pure helper `mapRegardingReadResultToGroups` (in `CommunicationTimeline.buildTimeline.ts`) maps the DTO → groups using the EXISTING `mapThreadMessageDtoToTimelineMessage` per message (no re-derivation).
+
+    **Contract for task 021 (PCF wrapper)**: mount `<CommunicationTimeline mode="regarding" entityType={...} id={...} authenticatedFetch={...} bffBaseUrl={...} pollIntervalMs={...} defaultExpandedThreadIds={...} onError={...} className={...} />` — `entityType`/`id` come from the host record context (one of the 11 ADR-024 regarding families); `authenticatedFetch`/`bffBaseUrl` wire from the PCF's `@spaarke/auth` init exactly like the existing thread-id-mode PCF does; `defaultExpandedThreadIds` and `pollIntervalMs` are optional passthroughs (no default expansion needed unless the PCF wants to seed one open group). No `threadId` prop in this mode — passing both `threadId` and `entityType`/`id` is a type error (discriminated union), so task 021 must NOT reuse the same prop-building code path as the existing thread-id-mode PCF wrapper without branching on which mode it's instantiating.
   </notes>
 
   <execution>

@@ -9,13 +9,27 @@
     <effort>xhigh</effort>
     <parallel-group>W2-E1</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>022,023</deps>
+    <deps>022,023,026,027</deps>
     <tags>testing,bff-api,docx</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <assigned>unassigned</assigned>
     <started></started>
     <completed></completed>
   </metadata>
+
+  <amendment date="2026-07-18" by="spaarkeai-compose-r3 re-architecture">
+    EXPANDED scope + Option C. Two changes:
+    (1) DROP the "Approach A cosmetic re-serialization acceptable" allowance in the prose below — under
+        Option C (`ComposeParagraphRedlineSynthesizer`) untouched paragraphs are BYTE-IDENTICAL (amended
+        FR-07). Assert byte-identity for untouched paragraphs, not merely structural equivalence.
+    (2) ADD a SECOND seam path — BORN-IN-EDITOR creation: POST a paraId-keyed content model through
+        `create-on-save`, capture the SERVER-RENDERED bytes (026 `ComposeDocumentRenderer`) at the
+        SpeFileStore facade, and assert the rendered `.docx` is well-formed, round-trips through the Load
+        import + `ParaIdPreParser`, carries a unique `w14:paraId` per paragraph, and — the numbering
+        GOLDEN-FILE — renders a 1/1.1/1.1.1 clause tree as a style-linked multi-level `abstractNum`. Also
+        assert a subsequent tracked-change edit on the rendered doc does not corrupt its numbering.
+    Deps now include 026 (renderer) + 027 (client cutover) so the seam exercises the real end-to-end path.
+  </amendment>
 
   <prompt>
     Implement FR-07 + NFR-06: a through-the-wire `WebApplicationFactory` seam slice test in

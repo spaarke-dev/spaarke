@@ -19,7 +19,7 @@ if (typeof (global as any).TextEncoder === 'undefined') (global as any).TextEnco
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 if (typeof (global as any).TextDecoder === 'undefined') (global as any).TextDecoder = NodeTextDecoder;
 import React, { act } from 'react';
-import { render } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
@@ -150,16 +150,34 @@ beforeEach(() => {
   captured.onAttachmentsChanged = undefined;
 });
 
-describe('FIX #7: an Assistant file upload auto-loads into Compose', () => {
-  it('auto-dispatches the compose upload-seed mount when a chat file finishes uploading (no revise, no chip)', async () => {
+// R4-4 (UAT 2026-07-19): the FIX #7 auto-open-on-attach was REVERTED (owner: uploading 2 files
+// spawned 2 Compose tabs). Uploading no longer auto-mounts Compose; opening in Compose is now the
+// on-demand "Revise in Compose" tray action.
+describe('R4-4: an Assistant file upload does NOT auto-load into Compose', () => {
+  it('does NOT dispatch a compose mount automatically when a chat file finishes uploading', async () => {
     renderPane();
 
     await driveChatUpload('brief.docx');
 
+    expect(composeUploadOpens()).toHaveLength(0);
+  });
+
+  it('opens the file in Compose only when "Revise in Compose" is clicked (on demand)', async () => {
+    renderPane();
+
+    await driveChatUpload('brief.docx');
+    expect(composeUploadOpens()).toHaveLength(0);
+
+    // The Revise affordance appears in the files tray once the upload is promoted/indexed.
+    const reviseBtn = await screen.findByTestId('files-revise-button');
+    await act(async () => {
+      fireEvent.click(reviseBtn);
+    });
+
     const opens = composeUploadOpens();
-    expect(opens).toHaveLength(1); // exactly one mount — deduped, no stacking
-    const compose = (opens[0].widgetData as { compose?: { upload?: Record<string, unknown> } }).compose ?? {};
-    expect(compose.upload).toBeDefined();
+    expect(opens).toHaveLength(1);
+    const compose =
+      (opens[0].widgetData as { compose?: { upload?: Record<string, unknown> } }).compose ?? {};
     expect(compose.upload!.sessionFileId).toBe(SESSION_FILE_ID);
     expect(compose.upload!.sessionId).toBe(CHAT_SESSION);
     expect(compose.upload!.fileName).toBe('brief.docx');
