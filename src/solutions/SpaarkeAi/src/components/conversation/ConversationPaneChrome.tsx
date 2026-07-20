@@ -182,6 +182,10 @@ const useStyles = makeStyles({
     minWidth: "auto",
     flexShrink: 0,
   },
+  filesReviseButton: {
+    marginLeft: "auto",
+    flexShrink: 0,
+  },
   filesAttachedIndicatorText: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
@@ -434,11 +438,17 @@ export function RefinementChipBar(props: {
 export function UploadProgressIndicator(props: {
   attaching: boolean;
   classifying: boolean;
+  /** R4-10: a running chip capability (e.g. Summarize) with no upload/classify stage of its own. */
+  working?: boolean;
 }): React.JSX.Element | null {
   const styles = useStyles();
-  if (!props.attaching && !props.classifying) return null;
-  // Attach precedes classify; if both are somehow set, surface the earlier stage.
-  const label = props.attaching ? "Attaching file…" : "Classifying file…";
+  if (!props.attaching && !props.classifying && !props.working) return null;
+  // Attach precedes classify precedes a generic capability run.
+  const label = props.attaching
+    ? "Attaching file…"
+    : props.classifying
+      ? "Classifying file…"
+      : "Working…";
   return (
     <div
       className={styles.uploadProgressIndicator}
@@ -472,9 +482,11 @@ export function FilesAttachedIndicator(props: {
   promotedCount: number;
   /** Per-file details for the expandable list (optional; when absent, header-only as before). */
   files?: ReadonlyArray<AttachedFileSummary>;
+  /** R4-4 (UAT 2026-07-19): open the attached file(s) in Compose to revise them (on demand). */
+  onRevise?: () => void;
 }): React.JSX.Element {
   const styles = useStyles();
-  const { uploadedFileCount, promotedCount, files } = props;
+  const { uploadedFileCount, promotedCount, files, onRevise } = props;
   const [expanded, setExpanded] = React.useState(false);
   const canExpand = !!files && files.length > 1;
   const headerText =
@@ -513,6 +525,19 @@ export function FilesAttachedIndicator(props: {
           <Text className={styles.filesAttachedIndicatorHint} data-testid="files-promoted-indicator">
             {`(${promotedCount} indexed)`}
           </Text>
+        )}
+        {/* R4-4: on-demand "Revise in Compose" — replaces the removed auto-open-on-attach. */}
+        {onRevise && (
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<EditRegular />}
+            className={styles.filesReviseButton}
+            onClick={onRevise}
+            data-testid="files-revise-button"
+          >
+            Revise in Compose
+          </Button>
         )}
       </div>
       {canExpand && expanded && (
