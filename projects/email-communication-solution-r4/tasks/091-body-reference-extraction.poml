@@ -2,7 +2,7 @@
   <metadata>
     <title>Association Engine — deterministic body/attachment reference-number extraction (UAT #7)</title>
     <phase>Wave 9 — Post-UAT remediation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>015,030</dependencies>
     <blocks>—</blocks>

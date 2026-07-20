@@ -69,7 +69,7 @@
 
 | # | Title | Sev | Task | State |
 |---|-------|:---:|:---:|---|
-| 7 | Body-embedded reference numbers not matched | P1 | **091** | Root cause CONFIRMED · decision locked (Suggest-only) · POML authored |
+| 7 | Body-embedded reference numbers not matched | P1 | **091** | ✅ FIXED (`d6d03f6cb`) — extraction + exact `referenceNumbers` filter; Suggest-only; +4 regression tests; gate clean. Non-blocking follow-ups: (a) escape embedded `"` in the RecordNameMatch provenance payload; (b) relocate #7 split-index regression tests to `tests/integration/regression/` at the eventual test-path reorg (task 050). |
 | 4 | `.eml` faithful original + extension/content-type | P1 | **092** | Scoped · decision locked (embed attachments) · POML authored |
 | 5 | Document Profile on-demand archive gap | P2 | **092** | Root cause CONFIRMED (on-demand enqueue gap; not a regression) · POML authored |
 | 2 | Attachment subgrid → Document Preview PCF | P2 | **093** | Buildable plan (reuse `RichFilePreviewDialog`) · POML authored |
