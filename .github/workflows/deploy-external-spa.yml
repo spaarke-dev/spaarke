@@ -34,6 +34,13 @@ jobs:
         working-directory: src/client/external-spa
         run: npm run build
 
+      # staticwebapp.config.json lives at the project root (source of truth) but the SWA
+      # runtime only reads it from the deployed content root. There is no public/ dir, so
+      # Vite does not copy it into dist — stage it here before upload (skip_app_build: true).
+      - name: Stage SWA runtime config into build output
+        working-directory: src/client/external-spa
+        run: cp staticwebapp.config.json dist/staticwebapp.config.json
+
       - name: Deploy to Azure Static Web Apps
         uses: Azure/static-web-apps-deploy@v1
         with:

@@ -3,7 +3,8 @@
     <title>Author staticwebapp.config.json + SWA deploy workflow</title>
     <phase>1 Hosting migration + routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE (executed by a parallel subagent, reviewed + committed by main session). Created src/client/external-spa/staticwebapp.config.json: navigationFallback rewrite→/index.html excluding /assets/* + static extensions (SPA deep-link support for the BrowserRouter migration in task 011); globalHeaders Referrer-Policy + CSP frame-ancestors 'self' (FR-04 explicit frame directive; no X-Frame-Options — CSP is the modern replacement) + X-Content-Type-Options nosniff. Reused the existing task-003 deploy-external-spa.yml scaffold (§11) and added ONE step to stage staticwebapp.config.json into dist/ before upload (Vite has no public/ dir so it isn't copied automatically; the SWA runtime only reads the config from the deployed content root). No /api reverse-proxy (BFF is a separate origin). Trigger stays workflow_dispatch (push/path auto-deploy is task 014). JSON + YAML validated (parse clean). Notes: notes/task-010-swa-config.md. No BFF/tests touched; no build run (external-spa build breakage DI-028-02 is unrelated + pre-existing).</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Deploy config + CI workflow (ci-workflows hot path)</rigor-reason>
     <model-tier>sonnet</model-tier>
