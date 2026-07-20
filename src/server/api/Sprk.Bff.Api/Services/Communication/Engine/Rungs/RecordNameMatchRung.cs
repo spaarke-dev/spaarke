@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -54,6 +55,17 @@ public sealed class RecordNameMatchRung : IAssociationRung
     /// <summary>Record types the <c>spaarke-records-index</c> contains (matter / project / invoice).</summary>
     private static readonly IReadOnlyList<string> SearchableRecordTypes = RecordEntityType.ValidTypes;
 
+    /// <summary>
+    /// Permissive reference-number token pattern (a CANDIDATE generator): a 2–6 letter prefix, a hyphen, a
+    /// digit, then alphanumerics/dots/hyphens ending on an alphanumeric (trailing punctuation trimmed).
+    /// Matches e.g. <c>PAT-942665</c>, <c>REAL-2026-123456.02</c>, <c>MAT-123</c>, <c>SPRK-456</c>. Precision
+    /// comes from the EXACT <c>referenceNumbers</c> server-side filter (eq), NOT this pattern — an over-match
+    /// (a phone number, an order id not in any record) simply resolves to no record and emits nothing.
+    /// </summary>
+    private static readonly Regex ReferenceTokenPattern =
+        new(@"\b[A-Za-z]{2,6}-\d(?:[A-Za-z0-9.\-]*[A-Za-z0-9])?\b",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
     public RecordNameMatchRung(
         IServiceScopeFactory scopeFactory,
         IOptions<RecordNameMatchOptions> options,
@@ -95,13 +107,24 @@ public sealed class RecordNameMatchRung : IAssociationRung
         if (corpora.IsEmpty)
             return Array.Empty<RungMatch>();
 
+        // Explicit reference-number tokens extracted from the FULL envelope (subject + body + attachment).
+        // These drive an EXACT server-side `referenceNumbers` filter so a number that appears ONLY in the body
+        // or an attachment resolves its record regardless of keyword ranking — closing the email-r4 UAT #7
+        // recall gap where a body-only reference never ranked into the whole-text retrieval window.
+        var refCandidates = ExtractReferenceCandidates(message, opts);
+
         var startTs = Stopwatch.GetTimestamp();
 
-        RecordSearchResponse response;
+        // Merge candidate records (by record id) from two retrievals so verification sees BOTH the ranked
+        // whole-text hits AND the exact reference-number hits.
+        var byId = new Dictionary<string, RecordSearchResult>(StringComparer.OrdinalIgnoreCase);
         using (var scope = _scopeFactory.CreateScope())
         {
             var matcher = scope.ServiceProvider.GetRequiredService<IRecordMatchingAi>();
-            var request = new RecordSearchRequest
+
+            // (1) Whole-text keyword retrieval — catches record NAME matches + reference numbers that rank
+            // (e.g. a number in the subject). Unchanged from the original behavior.
+            var wholeText = await matcher.SearchAsync(new RecordSearchRequest
             {
                 Query = query,
                 RecordTypes = SearchableRecordTypes,
@@ -111,17 +134,39 @@ public sealed class RecordNameMatchRung : IAssociationRung
                     HybridMode = RecordHybridSearchMode.KeywordOnly,
                     PreferKeywordRanking = true, // deterministic verification follows; don't let the reranker reorder
                 },
-            };
+            }, ct);
+            foreach (var r in wholeText.Results)
+                byId[r.RecordId] = r;
 
-            response = await matcher.SearchAsync(request, ct);
+            // (2) EXACT reference-number filter — ranking-independent recall for body/attachment references
+            // (#7). The index applies `referenceNumbers/any(r: r eq '<token>')`, so only records that actually
+            // carry one of the extracted numbers come back; verification below still confirms containment.
+            if (refCandidates.Count > 0)
+            {
+                var filtered = await matcher.SearchAsync(new RecordSearchRequest
+                {
+                    Query = string.Join(' ', refCandidates), // required, non-empty; also keyword-relevant
+                    RecordTypes = SearchableRecordTypes,
+                    Filters = new RecordSearchFilters { ReferenceNumbers = refCandidates },
+                    Options = new RecordSearchOptions
+                    {
+                        Limit = opts.Limit,
+                        HybridMode = RecordHybridSearchMode.KeywordOnly,
+                        PreferKeywordRanking = true,
+                    },
+                }, ct);
+                foreach (var r in filtered.Results)
+                    byId[r.RecordId] = r;
+            }
         }
 
-        var matches = VerifyAndMap(response, corpora, opts);
+        var candidateRecords = byId.Values.ToList();
+        var matches = VerifyAndMap(candidateRecords, corpora, opts);
         var elapsed = Stopwatch.GetElapsedTime(startTs);
 
         _logger.LogInformation(
-            "Rung 3.5 (record-name match) fired | QueryChars: {QueryChars}, Candidates: {CandidateCount}, Verified: {VerifiedCount}, ElapsedMs: {ElapsedMs}",
-            query.Length, response.Results.Count, matches.Count, (long)elapsed.TotalMilliseconds);
+            "Rung 3.5 (record-name match) fired | QueryChars: {QueryChars}, RefCandidates: {RefCandidates}, Candidates: {CandidateCount}, Verified: {VerifiedCount}, ElapsedMs: {ElapsedMs}",
+            query.Length, refCandidates.Count, candidateRecords.Count, matches.Count, (long)elapsed.TotalMilliseconds);
 
         return matches;
     }
@@ -150,6 +195,53 @@ public sealed class RecordNameMatchRung : IAssociationRung
     }
 
     /// <summary>
+    /// Extracts distinct reference-number candidate tokens from subject + body + attachment for the EXACT
+    /// <c>referenceNumbers</c> filter (email-r4 UAT #7). Both the as-authored token and its upper-case form are
+    /// emitted because the Azure AI Search <c>eq</c> filter is case-sensitive and record numbers are stored
+    /// upper-cased. Bounded by <see cref="RecordNameMatchOptions.MaxReferenceCandidates"/>; a token whose
+    /// alphanumeric-collapsed length is below <see cref="RecordNameMatchOptions.MinNumberLength"/> is dropped as
+    /// too weak. Best-effort (NFR-06): a regex timeout yields no candidates for that section.
+    /// </summary>
+    private static IReadOnlyList<string> ExtractReferenceCandidates(NormalizedMessage message, RecordNameMatchOptions opts)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var candidates = new List<string>();
+
+        void Scan(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text) || candidates.Count >= opts.MaxReferenceCandidates)
+                return;
+
+            try
+            {
+                foreach (Match m in ReferenceTokenPattern.Matches(text))
+                {
+                    var token = m.Value;
+                    if (CollapseAlphanumeric(token).Length < opts.MinNumberLength)
+                        continue;
+
+                    foreach (var variant in new[] { token, token.ToUpperInvariant() })
+                    {
+                        if (candidates.Count >= opts.MaxReferenceCandidates)
+                            return;
+                        if (seen.Add(variant))
+                            candidates.Add(variant);
+                    }
+                }
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // Defensive: treat a pathological input as yielding no candidates for this section (NFR-06).
+            }
+        }
+
+        Scan(message.Subject);
+        Scan(message.BodyText);
+        Scan(message.AttachmentText);
+        return candidates;
+    }
+
+    /// <summary>
     /// Deterministically verifies each index candidate against the location-scoped email corpora and maps hits
     /// to <see cref="RungMatch"/>. A candidate qualifies when its NAME (normalized token subsequence, subject to
     /// the length/token guards) OR a reference NUMBER (normalized alphanumeric) appears — with confidence tiered
@@ -158,11 +250,11 @@ public sealed class RecordNameMatchRung : IAssociationRung
     /// confidence; returns the top N by confidence (so subject matches survive the cap over attachment noise).
     /// </summary>
     private IReadOnlyList<RungMatch> VerifyAndMap(
-        RecordSearchResponse response, MatchCorpora corpora, RecordNameMatchOptions opts)
+        IReadOnlyList<RecordSearchResult> results, MatchCorpora corpora, RecordNameMatchOptions opts)
     {
         var best = new Dictionary<(string Field, Guid Id), RungMatch>();
 
-        foreach (var result in response.Results)
+        foreach (var result in results)
         {
             var field = RegardingFieldMap.FieldFor(result.RecordType);
             if (field is null)
