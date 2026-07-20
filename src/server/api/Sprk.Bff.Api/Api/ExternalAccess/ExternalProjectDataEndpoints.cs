@@ -1,6 +1,9 @@
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -59,6 +62,19 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalCollectionResponse<ExternalDocumentDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .AddExternalCallerAuthorizationFilter();
+
+        // GET /api/v1/external/projects/{id}/documents/{documentId}/content — download document bytes.
+        // Authz-before-stream (broker-only, app-only): HasProjectAccess + document->project scoping are
+        // enforced BEFORE any SPE pointer resolution or Graph read (ADR-028 A1, NFR-03).
+        group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentContent)
+            .WithName("DownloadExternalProjectDocument")
+            .WithSummary("Download a Secure Project document's content (authz-before-stream, app-only)")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .AddExternalCallerAuthorizationFilter();
 
         // GET /api/v1/external/projects/{id}/todos
@@ -161,6 +177,82 @@ public static class ExternalProjectDataEndpoints
 
         var documents = await dataService.GetDocumentsAsync(id, ct);
         return Results.Ok(new ExternalCollectionResponse<ExternalDocumentDto> { Value = documents });
+    }
+
+    /// <summary>
+    /// Streams a document's content to an authorized external caller.
+    ///
+    /// <b>Authz-before-stream (highest-consequence property).</b> Authorization — project access AND
+    /// document→project scoping — is fully enforced BEFORE any SPE pointer resolution or Graph read.
+    /// An unauthorized caller receives 403 with NO bytes and NO Graph call. Broker-only: streaming uses
+    /// the existing app-only <see cref="SpeFileStore.DownloadFileAsync(string, string, CancellationToken)"/>
+    /// — NOT the OBO path — and no Graph pointer (driveId/itemId) is ever returned to the client.
+    /// </summary>
+    private static async Task<IResult> DownloadDocumentContent(
+        Guid id,
+        Guid documentId,
+        HttpContext httpContext,
+        ExternalDataService dataService,
+        IDocumentStorageResolver storageResolver,
+        SpeFileStore fileStore,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContext = GetCallerContext(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
+        // (1) Project-level access from the caller's participation set.
+        if (!callerContext.HasProjectAccess(id))
+        {
+            logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
+                callerContext.ContactId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "You do not have access to this project");
+        }
+
+        // (2) Document→project scoping — the requested document MUST belong to the requested project.
+        //     A mismatch OR a non-existent document is a uniform 403 (do not leak document existence).
+        //     This is an app-only Dataverse authorization read — it resolves NO Graph pointer.
+        var (documentProjectId, documentName) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
+        if (documentProjectId is null || documentProjectId.Value != id)
+        {
+            logger.LogWarning(
+                "[EXT-DOWNLOAD] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
+                callerContext.ContactId, documentId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "This document is not part of the requested project");
+        }
+
+        // ── AUTHORIZED — only now resolve SPE pointers (server-side) and stream app-only ──
+        try
+        {
+            var (driveId, itemId) = await storageResolver.GetSpePointersAsync(documentId, ct);
+
+            // App-only download (broker-only). MUST NOT be the OBO DownloadFileAsUserAsync path.
+            var stream = await fileStore.DownloadFileAsync(driveId, itemId, ct);
+            if (stream is null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found",
+                    detail: "Document content is not available.");
+            }
+
+            logger.LogInformation(
+                "[EXT-DOWNLOAD] Contact {ContactId} downloaded document {DocumentId} from project {ProjectId}",
+                callerContext.ContactId, documentId, id);
+
+            // application/octet-stream + attachment: force download of untrusted external content
+            // (no inline rendering). Pointers are never surfaced to the client.
+            var downloadName = string.IsNullOrWhiteSpace(documentName) ? documentId.ToString() : documentName;
+            return Results.File(stream, "application/octet-stream", fileDownloadName: downloadName);
+        }
+        catch (SdapProblemException ex)
+        {
+            // Post-authorization storage-state problems (document_not_found / no_file_attached /
+            // mapping_missing_*) — surface the resolver's stable code + status.
+            return Results.Problem(statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+        }
     }
 
     private static async Task<IResult> GetTodos(

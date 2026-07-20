@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-19 (tasks 022/021/023/028/025 COMPLETE = 12 tasks ✅; CIAM provisioner landed; next 027 xhigh download-authz)
+> **Last Updated**: 2026-07-20 (task 027 COMPLETE = 13 tasks ✅; download authz-before-stream landed; both xhigh done; next 029)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 + 020/024/026 + 022/021/023/028/025 COMPLETE**. 12 tasks ✅. |
-| **Step** | 025 done; next 027 (last xhigh) |
-| **Status** | 12 ✅ (001, 002, 003, 004, 020, 021, 022, 023, 024, 025, 026, 028) |
-| **Next Action** | **027** (external doc download endpoint, **xhigh** — authz-before-stream: enforce `sprk_externalrecordaccess` + document→project scoping BEFORE resolving Graph pointers/streaming; reuse `SpeFileStore.DownloadFileAsync`; endpoint keyed on `documentId`, no driveId/driveItemId exposed; **negative 403/no-bytes test is the single highest-consequence property**; deps 021+023 ✅, on ExternalProjectDataEndpoints). Then **029** (core-user invite trigger, deps 025) → **030** (unit tests for CIAM surface, deps 020/021/022/023/025/026/027) → **031** (deploy BFF). **OPEN ESCALATIONS (notes/defer-issues.md)**: DI-028-01 CIAM SPA+BFF-API app regs (ops — blocks live auth + 031 substitution); DI-028-02 external-spa build (blocks 014); DI-025-01 provisioner partial-failure hardening (post-R1). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert. |
+| **Task** | none active — **Phase 0 + 020/024/026 + 022/021/023/028/025/027 COMPLETE**. 13 tasks ✅. Both xhigh tasks (025, 027) done. |
+| **Step** | 027 done; next 029 |
+| **Status** | 13 ✅ (001, 002, 003, 004, 020, 021, 022, 023, 024, 025, 026, 027, 028) |
+| **Next Action** | **029** (core-user "Invite to Secure Workspace" trigger — new command + wiring that calls the 025 provisioner flow; deps 025 ✅). Then **030** (unit tests for the whole CIAM external-access surface — asserts 021 scheme-pin negatives, 023 oid-resolution matrix, 025 idempotency + BuildCiamUser payload, 026, **027 authz-before-stream 403/no-bytes** — the highest-consequence assertion; deps 020/021/022/023/025/026/027 ✅) → **031** (deploy BFF + verify size/CVE; deps 030). **OPEN ESCALATIONS (notes/defer-issues.md)**: DI-028-01 CIAM SPA+BFF-API app regs (ops — blocks live auth + 031 substitution); DI-028-02 external-spa build (blocks 014); DI-025-01 provisioner partial-failure hardening (post-R1). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert. |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

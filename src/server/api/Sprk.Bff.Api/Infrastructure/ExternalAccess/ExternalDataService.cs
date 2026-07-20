@@ -199,6 +199,25 @@ public class ExternalDataService
         return rows.Select(MapDocument).ToList();
     }
 
+    /// <summary>
+    /// Returns the document's parent project id and display name — used by the external download
+    /// endpoint (task 027) for document→project authorization scoping BEFORE any SPE pointer
+    /// resolution or Graph content read. App-only Dataverse read; returns (null, null) when the
+    /// document does not exist. Does NOT expose any Graph pointer (driveId/itemId).
+    /// </summary>
+    public async Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(
+        Guid documentId, CancellationToken ct = default)
+    {
+        var select = "sprk_documentname,_sprk_project_value";
+        var url = $"{GetApiUrl()}/sprk_documents({documentId})?$select={select}";
+
+        var row = await GetSingleAsync<DocumentRow>(url, ct);
+        if (row is null) return (null, null);
+
+        var projectId = Guid.TryParse(row.SprkProjectidValue, out var pid) ? pid : (Guid?)null;
+        return (projectId, row.SprkName);
+    }
+
     // ---------------------------------------------------------------------------
     // To Do queries and mutations (smart-todo-decoupling-r3 FR-29)
     //

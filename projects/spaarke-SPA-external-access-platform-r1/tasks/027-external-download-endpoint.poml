@@ -3,7 +3,8 @@
     <title>Add app-only external document download endpoint (authz-before-stream)</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Added GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content in ExternalProjectDataEndpoints under AddExternalCallerAuthorizationFilter. AUTHZ-BEFORE-STREAM (the highest-consequence property) enforced by construction: (1) callerContext.HasProjectAccess(projectId) → 403; (2) new ExternalDataService.GetDocumentProjectAndNameAsync (app-only Dataverse read of sprk_documents._sprk_project_value) → 403 if the document's project ≠ the URL project OR the doc doesn't exist (uniform 403, no existence leak). ONLY after both pass: IDocumentStorageResolver.GetSpePointersAsync(documentId) then the EXISTING app-only SpeFileStore.DownloadFileAsync(driveId,itemId) — so an unauthorized caller triggers NO pointer resolution and NO Graph call (no bytes). Broker-only: app-only DownloadFileAsync, NOT the OBO DownloadFileAsUserAsync. No new SpeFileStore/DriveItemOperations download method. No driveId/driveItemId returned or added to any DTO (ExternalProjectDtos untouched). Response: Results.File(stream, application/octet-stream, fileDownloadName) — attachment forces download of untrusted content (no inline render); stream disposed by FileStreamHttpResult. Post-authz storage states (SdapProblemException: document_not_found 404 / no_file_attached + mapping_missing_* 409) mapped with stable code. Audit-logged (contact/doc/project). Build 0 errors; publish 45.69 MB (≤60, no new package). code-review+adr-check clean. Negative 403/no-bytes case asserted in task 030.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>External data-egress endpoint; authz-before-stream is the highest-consequence property</rigor-reason>
     <model-tier>sonnet</model-tier>

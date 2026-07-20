@@ -23,7 +23,7 @@
 | 024 | Add CIAM onboarding email template + method | 2 | STANDARD | sonnet/high | none | ✓ Group B | ✅ |
 | 025 | Implement admin-initiated CIAM provisioner | 2 | FULL | **opus**/**xhigh** | 022,004,024 | ✗ (multi-file wiring) | ✅ |
 | 026 | Remove vestigial synthetic SPE container grant | 2 | FULL | sonnet/high | none | ✗ (shares GrantEndpoint) | ✅ |
-| 027 | Add app-only external document download endpoint | 2 | FULL | sonnet/**xhigh** | 021,023 | ✗ (shares ExternalProjectDataEndpoints) | 🔲 |
+| 027 | Add app-only external document download endpoint | 2 | FULL | sonnet/**xhigh** | 021,023 | ✗ (shares ExternalProjectDataEndpoints) | ✅ |
 | 028 | Point external-spa at the CIAM authority | 2 | FULL | sonnet/high | 020 | ✗ (SPA auth config) | ✅ |
 | 029 | Core-user "Invite to Secure Workspace" trigger | 2 | FULL | sonnet/high | 025 | ✗ (new command + wiring) | 🔲 |
 | 030 | Unit tests for CIAM external-access surface | 2 | FULL (TEST) | sonnet/high | 020,021,022,023,025,026,027 | ✗ (spans files) | 🔲 |
