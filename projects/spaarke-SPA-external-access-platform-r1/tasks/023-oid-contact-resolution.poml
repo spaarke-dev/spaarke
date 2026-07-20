@@ -3,7 +3,8 @@
     <title>Resolve Contact by CIAM oid (extend filter + participation service)</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Extended (not forked) the single ExternalCallerAuthorizationFilter + ExternalParticipationService for stable-oid resolution (ADR-028 A1). Filter now reads oid (raw 'oid' + objectidentifier URI) + email; 401 if BOTH absent (escalation trigger); calls new ResolveExternalContactAsync(oid,email). Service: ResolveContactByOidAsync (Contact by sprk_externalobjectid — authoritative), ResolveContactRowByEmailAsync (returns contactId + current oid binding), BindOidToContactAsync (first-login PATCH, If-Match:* update-only, non-fatal). Resolution: oid-bound→by-oid (email ignored); unbound+email→bind+grant; email matches a Contact bound to a DIFFERENT oid→deny (no shared-email hijack); unknown→403. ContactRow extended with sprk_externalobjectid; ExternalCallerContext gains Oid. OData literals hardened (doubled quotes + URL-encode) on both queries. tid cache-keying unchanged (generic → CIAM tid works, ADR-009). ResolveContactByEmailAsync kept (delegates to row method). Build 0 errors; publish 45.69 MB (≤60, no package delta). code-review + adr-check clean. Negative cases asserted in task 030.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Auth identity resolution on the external surface (tags: auth)</rigor-reason>
     <model-tier>opus</model-tier>

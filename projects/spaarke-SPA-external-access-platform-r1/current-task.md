@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-19 (task 022 COMPLETE = 8 tasks ✅; CIAM Graph client landed; next 021)
+> **Last Updated**: 2026-07-19 (tasks 022/021/023 COMPLETE = 10 tasks ✅; CIAM Graph client + scheme-pin + oid-resolution landed; next 028)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **Phase 0 + 020/024/026 + 022 COMPLETE**. 8 tasks ✅. |
-| **Step** | 022 done; ready for 021/023/028 (Wave 2.2) |
-| **Status** | 8 ✅ (001, 002, 003, 004, 020, 022, 024, 026) |
-| **Next Action** | Continue Phase 2 auth chain (Wave 2.2, all deps met): **021** (pin `AuthSchemes.Ciam` on `/api/v1/external` group — deps 020 ✅), **023** (resolve Contact by CIAM `oid` via `sprk_externalobjectid`; extend `ExternalCallerAuthorizationFilter`/`ExternalParticipationService` — deps 004+020 ✅), **028** (external-spa → CIAM authority — deps 020 ✅). These are `parallel-safe:false` (share endpoint/filter files); run sequentially. Then 025 (provisioner, xhigh, consumes 022's `CiamGraphClientFactory`) → 027 (download authz, xhigh) → 030 (tests) → 031 (deploy). |
+| **Task** | none active — **Phase 0 + 020/024/026 + 022/021/023 COMPLETE**. 10 tasks ✅. |
+| **Step** | 023 done; ready for 028, then 025/027 (xhigh) |
+| **Status** | 10 ✅ (001, 002, 003, 004, 020, 021, 022, 023, 024, 026) |
+| **Next Action** | **028** (external-spa → CIAM authority — SPA auth config, deps 020 ✅; frontend `src/client/external-spa`, separate from BFF). Then the two `xhigh` correctness-critical BFF tasks: **025** (admin-initiated CIAM provisioner — consumes 022's `CiamGraphClientFactory.CreateClientForAppAsync`, calls Graph POST /users, persists oid to `Contact.sprk_externalobjectid`, sends 024's onboarding email; deps 022+004+024 ✅) → **027** (external doc download, authz-before-stream + negative test; deps 021+023 ✅) → **029** (invite trigger, deps 025) → **030** (tests) → **031** (deploy). Runtime prereq for 031: BFF MI needs KV 'Secrets User' on spaarke-spekvcert (022 cert load). |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

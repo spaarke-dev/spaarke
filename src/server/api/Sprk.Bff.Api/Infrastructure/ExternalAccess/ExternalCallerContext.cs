@@ -16,9 +16,16 @@ public sealed class ExternalCallerContext
     public required Guid ContactId { get; init; }
 
     /// <summary>
-    /// The external user's email / UPN (from portal token claims).
+    /// The external user's email / UPN (from token claims). May be empty for an oid-resolved
+    /// CIAM caller whose token carries no email claim.
     /// </summary>
     public required string Email { get; init; }
+
+    /// <summary>
+    /// The stable CIAM object id ('oid') the caller was resolved by (Contact.sprk_externalobjectid),
+    /// per ADR-028 Amendment A1. Null on a transitional email-only resolution.
+    /// </summary>
+    public string? Oid { get; init; }
 
     /// <summary>
     /// List of active project participations for this Contact.
