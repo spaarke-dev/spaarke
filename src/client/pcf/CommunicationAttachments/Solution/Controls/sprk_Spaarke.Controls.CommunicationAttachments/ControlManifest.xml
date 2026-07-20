@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.0.0" display-name-key="Communication Attachments" description-key="Virtual PCF: attachment list for sprk_communication. Replaces the OOB attachment subgrid — lists the communication's sprk_communicationattachment rows (name + type; inline-image types filtered out) and on row click opens the shared RichFilePreviewDialog for that attachment's sprk_document (preview URL via BFF; .eml/message-rfc822 routes to download/open). Auth via @spaarke/auth (ADR-028). Place in the OOB form where the attachment subgrid was." control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.0.0" display-name-key="Communication Attachments" description-key="Communication attachments preview list." control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
     </external-service-usage>
-    <property name="boundField" display-name-key="Placement Field" description-key="Bind to any text column on the form (e.g. sprk_name). Used only as a placement anchor; the control reads the communication id from page context and queries attachments via the Web API." of-type="SingleLine.Text" usage="bound" required="false" />
-    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL. When empty, resolved from the Dataverse environment variable sprk_BffApiBaseUrl." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID. When empty, resolved from the Dataverse environment variable sprk_TenantId." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication. When empty, resolved from the Dataverse environment variable sprk_MsalClientId." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction. When empty, resolved from the Dataverse environment variable sprk_BffApiAppId." of-type="SingleLine.Text" usage="input" required="false" />
-    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="When true (default), displays the PCF version footer at the bottom of the control. Set to false to hide it on production forms." of-type="TwoOptions" usage="input" required="false" default-value="true" />
+    <property name="boundField" display-name-key="Placement Field" description-key="Placement anchor. Bind to any text column on the form." of-type="SingleLine.Text" usage="bound" required="false"/>
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="API base URL. Falls back to the sprk_BffApiBaseUrl environment variable." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID. Falls back to the sprk_TenantId environment variable." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Client application ID. Falls back to the sprk_MsalClientId environment variable." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="bffAppId" display-name-key="API App ID" description-key="API application ID. Falls back to the sprk_BffApiAppId environment variable." of-type="SingleLine.Text" usage="input" required="false"/>
+    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="Show the version footer at the bottom of the control." of-type="TwoOptions" usage="input" required="false" default-value="true"/>
     <resources>
-      <code path="bundle.js" order="1" />
-      <css path="styles.css" order="1" />
-      <platform-library name="React" version="16.14.0" />
-      <platform-library name="Fluent" version="9.46.2" />
+      <code path="bundle.js" order="1"/>
+      <css path="styles.css" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
     </resources>
     <feature-usage>
-      <uses-feature name="WebAPI" required="true" />
-      <uses-feature name="Utility" required="true" />
-      <uses-feature name="Navigation" required="true" />
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+      <uses-feature name="Navigation" required="true"/>
     </feature-usage>
-    <built-by name="pac" version="1.51.1" />
+    <built-by name="pac" version="1.51.1"/>
   </control>
 </manifest>
