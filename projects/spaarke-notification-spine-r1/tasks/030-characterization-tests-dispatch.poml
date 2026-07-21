@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Characterization tests pinning current chat/playbook dispatch behavior (pre-Layer-A extraction)</title>
+    <phase>3 Layer A + Notification flip</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Test-authoring task, no production code changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical characterization-test authoring against three already-read executors; no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Precedes 031 extraction — 031 is gated on this task's tests existing and passing first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, integration-test, testing</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+
+  <prompt>Author characterization tests that pin the CURRENT, shipped behavior of the three node executors task 031 will extract Layer A behind (CreateNotificationNodeExecutor, CreateTaskNodeExecutor, UpdateRecordNodeExecutor) BEFORE any extraction happens, so that 031's refactor is provably behavior-neutral: if these tests still pass unmodified after the extraction, the extraction changed nothing observable.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in xUnit/Moq/FluentAssertions characterization testing and the ADR-038 seam-test category (production types across a convergence seam, not a router-unit test).</role>
+
+  <goal>A new `tests/integration/seam/**` test suite exists that exercises CreateNotificationNodeExecutor.ExecuteAsync/Validate, CreateTaskNodeExecutor.ExecuteAsync/Validate, and UpdateRecordNodeExecutor.ExecuteAsync/Validate via production `NodeExecutionContext` objects (real `TemplateEngine`, real entity-building code; only the Dataverse-boundary services — `IGenericEntityService` / `IFieldMappingDataverseService` — are test doubles, consistent with the existing unit-test convention). The suite pins the exact `NodeOutput` shape and exact Dataverse `Entity` field sets written for the happy path AND the documented edge cases of each executor. All new tests pass against the CURRENT (pre-031) code with zero production changes in this task.</goal>
+
+  <context>
+    <background>
+      FR-07 requires that Layer-A extraction (task 031) leave chat/playbook dispatch behavior unchanged. The proof mechanism is characterization tests written FIRST, against the shipped code, asserting exact current behavior — then task 031's acceptance criterion is that these same tests pass UNMODIFIED after the extraction. This is Feathers' characterization-test pattern, deliberately distinct from a redesign-driving unit test: the goal is to pin what IS, not what SHOULD be.
+
+      A gap discovered during planning (2026-07-20 verification): `CreateNotificationNodeExecutor` has ZERO existing unit test coverage — there is no `CreateNotificationNodeExecutorTests.cs` anywhere under `tests/`. `CreateTaskNodeExecutor` and `UpdateRecordNodeExecutor` DO have existing unit tests (`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs`, `UpdateRecordNodeExecutorTests.cs`) that already exercise much of their happy-path behavior — but those are unit tests (mock-heavy, `tests/unit/**`), not the `tests/integration/seam/**` vertical-slice category ADR-038 requires as DoD for dispatch-spine changes. This task's output is NEW seam-category tests; it does not replace the existing unit tests, and must not modify them.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeExecutionContext.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/UpdateRecordNodeExecutorTests.cs</file>
+      <file>tests/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Every new test in this task lives under `tests/integration/seam/**` (the vertical-slice seam KEEP category per `tests/CLAUDE.md`: "end-to-end across an AI convergence seam ... with production types — router-unit ≠ working slice"). Do not place these under `tests/unit/**`.</constraint>
+    <constraint source="ADR-038">No banned test shapes (17-ban list in `tests/CLAUDE.md`): no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no constructor null-check tests, no mirror/coverage-filler assertions. Every test asserts an observable behavior (returned `NodeOutput` shape, or the `Entity` object passed to `CreateAsync`/`UpdateRecordFieldsAsync`) that would break if the extraction in 031 silently changed it.</constraint>
+    <constraint source="project">Zero production code changes in this task — this is characterization-only. If a test reveals behavior that looks like an unintended defect (e.g., an inconsistency in the idempotency check or the recipient-resolution fallback), pin the CURRENT behavior anyway and flag it via the escalation trigger rather than "fixing" it here.</constraint>
+    <constraint source="project">Use production `NodeExecutionContext` objects built with real `PlaybookNodeDto`/`AnalysisAction`/`ResolvedScopes` values (not a fake context type) — the seam-test category exists specifically because router/executor-unit tests using ad hoc fakes have historically diverged from the working slice (E-40 rationale in `tests/CLAUDE.md`). Only the outermost Dataverse-boundary dependencies (`IGenericEntityService`, `IFieldMappingDataverseService`) are Moq doubles, matching the existing unit-test convention for these executors.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing executor unit-test mock convention" location="tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs">Mock `ITemplateEngine`, `IGenericEntityService`/`IFieldMappingDataverseService`, `ILogger&lt;T&gt;`; assert on the `Entity` captured via `Mock.Setup(...).Callback&lt;Entity,...&gt;(...)` or `Verify` argument matchers, and on the returned `NodeOutput`'s structured data.</pattern>
+      <pattern name="Seam-test description" location="tests/CLAUDE.md">"vertical-slice seam: end-to-end across an AI convergence seam (dispatch→executor→ledger→disposition) with production types" — for this task, the slice is `NodeExecutionContext` (production) → executor `ExecuteAsync` (production) → `Entity` built/created (asserted).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the three executors' full source (already available in this project's substrate review) and each executor's existing unit tests (CreateTask, UpdateRecord) to catalogue every distinct code path: happy path, validation-failure path, and every documented edge case (see acceptance criteria below for the closed set).</step>
+    <step order="2">Create `tests/integration/seam/Ai/Nodes/` and author one test class per executor: `CreateNotificationNodeExecutorSeamTests.cs`, `CreateTaskNodeExecutorSeamTests.cs`, `UpdateRecordNodeExecutorSeamTests.cs`.</step>
+    <step order="3">For each test, construct a production `NodeExecutionContext` (real `PlaybookNodeDto` with a realistic `ConfigJson`, real `ExecutorType`, a real `ResolvedScopes` instance, `RunId`/`PlaybookId`/`TenantId` populated) and a real `TemplateEngine` instance (no mock — template rendering is exactly the behavior being pinned).</step>
+    <step order="4">Mock only `IGenericEntityService` / `IFieldMappingDataverseService` at the Dataverse boundary; capture the `Entity`/field-dictionary passed to `CreateAsync`/`UpdateRecordFieldsAsync` and assert its exact field set and values.</step>
+    <step order="5">Assert the exact `NodeOutput` shape returned (Success/Error, `ErrorCode`, structured `StructuredData` fields, `TextContent`) for every case in the acceptance criteria.</step>
+    <step order="6">Run `dotnet test tests/integration/seam/` and confirm every new test passes against the CURRENT (pre-031) code with zero production edits.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If characterizing a code path surfaces behavior that looks like an unintended defect (e.g., an idempotency check that appears to skip the wrong record, or a recipient-resolution fallback that silently swallows a required value) rather than a legitimate current contract, STOP and escalate rather than treating the defect as the baseline to preserve — pinning a bug as "correct behavior" would poison 031's safety net (root §6).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Ai/Nodes/CreateNotificationNodeExecutorSeamTests.cs</output>
+    <output type="test">tests/integration/seam/Ai/Nodes/CreateTaskNodeExecutorSeamTests.cs</output>
+    <output type="test">tests/integration/seam/Ai/Nodes/UpdateRecordNodeExecutorSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given CreateNotificationNodeExecutor with a valid config (title, body, category, recipientId), when ExecuteAsync runs, then the created `appnotification` Entity has exactly the fields the production BuildNotificationEntity sets today (title, body, priority, toasttype, ownerid, ttlinseconds=604800, sprk_category, sprk_source="playbook", sprk_playbookrunid) and NodeOutput.Ok returns structured data {notificationId, title, recipientId, category, skipped=false}.</criterion>
+    <criterion testable="true">Given CreateNotificationNodeExecutor with `regardingId`+`category` matching an existing unread notification (duplicate), when ExecuteAsync runs, then CreateAsync is NEVER called and NodeOutput.Ok returns {skipped=true, reason="Duplicate unread notification exists", ...}.</criterion>
+    <criterion testable="true">Given CreateNotificationNodeExecutor with `iterateItems=true` and an upstream `items` array, when ExecuteAsync runs, then one notification is created per non-duplicate, non-skipped item, and the returned structured data {created, skipped, totalItems} matches the input array exactly.</criterion>
+    <criterion testable="true">Given CreateNotificationNodeExecutor where no recipientId can be resolved (config omits recipientId AND run-context userId is absent), when ExecuteAsync runs, then NodeOutput.Error is returned with `NodeErrorCodes.ValidationFailed` and message "Cannot determine notification recipient: recipientId is required" — this is the negative/authorization case (no notification is ever created for an unresolvable recipient).</criterion>
+    <criterion testable="true">Given CreateNotificationNodeExecutor with missing/malformed ConfigJson, when Validate runs, then it returns Failure with the exact current error messages ("CreateNotification node requires configuration (ConfigJson)" / "Notification title is required" / "Notification body is required" / JSON parse error message).</criterion>
+    <criterion testable="true">Given CreateTaskNodeExecutor with a valid config (subject, description, dueDate, regardingObjectId+Type, ownerId), when ExecuteAsync runs, then the created `task` Entity has exactly {subject, description, scheduledend, regardingobjectid, ownerid} and NodeOutput.Ok structured data {taskId, subject, description, createdAt}.</criterion>
+    <criterion testable="true">Given CreateTaskNodeExecutor where `IGenericEntityService.CreateAsync` throws, when ExecuteAsync runs, then the executor does NOT propagate the exception — it returns NodeOutput.Ok with `taskId=Guid.Empty` (the current "degraded success" behavior), pinned exactly as-is.</criterion>
+    <criterion testable="true">Given UpdateRecordNodeExecutor with typed `fieldMappings` (String, Choice, Boolean, Number types), when ExecuteAsync runs, then `UpdateRecordFieldsAsync` is called with the exact coerced payload (Choice label→int via options map or metadata fallback; Boolean truthy/falsy parsing; Number int-then-decimal parsing) matching current `CoerceFieldValue` behavior.</criterion>
+    <criterion testable="true">Given UpdateRecordNodeExecutor with legacy flat `fields` dict, when ExecuteAsync runs, then `HeuristicParse` int→decimal→bool→string precedence is pinned exactly as today.</criterion>
+    <criterion testable="true">Given UpdateRecordNodeExecutor where a `type:"string"` mapping targets a Choice column (per resolved `EntityMetadataDto`) and the rendered value matches no option label or numeric value, when ExecuteAsync runs, then it returns NodeOutput.Error with `NodeErrorCodes.ValidationFailed` and the `FieldCoercionException` message — the FAIL LOUD contract, never a silent string pass-through — this is the negative/authorization case for UpdateRecord.</criterion>
+    <criterion testable="true">All new seam tests pass with zero changes to `CreateNotificationNodeExecutor.cs`, `CreateTaskNodeExecutor.cs`, or `UpdateRecordNodeExecutor.cs` in this task (`git diff` on the three production files is empty at task close).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per root CLAUDE.md §8's TEST-MODIFYING override row, this task's declared rigor is STANDARD but code-review + adr-check run UNCONDITIONALLY at Step 9.5 anyway because it adds files under `tests/**` and carries the `testing`/`integration-test` tags — the STANDARD rigor level does not skip those gates for this task. Spec refs: FR-07 pre-req, NFR-07.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

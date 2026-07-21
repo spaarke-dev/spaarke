@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>R3-P1 Contract-Lock Note — Deliver communication-arrived Contract to messaging-r3</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:024,021,022</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation deliverable — a written contract note summarizing already-shipped contracts (013/020/021/022/024); no code changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Faithful summarization of already-shipped contracts into a written note — not a design or judgment task.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>The deliverable depends on 021/022/024 having shipped their FINAL contract shapes — drafting before they land risks documenting a stale/incorrect shape and misleading R3's task 045.</parallel-reason>
+    <deps>024,021,022</deps>
+    <tags>docs</tags>
+    <estimated-effort>2h</estimated-effort>
+  </metadata>
+
+  <prompt>Deliver the written contract-lock note to messaging-communication-app-r3 confirming the shipped communication-arrived trigger, envelope, consumer API, and degrade semantics — the formal answer their task 045's P1 gate is blocked on.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Precise technical writer — this note is read by a different project team as an authoritative contract; cite exact shipped file paths and API shapes, not paraphrases.</role>
+
+  <goal>A contract-lock note exists at messaging-communication-app-r3's notes directory (the sibling worktree at C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/) confirming, with citations to the ACTUAL shipped code from tasks 013/020/021/022/024: (1) trigger = persistence, all channels, capture and send identically; (2) the spine emits, R3 consumes only — R3 must NOT wire its own communication-arrived producer; (3) the exact envelope shape (kind, communicationId, threadId, channel, direction, senderDisplay, optional privacy-gated snippet, badgeDelta); (4) the consumer API — the shared subscriber library's public contract (task 021) plus the pending/poll fallback endpoint (task 022); (5) degrade semantics (ADR-032 null-object — SignalR off falls back to the poll endpoint). The note formalizes R3's existing pre-implementation alignment note and unblocks their task 045.</goal>
+
+  <context>
+    <background>
+      Spec FR-19. R3 already has a PRE-implementation alignment note on file (C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-alignment.md, dated 2026-07-20) recording their unresolved questions and this project's design-time answers. This task delivers the POST-implementation FORMAL lock — citing the actual shipped code (not the design-time promise) — so R3's task 045 can move from "blocked" to "verify-only" per that alignment note's own text ("Task 045's step 2... should be reconciled at P1 to 'verify the spine's emit fires'... Task 045 stays blocked until the spine's spec formalizes the above; this note is the design-level confirmation its escalation trigger asks for." — this task is the FOLLOW-UP formal confirmation once code has shipped).
+    </background>
+    <relevant-files>
+      <file>C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-alignment.md</file>
+      <file>projects/spaarke-notification-spine-r1/spec.md</file>
+      <file>src/client/shared/Spaarke.Notifications/README.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Notifications/NotificationsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationArrivedProducer.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Cite the ACTUAL shipped file paths, method/endpoint signatures, and envelope field names from tasks 013/020/021/022/024 — do not restate the design-time promise from R3's existing alignment note as if it were confirmed fact without verifying it against the shipped code first.</constraint>
+    <constraint source="project">State explicitly that R3 MUST NOT wire its own communication-arrived producer (spine emits; R3 consumes only) — this is a MUST NOT rule from spec/root CLAUDE.md, not a suggestion.</constraint>
+    <constraint source="project">Deliver the note into R3's own notes directory (the sibling worktree), not only into this project's notes — the deliverable's purpose is R3 acknowledgment at their P1, which requires the note to live where their team looks for it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-notification-spine-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the actual shipped shapes from tasks 013 (envelope types), 020 (negotiate endpoint + delivery entrypoint), 021 (subscriber library public API / README), 022 (pending endpoint), and 024 (communication-arrived producer trigger points) — verify each against code, not against this project's spec/plan promises.</step>
+    <step order="2">Read R3's existing pre-implementation alignment note (C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-alignment.md) to match its structure and answer its open items with confirmed, cited facts.</step>
+    <step order="3">Write the contract-lock note covering: trigger=persistence (cite the exact persist call sites task 024 wired), spine-emits/R3-consumes (explicit MUST NOT), the envelope shape (cite task 013's types), the consumer API (cite task 021's library README + task 022's endpoint route), and degrade semantics (cite the ADR-032 null-object path).</step>
+    <step order="4">Deliver the note to C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-lock.md.</step>
+    <step order="5">Mirror a copy into this project's own notes/handoffs/ for local traceability.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 025 to ✅ completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of tasks 013/020/021/022/024's shipped shape materially contradicts what R3's existing alignment note assumed (e.g. a different envelope field set, a different endpoint route), STOP and flag the discrepancy explicitly in the note rather than quietly reconciling it — R3's task 045 needs to know if their assumption was wrong, not just the corrected answer.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Shell (file delivery to the sibling worktree path)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-lock.md</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/handoffs/ (mirrored copy)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the contract-lock note is read, when checked against task 024's shipped code, then its trigger description (persistence, all channels, capture+send identically) matches the actual wired call sites — not a paraphrase of the design-time spec.</criterion>
+    <criterion testable="true">Given the note states the consumer API, when checked against task 021's library and task 022's endpoint, then the cited method names / route / envelope fields match the shipped code exactly.</criterion>
+    <criterion testable="true">Given the note is reviewed, when checked for the ownership statement, then it explicitly states R3 MUST NOT wire its own communication-arrived producer.</criterion>
+    <criterion testable="true">Given the note is delivered, when its location is checked, then it exists at C:/code_files/spaarke-wt-messaging-communication-app-r3/projects/messaging-communication-app-r3/notes/notification-spine-contract-lock.md (R3's own notes directory, not only this project's).</criterion>
+    <criterion testable="true">Given degrade semantics are described, when checked against task 022's endpoint and the ADR-032 null-object pattern, then the note correctly states that SignalR-off falls back to the poll endpoint with no signal loss.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is the FR-19 deliverable — its success is measured by R3 unblocking their task 045, not by code correctness (there is no code in this task). Keep it precise and citation-heavy; R3's team will act on it directly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

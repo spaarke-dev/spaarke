@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Create the `sprk_` Kind-Typed Notification Outbox Dataverse Table</title>
+    <phase>1 Layer B + Contract + ADR-047</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New Dataverse schema deployment task; not a `.cs`/`.ts` code-implementation task.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema creation follows an established skill pattern (`dataverse-create-schema`); no architectural judgment beyond the column-set proposal.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, fields</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+  <prompt>Create a new `sprk_` Dataverse table that is the durable, per-user, `kind`-typed pending-notification outbox — the source of truth Layer B (the outbox service, task 012) reads and writes — because `appnotification` cannot carry a `kind` discriminator, a typed envelope payload, or delivered/dismissed/expiry semantics.</prompt>
+  <role>SPAARKE platform developer with Dataverse schema authoring expertise. Follow ADRs strictly. Use the `dataverse-create-schema` skill's Web API + PowerShell pattern — this is schema, not `pac table create`/`pac column create`.</role>
+  <goal>A new `sprk_` outbox table exists in the target Dataverse environment with columns supporting: per-user pending row identity, a `kind` discriminator, an envelope JSON payload column, a regarding reference (per ADR-024), and delivered/dismissed/expiry timestamps — verified via `describe_table` — plus a `docs/data-model/` entry documenting the schema for task 012 (the service layer) to build against.</goal>
+  <context>
+    <background>
+      This is Layer B of the notification spine: a durable per-user pending-row store that Layer C (SignalR) accelerates but does not replace — disconnected/offline clients still get their signal via this table (FR-02, FR-06). `appnotification` (the existing Dataverse notification entity, consumed via `NotificationService.CreateNotificationAsync` → `useBriefingNotifications`) stays as an OPTIONAL mirror for MDA-shell visibility, not the source of truth — it has no `kind` discriminator, no typed envelope payload, and no delivered/dismissed/expiry semantics, which is exactly what this table adds. The outbox payload is envelope-shaped JSON (per spec Assumptions) plus a regarding lookup — producers persist full action detail in their own domain records; the outbox itself carries only what task 013's envelope contract defines (IDs + minimal display metadata).
+    </background>
+    <relevant-files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/data-model/INDEX.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Propose the table's logical name and full column set AT this task (per spec Unresolved Questions — "outbox table naming + column set — blocks: schema task; propose at task time"); do not assume a name in advance beyond the `sprk_` prefix.</constraint>
+    <constraint source="ADR-024">The regarding reference on the outbox row follows the ADR-024 resolver-field convention (at minimum `sprk_regardingrecordid` text + a record-type discriminator) — do NOT build the full 8-lookup dual-field polymorphic pattern (that pattern is for subgrid-filterable entities; the outbox has no such UI requirement) unless a concrete subgrid-filtering need is identified during this task.</constraint>
+    <constraint source="project">The row model is PER-USER PENDING, not per-event-broadcast — the table's primary consumer key is the owning user, and `kind` + delivered/dismissed/expiry timestamps are per-row state on that user's pending item, matching the outbox service's write→pending→dismiss/expiry lifecycle (task 012).</constraint>
+    <constraint source="dataverse-create-schema skill">Schema-creation script MUST be idempotent (safe to re-run) per the skill's stated pattern; do not hand-edit schema via the classic maker UI as the source of truth — script + `describe_table` verification is the authoritative record.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse entity + attribute creation script" location=".claude/skills/dataverse-create-schema/SKILL.md">Follow the exemplar `scripts/Deploy-ChartDefinitionEntity.ps1` structure — idempotent Web API calls for entity creation, attribute add, and any needed option sets.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Propose the table's logical name (e.g. `sprk_notificationoutbox` or equivalent — confirm no naming collision via `mcp__dataverse__describe` or `search`) and the full column set: owning-user lookup/reference, `sprk_kind` (text or choice matching task 013's taxonomy), `sprk_envelope` (JSON text column, per task 013's envelope contract), regarding reference per ADR-024 minimal pattern, `sprk_delivered` (datetime, nullable), `sprk_dismissed` (datetime, nullable), `sprk_expiresat` (datetime). Document the proposal before creating anything.</step>
+    <step order="2">Verify the proposed name/columns do not overlap an existing table via `mcp__dataverse__search` / `describe` — confirm `appnotification` genuinely cannot be extended (per the §11 justification already in spec.md) rather than re-deriving that conclusion from scratch.</step>
+    <step order="3">Author the idempotent Web API + PowerShell schema-creation script per the `dataverse-create-schema` skill pattern (entity creation, then attributes, then any option sets for `kind` if a choice column is chosen over text).</step>
+    <step order="4">Run the script against the target Dataverse environment.</step>
+    <step order="5">Verify via `mcp__dataverse__describe_table` (or equivalent) that all proposed columns exist with correct types.</step>
+    <step order="6">Write the `docs/data-model/` entry for the new table (schema, column purposes, lifecycle states) so task 012 (the service layer) has an authoritative reference; add it to `docs/data-model/INDEX.md`.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If Binding (`sprk_playbookconsumer`) can already express the per-user pending row (kind, envelope, delivered/dismissed/expiry semantics), STOP and escalate before creating a new table (root §11 — verify by grep/describe against `sprk_playbookconsumer`'s actual schema before concluding a new table is necessary).</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">PowerShell for schema-creation script execution</tool>
+  </tools>
+  <outputs>
+    <output type="code">scripts/ (idempotent schema-creation script for the outbox table — exact path chosen at task time following the dataverse-create-schema skill's script location convention)</output>
+    <output type="docs">docs/data-model/sprk_notificationoutbox.md (exact filename matches the proposed table logical name)</output>
+    <output type="docs">docs/data-model/INDEX.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given `mcp__dataverse__search`/`describe` run against `sprk_playbookconsumer` and `appnotification` BEFORE table creation, when the results are reviewed, then neither can express the per-user `kind`-typed pending row with delivered/dismissed/expiry semantics — confirmed by evidence, not assumed.</criterion>
+    <criterion testable="true">Given the new outbox table is created, when `describe_table` is run, then it confirms the table exists with a `kind` column, an envelope JSON/text column, a regarding reference, and delivered/dismissed/expiry timestamp columns.</criterion>
+    <criterion testable="true">Given the schema-creation script, when run a second time against the same environment, then it completes without error (idempotent — no duplicate-column or duplicate-entity failure).</criterion>
+    <criterion testable="true">Given the new table, when `docs/data-model/INDEX.md` is checked, then it lists the new entry with a link to the new schema doc.</criterion>
+    <criterion testable="true">Given Binding CAN express the per-user pending row (negative case), when that is discovered during step 1/2, then the escalation trigger fires and no new table is created.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-02 (schema half). The service half (write/read/expire operations) is task 012, which depends on this task. Column names above are a proposal baseline, not a lock — the task-time proposal step is where the final name/types are decided and documented.</notes>
+  <justification>
+    <existing>`appnotification` (Dataverse OOB notification entity, consumed via `NotificationService.CreateNotificationAsync` / `useBriefingNotifications`) is the only existing per-user notification store. Verified: it has no `kind` discriminator column, no typed JSON payload column, and no delivered/dismissed/expiry timestamp trio.</existing>
+    <extension>No — `appnotification` stays as the OOB MDA-shell mirror (spec explicitly keeps it as an "optional mirror," not the source of truth); extending its schema would mean customizing a Microsoft-owned system table, which the platform avoids, and would not add the delivered/dismissed/expiry lifecycle the outbox service needs.</extension>
+    <cost-of-doing-nothing>Without a durable per-user pending-row store, live push becomes fire-and-forget-only — a disconnected or offline user permanently loses a signal instead of receiving it on next load (FR-02/FR-06 fail outright; NFR-04 degrade path has nothing to degrade to).</cost-of-doing-nothing>
+  </justification>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

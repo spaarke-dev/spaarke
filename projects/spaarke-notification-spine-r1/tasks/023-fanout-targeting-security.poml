@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Fan-Out Targeting Security — Derive Recipients From Dataverse Record Security</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical: a leak of a private-thread or internal-only communication signal to an unauthorized user is a compliance incident (R-5). Unconditional code-review + adr-check per root CLAUDE.md §8 test-modifying override row (this task adds tests/integration/seam/** negative-access tests).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-critical; leak = compliance incident. Judgment is required to correctly compose the existing access-decision primitives (ICommunicationAccessFilter + IThreadPrivateGrantProvider + sprk_communicationparticipant) rather than inventing a new access model.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Negative-access correctness across thread/participant security requires exhaustive case enumeration (private thread, internal-only, unresolved external participant, revoked grant) — not a single well-specified happy path.</effort-reason>
+    <parallel-group>Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>bff-api, api, security, integration-test</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Compute the fan-out recipient set for a Layer-C ping (Clients.User(oid) / Group(...) from task 020) STRICTLY from existing Dataverse record security — never a heuristic — so a private thread's events reach only its shared participants and an internal-only message never reaches an external user, with test-verified negative-access cases and a named security sign-off.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep experience with the existing Communication access model (ICommunicationAccessFilter, IThreadPrivateGrantProvider, sprk_communicationparticipant per ADR-048) and negative-access test design. Security-first mindset — when in doubt, deny.</role>
+
+  <goal>A fan-out targeting function/service that, given a persisted sprk_communication row (and its thread), returns the set of Dataverse systemuserids who should receive a Layer-C ping — computed by composing the EXISTING record-security primitives (the message-grain sprk_communicationparticipant junction per ADR-048 for candidate participants, ICommunicationAccessFilter's internal-only rule for exclusion, and IThreadPrivateGrantProvider's fail-closed grant model for private-thread scope) — with NO new heuristic access logic. Test-verified negative-access cases prove a private thread's event reaches only shared participants and an internal-only message never reaches an external user. A named security sign-off is recorded.</goal>
+
+  <context>
+    <background>
+      Spec FR-08 + NFR-07. The existing Communication module already solved "who may read message M" with a fail-closed, two-rule filter applied on top of Dataverse-impersonated reads (notes/access-model-decision.md, 2026-07-16 owner decision): ICommunicationAccessFilter.EvaluateMessage(caller, message) checks (1) sprk_isinternalonly — a non-internal caller is denied, fail-closed on an unreadable flag, and (2) privilege classification, carried as metadata only (never gates). Private-thread visibility beyond direct participants is governed by IThreadPrivateGrantProvider (fail-closed; the DenyAllThreadPrivateGrantProvider is the current default registration — private-thread grants deny by default until a Dataverse-backed provider ships). The message-grain sprk_communicationparticipant junction (ADR-048) is the queryable "who was on this message" index (systemuser/contact typed lookups, sprk_isresolved flag for unresolvable external addresses). This task's job is to COMPOSE these three existing primitives into a fan-out recipient list — it is NOT a new access model.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/ICommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessModels.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/IThreadPrivateGrantProvider.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationParticipantIndexer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file>.claude/adr/ADR-048-communication-participant-index.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Candidate recipients for a message-level event come ONLY from that message's sprk_communicationparticipant rows (ADR-048 message-grain junction) — do NOT widen the candidate set to "everyone with any access to the record" (e.g. via a broad Dataverse security-role query); the junction already encodes exactly who was on the message.</constraint>
+    <constraint source="project">Apply ICommunicationAccessFilter.EvaluateMessage's internal-only rule per candidate: if the message has sprk_isinternalonly=true (or the flag is unreadable — fail closed, per CommunicationAccessFilter's existing IsInternalOnlyOrUnknown behavior), EXCLUDE any candidate whose IsInternalUser=false from the recipient set. Reuse the existing filter type — do not re-implement the internal-only check.</constraint>
+    <constraint source="project">For a PRIVATE thread, only candidates who are direct message participants (from the junction) AND pass the existing private-thread grant check are eligible — reuse IThreadPrivateGrantProvider.GetActiveGrantsAsync's fail-closed semantics (the current DenyAllThreadPrivateGrantProvider default means private-thread fan-out is empty until a real grant provider ships; this task must NOT bypass that default-deny to "make fan-out work" for private threads).</constraint>
+    <constraint source="project">An sprk_communicationparticipant row with sprk_isresolved=false (unresolved external address, both person lookups null) MUST NOT resolve to a deliverable systemuserid — it contributes no recipient (there is no oid to target); this is a natural exclusion, not a special case to work around.</constraint>
+    <constraint source="ADR-013">If a new targeting service is introduced, it lives in Services/Communication/ or Services/Notifications/ per its actual dependency shape (Communication data access vs Notifications delivery) — consumed by task 020's producer entrypoint via the PublicContracts facade if crossing that boundary; do not inject Communication-internal access types directly into unrelated CRUD code.</constraint>
+    <constraint source="project">MUST NOT resolve targeting via a heuristic (e.g. "everyone in the same matter/team", "recent participants", role-based broad grants) — the escalation trigger below fires if record security cannot express the needed answer precisely.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-048-communication-participant-index.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="fail-closed-access-filter" location="src/server/api/Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessFilter.cs">EvaluateMessage's IsInternalOnlyOrUnknown — an unreadable flag denies for a non-internal caller; mirror this fail-closed discipline in the fan-out composition, do not default-allow on missing data.</pattern>
+      <pattern name="fail-closed-grant-provider" location="src/server/api/Sprk.Bff.Api/Services/Communication/Access/IThreadPrivateGrantProvider.cs">DenyAllThreadPrivateGrantProvider — the ADR-032 null-object default for private-thread grants; reuse its contract rather than assuming private threads always have grants.</pattern>
+      <pattern name="message-grain-junction" location=".claude/adr/ADR-048-communication-participant-index.md">sprk_communicationparticipant — the queryable "who was on this message" source; systemuser XOR contact typed lookups, sprk_isresolved flag.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ICommunicationAccessFilter, CommunicationAccessModels.cs, IThreadPrivateGrantProvider, and the ADR-048 junction schema in full — confirm the exact fields/flags (sprk_isinternalonly, sprk_isresolved, systemuser/contact lookups, thread private flag) before designing the composition.</step>
+    <step order="2">Design the targeting function: input = a persisted sprk_communication row (+ resolved thread); output = the deduplicated set of resolved systemuserids eligible to receive the ping. Compose: junction participants → internal-only exclusion (CommunicationAccessFilter reuse) → private-thread grant gate (IThreadPrivateGrantProvider reuse, only if the thread is private) → drop unresolved/non-systemuser candidates.</step>
+    <step order="3">Wire the targeting function into task 020's producer entrypoint (Clients.User(oid) per recipient, or Group(...) if a thread-scoped group primitive is more efficient — justify the choice against task 020's actual exposed primitives).</step>
+    <step order="4">Write negative-access seam tests under tests/integration/seam/Communication/ or tests/integration/seam/Notifications/ covering (at minimum): (a) private thread, external non-participant → NOT targeted; (b) internal-only message, external participant on the message → NOT targeted; (c) private thread with no active grant (DenyAllThreadPrivateGrantProvider default) → non-message-participant NOT targeted even if record-visible elsewhere; (d) unresolved external address (sprk_isresolved=false) → contributes no recipient; (e) positive case — internal participant on a non-internal-only, non-private message → correctly targeted.</step>
+    <step order="5">Record the named security sign-off (R-5) — a reviewer-attributed note in projects/spaarke-notification-spine-r1/notes/ confirming the negative-access tests were reviewed and pass.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 023 to ✅ completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If targeting cannot be derived purely from the existing record-security primitives (ICommunicationAccessFilter + IThreadPrivateGrantProvider + sprk_communicationparticipant) — i.e., a correct answer would require a heuristic, a broad security-role query, or new access logic not backed by an existing MUST-rule source — STOP and escalate. Do NOT ship a best-guess fan-out; a leak is a compliance incident.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationFanOutTargetingService.cs (or Services/Notifications/ — decide per step 3 justification)</output>
+    <output type="test">tests/integration/seam/Communication/FanOutTargetingSecuritySeamTests.cs</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/ (R-5 named security sign-off)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PRIVATE thread's message and a user who is NOT a participant on that message and holds no active grant (DenyAllThreadPrivateGrantProvider default), when fan-out targeting is computed, then that user is NOT in the recipient set — test-verified.</criterion>
+    <criterion testable="true">Given an sprk_isinternalonly=true message with both internal and external participants (per the junction), when fan-out targeting is computed, then external (IsInternalUser=false) participants are EXCLUDED from the recipient set and internal participants ARE included — test-verified.</criterion>
+    <criterion testable="true">Given a message whose sprk_isinternalonly flag is missing/unreadable, when fan-out targeting is computed for a non-internal candidate, then that candidate is EXCLUDED (fail-closed, mirroring CommunicationAccessFilter's existing IsInternalOnlyOrUnknown behavior) — test-verified.</criterion>
+    <criterion testable="true">Given an sprk_communicationparticipant row with sprk_isresolved=false (unresolved external address), when fan-out targeting is computed, then that row contributes NO recipient (no systemuserid to target) — test-verified.</criterion>
+    <criterion testable="true">Given a NON-private, non-internal-only message with a resolved internal systemuser participant, when fan-out targeting is computed, then that participant IS in the recipient set (positive case, proving the negative-access rules don't over-exclude) — test-verified.</criterion>
+    <criterion testable="true">Given the targeting implementation is code-reviewed, when checked for new access-decision logic, then it contains ZERO new authorization primitives — every inclusion/exclusion decision traces to ICommunicationAccessFilter, IThreadPrivateGrantProvider, or the sprk_communicationparticipant junction.</criterion>
+    <criterion testable="true">A named security sign-off (R-5) exists in projects/spaarke-notification-spine-r1/notes/ recording reviewer attribution and confirming all negative-access tests pass.</criterion>
+    <criterion testable="true">A tests/integration/seam/** test suite exists exercising all five criteria above as executable seam tests (not unit-level mocks of the access primitives — the seam test proves the COMPOSITION, per ADR-038 DoD for dispatch-spine/security-relevant changes).</criterion>
+  </acceptance-criteria>
+
+  <notes>This task deliberately does NOT touch CommunicationAccessFilter, IThreadPrivateGrantProvider, or the junction's schema — it composes them read-only. If any of those primitives appear insufficient to express the needed targeting answer, that is the escalation trigger, not a license to extend them ad hoc within this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

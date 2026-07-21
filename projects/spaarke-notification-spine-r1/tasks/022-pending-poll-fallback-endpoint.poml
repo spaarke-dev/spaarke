@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Kind-Generic Pending/Poll Fallback Endpoint (ADR-032 Degrade Path)</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:012</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New unconditional BFF endpoint over the outbox; forms the platform-wide ADR-032 degrade path every host shares — meets root CLAUDE.md §8 FULL criteria (bff-api tag, new endpoint).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Straightforward read endpoint over an already-built outbox service (task 012) — no architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>bff-api, api</tags>
+    <estimated-effort>3h</estimated-effort>
+  </metadata>
+
+  <prompt>Add a kind-generic pending/poll endpoint over the task-012 outbox so every host (workspace, PCF, code page) has ONE degrade path when SignalR is off or unreachable, and so a client that missed a live ping still gets the signal on next load or next poll tick.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep experience with ASP.NET Core Minimal APIs and ADR-032 degrade-path design.</role>
+
+  <goal>An authenticated GET /api/notifications/pending endpoint returns the calling user's pending outbox rows (kind-generic — every active kind in the same response shape) sourced from task 012's outbox read API. The endpoint behaves IDENTICALLY regardless of SignalR state — it IS the degrade path, not a SignalR-aware branch — so with the SignalR delivery service (task 020) disabled or absent, a written outbox row is still retrievable through this endpoint.</goal>
+
+  <context>
+    <background>
+      Spec FR-06 + NFR-04. This is the ADR-032 degrade path every consumer shares: task 021's client library falls back to it on disconnect; task 025's contract-lock note cites it as R3's polling-only path. It is deliberately kind-generic (unlike the existing appnotification-only useBriefingNotifications hook) because multiple active kinds (suggestion, communication-assessed, communication-arrived) must all surface through the same fallback mechanism.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNotifications.ts</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">The endpoint reads from task 012's outbox service's read API — it does NOT re-implement outbox querying and does NOT read appnotification. It is a NEW store (the outbox), not a reformatting of the existing useBriefingNotifications appnotification-only path.</constraint>
+    <constraint source="ADR-032">The endpoint is registered UNCONDITIONALLY and its behavior does NOT branch on whether SignalR is enabled — it always serves whatever is currently pending in the outbox for the caller. Its correctness under "SignalR off" is a consequence of being SignalR-agnostic, not a special-cased fallback branch.</constraint>
+    <constraint source="ADR-028">The endpoint derives the caller's identity server-side from the validated JWT (oid) — it MUST NOT accept a target userId query/body parameter (no cross-user pending reads).</constraint>
+    <constraint source="project">Response items carry the same envelope shape as task 013's contract (IDs + minimal display metadata only) — no message bodies, no privileged content, no pre-authorized action tokens (NFR-02/03).</constraint>
+    <constraint source="bff-extensions.md §C">Minimal API only, mapped via a Map{Feature}Endpoints extension, .RequireAuthorization(), Results.Problem(...) for errors.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="minimal-api-endpoint-group" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">MapGroup + RequireAuthorization + WithName/WithDescription/Produces&lt;T&gt; — copy this shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>useBriefingNotifications (src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNotifications.ts) reads appnotification only — no kind discriminator, no outbox awareness.</existing>
+    <extension>No — different store (the new outbox, not appnotification) and a kind-generic contract useBriefingNotifications was never designed for; extending it would conflate two stores.</extension>
+    <cost-of-doing-nothing>No degrade path when SignalR is off (NFR-04 fails outright); R3's polling fallback (their task 045, per the contract-lock note already drafted at their side) has no target endpoint to poll.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read task 012's outbox service's actual read/query API (method signatures, filter-by-user, kind field) — do not assume its shape.</step>
+    <step order="2">Add GET /api/notifications/pending to a Map{Feature}Endpoints extension (reuse or extend task 020's NotificationsEndpoints.cs if it exists, or create Api/Notifications/NotificationsEndpoints.cs), authenticated, deriving caller identity from the JWT.</step>
+    <step order="3">Return the caller's pending outbox rows in envelope shape (task 013 types) — kind-generic, no filtering by kind unless the client requests it via an optional query parameter.</step>
+    <step order="4">Register the endpoint mapping UNCONDITIONALLY; verify no asymmetric registration against task 012's outbox service (bff-extensions.md §F.1 static-scan recipe).</step>
+    <step order="5">Write the degrade seam test under tests/integration/seam/Notifications/: with the SignalR delivery service's null-object active (SignalR "off"), a producer writes an outbox row, then a request to GET /api/notifications/pending returns that row.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 022 to ✅ completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 012's outbox read API cannot filter/scope rows to the calling user without an app-only cross-user query, STOP and escalate before adding a workaround — cross-user leakage in a "pending" endpoint is the same class of compliance risk as task 023's fan-out leak.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Notifications/NotificationsEndpoints.cs (pending handler, added to or alongside task 020's file)</output>
+    <output type="test">tests/integration/seam/Notifications/PendingPollFallbackSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SignalR is disabled (null-object registered, per task 020), when a producer writes an outbox row for user U and then user U calls GET /api/notifications/pending, then the response includes that row.</criterion>
+    <criterion testable="true">Given SignalR is enabled and a client already received a live ping for a row, when the same client subsequently calls GET /api/notifications/pending before dismissing it, then the row still appears (idempotent read; dismissal is a separate operation owned by task 012's outbox service, not by this endpoint).</criterion>
+    <criterion testable="true">Given user A calls GET /api/notifications/pending, when the response is inspected, then it contains ONLY user A's pending rows — no row belonging to another user, regardless of any query parameter supplied.</criterion>
+    <criterion testable="true">Given an unauthenticated request to GET /api/notifications/pending, when it is sent, then the endpoint returns 401.</criterion>
+    <criterion testable="true">Given the outbox contains rows of multiple kinds (suggestion, communication-assessed, communication-arrived) for the same user, when GET /api/notifications/pending is called without a kind filter, then all active-kind rows are returned in the same response shape.</criterion>
+    <criterion testable="true">Given a response item is inspected against task 013's envelope contract, when compared, then it carries IDs + minimal display metadata only — no message body, no privileged content, no pre-authorized action token.</criterion>
+    <criterion testable="true">A tests/integration/seam/Notifications/** test exists proving the SignalR-off → written row → retrievable-via-endpoint degrade path (NFR-04) as an executable seam test.</criterion>
+  </acceptance-criteria>
+
+  <notes>This endpoint is the SAME degrade path both R3's polling-only hosts and this project's own client library (task 021) consume — do not design it as a SpaarkeAi-specific or comms-specific shape.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

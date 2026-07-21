@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Host-Agnostic Shared Client Subscriber Library (Layer C client)</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:020,013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared package under src/client/shared/ consumed by three future hosts (SpaarkeAi workspace, record-form PCFs, standalone code pages); auth-sensitive (token acquisition + raw-fetch exception boundary); 6+ steps — meets root CLAUDE.md §8 FULL criteria.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified client library extraction with a concrete reference contract (task 020's negotiate endpoint + task 013's envelope types) — not an architectural judgment call.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 020's negotiate contract (exact request/response shape) and task 013's envelope/kind types — cannot be authored against an assumed shape.</parallel-reason>
+    <deps>020,013</deps>
+    <tags>typescript, auth, shared-lib, client</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Build the ONE host-agnostic shared client subscriber library that negotiates + connects to the Layer-C SignalR delivery service and routes incoming envelopes by kind, so the SpaarkeAi workspace, record-form PCFs, and standalone code pages each consume the SAME library instead of hand-rolling their own connection logic.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep experience with TypeScript shared-package authoring under src/client/shared/, the @azure/microsoft-signalr client SDK, and Auth v2 (ADR-028) client-side token acquisition via @spaarke/auth.</role>
+
+  <goal>A new src/client/shared/Spaarke.Notifications package (npm name @spaarke/notifications) exports: (1) negotiate/connect handling using @spaarke/auth's authenticatedFetch against task 020's negotiate endpoint, (2) kind-routing that dispatches an incoming envelope to registered per-kind handlers using task 013's envelope/kind types, and (3) automatic fallback to task 022's pending/poll endpoint when the live connection is down. The package builds standalone (tsc, zero errors, no host-project dependency) and is consumed by the SpaarkeAi workspace as its first real integration. Its public contract is documented for R3's later consumption (feeds task 025).</goal>
+
+  <context>
+    <background>
+      Spec FR-05 + §5A.7 #2 (R3's three hosts requirement). No push client exists anywhere in the repo today (verified 2026-07-20) — chat's SSE client is chat-only and not host-agnostic. This library is the ONE client-side half of the spine; building a second one for any host is the forked-consumer failure §6/§11 forbids. It must read task 020's actual shipped negotiate contract and task 013's actual shipped envelope types rather than assuming their shape.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+      <file>src/client/shared/Spaarke.Auth/package.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Notifications/NotificationsEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/solutions/SpaarkeAi/src/main.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Every negotiate/poll HTTP call in this library uses @spaarke/auth's authenticatedFetch/getAccessToken() — the ONE enumerated raw-fetch exception is the SignalR/WebSocket transport connection itself underneath the SignalR client SDK, and that call site MUST carry the `// Auth v2 (D-AUTH-7):` comment.</constraint>
+    <constraint source="project">The library is host-agnostic: it MUST NOT import from src/solutions/SpaarkeAi/**, any PCF control project, or any code-page project — only from other src/client/shared/** packages (e.g. @spaarke/auth) and its own declared dependencies.</constraint>
+    <constraint source="project">kind-routing MUST dispatch on the envelope's kind discriminator using task 013's actual exported types (import them, do not redeclare a parallel/duplicate shape) and MUST log-and-skip (never throw) any kind value not in the locked taxonomy — a future reserved kind (job-complete/share/system-alert) going active must not break an already-shipped host consuming an older library version.</constraint>
+    <constraint source="project">On SignalR connect failure or disconnect, the library MUST fall back to task 022's pending/poll endpoint at a bounded interval — this is the client half of the ADR-032 degrade path (NFR-04). Do not silently drop signals when the live connection is unavailable.</constraint>
+    <constraint source="project">No second push/delivery mechanism: this library wraps the ONE negotiate endpoint from task 020. It MUST NOT add a second connection target or a host-specific hub URL.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="shared-package-scaffold" location="src/client/shared/Spaarke.Auth/package.json">npm name @spaarke/{name}, tsc build/build:watch/clean scripts, jest test/test:watch/test:coverage scripts, UNLICENSED license, peerDependencies for external SDKs.</pattern>
+      <pattern name="authenticated-fetch" location="src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts">Standard client-side authenticated HTTP call — use for negotiate + poll-fallback requests; do not hand-roll token attachment.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>No push client anywhere in the repo — verified 2026-07-20 (plan.md Reusable Code inventory: "no push client anywhere"). Chat's SSE client is chat-only, not host-agnostic, and not a subscriber to this spine.</existing>
+    <extension>No — nothing existing provides negotiate/connect + kind-routing; this is genuinely new client infrastructure.</extension>
+    <cost-of-doing-nothing>Each host (SpaarkeAi workspace, record-form PCFs, standalone code pages) hand-rolls its own connection logic → the forked-consumer failure mode CLAUDE.md §6/§11 forbids. Messaging-r3's task 045 (blocked on this exact deliverable) and the Phase 5 suggestion renderer (task 051) would each build a redundant, subtly-different client.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read task 020's actual negotiate endpoint request/response shape and task 013's actual envelope + kind taxonomy types from the shipped code — do not assume either shape.</step>
+    <step order="2">Scaffold src/client/shared/Spaarke.Notifications/ following Spaarke.Auth's package.json conventions (npm name @spaarke/notifications; tsc build; jest test scripts).</step>
+    <step order="3">Implement negotiate/connect: authenticatedFetch call to the negotiate endpoint, then SignalR client SDK connection using the returned info (the SignalR transport call itself is the ADR-028 raw-fetch exception — comment it accordingly).</step>
+    <step order="4">Implement kind-routing: a registerHandler(kind, callback) API dispatching incoming envelopes; log-and-skip unknown kinds per constraints.</step>
+    <step order="5">Implement poll-fallback wiring against task 022's pending endpoint (bounded retry/backoff), activated on disconnect or negotiate failure.</step>
+    <step order="6">Verify the package builds standalone (`npm run build` in Spaarke.Notifications with no other src/client/shared/** or host project as a build-time dependency beyond declared peerDependencies); add a jest suite covering kind-routing dispatch + unknown-kind skip behavior.</step>
+    <step order="7">Wire a first consumer into the SpaarkeAi workspace (thin integration proving negotiate → connect → kind-routed callback fires) — do not build the full suggestion renderer UI (that is task 051's job).</step>
+    <step order="8">Write the package's public-API contract into its README (consumed by task 025's contract-lock deliverable to messaging-r3 — do not duplicate 025's delivery step here).</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set task 021 to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 020's shipped negotiate contract or task 013's shipped envelope types differ materially from what spec §5A.3/§5A.7 describe, STOP and reconcile with the actual shipped shape before building against an assumption — do not paper over a contract mismatch.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the TypeScript package</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Notifications/src/negotiate.ts</output>
+    <output type="code">src/client/shared/Spaarke.Notifications/src/kindRouter.ts</output>
+    <output type="code">src/client/shared/Spaarke.Notifications/src/pollFallback.ts</output>
+    <output type="code">src/client/shared/Spaarke.Notifications/package.json</output>
+    <output type="test">src/client/shared/Spaarke.Notifications/test/kindRouter.test.ts</output>
+    <output type="docs">src/client/shared/Spaarke.Notifications/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the package is built standalone with no other src/client/shared/** or host project as a build-time dependency beyond declared peerDependencies, when `npm run build` runs, then it succeeds with zero TypeScript errors.</criterion>
+    <criterion testable="true">Given a caller registers a handler for kind=communication-arrived, when an envelope with that kind arrives over the SignalR connection, then only that handler fires — handlers registered for other kinds do not fire.</criterion>
+    <criterion testable="true">Given an envelope arrives with a kind value NOT in the locked taxonomy (e.g. a reserved value activated early), when the library routes it, then it is logged and skipped — no thrown exception, no handler misfire, no unhandled promise rejection.</criterion>
+    <criterion testable="true">Given the SignalR connection is down or negotiate fails, when an outbox row exists server-side, then the library's poll-fallback path retrieves it via task 022's endpoint within the configured interval.</criterion>
+    <criterion testable="true">Given any HTTP call the library makes to the BFF (negotiate, poll), when inspected, then it uses @spaarke/auth's authenticatedFetch/getAccessToken() — the only raw-fetch call in the library is the SignalR transport connection itself, and it carries the `// Auth v2 (D-AUTH-7):` comment.</criterion>
+    <criterion testable="true">Given the SpaarkeAi workspace imports and uses the library, when the workspace builds, then it resolves the library via the standard workspace package dependency mechanism (no relative path-reach-around into src/client/shared/Spaarke.Notifications/src).</criterion>
+    <criterion testable="true">Given an unauthenticated or expired-token caller, when the library attempts negotiate, then the failure surfaces to the caller as a typed error/rejected promise (not a silent no-op) so hosts can render a degraded state.</criterion>
+    <criterion testable="true">Given the library's source is grepped for import statements, when checked against src/solutions/SpaarkeAi/**, any PCF control project, or any code-page project, then zero matches are found — the library imports only from src/client/shared/** packages and its declared dependencies.</criterion>
+  </acceptance-criteria>
+
+  <notes>Package naming follows the @spaarke/auth precedent (infra-level lib, not a *.Components UI package). The poll-fallback endpoint is task 022's — read its actual shape once shipped, do not assume.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

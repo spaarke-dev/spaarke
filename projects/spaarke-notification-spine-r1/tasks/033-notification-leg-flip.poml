@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Flip DispositionRoutability.Notification to Routable=true THROUGH the registry (ADR-043 Path-C, sequenced after the 032 audit)</title>
+    <phase>3 Layer A + Notification flip</phase>
+    <gate>blocked-until:032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>ADR-043 shipped-catalog behavior-surface change touching `Services/Ai/DispositionRoutability.cs` and `Services/Ai/OutputRouter.cs`; dispatch-spine change requires FULL protocol + unconditional Step 9.5 gates.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-043 shipped-catalog behavior-surface change — flipping a disposition that is registry-wide (no per-Binding granularity) and immediately affects every capability the 032 audit enumerated; requires judgment to keep the realized leg inside the FR-10 locked kind taxonomy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>032</deps>
+    <tags>bff-api, api, ai, integration-test</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+
+  <prompt>Flip `DispositionRoutability.Notification` from `Routable=false` to `Routable=true` and add the corresponding `OutputRouter` routing leg that calls the Layer-A seam (`IActionSeam.CreateNotificationAsync`, task 031) to realize the disposition — going THROUGH the ADR-043 registry exactly like every other disposition, never around it — only after task 032's "what lights up" audit has been reviewed and its sequencing recommendation followed.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the ADR-043 disposition-registry pattern and ADR-040 store-before-render discipline.</role>
+
+  <goal>`DispositionRoutability.cs`'s `Notification` entry is `Routable=true` with no `NotRoutableReason`. `OutputRouter.cs` has a new `case BindingDisposition.Notification:` leg (alongside the existing `Compose`/`SurfaceLaunch`/`Email`/`WorkProduct` cases) that parses the stored `SessionOutput` entry's notification payload and calls `IActionSeam.CreateNotificationAsync` to create the `appnotification` record — never falling through to the registry/router-drift `default` case. Every Binding the 032 audit found is accounted for per its recommendation. Dispatch-spine seam tests (including a new admit⇔route⇔store assertion for `Notification`, per `DispositionRoutability`'s own doc-comment contract) are green.</goal>
+
+  <context>
+    <background>
+      `DispositionRoutability` (ADR-043 §3) is the ONE table three consumers read: the dispatch admit-gate (`IsAdmissible`), `OutputRouter`'s routing switch, and the ADR-040 ledger vocabulary (`ToLedgerValue`). Today `Notification` is `Routable=false` (lines 98-102), so `IsAdmissible(Notification)` returns `false` and any Binding declaring that disposition is rejected with a loud 422 before it ever reaches `OutputRouter`. Flipping `Routable=true` makes `IsAdmissible` return `true` immediately — but `OutputRouter.RouteAsync`'s switch statement has NO case for `BindingDisposition.Notification` today (it is one of the three not-yet-routable entries excluded above the switch). Leaving the switch unchanged after the flip would cause every Notification-disposition dispatch to fall through to the router's `default:` case, which THROWS `ArgumentOutOfRangeException` ("registry/router drift") — the router's own designed self-check. This task MUST add the missing switch leg in the SAME change as the registry flip; flipping the registry entry alone is an incomplete, broken change.
+
+      "Realize the Layer-A/B legs" (spec Scope): Layer A is realized by the new `OutputRouter` leg calling `IActionSeam.CreateNotificationAsync` (task 031) — the same durable `appnotification`-creation code path `CreateNotificationNodeExecutor` uses today, now reachable from the dispatch/router surface via the session-agnostic seam. This is a genuinely NEW capability: previously, a chat capability could never actually cause an `appnotification` to be created via its OWN disposition (it was always rejected); now it can.
+
+      Layer B is the NEW `sprk_`-prefixed durable outbox from Phase 1 (kind-typed, `suggestion`/`communication-assessed`/`communication-arrived` active; `job-complete`/`share`/`system-alert` reserved with explicitly NO consumers in R1 per spec Out-of-Scope). A dispatch-triggered Notification-disposition capability does not cleanly map to any of the three ACTIVE kinds — it is closest in spirit to the reserved `job-complete` kind, but the spec explicitly reserves that kind with no R1 consumer and FR-10 locks the taxonomy. Therefore this task's realized leg writes the durable `appnotification` record (the existing mirror mechanism, already durable-by-construction) via the Layer-A seam, and does NOT write a new Layer-B outbox row or introduce a new `kind` value — see the escalation trigger below if execution reveals this reading is wrong.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ActionSeam.cs</file>
+      <file>projects/spaarke-notification-spine-r1/notes/what-lights-up-audit.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">The `Notification` entry's `Routable` flag and `OutputRouter`'s new switch leg are added TOGETHER in this task — never flip the registry without the matching router leg in the same change (the router's own `default:` case will throw `ArgumentOutOfRangeException` for exactly this "registry says routable, router has no leg" drift).</constraint>
+    <constraint source="ADR-040">The `Notification` leg follows store-before-render: the `SessionOutput` ledger entry is already written BEFORE `OutputRouter.RouteAsync`'s switch runs (per the existing pattern for Email/WorkProduct); the new leg only ADDS the `appnotification` side-effect after storage, exactly like the Email leg adds delivery after storage.</constraint>
+    <constraint source="project">The realized leg calls `IActionSeam.CreateNotificationAsync` (task 031) — never re-implement notification-entity-building inline in `OutputRouter.cs`, and never inject `CreateNotificationNodeExecutor` directly into the router.</constraint>
+    <constraint source="FR-10">Do not write a new Layer-B outbox row or introduce a new `kind` value for this leg — the taxonomy is locked to `suggestion`/`communication-assessed`/`communication-arrived` (active) and `job-complete`/`share`/`system-alert` (reserved, explicitly no R1 consumers). If the realized leg appears to need a new kind, that is a scope conflict to escalate, not to resolve by adding one.</constraint>
+    <constraint source="ADR-038">Add/extend a `tests/integration/seam/**` test asserting `Notification` now participates in the admit⇔route⇔store invariant `DispositionRoutability.cs`'s own doc comments describe as the seam-test contract for every registered disposition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-notification-spine-r1/notes/what-lights-up-audit.md</file>
+    </files>
+    <patterns>
+      <pattern name="Registry flip shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs lines 88-102">Change the `Notification` `Entry` from `Routable=false, NotRoutableReason="..."` to `Routable=true` with no `NotRoutableReason` — mirror the shape of the `Email`/`Compose`/`SurfaceLaunch` entries above it in the same file, which have `Routable=true` and no reason field.</pattern>
+      <pattern name="Router leg shape (pass-through vs side-effecting)" location="src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs lines 281-329 (Email/WorkProduct cases)">The `Email` case calls `DeliverEmailAsync(entry, cancellationToken)` after storage, propagating a delivery failure loudly AFTER the ledger write. Mirror this shape for `Notification`: parse the stored entry's notification-shaped payload, call `IActionSeam.CreateNotificationAsync`, propagate failure loudly after storage (never a silent skip).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `notes/what-lights-up-audit.md` and confirm its sequencing recommendation (immediate flip vs remediate-first) — follow it exactly; if it names Bindings requiring remediation before the flip, confirm that remediation happened first.</step>
+    <step order="2">In `DispositionRoutability.cs`, change the `Notification` entry (lines ~98-102) to `Routable=true`, removing `NotRoutableReason`.</step>
+    <step order="3">In `OutputRouter.cs`, add `case BindingDisposition.Notification:` alongside the existing cases, parsing the stored entry's notification payload (mirror the `NotificationNodeConfig` field shape: title/body/category/priority/actionUrl/regardingId/regardingType/recipientId) and calling `IActionSeam.CreateNotificationAsync`, propagating failure loudly after storage.</step>
+    <step order="4">Run the full dispatch-spine seam test suite (including task 031's `ActionSeamTests.cs` and any existing `tests/integration/seam/**` disposition tests) and confirm no `ArgumentOutOfRangeException` registry/router-drift failure occurs for `Notification`.</step>
+    <step order="5">Author a new seam test asserting the admit⇔route⇔store invariant specifically for `Notification`: a dispatch with `disposition=Notification` is admitted (no 422), routed (creates an `appnotification` via the seam), and stored (the `SessionOutput` ledger entry exists) — matching the pattern `DispositionRoutability.cs`'s doc comments describe as the contract for every registered disposition.</step>
+    <step order="6">Run the project's contract tests under `tests/integration/contract/Api/Ai/` touching dispatch (`DispatchSessionEndpointContractTests.cs`, `GateDecisionV2ContractTests.cs`) to confirm no regression to the admit-gate for the OTHER dispositions.</step>
+    <step order="7">Verify BFF publish size + CVE scan per the standard BFF-touching-task checklist.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="9">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the flip would route a capability the 032 audit did not anticipate, STOP and escalate.</trigger>
+    <trigger>If realizing the Notification leg appears to genuinely require a new Layer-B outbox `kind` value or live SignalR push (rather than the existing durable `appnotification` write via the Layer-A seam), STOP and escalate — this would violate the FR-10 locked taxonomy and expand scope beyond "realize the Layer-A leg through the registry" into new spine surface, which is a separately-scoped decision (root §6.5 ADR Tension path).</trigger>
+    <trigger>If `notes/what-lights-up-audit.md` from task 032 has not been reviewed/signed off, STOP and escalate — do not perform the flip without the completed, reviewed gate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</output>
+    <output type="test">tests/integration/seam/Ai/DispositionRoutabilityNotificationSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `DispositionRoutability.For(BindingDisposition.Notification)`, when queried after this task, then `Entry.Routable == true` and `Entry.NotRoutableReason == null`.</criterion>
+    <criterion testable="true">Given a stored `SessionOutput` entry with `Disposition = Notification`, when `OutputRouter.RouteAsync` processes it, then it does NOT throw `ArgumentOutOfRangeException` (the registry/router-drift guard) — a real switch leg handles it.</criterion>
+    <criterion testable="true">Given a valid Notification-disposition dispatch, when routed, then `IActionSeam.CreateNotificationAsync` is called and an `appnotification` record is created with the fields from the stored payload — verified by a seam test, not a mock-only unit test.</criterion>
+    <criterion testable="true">Given a Notification-disposition dispatch whose stored payload is malformed (missing required fields the seam requires), when routed, then the router propagates a loud failure AFTER the ledger write (never a silent skip) — mirroring the `Email` leg's failure contract.</criterion>
+    <criterion testable="true">Given every OTHER registered disposition (Informational/WorkProduct/Email/Compose/SurfaceLaunch/Overlay/Record), when the dispatch-spine contract tests run after this task, then their admit/route/store behavior is unchanged (no regression to the admit-gate for non-Notification dispositions).</criterion>
+    <criterion testable="true">Given `notes/what-lights-up-audit.md`'s sequencing recommendation, when this task closes, then every Binding it named as "must remediate/disable before flip" has been remediated/disabled BEFORE the registry change landed (verified by re-reading the audit's list against the final state).</criterion>
+    <criterion testable="true">No new `kind` value was added to the Layer-B outbox taxonomy and no new outbox row is written by this leg (FR-10 taxonomy remains exactly `suggestion`/`communication-assessed`/`communication-arrived` active, `job-complete`/`share`/`system-alert` reserved).</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed (report absolute + diff vs ~49.63 MB incl-PDB baseline, state PDB convention); 0 new HIGH CVE (`dotnet list package --vulnerable --include-transitive`); Placement Justification stated per `.claude/constraints/bff-extensions.md` (registry/router edits only — no new package dependency expected).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-14. ADR Tension (spec.md "ADR Tensions" table): ADR-043's shipped disposition catalog is a behavior surface; flipping it routable is resolved as Path C (comply, sequenced) — comply with the registry-first discipline, sequenced after the 032 audit. This task IS that compliance: the flip goes through `DispositionRoutability` + `OutputRouter` exactly like every other disposition, never around it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

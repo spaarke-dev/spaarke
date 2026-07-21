@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Daily-Briefing kind=suggestion producer — grounded + gated BEFORE outbox write</title>
+    <phase>5 Suggestion consumer</phase>
+    <gate>blocked-until:012,013,042</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Producer correctness on a hard invariant (grounded+gated-before-write); touches shared Services/Ai/Narrators + writes to the outbox; BFF-touching + dispatch-spine-adjacent per root CLAUDE.md §8</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Grounded+gated-before-outbox invariant; producer correctness — a mistake here lets ungrounded/ungated content reach the spine (NFR-03 violation)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 012 (outbox service), 013 (envelope contract), 042 (RI actions via seam — establishes the Layer-A-seam + outbox-write precedent this producer follows)</parallel-reason>
+    <deps>012,013,042</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Daily-Briefing `kind=suggestion` producer: it evaluates a candidate suggestion from the briefing's collected data, applies ADR-039 grounding and the ADR-041 confirmation gate (`origin=proactive`) BEFORE writing anything, and ONLY on a grounded+gated pass writes a `kind=suggestion` row to the Layer-B outbox (never through `DailyBriefingNarrator`, which stays narration-only).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the ADR-039 grounded-execution model, the ADR-041 confirmation-gate mechanism (`PendingPlanManager`), and the Layer-B outbox service built in task 012.</role>
+
+  <goal>A new suggestion-producer component evaluates one or more candidate suggestions per Daily-Briefing run; each candidate is (1) grounded per ADR-039 (backed by real, currently-true source data — no invented facts) and (2) passed through the ADR-041 confirmation gate with `origin=proactive` semantics; only a candidate that passes BOTH gates results in a `kind=suggestion` outbox row (envelope per task 013's suggestion contract, `actionHint` + `expiresAt` populated) written EXPLICITLY via the outbox service from task 012 (NOT via `DailyBriefingNarrator`, which remains narration-only per the verified substrate correction). A candidate that fails either gate produces NO outbox row — this is enforced and tested, not just documented.</goal>
+
+  <context>
+    <background>
+      Absorbed from assistant-r1.5 (spec §4A / Owner Clarifications "combined path iii"): Daily Briefing today only narrates (`DailyBriefingNarrator` → TL;DR + deterministic channel bullets, `Api/Ai/DailyBriefingEndpoints.cs`); it does NOT act. FR-15 adds a proactive leg: the collector's data (already surfaced to the narrator as `TldrFactsDto` / channel view models) is also evaluated for actionable suggestions ("you have an unanswered message from X — draft a reply?"). The spine's core doctrine (NFR-03) is that it NEVER carries ungrounded or ungated content — grounding and gating are producer responsibilities, not spine responsibilities. This task is the suggestion producer's half of that contract; task 051 (renderer) and 052 (dispatch parity) are downstream consumers of the outbox row this task writes.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/**</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/**</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Every candidate suggestion this producer considers MUST be grounded: its content traces to real, currently-true source data the producer holds at evaluation time (the collector's TldrFactsDto-equivalent view models); no candidate is invented or inferred beyond what the source data supports.</constraint>
+    <constraint source="ADR-041">Every candidate MUST pass the ONE confirmation gate (`PendingPlanManager`-equivalent gating discipline) with `origin=proactive` semantics BEFORE any outbox write is attempted; this producer MUST NOT introduce a second, parallel gate or decider — reuse the existing gate mechanism's discipline (metadata-driven gating decision per ADR-039/041), do not fork a bespoke suggestion-only gate.</constraint>
+    <constraint source="project">The outbox write happens ONLY after both grounding and the gate pass — the write is the OUTPUT of the gates, never a precondition-free default. An ungrounded OR ungated candidate MUST result in zero outbox rows (not a row marked "pending review" — genuinely zero rows).</constraint>
+    <constraint source="project">This producer writes to the Layer-B outbox / `NotificationService` EXPLICITLY (per task 012's service and task 013's envelope contract). `DailyBriefingNarrator` itself MUST NOT be modified to write appnotification or the outbox — it stays narration-only (verified substrate correction, project CLAUDE.md).</constraint>
+    <constraint source="ADR-013">Any seam back into `Services/Ai/` internals for grounding/candidate evaluation goes through `Services/Ai/PublicContracts/` — no direct injection of AI internals into the producer beyond the facade.</constraint>
+    <constraint source="ADR-032">The producer is registered unconditionally with an ADR-032 null-object fallback consistent with the outbox/delivery services it depends on (task 012/020); a disabled downstream service degrades silently, it does not throw.</constraint>
+    <constraint source="ADR-038">This task touches dispatch-spine-adjacent code (a new outbox-writing producer) — it MUST include a `tests/integration/seam/**` test verifying the grounded+gated-before-write invariant end to end (candidate → gate → write), per ADR-038 DoD.</constraint>
+    <constraint source="project">BFF publish measured ≤60 MB compressed (report absolute + diff vs ~49.63 MB incl-PDB baseline, state PDB convention); 0 new HIGH CVE (`dotnet list package --vulnerable --include-transitive`); Placement Justification stated per `.claude/constraints/bff-extensions.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-notification-spine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Confirmation-gate discipline" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">The ONE metadata-driven gating decision (ADR-039/D12) — SuspendInvocationAsync/ResumeInvocationAsync. Follow its "gate before side-effect" shape for the proactive-suggestion candidate; do not fork a second decider.</pattern>
+      <pattern name="Narration-only narrator, explicit outbox write" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs">The narrator produces TL;DR + deterministic bullets and returns a response — it has no write side effect today. The suggestion producer is a SEPARATE component that reads the same collected data and writes explicitly; it does not extend the narrator's write surface.</pattern>
+      <pattern name="Outbox write-before-ping" location="src/server/api/Sprk.Bff.Api/Services/Notifications/**">Task 012's outbox service write/read/expire contract — write the durable row first; any downstream ping is best-effort and happens after.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the outbox service (task 012 output) and the envelope contract + suggestion `kind` shape (task 013 output: `actionHint`, `expiresAt`) to know the exact write API and payload shape this producer targets.</step>
+    <step order="2">Identify the candidate-suggestion source: the Daily-Briefing collector's already-computed view models (`DailyBriefingCollector.cs`) — do not re-fetch or duplicate data collection; read what the narrator already reads.</step>
+    <step order="3">Design and implement the grounding check (ADR-039): a candidate is admissible only if every fact it cites resolves to source data present in the collector's output at evaluation time.</step>
+    <step order="4">Wire the ADR-041 confirmation gate with `origin=proactive` semantics ahead of the write — reuse the existing gate mechanism's discipline; do not introduce a parallel gate.</step>
+    <step order="5">Implement the outbox write path: on a grounded+gated pass, write a `kind=suggestion` row via the outbox service (task 012) using the envelope contract (task 013); on a failed grounding or gate check, write nothing and log the decision (mirrors the FR-12 "no match/below threshold → no action, decision logged" precedent).</step>
+    <step order="6">Wire this producer into the Daily-Briefing run path as a sibling step to narration (not inside `DailyBriefingNarrator`) — confirm the narrator's own behavior and tests are unmodified.</step>
+    <step order="7">Add unit tests: grounded+gated candidate → exactly one outbox row with correct envelope shape; ungrounded candidate → zero rows; grounded-but-ungated candidate → zero rows.</step>
+    <step order="8">Add the `tests/integration/seam/**` test: end-to-end candidate → grounding → gate → outbox write (or correctly no-write) verified against the real outbox service (task 012), not a mock of it.</step>
+    <step order="9">Run `dotnet build`, `dotnet test`, measure BFF publish size, run the CVE scan; record results per bff-extensions.md.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="11">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a candidate could reach the outbox without passing grounding+gate, STOP and escalate (NFR-03 — spine never carries ungrounded/ungated content).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/** (new suggestion-producer component, sibling to DailyBriefingNarrator)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/** (grounded/ungrounded/ungated cases)</output>
+    <output type="test">tests/integration/seam/** (grounded+gated-before-write end-to-end seam test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a candidate suggestion whose facts are fully backed by the collector's source data, when the producer evaluates it and the ADR-041 gate (origin=proactive) passes, then exactly one `kind=suggestion` outbox row is written with `actionHint` and `expiresAt` populated per the task-013 envelope contract.</criterion>
+    <criterion testable="true">Given a candidate suggestion whose content is NOT backed by source data (ungrounded), when the producer evaluates it, then zero outbox rows are written, regardless of gate outcome.</criterion>
+    <criterion testable="true">Given a grounded candidate that fails the ADR-041 confirmation gate, when the producer evaluates it, then zero outbox rows are written and the no-action decision is logged.</criterion>
+    <criterion testable="true">Given the Daily-Briefing narration path runs, when the suggestion producer also runs in the same request, then `DailyBriefingNarrator`'s own output and existing tests are unchanged (the narrator does not itself write appnotification or the outbox).</criterion>
+    <criterion testable="true">Given the outbox service (task 012) is available, when the producer writes a `kind=suggestion` row, then the write uses the outbox service's write API explicitly — no code path writes via `DailyBriefingNarrator`.</criterion>
+    <criterion testable="true">A `tests/integration/seam/**` test exists exercising candidate → grounding → gate → outbox write (and the ungrounded/ungated no-write cases) against the real task-012 outbox service.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; absolute size + diff vs ~49.63 MB incl-PDB baseline reported with PDB convention stated; 0 new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`; Placement Justification stated per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">All existing `DailyBriefingNarrator`/`DailyBriefingCollector`/`DailyBriefingCompositeService` tests pass unmodified.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-15, NFR-03. Substrate correction (project CLAUDE.md): `DailyBriefingNarrator` does NOT write appnotification — narration-only; appnotification/outbox writes are centralized elsewhere and this producer must write explicitly. `PendingPlanManager` cites ADR-039/040 in-code; the spec labels its gate the "ADR-041 gate" — treat them as the same mechanism, not two. Coordinate with `spaarke-daily-update-service-r5` per project CLAUDE.md Related Projects (Daily-Briefing producer coordination).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

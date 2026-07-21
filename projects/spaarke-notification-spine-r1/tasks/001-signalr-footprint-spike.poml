@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>FR-01 SignalR Footprint Spike — Serverless vs Default Mode Go/No-Go</title>
+    <phase>0 Gate-Zero</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Spike producing a go/no-go decision; adds the SignalR SDK experimentally to measure footprint, not to ship production code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Go/no-go architectural gate; Layer-C placement judgment (BFF vs out-of-BFF) rests on this task's measurements.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single blocking gate — every Phase 2 (Layer-C) task is gated on this task's outcome; nothing should start in parallel with it.</parallel-reason>
+    <deps>none</deps>
+    <tags>azure, bff-api, ai, spike</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+  <prompt>Measure the real compressed-publish, cold-start, CVE, and CSP footprint of hosting Azure SignalR Service inside the BFF, in BOTH Serverless and Default modes, and record a go/no-go + mode decision that Phase 2 (Layer-C) tasks are gated on.</prompt>
+  <role>SPAARKE platform developer with Azure App Service / BFF deployment expertise. Follow ADRs strictly. This is an experimental measurement task — you add the SignalR SDK temporarily to get real numbers, not to ship a feature.</role>
+  <goal>A written spike note recording measured compressed BFF publish size (both modes, absolute + diff vs baseline), cold-start delta, transitive CVE scan result, and target-env CSP `connect-src` verification, ending in an explicit go/no-go decision and (if go) a mode decision (Serverless vs Default) that Phase 2 tasks can build on without re-litigating placement.</goal>
+  <context>
+    <background>
+      The project needs Azure SignalR real-time delivery (Layer C) inside the BFF, but the BFF has a binding ≤60 MB compressed-publish ceiling (root CLAUDE.md §10) and the current baseline is ~49.63 MB incl-PDB / 45.87 MB excl-PDB. Nobody has measured what the SignalR SDK actually costs in this specific BFF. Two prior researcher spikes (2026-07-15/16) recommend Azure SignalR generally but did NOT measure this BFF's publish-size delta, and disagree slightly on mode: the earlier note leans Serverless-first for MDA-only scope, the later note (assistant push channel) recommends Default mode + hub-in-BFF + durable outbox. This task's burden of proof is explicitly on Default (a send-only topology structurally favors Serverless, per spec FR-01) — Default must justify itself with real numbers, not be the default choice by inertia.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/agent-memory/researcher/signalr-vs-sse-notification-fabric-2026-07-16.md</file>
+      <file>.claude/agent-memory/researcher/assistant-push-channel-2026-07-15.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">This task's experimental SDK addition (Microsoft.Azure.SignalR and/or Microsoft.Azure.SignalR.Management) is git-committed ONLY if the go decision is reached; if no-go or the mode decision changes the placement, the experimental package reference(s) MUST be reverted before this task closes — the spike note carries the numbers, the BFF csproj does not carry a dead experiment.</constraint>
+    <constraint source="project">Measure BOTH Microsoft.Azure.SignalR (Default/hub-hosted mode) and Microsoft.Azure.SignalR.Management (Serverless/publish-only mode) independently — do not measure only one and infer the other from package size alone; cold-start and transitive-dependency graphs differ between the two packages.</constraint>
+    <constraint source="root CLAUDE.md §10">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` for each mode's measurement; report absolute compressed size AND diff vs the ~49.63 MB incl-PDB baseline; state the PDB convention (incl. vs excl.) explicitly for every number reported.</constraint>
+    <constraint source="root CLAUDE.md §10">Run `dotnet list package --vulnerable --include-transitive` after adding each SDK; 0 new HIGH-severity CVE is required for a go decision on that mode.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/agent-memory/researcher/signalr-vs-sse-notification-fabric-2026-07-16.md</file>
+      <file>.claude/agent-memory/researcher/assistant-push-channel-2026-07-15.md</file>
+    </files>
+    <patterns>
+      <pattern name="publish-size measurement" location=".claude/constraints/azure-deployment.md">Follow the documented BFF Publish-Size Per-Task Verification Rule (NFR-01) procedure exactly — same dotnet publish invocation and reporting convention every BFF task uses, so this spike's numbers are comparable to later tasks' deltas.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Record the current BFF publish baseline (both incl-PDB and excl-PDB) by running `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-baseline/` on a clean checkout, before any SDK is added, and note the compressed size.</step>
+    <step order="2">Add `Microsoft.Azure.SignalR.Management` (Serverless mode — publish-only, no hosted hub) to `Sprk.Bff.Api.csproj`. Re-run `dotnet publish` and measure the compressed size delta. Run `dotnet list package --vulnerable --include-transitive` and record any new HIGH-severity CVE. Measure cold-start delta (App Service cold-start time with vs without the package, via local `dotnet run` warm-up timing or an equivalent proxy documented in the note). Then revert the package addition before step 3.</step>
+    <step order="3">Add `Microsoft.Azure.SignalR` (Default mode — hosted hub via `AddAzureSignalR()`) to `Sprk.Bff.Api.csproj`, with a minimal `MapHub&lt;T&gt;()` registration so the publish graph reflects real usage. Re-run `dotnet publish`, measure the compressed size delta, run the CVE scan, and measure cold-start delta the same way as step 2.</step>
+    <step order="4">Verify target-environment CSP `connect-src` allows the SignalR endpoint (`wss://*.service.signalr.net`) — check the Spaarke target environment's CSP configuration (App Service / Dataverse-hosted client CSP, per the researcher notes' "silent-fallback risk if missed" warning) and record pass/fail per environment checked.</step>
+    <step order="5">Compare both modes against the 55 MB review band and 60 MB stop band (NFR-01). Weigh Serverless's structural fit for a send-only topology (per spec FR-01 burden-of-proof-on-Default) against Default's operational simplicity, using the two researcher notes as prior art. Write the go/no-go decision and, if go, the mode decision.</step>
+    <step order="6">Write `notes/spikes/fr-01-signalr-footprint.md` recording: both modes' measured compressed sizes (absolute + diff vs baseline, PDB convention stated), cold-start deltas, CVE scan results, CSP verification result, the go/no-go decision, the mode decision (with rationale), and — if either mode breached >60 MB — the revised Layer-C placement (hub/negotiate moved out of the BFF) that Phase 2 tasks must follow instead.</step>
+    <step order="7">Revert whichever experimental package reference does NOT match the final mode decision from `Sprk.Bff.Api.csproj` (leave the codebase in the state Phase 2 tasks should start from: either no SignalR package if no-go, or only the chosen mode's package if go).</step>
+    <step order="8">Update `projects/spaarke-notification-spine-r1/tasks/TASK-INDEX.md`: set this task to completed.</step>
+    <step order="9">Document any deviations in `projects/spaarke-notification-spine-r1/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If either mode pushes compressed publish size &gt;60 MB, STOP: do not proceed to Layer-C tasks (Phase 2); escalate that the hub/negotiate endpoint must move OUT of the BFF (root §6) and the Layer-C design must be revised in the spike note before any downstream task starts.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/publish/measure the BFF; run vulnerable-package scan</tool>
+    <tool name="terminal">Shell for publish-size measurement and package add/revert</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/spikes/fr-01-signalr-footprint.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a clean BFF checkout, when `dotnet publish -c Release` is run before any SignalR SDK is added, then the baseline compressed size (incl-PDB and excl-PDB) is recorded in the spike note.</criterion>
+    <criterion testable="true">Given `Microsoft.Azure.SignalR.Management` (Serverless mode) added to the BFF csproj, when publish is measured, then the spike note records absolute compressed size and diff vs baseline, with the PDB convention stated.</criterion>
+    <criterion testable="true">Given `Microsoft.Azure.SignalR` (Default mode) added to the BFF csproj with a minimal hub mapped, when publish is measured, then the spike note records absolute compressed size and diff vs baseline, with the PDB convention stated.</criterion>
+    <criterion testable="true">Given each mode's package addition, when `dotnet list package --vulnerable --include-transitive` is run, then the spike note records the result and 0 new HIGH-severity CVE is confirmed for the chosen mode (or the CVE finding is the stated reason for a no-go on that mode).</criterion>
+    <criterion testable="true">Given the target environment's CSP configuration, when checked for `connect-src` coverage of the SignalR endpoint, then the spike note records pass/fail explicitly (not silently assumed).</criterion>
+    <criterion testable="true">Given both modes' measurements, when the spike note is finalized, then it states an explicit go/no-go decision and, if go, an explicit mode decision (Serverless or Default) with rationale referencing the burden-of-proof-on-Default rule.</criterion>
+    <criterion testable="true">Given a >60 MB breach in either mode (negative case), when that breach is measured, then the spike note documents the revised Layer-C placement (hub/negotiate moved out of the BFF) instead of a mode decision, and the escalation trigger fires — no downstream Layer-C task proceeds against a >60 MB BFF placement.</criterion>
+    <criterion testable="true">Given the spike concludes, when the BFF csproj is inspected, then it contains only the package reference matching the final decision (none if no-go; exactly one SDK package if go) — no leftover experimental reference from the rejected mode.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-01. This is the hard blocking gate for the whole project's Phase 2 — do not let schedule pressure shortcut the CVE scan or CSP check. The two researcher memory files are prior art, not a substitute for this task's own measurements against THIS BFF's current dependency graph.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

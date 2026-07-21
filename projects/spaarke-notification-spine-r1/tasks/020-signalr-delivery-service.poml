@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>SignalR Delivery Service + Authenticated Negotiate Endpoint (Layer C)</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:001,012,013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF infrastructure service + authenticated endpoint; auth-sensitive; 6+ steps; unblocks four downstream Phase-2 tasks — meets root CLAUDE.md §8 FULL criteria (bff-api tag, auth tag, architecture change).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New SignalR infra; authenticated negotiate is security-sensitive (per-user scoping must be server-derived, never client-supplied).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Establishes the negotiate contract + producer entrypoint shape that 021 (client lib), 023 (fan-out targeting), and 024 (communication-arrived producer) all consume — must land first among the Phase 2 SignalR-dependent tasks.</parallel-reason>
+    <deps>001,012,013</deps>
+    <tags>bff-api, api, azure, auth</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Layer-C SignalR delivery service and its authenticated negotiate endpoint so producers (starting with task 024's communication-arrived) can send a best-effort, signal-only real-time ping AFTER durably writing an outbox row, with an ADR-032 null-object degrade path when SignalR is disabled or unreachable.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep experience with ASP.NET Core Minimal APIs, Azure SignalR Service (Management SDK / IHubContext depending on mode), ADR-032 null-object kill-switches, and Auth v2 (ADR-028) server-side token validation.</role>
+
+  <goal>A SignalR delivery service (mode per task 001's recorded decision) is registered UNCONDITIONALLY — the real implementation when SignalR is enabled, an ADR-032 null-object no-op when disabled — and exposes a producer entrypoint that sends an at-most-once, signal-only ping to Clients.User(oid) (and a Group(...) primitive for task 023's fan-out to build on) AFTER the caller has already durably written its outbox row. An authenticated POST /api/notifications/negotiate endpoint issues SignalR connection info scoped to the calling user only. A tests/integration/seam/** test proves the outbox-before-ping ordering contract and the null-object degrade path.</goal>
+
+  <context>
+    <background>
+      Spec FR-04 + NFR-04. The spine is dumb transport: this service carries NO envelope content, only a "changed → fetch" signal, so clients re-fetch through access-checked BFF endpoints (NFR-02/03 — envelope shape and content live in task 013's contract, not here). Task 001's spike (notes/spikes/fr-01-signalr-footprint.md) decided the SignalR mode (Serverless vs Default) and confirmed placement stays inside the BFF within the 55/60 MB publish bands. Task 012 already built the outbox write/read/expire service in Services/Notifications/**; task 013 already built the typed envelope contract. This task is the delivery LEG only — every producer (024 here, later 040/042/050) decides WHEN to call ping (after its own outbox write) and WHAT kind fired; this service does not know about kinds.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-notification-spine-r1/notes/spikes/fr-01-signalr-footprint.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>tests/integration/seam/README.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">This service has multiple future producer consumers (024/040/042/050) — if implemented as a sealed concrete class, follow the concrete-class-subclass Null-Object pattern (unseal + protected ctor + virtual methods, preferred per ADR-010). If an interface is used instead, add a code comment stating why ADR-010's "no interface solely for null-object" bar is met (multiple independent producer consumers, not just the null-object).</constraint>
+    <constraint source="ADR-032">Register the delivery service AND the negotiate endpoint UNCONDITIONALLY. When SignalR is disabled/unreachable, the null-object's ping method is a quiet no-op (P2 pattern — absence of a live signal is not caller-visible error state; the outbox + task 022's poll fallback already carry the durable truth). Do NOT throw FeatureDisabledException on ping — producers call it fire-and-forget after their own outbox write already succeeded.</constraint>
+    <constraint source="project">The public API of the ping entrypoint MUST make the outbox-before-ping ordering unmistakable (e.g., require a value that only exists post-write, such as the outbox row id, as a parameter) rather than relying on caller discipline alone — this is the MUST rule from spec + root CLAUDE.md ("write the outbox BEFORE pinging SignalR").</constraint>
+    <constraint source="ADR-028">The negotiate endpoint is authenticated (.RequireAuthorization()); it derives the target user's identity server-side from the validated JWT (oid claim) and returns connection info scoped to that user ONLY — it MUST NOT accept a target userId/oid from the request body or query string.</constraint>
+    <constraint source="ADR-028">SignalR/negotiate raw-fetch is the enumerated ADR-028 exception on the CLIENT side (task 021's job, carrying the `// Auth v2 (D-AUTH-7):` comment). On the SERVER, this task's negotiate endpoint is a normal authenticated Minimal API endpoint like any other in the BFF — no exception applies here.</constraint>
+    <constraint source="project">No second push/delivery mechanism: this is the ONE SignalR hub/delivery service for the whole platform. Do NOT create a per-consumer hub or a parallel connection surface for a specific consumer (root CLAUDE.md Key Technical Constraints).</constraint>
+    <constraint source="CLAUDE.md §10">State the Placement Justification in the PR description (spine stays in BFF — sole policy/token point per spec §8); verify BFF publish size after adding the Azure SignalR SDK package(s); run dotnet list package --vulnerable --include-transitive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="feature-module-di" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs">Focused Add{Feature}Module() extension method (ADR-010); Configure&lt;TOptions&gt; for kill-switch options; register services unconditionally when they have no feature-gated transitive deps.</pattern>
+      <pattern name="minimal-api-endpoint-group" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">MapGroup + RequireAuthorization + AddEndpointFilter&lt;...&gt; + WithName/WithDescription/Produces&lt;T&gt; — copy this shape for the negotiate endpoint group.</pattern>
+      <pattern name="null-object-kill-switch" location=".claude/adr/ADR-032-bff-nullobject-kill-switch.md">Concrete-class Null-Object subclass (preferred) or P2 quiet no-op — pick per the Decision table in the ADR.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Zero SignalR (or any comparable live-push transport) exists in the repo — verified 2026-07-20 (plan.md Reusable Code inventory).</existing>
+    <extension>No — this is a new real-time delivery mechanism class; nothing existing can be extended to add live push without becoming this service.</extension>
+    <cost-of-doing-nothing>No live push at all: messaging-r3's badges/toasts (task 045, blocked on this contract) and the Phase 5 Daily-Briefing suggestion cards wait for the next poll interval instead of real-time delivery — the spine's core value proposition (server-initiated real-time signal) is not delivered, and each consumer would eventually re-attempt to build its own push channel (the exact forked-consumer failure root §11 forbids).</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read notes/spikes/fr-01-signalr-footprint.md; confirm the mode decision (Serverless vs Default) and that placement stays in the BFF. If the spike is unresolved, or recorded a &gt;60 MB outcome with a revised out-of-BFF placement, STOP per escalation and do not proceed.</step>
+    <step order="2">Add the Azure SignalR SDK package reference(s) per the mode decision to Sprk.Bff.Api.csproj; run `dotnet list package --vulnerable --include-transitive`; record 0 new HIGH CVE.</step>
+    <step order="3">Design and implement the delivery service in src/server/api/Sprk.Bff.Api/Services/Notifications/: a producer entrypoint (e.g., PingUserAsync(Guid outboxRowId, string userOid, ...) targeting Clients.User(oid)) plus a Group-targeting primitive for task 023 to build fan-out on top of; implement the real impl (Management SDK or IHubContext per mode) and the ADR-032 null-object.</step>
+    <step order="4">Add the negotiate endpoint: POST /api/notifications/negotiate, mapped via a new Map{Feature}Endpoints extension (follow the CommunicationEndpoints.cs shape) — authenticated, resolves the caller's oid server-side, returns connection info scoped to that user only.</step>
+    <step order="5">Register the delivery service and the endpoint mapping UNCONDITIONALLY in a feature-module DI extension (new or extending 012's Notifications module) per ADR-010/032; run the bff-extensions.md §F.1 static-scan recipe to verify no asymmetric registration.</step>
+    <step order="6">Write the seam test under tests/integration/seam/Notifications/: asserts (a) a ping call after an outbox write reaches a connected test client, (b) with the null-object registered (SignalR off), the ping call returns without throwing and without blocking.</step>
+    <step order="7">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed publish size; report absolute size + diff vs the ~49.63 MB incl-PDB baseline; escalate per NFR-01 bands if ≥55 MB.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 020 to ✅ completed.</step>
+    <step order="9">Document any deviations (mode-specific implementation notes, interface-vs-concrete-class choice) in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If publish size breaches the 55 MB review band after adding the SignalR SDK, STOP and escalate per NFR-01 — do not proceed to register the service unconditionally without owner sign-off on the size delta.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET; dotnet list package --vulnerable</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Notifications/SignalRDeliveryService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Notifications/NotificationsEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/NotificationsModule.cs</output>
+    <output type="test">tests/integration/seam/Notifications/SignalRDeliverySeamTests.cs</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/ (publish-size report + mode-implementation notes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SignalR mode X (per task 001's decision) and a connected test client subscribed as user U, when a producer writes an outbox row and then calls the delivery service's ping entrypoint for U, then the connected client receives an at-most-once, signal-only message within the seam test's timeout.</criterion>
+    <criterion testable="true">Given SignalR is disabled or unreachable (null-object registered), when a producer calls the ping entrypoint after its own outbox write, then the call returns without throwing and without blocking the producer's own success path.</criterion>
+    <criterion testable="true">Given an authenticated user calls POST /api/notifications/negotiate, when the request succeeds, then the returned connection info is scoped to that user's own oid only — no request parameter can target a different user's connection (verified: a request with a spoofed target-user field, if any is accepted at all, is ignored server-side).</criterion>
+    <criterion testable="true">Given an unauthenticated request to POST /api/notifications/negotiate, when it is sent, then the endpoint returns 401 and no connection info is returned.</criterion>
+    <criterion testable="true">Given the delivery service and negotiate endpoint are registered, when the BFF host starts with SignalR OFF (null-object path), then ASP.NET Core minimal-API endpoint metadata generation succeeds at startup (no unconditional-endpoint-vs-conditional-service abort per ADR-032).</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed (report absolute size + diff vs ~49.63 MB incl-PDB baseline, state the PDB convention used); 0 new HIGH-severity CVE from `dotnet list package --vulnerable --include-transitive`; Placement Justification stated per .claude/constraints/bff-extensions.md.</criterion>
+    <criterion testable="true">A tests/integration/seam/Notifications/** test exists that exercises both the outbox-before-ping ordering and the null-object degrade path as an executable seam test (not a unit-level mock substitute per ADR-038's banned-test-class list).</criterion>
+    <criterion testable="true">Given the ping entrypoint's payload is inspected, when compared against the envelope contract from task 013, then it carries NO message body, NO privileged content, and NO pre-authorized action token — only routing/signal information (NFR-02/03).</criterion>
+  </acceptance-criteria>
+
+  <notes>Mode decision file: notes/spikes/fr-01-signalr-footprint.md. Envelope shape belongs to task 013 — do not design envelope fields here. Group(...) targeting is a primitive this task exposes; task 023 owns the actual fan-out/targeting decision logic on top of it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>
