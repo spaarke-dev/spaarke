@@ -81,6 +81,7 @@ import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
+import { LOCAL_CHIP } from "./localActionChips";
 import {
   detectReviseThisDocumentIntent,
   REVISE_MOUNT_ASK_MESSAGE,
@@ -384,6 +385,10 @@ export function ConversationPane(): React.JSX.Element {
   // here), so the SNS cards' "More" affordance reaches it through a ref
   // rather than reordering hook declarations.
   const openLibraryModalRef = React.useRef<() => void>(() => undefined);
+  // UAT R4-6 / R4-11: local-action chips (Send as email / Save to document / Ask about these
+  // files) route here. `handleDocAction` (the reused editor/email bridges) is declared further
+  // below, so the chip strip reaches it through a ref rather than reordering hook declarations.
+  const localChipActionRef = React.useRef<(actionId: string) => void>(() => undefined);
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
@@ -397,6 +402,8 @@ export function ConversationPane(): React.JSX.Element {
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
+    // UAT R4-6 / R4-11: local-action chips route through the ref to `handleLocalChipAction` (below).
+    onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
     // UAT 2026-07-19: the post-classify "Create a matter" chip carries the uploaded file into the
     // wizard (parity with the text path) — read the session's active source doc.
     getActiveSourceFile: React.useCallback(
@@ -451,6 +458,24 @@ export function ConversationPane(): React.JSX.Element {
     },
     [bffBaseUrl, getSessionId]
   );
+
+  // UAT R4-12: the session's attached-file context for Quick Start wizards. Unlike the chip/text
+  // surface-launch (which carries the single ACTIVE source file), Quick Start carries ALL promoted
+  // session files (the user expects both uploaded files to reach the wizard). By reference only —
+  // session id + session file ids + display names; the wizard fetches binaries itself. Null when none.
+  const getQuickStartFileContext = React.useCallback((): {
+    sessionId: string | null;
+    fileIds: string[];
+    fileNames: string[];
+  } | null => {
+    const entries = Array.from(promotedFileIdsByNameRef.current.entries());
+    if (entries.length === 0) return null;
+    return {
+      sessionId: getSessionId(),
+      fileIds: entries.map(([, sessionFileId]) => sessionFileId),
+      fileNames: entries.map(([fileName]) => fileName),
+    };
+  }, [getSessionId]);
 
   // ── P1-1 (UAT 2026-07-18): cold-open get-started cards ────────────────────
   // Three quick-start actions on the welcome stage, each reusing an EXISTING
@@ -819,6 +844,36 @@ export function ConversationPane(): React.JSX.Element {
     },
     [summarizeBindingId, chips, injection, dispatch, composeSave]
   );
+
+  // UAT R4-6 / R4-11 — local-action chips (Send as email / Save to document / Ask about these files).
+  // Each REUSES an existing affordance (CLAUDE.md §11), never a net-new capability:
+  //  - Send as email     → the `draft-email` Email-widget bridge (handleDocAction)
+  //  - Save to document   → the `add-to-dms` Compose create-on-save bridge (handleDocAction)
+  //  - Ask about these files → an honest prompt nudge: the files are already attached to the session,
+  //    so the user's next chat turn is grounded in them — no capability is faked or dispatched.
+  const handleLocalChipAction = React.useCallback(
+    (actionId: string): void => {
+      switch (actionId) {
+        case LOCAL_CHIP.sendAsEmail:
+          handleDocAction("draft-email");
+          return;
+        case LOCAL_CHIP.saveToDocument:
+          handleDocAction("add-to-dms");
+          return;
+        case LOCAL_CHIP.askAboutFiles:
+          injection.enqueue(
+            makeLocalAssistantMessage(
+              "Ask me anything about the attached file(s) — type your question below and I'll answer using their contents."
+            )
+          );
+          return;
+        default:
+          return;
+      }
+    },
+    [handleDocAction, injection]
+  );
+  localChipActionRef.current = handleLocalChipAction;
 
   // FIX #7a — the save-completed conduit handler (registered on the bridge below). ComposeWorkspace
   // calls it after a successful create-on-save with the persisted document's id + filename. We inject
@@ -1657,7 +1712,11 @@ export function ConversationPane(): React.JSX.Element {
       </div>
 
       {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
-      <QuickStartModal open={quickStartOpen} onClose={() => setQuickStartOpen(false)} />
+      <QuickStartModal
+        open={quickStartOpen}
+        onClose={() => setQuickStartOpen(false)}
+        getFileContext={getQuickStartFileContext}
+      />
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
 
