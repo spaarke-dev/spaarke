@@ -119,7 +119,12 @@ function toSourceRecord(m: TimelineMessage): ISourceCommunicationRecord {
 describe('ConversationView forward affordance (FR-08)', () => {
   it('renders a Forward affordance on EVERY message (email block AND chat bubble) when a handler is wired', async () => {
     const messages = [
-      dto('email1', { communicationType: EMAIL, subject: 'Quarterly Review', from: 'alice@example.com', sentBy: USER_1 }),
+      dto('email1', {
+        communicationType: EMAIL,
+        subject: 'Quarterly Review',
+        from: 'alice@example.com',
+        sentBy: USER_1,
+      }),
       dto('msg1', { communicationType: MESSAGE, body: 'hello there', sentBy: USER_2, sentByName: 'Colleague' }),
     ];
     renderView({
