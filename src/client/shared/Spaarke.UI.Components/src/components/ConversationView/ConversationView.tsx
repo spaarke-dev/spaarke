@@ -37,6 +37,7 @@ import * as React from 'react';
 import {
   Button,
   Dropdown,
+  Link,
   Option,
   Spinner,
   Text,
@@ -72,6 +73,32 @@ const useStyles = makeStyles({
     height: '100%',
     minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Conversation title header (task 025 / FR-12) — only rendered when a `title`
+  // is supplied. Semantic tokens only (ADR-021).
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Plain (record-less) title — non-interactive text.
+  titleText: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // Record-linked title — a Fluent Link (rendered as a button) that delegates
+  // the record open to the host's `onOpenRecord`. Weight matches the plain
+  // title so linking a title doesn't reflow the header.
+  titleLink: {
+    fontWeight: tokens.fontWeightSemibold,
+    textAlign: 'left',
   },
   list: {
     flex: 1,
@@ -545,6 +572,9 @@ export function extractWordOptions(messages: TimelineMessage[], cap = 40): strin
 export const ConversationView = React.forwardRef<ConversationViewHandle, ConversationViewProps>((props, ref) => {
   const {
     threadId,
+    title,
+    regarding,
+    onOpenRecord,
     currentUserSystemUserId,
     authenticatedFetch,
     bffBaseUrl,
@@ -717,6 +747,40 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   return (
     <div className={mergeClasses(styles.root, className)} role="region" aria-label="Conversation">
       <div ref={liveRegionRef} aria-live="polite" className={styles.visuallyHidden} />
+
+      {/* Conversation title header (task 025 / FR-12). The title links to the
+          associated record ONLY when the thread has a `regarding` AND the host
+          wired `onOpenRecord`; clicking delegates the open to the host, which
+          uses the sanctioned OOB record-scoped modal (MODAL-DECISION-CRITERIA
+          Layout 1) — ConversationView imports no `Xrm` and embeds no iframe
+          (ADR-012). Record-less threads (no regarding), or hosts that provide
+          no `onOpenRecord`, render a plain, non-interactive title. Rendered
+          only when a `title` is supplied (header-less otherwise). */}
+      {title && (
+        // role=heading (aria-level 2) so a screen-reader user can jump to the
+        // conversation title via heading navigation; the interactive link/plain
+        // text sits inside (NFR-05).
+        <div className={styles.header} role="heading" aria-level={2}>
+          {regarding && onOpenRecord ? (
+            <Link
+              as="button"
+              // Native <button> defaults to type="submit" — force "button" so
+              // activating the title link never submits a host <form> (matches
+              // the SprkChatMessageRenderer / TextareaField convention).
+              type="button"
+              className={styles.titleLink}
+              // Accessible name keeps the visible title and states the action so
+              // a screen-reader user knows the link opens the record (NFR-05).
+              aria-label={`${title}, open associated record`}
+              onClick={() => onOpenRecord(regarding.entityType, regarding.id)}
+            >
+              {title}
+            </Link>
+          ) : (
+            <Text className={styles.titleText}>{title}</Text>
+          )}
+        </div>
+      )}
 
       {/* Transient poll error while messages are already loaded — inline banner, list stays visible. */}
       {state.error && state.status === 'ready' && (

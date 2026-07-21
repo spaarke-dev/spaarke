@@ -18,6 +18,20 @@ import type { AuthenticatedFetchFn } from '../../services/EntityCreationService'
 import type { TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
 import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
 
+/**
+ * The Dataverse record a thread is associated with ("regarding"), used by the
+ * FR-12 header title link (task 025). Mirrors `IConversationWorkspaceRegarding`
+ * (shell) — a logical entity name + record id, plus an optional display name.
+ */
+export interface IConversationViewRegarding {
+  /** Logical entity name (e.g. `sprk_matter`, `contact`) — one of the 11 ADR-024 families. */
+  entityType: string;
+  /** Record GUID. */
+  id: string;
+  /** Optional display name (unused for the open call, available for future labelling). */
+  name?: string;
+}
+
 export interface ConversationViewProps {
   // — Auth (injected per shared-lib decoupling rule, ADR-028) —
   authenticatedFetch: AuthenticatedFetchFn;
@@ -26,6 +40,36 @@ export interface ConversationViewProps {
 
   /** The thread to render (`sprk_communication` rows sharing this thread anchor). */
   threadId: string;
+
+  /**
+   * Optional conversation title shown in a header row at the top of the view
+   * (task 025, FR-12) — typically the thread's display name (`ThreadList` row
+   * `name`). When omitted, NO header renders (existing callers that pass no
+   * title are unaffected — the view stays header-less as before).
+   */
+  title?: string;
+
+  /**
+   * The Dataverse record this thread is associated with (its "regarding"), if
+   * any (task 025, FR-12). When present AND `onOpenRecord` is wired, the header
+   * title renders as a link that opens this record; when absent (a record-less
+   * Direct thread) the title renders as plain, non-interactive text. One of the
+   * 11 ADR-024 regarding families (e.g. `sprk_matter`, `contact`).
+   */
+  regarding?: IConversationViewRegarding;
+
+  /**
+   * Host-provided capability to OPEN the associated record (task 025, FR-12).
+   * ConversationView stays context-agnostic (ADR-012): it holds no `Xrm` /
+   * navigation API, so it never opens the record itself — it delegates to this
+   * injected callback. The host wrapper (PCF / code page, Phase 4) wires it to
+   * the sanctioned OOB record-scoped modal
+   * (`Xrm.Navigation.navigateTo({ pageType: 'entityrecord', ... }, { target: 2 })`,
+   * Layout 1 per `docs/standards/MODAL-DECISION-CRITERIA.md`) — NOT a bespoke
+   * iframe/modal (the iframe-embedding anti-pattern). Omit it (or omit
+   * `regarding`) and the title renders as plain text.
+   */
+  onOpenRecord?: (entityType: string, id: string) => void;
 
   /**
    * The CALLER's own Dataverse `systemuserid` (GUID string). Mine/others
@@ -124,5 +168,4 @@ export type MessageBubbleStatus = 'sent' | 'delivered' | 'failed';
 
 /** One row in the rendered list: either a day-boundary divider or a message bubble. */
 export type ConversationRenderItem =
-  | { kind: 'divider'; key: string; label: string }
-  | { kind: 'message'; key: string; entry: TimelineEntry };
+  { kind: 'divider'; key: string; label: string } | { kind: 'message'; key: string; entry: TimelineEntry };

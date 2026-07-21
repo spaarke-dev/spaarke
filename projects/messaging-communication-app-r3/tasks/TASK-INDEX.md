@@ -29,7 +29,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 022 | FR-08 forward action → email modal (forward mode) | 3 | ✅ | FULL/sonnet/high | 020 | serial |
 | 023 | FR-05 `MessageQuickView` popover (200-char, open→pin) | 3 | ✅ | FULL/sonnet/high | 011 | Wave 11 (C) |
 | 024 | FR-11 `NewThreadModal` (find-or-create `POST /threads/direct`) | 3 | ✅ | FULL/sonnet/high | 012 | Wave 11 (C) |
-| 025 | FR-12 conversation title → record-scoped modal link | 3 | 🔲 | FULL/sonnet/high | 011,012 | serial |
+| 025 | FR-12 conversation title → record-scoped modal link | 3 | ✅ | FULL/sonnet/high | 011,012 | serial |
 | 030 | FR-13 record right-pane conversation PCF | 4 | 🔲 | FULL/**opus**/high | 011,012,023 | Wave 15 (D) |
 | 031 | FR-14a SpaarkeAI workspace widget (keep `communications-list`) | 4 | 🔲 | FULL/sonnet/high | 012 | Wave 15 (D) |
 | 032 | FR-14b standalone Vite conversation code page | 4 | 🔲 | FULL/sonnet/high | 012 | Wave 15 (D) |

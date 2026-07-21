@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 1 ✅ · Phase 2 ✅ · **Phase 3: 5/6 done** (020,021,022,023,024 ✅ gated+pushed). Only **025** (FR-12 title→record modal link) remains, then **Phase 4**. |
-| **Step** | — (between tasks; nothing in-progress) |
-| **Status** | **CLEAN + fully pushed** — working tree clean, 0 unpushed to PR #664 (HEAD `d6050810e`). ⚠️ **10 behind origin/master** (other projects merged during the session). |
-| **Next Action** | `work on task 025` (FR-12 conversation title → record-scoped modal link, deps 011+012 — both done). It finishes Phase 3. **RECOMMENDED FIRST**: `git merge origin/master` (10 behind; likely touches shared EmailComposer/UI surfaces again — resolve like prior merges, prefer R3 logic, re-run tests). Then Phase 4 (030 record PCF **[opus]**, 031 widget, 032 code page, 033 Email&Messages DataGrid tab, 034 deploy). |
+| **Task** | Phase 1 ✅ · Phase 2 ✅ · **Phase 3 ✅ COMPLETE** (020,021,022,023,024,025 all gated). Next: **Phase 4** (Wave 15 — goal-eligible). |
+| **Step** | — (between tasks; task 025 done, committed locally; not yet pushed) |
+| **Status** | Merged `origin/master` (was 16 behind; 1 conflict in `SendEmailDialog.tsx` resolved as a **union** — R3 `regarding`-fold + master R6-4 760px dialog — committed `201a4e607`). Task 025 implemented + gated. **Local commits ahead of origin — needs `/push-to-github`.** |
+| **Next Action** | **`/push-to-github`** (run `/conflict-check` first per project CLAUDE.md — touches shared UI; run `npx prettier --write` on changed client files before push to dodge the CI-Prettier reject cycle). Then **Phase 4 Wave 15**: 030 record right-pane PCF **[opus — switch model]**, 031 SpaarkeAI widget, 032 standalone Vite code page, 033 Email&Messages DataGrid tab; then 034 deploy. Wave 15 is the ONLY goal-eligible wave (see TASK-INDEX §Wave 15). 030/031/032 are parallel-safe (different surfaces); 033 independent. |
 
 ### Progress this session — 7 implementation tasks + backend enrichment, ALL gated + committed + PUSHED (PR #664)
 - **Phase 1 (001–006)** + **Phase 2 core (010,011,012)**: done in a PRIOR session, pushed.
@@ -24,7 +24,8 @@
 - **022** FR-08 forward → SendEmailDialog forward mode. Ship (regarding-in-forward doc-mitigated). `notes/task-022-notes.md`.
 - **023** FR-05 MessageQuickView + ConversationView `scrollToMessage` handle. Ship. `notes/task-023-notes.md`.
 - **024** FR-11 NewThreadModal find-or-create. Fixed 3 Majors; §6.5 Path-A (name/desc omitted) accepted. `notes/task-024-notes.md`.
-- **Merges reconciled**: 54-commit master merge (email-r4 moved `mapStateToSendRequest` → `EmailComposer.reducer.ts` + added attachment body-links) + 2 CI-Prettier merges. All conflict-resolved, tests green.
+- **025** FR-12 conversation title → record link. Added `ConversationView` header (`title`/`regarding`/`onOpenRecord` props); title is a Fluent `Link as="button" type="button"` when regarding+callback present, else plain `Text`; delegates open to host (no `Xrm`/iframe in shared lib — ADR-012/MODAL-DECISION-CRITERIA). Gate fixed 2 Minors (`type="button"` form-submit guard; `role="heading"` a11y), accepted 1 (parity `name`). 63/63 CV tests. `notes/task-025-notes.md`. **← Phase 3 complete.**
+- **Merges reconciled**: 54-commit master merge (email-r4 moved `mapStateToSendRequest` → `EmailComposer.reducer.ts` + added attachment body-links) + 2 CI-Prettier merges + **16-commit master merge this session** (1 conflict `SendEmailDialog.tsx` → union resolve `201a4e607`). All conflict-resolved, tests green.
 
 ### Critical Context (carry forward — CURRENT)
 1. **Read DTO now carries `subject` + `to`** (task 021): `ThreadMessageDto` (backend) / `IThreadMessageDto` / `TimelineMessage` + `buildTimeline` mapping. Recipients = access-filtered `sprk_to` on the visible row (NEVER fabricated, NEVER BCC — `sprk_bcc` is separate, never selected). The email-in-flow block + the word filter use them.
@@ -47,12 +48,12 @@ None uncommitted — **all work is committed + pushed**. Per-task detail in `not
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | 003 |
-| **Task File** | `tasks/003-list-all-threads-endpoint.poml` |
-| **Title** | FR-16 `GET /communications/threads` + `ListThreadsAsync` + seam tests |
-| **Phase** | 1 (backend read/thread spine) |
-| **Status** | implemented — build/test/publish/CVE green (see `notes/task-003-notes.md`); pending PR + `/conflict-check` |
-| **Started** | 2026-07-20 |
+| **Task ID** | 025 |
+| **Task File** | `tasks/025-conversation-title-record-link.poml` |
+| **Title** | FR-12 conversation title → record-scoped modal link |
+| **Phase** | 3 (email-in-flow + quick-view + new-thread) |
+| **Status** | in-progress — merged origin/master first (SendEmailDialog conflict resolved as union: R3 `regarding`-fold + master R6-4 760px dialog); implementing header title link |
+| **Started** | 2026-07-21 |
 
 ### Approach (decided)
 - Impersonated `sprk_communicationthreads` query, NO regarding filter (record-less inclusion via impersonation).
