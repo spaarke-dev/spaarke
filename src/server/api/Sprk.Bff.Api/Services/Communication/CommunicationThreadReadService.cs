@@ -39,9 +39,10 @@ public sealed class CommunicationThreadReadService
     private const string CommunicationAttachmentSet = "sprk_communicationattachments";
     private const string ThreadSet = "sprk_communicationthreads"; // by-regarding thread query (R2 task 010)
 
-    // sprk_communicationthread columns (R2 tasks 010/002).
+    // sprk_communicationthread columns (R2 tasks 010/002; R3 task 003 adds sprk_threadtype for the list pane).
     private const string ThreadPkField = "sprk_communicationthreadid";
     private const string ThreadNameField = "sprk_name";
+    private const string ThreadTypeField = "sprk_threadtype"; // Record-Anchored=100000000, Direct 1:1=100000001
 
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
@@ -71,6 +72,8 @@ public sealed class CommunicationThreadReadService
     private const int MaxPageSize = 200;
     private const int MaxUnreadScan = 500; // bound the unread projection scan (NFR-07)
     private const int MaxThreads = 200;         // bound the by-regarding thread fan (R2 task 010)
+    private const int DefaultThreadListPage = 50;  // list-all-threads default page size (R3 task 003 / FR-16)
+    private const int MaxThreadListPage = 200;     // list-all-threads page-size ceiling (mirrors MaxThreads)
     private const int MaxRegardingScan = 500;   // bound the by-regarding message scan across threads (R2 task 010)
     private const int MaxQueryScan = 200;       // bound the filtered-query message scan (R2 task 011)
 
@@ -265,6 +268,148 @@ public sealed class CommunicationThreadReadService
             entityType, recordId, callerSystemUserId, threadResults.Count, messageCount);
 
         return new RegardingReadResult(entityType, recordId, threadResults, threadResults.Count, messageCount);
+    }
+
+    // ── list all threads (R3 task 003 / FR-16) ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists ALL threads the caller may see — record-anchored AND record-less (Direct) — for the R3 workspace
+    /// left pane + standalone code page (FR-16 / Success Criterion 5). Paged and optionally name-searchable.
+    ///
+    /// <para><b>Access model (NFR-01 — the exact failure mode this method guards):</b> the thread query is issued
+    /// IMPERSONATED (<c>MSCRMCallerID</c> = caller <c>systemuserid</c>) via <see cref="IImpersonatedCommunicationQuery"/>,
+    /// so Dataverse row-level security is the ONLY visibility gate (ownership, role depth, BU, teams, sharing,
+    /// hierarchy). The returned set is EXACTLY what impersonation returns — there is NO post-hoc regarding scoping and
+    /// NO hand-computed membership-union (retired 2026-07-16, <c>../messaging-communication-app-r1/notes/access-model-decision.md</c>).
+    /// A thread the caller cannot see is simply absent (no over-disclosure). Fail-closed: an unresolved caller is
+    /// refused (403) — no app-only fallback that would widen access.</para>
+    ///
+    /// <para><b>Record-less inclusion:</b> the query is deliberately NOT scoped to any <c>sprk_regarding{type}</c>
+    /// lookup (unlike <see cref="ReadByRegardingAsync"/>), so a Direct/record-less thread — which carries no regarding
+    /// anchor — is returned alongside record-anchored threads. Nothing post-filters by regarding.</para>
+    ///
+    /// <para><b>Search + paging:</b> <paramref name="search"/> (optional) adds a <c>contains(sprk_name, …)</c> predicate
+    /// with the value single-quote-escaped (OData string-literal injection safe). Ordering is <c>createdon desc</c>
+    /// (deterministic), and paging is a keyset cursor on <c>createdon</c> (Dataverse Web API has no <c>$skip</c>, and
+    /// the impersonated-query seam does not surface the <c>@odata.nextLink</c> skiptoken): <paramref name="pageToken"/>
+    /// is the opaque base64 cursor returned by the previous page, decoded to a <c>createdon lt …</c> lower bound — so
+    /// pages are stable and non-overlapping. A malformed token is a 400 (ADR-019).</para>
+    /// </summary>
+    public async Task<ThreadListResult> ListThreadsAsync(
+        ClaimsPrincipal? caller,
+        string? search,
+        int? top,
+        string? pageToken,
+        CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        var pageSize = NormalizeThreadListPageSize(top);
+
+        // Build the filter: NO regarding scoping (record-less inclusion) + optional name search + keyset cursor.
+        var clauses = new List<string>();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            // Two-stage escape: (1) double single quotes so the value cannot break out of the OData string literal;
+            // (2) Uri.EscapeDataString so transport-significant chars (space, & # + %) cannot break out of the query
+            // string — the impersonated-query seam concatenates the value RAW into the URL (no Uri.EscapeDataString
+            // there), so an un-encoded '&'/space would truncate/inject the query. Order matters: quote-double FIRST,
+            // then percent-encode the whole literal.
+            var searchLiteral = Uri.EscapeDataString(EscapeODataString(search.Trim()));
+            clauses.Add($"contains({ThreadNameField},'{searchLiteral}')");
+        }
+
+        var cursor = DecodePageToken(pageToken);
+        if (cursor is { } c)
+        {
+            // COMPOSITE keyset cursor over (createdon, sprk_communicationthreadid) — createdon alone is NOT unique
+            // (Dataverse createdon is second-granular; bulk/seed/rapid creation ties routinely), so a createdon-only
+            // `lt` cursor would silently DROP tied rows past the page cut (a user loses visibility of their own
+            // threads — breaks FR-16 "list ALL"). The tuple comparison keeps paging stable AND lossless.
+            var v = FormatOData(c.CreatedOn);
+            clauses.Add(
+                $"({CreatedOnField} lt {v} or ({CreatedOnField} eq {v} and {ThreadPkField} lt {c.ThreadId}))");
+        }
+
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField });
+        var filterPart = clauses.Count > 0 ? $"&$filter={string.Join(" and ", clauses)}" : string.Empty;
+        // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
+        // to detect whether a further page exists without a second COUNT query.
+        var odata =
+            $"$select={select}{filterPart}&$orderby={CreatedOnField} desc,{ThreadPkField} desc&$top={pageSize + 1}";
+
+        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+
+        var items = rows
+            .Select(r => new ThreadListItem(
+                ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
+                Name: TryString(r, ThreadNameField),
+                ThreadType: TryInt(r, ThreadTypeField),
+                CreatedOn: TryDateTimeOffset(r, CreatedOnField)))
+            .Where(t => t.ThreadId != Guid.Empty)
+            .ToList();
+
+        var hasMore = items.Count > pageSize;
+        if (hasMore)
+            items = items.Take(pageSize).ToList();
+
+        // A next cursor is only meaningful when there IS a further page AND the boundary row has a createdon; the
+        // cursor is the COMPOSITE (createdon, threadId) of the last kept row so the next page resumes losslessly.
+        var nextToken = hasMore && items.Count > 0 && items[^1].CreatedOn is { } last
+            ? EncodePageToken(last, items[^1].ThreadId)
+            : null;
+        // If we could not mint a cursor (missing createdon), do not claim a further page the caller cannot fetch.
+        hasMore = nextToken is not null;
+
+        _logger.LogDebug(
+            "[LIST-THREADS] caller={Caller} search={HasSearch} returned={Returned} hasMore={HasMore} (impersonated set)",
+            callerSystemUserId, !string.IsNullOrWhiteSpace(search), items.Count, hasMore);
+
+        return new ThreadListResult(items, items.Count, nextToken, hasMore);
+    }
+
+    private static int NormalizeThreadListPageSize(int? top)
+        => top is null or <= 0 ? DefaultThreadListPage : Math.Min(top.Value, MaxThreadListPage);
+
+    /// <summary>The composite keyset cursor for list-all-threads paging: the last kept row's ordering tuple.</summary>
+    private readonly record struct ThreadPageCursor(DateTimeOffset CreatedOn, Guid ThreadId);
+
+    /// <summary>
+    /// Opaque base64 keyset cursor over a thread's ordering tuple (<c>createdon</c> round-trip-precise UTC +
+    /// <c>sprk_communicationthreadid</c>). The id disambiguates rows sharing the same second-granular createdon so
+    /// the next page resumes without dropping or duplicating a tied row.
+    /// </summary>
+    private static string EncodePageToken(DateTimeOffset createdOn, Guid threadId)
+        => Convert.ToBase64String(Encoding.UTF8.GetBytes($"{FormatOData(createdOn)}|{threadId:D}"));
+
+    /// <summary>
+    /// Decodes an opaque paging cursor back into the composite <c>(createdon, threadId)</c> lower bound. Null/blank →
+    /// null (first page). A non-decodable/malformed/incomplete token is a 400 ProblemDetails (ADR-019) — never a
+    /// silent full-list dump.
+    /// </summary>
+    private static ThreadPageCursor? DecodePageToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return null;
+
+        try
+        {
+            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(token));
+            var separator = decoded.IndexOf('|');
+            if (separator > 0
+                && DateTimeOffset.TryParse(
+                    decoded[..separator], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var createdOn)
+                && Guid.TryParse(decoded[(separator + 1)..], out var threadId)
+                && threadId != Guid.Empty)
+            {
+                return new ThreadPageCursor(createdOn, threadId);
+            }
+        }
+        catch (FormatException)
+        {
+            // fall through to the 400 below
+        }
+
+        throw BadRequest("'pageToken' is not a valid pagination cursor.");
     }
 
     // ── filtered query (R2 task 011 / FR-02) ─────────────────────────────────────────────────────────

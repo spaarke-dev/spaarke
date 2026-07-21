@@ -111,6 +111,22 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // GET /api/communications/threads — list ALL threads the caller may see, INCLUDING record-less (Direct)
+        // threads, for the R3 workspace left pane + standalone code page (task 003 / FR-16, Surface 2). Impersonated
+        // (MSCRMCallerID — Dataverse row-level security is the ONLY visibility gate); NOT scoped to any regarding
+        // lookup (so Direct/record-less threads are included) and NO membership-union (retired 2026-07-16). Optional
+        // ?search=<name> (contains on sprk_name, injection-escaped), ?top=<n> page size, ?pageToken=<opaque cursor>
+        // for stable, non-overlapping keyset paging over createdon desc. A bare GET /threads is DISTINCT from
+        // GET /threads/{threadId}/messages, GET /threads/{threadId}/unread-count, and POST /threads/direct — no route
+        // collision (literal segment, no route param, GET verb). Fail-closed 403 on an unresolved caller.
+        group.MapGet("/threads", ListThreadsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ListThreads")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=.")
+            .Produces<ThreadListResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
         // messages for the record-level regarding-mode Timeline (R2 task 010 / FR-01, Surface 1). Entity-set-agnostic
         // across all 11 ADR-024 regarding families (matter, contact, …). Impersonated (Dataverse row-level security)
@@ -502,6 +518,24 @@ public static class CommunicationEndpoints
         }
 
         return parsed;
+    }
+
+    /// <summary>
+    /// List-all-threads for the R3 workspace left pane + standalone code page (task 003 / FR-16). Resolves the caller
+    /// server-side (never client-supplied) and delegates to the impersonated, access-parity list read. Optional
+    /// <c>?search=</c> (name contains), <c>?top=</c> (page size), <c>?pageToken=</c> (opaque keyset cursor). A malformed
+    /// <c>pageToken</c> is a 400 ProblemDetails (ADR-019); an unresolved caller is a 403 (fail closed).
+    /// </summary>
+    private static async Task<IResult> ListThreadsAsync(
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? search,
+        [FromQuery] int? top,
+        [FromQuery] string? pageToken,
+        CancellationToken ct)
+    {
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct);
+        return TypedResults.Ok(result);
     }
 
     /// <summary>

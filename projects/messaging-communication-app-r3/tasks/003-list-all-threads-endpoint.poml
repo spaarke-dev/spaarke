@@ -4,7 +4,7 @@
     <title>FR-16: GET /api/communications/threads — list all threads (incl. record-less), impersonated + access-filtered, no membership-union</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>after:002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New endpoint + new service method on the correctness-critical impersonated read path; brownfield edit of shared files; the negative-access/no-over-disclosure cases are non-negotiable (NFR-01). ADR-038 seam tests are DoD. FULL gate.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 003 — FR-16 `GET /communications/threads` + `ListThreadsAsync` (list-all incl. record-less) |
-| **Step** | not-started (Wave 3) |
+| **Task** | 004 — FR-17 participant naming in `ThreadResolver` + BFF rename endpoint |
+| **Step** | not-started (Wave 4) |
 | **Status** | not-started |
-| **Next Action** | `work on task 003` — serial, **opus/xhigh**, correctness-critical (impersonated, access-filtered, NO membership-union; seam tests DoD). Deps 002 ✅. `/conflict-check` before the BFF PR. |
+| **Next Action** | `work on task 004` — serial, **opus**, edits shared `ThreadResolver.cs` + `CommunicationEndpoints.cs` (extends unwired `ReDeriveThreadNameAsync`; NO plugin; edit-preserve via `sprk_nameisautoderived`). Deps 001 ✅. `/conflict-check` before the BFF PR. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001
@@ -30,12 +30,20 @@ Wave 1 (001 characterize + 006 doc-drift) complete + gates passed 2026-07-20. **
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 003 |
+| **Task File** | `tasks/003-list-all-threads-endpoint.poml` |
+| **Title** | FR-16 `GET /communications/threads` + `ListThreadsAsync` + seam tests |
+| **Phase** | 1 (backend read/thread spine) |
+| **Status** | implemented — build/test/publish/CVE green (see `notes/task-003-notes.md`); pending PR + `/conflict-check` |
+| **Started** | 2026-07-20 |
+
+### Approach (decided)
+- Impersonated `sprk_communicationthreads` query, NO regarding filter (record-less inclusion via impersonation).
+- `$select` = id, name, threadtype, createdon; `$orderby=createdon desc` (deterministic, stable paging).
+- Name search: `contains(sprk_name,'<escaped>')` — single-quote doubled (OData injection safe).
+- Paging: keyset/cursor on `createdon` (Dataverse Web API has no `$skip`; seam drops `@odata.nextLink`).
+  Opaque base64 `pageToken` = last row `createdon`; next-page filter `createdon lt <cursor>` (non-overlapping).
+- No new DI dependency (service already scoped); NO membership seam (retired union stays retired).
 
 ---
 

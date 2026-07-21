@@ -88,6 +88,38 @@ public sealed record RegardingReadResult(
     int MessageCount);
 
 /// <summary>
+/// One thread summary row for the left-pane thread list (R3 task 003 / FR-16). Minimal by construction — the list
+/// pane renders a label + type; opening a thread fetches its messages via the existing thread-read. Every item here
+/// was returned by the IMPERSONATED <c>sprk_communicationthreads</c> query, so the caller may see the thread record
+/// (Dataverse row-level security decided it — ownership, role depth, BU, teams, sharing, hierarchy). RECORD-LESS
+/// (Direct / non-record-anchored) threads are included exactly like record-anchored ones because that query is NOT
+/// scoped to any <c>sprk_regarding{type}</c> lookup. <see cref="ThreadType"/> is <c>sprk_threadtype</c>
+/// (Record-Anchored=100000000, Direct 1:1=100000001; null when unset); <see cref="CreatedOn"/> is the deterministic
+/// ordering key that also backs the opaque paging cursor.
+/// </summary>
+public sealed record ThreadListItem(
+    Guid ThreadId,
+    string? Name,
+    int? ThreadType,
+    DateTimeOffset? CreatedOn);
+
+/// <summary>
+/// List-all-threads result (R3 task 003 / FR-16 / Success Criterion 5): a paged, name-searchable list of ALL threads
+/// the caller may see, INCLUDING record-less Direct threads. The set is EXACTLY what the IMPERSONATED
+/// <c>sprk_communicationthreads</c> query returns for the caller (access parity — Dataverse row-level security is the
+/// only gate; NO post-hoc regarding scoping, NO hand-computed membership-union — retired 2026-07-16). A thread the
+/// caller cannot see is simply absent (no over-disclosure — NFR-01). Ordering is <c>createdon desc</c> (deterministic)
+/// so <see cref="NextPageToken"/> yields stable, non-overlapping pages: it is an opaque keyset cursor (Dataverse Web
+/// API has no <c>$skip</c>) that the caller passes back as <c>?pageToken=</c> to fetch the next page;
+/// <see cref="HasMore"/> is true iff a further page exists (<see cref="NextPageToken"/> is then non-null).
+/// </summary>
+public sealed record ThreadListResult(
+    IReadOnlyList<ThreadListItem> Threads,
+    int Count,
+    string? NextPageToken,
+    bool HasMore);
+
+/// <summary>
 /// Filtered communication-query result (R2 task 011 / FR-02): a flat, access-filtered communication list in the R1
 /// <see cref="ThreadMessageDto"/> shape, produced by composing the thread/regarding/channel/date facets onto the
 /// SAME impersonation read path + <c>CommunicationAccessFilter</c> as <see cref="RegardingReadResult"/>. The
