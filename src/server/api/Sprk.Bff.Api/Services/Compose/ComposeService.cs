@@ -547,7 +547,18 @@ public class ComposeService : IComposeService
                 "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
                 request.EditedParagraphs.Count, request.SessionId);
             contentToPersist = _redlineSynthesizer.SynthesizeRedline(
-                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt);
+                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt,
+                out var unresolvedParaIds);
+            // UAT round-4 graceful degradation: the save SUCCEEDS with the paragraphs that resolved; any
+            // that did not (a mammoth-dropped/structural paragraph shifted the client's paraId mapping) are
+            // logged here, non-silently, instead of aborting the whole save. Not an error-level event — the
+            // document persisted; these paragraphs simply were not redlined onto the retained original.
+            if (unresolvedParaIds.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Compose save: {UnresolvedCount} of {EditCount} edited paragraph(s) had a w14:paraId that matched no paragraph in the retained original and were NOT redlined (session={SessionId}): {UnresolvedParaIds}. The save still persisted the resolved paragraphs.",
+                    unresolvedParaIds.Count, request.EditedParagraphs.Count, request.SessionId, string.Join(", ", unresolvedParaIds));
+            }
         }
 
         if (request.Annotations is { Count: > 0 })
