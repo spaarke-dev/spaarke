@@ -3,6 +3,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -39,11 +40,13 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </list>
 ///
 /// <para>
-/// <b>Output grain.</b> Only a junction row resolved to a <c>systemuser</c> (an internal user) yields a
-/// pingable <c>systemuserid</c>. A row resolved to a <c>contact</c> (an external party) has no
-/// <c>systemuserid</c>, so it never appears in the per-user fan-out — which is why external exclusion is
-/// enforced BOTH by the internal-only filter (the load-bearing contract once contact-scoped push ships in
-/// R2/R3) AND by the systemuserid projection (load-bearing today). Both point the same, fail-safe way.
+/// <b>Internal is an authoritative flag, not a record type.</b> A <c>systemuser</c> participant is treated
+/// as internal ONLY when <c>systemuser.sprk_isexternal = false</c> — resolved via
+/// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> (fail-closed: unresolvable/absent ⇒ external).
+/// An external party CAN be a licensed <c>systemuser</c> (owner confirmation 2026-07-21), so the internal-only
+/// filter (rule 2) is now the LOAD-BEARING exclusion for such a user — it is no longer mere defense-in-depth
+/// behind the systemuserid projection. A <c>contact</c> participant is always external and has no
+/// <c>systemuserid</c>, so it never appears in the per-user fan-out regardless.
 /// </para>
 ///
 /// <para>
@@ -77,17 +80,20 @@ public sealed class CommunicationFanOutTargetingService
     private readonly IGenericEntityService _entityService;
     private readonly ICommunicationAccessFilter _accessFilter;
     private readonly IThreadPrivateGrantProvider _grantProvider;
+    private readonly ISystemUserIdentityResolver _identityResolver;
     private readonly ILogger<CommunicationFanOutTargetingService> _logger;
 
     public CommunicationFanOutTargetingService(
         IGenericEntityService entityService,
         ICommunicationAccessFilter accessFilter,
         IThreadPrivateGrantProvider grantProvider,
+        ISystemUserIdentityResolver identityResolver,
         ILogger<CommunicationFanOutTargetingService> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessFilter = accessFilter ?? throw new ArgumentNullException(nameof(accessFilter));
         _grantProvider = grantProvider ?? throw new ArgumentNullException(nameof(grantProvider));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -144,11 +150,14 @@ public sealed class CommunicationFanOutTargetingService
             if (!isResolved || (systemUserRef is null && contactRef is null))
                 continue;
 
-            // Candidate access context, built from the junction identity type. A systemuser participant is an
-            // INTERNAL user (R1 model — see CommunicationAccessContext); a contact participant is EXTERNAL.
-            // EvaluateMessage reads only the message flags + IsInternalUser, so a contact's Guid.Empty
-            // systemuserid is never dereferenced.
-            var isInternal = systemUserRef is not null;
+            // Candidate access context. INTERNAL is the AUTHORITATIVE systemuser.sprk_isexternal flag — NOT
+            // "is a systemuser". An external party CAN be a licensed systemuser (owner confirmation
+            // 2026-07-21), so inferring internal from record type would leak internal-only content to them.
+            // A contact participant is always external. Fail-closed: an unresolvable/absent flag → external.
+            // (EvaluateMessage reads only the message flags + IsInternalUser, so a contact's Guid.Empty
+            // systemuserid is never dereferenced.)
+            var isInternal = systemUserRef is not null
+                && !await _identityResolver.IsExternalAsync(systemUserRef.Id, ct);
             var callerContext = new CommunicationAccessContext(
                 CallerSystemUserId: systemUserRef?.Id ?? Guid.Empty,
                 IsInternalUser: isInternal,

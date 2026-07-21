@@ -44,18 +44,23 @@ flags and one junction, and delegates every access DECISION to `ICommunicationAc
 - Missing `createdon` cannot satisfy a grant's point-forward `EffectiveFrom` ⇒ excluded.
 - Consequence: a producer that forgets to project a flag **under-fans (safe)**, never over-fans (leak).
 
-## 4. Honest finding — the internal-only filter is defense-in-depth for R1 systemuserid fan-out
+## 4. RESOLVED (2026-07-21) — internal-only is now load-bearing via an authoritative flag
 
-In R1, every junction candidate that yields a systemuserid is a **systemuser**, which the access model treats as
-**internal**. Therefore the internal-only filter, applied to systemuser candidates, always returns *visible* — it
-never changes the R1 systemuserid output on its own. External parties are excluded **twice**: (i) by the reused
-internal-only filter (the load-bearing rule the moment R2/R3 makes contacts pingable via a contact-scoped push
-channel), and (ii) by the systemuserid projection (load-bearing today, since a contact has no systemuserid). Both
-point the same, fail-safe way. The filter is applied unconditionally so the security contract is explicit and
-tested, not incidental. **This is not a gap; it is intentional redundancy** — but a human reviewer should confirm
-the framing is acceptable and note that if the internal/external distinction ever becomes finer-grained than
-"systemuser vs contact", the fan-out MUST source `IsInternalUser` from that same finer primitive (which does not
-exist today — its absence would be the escalation trigger, not a silent guess).
+**Original finding (superseded):** the fan-out derived `IsInternalUser` from `systemUserRef is not null`
+("systemuser ⇒ internal"). Per owner confirmation that proxy is **incorrect** — an external party CAN be a
+licensed `systemuser`, so it would have leaked an internal-only message to such a user.
+
+**Fix (this branch):** the fan-out now sets `IsInternalUser: !await ISystemUserIdentityResolver.IsExternalAsync(id)`,
+reading the authoritative `systemuser.sprk_isexternal` two-option flag (fail-closed: unresolvable/absent ⇒
+external). The internal-only filter is therefore now the **load-bearing** exclusion for an external-licensed
+systemuser, not incidental redundancy. Seam case **(g)** proves it: internal-only message + external-licensed
+systemuser participant → **excluded** (internal participant still targeted). Fan-out seam suite: **7/7 pass**.
+
+**Same root cause elsewhere (handed off):** the timeline READ path (`CommunicationThreadReadService`, 3 sites)
+hardcodes `IsInternalUser: true` and has the identical leak. It is owned/edited by messaging-r3 (PR #664), so the
+spine did NOT edit it in parallel — see [`HANDOFF-messaging-r3-internal-only-readpath.md`](HANDOFF-messaging-r3-internal-only-readpath.md).
+**Full system-wide closure depends on r3 landing the read-path swap** + a CI guard test (deferred to that hand-off
+because the hardcoded `true` still exists until r3 lands it).
 
 ## 5. Negative-access test results
 

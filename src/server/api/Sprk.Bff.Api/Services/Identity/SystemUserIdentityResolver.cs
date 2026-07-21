@@ -46,6 +46,27 @@ public interface ISystemUserIdentityResolver
     /// matching enabled systemuser row.
     /// </summary>
     Task<Guid?> ResolveSystemUserIdAsync(string oid, CancellationToken ct = default);
+
+    /// <summary>
+    /// The authoritative internal-vs-external determination for a Dataverse user, read from the
+    /// <c>systemuser.sprk_isexternal</c> two-option flag. Returns <c>true</c> when the user is EXTERNAL
+    /// (a licensed-but-external systemuser), <c>false</c> when INTERNAL.
+    /// <para>
+    /// <b>Why a flag, not "is a systemuser".</b> A person we treat as external for internal-only-message
+    /// purposes CAN be a licensed <c>systemuser</c> (owner confirmation 2026-07-21). Inferring internal from
+    /// record type (systemuser⇒internal) therefore leaks internal-only content to external licensed users.
+    /// This is the single authoritative source for the <c>CommunicationAccessContext.IsInternalUser</c> bit
+    /// (callers pass <c>IsInternalUser: !await IsExternalAsync(id)</c>) — used by BOTH the notification
+    /// fan-out and (via a coordinated messaging-r3 change) the timeline read path.
+    /// </para>
+    /// <para>
+    /// <b>Fail-closed:</b> an empty id, a missing systemuser row, or an unreadable flag returns <c>true</c>
+    /// (external) — the safe posture for internal-only exclusion (under-deliver, never leak). A present
+    /// <c>false</c> is honored as internal (the column default is 'No'/internal). Cached like the other
+    /// directions.
+    /// </para>
+    /// </summary>
+    Task<bool> IsExternalAsync(Guid systemUserId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -58,9 +79,11 @@ public sealed class SystemUserIdentityResolver : ISystemUserIdentityResolver
     private const string SystemUserEntity = "systemuser";
     private const string AadObjectIdColumn = "azureactivedirectoryobjectid";
     private const string SystemUserIdColumn = "systemuserid";
+    private const string IsExternalColumn = "sprk_isexternal";
 
     private const string SystemUserToOidCacheKeyPrefix = "identity:sysuser-to-oid:";
     private const string OidToSystemUserCacheKeyPrefix = "identity:oid-to-sysuser:";
+    private const string ExternalityCacheKeyPrefix = "identity:sysuser-isexternal:";
 
     /// <summary>
     /// TTL for both cache directions. Mirrors <c>BriefingService.CurrentUserCacheTtl</c> (10 minutes) so a
@@ -226,6 +249,97 @@ public sealed class SystemUserIdentityResolver : ISystemUserIdentityResolver
         }
 
         return systemUserId;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsExternalAsync(Guid systemUserId, CancellationToken ct = default)
+    {
+        // Fail-closed: an unresolved user is treated as external for internal-only exclusion.
+        if (systemUserId == Guid.Empty)
+        {
+            return true;
+        }
+
+        var cacheKey = ExternalityCacheKeyPrefix + systemUserId.ToString("D");
+
+        // Cache lookup — fail-open on read errors (a cache miss/error falls through to a live resolve).
+        try
+        {
+            var cached = await _cache.GetAsync(cacheKey, ct).ConfigureAwait(false);
+            if (cached is { Length: 1 })
+            {
+                return cached[0] != 0;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "SystemUserIdentityResolver: isexternal cache read failed for {CacheKey}; falling through to live resolve.",
+                cacheKey);
+        }
+
+        // Live read of systemuser.sprk_isexternal (two-option, column default 'No'/internal).
+        var query = new QueryExpression(SystemUserEntity)
+        {
+            ColumnSet = new ColumnSet(IsExternalColumn),
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition(SystemUserIdColumn, ConditionOperator.Equal, systemUserId);
+
+        var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+
+        // Fail-closed: a missing row or an unreadable/absent flag → external (never leak an internal-only
+        // message to a user whose posture we cannot confirm internal). A present `false` is honored as internal.
+        bool isExternal;
+        if (results.Entities.Count == 0)
+        {
+            _logger.LogWarning(
+                "SystemUserIdentityResolver: systemuser {SystemUserId} not found reading '{Column}' — treating as EXTERNAL (fail closed).",
+                systemUserId, IsExternalColumn);
+            isExternal = true;
+        }
+        else
+        {
+            var flag = results.Entities[0].GetAttributeValue<bool?>(IsExternalColumn);
+            if (flag is null)
+            {
+                _logger.LogWarning(
+                    "SystemUserIdentityResolver: systemuser {SystemUserId} has no readable '{Column}' value — treating as EXTERNAL (fail closed).",
+                    systemUserId, IsExternalColumn);
+                isExternal = true;
+            }
+            else
+            {
+                isExternal = flag.Value;
+            }
+        }
+
+        // Cache write — fail-open on write errors.
+        try
+        {
+            await _cache.SetAsync(
+                cacheKey,
+                new[] { (byte)(isExternal ? 1 : 0) },
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CacheTtl },
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "SystemUserIdentityResolver: isexternal cache write failed for {CacheKey}; next call will re-resolve.",
+                cacheKey);
+        }
+
+        return isExternal;
     }
 
     private async Task CacheStringAsync(string cacheKey, string value, CancellationToken ct)

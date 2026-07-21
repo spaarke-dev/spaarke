@@ -2,6 +2,26 @@
 
 > Two-write rule: every entry here is mirrored to a GitHub Issue (portfolio board). See `/project-defer-issue-tracking`.
 
+## Issues (ISS)
+
+### ISS-001 — Internal-only messages readable by any caller (read-path hardcodes IsInternalUser:true)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — handed to messaging-r3 |
+| **Urgency** | now (security) |
+| **Filed** | 2026-07-21 |
+| **Source** | FR-08 fan-out security review; owner confirmed external users can be licensed systemusers |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/674 |
+
+**Description**: `CommunicationThreadReadService.cs` hardcodes `IsInternalUser: true` at 3 sites → the internal-only rule is unenforced on the timeline read path; an external-licensed systemuser reads internal-only messages. Owned/edited by messaging-r3 (PR #664), so the spine did the shared `IsExternalAsync` resolver + its own fan-out fix and **handed off** the 3-site read-path swap. Concrete failure: internal-only content leaks to external-licensed users on read.
+
+**Entry-points**: `notes/HANDOFF-messaging-r3-internal-only-readpath.md` (full step-by-step); `CommunicationThreadReadService.cs` (~L129/185/463); resolver `Services/Identity/SystemUserIdentityResolver.cs` `IsExternalAsync`.
+
+**Blockers**: notification-spine merges first (provides `IsExternalAsync`) + backfill `systemuser.sprk_isexternal`.
+
+---
+
 ## Deferrals (DEF)
 
 ### DEF-001 — Consolidate ad-hoc oid↔systemuserid resolution onto shared ISystemUserIdentityResolver

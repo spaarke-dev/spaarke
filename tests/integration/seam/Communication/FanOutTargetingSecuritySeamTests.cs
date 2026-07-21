@@ -6,6 +6,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -34,7 +35,9 @@ public sealed class FanOutTargetingSecuritySeamTests
 
     // ── seam wiring: REAL access primitives, only the Dataverse junction read doubled ──────────────────
 
-    private static CommunicationFanOutTargetingService CreateService(IReadOnlyList<DataverseEntity> junctionRows)
+    private static CommunicationFanOutTargetingService CreateService(
+        IReadOnlyList<DataverseEntity> junctionRows,
+        IReadOnlyCollection<Guid>? externalSystemUsers = null)
     {
         var entity = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entity
@@ -43,10 +46,21 @@ public sealed class FanOutTargetingSecuritySeamTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(junctionRows.ToList()));
 
+        // Authoritative externality flag doubled at the module boundary: a systemuserid in externalSystemUsers
+        // is EXTERNAL (systemuser.sprk_isexternal=true), everyone else INTERNAL. This is what the real
+        // SystemUserIdentityResolver reads from systemuser.sprk_isexternal — proving the fan-out consults the
+        // flag, NOT the "is a systemuser" proxy.
+        var external = externalSystemUsers ?? Array.Empty<Guid>();
+        var resolver = new Mock<ISystemUserIdentityResolver>(MockBehavior.Strict);
+        resolver
+            .Setup(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) => Task.FromResult(external.Contains(id)));
+
         return new CommunicationFanOutTargetingService(
             entity.Object,
             new CommunicationAccessFilter(NullLogger<CommunicationAccessFilter>.Instance), // REAL filter
             new DenyAllThreadPrivateGrantProvider(),                                        // REAL fail-closed default
+            resolver.Object,
             NullLogger<CommunicationFanOutTargetingService>.Instance);
     }
 
@@ -218,6 +232,36 @@ public sealed class FanOutTargetingSecuritySeamTests
         recipients.Should().NotContain(externalContact,
             "an unreadable internal-only flag fails closed — the external candidate is excluded");
         recipients.Should().Contain(internalUser, "the fail-closed rule must not exclude an internal candidate");
+        recipients.Should().HaveCount(1);
+    }
+
+    // ── (g) THE LEAK THIS FIX CLOSES: internal-only message + EXTERNAL-LICENSED SYSTEMUSER → EXCLUDED ─────
+    // An external party can be a licensed systemuser (owner confirmation 2026-07-21). The old
+    // "systemuser ⇒ internal" proxy would have INCLUDED this user on an internal-only message. The
+    // authoritative systemuser.sprk_isexternal flag excludes them.
+
+    [Fact]
+    public async Task GetEligibleRecipients_InternalOnlyMessageWithExternalLicensedSystemUser_ExcludesExternalKeepsInternal()
+    {
+        var messageId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var internalUser = Guid.NewGuid();
+        var externalLicensedUser = Guid.NewGuid(); // a systemuser, but sprk_isexternal = true
+
+        var sut = CreateService(
+            new[]
+            {
+                SystemUserParticipant(internalUser),           // sprk_isexternal = false → internal
+                SystemUserParticipant(externalLicensedUser),   // sprk_isexternal = true  → external
+            },
+            externalSystemUsers: new[] { externalLicensedUser });
+
+        var recipients = await sut.GetEligibleRecipientsAsync(
+            Message(messageId, isInternalOnly: true), OpenThread(threadId));
+
+        recipients.Should().NotContain(externalLicensedUser,
+            "an external-licensed systemuser must NOT receive an internal-only message — the fix consults sprk_isexternal, not record type");
+        recipients.Should().Contain(internalUser, "the genuinely internal systemuser participant is still targeted");
         recipients.Should().HaveCount(1);
     }
 }
