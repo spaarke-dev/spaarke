@@ -157,6 +157,7 @@ import {
   DrawerHeader,
   DrawerHeaderTitle,
   DrawerBody,
+  DrawerFooter,
 } from "@fluentui/react-components";
 import {
   DismissRegular,
@@ -332,28 +333,22 @@ const useStyles = makeStyles({
   defaultBadge: {
     flexShrink: 0,
   },
-  // UAT 2026-07-21: the footer divider line runs the FULL pane width. The
-  // border-top lives on this full-bleed wrapper (no horizontal padding); the
-  // buttons are padded by `footerInner` inside it, so the line reaches both
-  // edges while the buttons stay inset.
+  // UAT 2026-07-21 (round 3): use Fluent's DrawerFooter so the footer aligns to
+  // the drawer surface (a raw <div> child was inset by the surface, which both
+  // pushed the buttons off the right edge and shortened the divider line). We
+  // lay it out as a full-width flex row: Cancel left, New+Save right. The
+  // border-top on DrawerFooter spans the full pane width.
   footer: {
-    flexShrink: 0,
-    borderTopStyle: "solid",
-    borderTopWidth: "1px",
-    borderTopColor: tokens.colorNeutralStroke2,
-  },
-  footerInner: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalM,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    borderTopStyle: "solid",
+    borderTopWidth: "1px",
+    borderTopColor: tokens.colorNeutralStroke2,
   },
   // Right-aligned button cluster (+ New, Save). Cancel sits at the left edge
-  // via footerInner's space-between; this group holds the two right buttons.
+  // via the footer's space-between; this group holds the two right buttons.
   footerRight: {
     display: "flex",
     alignItems: "center",
@@ -1312,50 +1307,49 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
           )}
         </DrawerBody>
 
-        {/* Footer (UAT 2026-07-20) — Cancel left-aligned; "+ New" (gray /
-         * secondary) + Save (primary) right-aligned. "+ New" launches the
-         * create wizard; Save reconciles the open tabs against the pinned
-         * list; Cancel and Save both close the drawer. */}
-        <div className={styles.footer}>
-          <div className={styles.footerInner}>
+        {/* Footer (UAT 2026-07-21) — Fluent DrawerFooter so it aligns to the
+         * drawer surface: Cancel left-aligned; "+ New" (gray / secondary) +
+         * Save (primary) right-aligned; the top divider spans the full pane
+         * width. "+ New" launches the create wizard; Save reconciles the open
+         * tabs against the pinned list; Cancel and Save both close the drawer. */}
+        <DrawerFooter className={styles.footer}>
+          <Tooltip
+            content="Close without opening pinned workspaces."
+            relationship="description"
+          >
+            <Button
+              appearance="secondary"
+              onClick={handleCancel}
+              data-testid="manage-workspaces-cancel"
+            >
+              Cancel
+            </Button>
+          </Tooltip>
+          <div className={styles.footerRight}>
+            <Tooltip content="Create a new workspace." relationship="description">
+              <Button
+                appearance="secondary"
+                icon={<AddRegular />}
+                onClick={() => void handleNew()}
+                data-testid="manage-workspaces-new"
+              >
+                New
+              </Button>
+            </Tooltip>
             <Tooltip
-              content="Close without opening pinned workspaces."
+              content="Apply changes and open pinned workspaces."
               relationship="description"
             >
               <Button
-                appearance="secondary"
-                onClick={handleCancel}
-                data-testid="manage-workspaces-cancel"
+                appearance="primary"
+                onClick={handleSave}
+                data-testid="manage-workspaces-save"
               >
-                Cancel
+                Save
               </Button>
             </Tooltip>
-            <div className={styles.footerRight}>
-              <Tooltip content="Create a new workspace." relationship="description">
-                <Button
-                  appearance="secondary"
-                  icon={<AddRegular />}
-                  onClick={() => void handleNew()}
-                  data-testid="manage-workspaces-new"
-                >
-                  New
-                </Button>
-              </Tooltip>
-              <Tooltip
-                content="Apply changes and open pinned workspaces."
-                relationship="description"
-              >
-                <Button
-                  appearance="primary"
-                  onClick={handleSave}
-                  data-testid="manage-workspaces-save"
-                >
-                  Save
-                </Button>
-              </Tooltip>
-            </div>
           </div>
-        </div>
+        </DrawerFooter>
       </OverlayDrawer>
 
       {/* Inline delete-confirmation dialog (preserved from task 093). */}
