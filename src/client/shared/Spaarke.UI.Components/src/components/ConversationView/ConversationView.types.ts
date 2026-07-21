@@ -124,4 +124,5 @@ export type MessageBubbleStatus = 'sent' | 'delivered' | 'failed';
 
 /** One row in the rendered list: either a day-boundary divider or a message bubble. */
 export type ConversationRenderItem =
-  { kind: 'divider'; key: string; label: string } | { kind: 'message'; key: string; entry: TimelineEntry };
+  | { kind: 'divider'; key: string; label: string }
+  | { kind: 'message'; key: string; entry: TimelineEntry };
