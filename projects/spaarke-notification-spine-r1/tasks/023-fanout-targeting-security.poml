@@ -4,7 +4,7 @@
     <title>Fan-Out Targeting Security — Derive Recipients From Dataverse Record Security</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical: a leak of a private-thread or internal-only communication signal to an unauthorized user is a compliance incident (R-5). Unconditional code-review + adr-check per root CLAUDE.md §8 test-modifying override row (this task adds tests/integration/seam/** negative-access tests).</rigor-reason>
     <model-tier>opus</model-tier>

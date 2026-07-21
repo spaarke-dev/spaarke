@@ -16,9 +16,9 @@
 | 012 | Outbox service (FR-02) | 1 | ✅ | 011 | sonnet/high | FULL | — |
 | 013 | Envelope contract + kind taxonomy (FR-03/10) | 1 | ✅ | none | sonnet/high | FULL | Group P1 |
 | 020 | SignalR delivery service + negotiate (FR-04) | 2 | ✅ | 001,012,013 | opus/high | FULL | — |
-| 021 | Shared client subscriber library (FR-05) | 2 | 🔲 | 020,013 | sonnet/high | FULL | — |
-| 022 | Pending/poll fallback endpoint (FR-06) | 2 | 🔲 | 012 | sonnet/high | FULL | Group Q |
-| 023 | Fan-out targeting + negative-access (FR-08) | 2 | 🔲 | 020 | opus/xhigh | FULL | Group Q |
+| 021 | Shared client subscriber library (FR-05) | 2 | ✅ | 020,013 | sonnet/high | FULL | — |
+| 022 | Pending/poll fallback endpoint (FR-06) | 2 | ✅ | 012 | sonnet/high | FULL | Group Q |
+| 023 | Fan-out targeting + negative-access (FR-08) | 2 | ✅⚠️ | 020 | opus/xhigh | FULL | Group Q |
 | 024 | communication-arrived producer (FR-09) | 2 | 🔲 | 012,013,020 | opus/high | FULL | — |
 | 025 | R3 contract-lock note (FR-19) | 2 | 🔲 | 024,021,022 | sonnet/high | MINIMAL | — |
 | 030 | Characterization tests — dispatch (FR-07 pre) | 3 | 🔲 | none | sonnet/high | STANDARD | — |

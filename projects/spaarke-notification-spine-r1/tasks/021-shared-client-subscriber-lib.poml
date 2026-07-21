@@ -4,7 +4,7 @@
     <title>Host-Agnostic Shared Client Subscriber Library (Layer C client)</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:020,013</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared package under src/client/shared/ consumed by three future hosts (SpaarkeAi workspace, record-form PCFs, standalone code pages); auth-sensitive (token acquisition + raw-fetch exception boundary); 6+ steps — meets root CLAUDE.md §8 FULL criteria.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,7 +106,9 @@
     <criterion testable="true">Given the library's source is grepped for import statements, when checked against src/solutions/SpaarkeAi/**, any PCF control project, or any code-page project, then zero matches are found — the library imports only from src/client/shared/** packages and its declared dependencies.</criterion>
   </acceptance-criteria>
 
-  <notes>Package naming follows the @spaarke/auth precedent (infra-level lib, not a *.Components UI package). The poll-fallback endpoint is task 022's — read its actual shape once shipped, do not assume.</notes>
+  <notes>Package naming follows the @spaarke/auth precedent (infra-level lib, not a *.Components UI package). The poll-fallback endpoint is task 022's — read its actual shape once shipped, do not assume.
+
+COMPLETION (2026-07-21): Built src/client/shared/Spaarke.Notifications/ (@spaarke/notifications). Exports NotificationsClient (primary entrypoint), KindRouter, negotiate/connectSignalR, startPollFallback, and mirrored types for task 013's envelope/kind contract. `npm run build` — zero TS errors. `npm test` — 26/26 passing (kindRouter, negotiate, pollFallback, NotificationsClient suites). Step 9.5 quality-gate self-review found + fixed two real bugs before completion: (1) NotificationsClient.stop() leaked a background poll loop because HubConnection.stop() itself fires onclose, which unconditionally called startPolling() — fixed with a `stopping` guard flag; (2) pollFallback.ts misattributed a throwing onEvent handler as a fetch failure (wrongly triggering backoff/onError for a tick whose fetch actually succeeded) — fixed by isolating per-item handler exceptions. Both have regression tests. Full detail: notes/021-shared-client-subscriber-lib-deviations.md "Quality gates" section. Grep-verified zero imports from src/solutions/SpaarkeAi/**, PCF, or code-page projects. D-AUTH-7 comment present exactly once, at the SignalR HubConnectionBuilder/.start() call site in negotiate.ts; every other HTTP call (negotiate, poll) uses @spaarke/auth's authenticatedFetch. @spaarke/auth + @microsoft/signalr declared as peerDependencies (not regular deps) to preserve ADR-028 INV-7 MSAL singleton guarantee. Task 022's pending endpoint landed concurrently during this task's execution — its shipped shape ({ items: [{ outboxRowId, kind, envelope }] }) was verified post-hoc and matches the defensive parsing already written (no code change needed, comments updated from "provisional" to "confirmed"). First-consumer wiring: src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts + a `void initNotificationsClient()` call in main.tsx's bootstrap(), thin/log-only per scope boundary (task 051 builds the real renderer). SpaarkeAi's scoped typecheck (tsc-surface-gate.mjs) reports 0 surface-owned errors. Full deviation log: projects/spaarke-notification-spine-r1/notes/021-shared-client-subscriber-lib-deviations.md. Per coordination guards, did NOT edit tasks/TASK-INDEX.md or current-task.md (main session reconciles) and did NOT touch any src/server/** files.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

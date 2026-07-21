@@ -4,7 +4,7 @@
     <title>Kind-Generic Pending/Poll Fallback Endpoint (ADR-032 Degrade Path)</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:012</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New unconditional BFF endpoint over the outbox; forms the platform-wide ADR-032 degrade path every host shares — meets root CLAUDE.md §8 FULL criteria (bff-api tag, new endpoint).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,26 @@
     <criterion testable="true">A tests/integration/seam/Notifications/** test exists proving the SignalR-off → written row → retrievable-via-endpoint degrade path (NFR-04) as an executable seam test.</criterion>
   </acceptance-criteria>
 
-  <notes>This endpoint is the SAME degrade path both R3's polling-only hosts and this project's own client library (task 021) consume — do not design it as a SpaarkeAi-specific or comms-specific shape.</notes>
+  <notes>This endpoint is the SAME degrade path both R3's polling-only hosts and this project's own client library (task 021) consume — do not design it as a SpaarkeAi-specific or comms-specific shape.
+
+  COMPLETION SUMMARY (2026-07-21): Implemented `GET /api/notifications/pending` on the existing
+  task-020 `NotificationsEndpoints.cs` MapGroup — kind-generic, SignalR-agnostic (no SignalR
+  dependency in the handler signature at all). Caller identity derived server-side from the JWT
+  `oid` claim (mirrors `NegotiateAsync`), resolved to a Dataverse `systemuserid` via
+  `ISystemUserIdentityResolver.ResolveSystemUserIdAsync`; a null resolution returns 200 + empty
+  list (not an error). Rows come from `OutboxService.GetPendingAsync(systemUserId)`, projected to
+  `{ outboxRowId, kind, envelope }` where `envelope` is the task-013 envelope JSON parsed to a raw
+  `JsonElement` (kind-generic — no per-kind switch). Optional `?kind=` query filter reuses
+  `NotificationKind`'s existing wire converter; unrecognized values return 400. No DI changes — both
+  dependencies were already registered. Seam test
+  `tests/integration/seam/Notifications/PendingPollFallbackSeamTests.cs` (6 tests, all passing)
+  covers: SignalR-off degrade path, cross-user isolation (2 tests), multi-kind + filter, invalid
+  filter 400, and the REAL `SystemUserIdentityResolver` production class (Dataverse boundary
+  mocked). Deviation: the handler was marked `internal` (not `private`) specifically so the seam
+  test can call it directly per the established `InternalsVisibleTo` seam convention in this
+  category, avoiding a full `WebApplicationFactory` host for a service composed of two already-unit-
+  tested collaborators. `dotnet build` 0 errors; `dotnet test` (Notifications scope) 75/75 passed.
+  No new package — publish-size delta ~0, no re-publish run.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
