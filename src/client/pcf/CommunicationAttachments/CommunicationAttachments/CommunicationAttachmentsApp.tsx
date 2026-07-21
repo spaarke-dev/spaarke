@@ -57,12 +57,15 @@ const useStyles = makeStyles({
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalL,
   },
-  kicker: {
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    fontSize: tokens.fontSizeBase200,
+  // Spaarke section-header standard (docs/standards/UI-DESIGN-STANDARDS.md):
+  // 14px (fontSizeBase300) · semibold (fontWeightSemibold) · neutral foreground 1
+  // (colorNeutralForeground1 — #242424 in light, theme-correct in dark). Token
+  // names ONLY (ADR-021) — no hardcoded hex/px.
+  sectionHeader: {
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
   },
   grow: { flex: 1 },
   empty: { padding: tokens.spacingHorizontalL, color: tokens.colorNeutralForeground3 },
@@ -247,6 +250,36 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   // ── Preview modal ─────────────────────────────────────────────────────────
   const [previewItem, setPreviewItem] = React.useState<IAttachmentItem | null>(null);
 
+  // Navigation set for the modal's prev/next "N of M" browse (A1).
+  // Built from the already-filtered `items` (inline images excluded upstream by
+  // the service). Email-message attachments (.eml/.msg) route to download/open
+  // and NEVER render in the inline modal (owner decision #4), so they are
+  // excluded from the modal nav sequence too — every navigable index resolves
+  // to a document the modal can actually preview. Rows without a document
+  // lookup are likewise unnavigable.
+  const navItems = React.useMemo(
+    () => items.filter(i => !!i.documentId && !isEmailMessageAttachment(i)),
+    [items]
+  );
+
+  // 0-based position of the currently-previewed attachment inside `navItems`.
+  const previewIndex = React.useMemo(
+    () => (previewItem ? navItems.findIndex(i => i.attachmentId === previewItem.attachmentId) : -1),
+    [previewItem, navItems]
+  );
+
+  // Move the modal to a different attachment. The shell clamps prev/next at the
+  // ends (no wrap — matches SemanticSearchControl); we guard bounds defensively.
+  // Swapping `previewItem` changes the dialog's `documentId` prop, which the
+  // renderer uses to re-resolve the preview URL for the new document.
+  const handlePreviewNavigate = React.useCallback(
+    (nextIndex: number): void => {
+      if (nextIndex < 0 || nextIndex >= navItems.length) return;
+      setPreviewItem(navItems[nextIndex]);
+    },
+    [navItems]
+  );
+
   const handleRowActivate = React.useCallback(
     (item: IAttachmentItem): void => {
       if (!item.documentId) return;
@@ -311,7 +344,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   return (
     <div className={s.root}>
       <div className={s.header}>
-        <Text className={s.kicker}>Attachments</Text>
+        <Text className={s.sectionHeader}>Attachments</Text>
         <div className={s.grow} />
         {items.length > 0 && (
           <Badge appearance="tint" color="informative">
@@ -347,6 +380,9 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
           documentId={previewItem.documentId}
           documentType={fileTypeLabel(previewItem.name)}
           onClose={() => setPreviewItem(null)}
+          navigationTotal={navItems.length}
+          currentIndex={previewIndex >= 0 ? previewIndex : undefined}
+          onNavigate={handlePreviewNavigate}
           fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
           onOpenFile={mode => {
             void (async () => {

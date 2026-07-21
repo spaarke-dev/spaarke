@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.0.0" display-name-key="Communication Attachments" description-key="Communication attachments preview list." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.1.0" display-name-key="Communication Attachments" description-key="Communication attachments preview list." control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

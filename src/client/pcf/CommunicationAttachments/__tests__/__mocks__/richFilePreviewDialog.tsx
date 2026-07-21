@@ -17,13 +17,29 @@ export interface IFilePreviewDialogProps {
   onOpenRecord: () => void;
   onEmailDocument: () => void;
   onCopyLink: () => void;
+  /** Prev/next "N of M" browse props (A1) — surfaced so wiring can be asserted. */
+  navigationTotal?: number;
+  currentIndex?: number;
+  onNavigate?: (nextIndex: number) => void;
 }
 
 export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = props => {
   if (!props.open) return null;
+  const idx = typeof props.currentIndex === 'number' ? props.currentIndex : -1;
   return (
-    <div data-testid="rich-file-preview-dialog" data-document-id={props.documentId}>
+    <div
+      data-testid="rich-file-preview-dialog"
+      data-document-id={props.documentId}
+      data-nav-total={props.navigationTotal}
+      data-nav-index={props.currentIndex}
+    >
       <span data-testid="preview-doc-name">{props.documentName}</span>
+      <button data-testid="preview-prev" onClick={() => props.onNavigate?.(idx - 1)}>
+        prev
+      </button>
+      <button data-testid="preview-next" onClick={() => props.onNavigate?.(idx + 1)}>
+        next
+      </button>
       <button data-testid="preview-fetch-url" onClick={() => void props.fetchPreviewUrl()}>
         fetch
       </button>
