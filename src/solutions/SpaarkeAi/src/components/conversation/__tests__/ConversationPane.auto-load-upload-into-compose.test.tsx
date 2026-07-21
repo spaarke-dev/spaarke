@@ -45,6 +45,7 @@ const authenticatedFetchMock = jest.fn(async (url: string) => {
 const captured: {
   onAttachmentReady?: (a: unknown) => void;
   onAttachmentsChanged?: (chips: unknown[]) => void;
+  onContextEvent?: (e: unknown) => void;
 } = {};
 
 jest.mock('@spaarke/ui-components', () => {
@@ -55,9 +56,11 @@ jest.mock('@spaarke/ui-components', () => {
       const p = props as ISprkChatProps & {
         onAttachmentReady?: (a: unknown) => void;
         onAttachmentsChanged?: (chips: unknown[]) => void;
+        onContextEvent?: (e: unknown) => void;
       };
       captured.onAttachmentReady = p.onAttachmentReady;
       captured.onAttachmentsChanged = p.onAttachmentsChanged;
+      captured.onContextEvent = p.onContextEvent;
       return <div data-testid="sprkchat-stub">{props.transcriptFooterSlot}</div>;
     },
   };
@@ -143,11 +146,22 @@ async function driveChatUpload(fileName: string): Promise<void> {
   });
 }
 
+/** Deliver post-classify chips (task-022 `consumer_chips` SSE contract) through SprkChat's callback. */
+function deliverClassifyChips(): void {
+  act(() => {
+    captured.onContextEvent?.({
+      contextEventType: 'consumer_chips',
+      contextChips: [{ target_binding_id: 'b-summarize', chip_label: 'Summarize this file' }],
+    });
+  });
+}
+
 beforeEach(() => {
   workspaceEvents.length = 0;
   authenticatedFetchMock.mockClear();
   captured.onAttachmentReady = undefined;
   captured.onAttachmentsChanged = undefined;
+  captured.onContextEvent = undefined;
 });
 
 // R4-4 (UAT 2026-07-19): the FIX #7 auto-open-on-attach was REVERTED (owner: uploading 2 files
@@ -162,16 +176,18 @@ describe('R4-4: an Assistant file upload does NOT auto-load into Compose', () =>
     expect(composeUploadOpens()).toHaveLength(0);
   });
 
-  it('opens the file in Compose only when "Revise in Compose" is clicked (on demand)', async () => {
+  it('opens the file in Compose only when the "Revise in Compose" card is clicked (on demand, R5-1)', async () => {
     renderPane();
 
     await driveChatUpload('brief.docx');
     expect(composeUploadOpens()).toHaveLength(0);
 
-    // The Revise affordance appears in the files tray once the upload is promoted/indexed.
-    const reviseBtn = await screen.findByTestId('files-revise-button');
+    // R5-1: "Revise in Compose" is now an in-line action CARD appended to the post-attach chip set
+    // (not a tray button). Deliver the classify chips so the strip renders with the revise card.
+    deliverClassifyChips();
+    const reviseChip = await screen.findByTestId('consumer-chip-local:revise-in-compose');
     await act(async () => {
-      fireEvent.click(reviseBtn);
+      fireEvent.click(reviseChip);
     });
 
     const opens = composeUploadOpens();
