@@ -87,7 +87,6 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
-  TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
@@ -97,7 +96,6 @@ import {
   composeSessionCommentThreadsToDocxAnnotations,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
@@ -1210,12 +1208,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const trackChangesExtension = React.useMemo(
       () =>
         TrackChangesExtension.configure({
-          initialEnabled: false,
+          // UAT round-4: Track Changes is ON by default — user edits show as redlines immediately (a
+          // freshly-loaded doc shows nothing until the first edit, since current == baseline).
+          initialEnabled: true,
           getBaseline: () => paraIdSnapshotRef.current,
         }),
       []
     );
-    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(false);
+    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(true);
 
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
@@ -1272,12 +1272,6 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
       commentThreadsRef.current = threads;
     }, []);
-
-    // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
-    // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
-    // state; the two panels are never coupled). Its FAB is pinned to the OPPOSITE (top-left) corner of
-    // the editor scroll region — see `stylesToggleFab` — so it never collides with `commentsToggleFab`.
-    const [stylesOpen, setStylesOpen] = React.useState<boolean>(false);
 
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
@@ -1825,14 +1819,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
         />
-        {/* ===================================================================
-            FR-22 styles pane — task 043. Lists the loaded document's EXISTING paragraph styles and
-            applies a chosen one to the current selection. Toggled by the floating "Styles" button
-            pinned top-left of the editor scroll region (see below); dismissed by its own close
-            button. SCOPE GUARD: apply-existing-only — no create/rename/delete/manage affordance
-            anywhere in the pane (see ComposeStylesPane.tsx file-level JSDoc).
-            =================================================================== */}
-        <ComposeStylesPane editor={editor} open={stylesOpen} onClose={() => setStylesOpen(false)} />
+        {/* UAT round-4: the FR-22 styles pane mount was REMOVED per user request (the "Show styles"
+            toggle above it is gone too). Component + hook retained, unmounted. */}
         {/* NOTE (UAT 2026-07-19 P1 fix): the AI-actions <BubbleMenu> was RELOCATED to be
             the LAST child of this container (see just before the container's closing tag
             below). Rationale: TipTap's BubbleMenu plugin calls `this.element.remove()` on
@@ -2069,20 +2057,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               data-testid="compose-comments-toggle"
             />
           </Tooltip>
-          {/* FR-22 (task 043) — "Styles" pane toggle, pinned top-left (see `stylesToggleFab`). */}
-          <Tooltip content={stylesOpen ? 'Hide styles' : 'Show styles'} relationship="description" withArrow>
-            <Button
-              appearance={stylesOpen ? 'primary' : 'secondary'}
-              shape="circular"
-              size="large"
-              className={styles.stylesToggleFab}
-              icon={<TextEditStyle20Regular />}
-              aria-label="Toggle styles pane"
-              aria-pressed={stylesOpen}
-              onClick={() => setStylesOpen(prev => !prev)}
-              data-testid="compose-styles-toggle"
-            />
-          </Tooltip>
+          {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
+              styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
+              ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}
           {showScrollDown ? (
             <Button
               appearance="primary"

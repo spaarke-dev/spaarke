@@ -120,7 +120,6 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
   anchoredAnnotationsToDocxAnnotations,
-  selectSaveRedlineAnnotations,
   type DocxAnnotationInput,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
@@ -1007,20 +1006,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
       const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
 
-      // Pending AI redlines (task 023) → native-markup annotations the SERVER composes onto the authored
-      // baseline (replaces the old client reject-baseline reconstruction). Combined with the session's
-      // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
-      const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
+      // Save-robustness fix (UAT round-4): pending AI/user REDLINES are NO LONGER sent as text-searched
+      // annotations. `DocxAnnotationWriter.LocateTarget` re-locates each target in the raw OOXML by text,
+      // which 422s whenever the target spans a `<w:tab/>`/`<w:br/>` (tab-laid-out list items) or drifts —
+      // the recurring "a tracked change could not be located" error. Redlines now persist through the
+      // POSITION-based path instead: `collectEditedParagraphs` emits each changed paragraph's ACCEPT-STATE
+      // text (pending redline applied) keyed by paraId, and the server synthesizer diffs it against the
+      // retained original to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only COMMENTS still
+      // ride the annotation path (no position-based comment synthesis exists; a comment anchors a user
+      // SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search remains for Push-to-Word.
+      const redlineAnnotations: DocxAnnotationInput[] = [];
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
-      // Item 3 (UAT round-4): only bake redline tracked-changes into the saved .docx when the user has
-      // actually ENGAGED the document (editorIsDirty) — see selectSaveRedlineAnnotations for the full
-      // rationale (a zero-edit save of a freshly-mounted doc must not 422 on unverified AI suggestions).
-      const getRedlines = editorRef.current.getRedlineAnnotations;
-      const redlineAnnotations = selectSaveRedlineAnnotations({
-        editorIsDirty,
-        hasRedlines: hasRedlines && typeof getRedlines === 'function',
-        getRedlineAnnotations: () => (typeof getRedlines === 'function' ? getRedlines.call(editorRef.current) : []),
-      });
       // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
       // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
       // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an

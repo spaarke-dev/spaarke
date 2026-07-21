@@ -79,7 +79,64 @@ export function diffTokens(baseline: string, current: string): TrackChangeDiffOp
     if (last && last.type === op.type) last.text += op.text;
     else ops.push({ ...op });
   }
-  return ops;
+  return cleanupSemantic(ops);
+}
+
+/**
+ * Longest UNCHANGED span (trimmed chars) that is still ABSORBED into a surrounding change when it sits
+ * between two edits. Short coincidental word matches in a rewrite ("item", "with", "to", "a") would
+ * otherwise fragment a rewritten sentence into a salt-and-pepper redline; absorbing them yields one
+ * clean strike + one clean insert (Word-like). A genuinely unchanged longer phrase (> this) stays an
+ * anchor and is NOT struck.
+ */
+const SEMANTIC_EQUALITY_MAX = 4;
+
+/**
+ * Item 4 diff-quality (UAT round-4): semantic cleanup — the client twin of diff-match-patch's
+ * `diff_cleanupSemantic`, scoped to our op shape (no new dependency). Two passes: (1) absorb SHORT
+ * equalities flanked by edits on BOTH sides into a delete+insert (kills the coincidental-short-word
+ * fragmentation); (2) within each maximal run of edits, concatenate all deletions then all insertions
+ * so a rewritten region renders as ONE struck span + ONE inserted span, not many tiny ones. Both the
+ * baseline (equal+delete) and current (equal+insert) reconstructions are preserved — an absorbed equality
+ * simply moves from `equal` into BOTH `delete` and `insert`, so it still appears in each reconstruction.
+ */
+export function cleanupSemantic(ops: readonly TrackChangeDiffOp[]): TrackChangeDiffOp[] {
+  // Pass 1 — absorb short, edit-flanked equalities into (delete + insert).
+  const expanded: TrackChangeDiffOp[] = [];
+  for (let i = 0; i < ops.length; i++) {
+    const op = ops[i];
+    const prevIsEdit = i > 0 && ops[i - 1].type !== 'equal';
+    const nextIsEdit = i < ops.length - 1 && ops[i + 1].type !== 'equal';
+    if (op.type === 'equal' && prevIsEdit && nextIsEdit && op.text.trim().length <= SEMANTIC_EQUALITY_MAX) {
+      expanded.push({ type: 'delete', text: op.text }, { type: 'insert', text: op.text });
+    } else {
+      expanded.push({ ...op });
+    }
+  }
+
+  // Pass 2 — coalesce each maximal edit run into one delete + one insert (deletes first, matching
+  // diffToRegions' replace ordering).
+  const out: TrackChangeDiffOp[] = [];
+  let i = 0;
+  while (i < expanded.length) {
+    if (expanded[i].type === 'equal') {
+      const last = out[out.length - 1];
+      if (last && last.type === 'equal') last.text += expanded[i].text;
+      else out.push({ ...expanded[i] });
+      i++;
+      continue;
+    }
+    let del = '';
+    let ins = '';
+    while (i < expanded.length && expanded[i].type !== 'equal') {
+      if (expanded[i].type === 'delete') del += expanded[i].text;
+      else ins += expanded[i].text;
+      i++;
+    }
+    if (del) out.push({ type: 'delete', text: del });
+    if (ins) out.push({ type: 'insert', text: ins });
+  }
+  return out;
 }
 
 /**
