@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-21 (Phase 2 complete — 013 + 014 done + gated)
+> **Last Updated**: 2026-07-21 (by context-handoff — Phase 3 at 5/6; tasks 013,014,020,021,022,023,024 done)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,33 +10,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 2 ✅ · 020,021,023,024 ✅ (pushed) · **Task 022 (FR-08 forward) COMPLETE ✅ + gated**. Phase 3 remaining: **025** (title→record modal link). |
-| **Step** | — |
-| **Status** | 013,014,020,021,023,024 + merges committed+pushed (PR #664). **022 done + gated, about to commit** (ConversationView Forward affordance + SendEmailDialog sourceRecord). 8 tasks this session. |
-| **Next Action** | Commit 022, then `work on task 025` (FR-12 conversation title → record-scoped modal link, deps 011+012). After 025, **Phase 3 is complete** → Phase 4 (030 record PCF [opus], 031 widget, 032 code page, 033 Email&Messages tab, 034 deploy). ⚠️ **regarding-in-forward is host-wired** via `sourceRecord.associations` (ISS-005 #672 for the engine-union follow-up). Two Fluent-dialog integration tests hardened w/ `findByRole('dialog',{},{timeout:4000})` (jsdom flake). `mapStateToSendRequest` lives in `EmailComposer.reducer.ts`. ⚠️ worktree build gap: verify via scoped `tsc --noEmit` + `npm test`. |
+| **Task** | Phase 1 ✅ · Phase 2 ✅ · **Phase 3: 5/6 done** (020,021,022,023,024 ✅ gated+pushed). Only **025** (FR-12 title→record modal link) remains, then **Phase 4**. |
+| **Step** | — (between tasks; nothing in-progress) |
+| **Status** | **CLEAN + fully pushed** — working tree clean, 0 unpushed to PR #664 (HEAD `d6050810e`). ⚠️ **10 behind origin/master** (other projects merged during the session). |
+| **Next Action** | `work on task 025` (FR-12 conversation title → record-scoped modal link, deps 011+012 — both done). It finishes Phase 3. **RECOMMENDED FIRST**: `git merge origin/master` (10 behind; likely touches shared EmailComposer/UI surfaces again — resolve like prior merges, prefer R3 logic, re-run tests). Then Phase 4 (030 record PCF **[opus]**, 031 widget, 032 code page, 033 Email&Messages DataGrid tab, 034 deploy). |
 
-### Progress — 11 tasks ✅ (001–006, 010–014). 9 committed+pushed (PR #664); **013 + 014 committed? NO — uncommitted**
-- **Phase 1 (backend spine) COMPLETE + pushed**: 001–006.
-- **Phase 2 (shared conversation core) COMPLETE**: 010 characterize · 011 bubbles · 012 two-pane shell (all pushed) · **013 in-conversation compose · 014 additive filters (this session, gated, NOT yet committed)**.
-- **013**: added a Teams-style chat input to `ConversationView` sending via existing `sendTimelineMessage({communicationType:'message', threadId, ...})` (ACS branch, ADR-045/046); `pollNow` on-send + on-demand refresh; ~5s poll retained. Gate found 1 Major (double-send on type-during-send) → FIXED (inFlightRef). See `notes/task-013-notes.md`.
-- **014**: added additive filters (Email/Message toggles + word Dropdown) to `ConversationView`; presentational-only over the polled timeline; exported pure helpers `messagePassesFilters`/`extractWordOptions`. Gate verdict Ship (2 Minor fixed). See `notes/task-014-notes.md`.
-- **Files changed this session (uncommitted)**: `ConversationView.tsx`, `ConversationView.types.ts`, 2 new tests (`ConversationView.compose.test.tsx`, `ConversationView.filters.test.tsx`), `notes/task-013-notes.md`, `notes/task-014-notes.md`, `notes/defer-issues.md` (added ISS-003), `tasks/TASK-INDEX.md`, POMLs 013/014, this file. **40 tests pass** for the ConversationView suite.
+### Progress this session — 7 implementation tasks + backend enrichment, ALL gated + committed + PUSHED (PR #664)
+- **Phase 1 (001–006)** + **Phase 2 core (010,011,012)**: done in a PRIOR session, pushed.
+- **013** FR-06 in-conversation compose (ConversationView chat input via existing `sendTimelineMessage`, ACS branch; `pollNow` refresh). Gate fixed a Major double-send (`inFlightRef`). `notes/task-013-notes.md`.
+- **014** FR-09 additive filters (Email/Message toggles + word Dropdown; presentational). Ship. `notes/task-014-notes.md`.
+- **020** FR-07/19 SendEmailDialog thread-pin + auto-associate (opus). Gate fixed a Major stale-contract doc + 4 minors. `notes/task-020-notes.md`.
+- **021** FR-04 email-in-flow block **+ correctness-critical backend read-DTO Subject/To enrichment** (owner-approved escalation resolution). Recipient-disclosure gate-verified SAFE. `notes/task-021-notes.md`.
+- **022** FR-08 forward → SendEmailDialog forward mode. Ship (regarding-in-forward doc-mitigated). `notes/task-022-notes.md`.
+- **023** FR-05 MessageQuickView + ConversationView `scrollToMessage` handle. Ship. `notes/task-023-notes.md`.
+- **024** FR-11 NewThreadModal find-or-create. Fixed 3 Majors; §6.5 Path-A (name/desc omitted) accepted. `notes/task-024-notes.md`.
+- **Merges reconciled**: 54-commit master merge (email-r4 moved `mapStateToSendRequest` → `EmailComposer.reducer.ts` + added attachment body-links) + 2 CI-Prettier merges. All conflict-resolved, tests green.
 
-### Next Action (explicit)
-1. **Commit** this session's Phase-2 work (013+014). 2. **File ISS-003** GitHub issue (`/defer` — push-to-github Step 1.6 blocks on the `{URL}` placeholder in `notes/defer-issues.md`). 3. `work on task 020` — FR-07 extend `SendEmailDialog`/`EmailComposer` (thread id + record link), **opus tier**, serial. Then Wave 11 = 023 + 024 (parallel-safe), 021, 022, 025.
-
-### Critical Context (carry forward)
-0. **ISS-003 filed → [#669](https://github.com/spaarke-dev/spaarke/issues/669)** — `useThreadPoll.pollNow` swallowed when a poll is in flight → task-013 on-send refresh can miss by ≤5s in a narrow race; fix belongs in the characterized core (NFR-06), deferred.
-1. **Identity contract (FR-02/18)**: bubble alignment keys on `senderSystemUserId` (backend `SentBy`, shipped by task 002; plumbed to client by 011 via `IThreadMessageDto`/`TimelineMessage`/`buildTimeline` mapping). NEVER align on email-string.
-2. **Access model (NFR-01)**: all reads impersonated + shared access-filter; **NO membership-union** (retired). Client renders exactly what server returns; no client-side thread filtering.
-3. **§6.5 Path A exception (task 012, on record for review)**: `ConversationWorkspace` record-mode lists via existing `GET /by-regarding/{entityType}/{id}` (FR-16 `/threads` has no regarding param by design so record-less threads surface in all-mode). Both server-access-filtered.
-4. **Renderer seam**: Phase-4 hosts (030 PCF / 031 widget / 032 code page) inject `ConversationView` into `ConversationWorkspace`'s `renderConversation` prop + supply `currentUserSystemUserId`.
-5. **⚠️ Worktree build gap**: sibling `@spaarke/auth`/`@spaarke/sdap-client` `dist/` unbuilt → 2 tsc errors in `EntityCreationService.ts`/`useWizardPageBootstrap.ts` (UNRELATED to R3). Verify client work via scoped `tsc --noEmit` (expect exactly those 2) + `jest`. Whole-package `npm run build` will fail on them until siblings are built.
-6. **Filed issues**: #666 (ISS-001 participant= escaping), #667 (ISS-002 roll-up OrderBy). Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` — NOT introduced by R3.
-7. **CI**: `sdap-ci.yml` shows no checks on this branch (not triggering on these pushes — verify when PR #664 → ready).
+### Critical Context (carry forward — CURRENT)
+1. **Read DTO now carries `subject` + `to`** (task 021): `ThreadMessageDto` (backend) / `IThreadMessageDto` / `TimelineMessage` + `buildTimeline` mapping. Recipients = access-filtered `sprk_to` on the visible row (NEVER fabricated, NEVER BCC — `sprk_bcc` is separate, never selected). The email-in-flow block + the word filter use them.
+2. **Identity contract (FR-02/18)**: bubble alignment keys on `senderSystemUserId` (`SentBy`), NEVER email-string. **Access model (NFR-01)**: impersonated + shared access-filter; NO membership-union; client renders exactly what server returns.
+3. **`mapStateToSendRequest` lives in `EmailComposer.reducer.ts`** now (email-r4 moved it in the merged master) — Phase-4/future send-shaping edits go there, not `EmailComposer.tsx`. R3's `threadId` arg was re-applied there.
+4. **Decoupled host seams (ADR-012)** on ConversationView: `renderConversation` (012), `currentUserSystemUserId`, `scrollToMessage` handle via `forwardRef` (023), `onOpenEmail` (021), `onForwardMessage` (022). Phase-4 hosts (030 PCF / 031 widget / 032 code page) mount `ConversationView` into `ConversationWorkspace`'s `renderConversation` + wire these callbacks (open/forward → the extended `SendEmailDialog`; the enriched message builds the view/forward `sourceRecord`).
+5. **regarding-in-forward (ISS-005 #672)**: in `mode="forward"` the composer derives `associations` from `sourceRecord.associations`, dropping the dialog's `regarding` fold. Host MUST include regarding in `sourceRecord.associations` (documented in the `onForwardMessage`/`sourceRecord` JSDocs). `threadId` DOES survive forward.
+6. **§6.5 Path exceptions on record** (cite in deploy PRs): task 012 Path-A (`ConversationWorkspace` record-mode via `by-regarding`); task 024 Path-A (NewThreadModal name/desc omitted — endpoint has no field, ISS-004 #670); ADR-006 (task 033 DataGrid web-resource) + ADR-026 (task 030 Path-A PCF) both Path C.
+7. **⚠️ Worktree build gap**: sibling `@spaarke/auth`/`@spaarke/sdap-client` `dist/` unbuilt → exactly 2 unrelated tsc errors (`EntityCreationService.ts`/`useWizardPageBootstrap.ts`). Verify client work via **scoped `tsc --noEmit` (expect exactly those 2) + `npm test`**, NOT whole-package `npm run build`.
+8. **CI is now triggering** on PR #664 (8 checks). CI runs Prettier and pushes `style: auto-format` commits back — to avoid the reject/merge cycle, run `npx prettier --write` on changed client files BEFORE pushing.
+9. **Flaky-dialog tests**: the 2 Fluent-`Dialog`-open integration tests (`ConversationView.emailInFlow` open→dialog, `ConversationView.forward` forward→dialog) were hardened with `findByRole('dialog', {}, { timeout: 4000 })` (jsdom/tabster timing flake — not a logic bug).
+10. **Filed follow-ups**: #666/#667 (participant escaping, roll-up OrderBy), #669 (ISS-003 `useThreadPoll.pollNow` swallowed race), #670 (ISS-004 named-direct-threads Path-B), #672 (ISS-005 regarding-in-forward engine-union). All in `notes/defer-issues.md` with URLs (push-to-github Step 1.6 clean).
 
 ### Files Modified This Session
-None uncommitted — all work across 001–006 + 010–012 is committed. See `git log --oneline origin/master..HEAD` and per-task `notes/task-0NN-notes.md`.
+None uncommitted — **all work is committed + pushed**. Per-task detail in `notes/task-0NN-notes.md` (013,014,020,021,022,023,024); commits: `git log --oneline aff99a072..HEAD` (Wave-11 checkpoint → HEAD).
 
 ---
 
