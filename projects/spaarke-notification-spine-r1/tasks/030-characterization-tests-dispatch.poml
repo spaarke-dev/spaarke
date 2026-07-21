@@ -4,7 +4,7 @@
     <title>Characterization tests pinning current chat/playbook dispatch behavior (pre-Layer-A extraction)</title>
     <phase>3 Layer A + Notification flip</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Test-authoring task, no production code changes.</rigor-reason>
     <model-tier>sonnet</model-tier>

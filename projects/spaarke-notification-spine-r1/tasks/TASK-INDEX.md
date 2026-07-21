@@ -21,7 +21,7 @@
 | 023 | Fan-out targeting + negative-access (FR-08) | 2 | ✅⚠️ | 020 | opus/xhigh | FULL | Group Q |
 | 024 | communication-arrived producer (FR-09) | 2 | 🔲 | 012,013,020 | opus/high | FULL | — |
 | 025 | R3 contract-lock note (FR-19) | 2 | 🔲 | 024,021,022 | sonnet/high | MINIMAL | — |
-| 030 | Characterization tests — dispatch (FR-07 pre) | 3 | 🔲 | none | sonnet/high | STANDARD | — |
+| 030 | Characterization tests — dispatch (FR-07 pre) | 3 | ✅ | none | sonnet/high | STANDARD | — |
 | 031 | Layer-A action seam behind executors (FR-07) | 3 | 🔲 | 030 | opus/xhigh | FULL | — |
 | 032 | "What lights up" audit (FR-14 pre) | 3 | 🔲 | 031 | opus/high | STANDARD | — |
 | 033 | Notification leg flip (FR-14) | 3 | 🔲 | 032 | opus/high | FULL | — |

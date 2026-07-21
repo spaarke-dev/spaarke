@@ -9,10 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Between waves — **Phase 0, Phase 1, Phase 2 Layer C all COMPLETE + externality security fix** |
-| **Step** | — (9 tasks done: 001, 010, 011, 012, 013, 020, 021, 022, 023 + identity/externality resolvers) |
-| **Status** | ready-for-Phase-3 (or wait on email-r4 W10 for 024) |
-| **Next Action** | **Recommended: start Phase 3** — `030` (characterization tests) → `031` (Layer-A action seam behind `*NodeExecutor.cs`, opus/xhigh) → `032` ("what lights up" audit) → `033` (ADR-043 Notification `Routable=false` flip). No email-r4 dependency. Invoke via `task-execute` on `tasks/030-*.poml`. |
+| **Task** | **031 — Layer-A action seam behind `*NodeExecutor.cs` (Phase 3, Wave 9)** — NOT started |
+| **Step** | — (030 ✅ complete: 14 seam tests green, both quality gates CLEAN, zero production changes) |
+| **Status** | ready-for-031 (opus/xhigh, FULL rigor, highest blast radius — brownfield extraction) |
+| **Next Action** | **Dispatch 031** via `task-execute` on `tasks/031-layer-a-action-seam.poml`. Its DoD: the 14 task-030 seam tests pass **UNMODIFIED** after the extraction (if any must change → the extraction altered observable behavior → STOP/reconcile, don't "fix" the test). |
+
+### Task 030 result (Phase 3, Wave 8 — ✅ DONE 2026-07-21)
+- **14 seam tests** authored under `tests/integration/seam/Ai/Nodes/` (CreateNotification 8 / CreateTask 3 / UpdateRecord 3) — the behavior-neutrality safety net for 031. All green vs pre-031 code; `git diff` on the three executors empty.
+- Both Step 9.5 gates CLEAN (code-review + adr-check — mandatory per TEST-MODIFYING override). ADR-038 seam KEEP-path, no banned shapes.
+- Notes + escalation-trigger disposition: `notes/030-characterization-notes.md` (trigger correctly did NOT fire — 3 defect-adjacent paths are documented intentional contracts).
+- ⚠️ **031 contract**: those 14 tests are 031's DoD — they must pass unmodified after the Layer-A extraction.
 
 ### Files Modified This Session
 All committed + pushed (6 commits `672ec11f6`→`c759dd4c8`). Nothing uncommitted except this file.
