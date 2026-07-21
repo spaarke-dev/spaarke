@@ -43,6 +43,7 @@ import type { Editor } from '@tiptap/core';
 import type {
   ParaIdMapEntry,
   ComposeEditedParagraph,
+  ComposeBaselineParaId,
   ComposeContentModel,
   ComposeContentBlock,
   ComposeInlineRun,
@@ -293,6 +294,31 @@ export function collectEditedParagraphs(
     }
   });
   return edited;
+}
+
+/**
+ * C2 fix (UAT 2026-07-20): build the ordered baseline paraId map the save sends so the SERVER can stamp
+ * MINTED ids physically onto the retained-original baseline's id-less paragraphs before the synthesizer
+ * resolves (see `ComposeBaselineParaIdStamper`). Sourced from the LOAD-TIME {@link captureParaIdSnapshot}
+ * snapshot — document order, `paraId` → reject-state text — so each entry's `text` is exactly the baseline
+ * paragraph's text (the server's verification key), NOT the post-edit text. One entry per snapshot
+ * paragraph; `index` is its zero-based document-order position (the snapshot Map preserves insertion =
+ * document order). Returns `[]` for an absent/empty snapshot (e.g. a born-in-editor doc — the server
+ * renders its ids and the stamp is a no-op there anyway).
+ *
+ * Privacy (ADR-015 Tier 3): the text is document content — carried to the save request only, NEVER logged.
+ */
+export function buildBaselineParaIdMap(
+  snapshot: ReadonlyMap<string, string> | null | undefined
+): ComposeBaselineParaId[] {
+  if (!snapshot || snapshot.size === 0) return [];
+  const map: ComposeBaselineParaId[] = [];
+  let index = 0;
+  for (const [paraId, text] of snapshot) {
+    if (paraId) map.push({ index, paraId, text });
+    index++;
+  }
+  return map;
 }
 
 /**

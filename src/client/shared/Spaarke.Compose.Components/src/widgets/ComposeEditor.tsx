@@ -87,6 +87,7 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
+  Lightbulb16Regular,
   TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
@@ -115,6 +116,7 @@ import {
   captureParaIdSnapshot,
   collectEditedParagraphs,
   buildContentModel,
+  buildBaselineParaIdMap,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
 import { applyImportedRevisions } from './importedRevisions';
@@ -122,6 +124,7 @@ import { applyImportedCommentAnchors, groupImportedComments } from './importedCo
 import type {
   ParaIdMapEntry,
   ComposeEditedParagraph,
+  ComposeBaselineParaId,
   ComposeContentModel,
   ImportedRevision,
   ImportedComment,
@@ -514,6 +517,15 @@ export interface ComposeEditorHandle {
   collectEditedParagraphs(): ComposeEditedParagraph[];
 
   /**
+   * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
+   * sends on save so the server can stamp minted ids physically onto the retained-original baseline's
+   * id-less paragraphs before the synthesizer resolves. Read-only (no dirty-flag side effect) — sourced
+   * from the load-time paraId snapshot, so its `text` is the baseline (reject-state) text the server
+   * verifies against. Empty for a born-in-editor doc (no snapshot / the server renders its ids).
+   */
+  getBaselineParaIdMap(): ComposeBaselineParaId[];
+
+  /**
    * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
    * (AI-drafted / blank / browse-local). The host sends it to create-on-save; the server RENDERS the
    * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
@@ -840,13 +852,50 @@ const useStyles = makeStyles({
   // FR-14 (task 031) — rationale-first popover restructure: the rationale is the visual HEADLINE
   // (bold, full foreground weight), the confidence band a SECONDARY row underneath (design §6.2 —
   // never a numeric score; coarse band only). Semantic tokens only (ADR-021 dark-mode-correct).
+  // U1 fix (UAT 2026-07-20): the per-change popover is now a PROPER CARD (column layout, comfortable
+  // width) so the cited rationale — the primary trust cue (design §6.2) — is fully READABLE instead of a
+  // clipped single line in the compact single-row bubble the popover used to borrow. Semantic tokens only
+  // (ADR-021 dark-mode-correct); positioned at the click point by `contextMenuPopup`.
+  redlinePopover: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    width: '320px',
+    maxWidth: 'min(320px, 92vw)',
+    padding: tokens.spacingHorizontalM,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow16,
+  },
+  // The "Suggested edit" header row — a note icon + label so the rationale reads as an AI suggestion.
+  redlineHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+  },
+  redlineHeaderIcon: {
+    color: tokens.colorBrandForeground1,
+    flexShrink: 0,
+  },
+  // U1: the cited rationale — now WRAPS to as many lines as needed (up to a scrollable cap) instead of
+  // the former single-line ellipsis truncation that hid most of the explanation.
   redlineHeadline: {
     display: 'block',
     width: '100%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    maxHeight: '9.5em',
+    overflowY: 'auto',
+    whiteSpace: 'normal',
+    lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground1,
+  },
+  // The Accept/Reject actions row — right-aligned, comfortably spaced (a proper card footer).
+  redlineActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    columnGap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXXS,
   },
   redlineSecondaryRow: {
     display: 'flex',
@@ -899,13 +948,6 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
 });
-
-/** Truncated, log-safe label for a pending redline (rationale is Tier 3 — shown, never logged). */
-function redlineLabelText(rationale: string | undefined, ledgerRef: string): string {
-  const base = rationale && rationale.trim().length > 0 ? rationale.trim() : 'Suggested edit';
-  const label = base.length > 80 ? `${base.slice(0, 80)}…` : base;
-  return `${label} (${ledgerRef})`;
-}
 
 /**
  * FR-14 (task 031) — coarse, qualitative confidence label for the SECONDARY band badge (design §6.2
@@ -1542,6 +1584,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onDirtyChange?.(false);
           return edited;
         },
+        // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
+        // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
+        getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),
         // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
         buildContentModel: () => {
           if (!editor) {
@@ -1821,7 +1866,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               return (
                 <div
                   ref={redlinePopoverRef}
-                  className={mergeClasses(styles.bubbleMenu, styles.contextMenuPopup)}
+                  className={mergeClasses(styles.redlinePopover, styles.contextMenuPopup)}
                   style={{ left: redlineClickAnchor.x, top: redlineClickAnchor.y }}
                   role="group"
                   aria-label="Accept or reject this suggested edit"
@@ -1830,14 +1875,19 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                 >
                   {clicked ? (
                     <>
-                      <Text
-                        size={300}
-                        weight="semibold"
-                        className={styles.redlineHeadline}
-                        title={clicked.rationale}
-                        data-testid="compose-redline-rationale"
-                      >
-                        {redlineLabelText(clicked.rationale, clicked.ledgerRef)}
+                      {/* U1 (UAT 2026-07-20): a clear "Suggested edit" header + the FULL cited rationale
+                          (wraps, scrolls if long) — the primary trust cue, no longer clipped to one line
+                          nor cluttered with the internal ledger id. */}
+                      <div className={styles.redlineHeader}>
+                        <Lightbulb16Regular className={styles.redlineHeaderIcon} aria-hidden="true" />
+                        <Text size={200} weight="semibold">
+                          Suggested edit
+                        </Text>
+                      </div>
+                      <Text size={300} className={styles.redlineHeadline} data-testid="compose-redline-rationale">
+                        {clicked.rationale && clicked.rationale.trim().length > 0
+                          ? clicked.rationale.trim()
+                          : 'Suggested edit'}
                       </Text>
                       <div className={styles.redlineSecondaryRow} data-testid="compose-redline-confidence-band">
                         <Badge size="small" appearance="tint" color={confidenceBandColor(clicked.confidenceBand)}>
@@ -1855,30 +1905,32 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                       </div>
                     </>
                   ) : null}
-                  <Button
-                    size="small"
-                    appearance={isLowBand ? 'secondary' : 'primary'}
-                    icon={<Checkmark16Regular />}
-                    onClick={() => {
-                      redline.accept(redlineClickAnchor.ledgerRef);
-                      setRedlineClickAnchor(null);
-                    }}
-                    data-testid={`compose-redline-accept-${redlineClickAnchor.ledgerRef}`}
-                  >
-                    Accept
-                  </Button>
-                  <Button
-                    size="small"
-                    appearance="subtle"
-                    icon={<Dismiss16Regular />}
-                    onClick={() => {
-                      redline.reject(redlineClickAnchor.ledgerRef);
-                      setRedlineClickAnchor(null);
-                    }}
-                    data-testid={`compose-redline-reject-${redlineClickAnchor.ledgerRef}`}
-                  >
-                    Reject
-                  </Button>
+                  <div className={styles.redlineActions}>
+                    <Button
+                      size="small"
+                      appearance="subtle"
+                      icon={<Dismiss16Regular />}
+                      onClick={() => {
+                        redline.reject(redlineClickAnchor.ledgerRef);
+                        setRedlineClickAnchor(null);
+                      }}
+                      data-testid={`compose-redline-reject-${redlineClickAnchor.ledgerRef}`}
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      size="small"
+                      appearance={isLowBand ? 'secondary' : 'primary'}
+                      icon={<Checkmark16Regular />}
+                      onClick={() => {
+                        redline.accept(redlineClickAnchor.ledgerRef);
+                        setRedlineClickAnchor(null);
+                      }}
+                      data-testid={`compose-redline-accept-${redlineClickAnchor.ledgerRef}`}
+                    >
+                      Accept
+                    </Button>
+                  </div>
                 </div>
               );
             })()
