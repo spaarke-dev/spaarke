@@ -60,6 +60,7 @@ import {
   applyRegardingSelection,
   advanceAssociationStatus,
   persistOverrideReason,
+  unlinkRegarding,
   type IResolverWriteContext,
   type IRegardingSelection,
 } from './handlers/ConnectionsWriteHandler';
@@ -541,6 +542,38 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     setOverrideReason('');
   }, []);
 
+  // Unlink ONE filed association (null exactly that entity's typed regarding lookup —
+  // additive-safe, siblings untouched; NOT a clear-and-set). Drops it from the
+  // confirmed set + clears the primary designation if it was primary.
+  const handleUnlink = React.useCallback(
+    (conn: Connection): void => {
+      void (async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          const res = await unlinkRegarding(writeCtx, conn.entity);
+          if (!res.success) {
+            setError(res.error ?? 'Could not unlink this connection.');
+            return;
+          }
+          setConfirmedFields(prev => {
+            const nextSet = new Set(prev);
+            nextSet.delete(conn.field);
+            return nextSet;
+          });
+          setPrimaryField(prev => (prev === conn.field ? null : prev));
+          await refreshForm();
+          setReloadKey(k => k + 1);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Unexpected error while unlinking.');
+        } finally {
+          setBusy(false);
+        }
+      })();
+    },
+    [writeCtx]
+  );
+
   const submitOverride = React.useCallback((): void => {
     const conn = overrideConn;
     if (!conn) return;
@@ -654,13 +687,14 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 onAcceptAll={handleAcceptAll}
                 onChange={handleChange}
                 onSetPrimary={handleSetPrimary}
+                onUnlink={handleUnlink}
                 onLinkAnother={handleLinkAnother}
                 onCreateType={handleCreateType}
               />
             </DialogContent>
             <DialogActions className={s.modalActions}>
-              <Button appearance="secondary" onClick={() => setModalOpen(false)}>
-                Close
+              <Button appearance="primary" onClick={() => setModalOpen(false)}>
+                Done
               </Button>
             </DialogActions>
           </DialogBody>

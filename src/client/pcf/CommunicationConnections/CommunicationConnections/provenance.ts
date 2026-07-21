@@ -484,3 +484,61 @@ export function deriveCreateActions(doc: ProvenanceDoc): CreateAction[] {
 export function connectionTarget(conn: Connection): { entityType: string; recordId: string; recordName: string } {
   return { entityType: conn.entity, recordId: conn.targetId, recordName: conn.targetName };
 }
+
+// ── Group-by-action model (task 105 / UAT R2 C1) ────────────────────────────────
+//
+// The review surface groups matches by the ACTION the reviewer must take, not by
+// record type (owner-approved mockup 3c1eaf58). This pure function partitions the
+// already-derived connection slots + AI type-suggestions into the three sections:
+//   • needsDecision — ambiguous conflicts the reviewer must resolve (pick one).
+//   • filed         — high-confidence auto-links already written (done; ★ primary).
+//   • suggested     — soft matches to Confirm or Dismiss (contacts, name matches).
+//   • aiSuggested   — AI "looks like a new X" create-suggestions to Create or Dismiss.
+// Dismissal is a client-side, in-session hide (the match was never filed, so hiding
+// it needs no write) — `dismissedKeys` carries slot fields and `ai:<entityType>` keys.
+
+/** The action-grouped partition the rebuilt review UI renders. */
+export interface GroupedConnections {
+  /** Ambiguous conflicts — render as selectable options + "Set as primary". */
+  needsDecision: Connection[];
+  /** Confirmed / auto-filed associations — render as done rows with ★ primary + change/unlink. */
+  filed: Connection[];
+  /** Suggested slots (not yet filed, not dismissed) — render with Confirm / Dismiss. */
+  suggested: Connection[];
+  /** AI-suggested record types (not dismissed) — render with Create / Dismiss. */
+  aiSuggested: AiSuggestedType[];
+}
+
+/** True when a slot is filed — engine-written OR confirmed this session by the App. */
+export function isConnectionConfirmed(conn: Connection, confirmedFields: ReadonlySet<string>): boolean {
+  return conn.status === 'confirmed' || confirmedFields.has(conn.field);
+}
+
+/**
+ * Partition connections + AI suggestions into the three action groups the rebuilt
+ * modal renders. Pure (no React, no webApi) so the grouping is unit-testable.
+ */
+export function groupConnectionsByAction(
+  connections: Connection[],
+  aiSuggestions: AiSuggestedType[],
+  confirmedFields: ReadonlySet<string>,
+  dismissedKeys: ReadonlySet<string>
+): GroupedConnections {
+  const needsDecision: Connection[] = [];
+  const filed: Connection[] = [];
+  const suggested: Connection[] = [];
+
+  for (const c of connections) {
+    if (isConnectionConfirmed(c, confirmedFields)) {
+      filed.push(c);
+    } else if (c.status === 'ambiguous') {
+      needsDecision.push(c);
+    } else if (!dismissedKeys.has(c.field)) {
+      suggested.push(c);
+    }
+  }
+
+  const aiSuggested = aiSuggestions.filter(a => !dismissedKeys.has(`ai:${a.entityType}`));
+
+  return { needsDecision, filed, suggested, aiSuggested };
+}

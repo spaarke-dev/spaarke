@@ -246,6 +246,57 @@ export async function applyRegardingSelection(
 }
 
 // ---------------------------------------------------------------------------
+// Public: unlink ONE filed regarding association (user-initiated removal)
+// ---------------------------------------------------------------------------
+
+/**
+ * Remove a SINGLE filed regarding association from the host communication.
+ *
+ * This is NOT a "clear-and-set" (which the additive multi-association model
+ * forbids — see `applyRegardingSelection`). It is the reviewer explicitly
+ * unlinking ONE record via the "Unlink" affordance in the Filed section: it nulls
+ * exactly that entity's typed regarding lookup and leaves every sibling
+ * association untouched. The additive write invariant is preserved — this is the
+ * inverse of an additive add, never a bulk wipe.
+ *
+ * The typed lookup is nulled by PATCHing `"<NavigationProperty>@odata.bind": null`
+ * (the Web API single-valued-nav disassociate form), using the live-metadata
+ * nav-prop the shared write path also discovers. Denormalized primary fields are
+ * intentionally left alone — if the unlinked record was the primary, the reviewer
+ * designates a new primary via "Set as primary"/"Make primary", which repoints the
+ * denorm fields. Returns success (no-op) in CREATE mode (no host GUID).
+ */
+export async function unlinkRegarding(
+  ctx: IResolverWriteContext,
+  entityType: string,
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<IResolverWriteResult> {
+  const cleanId = ctx.hostRecordId?.replace(/[{}]/g, '');
+  if (!cleanId || cleanId.length !== 36) {
+    return { success: true }; // Nothing filed to unlink without a persisted record.
+  }
+
+  const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
+  const target = entityType.toLowerCase();
+  const navProp = navProps.find(n => n.referencedEntity?.toLowerCase() === target);
+  if (!navProp) {
+    return {
+      success: false,
+      error: `[CommunicationConnections] No regarding lookup found for "${entityType}" on ${ctx.hostEntity} — cannot unlink.`,
+    };
+  }
+
+  try {
+    await ctx.webApi.updateRecord(ctx.hostEntity, cleanId, {
+      [`${navProp.navPropName}@odata.bind`]: null,
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'unlink failed' };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public: advance association status (plain host-field write — NOT regarding logic)
 // ---------------------------------------------------------------------------
 
