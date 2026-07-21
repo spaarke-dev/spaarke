@@ -1,12 +1,14 @@
 # Spaarke Notification & Action Spine — R1 Design (Working Document)
 
 > **Project ID (proposed)**: `spaarke-notification-spine-r1`
-> **Status**: DRAFT design-seed — feeds `/design-to-spec`. **For review alongside `messaging-communication-app-r1` + `spaarkeai-assistant-enhancements-r1`.**
+> **Status**: DESIGN — combined-scope decision made (path iii, §6) + status verified against master 2026-07-20; feeds `/design-to-spec`. **Absorbs assistant R1.5 proactive-push scope (§4A). Remaining pre-spec items: §10 #3 (rule store), #4 (gate-zero spike), #5 (taxonomy lock — time-bound by messaging-r3 P1), #7 (routable audit), #8 (re-entry confirmation), plus the §6 follow-through note in the assistant project's docs.**
 > **Date**: 2026-07-16
 > **Origin**: `email-communication-solution-r4` W5 scoping surfaced that communication Responsive Intelligence needs shared infrastructure that two sibling projects independently designed. Owner directive (2026-07-16): "close r4 at its milestone; set up this shared capability as its own project with a name that reflects it serves different purposes in other contexts."
 > **Grounded against**: `email-communication-solution-r4/notes/W5-responsive-intelligence-and-shared-notification-spine.md` · `messaging-communication-app-r1/design.md` §7 · `spaarkeai-assistant-enhancements-r1/design.md` §14.1a/§14.1b · live BFF `Services/Ai` + `Services/Communication` code.
 
 > **⚠️ Name is proposed, for review.** This capability is broader than "notifications" (it also carries shared *domain actions*) and broader than "communications" or "responsive intelligence" (which are consumers). Alternatives to weigh: `spaarke-signal-action-spine-r1`, `spaarke-action-notification-fabric-r1`, `spaarke-responsive-platform-r1`. Keeping `notification-spine` for continuity — both sibling designs already call it that.
+
+> **2026-07-20 — SCOPE DECISION + verified status refresh (owner directive).** A four-track investigation (email-r4, assistant-r1, messaging-r1/r2/r3, live-master ground-truth) confirmed **every §2 current-state claim still holds on master**. **§6 is RESOLVED as path (iii) — combined project**: this project owns Layers A–D **and absorbs the assistant R1.5 proactive-push scope** (assistant design §14.1a / §12.5 / §14.1b / §7 — fully designed there, never spec'd/tasked) as its **second proving consumer**; `spaarkeai-assistant-enhancements-r1` closes at its reactive milestone. No separate r1.5 project is created. Verified deltas folded into this doc: the **§5B.5 create-flow dependency is SATISFIED** (assistant create-flow vertical shipped + merged to master, two UAT rounds); **ADR-047 is reserved for this project** (messaging-r2 deliberately took ADR-048); **messaging-r3's spec FR-22 is a COMMITTED consumer** of `communication-arrived` ("the spine will be made available" — contract lock needed at r3's P1); BFF publish baseline is now **~46.24 MB** (was ~45.30); email-r4 **W10 (UAT round 2) is authored-but-unstarted** — sequence the enrichment-producer touch after it merges. See **§4A** (absorbed R1.5 scope), **§6** (resolution), **§10** (updated register).
 
 > **Assistant-side technical review incorporated (2026-07-16, `spaarkeai-assistant-enhancements-r1`).** Because that project owns the live AI **dispatch spine** (`DispositionRoutability`, `OutputRouter`, `SessionDispatchOrchestrator`, ADR-039/040/041) and is the R1.5 proactive-push consumer, its edits appear as **§5B** (assistant-side consumer spec, mirroring messaging's §5A), the **§3 dispatch-spine convergence** note, the **§6 doctrine** sharpening, the **§8A gate-zero spike** (Serverless-vs-Default), and **§10 #4/#7**. Recurring assistant-side theme: **the spine is dumb transport — every "should we act/push?" decision stays grounded + gated in per-source policy, and acting on a delivered signal re-enters the *shipped* dispatch path, never a parallel one.**
 
@@ -38,12 +40,12 @@ email-r4's W5 (auto-create Event/Task/Notification from `communication_assessed`
 
 ---
 
-## 2. Current-state truth (grounded 2026-07-16)
+## 2. Current-state truth (grounded 2026-07-16; **all rows re-verified against live master 2026-07-20** — every claim CONFIRMED: emit-only log intact, `Notification`/`Record` legs still `Routable=false`, zero SignalR references/packages, no outbox table, `FireAsync` still requires SessionId+UserOid, `appnotification` path intact)
 
 | Capability | Status | Where |
 |---|---|---|
 | `communication_assessed` signal (emit point) | **EXISTS (emit-only log)** | `CommunicationEnrichmentService` step 5 |
-| Domain-action executors: `CreateNotification` / `CreateTask` / `UpdateRecord` | **EXIST as node executors** (chat-coupled) | `Services/Ai/Nodes/*NodeExecutor.cs` |
+| Domain-action executors: `CreateNotification` / `CreateTask` / `UpdateRecord` | **EXIST as node executors** (playbook-run-coupled via `NodeExecutionContext` — RunId/PlaybookId/TenantId/UserId; precision refined 2026-07-20, the extraction claim is unchanged: no session-agnostic seam exists) | `Services/Ai/Nodes/*NodeExecutor.cs` |
 | `CreateNotification` → native `appnotification` → Daily Briefing | **EXISTS** | `NotificationService.CreateNotificationAsync`; `useBriefingNotifications` reader |
 | `sprk_risk` + the ONE confirmation gate (ADR-039/041) | **EXISTS** (chat dispatch) | `PendingPlanManager.RequiresConfirmation` |
 | Deterministic rule/gate primitives (cost cap, opt-out, confidence) | **EXIST but user/session-scoped** | `EventRulesService` |
@@ -89,9 +91,29 @@ Today's chat spine fuses four concerns. Separate them so email, chat/messaging, 
 
 **Absorbs email-r4 tasks 050–054** (re-homed) as the comms-RI slice.
 
-**R1 does NOT**: route comms RI through `EventRulesService.FireAsync`; build a comms-only hub; build the assistant proactive producer or messaging fan-out (those are the *other* consumers — this project makes the spine they'll ride).
+**R1 does NOT**: route comms RI through `EventRulesService.FireAsync`; build a comms-only hub; build the messaging fan-out (messaging consumes in its own R3+). ~~build the assistant proactive producer~~ — **superseded 2026-07-20 (path iii)**: the proactive suggestion producer + renderer ARE this project's later waves; see §4A.
 
-**New ADR** (concise + full): "Notification & action spine — typed signals, shared domain actions, per-source policy, SSE-as-presentation." Author main-session (`.claude/` write boundary).
+**New ADR** (concise + full): "Notification & action spine — typed signals, shared domain actions, per-source policy, SSE-as-presentation." Author main-session (`.claude/` write boundary). **Number confirmed: ADR-047** — the gap between ADR-046 and ADR-048 was explicitly held open for this project by messaging-r2 (its task 004 was instructed not to claim it).
+
+---
+
+## 4A. Absorbed R1.5 scope — proactive suggestions as the SECOND proving consumer (added 2026-07-20, path iii)
+
+> Source: `spaarkeai-assistant-enhancements-r1/design.md` §14.1a (five-layer target architecture), §12.5 (SignalR resolution), §14.1b (general `kind`-typed spine framing), §7. R1.5 was carved out of assistant-R1 by the 2026-07-15 "reactive-first" owner decision and was **fully designed but never spec'd or tasked** — so absorption is a design-merge, with zero task rework. The assistant project closes at its reactive milestone (shipped + merged; §5B.5 dependency satisfied).
+
+**What R1.5 is**: the full proactive-push capability — the Assistant surfaces a **grounded, gated** suggestion while the user is idle (not in response to something they just did). The proving flip: **Daily-Briefing sensor → "let's review them" → pre-seeded flow** (one reactive→proactive flip of an already-shipped reactive capability).
+
+**Five-layer R1.5 architecture (assistant §14.1a) mapped onto this spine** — the mapping is near-1:1, which is why absorption is cheap:
+
+| # | Assistant R1.5 layer (§14.1a) | Spine mapping | Wave |
+|---|---|---|---|
+| 1 | **Server-fireable Event-path producer** — Daily-Briefing is R1.5's ONE producer | A `kind=suggestion` producer over the Layer-A/B seam (grounding + ADR-041 `origin=proactive` gate applied BEFORE the outbox write, per §5B.2) | Suggestion wave (after spine + comms-RI proving waves); coordinate `Services/Ai/Narrators/DailyBriefing*` with active `spaarke-daily-update-service-r5` |
+| 2 | **Durable pending-suggestion outbox** — thin new `sprk_` table, **payload authority**; `appnotification` kept only as an optional MDA mirror | **IS Layer B**, verbatim — one `kind`-typed table serves all consumers; suggestion rows are `kind=suggestion` | Core spine wave |
+| 3 | **Azure SignalR Service** — "suggestions changed → fetch" **signal only; at-most-once; durability lives in the outbox** | **IS Layer C**. The signal-only/fetch-on-ping semantics generalize to every `kind` (identical to the §5A.3/§5B.4 envelope-then-refetch contract). ⚠️ The assistant design assumed **Default mode (hub-in-BFF, Standard tier, ~$49/mo/unit)** — that assumption is **superseded by the §8A gate-zero spike** (Serverless recommended; the spike decides, burden of proof on Default) | Gate-zero spike, then core spine wave |
+| 4 | **Client subscriber / render slot in the Assistant** — a **chip source reusing the shipped dispatch + ack-gate: no new pipeline, no second gate** | The `kind=suggestion` renderer branch of the one kind-routing subscriber. Satisfies §5B.3 re-entry + the P5 ack-contract **by construction** — acting on a suggestion re-enters the shipped dispatch path | Suggestion wave |
+| 5 | **Polling fallback to the same pending-suggestions endpoint** | The degraded path (§3 / §5A.6 #6 / §5B.8 #6, ADR-032 Null-Object). Concretizes generic "next-load/poll": a **pending read endpoint over the Layer-B outbox — build it `kind`-generic**, so every consumer (suggestions, comms, badges) polls the same surface when SignalR is off | Core spine wave |
+
+**Absorption consequences for R1 scope (§4)**: the "R1 does NOT build the assistant proactive producer" line is **superseded** — this project now builds it, as **later waves after the comms-RI proving producer**. The wave order preserves the original proving logic (spine proves itself on comms-RI first) while removing the cross-project contract seam entirely. Natural mid-point milestone: spine + comms-RI live — the project can pause there if priorities shift before the suggestion waves.
 
 ---
 
@@ -99,10 +121,10 @@ Today's chat spine fuses four concerns. Separate them so email, chat/messaging, 
 
 | Consumer | `kind` | Owner project | When |
 |---|---|---|---|
-| Communication Responsive Intelligence | `communication-assessed` | **this (R1 proving producer)** | R1 |
-| Proactive NBA suggestions | `suggestion` | `spaarkeai-assistant-enhancements-r1.5` | coordinate — see §6 |
+| Communication Responsive Intelligence | `communication-assessed` | **this (R1 proving producer #1)** | R1 |
+| Proactive NBA suggestions | `suggestion` | **this (R1 proving consumer #2 — absorbed R1.5, §4A; path iii resolved 2026-07-20)** | R1 later waves |
 | Email unread/badge | `communication-arrived` | email (opt-in) | after R1 |
-| Cross-channel messaging fan-out | `communication-arrived` | `messaging-communication-app` R2 | R2 |
+| Cross-channel messaging awareness (badge + toast) | `communication-arrived` | `messaging-communication-app-r3` — **COMMITTED consumer (its spec FR-22, 2026-07-20: "the spine will be made available"); contract lock (kind + envelope + persistence-time trigger) needed at r3's P1.** R2 closed reserve-only (code-complete 2026-07-19, stayed BFF-polling per its Q-E). | messaging R3 |
 | Job-completion / share / system-alert | those kinds | later, incremental | later |
 
 Each new consumer = a renderer branch (client) + a producer (server) + authoring — **never new spine**.
@@ -179,6 +201,18 @@ Communication access is governed by **Dataverse record security on `sprk_communi
 5. Envelope includes `threadId` so cross-channel timeline consumers can group by thread (the messaging-r1 thread model).
 6. Spine degrades gracefully (ADR-032 Null-Object): if SignalR is off, the durable outbox + next-load/poll still deliver — messaging R1 relies on exactly this (BFF polling, no server push in R1).
 
+### 5A.7 Messaging-R3 consumer verification (added 2026-07-20 — R3 is EXECUTING and release-gates on this spine)
+
+> Verified against `messaging-communication-app-r3` spec + tasks (31 tasks via `/project-pipeline` 2026-07-20; Wave 1 complete same day). Its **task 045** (FR-22: `communication-arrived` → unread badge + toast, awareness only, content stays ~5s polling per its NFR-03) is `status=blocked` on this spine's contract, with a correct escalation trigger ("degrade to polling-only; do NOT invent a contract") — and its **deploy/UAT task 050 depends on 045**, so **this spine is on R3's release-critical path**.
+
+**Verification result: the §5A contract fully covers R3's requirements** — kind separation (§5A.2), persistence-time trigger, envelope fields R3 needs (`threadId`, `badgeDelta`, `communicationId`, `channel`, `direction`, `senderDisplay`, privacy-gated `snippet?`), Dataverse-security targeting (§5A.4 — now buildable on the shipped `sprk_communicationparticipant` junction), and ADR-032 degradation matching R3's polling fallback. Three items need explicit resolution at the R3-P1 contract lock:
+
+1. **Producer ownership — spine emits; R3 consumes only.** R3's task 045 step 2 currently plans to *emit* `communication-arrived` from the BFF itself. Per §5A.5's "ask" (accepted): **this spine's R1 emits at persistence time for ALL channels** from the shared persist path — R3 should not wire a producer. At R3's P1, reconcile: 045's emit step becomes "verify the spine's emit fires for message + email persistence"; 045 keeps only the client consume (badge + toast). This prevents double-wiring and keeps the single-integration-point guarantee of §5A.1. Answer to R3's open "on-capture vs on-send" question: **both — the trigger is persistence** (`sprk_communication` row written), which covers inbound capture and outbound send identically.
+2. **The client subscriber MUST be a shared library, not a SpaarkeAi-shell-only component.** R3 consumes from three hosts: the SpaarkeAi workspace widget, a **record-form PCF**, and a **standalone Vite code page**. The §3 "one `kind`-routing client subscriber" must therefore ship as a host-agnostic shared package (e.g., under `@spaarke/ui-components` or a thin `@spaarke/notifications` client lib) with the negotiate/connection handling reusable outside the workspace shell — plus the `kind`-generic pending/poll endpoint (§4A layer 5) as the no-SignalR fallback all three hosts share. This is a NEW requirement surfaced by R3; fold into the spine spec.
+3. **Contract-lock contents + coordination.** The R3-P1 lock must cover: kind name (`communication-arrived` — locked), envelope shape (§5A.3), trigger point (persistence — above), **consumer API surface** (subscriber package + negotiate endpoint + poll fallback endpoint), and degrade semantics. ⚠️ Sequencing: R3's Phase-1 backend wave (tasks 002–005, serial, active NOW) edits the same `Services/Communication/` persist/read path this spine's arrived-producer touches — `/conflict-check` + merge-order with R3, in addition to the email-r4 W10 constraint (§7). Note the **wave-ordering opportunity**: the `communication-arrived` producer needs only Layers B+C (outbox + delivery), NOT Layer A or the comms policy layer — so it can land in the core spine wave, ahead of the comms-RI producer, unblocking R3's release gate earlier.
+
+(Minor, R3-side, non-blocking: task 045's POML labels its dep 003 as "participant junction" — in R3's numbering, 003 is the list-threads endpoint; the junction was R2's 003. Surface at R3's P1. Also R3's references point at the email-r4 worktree *copy* of this design — the authoritative copy is `projects/spaarke-notification-spine-r1/design.md` in the main repo; the copy is being kept in sync.)
+
 ---
 
 ## 5B. Assistant-side consumer specification (R1.5 proactive suggestions)
@@ -222,7 +256,9 @@ Like the communication envelope, a suggestion envelope carries **identifiers + m
 
 The client renders a compact card and **re-fetches / re-grounds the actionable detail through the BFF at action time**, which re-checks grounding *and* access. Two reasons this is a hard requirement, not an optimization: **(a) parity** — the spine is an accelerator, never an authorization *or grounding* bypass (same principle as §5A.3); **(b) freshness** — a suggestion drafted at idle-time *T* must re-ground at action-time *T′*; the catalog/record state may have changed, and a stale, ungrounded push is worse than none. **The envelope never carries a pre-authorized action token.**
 
-### 5B.5 Reactive-first ordering is a HARD dependency, not a preference
+### 5B.5 Reactive-first ordering is a HARD dependency, not a preference — ✅ SATISFIED 2026-07-20
+
+> **Status update (2026-07-20 investigation)**: the dependency below is **satisfied**. Assistant-R1's create-flow vertical (tasks 002 SurfaceLaunch, 010 constrained-field resolver, 012/013 wizard handoff + pre-seed, 014, 020 P5 ack-contract, 031, 052 security sign-off) is shipped, **merged to master**, deployed to dev, and hardened through two UAT rounds (R3/R4). The suggestion waves (§4A) are no longer blocked on it; assistant-R1's remaining tail is owner-facing UAT items only.
 
 Assistant-R1 (reactive) must ship **working create flows** before proactive suggestions surface them (owner decision, assistant-r1 §14.1a). Rationale: because acting on a `create-*` suggestion re-enters the `SurfaceLaunch`/wizard hand-off (§5B.3), a proactive suggestion that launches into a *broken* create flow **amplifies** the failure — worse than no suggestion. Therefore the **suggestion consumer is blocked on assistant-R1's create-flow vertical landing**:
 
@@ -252,9 +288,13 @@ R1.5's first `kind=suggestion` source is the **Daily-Briefing producer**, which 
 
 ---
 
-## 6. The key coordination decision (for owner review)
+## 6. The key coordination decision — ✅ RESOLVED 2026-07-20: path (iii), combined project
 
-**Who builds Layers A–C?** `spaarkeai-assistant-enhancements-r1.5` is currently scoped to build the SignalR + outbox spine *inside its proactive-push work*. That would fork the platform capability into one consumer. Two paths:
+> **Owner decision (2026-07-20)**: neither (i) nor (ii) as originally framed — **path (iii): R1.5 and this project are COMBINED into one project.** This project owns Layers A–D AND the absorbed R1.5 proactive-suggestion scope (§4A) as its second proving consumer. `spaarkeai-assistant-enhancements-r1` closes at its reactive milestone (already shipped + merged); no separate r1.5 project is ever created. Rationale over path (i): the two-project split would put the contract (`kind` taxonomy, envelope, outbox schema) on a project boundary during its formative phase — coordination tax (drift-watches, joint reviews, the very ownership ambiguity R-1 warned about, which the investigation found live: the assistant's ratified design still claimed the spine for R1.5, and `spaarke-notification-spine-r1` appeared nowhere in its docs). Path (iii) also *strengthens* the doctrinal argument below: the spine is proven against **two consumers of deliberately different shapes** (server-side fire-and-forget comms-RI; user-targeted, grounded+gated suggestions) inside one project — the strongest generality guarantee available. R1.5 had zero decomposed tasks, so absorption cost = a design merge (§4A).
+>
+> **Follow-through required**: (a) record the scope move in `spaarkeai-assistant-enhancements-r1`'s design/notes so its §14.1a/§14.1b stop claiming the R1.5 build items (their docs are currently the only place still assigning the spine to R1.5); (b) confirm at r3/email intake touchpoints — messaging-r3 and email-r4 already reference this project by name, so no re-pointing is needed on their side.
+
+**Original analysis (retained for the record) — Who builds Layers A–C?** `spaarkeai-assistant-enhancements-r1.5` is currently scoped to build the SignalR + outbox spine *inside its proactive-push work*. That would fork the platform capability into one consumer. Two paths:
 
 - **(i) This project owns the shared spine (recommended).** Extract Layers A–C out of assistant-r1.5 into this project as **platform infrastructure**; assistant-r1.5 becomes a *consumer* (`kind=suggestion`) of it, messaging R2 another, comms-RI the R1 proving producer. Honors "design once"; matches messaging-r1 §7's "one fabric, coordinated." Cost: re-sequences a slice of assistant-r1.5.
 - **(ii) assistant-r1.5 builds the spine; this project is the comms-RI consumer + the domain-action extraction.** Less re-sequencing; but the spine is born inside one consumer and must be generalized later (assistant-r1.5 §14.1b at least designs it general, mitigating this).
@@ -265,15 +305,21 @@ R1.5's first `kind=suggestion` source is the **Daily-Briefing producer**, which 
 
 ## 7. Dependencies & sequencing
 
-- **Upstream ready**: Association Engine + enrichment + `communication_assessed` signal + channel seams (email-r4 ✅).
-- **Coordinate**: assistant-r1.5 (spine ownership §6), messaging R2 (consumer). Run `/conflict-check`; the spine touches `Services/Ai` (email-r4 now owns it; r2-core closed) + a new hub + a new Dataverse table.
-- **Azure**: Azure SignalR Service (Default mode, Standard tier, ~$49/mo/unit) — per-customer provisioning wired into the provisioning orchestrator (ADR-027). Verify target-env CSP `connect-src` before design freeze (assistant-r1.5 open item).
+- **Upstream ready** (re-verified on master 2026-07-20): Association Engine + enrichment + `communication_assessed` signal + channel seams (email-r4 ✅). Also now shipped: **`IThreadResolver` + the `threadId` contract** (messaging-r1 task 040, extended additively by r2 — stable in master, grounding the §5A.3 envelope) and the **`sprk_communicationparticipant` junction (ADR-048, messaging-r2)** — directly relevant to §5A.4 Dataverse-derived fan-out targeting.
+- **Coordinate** (refreshed 2026-07-20):
+  - **email-r4** — NOT closed: W10 (UAT round 2, tasks 101–105) authored-but-unstarted; branch ahead of master. The proving producer edits `CommunicationEnrichmentService` (their file) — **sequence that touch after W10 merges**; `/conflict-check` before the producer wave.
+  - **assistant-r1** — UAT tail (R4-6/11/12) still touches `Services/Ai` + the SpaarkeAi page; §6 follow-through note in their docs; they produce the §10 #7 routable audit from the dispatch side.
+  - **messaging-r3** — committed consumer (spec FR-22), **EXECUTING as of 2026-07-20** (31 tasks; Wave 1 done; its task 045 is `blocked` on this spine and its deploy task 050 depends on 045 → **this spine is on r3's release-critical path**). **Lock the contract at r3's P1** (kind + envelope + persistence trigger + consumer-API surface — full list §5A.7); resolve producer ownership (spine emits, r3 consumes — §5A.7 #1); its Phase-1 backend wave edits the same `Services/Communication/` path serially right now — `/conflict-check` + merge-order. Wave-ordering opportunity: the arrived-producer needs only Layers B+C — land it in the core spine wave to unblock r3 early (§5A.7 #3).
+  - **daily-update-r5** — active on `Services/Ai/Narrators/DailyBriefing*` (prod-fix mode); coordinate the §4A suggestion-producer wave's merge order.
+  - **ai-architecture-redesign** — r1 COMPLETE + archived 2026-07-08; r2 uninitialized (design-stage). No live collision; consume published `PublicContracts` seams, no fork.
+  - Run `/conflict-check`; the spine touches `Services/Ai` + `Services/Communication` + a new hub/negotiate + a new Dataverse table; register in `projects/INDEX.md` with hot-path declaration at start.
+- **Azure**: Azure SignalR Service — **mode decided by the §8A gate-zero spike** (Serverless recommended; the absorbed R1.5 design's Default-mode assumption is superseded pending the spike, §4A layer 3). Standard tier ~$49/mo/unit either way; per-customer provisioning wired into the provisioning orchestrator (ADR-027). Verify target-env CSP `connect-src` before design freeze (inherited open item).
 
 ---
 
 ## 8. BFF governance (root §10)
 - **Placement**: spine + producer live in the existing BFF (sole policy + token-minting point). Hot-path `<bff>Y`, `<spaarke-ai>` touches `Services/Ai/Nodes` (domain-action seam).
-- **Publish-size**: the **Azure SignalR SDK footprint** vs the ≤60 MB ceiling is an open risk (assistant-r1.5 flags ~40 KB client SDK; server SDK footprint to measure in a spike). Baseline ~45.30 MB (post-r4).
+- **Publish-size**: the **Azure SignalR SDK footprint** vs the ≤60 MB ceiling is an open risk (absorbed R1.5 design flags ~40 KB client SDK; server SDK footprint to measure in the §8A spike). **Baseline ~46.24 MB** (latest recorded, messaging-r2 2026-07-19; supersedes the 45.30 figure — headroom to the 55 MB review band is ~8.8 MB).
 - **CVE** scan; **`/conflict-check`** before PRs; register in `projects/INDEX.md` at start.
 - New services use ADR-032 Null-Object (the spine degrades to next-load when SignalR is off).
 
@@ -303,7 +349,7 @@ R-2 (Azure SignalR SDK vs the 60 MB BFF ceiling) is a **go/no-go gate that must 
 ## 9. Risks
 | # | Risk | Mitigation |
 |---|---|---|
-| R-1 | Spine ownership ambiguity across 3 projects → two hubs | §6 decision at spec intake with all owners; one project owns A–C |
+| R-1 | ~~Spine ownership ambiguity across 3 projects → two hubs~~ **RETIRED 2026-07-20** — §6 resolved path (iii); residual: the assistant project's docs still claim R1.5 builds the spine until the §6 follow-through note lands there | §6 resolution recorded; follow-through note in assistant docs |
 | R-2 | Azure SignalR SDK breaches 60 MB BFF ceiling | **GATE-ZERO spike (§8A) — go/no-go BEFORE Layer-C placement**, not a mitigation alongside design. Compare **Serverless (send-only, recommended) vs Default (hub-in-BFF)** modes against the 55/60 MB bands; if it breaches, the hub/negotiate moves out of the BFF. |
 | R-3 | Comms policy layer duplicates chat gate logic | Reuse gate *primitives*; do NOT reuse chat user/session scoping |
 | R-4 | Domain-action extraction regresses chat dispatch | Session-agnostic seam behind the existing executors; keep chat path green (seam tests) |
@@ -312,12 +358,12 @@ R-2 (Azure SignalR SDK vs the 60 MB BFF ceiling) is a **go/no-go gate that must 
 
 ---
 
-## 10. Decisions to resolve before `/design-to-spec`
-1. **Spine ownership** (§6 — the big one): this project owns Layers A–C vs assistant-r1.5 builds them. Decide with all three owners.
-2. **Project name** (header): confirm `spaarke-notification-spine-r1` vs an alternative.
+## 10. Decisions to resolve before `/design-to-spec` (register updated 2026-07-20)
+1. ~~**Spine ownership**~~ — ✅ **RESOLVED 2026-07-20: path (iii), combined project** (§6). This project owns Layers A–D + the absorbed R1.5 suggestion consumer (§4A); assistant-r1 closes at reactive. Remaining follow-through: record the scope move in the assistant project's docs.
+2. **Project name** (header): confirm `spaarke-notification-spine-r1` vs an alternative. **Leaning KEEP** — messaging-r2/r3 and email-r4 already bind to this name in their specs, and ADR-047 is reserved under it; renaming now has real drift cost. The absorbed suggestion scope is recorded here (§4A) rather than in the name.
 3. **Comms rule config store** — reuse Binding (`sprk_playbookconsumer`) + match conditions vs a comms-specific rule table.
-4. **Azure SignalR footprint + MODE** — the §8A **gate-zero** spike: **Serverless vs Default mode** (Serverless recommended — send-only, matches the §3 producer topology, lighter footprint) measured against the 55/60 MB BFF bands + cold-start + CVE, **before** Layer-C placement is committed. If it breaches, the hub/negotiate moves out of the BFF.
-5. **`kind` taxonomy** — lock the initial discriminator set (`suggestion`\|`communication`\|`job-complete`\|`share`\|`system-alert`).
-6. **New ADR number** — confirm + author main-session.
+4. **Azure SignalR footprint + MODE** — the §8A **gate-zero** spike: **Serverless vs Default mode** (Serverless recommended — send-only, matches the §3 producer topology, lighter footprint; the absorbed R1.5 design assumed Default — superseded pending the spike) measured against the 55/60 MB BFF bands + cold-start + CVE, **before** Layer-C placement is committed. Updated baseline **~46.24 MB**. If it breaches, the hub/negotiate moves out of the BFF.
+5. **`kind` taxonomy** — lock the initial discriminator set (`suggestion`\|`communication-assessed`\|`communication-arrived`\|`job-complete`\|`share`\|`system-alert`; the two communication kinds per §5A.2). ⏰ **Now time-bound**: messaging-r3's spec FR-22 binds to `communication-arrived` + the §5A.3 envelope and needs the producer-trigger question (on capture vs on send → answer: persistence-time, §5A.6 #2) confirmed **at r3's P1**.
+6. ~~**New ADR number**~~ — ✅ **RESOLVED: ADR-047** (gap held open by messaging-r2, which took ADR-048). Author main-session.
 7. **"What lights up when `Notification` becomes routable" audit** (assistant-side, §3 convergence) — realizing the Layer-A/B legs flips the live `DispositionRoutability` `Notification` leg from `Routable=false` to routable. Enumerate every shipped chat capability that would then be able to emit a notification, and **sequence that behavior-surface change deliberately** — it is a change to the existing dispatch catalog's behavior, to be planned, not discovered post-merge. (Assistant-r1 can produce this audit from the dispatch side.)
 8. **Suggestion action re-entry (assistant-side, §5B.3)** — confirm the Layer-A seam preserves the `SurfaceLaunch`/dispatch entry points + the P5 ack-contract, so acting on a proactive suggestion is behaviorally identical to a reactive dispatch (no parallel action path).
