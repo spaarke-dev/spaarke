@@ -15,7 +15,7 @@
 import * as React from 'react';
 
 import { EmailComposer } from '../EmailComposer';
-import type { EmailComposerMode } from '../EmailComposer.types';
+import type { EmailComposerMode, IAttachmentItem } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -29,6 +29,12 @@ export interface ISendEmailPageProps {
   initialCc?: string[];
   initialSubject?: string;
   initialBody?: string;
+  /**
+   * Source-communication attachments offered for inclusion on reply/replyAll/forward
+   * (task 104). Forwarded verbatim to the engine, which applies the per-mode
+   * attach-file default (forward → on, reply → off).
+   */
+  initialAttachments?: IAttachmentItem[];
   associations?: ICommunicationAssociation[];
   /**
    * Recipient directory lookup, forwarded verbatim to the engine's `RecipientField`
