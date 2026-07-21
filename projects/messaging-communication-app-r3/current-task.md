@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 18:30
+> **Last Updated**: 2026-07-21 (by context-handoff)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -15,14 +15,25 @@
 | **Status** | not-started |
 | **Next Action** | `work on task 013` (FR-06 in-conversation compose) — serial, edits ConversationView from 011. Then Wave 9 (014 filters). **Phase-4 hosts wire `ConversationView` into `ConversationWorkspace`'s `renderConversation` seam + supply currentUserSystemUserId.** ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify via scoped tsc/jest. |
 
-### Files Modified This Session (Wave 1 — completed)
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001
-- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceEmailSendThreadTests.cs` - Created (2 email-send baseline tests) - task 001
-- `docs/data-model/sprk_communication.md` - Modified (Message=100000004 + 6 R1 columns) - task 006
-- `projects/messaging-communication-app-r3/notes/task-001-notes.md`, `task-006-notes.md` - baseline + verification trails
+### Progress this session — 9 tasks ✅ (all gated + committed + PUSHED to PR #664)
+- **Phase 1 (backend spine) COMPLETE**: 001 characterize · 002 FR-18 DTO enrichment · 003 FR-16 list-all-threads · 004 FR-17 naming+rename · 005 FR-19 email ThreadId · 006 doc-drift.
+- **Phase 2 core**: 010 characterize · 011 ConversationView (bubbles) · 012 ConversationWorkspace (two-pane shell).
+- Working tree **CLEAN** — nothing uncommitted. 8 task/chore commits + init/portfolio on `origin/work/messaging-communication-app-r3`. Portfolio Tasks Completed = 9.
 
-### Critical Context
-Wave 1 (001 characterize + 006 doc-drift) complete + gates passed 2026-07-20. **001 baseline pins pre-change behavior that FR-16/17/18/19 will intentionally flip** — some of those tests are DESIGNED to break when 002–005 land (that's the characterization intent, confirmed by mutation-testing). Phase 1 backend (002–005) edits shared `Services/Communication/` and is serial (`parallel-safe:false`); `/conflict-check` before each BFF PR. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` noted (NOT introduced by R3).
+### Next Action (explicit)
+`work on task 013` — FR-06 in-conversation compose (chat input sends via existing send path; on-demand + on-send refresh; ~5s polling retained). Serial (edits `ConversationView` from 011, `parallel-safe:false`). Then Wave 9 = task 014 (additive filters). After Phase 2: Phase 3 (020 extend SendEmailDialog, 021 email-in-flow, 022 forward, 023 quick-view, 024 new-thread, 025 title link).
+
+### Critical Context (carry forward)
+1. **Identity contract (FR-02/18)**: bubble alignment keys on `senderSystemUserId` (backend `SentBy`, shipped by task 002; plumbed to client by 011 via `IThreadMessageDto`/`TimelineMessage`/`buildTimeline` mapping). NEVER align on email-string.
+2. **Access model (NFR-01)**: all reads impersonated + shared access-filter; **NO membership-union** (retired). Client renders exactly what server returns; no client-side thread filtering.
+3. **§6.5 Path A exception (task 012, on record for review)**: `ConversationWorkspace` record-mode lists via existing `GET /by-regarding/{entityType}/{id}` (FR-16 `/threads` has no regarding param by design so record-less threads surface in all-mode). Both server-access-filtered.
+4. **Renderer seam**: Phase-4 hosts (030 PCF / 031 widget / 032 code page) inject `ConversationView` into `ConversationWorkspace`'s `renderConversation` prop + supply `currentUserSystemUserId`.
+5. **⚠️ Worktree build gap**: sibling `@spaarke/auth`/`@spaarke/sdap-client` `dist/` unbuilt → 2 tsc errors in `EntityCreationService.ts`/`useWizardPageBootstrap.ts` (UNRELATED to R3). Verify client work via scoped `tsc --noEmit` (expect exactly those 2) + `jest`. Whole-package `npm run build` will fail on them until siblings are built.
+6. **Filed issues**: #666 (ISS-001 participant= escaping), #667 (ISS-002 roll-up OrderBy). Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` — NOT introduced by R3.
+7. **CI**: `sdap-ci.yml` shows no checks on this branch (not triggering on these pushes — verify when PR #664 → ready).
+
+### Files Modified This Session
+None uncommitted — all work across 001–006 + 010–012 is committed. See `git log --oneline origin/master..HEAD` and per-task `notes/task-0NN-notes.md`.
 
 ---
 
