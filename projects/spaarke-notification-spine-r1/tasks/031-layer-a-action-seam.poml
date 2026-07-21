@@ -4,7 +4,7 @@
     <title>Extract session-agnostic Layer-A action seam behind CreateNotification/CreateTask/UpdateRecord node executors</title>
     <phase>3 Layer A + Notification flip</phase>
     <gate>blocked-until:030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>High-blast-radius brownfield extraction directly behind three shipped, chat/playbook-dispatch-critical node executors; touches `.cs` in `Services/Ai/`; 6+ steps; deps on prior task.</rigor-reason>
     <model-tier>opus</model-tier>

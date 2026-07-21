@@ -179,58 +179,49 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 "Creating task with subject: {Subject}",
                 subject);
 
-            // Build task entity
-            var entity = new Entity("task");
-            entity["subject"] = subject;
-            if (description is not null)
-                entity["description"] = description;
-
+            // Resolve template values into typed parameters (session-specific), then delegate the
+            // `task` entity build + degraded-success create to the session-agnostic TaskActionCore
+            // (task 031). Template rendering + ConfigJson parsing stay here; the entity build/create
+            // is shared with the IActionSeam facade.
+            DateTime? scheduledEnd = null;
             if (config.DueDate is not null)
             {
                 var dueDateStr = _templateEngine.Render(config.DueDate, templateContext);
                 if (DateTime.TryParse(dueDateStr, out var dueDate))
                 {
-                    entity["scheduledend"] = dueDate.ToUniversalTime();
+                    scheduledEnd = dueDate.ToUniversalTime();
                 }
             }
 
-            // Add regarding object if specified
+            Guid? regardingObjectId = null;
             if (!string.IsNullOrWhiteSpace(config.RegardingObjectId) && !string.IsNullOrWhiteSpace(config.RegardingObjectType))
             {
-                var regardingId = _templateEngine.Render(config.RegardingObjectId, templateContext);
-                if (Guid.TryParse(regardingId, out var regardingGuid))
+                var regardingIdStr = _templateEngine.Render(config.RegardingObjectId, templateContext);
+                if (Guid.TryParse(regardingIdStr, out var regardingGuid))
                 {
-                    entity["regardingobjectid"] = new EntityReference(config.RegardingObjectType, regardingGuid);
+                    regardingObjectId = regardingGuid;
                 }
             }
 
-            // Add owner if specified
+            Guid? ownerId = null;
             if (!string.IsNullOrWhiteSpace(config.OwnerId))
             {
-                var ownerId = _templateEngine.Render(config.OwnerId, templateContext);
-                if (Guid.TryParse(ownerId, out var ownerGuid))
+                var ownerIdStr = _templateEngine.Render(config.OwnerId, templateContext);
+                if (Guid.TryParse(ownerIdStr, out var ownerGuid))
                 {
-                    entity["ownerid"] = new EntityReference("systemuser", ownerGuid);
+                    ownerId = ownerGuid;
                 }
             }
 
-            // Create the task record via shared Dataverse client
-            Guid taskId;
-            try
-            {
-                taskId = await _entityService.CreateAsync(entity, cancellationToken);
-            }
-            catch (Exception createEx)
-            {
-                _logger.LogWarning(
-                    createEx,
-                    "Dataverse task creation failed for node {NodeId}: {Error}",
-                    context.Node.Id, createEx.Message);
-
-                // Return a degraded success — the task payload was assembled correctly
-                // but Dataverse rejected it. Include the error for the user.
-                taskId = Guid.Empty;
-            }
+            var taskId = await new TaskActionCore(_entityService, _logger).CreateAsync(
+                new TaskActionInput(
+                    subject,
+                    description,
+                    scheduledEnd,
+                    regardingObjectId,
+                    config.RegardingObjectType,
+                    ownerId),
+                cancellationToken);
 
             _logger.LogInformation(
                 "CreateTask node {NodeId} completed - task created with subject: {Subject}, taskId: {TaskId}",

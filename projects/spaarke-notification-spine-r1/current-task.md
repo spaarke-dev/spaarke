@@ -9,10 +9,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **031 — Layer-A action seam behind `*NodeExecutor.cs` (Phase 3, Wave 9)** — NOT started |
-| **Step** | — (030 ✅ complete: 14 seam tests green, both quality gates CLEAN, zero production changes) |
-| **Status** | ready-for-031 (opus/xhigh, FULL rigor, highest blast radius — brownfield extraction) |
-| **Next Action** | **Dispatch 031** via `task-execute` on `tasks/031-layer-a-action-seam.poml`. Its DoD: the 14 task-030 seam tests pass **UNMODIFIED** after the extraction (if any must change → the extraction altered observable behavior → STOP/reconcile, don't "fix" the test). |
+| **Task** | **032 — "What lights up" audit (FR-14 pre) (Phase 3, Wave 10)** — NOT started |
+| **Step** | — (031 ✅ DONE: Layer-A seam extracted, behavior-neutral, both gates clean, 8780-test full suite green) |
+| **Status** | ready-for-032 (opus/high, STANDARD rigor — audit doc reviewed before the 033 flip) |
+| **Next Action** | **Dispatch 032** via `task-execute` on `tasks/032-what-lights-up-audit.poml`. It's the pre-flip audit ("what lights up" when `Notification` becomes routable) reviewed BEFORE 033 flips `DispositionRoutability` + `OutputRouter`. |
+
+### 031 result (Phase 3, Wave 9 — ✅ DONE 2026-07-21)
+- Session-agnostic Layer-A seam extracted behind the 3 node executors: 3 cores (`Services/Ai/Nodes/ActionCore/*`) + ADR-013 facade (`Services/Ai/PublicContracts/{IActionSeam,ActionSeam}.cs`) + DI (`AnalysisServicesModule.AddNodeExecutors`, unconditional Singleton). Executors refactored to delegate; **constructors byte-identical**.
+- **All 8 criteria met**; 030 characterization + existing unit tests pass ZERO-edit; **full BFF suite 8780/0**; publish 46.05 MB; both Step 9.5 gates clean. Notes: `notes/031-layer-a-seam-notes.md`.
+- **`IActionSeam` is now available** for Phase 4/5 producers (024/040/050) — they consume it, never the executors or a synthetic `NodeExecutionContext`.
+- 033 will touch `DispositionRoutability.cs` + `OutputRouter.cs` (left untouched here per criterion 6).
+
+### 031 design (locked — from POML prescriptive steps 2–4)
+- Three `internal sealed` cores under `Services/Ai/Nodes/ActionCore/`: `NotificationActionCore` (+`BuildNotificationEntity`/idempotency moved; `context.RunId`→`correlationId` param, `"playbook"`→`source` param), `TaskActionCore`, `UpdateRecordActionCore` (+coercion helpers + `FieldCoercionException` moved). Each ctor: boundary service (`IGenericEntityService` / `IFieldMappingDataverseService`+`IServiceScopeFactory`) + `ILogger` (base). Input = typed request records; NO `NodeExecutionContext`.
+- Executors keep template rendering + ConfigJson parse + NodeOutput wrapping; delegate build+create to a core built inline from their EXISTING injected fields → **constructors frozen** (criterion 4). `ResolveViaMatterMemberships` stays in the executor (reads `PreviousOutputs`).
+- `IActionSeam`+`ActionSeam` in `PublicContracts/`; DI mirror the `IBriefingAi` site (`AnalysisServicesModule.cs`) but **unconditional** (record-create is not feature-gated → no NullActionSeam).
+- **DoD / escalation**: 030 seam tests + `CreateTaskNodeExecutorTests`/`UpdateRecordNodeExecutorTests` pass with ZERO edits. If a test needs editing → extraction changed behavior → STOP/escalate (root §6), don't edit the test. If frozen-ctor is structurally impossible without dup → STOP (ADR-013/§11 extend-vs-fork tension).
+- Conflict-check: master +57 commits but the 3 executors + PublicContracts + OutputRouter + DispositionRoutability + DispatchSessionEndpoint are byte-identical to our branch → no rebase needed; do NOT touch OutputRouter/DispositionRoutability/DispatchSessionEndpoint (task 033's scope).
 
 ### Task 030 result (Phase 3, Wave 8 — ✅ DONE 2026-07-21)
 - **14 seam tests** authored under `tests/integration/seam/Ai/Nodes/` (CreateNotification 8 / CreateTask 3 / UpdateRecord 3) — the behavior-neutrality safety net for 031. All green vs pre-031 code; `git diff` on the three executors empty.

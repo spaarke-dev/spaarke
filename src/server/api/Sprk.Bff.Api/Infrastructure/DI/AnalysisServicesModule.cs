@@ -1241,6 +1241,14 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
 
+        // IActionSeam (task 031 / FR-07, ADR-013) — session-agnostic Layer-A record actions
+        // (CreateNotification / CreateTask / UpdateRecord) that share the SAME extracted cores the
+        // three node executors call. Registered UNCONDITIONALLY: record creation is not AI-model-gated,
+        // so — unlike IBriefingAi — it needs no Null-Object fallback. Singleton matches the executors'
+        // profile (its deps IGenericEntityService/IFieldMappingDataverseService/IServiceScopeFactory
+        // are all Singleton). Consumed by Phase 4/5 producers via this facade only (never the executors).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam, Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>();
+
         // AgentServiceNodeExecutor — ExecutorType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.AgentServiceClient>();
