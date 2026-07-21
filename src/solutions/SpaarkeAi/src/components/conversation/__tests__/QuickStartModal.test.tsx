@@ -176,17 +176,21 @@ describe("QuickStartModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('launches "Assign Work" via launchAssignWorkWizard and closes the modal', async () => {
+  it('launches "Assign Work" via the hand-off envelope (launchSurface, create-work-assignment) and closes the modal', async () => {
+    // R5-8: "Assign Work" is a SURFACE_LAUNCH_REGISTRY entry (create-work-assignment) and its
+    // wizard reads the handoff envelope, so it routes through launchSurface (carrying session files
+    // when present) rather than the file-less Path-B launchAssignWorkWizard.
     const onClose = jest.fn();
     renderModal({ onClose });
     const user = userEvent.setup();
 
     await user.click(screen.getByText("Assign Work"));
 
-    expect(mockLaunchAssignWorkWizard).toHaveBeenCalledWith({
+    expect(mockLaunchSurface).toHaveBeenCalledWith({
+      consumerType: "create-work-assignment",
       bffBaseUrl: "https://test-bff.example.com",
     });
-    expect(mockLaunchSurface).not.toHaveBeenCalled();
+    expect(mockLaunchAssignWorkWizard).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
