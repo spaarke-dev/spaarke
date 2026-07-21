@@ -105,6 +105,34 @@ describe('composeWorkspaceReducer — P2 save-baseline retention (saveSucceeded)
     expect(state.versionId).toBe('v-load-time');
   });
 
+  it('ITEM 6: mountDraftHtml adopts a minted sessionId (born-in-editor doc gets a real document session)', () => {
+    const state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'mountDraftHtml',
+      html: '<p></p>',
+      fileName: 'Untitled document.docx',
+      containerId: 'bu-container-1',
+      sessionId: 'compose-doc-minted-1',
+    });
+    // Pre-fix, mountDraftHtml never set sessionId → it stayed '' (INITIAL_STATE) and a "Draft
+    // alternative" misrouted to informational prose instead of an in-editor redline.
+    expect(state.sessionId).toBe('compose-doc-minted-1');
+    expect(state.docxBytes).toBeNull(); // still born-in-editor (seedHtml, not bytes)
+    expect(state.seedHtml).toBe('<p></p>');
+  });
+
+  it('ITEM 6: mountDraftHtml without an explicit sessionId preserves the existing state.sessionId (Part-A ledger path)', () => {
+    // The Part-A ledger draft path sets the session via requestUploadMount BEFORE mountDraftHtml.
+    let state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'requestUploadMount',
+      sessionId: 'ledger-session-1',
+    });
+    state = composeWorkspaceReducer(state, {
+      kind: 'mountDraftHtml',
+      html: '<p>Drafted from ledger.</p>',
+    });
+    expect(state.sessionId).toBe('ledger-session-1');
+  });
+
   it('OLDER BFF (no driveId/versionId in the response): degrades gracefully, no baseline fabricated', () => {
     let state = composeWorkspaceReducer(INITIAL_STATE, {
       kind: 'mountDraftHtml',

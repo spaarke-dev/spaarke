@@ -156,6 +156,12 @@ export interface ComposeFormatToolbarProps {
   /** True while a push-to-Word is in flight. */
   isPushingToWord?: boolean;
 
+  // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
+  /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
+  trackChangesEnabled?: boolean;
+  /** Toggle the live Track Changes overlay. Rendered only when supplied. */
+  onToggleTrackChanges?: () => void;
+
   // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
   /** Save handler (create-on-save first Save, or update). */
   onSave?: () => void;
@@ -264,6 +270,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSave,
     canSave,
     isSaving,
+    trackChangesEnabled,
+    onToggleTrackChanges,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -607,8 +615,32 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Menu>
       ) : null}
 
-      {/* Spacer — pushes Save + Undo/Redo to the right edge. */}
+      {/* Spacer — pushes Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
+
+      {/* ---- Track Changes toggle (item 4, UAT round-4) — labelled, right-aligned ---- */}
+      {onToggleTrackChanges ? (
+        <Tooltip
+          content={
+            trackChangesEnabled
+              ? 'Track changes is on — your edits show as redlines and save as tracked changes'
+              : 'Track changes is off — turn on to see your edits as redlines'
+          }
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance={trackChangesEnabled ? 'primary' : 'subtle'}
+            aria-pressed={trackChangesEnabled === true}
+            aria-label="Toggle track changes"
+            disabled={controlDisabled}
+            onClick={onToggleTrackChanges}
+            data-testid="compose-format-track-changes"
+          >
+            Track changes
+          </ToolbarButton>
+        </Tooltip>
+      ) : null}
 
       {/* ---- Save (icon-only, right-aligned) ---- */}
       {onSave ? (

@@ -248,3 +248,49 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
     expect(screen.getByTestId('compose-empty-state-browse')).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Item 7 (Blank page / Open template) + Item 6 (born-in-editor session) — UAT round-4
+// ---------------------------------------------------------------------------
+describe('ComposeWorkspace — item 7 born-in-editor empty-state CTAs', () => {
+  it('renders all four start options (Blank page, Open template, Browse, Search)', () => {
+    renderWorkspace();
+    expect(screen.getByTestId('compose-empty-state-blank')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-empty-state-template')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-empty-state-browse')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-empty-state-search')).toBeInTheDocument();
+  });
+
+  it('Blank page mounts a born-in-editor draft (empty state gone) with NO persistence round-trip', async () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByTestId('compose-empty-state-blank'));
+
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    expect(screen.queryByTestId('compose-empty-state')).not.toBeInTheDocument();
+    // Born-in-editor: seed HTML, not bytes; create-on-save on first Save — no BFF call on mount.
+    expect(editorDocxBytes.current).toBeNull();
+    expect(editorCanSave.current).toBe(true);
+    expectNoPersistenceCalls();
+  });
+
+  it('Blank page establishes a NON-EMPTY document session id (item 6 — Draft alternative routes to a redline)', async () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByTestId('compose-empty-state-blank'));
+
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    // The minted session id is threaded to ComposeEditor → ComposeAiToolbar's `documentSessionId`.
+    // Pre-fix, mountDraftHtml left state.sessionId '' → a "Draft alternative" misrouted to prose.
+    expect(typeof editorSessionId.current).toBe('string');
+    expect(editorSessionId.current).not.toBe('');
+  });
+
+  it('Open template mounts a born-in-editor draft with a starter scaffold + a non-empty session', async () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByTestId('compose-empty-state-template'));
+
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    expect(screen.queryByTestId('compose-empty-state')).not.toBeInTheDocument();
+    expect(editorSessionId.current).not.toBe('');
+    expectNoPersistenceCalls();
+  });
+});

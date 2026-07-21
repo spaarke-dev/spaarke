@@ -197,17 +197,41 @@ export interface ComposeCommentThreadProps {
   pendingRange?: ComposeCommentPendingRange | null;
   /** Called after a new thread is successfully created — the host clears `pendingRange`. */
   onThreadCreated?: (threadId: string) => void;
+  /**
+   * Item 5b (UAT round-4, FR-23): fired whenever the live thread list changes (create / reply /
+   * resolve / import). The host (ComposeEditor) captures the latest threads so save can persist
+   * session comments as native `w:comment`s. Pass a STABLE callback (the panel calls it in an effect
+   * keyed on the thread list) to avoid churn.
+   */
+  onThreadsChanged?: (threads: readonly ComposeCommentThreadModel[]) => void;
   /** Seeds the panel's thread list on first mount (e.g. a future FR-25 hydration). */
   initialThreads?: readonly ComposeCommentThreadModel[];
 }
 
 export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JSX.Element | null {
-  const { editor, open, onClose, author = 'You', pendingRange, onThreadCreated, initialThreads } = props;
+  const {
+    editor,
+    open,
+    onClose,
+    author = 'You',
+    pendingRange,
+    onThreadCreated,
+    onThreadsChanged,
+    initialThreads,
+  } = props;
   const styles = useStyles();
   const threadsState = useComposeCommentThreads(editor, author, initialThreads);
 
   const [draftText, setDraftText] = React.useState<string>('');
   const [replyDrafts, setReplyDrafts] = React.useState<Record<string, string>>({});
+
+  // Item 5b (UAT round-4, FR-23): report the live thread list up so the host can persist session
+  // comments on save. Runs REGARDLESS of `open` (hooks precede the early return) — thread state
+  // persists across open/close, and the host must see it even while the panel is collapsed.
+  const { threads } = threadsState;
+  React.useEffect(() => {
+    onThreadsChanged?.(threads);
+  }, [threads, onThreadsChanged]);
 
   if (!open) return null;
 

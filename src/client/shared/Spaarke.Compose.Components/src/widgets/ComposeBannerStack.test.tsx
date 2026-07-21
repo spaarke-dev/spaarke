@@ -47,7 +47,7 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     renderStack({ importWarnings: TWO_WARNINGS });
 
     expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByText('Document opened with 2 simplification(s)')).toBeInTheDocument();
+    expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
     expect(screen.getByTestId('compose-workspace-import-warning-dismiss')).toBeInTheDocument();
     expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
   });
@@ -94,7 +94,7 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     );
 
     expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByText('Document opened with 1 simplification(s)')).toBeInTheDocument();
+    expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
   });
 
   it('dark mode (ADR-021): renders with no hardcoded hex color', () => {

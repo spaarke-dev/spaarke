@@ -42,13 +42,16 @@ describe('surfaceLaunchRegistry (surface-launch-mechanism §3)', () => {
   });
 
   it('registry covers the cataloged create intents', () => {
-    // create-matter/-task/-todo (R1) + create-project (UAT #1) + create-work-assignment (R5-8).
+    // create-matter/-task/-todo (R1) + create-project (UAT #1) + create-work-assignment /
+    // summarize-files / find-similar (R5-8 Quick Start file legs).
     expect(Object.keys(SURFACE_LAUNCH_REGISTRY).sort()).toEqual([
       'create-matter',
       'create-project',
       'create-task',
       'create-todo',
       'create-work-assignment',
+      'find-similar',
+      'summarize-files',
     ]);
   });
 });

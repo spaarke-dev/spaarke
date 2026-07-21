@@ -173,7 +173,12 @@ export type ComposeWorkspaceAction =
   // preserves the sessionId already on state — INVARIANT: no mount leaves state.sessionId empty.
   | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string; sessionId?: string }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
-  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string }
+  // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
+  // (inline draft / Blank page / Open template). Without it state.sessionId stays '', which makes the
+  // AI toolbar thread `documentSessionId: ''` → a "Draft alternative" is reclassified as informational
+  // prose instead of an in-editor redline, and `materializeComposeDraftFromLedger` aborts. Same
+  // NEVER-'' invariant as `mountTransient`.
+  | { kind: 'mountDraftHtml'; html: string; fileName?: string; containerId?: string; sessionId?: string }
   | { kind: 'requestSave' }
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
   // server-minted id back so a second Save targets the real item (the replace path), not the
@@ -323,6 +328,10 @@ export function composeWorkspaceReducer(
         seedHtml: action.html,
         etag: null,
         versionId: null,
+        // Item 6 (UAT round-4): adopt a minted document session id (born-in-editor mounts have no
+        // server round-trip to supply one). Fall back to the existing state.sessionId for the Part-A
+        // ledger draft path, which already set it via `requestUploadMount` before this action.
+        sessionId: action.sessionId ?? state.sessionId,
         documentRef: { speDriveItemId: '', fileName: action.fileName, containerId: action.containerId },
         checkoutStatus: 'skipped',
         // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.

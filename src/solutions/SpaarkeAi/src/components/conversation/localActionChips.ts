@@ -75,5 +75,6 @@ export function buildAskAboutFilesChip(): ConsumerChip {
  * the files tray. Opens the attached file(s) in the Compose editor. Requires attachments.
  */
 export function buildReviseInComposeChip(): ConsumerChip {
-  return { label: "Revise in Compose", bindingId: LOCAL_CHIP.reviseInCompose, requiresAttachments: true };
+  // R6-1 (UAT 2026-07-21): labeled "Revise document" (was "Revise in Compose").
+  return { label: "Revise document", bindingId: LOCAL_CHIP.reviseInCompose, requiresAttachments: true };
 }

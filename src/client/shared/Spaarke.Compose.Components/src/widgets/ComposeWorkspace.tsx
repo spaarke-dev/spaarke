@@ -120,6 +120,7 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
   anchoredAnnotationsToDocxAnnotations,
+  selectSaveRedlineAnnotations,
   type DocxAnnotationInput,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
@@ -183,6 +184,13 @@ function mintDocumentSessionId(): string {
   }
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+// Item 7 (UAT round-4): the single generic starter scaffold "Open template" mounts today. A neutral
+// title + body the user overwrites — the seam for a future template picker (each future template is
+// just another HTML string / fetched body routed through the same born-in-editor mount). Intentionally
+// plain (no firm branding, no letterhead) so it is a safe default for any document type.
+const COMPOSE_BLANK_TEMPLATE_HTML =
+  '<h1>Document title</h1><p>Start writing here. Replace this text with your content.</p>';
 
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
@@ -1004,13 +1012,30 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
       const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
-      const redlineAnnotations =
-        hasRedlines && typeof editorRef.current.getRedlineAnnotations === 'function'
-          ? editorRef.current.getRedlineAnnotations()
+      // Item 3 (UAT round-4): only bake redline tracked-changes into the saved .docx when the user has
+      // actually ENGAGED the document (editorIsDirty) — see selectSaveRedlineAnnotations for the full
+      // rationale (a zero-edit save of a freshly-mounted doc must not 422 on unverified AI suggestions).
+      const getRedlines = editorRef.current.getRedlineAnnotations;
+      const redlineAnnotations = selectSaveRedlineAnnotations({
+        editorIsDirty,
+        hasRedlines: hasRedlines && typeof getRedlines === 'function',
+        getRedlineAnnotations: () => (typeof getRedlines === 'function' ? getRedlines.call(editorRef.current) : []),
+      });
+      // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
+      // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
+      // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an
+      // older editor build without the handle.
+      const commentThreadAnnotations =
+        typeof editorRef.current.getCommentThreadAnnotations === 'function'
+          ? editorRef.current.getCommentThreadAnnotations()
           : [];
       // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
       // so concat order only affects the ins/del sequence the bridge already ordered correctly.
-      const saveAnnotations: DocxAnnotationInput[] = [...redlineAnnotations, ...commentAnnotations];
+      const saveAnnotations: DocxAnnotationInput[] = [
+        ...redlineAnnotations,
+        ...commentAnnotations,
+        ...commentThreadAnnotations,
+      ];
 
       // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
       // iterate (not spread) to avoid a call-stack overflow on large documents.
@@ -1615,6 +1640,35 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   // -------------------------------------------------------------------------
+  // Item 7 (UAT round-4) — Blank page / Open template born-in-editor mounts
+  // -------------------------------------------------------------------------
+  // Both mount a born-in-editor working draft via `mountDraftHtml` (create-on-save on first Save, the
+  // same lifecycle as an inline AI draft). Each mints a document session id (item 6) so a subsequent
+  // "Draft alternative" / AI edit routes into a real session and materializes as a redline. "Open
+  // template" mounts a single generic starter scaffold today; the handler is the seam for a future
+  // template picker (the empty-state CTA already exists).
+  const mountBornInEditor = React.useCallback((html: string, fileName: string): void => {
+    setSearchResolvedDriveId(null);
+    dispatch({
+      kind: 'mountDraftHtml',
+      html,
+      fileName,
+      containerId: containerIdRef.current,
+      sessionId: mintDocumentSessionId(),
+    });
+    // A freshly-created born-in-editor doc is unsaved by definition — enable Save (create-on-save).
+    setIsDirty(true);
+  }, []);
+
+  const handleBlankRequested = React.useCallback((): void => {
+    mountBornInEditor('<p></p>', 'Untitled document.docx');
+  }, [mountBornInEditor]);
+
+  const handleTemplateRequested = React.useCallback((): void => {
+    mountBornInEditor(COMPOSE_BLANK_TEMPLATE_HTML, 'Untitled document.docx');
+  }, [mountBornInEditor]);
+
+  // -------------------------------------------------------------------------
   // R3 — "Visible to assistant" toggle → active-document register/withdraw
   // -------------------------------------------------------------------------
   // The toggle lives on the WORKSPACE tab strip (WorkspacePane.handleToggleVisibility), but the
@@ -1902,11 +1956,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // Part B: inline html — mount directly, no fetch.
     if (typeof initialDraftRef.html === 'string' && initialDraftRef.html.length > 0) {
       setSearchResolvedDriveId(null);
+      // Item 6 (UAT round-4): mint a document session id so a later "Draft alternative" (or any
+      // AI-edit) on this born-in-editor doc routes into a real session and materializes as a redline
+      // instead of misrouting to informational prose. Mirrors the Browse path (mountTransient).
+      const draftDocumentSessionId = mintDocumentSessionId();
       dispatch({
         kind: 'mountDraftHtml',
         html: initialDraftRef.html,
         fileName: initialDraftRef.fileName,
         containerId: containerIdRef.current,
+        sessionId: draftDocumentSessionId,
       });
       setIsDirty(true);
       return;
@@ -2139,7 +2198,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               </MessageBar>
             </div>
           ) : null}
-          <ComposeEmptyState onBrowseRequested={handleBrowseRequested} onSearchRequested={handleSearchRequested} />
+          <ComposeEmptyState
+            onBlankRequested={handleBlankRequested}
+            onTemplateRequested={handleTemplateRequested}
+            onBrowseRequested={handleBrowseRequested}
+            onSearchRequested={handleSearchRequested}
+          />
         </>
       ) : null}
 

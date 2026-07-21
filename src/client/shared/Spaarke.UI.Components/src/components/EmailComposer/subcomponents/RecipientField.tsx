@@ -273,8 +273,10 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       // Resolve to the contact's actual email (first-class `item.email`, else
       // parsed from the "Full Name (email)" display string). A result with no
       // usable email is NON-SELECTABLE — never commit the display name as the
-      // recipient value (task 123 / UAT R4 C12-1: the "Invalid email address:
-      // {name}" bug).
+      // recipient value (task 123 / UAT R4 C12-1 + parallel R6-5, both 2026-07-21:
+      // the "Invalid email address: {name}" bug). This variant is stricter than
+      // the R6-5 inline fix — it refuses to commit an unusable recipient rather
+      // than falling back to `item.name`.
       const resolved = resolveRecipientEmail(item);
       if (!resolved) return;
       const { email, displayName } = resolved;

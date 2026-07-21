@@ -236,10 +236,11 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       ) : null}
 
       {showImportWarnings ? (
-        <MessageBar intent="warning" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
+        <MessageBar intent="info" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
-            Some advanced features may not be preserved on save.
+            <MessageBarTitle>Some formatting was simplified</MessageBarTitle>
+            This document uses advanced Word features that Compose shows in a simplified view. Your original file
+            isn&apos;t changed until you save.
           </MessageBarBody>
           {/* FR-21/DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
               container action. Clears the banner AND persists the dismissal to

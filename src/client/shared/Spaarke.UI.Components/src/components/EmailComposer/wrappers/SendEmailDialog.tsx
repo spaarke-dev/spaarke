@@ -15,13 +15,23 @@
  * No `@spaarke/auth` import (ADR-028) — `authenticatedFetch` is injected via props.
  */
 import * as React from 'react';
-import { Dialog, DialogSurface, DialogBody } from '@fluentui/react-components';
+import { Dialog, DialogSurface, DialogBody, makeStyles } from '@fluentui/react-components';
 
 import { EmailComposer } from '../EmailComposer';
 import type { EmailComposerMode, EmailComposerBodyFormat, IComposerAttachmentSource } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
+
+// R6-4 (UAT 2026-07-21): Fluent's default DialogSurface caps at ~600px, which made the Assistant's
+// email modal read smaller than the standard Spaarke email surface. Widen to 760px to match the
+// engine's `dialog` mount cap (there is no shared modal-width token — see MODAL-DECISION-CRITERIA).
+const useDialogStyles = makeStyles({
+  surface: {
+    maxWidth: '760px',
+    width: '92vw',
+  },
+});
 
 export interface ISendEmailDialogProps {
   open: boolean;
@@ -46,6 +56,7 @@ export interface ISendEmailDialogProps {
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
   const { open, onClose, mode, onSent, onError, ...composerProps } = props;
+  const dialogStyles = useDialogStyles();
 
   return (
     <Dialog
@@ -54,7 +65,7 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
         if (!data.open) onClose();
       }}
     >
-      <DialogSurface>
+      <DialogSurface className={dialogStyles.surface}>
         <DialogBody>
           <EmailComposer
             {...composerProps}

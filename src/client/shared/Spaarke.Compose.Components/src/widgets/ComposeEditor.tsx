@@ -87,16 +87,20 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
-  Lightbulb16Regular,
   TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
+import {
+  composeSessionCommentThreadsToDocxAnnotations,
+  type ComposeCommentThreadModel,
+} from './ComposeCommentThread.types';
 import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
+import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
@@ -544,6 +548,16 @@ export interface ComposeEditorHandle {
   hasPendingRedlines(): boolean;
 
   /**
+   * Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's NEW (session-authored) threads
+   * mapped to {@link DocxAnnotationInput}[] (`w:comment`) via `composeCommentThreadsToDocxAnnotations`.
+   * The host appends these to the save `annotations` list so panel comments persist as native Word
+   * comments (previously they lived only in React state and vanished on reload). IMPORTED threads
+   * (seeded from the retained original's own `w:comment`s) are EXCLUDED — they already ride the
+   * retained baseline, so re-emitting them would duplicate. Empty when no session comments exist.
+   */
+  getCommentThreadAnnotations(): DocxAnnotationInput[];
+
+  /**
    * Live character + word counters from the TipTap CharacterCount extension.
    * Host renders these in the toolbar or status bar (NFR-04).
    */
@@ -716,6 +730,38 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedForeground1,
       textDecorationLine: 'line-through',
     },
+    // Item 4 (UAT round-4): the LIVE Track Changes decoration overlay. Same green-underline /
+    // red-strike redline look as the AI marks above, but DISTINCT classes so they do NOT inherit the
+    // AI-rationale lightbulb `::before` (a user's own edit carries no rationale popover). These style
+    // ProseMirror decoration spans/widgets, not schema marks — pure view (see TrackChangesExtension.ts).
+    '& .compose-track-insertion': {
+      color: tokens.colorPaletteGreenForeground1,
+      textDecorationLine: 'underline',
+    },
+    '& .compose-track-deletion': {
+      color: tokens.colorPaletteRedForeground1,
+      textDecorationLine: 'line-through',
+      // The deleted text is a non-editable widget reinserted for display only.
+      userSelect: 'none',
+    },
+    // U1 R2 (UAT 2026-07-20): a small lightbulb at the FRONT of each pending redline signals "click me
+    // for the rationale". A redline renders as a deletion span (struck original) immediately followed by
+    // an insertion span (new text) — the rule below puts ONE bulb on whichever span comes first and
+    // SUPPRESSES the duplicate on the insertion half of a deletion→insertion pair, so a pair shows a
+    // single cue. Semantic token color; no text-decoration bleed onto the glyph.
+    '& .compose-mark-insertion::before, & .compose-mark-deletion::before': {
+      content: '"\\1F4A1"', // 💡
+      fontSize: '0.8em',
+      marginRight: '2px',
+      color: tokens.colorNeutralForeground3,
+      textDecorationLine: 'none',
+      cursor: 'pointer',
+      userSelect: 'none',
+      verticalAlign: 'baseline',
+    },
+    '& .compose-mark-deletion + .compose-mark-insertion::before': {
+      content: 'none', // the pair's cue already sits on the leading deletion span
+    },
     '& .compose-mark-comment-anchor': {
       backgroundColor: tokens.colorPaletteYellowBackground2,
       color: tokens.colorNeutralForeground1,
@@ -856,31 +902,38 @@ const useStyles = makeStyles({
   // width) so the cited rationale — the primary trust cue (design §6.2) — is fully READABLE instead of a
   // clipped single line in the compact single-row bubble the popover used to borrow. Semantic tokens only
   // (ADR-021 dark-mode-correct); positioned at the click point by `contextMenuPopup`.
+  // U1 (UAT 2026-07-20 R2): a responsive CARD — sizes to its content (up to a viewport-safe max),
+  // never the former clipped single-row bubble. Semantic tokens only (ADR-021 dark-mode-correct);
+  // positioned at the click point by `contextMenuPopup`.
   redlinePopover: {
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalXS,
-    width: '320px',
-    maxWidth: 'min(320px, 92vw)',
+    width: 'max-content',
+    minWidth: '220px',
+    maxWidth: 'min(360px, 92vw)',
     padding: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow16,
   },
-  // The "Suggested edit" header row — a note icon + label so the rationale reads as an AI suggestion.
-  redlineHeader: {
+  // U1 R2: the confidence band is now the compact HEADER (the "Suggested edit" label was removed at the
+  // operator's request), with a little padding + a hairline divider below it separating it from the
+  // rationale body. The §6.2 anti-rubber-stamp safeguards are UNCHANGED — a low-band edit still shows its
+  // explicit "Needs review" cue here and its Accept button stays demoted below.
+  redlineTopBar: {
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground2,
+    flexWrap: 'wrap',
+    rowGap: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalXXS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  redlineHeaderIcon: {
-    color: tokens.colorBrandForeground1,
-    flexShrink: 0,
-  },
-  // U1: the cited rationale — now WRAPS to as many lines as needed (up to a scrollable cap) instead of
-  // the former single-line ellipsis truncation that hid most of the explanation.
+  // U1: the cited rationale — WRAPS to as many lines as needed (up to a scrollable cap) instead of the
+  // former single-line ellipsis truncation that hid most of the explanation.
   redlineHeadline: {
     display: 'block',
     width: '100%',
@@ -1149,6 +1202,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // against it to find the dirty paragraphs the server deltas onto the retained original.
     const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
+    // Item 4 (UAT round-4): live Track Changes decoration overlay. The extension is configured ONCE
+    // (stable options) — `getBaseline` reads the load-time snapshot ref live, so the redline tracks
+    // edits without re-registering the plugin. Enabled state is driven via a transaction meta (below),
+    // NOT via re-configuring the extension. See TrackChangesExtension.ts for the decoration-not-mark
+    // design rationale (edits stay real content → persist via the existing collectEditedParagraphs path).
+    const trackChangesExtension = React.useMemo(
+      () =>
+        TrackChangesExtension.configure({
+          initialEnabled: false,
+          getBaseline: () => paraIdSnapshotRef.current,
+        }),
+      []
+    );
+    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(false);
+
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
     // signature before mammoth, or via the mammoth-throw fallback). The editor
@@ -1193,6 +1261,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // two-concerns split. Recomputed only when the host supplies a new `importedComments` reference
     // (set atomically with `docxBytes` on a fresh mount, per the prop's own contract).
     const initialCommentThreads = React.useMemo(() => groupImportedComments(importedComments), [importedComments]);
+
+    // Item 5b (UAT round-4, FR-23): the comment-thread panel owns its thread state (survives
+    // open/close). To PERSIST panel comments on save, the panel reports its live threads up via
+    // `onThreadsChanged` into this ref; the imperative `getCommentThreadAnnotations()` maps the
+    // SESSION-authored ones (excluding imported threads, which ride the retained original) to
+    // `w:comment` annotations. A ref (not state) keeps this off the render path — save reads the
+    // latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
+    const commentThreadsRef = React.useRef<readonly ComposeCommentThreadModel[]>(initialCommentThreads);
+    const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
+      commentThreadsRef.current = threads;
+    }, []);
 
     // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
     // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
@@ -1287,6 +1366,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
+        trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
@@ -1541,6 +1621,18 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       });
     }, [editor]);
 
+    // Item 4 (UAT round-4): flip the Track Changes overlay. The enabled flag lives in BOTH React
+    // state (drives the toolbar's pressed style) AND the plugin state (drives `decorations`), kept in
+    // sync here — the toggle dispatches a transaction meta so ProseMirror re-runs `decorations`
+    // immediately (a ref change alone would not repaint).
+    const toggleTrackChanges = React.useCallback((): void => {
+      setTrackChangesEnabled(prev => {
+        const next = !prev;
+        if (editor) editor.view.dispatch(editor.state.tr.setMeta(trackChangesPluginKey, { enabled: next }));
+        return next;
+      });
+    }, [editor]);
+
     // ----- FIX #9 — track whether the editor surface has more content below ---
     // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
     // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
@@ -1602,6 +1694,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         getRedlineAnnotations: () =>
           editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
+        // Item 5b (UAT round-4, FR-23): panel comments → `w:comment` annotations, EXCLUDING imported
+        // threads (they already ride the retained-original baseline; re-emitting would duplicate). The
+        // imported id set is the load-time `initialCommentThreads` (seeded from the doc's own comments).
+        getCommentThreadAnnotations: () =>
+          composeSessionCommentThreadsToDocxAnnotations(
+            commentThreadsRef.current,
+            new Set(initialCommentThreads.map(t => t.id))
+          ),
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.
@@ -1696,6 +1796,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          trackChangesEnabled={trackChangesEnabled}
+          onToggleTrackChanges={toggleTrackChanges}
         />
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
@@ -1720,6 +1822,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           author={commentAuthor}
           pendingRange={pendingCommentRange}
           onThreadCreated={() => setPendingCommentRange(null)}
+          onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
         />
         {/* ===================================================================
@@ -1790,11 +1893,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             by usePendingRedline; semantic tokens only (ADR-021 dark-mode).
             =================================================================== */}
         {redline.error ? (
-          <div className={styles.redlineError} role="alert" data-testid="compose-redline-error">
+          <div className={styles.redlineError} role="status" data-testid="compose-redline-error">
             <Text size={200} className={styles.redlineErrorText}>
+              {/* Item 1 (UAT round-4): a table-heavy / cross-extractor document can leave several
+                  exact-but-cross-cell targets unplaceable. Prefer a CALM batched summary (N of M)
+                  over an alarming single-edit "not found" — the document is fully usable regardless.
+                  `ambiguous` keeps its actionable reselect guidance. */}
               {redline.error.kind === 'ambiguous'
-                ? `Couldn't place this suggested edit: its target text appears ${redline.error.matchCount} times in the document. Reselect the exact passage and try again.`
-                : `Couldn't place this suggested edit: its target text was not found in the current document.`}
+                ? `This suggested edit matches ${redline.error.matchCount} places in the document. Select the exact passage and try again.`
+                : (redline.error.failedCount ?? 0) > 1
+                  ? `${redline.error.failedCount} of ${redline.error.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                  : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
             </Text>
             <Button
               size="small"
@@ -1875,21 +1984,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                 >
                   {clicked ? (
                     <>
-                      {/* U1 (UAT 2026-07-20): a clear "Suggested edit" header + the FULL cited rationale
-                          (wraps, scrolls if long) — the primary trust cue, no longer clipped to one line
-                          nor cluttered with the internal ledger id. */}
-                      <div className={styles.redlineHeader}>
-                        <Lightbulb16Regular className={styles.redlineHeaderIcon} aria-hidden="true" />
-                        <Text size={200} weight="semibold">
-                          Suggested edit
-                        </Text>
-                      </div>
-                      <Text size={300} className={styles.redlineHeadline} data-testid="compose-redline-rationale">
-                        {clicked.rationale && clicked.rationale.trim().length > 0
-                          ? clicked.rationale.trim()
-                          : 'Suggested edit'}
-                      </Text>
-                      <div className={styles.redlineSecondaryRow} data-testid="compose-redline-confidence-band">
+                      {/* U1 R2 (UAT 2026-07-20): the confidence band is the compact header (the "Suggested
+                          edit" label was removed at the operator's request), with padding + a divider below
+                          it. The §6.2 anti-rubber-stamp safeguards are unchanged — a low-band edit still
+                          shows "Needs review" and its Accept stays demoted below. */}
+                      <div className={styles.redlineTopBar} data-testid="compose-redline-confidence-band">
                         <Badge size="small" appearance="tint" color={confidenceBandColor(clicked.confidenceBand)}>
                           {confidenceBandLabel(clicked.confidenceBand)}
                         </Badge>
@@ -1903,6 +2002,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                           </Text>
                         ) : null}
                       </div>
+                      {/* The FULL cited rationale (wraps, scrolls if long) — no internal ledger id. */}
+                      <Text size={300} className={styles.redlineHeadline} data-testid="compose-redline-rationale">
+                        {clicked.rationale && clicked.rationale.trim().length > 0
+                          ? clicked.rationale.trim()
+                          : 'Suggested edit'}
+                      </Text>
                     </>
                   ) : null}
                   <div className={styles.redlineActions}>
