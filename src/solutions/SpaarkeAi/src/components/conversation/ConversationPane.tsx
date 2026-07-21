@@ -25,7 +25,7 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
@@ -84,6 +84,7 @@ import { routeReviseIntent } from "./composeReviseRouting";
 import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
 import {
   detectReviseThisDocumentIntent,
+  detectSectionRewriteIntent,
   REVISE_MOUNT_ASK_MESSAGE,
   type RevisionIntent,
   type ComposeDocAction,
@@ -398,6 +399,14 @@ export function ConversationPane(): React.JSX.Element {
     initialSubject?: string;
     initialBody?: string;
   } | null>(null);
+  // R6-5 (UAT 2026-07-21): recipient (To/Cc/Bcc) directory lookup for the email modal. Reuses the
+  // same host-context Xrm.WebApi contacts/users search the standard CommunicationPage composer uses
+  // (searchUsersAndContacts → systemuser + contact; NO BFF/OBO per DATA-ACCESS-DECISION-CRITERIA).
+  const emailLookupDataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(emailLookupDataService, query),
+    [emailLookupDataService]
+  );
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
@@ -808,6 +817,9 @@ export function ConversationPane(): React.JSX.Element {
   //                    WorkspacePane owner's handler expects (the stub tab itself is created by that owner).
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
+      // R6-2: the user acted on a doc-action chip — clear the revise-context flag so the strip
+      // returns to the consumer cards (otherwise the doc-action row stays pinned all session).
+      setReviseChipsPending(false);
       switch (action) {
         case "summarize": {
           if (!summarizeBindingId) {
@@ -1248,6 +1260,31 @@ export function ConversationPane(): React.JSX.Element {
       const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
+
+      // R6-6 (UAT 2026-07-21): the document is ALREADY open in Compose (a live document session).
+      // A revise/rewrite instruction should update the OPEN document, not answer in the chat pane.
+      if (activeComposeDocSessionId != null) {
+        // A specific-SECTION rewrite with nothing highlighted → the right tool is the in-document
+        // "Draft alternative" on the selected text, not a whole-document redline. Point the user there.
+        if (detectSectionRewriteIntent(messageText) && selection.selectionChip === null) {
+          injection.enqueue(
+            makeLocalAssistantMessage(
+              'To rewrite a specific section, highlight it in the document and choose "Draft alternative" from the selection toolbar. To rewrite the whole document, just say "rewrite the document".'
+            )
+          );
+          return null;
+        }
+        // A whole-document revise/rewrite → redline the open document (reuses the shipped edit path).
+        if (detection.isReviseThisDocument) {
+          dispatchReviseDocument(
+            detection.namedIntent ?? "custom",
+            detection.namedIntent ? undefined : messageText,
+            activeComposeDocSessionId
+          );
+          return null;
+        }
+      }
+
       if (detection.isReviseThisDocument) {
         if (hasActiveSourceDoc) {
           const mounted = mountActiveSourceDocInCompose();
@@ -1278,7 +1315,15 @@ export function ConversationPane(): React.JSX.Element {
       }
       return handleDecorateOutboundBody(body);
     },
-    [handleDecorateOutboundBody, mountActiveSourceDocInCompose, injection, attachments.uploadedFileCount]
+    [
+      handleDecorateOutboundBody,
+      mountActiveSourceDocInCompose,
+      injection,
+      attachments.uploadedFileCount,
+      activeComposeDocSessionId,
+      dispatchReviseDocument,
+      selection.selectionChip,
+    ]
   );
 
   // Wave 4 — fire a NAMED-intent revise the moment the auto-mount registers the document session.
@@ -1453,12 +1498,13 @@ export function ConversationPane(): React.JSX.Element {
   // then true after it resolves — a hook placed BELOW the guard would run in the second render but
   // not the first, changing the hook count and throwing "rendered more hooks than during the previous
   // render". Keep every hook call above the guard.
+  // R6-2 (UAT 2026-07-21): show ONE chip row at a time. Right after a "revise the document" mount,
+  // the compose-context doc-action chips (Summarize / Add-to-DMS / Draft-email) are the relevant
+  // next-steps, so they REPLACE the generic consumer cards instead of stacking a second row. Once
+  // the user acts (handleDocAction clears reviseChipsPending), the consumer cards resume.
   const transcriptFooter = React.useMemo(
     () => (
-      <>
-        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : null}
-        {chips.consumerChipsSlot}
-      </>
+      <>{reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}</>
     ),
     [reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
   );
@@ -1780,6 +1826,7 @@ export function ConversationPane(): React.JSX.Element {
         initialSubject={emailSeed?.initialSubject}
         initialBody={emailSeed?.initialBody}
         initialBodyFormat="PlainText"
+        onSearchRecipients={handleSearchRecipients}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
         onSent={() => setEmailSeed(null)}

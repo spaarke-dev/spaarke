@@ -80,6 +80,8 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
     id: e['systemuserid'] as string,
     name: formatName(e['fullname'] as string, e['internalemailaddress'] as string | undefined),
     entityType: 'systemuser' as const,
+    // R6-5: carry the real email as a first-class field (no longer only inside `name`).
+    email: (e['internalemailaddress'] as string | undefined) || undefined,
   }));
 }
 
@@ -110,6 +112,8 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
     id: e['contactid'] as string,
     name: formatName(e['fullname'] as string, e['emailaddress1'] as string | undefined),
     entityType: 'contact' as const,
+    // R6-5: carry the real email as a first-class field (no longer only inside `name`).
+    email: (e['emailaddress1'] as string | undefined) || undefined,
   }));
 }
 
