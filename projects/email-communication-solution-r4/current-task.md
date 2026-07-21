@@ -1,6 +1,6 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-20 (by context-handoff, mid-W9 remediation)
+> **Last Updated**: 2026-07-20 (W10 complete — all 5 UAT-R2 tasks committed on branch, pre-deploy)
 > **Recovery**: Read "Quick Recovery" first.
 
 ---
@@ -9,12 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | W9 SHIPPED + DEPLOYED (PR #663 `9000fe2c3`). W9 verified in prod (#7 body-ref → Ambiguous ✅; #2 PCF imports ✅ after XSD/apostrophe fix `f35d29077`). **W10 (UAT round 2) POMLs authored — READY TO EXECUTE.** |
-| **Active (NEXT SESSION)** | Execute **Wave 10** via task-execute (FULL rigor, same flow as W9). Tasks 101–105 in `tasks/`. Decisions locked: **B1(102)=Suggest-only**; **C1(105) mockup APPROVED** → https://claude.ai/code/artifact/3c1eaf58-8b56-4417-9819-0a1aed1dace7. Feedback source: `notes/UAT-ROUND2-FEEDBACK.md`. Suggested order: 101+102+103/104+105 (101/102/105 independent; 103+104 share EmailComposer — sequence). Dispatch each via task-execute; verify + gate + commit each (the W9 pattern worked well). |
-| **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 hardening); 093 #2 PCF `2d56cf8e0`. Synced origin/master (72 commits, 0 conflicts) `dd57cb659`. Merged PR #663. Deployed BFF (build 47MB pkg, hash-verified). |
-| **Owner UAT re-verify (all live on dev)** | #7: email subject=matter#A + body=DIFFERENT matter#B → expect **Ambiguous** (both surfaced). #4: Save-to-SharePoint → open archived Document → opens as .eml with attachments, name ends `.eml`. #5+webhook-KV: one fresh inbound email (D-1) → archived .eml Document gains Document-Profile fields + first HMAC webhook validates. Plus Tier 2/3 PCF UI, B-4/B-5, H-8. |
-| **Open decisions** | Cert 170c98e1 pfx in %TEMP% → KV or leave (owner). PCF `CommunicationAttachments` import + form swap (owner maker). |
-| **Held** | Task 090 wrap-up until UAT closes. |
+| **Phase** | W9 SHIPPED + DEPLOYED + verified in prod. **W10 (UAT round 2) COMPLETE — all 5 tasks implemented, gated, committed on branch.** NOT yet pushed/merged/deployed. |
+| **Active (NEXT STEP)** | Owner decision: push+merge+deploy W10 (BFF for 102; import 3 updated PCFs), then owner UAT re-verify of W10 items. When W10 UAT closes → run **090 wrap-up** (HELD). |
+| **Done (W10, branch commits)** | 101 `7c51d17e3` (Attachments PCF nav+styling+UI-DESIGN-STANDARDS.md, v1.1.0) · 102 `22db1909f` (ContactNameMatchRung, Suggest-only) + `863bc4e57` (§6.5 Path A mapper trace fix — surface BOTH named contacts) · 105 `085c4ac9e` (Connections group-by-action UX, v1.3.0) · 103 `c55838518` (composer contact autocomplete via Xrm.WebApi, CommunicationActions v1.1.2) · 104 `423e9c7b8` (Reply/Forward attach+link, CommunicationActions v1.1.3). Shared-lib @spaarke/ui-components tsc build clean at HEAD. |
+| **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 hardening); 093 #2 PCF `2d56cf8e0`. Synced origin/master `dd57cb659`. Merged PR #663 `9000fe2c3`. Deployed BFF (hash-verified). Verified in prod (#7 body-ref → Ambiguous; #2 PCF imports after XSD fix `f35d29077`). |
+| **Deploy W10 (when owner ready)** | Merge origin/master → `/merge-to-master` (auto-merge PR) → deploy BFF from worktree (for 102 ContactNameMatchRung; publish 50.68 MB, under 60 ceiling). PCF imports (owner maker): CommunicationAttachments **v1.1.0**, CommunicationConnections **v1.3.0** (ZIPs tracked in `Solution/bin/`), CommunicationActions **v1.1.3** (bin/ gitignored per that control — pack via `Solution/pack.ps1`). |
+| **Owner UAT re-verify W10** | A1/A2: attachment preview prev/next + styling. B1: email body naming 2 existing contacts → BOTH surface as Suggested (user picks primary). C1: Connections modal grouped Needs-decision/Filed/Suggested with plain-language actions. D3: To/CC/BCC contact autocomplete. D1/D2: Reply/Forward carry source attachments (Forward auto-includes; Reply opt-in). Plus still-open W9 owner items: #4 open .eml, #5+webhook-KV via D-1 fresh email, Tier 2/3 PCF UI, B-4/B-5, H-8. |
+| **Known pre-existing reds (NOT W10 regressions — tracked follow-ups)** | (1) `CommunicationConnections/__tests__/provenance.test.ts` "deriveConnections renders confirmed when Resolved" — stale vs. task-042 `written`-precedence behavior (unmodified code). (2) `CommunicationPage` code-page build red in `ConnectionsEditor.tsx` — W4-deprecated host (OOB form + PCFs is the shipping path), untouched by W10. |
+| **Open decisions** | Cert 170c98e1 pfx in %TEMP% → KV or leave (owner). Whether wizard compose flows / CommunicationMessageActions warrant the same contact typeahead (103 note) + SPE external-share links for 104 attachment links (deferred, code note). |
+| **Held** | Task 090 wrap-up until W10 UAT closes. |
 
 ### W9 remediation tasks (POMLs + decisions locked)
 - **091** #7 — Suggest-only (body refs never auto-file; email-1 → Ambiguous). ✅ implemented (gate pending).
