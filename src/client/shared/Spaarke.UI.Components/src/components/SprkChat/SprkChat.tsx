@@ -26,7 +26,7 @@ import {
   ArrowSyncRegular,
   StopRegular,
   AttachRegular,
-  DismissRegular,
+  DismissCircle16Filled,
   PromptRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
@@ -237,13 +237,19 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
   },
-  // R5-4: compact dismiss (×) inside the pill — smaller footprint so the pill reads tighter.
+  // UAT 2026-07-21: compact dismiss (×) as a brand-blue filled circle glyph —
+  // matches the workspace-tab close affordance. Small footprint so the pill
+  // reads tight.
   attachmentChipDismiss: {
     minWidth: '16px',
     maxWidth: '16px',
     height: '16px',
     ...shorthands.padding('0'),
     fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+    ':hover': {
+      color: tokens.colorBrandForeground1,
+    },
   },
 });
 
@@ -2665,6 +2671,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         {/* R5-4 (UAT 2026-07-20): the attached-file pills share ONE wrapping row with the
             controls (paperclip / prompt) instead of taking a separate full-width strip above —
             "this row can be used by the uploaded file(s)". Controls first, then the pills. */}
+        {/* UAT 2026-07-21: this strip now holds only the optional Prompt button
+            + the attached-file pills. The Attach (paperclip) button MOVED to the
+            composer bottom tray (SprkChatInput toolbarLeadingSlot). The strip is
+            hidden entirely when it would be empty (no Prompt button, no pills). */}
+        {(!hidePromptMenu || attachmentFiles.length > 0) && (
         <div
           className={styles.controlsStrip}
           role="toolbar"
@@ -2684,15 +2695,6 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               data-testid="strip-prompt-menu-button"
             />
           )}
-          <Button
-            appearance="subtle"
-            icon={<AttachRegular />}
-            onClick={handleAttachButtonClick}
-            disabled={isStreaming || attachmentFiles.length >= 5}
-            aria-label="Attach files"
-            title="Attach files (text, markdown, PDF, DOCX)"
-            data-testid="strip-attach-button"
-          />
 
           {attachmentFiles.length > 0 && (
             <span
@@ -2706,30 +2708,34 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 const chipClassName = isError
                   ? `${styles.attachmentChip} ${styles.attachmentChipError}`
                   : styles.attachmentChip;
+                // UAT 2026-07-21: the leading "ready" checkmark was removed —
+                // a ready pill shows just its filename (the pill's presence IS
+                // the "ready" signal). The in-progress spinner and error warning
+                // remain, since those states are not otherwise conveyed.
                 const statusNode =
                   file.status === 'extracting' ? (
                     <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                  ) : file.status === 'ready' ? (
-                    <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                  ) : (
+                  ) : file.status === 'error' ? (
                     <WarningRegular
                       aria-label="Extraction failed"
                       data-testid={`attachment-chip-status-error-${index}`}
                     />
-                  );
+                  ) : null;
 
                 const chipBody = (
                   <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
-                    <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
-                      {statusNode}
-                    </span>
+                    {statusNode !== null && (
+                      <span className={styles.attachmentChipStatus}>
+                        {statusNode}
+                      </span>
+                    )}
                     <span className={styles.attachmentChipFilename} title={file.filename}>
                       {file.filename}
                     </span>
                     <Button
                       appearance="subtle"
                       size="small"
-                      icon={<DismissRegular />}
+                      icon={<DismissCircle16Filled />}
                       onClick={() => {
                         // R5 task 020 / D2-11: notify host BEFORE local splice so
                         // it can capture the chip metadata for the manifest +
@@ -2766,12 +2772,26 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             </span>
           )}
         </div>
+        )}
 
         {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
-            button to avoid duplicating the strip-mounted Prompt button. */}
+            button to avoid duplicating the strip-mounted Prompt button.
+            UAT 2026-07-21: the Attach (paperclip) button is passed as the
+            composer tray's leading slot so it sits bottom-left, opposite Send. */}
         <SprkChatInput
           ref={inputHandleRef}
           onSend={handleSend}
+          toolbarLeadingSlot={
+            <Button
+              appearance="subtle"
+              icon={<AttachRegular />}
+              onClick={handleAttachButtonClick}
+              disabled={isStreaming || attachmentFiles.length >= 5}
+              aria-label="Attach files"
+              title="Attach files (text, markdown, PDF, DOCX)"
+              data-testid="strip-attach-button"
+            />
+          }
           // Lock the composer for the WHOLE orchestration, not just the message
           // stream (UAT: a message typed while a file was uploading/classifying was
           // dropped). Busy = message streaming OR assistant typing OR a file still

@@ -337,12 +337,13 @@ export function buildWorkspaceConfig(p: WorkspaceConfigParams): WorkspaceConfig 
       },
 
       // -----------------------------------------------------------------------
-      // My Documents — DocumentsTab (50% width, overflow visible)
+      // Documents — DocumentsTab (50% width, overflow visible)
       // -----------------------------------------------------------------------
       {
         id: "documents",
         type: "content",
-        title: "My Documents",
+        // UAT 2026-07-21: dropped the "My " prefix — section title reads "Documents".
+        title: "Documents",
         badgeCount: p.docCount,
         toolbar: documentsToolbar,
         style: { minHeight: "auto", overflow: "visible" },
