@@ -11,9 +11,12 @@
 |-------|-------|
 | **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`7b9d249cf`**, merged to **origin/master**. Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed** | dev: `sprk_spaarkeai` + `sprk_createeventwizard` + `sprk_createworkassignmentwizard` + `sprk_summarizefileswizard` + `sprk_findsimilar` (R5 round-2, 2026-07-20). BFF **unchanged** across R4 round-2 + all of R5. |
-| **Next Action** | All R5 items shipped except **R4-7 / R4-9** (await owner repro). Ready for owner's next UAT pass against [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) + [`notes/uat-feedback-2026-07-20-R5.md`](notes/uat-feedback-2026-07-20-R5.md). Rule: `/worktree-sync` before any BFF deploy (none has been needed). |
+| **Git** | branch + `origin/branch` at **`d3428b930`**, merged to **origin/master**. Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
+| **Deployed** | dev: `sprk_spaarkeai` (R6, rebuilt from merged source) + the R5 wizard code pages. BFF **unchanged** across R4/R5/R6. |
+| **Next Action** | All R6 items shipped. Optional follow-ups: deploy `sprk_communicationpage` (the shared R6-5b recipient-email fix is merged, not yet live on the standard modal); establish shared modal-width tokens (R6-4 recommendation). Still awaiting owner repro: **R4-7 / R4-9**. Rule: `/worktree-sync` before any BFF deploy (none has been needed). |
+
+### R6 shipped 2026-07-21 (client + shared-lib email/compose)
+R6-1 Revise-document chip · R6-2 one chip row · R6-3 (already fixed on master via "Fix #4") · R6-4 email dialog 760px · R6-5 recipient lookup + shared ILookupItem.email fix · R6-6 rewrite→redline routing. Merged `d3428b930`. Backlog: [`notes/uat-feedback-2026-07-21-R6.md`](notes/uat-feedback-2026-07-21-R6.md).
 
 ### R5 round-2 shipped 2026-07-20 (shared-lib + wizard code-pages)
 R5-7 (Create Event) · R5-8 (Assign Work / Summarize / Find Similar) file legs · R5-4 (composer pills row). New shared `useHandoffFileLeg` hook (Matter/Event/Assign-Work/Summarize); Find Similar code-page-local single-doc variant. Registry → 7 entries. Commits e20d1cc7a / e498fc724 / 0a7d838bd / 7b9d249cf.

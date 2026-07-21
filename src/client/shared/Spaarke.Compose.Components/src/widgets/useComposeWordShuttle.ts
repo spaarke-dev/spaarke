@@ -73,6 +73,27 @@ export interface DocxAnnotationInput {
   date: string;
 }
 
+/**
+ * Item 3 (UAT round-4): decide which redline tracked-changes to bake into a save.
+ *
+ * A freshly-MOUNTED document carries passively-materialized AI suggestions as redline marks (the
+ * ledger-replay path renders them on mount, before the user touches anything). Sending those on a
+ * ZERO-EDIT save asks the server to locate each target in the raw OOXML — which can miss on
+ * intra-paragraph whitespace/tab drift and 422 ("a tracked change could not be located in the
+ * document to save"). The rule: only persist redline annotations once the user has ENGAGED the
+ * document (`editorIsDirty`). A clean save then round-trips the retained original byte-identical.
+ * Accepted suggestions / edits make the editor dirty and persist via the paraId-keyed
+ * `editedParagraphs` delta (FR-02), so no acted-upon change is lost by this gate.
+ */
+export function selectSaveRedlineAnnotations(opts: {
+  editorIsDirty: boolean;
+  hasRedlines: boolean;
+  getRedlineAnnotations: () => DocxAnnotationInput[];
+}): DocxAnnotationInput[] {
+  if (!opts.editorIsDirty || !opts.hasRedlines) return [];
+  return opts.getRedlineAnnotations();
+}
+
 /** A native comment recovered from the current SPE document (mirror of BFF `RecoveredComment`). */
 export interface RecoveredComment {
   [key: string]: unknown;

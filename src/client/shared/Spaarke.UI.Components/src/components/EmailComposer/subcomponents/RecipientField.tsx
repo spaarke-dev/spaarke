@@ -221,11 +221,12 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
   const handleSelectResult = React.useCallback(
     (item: ILookupItem) => {
-      // ILookupItem.name is formatted "Full Name (email)" (userLookup.ts) —
-      // extract the email; fall back to the whole name if no email is present.
+      // R6-5 (UAT 2026-07-21): prefer the first-class `item.email` (userLookup now sets it). Fall
+      // back to parsing "Full Name (email)" only for legacy sources that don't set the field. This
+      // fixes the "lookup doesn't fill the full email" bug on BOTH the Assistant + standard modals.
       const match = item.name.match(/\(([^)]+)\)\s*$/);
-      const email = match ? match[1] : item.name;
-      const displayName = match ? item.name.slice(0, match.index).trim() : undefined;
+      const email = item.email && item.email.trim().length > 0 ? item.email.trim() : match ? match[1] : item.name;
+      const displayName = match ? item.name.slice(0, match.index).trim() : item.email ? item.name.trim() : undefined;
       const existingEmails = new Set(value.map(r => r.email.toLowerCase()));
       if (!existingEmails.has(email.toLowerCase())) {
         onChange([...value, { email, displayName, resolved: true, sourceId: item.id, entityType: item.entityType }]);
