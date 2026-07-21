@@ -23,6 +23,14 @@ export const COMMUNICATION_TYPE_MESSAGE = 100000004;
 export const BODY_FORMAT_PLAIN_TEXT = 100000000;
 export const BODY_FORMAT_HTML = 100000001;
 
+/**
+ * `sprk_direction` choice-int constants (R3 task 002 / FR-18), mirrors
+ * `Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs`
+ * `ThreadMessageDto.Direction` doc comment: Incoming=100000000, Outgoing=100000001.
+ */
+export const DIRECTION_INCOMING = 100000000;
+export const DIRECTION_OUTGOING = 100000001;
+
 // ---------------------------------------------------------------------------
 // Channel + body format (timeline's own friendly domain shape)
 // ---------------------------------------------------------------------------
@@ -53,6 +61,23 @@ export interface TimelineMessage {
   /** Raw `sprk_communicationtype` int, kept for callers that need the exact wire value. */
   channelTypeRaw: number | null;
   sender?: string | null;
+  /**
+   * The sender's Dataverse `systemuserid` GUID (R3 task 002 / FR-18, from the
+   * BFF's `ThreadMessageDto.SentBy` — `_sprk_sentby_value`). This is the
+   * CANONICAL identity signal for mine/others bubble alignment
+   * (`ConversationView`, task 011) — NOT `sender` (an email-address string,
+   * which is unreliable for alignment: shared-mailbox sends, display-name/
+   * address mismatches, or an external participant's email coinciding with
+   * an internal user's alias all break email-string equality). Null when the
+   * sender-enrichment fields are unset (e.g. a row predating task 002, or a
+   * sender with no resolvable systemuserid) — such a message can never
+   * resolve as "mine" and always renders as an "others" bubble.
+   */
+  senderSystemUserId?: string | null;
+  /** The sender's display name (R3 task 002 / FR-18, from `ThreadMessageDto.SentByName` / `sprk_sentbyname`). */
+  senderName?: string | null;
+  /** `sprk_direction` (R3 task 002 / FR-18): `'incoming'` | `'outgoing'`, or `null` when unset. */
+  direction?: 'incoming' | 'outgoing' | null;
   /** Display/sort timestamp — `sentAt ?? createdOn`. */
   sentOn?: string | null;
   /** Raw `createdOn` — used as the incremental-poll cursor (see `useThreadPoll`). */

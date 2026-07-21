@@ -59,13 +59,30 @@ export interface IThreadAttachmentRefDto {
   attachmentType: number | null;
 }
 
-/** Mirrors `ThreadMessageDto` — one `sprk_communication` row projected for the timeline. */
+/**
+ * Mirrors `ThreadMessageDto` — one `sprk_communication` row projected for the timeline.
+ *
+ * `direction`/`sentBy`/`sentByName` (R3 task 002 / FR-18) are the sender-identity
+ * enrichment fields: `sentBy` is the sender's `systemuserid` GUID
+ * (`_sprk_sentby_value`, serialized as a string), the CANONICAL signal
+ * `ConversationView` (task 011) keys mine/others bubble alignment on — NOT
+ * `from` (an email-address string). All three ride the SAME already-
+ * impersonated, already-access-filtered row as every other field here (no
+ * second query, no directory lookup, no access gate) — see the BFF doc
+ * comment on `ThreadMessageDto` in `CommunicationThreadReadModels.cs`.
+ */
 export interface IThreadMessageDto {
   messageId: string;
   body: string | null;
   bodyFormat: number | null;
   communicationType: number | null;
   from: string | null;
+  /** `sprk_direction` choice int: Incoming=100000000, Outgoing=100000001; null when unset. */
+  direction: number | null;
+  /** Sender's `systemuserid` GUID (`_sprk_sentby_value`), serialized as a string; null when unset. */
+  sentBy: string | null;
+  /** Sender's display name (`sprk_sentbyname`); null when unset. */
+  sentByName: string | null;
   sentAt: string | null;
   createdOn: string | null;
   inReplyTo: string | null;

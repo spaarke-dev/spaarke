@@ -20,8 +20,8 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 005 | FR-19 honor `ThreadId` on email send branch | 1 | ✅ | FULL/opus/high | 001 | serial |
 | 006 | Doc-drift fix `docs/data-model/sprk_communication.md` | 1 | ✅ | MINIMAL/sonnet/high | none | Wave 1 (A) |
 | 010 | Characterize `CommunicationTimeline` core + `SendEmailDialog` | 2 | ✅ | STANDARD/sonnet/high | none | serial |
-| 011 | FR-02/03 `ConversationView` bubbles (sender-id alignment) | 2 | 🔲 | FULL/sonnet/high | 010,002 | Wave 7 (B) |
-| 012 | FR-01/10 two-pane shell + thread list | 2 | 🔲 | FULL/sonnet/high | 010,003 | Wave 7 (B) |
+| 011 | FR-02/03 `ConversationView` bubbles (sender-id alignment) | 2 | ✅ | FULL/sonnet/high | 010,002 | Wave 7 (B) |
+| 012 | FR-01/10 two-pane shell + thread list | 2 | ✅ | FULL/sonnet/high | 010,003 | Wave 7 (B) |
 | 013 | FR-06 in-conversation compose (existing send path) | 2 | 🔲 | FULL/sonnet/high | 011 | serial |
 | 014 | FR-09 in-conversation additive filters | 2 | 🔲 | FULL/sonnet/high | 011 | serial |
 | 020 | FR-07 extend `SendEmailDialog`/`EmailComposer` (thread id + record link) | 3 | 🔲 | FULL/**opus**/high | 010 | serial |

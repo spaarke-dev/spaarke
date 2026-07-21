@@ -27,6 +27,8 @@ import type { IRegardingReadResultDto, IThreadMessageDto } from '../../services/
 import {
   BODY_FORMAT_PLAIN_TEXT,
   COMMUNICATION_TYPE_MESSAGE,
+  DIRECTION_INCOMING,
+  DIRECTION_OUTGOING,
   type RegardingThreadGroup,
   type TimelineMessage,
 } from './CommunicationTimeline.types';
@@ -42,6 +44,14 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     channelType: dto.communicationType === COMMUNICATION_TYPE_MESSAGE ? 'message' : 'email',
     channelTypeRaw: dto.communicationType,
     sender: dto.from,
+    // R3 task 002/011 (FR-18/FR-02) — sender-identity enrichment, additive
+    // pass-through (no derivation/lookup here, mirrors every other field in
+    // this mapper). `senderSystemUserId` is the canonical alignment signal
+    // for ConversationView's mine/others bubbles; `sender` (email string)
+    // remains unchanged for existing MessageRow consumers.
+    senderSystemUserId: dto.sentBy,
+    senderName: dto.sentByName,
+    direction: dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
     sentOn: dto.sentAt ?? dto.createdOn,
     createdOn: dto.createdOn,
     body: dto.body,

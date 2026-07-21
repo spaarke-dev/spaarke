@@ -219,3 +219,18 @@ export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
 // indicator, and polls the BFF thread-read + unread-count endpoints
 // (task 050) on a configurable ~5s interval. NO client-side ACS SDK (NFR-04).
 export * from './CommunicationTimeline';
+
+// ConversationView - Teams-style chat-bubble renderer keyed on SENDER IDENTITY
+// (systemuserid, from FR-18), not email-string (task 011, FR-02/03). New
+// presentation over the CommunicationTimeline core (reducer/poll/buildTimeline
+// reused, not forked): mine-right/others-left alignment, day dividers, and
+// per-message status on own bubbles.
+export * from './ConversationView';
+
+// ConversationWorkspace - Mount-agnostic two-pane shell: thread list (name +
+// unread + word-filter + create-＋) beside a conversation, optional `regarding`
+// filter (task 012, FR-01/10/16). Right pane wired via the `renderConversation`
+// seam - Phase-4 hosts (PCF/widget/code-page) inject ConversationView + the
+// current user's systemuserid. All-mode -> FR-16 list; record-mode -> existing
+// by-regarding read (CLAUDE.md §6.5 Path A exception, both server-access-filtered).
+export * from './ConversationWorkspace';

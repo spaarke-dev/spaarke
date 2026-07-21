@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 7 (PARALLEL) — 011 ConversationView bubbles + 012 two-pane shell/thread list |
-| **Step** | dispatching 2 agents |
-| **Status** | in-progress |
-| **Next Action** | Run 011 + 012 in parallel (different components); gates each; build-verify. **011 must plumb FR-18 `SentBy` through `IThreadMessageDto`/`TimelineMessage` and align on it (NOT email-string) — backend already ships it (task 002).** buildTimeline has NO day-grouping today (net-new in 011). ⚠️ pre-existing worktree build gap: `@spaarke/auth`/`@spaarke/sdap-client` sibling dist unbuilt — breaks whole-package `npm run build` on 2 unrelated wizard files; verify components via scoped tsc/jest. |
+| **Task** | Wave 7 COMPLETE ✅ (011 ConversationView + 012 ConversationWorkspace) — next: Wave 8 (013 in-conversation compose) |
+| **Step** | — |
+| **Status** | not-started |
+| **Next Action** | `work on task 013` (FR-06 in-conversation compose) — serial, edits ConversationView from 011. Then Wave 9 (014 filters). **Phase-4 hosts wire `ConversationView` into `ConversationWorkspace`'s `renderConversation` seam + supply currentUserSystemUserId.** ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify via scoped tsc/jest. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001
