@@ -69,7 +69,7 @@ interface SettingsPageProps {
  * - User profile information (name, email from Entra B2B account)
  * - Appearance settings: light/dark mode toggle
  *
- * Accessible via the user name button in AppHeader → #/settings.
+ * Accessible via the user name button in AppHeader → /settings.
  */
 export const SettingsPage: React.FC<SettingsPageProps> = ({ isDark, onToggleDark, portalUser }) => {
   const styles = useStyles();

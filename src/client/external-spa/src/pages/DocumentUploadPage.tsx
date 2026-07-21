@@ -5,7 +5,7 @@
  * Composes the shared WizardShell with FileUploadZone and UploadedFileList
  * components, backed by BFF API adapters for authentication and file upload.
  *
- * Route: #/upload?entityType={entityType}&entityId={entityId}&containerId={containerId}
+ * Route: /upload?entityType={entityType}&entityId={entityId}&containerId={containerId}
  *
  * Query Parameters:
  *   - entityType  (required): Dataverse entity logical name (e.g., "sprk_project")
@@ -180,7 +180,7 @@ export const DocumentUploadPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Parse query params from the hash route's search string
+  // Parse query params from the route's search string (BrowserRouter clean URL)
   const pageParams = React.useMemo(() => parseQueryParams(location.search), [location.search]);
 
   // ── File state ──────────────────────────────────────────────────────────
@@ -273,7 +273,7 @@ export const DocumentUploadPage: React.FC = () => {
   if (!pageParams) {
     return (
       <PageContainer>
-        <NavigationBar items={[{ label: 'My Projects', href: '#/' }, { label: 'Upload Documents' }]} />
+        <NavigationBar items={[{ label: 'My Projects', href: '/' }, { label: 'Upload Documents' }]} />
         <div className={styles.errorContainer}>
           <MessageBar intent="error">
             <MessageBarBody>
@@ -369,8 +369,8 @@ export const DocumentUploadPage: React.FC = () => {
     <PageContainer>
       <NavigationBar
         items={[
-          { label: 'My Projects', href: '#/' },
-          ...(pageParams.entityId ? [{ label: 'Project', href: `#/project/${pageParams.entityId}` }] : []),
+          { label: 'My Projects', href: '/' },
+          ...(pageParams.entityId ? [{ label: 'Project', href: `/project/${pageParams.entityId}` }] : []),
           { label: 'Upload Documents' },
         ]}
       />

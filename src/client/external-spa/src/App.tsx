@@ -1,8 +1,8 @@
 import * as React from 'react';
-import { FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
+import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
-import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { resolveCodePageTheme, setupCodePageThemeListener, setUserThemePreference } from '@spaarke/ui-components/utils/themeStorage';
 import { APP_VERSION } from './config';
 import { AppHeader } from './components/AppHeader';
@@ -20,7 +20,7 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     // Use 100dvh to guarantee full viewport height regardless of parent container
-    // height in the Power Pages Code Site context (parent may be height: auto)
+    // height in the SWA hosting context (parent may be height: auto)
     height: '100dvh',
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -45,6 +45,22 @@ const useStyles = makeStyles({
     justifyContent: 'flex-end',
     flexShrink: 0,
   },
+  notFound: {
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    rowGap: tokens.spacingVerticalM,
+    padding: tokens.spacingVerticalXXL,
+    textAlign: 'center',
+  },
+  notFoundCode: {
+    fontSize: '48px',
+    lineHeight: '1',
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground2,
+  },
 });
 
 /**
@@ -63,7 +79,30 @@ function accountToPortalUser(account: ReturnType<typeof useMsal>['accounts'][0] 
 }
 
 /**
- * Inner shell — needs to be inside HashRouter to use useNavigate.
+ * In-app not-found (404) view for unknown clean-URL paths. Anchored to the external-spa
+ * Fluent v9 look (tokens + Text) so it renders correctly in both light and dark themes
+ * (ADR-021 — no hardcoded colors). Replaces the former `Navigate to="/"` silent redirect
+ * so a genuinely bad path is visible instead of masked.
+ */
+const NotFoundView: React.FC = () => {
+  const styles = useStyles();
+  const navigate = useNavigate();
+  return (
+    <div className={styles.notFound}>
+      <Text as="h1" className={styles.notFoundCode}>404</Text>
+      <Text size={500} weight="semibold">Page not found</Text>
+      <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
+        The page you&apos;re looking for doesn&apos;t exist or may have moved.
+      </Text>
+      <Button appearance="primary" onClick={() => navigate('/')}>
+        Back to my workspace
+      </Button>
+    </div>
+  );
+};
+
+/**
+ * Inner shell — needs to be inside BrowserRouter to use useNavigate.
  */
 const AppShell: React.FC<{
   isDark: boolean;
@@ -94,8 +133,8 @@ const AppShell: React.FC<{
                 path="/settings"
                 element={<SettingsPage isDark={isDark} onToggleDark={onToggleDark} portalUser={portalUser} />}
               />
-              {/* Redirect any unknown hash paths back to home */}
-              <Route path="*" element={<Navigate to="/" replace />} />
+              {/* Unknown paths render an explicit in-app 404 (not a silent redirect home). */}
+              <Route path="*" element={<NotFoundView />} />
             </Routes>
           </ErrorBoundary>
         </AuthGuard>
@@ -116,9 +155,10 @@ const AppShell: React.FC<{
  * Provides:
  * - FluentProvider with Fluent UI v9 light/dark theming via shared 4-level cascade (ADR-021)
  * - Dark mode toggle persisted to localStorage and synced across tabs
- * - HashRouter (required for Power Pages single-page hosting — all navigation is hash-based)
- * - AuthGuard: redirects unauthenticated users to Entra B2B login via MSAL
- * - Routes for WorkspaceHomePage (#/), ProjectPage (#/project/:id), SettingsPage (#/settings)
+ * - BrowserRouter (clean URLs) — deep links resolve via the SWA navigationFallback rewrite
+ *   (staticwebapp.config.json, task 010); unknown paths render an in-app 404 view
+ * - AuthGuard: redirects unauthenticated users to Entra login via MSAL
+ * - Routes for WorkspaceHomePage (/), ProjectPage (/project/:id), SettingsPage (/settings)
  * - ErrorBoundary wrapping all route content
  * - AppHeader with Spaarke logo, user settings link, and theme toggle
  */
@@ -160,9 +200,9 @@ export const App: React.FC = () => {
 
   return (
     <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <HashRouter>
+      <BrowserRouter>
         <AppShell isDark={isDark} onToggleDark={handleToggleDark} portalUser={portalUser} />
-      </HashRouter>
+      </BrowserRouter>
     </FluentProvider>
   );
 };

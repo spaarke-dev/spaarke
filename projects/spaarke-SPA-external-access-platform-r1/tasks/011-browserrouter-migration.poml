@@ -3,7 +3,8 @@
     <title>Migrate HashRouter to BrowserRouter + in-app 404</title>
     <phase>1 Hosting migration + routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE. App.tsx: HashRouter→BrowserRouter; catch-all `Navigate to="/"` replaced with in-app `NotFoundView` 404 route (Fluent v9 tokens, dark-safe, Button→navigate('/')); JSDoc/comments updated. Step-4 check surfaced extensive hash-based nav elsewhere → converted (directional "complete the migration"): SemanticSearch `window.location.hash=` → `useNavigate('/project/:id')`; breadcrumb `href:'#/'`/`#/project/` → clean `/` in ProjectPage/DocumentUploadPage/PlaybookLibraryPage; stale `#/` comments fixed (SettingsPage). DocumentUploadPage query parsing already used router-agnostic `useLocation().search` (no code change). tsc exit 0; vite build OK. sessionStorage MSAL untouched (ADR-028). Step 9.5 code-review+adr-check clean (ADR-021 tokens/dark, ADR-028). Noted deviation: shared NavigationBar `<a href>` breadcrumbs do full-page nav (functional under SWA fallback; soft-nav would touch the shared lib = out of scope). Browser ui-tests deferred to task 014 SWA deploy (need live navigationFallback + browser).</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies SPA routing (.tsx)</rigor-reason>
     <model-tier>sonnet</model-tier>

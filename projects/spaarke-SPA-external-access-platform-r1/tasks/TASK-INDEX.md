@@ -12,7 +12,7 @@
 | 003 | Provision Azure Static Web Apps resource + CI/CD scaffold | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
 | 004 | Add `Contact.sprk_externalobjectid` Dataverse field | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
 | 010 | Author `staticwebapp.config.json` + SWA deploy workflow | 1 | FULL | sonnet/high | 003 | ✗ (shared workflow/config) | ✅ |
-| 011 | Migrate HashRouter → BrowserRouter + in-app 404 | 1 | FULL | sonnet/high | 010 | ✗ (shares App.tsx) | 🔲 |
+| 011 | Migrate HashRouter → BrowserRouter + in-app 404 | 1 | FULL | sonnet/high | 010 | ✗ (shares App.tsx) | ✅ |
 | 012 | Preserve deep link through the login redirect | 1 | FULL | sonnet/high | 011 | ✗ (shares App.tsx/auth) | 🔲 |
 | 013 | Add SWA origin to BFF CORS + SPA redirect URIs | 1 | FULL | sonnet/high | 003 | ✗ (shares Program/AuthModule) | ✅ |
 | 014 | Deploy external-spa to SWA on existing B2B + verify parity | 1 | STANDARD | sonnet/high | 010,011,012,013 | ✗ (deploy gate) | 🔲 |
