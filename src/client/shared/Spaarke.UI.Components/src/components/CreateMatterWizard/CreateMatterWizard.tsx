@@ -32,7 +32,7 @@ import { CreateRecordWizard, type ICreateRecordWizardConfig, type IFinishContext
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import type { ICreateMatterFormState } from './formTypes';
-import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
+import { useHandoffFileLeg } from '../CreateRecordWizard/useHandoffFileLeg';
 import { CreateRecordStep } from './CreateRecordStep';
 import {
   MatterService,
@@ -293,37 +293,6 @@ const EMPTY_FORM_STATE: ICreateMatterFormState = {
 };
 
 // ---------------------------------------------------------------------------
-// Assistant hand-off file leg (UAT W-2/W-5): fetched-File → IUploadedFile
-// ---------------------------------------------------------------------------
-
-/** Wizard-supported upload types keyed by lowercase extension. */
-const HANDOFF_EXT_TO_FILE_TYPE: Readonly<Record<string, UploadedFileType>> = {
-  '.pdf': 'pdf',
-  '.docx': 'docx',
-  '.xlsx': 'xlsx',
-};
-
-/**
- * Build an {@link IUploadedFile} from a browser File fetched via the session
- * document-content endpoint. Returns null for an unsupported extension (the Add
- * file(s) step only accepts pdf/docx/xlsx) so unsupported session files are
- * skipped rather than injected as invalid entries.
- */
-function handoffFileToUploaded(file: File): IUploadedFile | null {
-  const dot = file.name.lastIndexOf('.');
-  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : '';
-  const fileType = HANDOFF_EXT_TO_FILE_TYPE[ext];
-  if (!fileType) return null;
-  return {
-    id: `handoff-${file.name}-${file.size}`,
-    name: file.name,
-    sizeBytes: file.size,
-    fileType,
-    file,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // CreateMatterWizard
 // ---------------------------------------------------------------------------
 
@@ -350,50 +319,11 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
     [initialFormValues]
   );
 
-  // -- Assistant hand-off file leg (UAT W-2/W-5) --
-  // Fetch the drafted-from session document(s) from the BFF and pre-seed them into
-  // the Add file(s) step (via `config.initialFiles`) so they ride the wizard's own
-  // upload+link+index pipeline into the new matter's container. Fail-soft: a failed
-  // fetch / unsupported type is skipped; nothing carried → the files step is empty
-  // exactly as a direct open. Never inline binary through the URL (envelope invariant).
-  const [handoffFiles, setHandoffFiles] = React.useState<IUploadedFile[]>([]);
-  React.useEffect(() => {
-    if (!open) {
-      setHandoffFiles([]);
-      return;
-    }
-    const sessionId = initialFileRefs?.sessionId;
-    const fileIds = initialFileRefs?.fileIds;
-    if (!sessionId || !fileIds || fileIds.length === 0) {
-      return;
-    }
-    const fileNames = initialFileRefs?.fileNames;
-    let cancelled = false;
-    void (async () => {
-      const built: IUploadedFile[] = [];
-      for (let i = 0; i < fileIds.length; i++) {
-        const fileId = fileIds[i];
-        try {
-          const res = await authenticatedFetch(
-            `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}/documents/${encodeURIComponent(fileId)}/content`
-          );
-          if (!res.ok) continue;
-          const blob = await res.blob();
-          const name = fileNames?.[i] ?? `document-${i + 1}`;
-          const file = new File([blob], name, { type: blob.type || 'application/octet-stream' });
-          const uploaded = handoffFileToUploaded(file);
-          if (uploaded) built.push(uploaded);
-        } catch {
-          // Non-fatal: a fetch failure (expired binary, network) just means that
-          // file isn't pre-attached; the user can add it manually.
-        }
-      }
-      if (!cancelled && built.length > 0) setHandoffFiles(built);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [open, initialFileRefs, authenticatedFetch, bffBaseUrl]);
+  // -- Assistant hand-off file leg (UAT W-2/W-5; shared hook per R5-7) --
+  // Fetch the drafted-from session document(s) from the BFF and pre-seed them into the Add
+  // file(s) step (via `config.initialFiles`) so they ride the wizard's own upload+link+index
+  // pipeline into the new matter's container. Shared with CreateEventWizard via useHandoffFileLeg.
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authenticatedFetch, bffBaseUrl);
 
   // -- Entity-specific form state --
   const [step2Valid, setStep2Valid] = React.useState(false);

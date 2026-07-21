@@ -34,6 +34,7 @@ import {
   type IAssociateToStepConfig,
   type AssociationResult,
 } from '../CreateRecordWizard';
+import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import { EVENT_REGARDING_TARGETS } from '../AssociateToStep/types';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -213,6 +214,15 @@ export interface ICreateEventWizardProps {
    * {@link onClose} (no result write → cancellation is inferred).
    */
   onComplete?: (recordId: string) => void;
+  /**
+   * Assistant hand-off FILE references (UAT R5-7 — the create-flow file leg for events).
+   * When launched from the Assistant "create an event from this file" flow, the solution
+   * `main.tsx` passes the hand-off seed's `{ sessionId, fileIds, fileNames }` here. The wizard
+   * fetches each file's binary from the BFF and pre-seeds the "Upload documents" step so the
+   * drafted-from document rides the wizard's existing upload+link+index pipeline onto the new
+   * event. `undefined`/no sessionId → nothing fetched; the files step opens empty as before.
+   */
+  initialFileRefs?: HandoffFileRefs;
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +263,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   showAssociateToStep,
   initialFormValues,
   onComplete,
+  initialFileRefs,
 }) => {
   // Assistant hand-off pre-seed (task 013): merge drafted values over the empty
   // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity.
@@ -301,6 +312,11 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
   const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
 
+  // -- Assistant hand-off file leg (R5-7) ------------------------------------
+  // Fetch the drafted-from session document(s) and pre-seed them into the Upload step so they
+  // attach to the new event (parity with CreateMatterWizard). Empty for direct opens.
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authFetch ?? fetch, bffBaseUrl ?? '');
+
   // -- Wizard config ---------------------------------------------------------
   const config: ICreateRecordWizardConfig = React.useMemo(
     () => ({
@@ -308,6 +324,9 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       entityLabel: 'event',
       filesStepSubtitle: 'Upload documents to associate with this event, or click Next to skip.',
       finishingLabel: 'Creating event\u2026',
+      // R5-7: files the Assistant create-flow drafted from, fetched above and pre-seeded into
+      // the Upload step so they attach to the new event.
+      initialFiles: handoffFiles,
 
       // visual-host-create-button-r1 task 015 -- see resolveEventAssociateToStepConfig
       // doc comment for the gating rationale (precise gate vs. TodoWizardDialog's
@@ -504,6 +523,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       initialAssociation,
       lockAssociation,
       showAssociateToStep,
+      handoffFiles,
     ]
   );
 

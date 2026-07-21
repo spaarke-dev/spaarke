@@ -1,6 +1,6 @@
 {
   "name": "spaarke-communication-attachments",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "PCF control: attachment list for sprk_communication that replaces the OOB attachment subgrid (UAT #2). Lists the communication's sprk_communicationattachment rows (name + type, inline-image types filtered out) and, on row click, opens the shared RichFilePreviewDialog for that attachment's sprk_document — resolving the preview URL via the BFF and routing .eml/message-rfc822 documents to download/open instead of Graph inline preview. Auth via @spaarke/auth (ADR-028). Virtual control on the OOB sprk_communication form.",
   "scripts": {
     "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",

@@ -453,6 +453,36 @@ public class AssociationStatusMapperTests
     }
 
     [Fact]
+    public void Decide_TwoContactsNamedOnRegardingPerson_SurfacesBothAsSuggestedCandidates()
+    {
+        // R4 UAT-R2-B1: an email whose body names two existing contacts (e.g. "Eyal Iffergan and Sara
+        // Chen") emits two Suggested-band sprk_regardingperson matches. Both must surface in the review
+        // trace so the reviewer sees + picks among them (owner: "surface all matches, user picks primary;
+        // never auto-dedup") — NOT collapsed to the single highest-confidence winner. Only the winner is
+        // written (single-value lookup); neither auto-files (contact is a fallback field).
+        var eyalId = Guid.NewGuid();
+        var saraId = Guid.NewGuid();
+        var mapper = AssociationTestSupport.Mapper(enabled: true, threshold: 0.85);
+
+        var decision = mapper.Decide(
+            new[]
+            {
+                Match(PersonField, eyalId, 0.72, RungKind.ContactNameMatch, entity: "contact", provenance: "body:fullname"),
+                Match(PersonField, saraId, 0.68, RungKind.ContactNameMatch, entity: "contact", provenance: "body:fullname"),
+            },
+            CommunicationDirection.Incoming, tenantKey: null);
+
+        decision.Status.Should().Be(AssociationStatusCodes.Suggested);
+        decision.AutoFiled.Should().BeFalse();
+
+        var personCandidates = decision.Provenance.Candidates.Where(c => c.Field == PersonField).ToList();
+        personCandidates.Should().HaveCount(2, "both named contacts must surface for review");
+        personCandidates.Select(c => c.TargetId).Should()
+            .BeEquivalentTo(new[] { eyalId.ToString("D"), saraId.ToString("D") });
+        personCandidates.Count(c => c.Written).Should().Be(1, "only the single-value lookup winner is written");
+    }
+
+    [Fact]
     public void Decide_RecordsMetadataOnlySignals_RegardlessOfAssociationOutcome()
     {
         // A structural detector metadata-only match (no target) is recorded as a signal even when a

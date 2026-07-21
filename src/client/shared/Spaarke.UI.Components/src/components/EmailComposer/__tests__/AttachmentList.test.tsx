@@ -49,10 +49,12 @@ function renderList(opts: {
   sources?: IComposerAttachmentSource[];
   onRemove?: (id: string) => void;
   onToggleSelected?: (id: string) => void;
+  onToggleLink?: (id: string) => void;
 }) {
   const onAdd = jest.fn();
   const onRemove = opts.onRemove ?? jest.fn();
   const onToggleSelected = opts.onToggleSelected ?? jest.fn();
+  const onToggleLink = opts.onToggleLink ?? jest.fn();
   const sources = opts.sources ?? [{ kind: 'related' }];
   const result = renderWithProviders(
     <AttachmentList
@@ -62,9 +64,10 @@ function renderList(opts: {
       onAdd={onAdd}
       onRemove={onRemove}
       onToggleSelected={onToggleSelected}
+      onToggleLink={onToggleLink}
     />
   );
-  return { ...result, onAdd, onRemove, onToggleSelected };
+  return { ...result, onAdd, onRemove, onToggleSelected, onToggleLink };
 }
 
 describe('AttachmentList — hard caps', () => {
@@ -118,21 +121,57 @@ describe('AttachmentList — remove', () => {
   });
 });
 
-describe('AttachmentList — forward-mode selection', () => {
-  it('renders inclusion checkboxes only in forward mode and toggles selection', () => {
+describe('AttachmentList — reply/forward include toggles (task 104)', () => {
+  it('renders the Attach toggle for a source attachment and fires onToggleSelected (forward)', () => {
     const onToggleSelected = jest.fn();
     renderList({
       mode: 'forward',
       items: [item('f1', 'related', 16, { fileName: 'brief.pdf', selected: true })],
       onToggleSelected,
     });
-    const checkbox = screen.getByRole('checkbox', { name: 'Include brief.pdf in forward' });
+    const checkbox = screen.getByRole('checkbox', { name: 'Attach brief.pdf as a file' });
     fireEvent.click(checkbox);
     expect(onToggleSelected).toHaveBeenCalledWith('f1');
   });
 
-  it('does not render inclusion checkboxes in compose mode', () => {
+  it('renders the Attach toggle in reply mode too (opt-in)', () => {
+    renderList({
+      mode: 'reply',
+      items: [item('r1', 'related', 16, { fileName: 'brief.pdf', selected: false })],
+    });
+    expect(screen.getByRole('checkbox', { name: 'Attach brief.pdf as a file' })).toBeInTheDocument();
+  });
+
+  it('renders the Link toggle only when linkUrl is present and fires onToggleLink', () => {
+    const onToggleLink = jest.fn();
+    renderList({
+      mode: 'reply',
+      items: [item('r1', 'related', 16, { fileName: 'brief.pdf', selected: false, linkUrl: 'https://x/doc' })],
+      onToggleLink,
+    });
+    const linkBox = screen.getByRole('checkbox', { name: 'Insert a link to brief.pdf in the message body' });
+    fireEvent.click(linkBox);
+    expect(onToggleLink).toHaveBeenCalledWith('r1');
+  });
+
+  it('does not render the Link toggle when linkUrl is absent', () => {
+    renderList({
+      mode: 'reply',
+      items: [item('r1', 'related', 16, { fileName: 'brief.pdf', selected: false })],
+    });
+    expect(screen.queryByRole('checkbox', { name: /Insert a link/ })).toBeNull();
+  });
+
+  it('does not render include toggles in compose mode', () => {
     renderList({ mode: 'compose', items: [item('c1', 'related', 16)] });
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('does not render include toggles for items lacking a documentId (local picks)', () => {
+    renderList({
+      mode: 'forward',
+      items: [item('l1', 'local', 16, { fileName: 'x.pdf', documentId: undefined })],
+    });
     expect(screen.queryByRole('checkbox')).toBeNull();
   });
 });

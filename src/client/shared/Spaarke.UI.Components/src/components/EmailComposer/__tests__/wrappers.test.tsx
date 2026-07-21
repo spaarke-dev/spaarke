@@ -9,7 +9,7 @@
  *   - SendEmailPage  → mount='page', requires mode, Cancel → onCancel(onClose)
  */
 import * as React from 'react';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SendEmailStep } from '../wrappers/SendEmailStep';
 import { SendEmailDialog } from '../wrappers/SendEmailDialog';
@@ -99,5 +99,48 @@ describe('SendEmailPage', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Task 103 (UAT R2 D3): the host-supplied `onSearchRecipients` seam must reach
+  // the engine's To/Cc/Bcc RecipientField so typing looks up contacts. These two
+  // tests assert the wrapper forwards the seam end-to-end (type → suggest → select
+  // → resolved recipient) and that free-typed addresses still work when NO search
+  // is supplied (autocomplete is additive, not mandatory).
+  it('forwards onSearchRecipients to the To field — a directory match becomes a resolved recipient', async () => {
+    const onSearchRecipients = jest
+      .fn()
+      .mockResolvedValue([{ id: 'contact-1', name: 'Fiona Contact (fiona@example.com)' }]);
+    renderWithProviders(
+      <SendEmailPage
+        mode="compose"
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={BFF}
+        onSearchRecipients={onSearchRecipients}
+      />
+    );
+
+    const toInput = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: 'fio' } });
+
+    // Debounced search (300 ms) → suggestion listbox renders the contact.
+    const option = await screen.findByRole('option', { name: /Fiona Contact/ }, { timeout: 2000 });
+    expect(onSearchRecipients).toHaveBeenCalledWith('fio');
+
+    fireEvent.click(option);
+
+    // The resolved contact is added as a To recipient chip carrying the email.
+    const toGroup = screen.getByRole('group', { name: 'To' });
+    await waitFor(() => expect(within(toGroup).getByText(/fiona@example\.com/)).toBeInTheDocument());
+  });
+
+  it('still accepts a free-typed address when no onSearchRecipients is supplied', () => {
+    renderWithProviders(<SendEmailPage mode="compose" authenticatedFetch={authenticatedFetch} bffBaseUrl={BFF} />);
+
+    const toInput = screen.getByRole('textbox', { name: 'To' }) as HTMLInputElement;
+    fireEvent.change(toInput, { target: { value: 'greg@example.com' } });
+    fireEvent.keyDown(toInput, { key: 'Enter' });
+
+    const toGroup = screen.getByRole('group', { name: 'To' });
+    expect(within(toGroup).getByText('greg@example.com')).toBeInTheDocument();
   });
 });

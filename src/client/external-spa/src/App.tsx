@@ -3,7 +3,11 @@ import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { resolveCodePageTheme, setupCodePageThemeListener, setUserThemePreference } from '@spaarke/ui-components/utils/themeStorage';
+import {
+  resolveCodePageTheme,
+  setupCodePageThemeListener,
+  setUserThemePreference,
+} from '@spaarke/ui-components/utils/themeStorage';
 import { APP_VERSION } from './config';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
@@ -89,8 +93,12 @@ const NotFoundView: React.FC = () => {
   const navigate = useNavigate();
   return (
     <div className={styles.notFound}>
-      <Text as="h1" className={styles.notFoundCode}>404</Text>
-      <Text size={500} weight="semibold">Page not found</Text>
+      <Text as="h1" className={styles.notFoundCode}>
+        404
+      </Text>
+      <Text size={500} weight="semibold">
+        Page not found
+      </Text>
       <Text size={300} style={{ color: tokens.colorNeutralForeground3 }}>
         The page you&apos;re looking for doesn&apos;t exist or may have moved.
       </Text>

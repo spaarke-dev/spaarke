@@ -55,9 +55,6 @@ import { GetStartedCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId } from '@spaarke/ai-widgets';
 import {
   launchSurface,
-  launchAssignWorkWizard,
-  launchSummarizeFilesWizard,
-  launchFindSimilarWizard,
   launchPlaybookIntent,
 } from '@spaarke/ui-components';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
@@ -160,16 +157,22 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
           break;
 
         case 'assign-work':
-          launchAssignWorkWizard({ bffBaseUrl });
+          // R5-8: route through the hand-off envelope so the session's attached file(s) reach the
+          // Create Work Assignment wizard's Add Files step (registry entry: create-work-assignment).
+          void launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'document-upload-wizard':
           // GetStartedCardsWidget labels this "Summarize Files".
-          launchSummarizeFilesWizard({ bffBaseUrl });
+          // R5-8: route through the hand-off envelope so the session's attached file(s) pre-seed the
+          // upload step (registry: summarize-files).
+          void launchSurface({ consumerType: 'summarize-files', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'find-similar-wizard':
-          launchFindSimilarWizard({ bffBaseUrl });
+          // R5-8: route through the hand-off envelope so the session's first attached file
+          // pre-selects (registry: find-similar).
+          void launchSurface({ consumerType: 'find-similar', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'email-compose':

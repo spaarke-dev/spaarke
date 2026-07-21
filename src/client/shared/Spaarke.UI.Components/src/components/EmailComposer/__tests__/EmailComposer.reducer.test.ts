@@ -9,7 +9,14 @@
  * Everything under test is pure (no I/O, no platform APIs — ADR-012), so these
  * are ADR-038 domain-logic behavior contracts (MAINTAIN-class), not scaffolding.
  */
-import { emailComposerReducer, initialState } from '../EmailComposer.reducer';
+import {
+  emailComposerReducer,
+  initialState,
+  mapStateToSendRequest,
+  buildBodyWithAttachmentLinks,
+  deriveReplyState,
+  deriveForwardState,
+} from '../EmailComposer.reducer';
 import type {
   EmailComposerState,
   IAttachmentItem,
@@ -193,6 +200,15 @@ describe('emailComposerReducer', () => {
     expect(on.attachments[0].selected).toBe(true);
   });
 
+  it('TOGGLE_ATTACHMENT_LINK flips linkSelected (task 104)', () => {
+    const withAtt: EmailComposerState = { ...start(), attachments: [att('a1', { linkUrl: 'https://x/doc' })] };
+    const on = emailComposerReducer(withAtt, { type: 'TOGGLE_ATTACHMENT_LINK', id: 'a1' });
+    expect(on.attachments[0].linkSelected).toBe(true);
+    expect(on.isDirty).toBe(true);
+    const off = emailComposerReducer(on, { type: 'TOGGLE_ATTACHMENT_LINK', id: 'a1' });
+    expect(off.attachments[0].linkSelected).toBe(false);
+  });
+
   describe('SET_MODE transition matrix', () => {
     const viewState = (): EmailComposerState => initialState(baseProps({ mode: 'view', sourceRecord }));
 
@@ -267,5 +283,146 @@ describe('emailComposerReducer', () => {
     // @ts-expect-error — exercising the reducer default branch with an unknown action
     const next = emailComposerReducer(s, { type: 'NOPE' });
     expect(next).toBe(s);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 104 — reply/forward attachment inclusion (D1/D2)
+// ---------------------------------------------------------------------------
+
+describe('task 104 — attachment inclusion on reply/forward', () => {
+  const stateWith = (
+    attachments: IAttachmentItem[],
+    overrides: Partial<EmailComposerState> = {}
+  ): EmailComposerState => ({
+    ...initialState(baseProps({ mode: 'compose' })),
+    attachments,
+    ...overrides,
+  });
+
+  describe('initialState with initialAttachments — per-mode default', () => {
+    const carried: IAttachmentItem[] = [
+      att('src-1', { source: 'related', documentId: 'doc-1', linkUrl: 'https://x/doc-1' }),
+    ];
+
+    it('forward defaults carried attachments to attach-file ON', () => {
+      const state = initialState(baseProps({ mode: 'forward', initialAttachments: carried }));
+      expect(state.attachments).toHaveLength(1);
+      expect(state.attachments[0].selected).toBe(true);
+      expect(state.attachments[0].linkSelected).toBe(false);
+    });
+
+    it('reply offers carried attachments but defaults attach-file OFF', () => {
+      const state = initialState(baseProps({ mode: 'reply', initialAttachments: carried }));
+      expect(state.attachments).toHaveLength(1);
+      expect(state.attachments[0].selected).toBe(false);
+    });
+
+    it('honors an explicit selected override from the host', () => {
+      const state = initialState(baseProps({ mode: 'reply', initialAttachments: [{ ...carried[0], selected: true }] }));
+      expect(state.attachments[0].selected).toBe(true);
+    });
+  });
+
+  describe('deriveReplyState / deriveForwardState (sourceRecord path)', () => {
+    const source: ISourceCommunicationRecord = {
+      communicationId: 'c1',
+      from: 'a@x.com',
+      to: ['b@x.com'],
+      subject: 'Hi',
+      body: '<p>b</p>',
+      bodyFormat: 'HTML',
+      attachments: [att('s1', { source: 'related', documentId: 'doc-1' })],
+    };
+
+    it('forward carries source attachments pre-selected', () => {
+      const patch = deriveForwardState(source);
+      expect(patch.attachments?.[0].selected).toBe(true);
+    });
+
+    it('reply carries source attachments offered-but-off', () => {
+      const patch = deriveReplyState(source);
+      expect(patch.attachments).toHaveLength(1);
+      expect(patch.attachments?.[0].selected).toBe(false);
+    });
+  });
+
+  describe('mapStateToSendRequest — selection → request payload', () => {
+    it('threads only kept, resolved attachments into attachmentDocumentIds (forward include)', () => {
+      const req = mapStateToSendRequest(
+        stateWith([
+          att('a1', { documentId: 'doc-1', selected: true }),
+          att('a2', { documentId: 'doc-2', selected: true }),
+        ])
+      );
+      expect(req.attachmentDocumentIds).toEqual(['doc-1', 'doc-2']);
+    });
+
+    it('excludes deselected attachments (reply default exclude)', () => {
+      const req = mapStateToSendRequest(
+        stateWith([
+          att('a1', { documentId: 'doc-1', selected: false }),
+          att('a2', { documentId: 'doc-2', selected: true }),
+        ])
+      );
+      expect(req.attachmentDocumentIds).toEqual(['doc-2']);
+    });
+
+    it('excludes attachments without a resolved documentId (e.g. local picks)', () => {
+      const req = mapStateToSendRequest(stateWith([att('a1', { selected: true })]));
+      expect(req.attachmentDocumentIds).toEqual([]);
+    });
+
+    it('appends chosen document links to the HTML body (link path)', () => {
+      const req = mapStateToSendRequest(
+        stateWith(
+          [
+            att('a1', {
+              fileName: 'contract.pdf',
+              documentId: 'doc-1',
+              selected: false,
+              linkSelected: true,
+              linkUrl: 'https://x/doc-1',
+            }),
+          ],
+          {
+            body: '<p>See below.</p>',
+            bodyFormat: 'HTML',
+          }
+        )
+      );
+      expect(req.body).toContain('<p>See below.</p>');
+      expect(req.body).toContain('href="https://x/doc-1"');
+      expect(req.body).toContain('contract.pdf');
+      // link-only, not attach-file:
+      expect(req.attachmentDocumentIds).toEqual([]);
+    });
+  });
+
+  describe('buildBodyWithAttachmentLinks', () => {
+    it('returns the body unchanged when nothing is link-selected', () => {
+      expect(buildBodyWithAttachmentLinks('<p>x</p>', 'HTML', [att('a1', { linkUrl: 'https://x' })])).toBe('<p>x</p>');
+    });
+
+    it('skips link-selected items missing a linkUrl (best-effort)', () => {
+      const out = buildBodyWithAttachmentLinks('<p>x</p>', 'HTML', [att('a1', { linkSelected: true })]);
+      expect(out).toBe('<p>x</p>');
+    });
+
+    it('formats a plain-text link block', () => {
+      const out = buildBodyWithAttachmentLinks('Body', 'PlainText', [
+        att('a1', { fileName: 'a.pdf', linkSelected: true, linkUrl: 'https://x/a' }),
+      ]);
+      expect(out).toContain('Linked documents:');
+      expect(out).toContain('- a.pdf: https://x/a');
+    });
+
+    it('escapes HTML in the file name and URL', () => {
+      const out = buildBodyWithAttachmentLinks('', 'HTML', [
+        att('a1', { fileName: 'a&b.pdf', linkSelected: true, linkUrl: 'https://x/a?q=1&r=2' }),
+      ]);
+      expect(out).toContain('a&amp;b.pdf');
+      expect(out).toContain('q=1&amp;r=2');
+    });
   });
 });

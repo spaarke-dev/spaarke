@@ -11,9 +11,12 @@
 |-------|-------|
 | **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`3a74acc40`**, merged to **origin/master** (`9fda08501..3a74acc40`). Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed** | dev: `sprk_spaarkeai` code page (R5 client batch, 2026-07-20). BFF **unchanged** across R4 round-2 + R5. |
-| **Next Action** | **Shared-lib/code-page chunk** (multi-deploy): **R5-4** SprkChat composer layout · **R5-7** Create Event file leg (add `initialFileRefs` to `CreateEventWizard` + wire main.tsx — envelope already carries files) · **R5-8** Assign Work / Summarize / Find Similar file legs (registry + new session-bytes ingestion seams). Also awaiting owner repro: **R4-7 / R4-9**. Rule: `/worktree-sync` before any BFF deploy (none needed so far). |
+| **Git** | branch + `origin/branch` at **`7b9d249cf`**, merged to **origin/master**. Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
+| **Deployed** | dev: `sprk_spaarkeai` + `sprk_createeventwizard` + `sprk_createworkassignmentwizard` + `sprk_summarizefileswizard` + `sprk_findsimilar` (R5 round-2, 2026-07-20). BFF **unchanged** across R4 round-2 + all of R5. |
+| **Next Action** | All R5 items shipped except **R4-7 / R4-9** (await owner repro). Ready for owner's next UAT pass against [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) + [`notes/uat-feedback-2026-07-20-R5.md`](notes/uat-feedback-2026-07-20-R5.md). Rule: `/worktree-sync` before any BFF deploy (none has been needed). |
+
+### R5 round-2 shipped 2026-07-20 (shared-lib + wizard code-pages)
+R5-7 (Create Event) · R5-8 (Assign Work / Summarize / Find Similar) file legs · R5-4 (composer pills row). New shared `useHandoffFileLeg` hook (Matter/Event/Assign-Work/Summarize); Find Similar code-page-local single-doc variant. Registry → 7 entries. Commits e20d1cc7a / e498fc724 / 0a7d838bd / 7b9d249cf.
 
 ### R5 round-1 shipped 2026-07-20 (client-only, `sprk_spaarkeai`)
 R5-1 Revise-as-card · R5-2 spacing · R5-3 remove ? icon · R5-5 history restore+styling · R5-9 Email Compose modal. New seams: `localActionChips.reviseInCompose`, `useConsumerChips.getAppendedLocalChips`/`onCorrespondenceDraft`, `QuickStartModal.onSendEmail`, `ConversationPane` mounts `SendEmailDialog`. 127 tests pass. Full backlog: [`notes/uat-feedback-2026-07-20-R5.md`](notes/uat-feedback-2026-07-20-R5.md).
