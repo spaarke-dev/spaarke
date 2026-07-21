@@ -1,0 +1,68 @@
+<task id="112" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationConnections PCF — spacing, configurable title, OOB title styling, remove open-icon + matched-because, full-viewport modal, Done→Save footer (UAT R3 B)</title>
+    <phase>Wave 11 — UAT round 3 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>105</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Reworks a shipped PCF's modal layout + interaction (.tsx); PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 3 (`notes/UAT-ROUND3-FEEDBACK.md` section B) refinements to the `CommunicationConnections` PCF
+    (`src/client/pcf/CommunicationConnections/`). The W10 group-by-action UX (task 105) is correct; these are polish.
+    Eight items:
+
+    B11-1 — in the card/row, add spacing between the record NUMBER and the record NAME (currently cramped).
+    B11-2 — make the section/modal title a PCF PROPERTY (manifest), default "RELATED RECORDS".
+    B11-3 — render the title per the OOB spec in `docs/standards/UI-DESIGN-STANDARDS.md`: `fontSizeBase300` (14px) +
+      `fontWeightSemibold` (600) + `colorNeutralForeground1` (#242424) + 20px height + 4px vertical padding
+      (`spacingVerticalXS`). Tokens only (ADR-021), theme-correct.
+    B11-4 — remove the "open" icon on the last line item (owner unsure what it does; remove it).
+    B11-5 — remove the per-row "Matched because …/Matched by …" subtitle text (not needed).
+    B11-6 — the Connections MODAL content region must fill the FULL modal viewport (currently content only fills the
+      top; the modal has large empty space below). Make the surface use the full modal height (flex column, content
+      grows, footer pinned bottom).
+    B11-7 — change the "Done" button label to "Save" (keep the existing save-on-change write semantics).
+    B11-8 — move the Save button into the modal's bottom FOOTER (pinned footer bar), not inline in the content.
+
+    DATA CONTRACT UNCHANGED: keep reading `sprk_associationprovenance` + `sprk_associationstatus` and writing via the
+    existing task-042 additive typed-lookup path; only presentation/layout changes here.
+  </prompt>
+
+  <goal>
+    The Connections card spaces number/name; the title is a configurable property (default "RELATED RECORDS") in the
+    OOB token spec; the stray open-icon and the matched-because subtitles are gone; the modal content fills the full
+    viewport with a pinned bottom footer whose button reads "Save". Data contract + write semantics unchanged.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Record number and record name have visible spacing between them in the row/card.</criterion>
+    <criterion testable="true">A manifest property controls the modal/section title, default "RELATED RECORDS"; the title renders per the OOB spec (`fontSizeBase300`/`fontWeightSemibold`/`colorNeutralForeground1`/20px/4px tokens, no hardcoded literals), theme-correct.</criterion>
+    <criterion testable="true">The "open" icon on the last line item is removed; the "Matched because/by …" row subtitle is removed from all row types.</criterion>
+    <criterion testable="true">The modal content region fills the full modal height (flex column; content area grows to fill; footer pinned to the bottom) — no large empty gap below the content.</criterion>
+    <criterion testable="true">The primary action button reads "Save" (was "Done") and lives in the modal's pinned bottom footer; existing save-on-change write behavior is preserved (still writes only on real changes).</criterion>
+    <criterion testable="true">The provenance-read + task-042 regarding-write DATA CONTRACT is unchanged (presentation-only rework).</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest updated/green (title-prop default + any layout logic); version bump all 5 locations (1.3.0 → 1.4.0); solution ZIP repacked + validated (type-66, apostrophe-free). NOTE: this control's `Solution/pack.ps1` is already hardened to `$PSScriptRoot` — keep it that way.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Do NOT change the association DATA model, engine, or the task-042 write semantics (additive typed-lookup, never clear-and-set) — client presentation/layout only.</constraint>
+    <constraint>ADR-021 Fluent v9 tokens; ADR-022 platform libs; ADR-028 auth (`context.webAPI`, no PublicClientApplication).</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free; type-66 solution; follow /pcf-deploy. Stay within `src/client/pcf/CommunicationConnections/**`; do NOT modify @spaarke/ui-components (if you must, STOP and report).</constraint>
+  </constraints>
+
+  <notes>
+    Title spec home: `docs/standards/UI-DESIGN-STANDARDS.md`. The W10 rebuild (task 105) already grouped by action;
+    read `ConnectionsEditor.tsx` + `CommunicationConnectionsApp.tsx` first. Leave changes UNCOMMITTED; do NOT touch
+    TASK-INDEX/current-task/project CLAUDE.md. Deploy remainder (import) = owner.
+  </notes>
+</task>
