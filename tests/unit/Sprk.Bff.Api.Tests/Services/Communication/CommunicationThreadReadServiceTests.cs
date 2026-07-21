@@ -102,6 +102,40 @@ public class CommunicationThreadReadServiceTests
         result.Messages[0].Privilege.Should().Be(PrivilegePrivileged);
     }
 
+    // ─────────────────────────── thread-read: current DTO shape (task 001 characterization baseline) ───────
+
+    [Fact]
+    public async Task ReadThreadAsync_SingleThreadRead_NameIsAlwaysNull()
+    {
+        // Pre-Phase-1 baseline (task 001 / plan Phase 1 gate): the R1 per-thread read is placed directly on the
+        // thread form, which already displays the thread's name via the host record header — so
+        // ThreadReadResult.Name is deliberately left null here (see the type's doc comment). Only the
+        // by-regarding read (ReadByRegardingAsync) populates Name, for the record-level grouped view. Pinning
+        // this BEFORE any FR-16..19 edit so a future change to this contract surfaces as a reviewable diff.
+        SetupMessages(MessageRow(Guid.NewGuid(), body: "hi"));
+        SetupAttachments();
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        result.Name.Should().BeNull();
+    }
+
+    [Fact]
+    public void ThreadMessageDto_CurrentShape_ExposesFromWithNoDirectionOrSenderIdentityField()
+    {
+        // Characterization baseline (task 001, pre-FR-16..19): the CURRENT R1 wire shape carries a raw `From`
+        // string and NO direction / sender-identity field (no "Direction", "IsInbound"/"IsOutbound", or
+        // "SenderId"/"SenderIdentity" property). This is the pre-change DTO contract FR-18/19 are expected to
+        // extend; when they do, this test's expected-property assertions are the reviewable diff the baseline
+        // exists to surface (plan Phase 1 gate / spec NFR-08).
+        var propertyNames = typeof(ThreadMessageDto).GetProperties().Select(p => p.Name).ToList();
+
+        propertyNames.Should().Contain("From");
+        propertyNames.Should().NotContain(
+            new[] { "Direction", "IsInbound", "IsOutbound", "SenderId", "SenderIdentity" },
+            "the current (pre-Phase-1) DTO carries no direction/sender-identity field");
+    }
+
     // ─────────────────────────── thread-read: no-leak (private via impersonation) ───────────────────────────
 
     [Fact]

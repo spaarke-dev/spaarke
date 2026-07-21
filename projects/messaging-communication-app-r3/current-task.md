@@ -10,19 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none - project just initialized |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Run task-execute on Phase 1 task 001 (backend read/thread spine). See `tasks/TASK-INDEX.md`. |
+| **Task** | 002 — FR-18 enrich single-thread read DTO (Direction + sender identity + Name) |
+| **Step** | not-started (Wave 2) |
+| **Status** | not-started |
+| **Next Action** | `work on task 002` — serial (edits shared `CommunicationThreadReadService.cs`; `/conflict-check` before the BFF PR). Deps 001 ✅. |
 
-### Files Modified This Session
-- `projects/messaging-communication-app-r3/README.md` - Created - project overview
-- `projects/messaging-communication-app-r3/plan.md` - Created - phases + WBS
-- `projects/messaging-communication-app-r3/CLAUDE.md` - Created - AI context
-- `projects/messaging-communication-app-r3/current-task.md` - Created - this file
+### Files Modified This Session (Wave 1 — completed)
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceEmailSendThreadTests.cs` - Created (2 email-send baseline tests) - task 001
+- `docs/data-model/sprk_communication.md` - Modified (Message=100000004 + 6 R1 columns) - task 006
+- `projects/messaging-communication-app-r3/notes/task-001-notes.md`, `task-006-notes.md` - baseline + verification trails
 
 ### Critical Context
-Project initialized via `/project-pipeline` on 2026-07-20 (merged origin/master, build green). No task started yet. Phase 1 (backend `Services/Communication/` spine) is the foundation and must precede all UI phases; its shared-file edits are `parallel-safe:false`.
+Wave 1 (001 characterize + 006 doc-drift) complete + gates passed 2026-07-20. **001 baseline pins pre-change behavior that FR-16/17/18/19 will intentionally flip** — some of those tests are DESIGNED to break when 002–005 land (that's the characterization intent, confirmed by mutation-testing). Phase 1 backend (002–005) edits shared `Services/Communication/` and is serial (`parallel-safe:false`); `/conflict-check` before each BFF PR. Pre-existing HIGH CVE `System.Security.Cryptography.Xml 8.0.3` noted (NOT introduced by R3).
 
 ---
 

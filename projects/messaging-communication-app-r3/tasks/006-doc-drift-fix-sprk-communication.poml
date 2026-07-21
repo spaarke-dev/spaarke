@@ -4,7 +4,7 @@
     <title>Doc-drift fix: sprk_communication.md missing Message=100000004 + R1 messaging columns</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation-only correction of a data-model reference file to match shipped code (the CommunicationType enum + R1 messaging columns). No source, no tests, no runtime surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

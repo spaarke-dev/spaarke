@@ -4,7 +4,7 @@
     <title>Characterize existing Communication read + send paths (baseline tests)</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Adds characterization tests only — no production `.cs`/`.ts` edits. Locks the pre-change behavior of the shared Services/Communication read + send paths before the correctness-critical Phase-1 edits (002-005) touch them.</rigor-reason>
     <model-tier>sonnet</model-tier>
