@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -12,28 +14,34 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
 /// <summary>
-/// Task-001 characterization baseline (plan Phase 1 gate / spec NFR-08) for the OUTBOUND EMAIL send path's
-/// thread resolution (<c>ResolveOutboundThreadAsync</c>, task 040 / FR-06), authored BEFORE any Phase-1
-/// (FR-16..19) edit. Pins the CURRENT, load-bearing contract that <see cref="CommunicationServiceMessageSendTests"/>
-/// already pins for the sibling Message channel: unlike the Message send path's explicit-target branch
-/// (<c>ResolveOutboundMessageThreadAsync</c> / <c>AssignExplicitThreadAsync</c>, task 062 / FR-12), the EMAIL
-/// path's <c>ResolveOutboundThreadAsync</c> does NOT branch on <see cref="SendCommunicationRequest.ThreadId"/> at
-/// all — it ALWAYS runs the find-or-create <see cref="IThreadResolver"/> ladder, regardless of whether
-/// <c>ThreadId</c> is supplied. This is documented on the field itself ("Ignored for Email sends") and is the
-/// PRE-FR-19 behavior the FR-19 task will deliberately change — this baseline makes that change a reviewable,
-/// intentional diff rather than a silent regression.
+/// Behavior of the OUTBOUND EMAIL send path's thread resolution (<c>ResolveOutboundThreadAsync</c>,
+/// task 040 / FR-06) AFTER FR-19 (task 005). FR-19 brings the email branch to parity with the sibling Message
+/// channel (<see cref="CommunicationServiceMessageSendTests"/>): when <see cref="SendCommunicationRequest.ThreadId"/>
+/// is supplied ("respond into the current thread"), the email's <c>sprk_communicationthread</c> is stamped DIRECTLY
+/// to that thread via the SAME <c>AssignExplicitThreadAsync</c> helper the Message path uses (no new send/assignment
+/// path — ADR-045), bypassing the find-or-create <see cref="IThreadResolver"/> ladder. When <c>ThreadId</c> is
+/// absent, the pre-FR-19 find-or-create behavior is preserved byte-for-byte (regression guard). Both paths are
+/// best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail an already-sent + persisted email.
+///
+/// <para>This file supersedes the task-001 PRE-FR-19 characterization baseline (which pinned the now-flipped
+/// "email silently ignores ThreadId" contract); the FR-19 flip is the reviewable, intentional diff task 001
+/// was authored to surface.</para>
+///
+/// <para>Both email call sites route through the identical private <c>ResolveOutboundThreadAsync</c>: the
+/// shared-mailbox branch (<c>SendAsync</c>) and the OBO branch (<c>SendAsUserAsync</c>, <c>SendMode.User</c>).
+/// Both are covered below.</para>
 ///
 /// <para><b>Boundary doubles only (ADR-038):</b> a hand-written <see cref="ICommunicationChannelSender"/> recording
-/// double (mirrors <c>RecordingMessagingSender</c> in <see cref="CommunicationServiceMessageSendTests"/> — a
-/// module-boundary test double, NOT <c>Mock&lt;HttpMessageHandler&gt;</c>) stands in for the Graph transmit;
-/// <see cref="IGenericEntityService"/> (the Dataverse persist boundary) and <see cref="IThreadResolver"/> (the
-/// task-040 ladder) are mocked. Everything else — <see cref="CommunicationService"/>, the REAL
-/// <see cref="CommunicationChannelDispatcher"/>, the REAL <see cref="ApprovedSenderValidator"/> — is production
-/// code, unmocked.</para>
+/// double (mirrors <c>RecordingMessagingSender</c> — a module-boundary test double, NOT <c>Mock&lt;HttpMessageHandler&gt;</c>)
+/// stands in for the Graph transmit; <see cref="IGenericEntityService"/> (the Dataverse persist boundary) and
+/// <see cref="IThreadResolver"/> (the task-040 ladder) are mocked. Everything else — <see cref="CommunicationService"/>,
+/// the REAL <see cref="CommunicationChannelDispatcher"/>, the REAL <see cref="ApprovedSenderValidator"/> — is
+/// production code, unmocked.</para>
 /// </summary>
 public class CommunicationServiceEmailSendThreadTests
 {
     private const string SenderEmail = "noreply@contoso.com";
+    private const string UserEmail = "user@contoso.com";
     private const string ProviderMessageId = "AAMkAGI2-test-internet-message-id@example.com";
 
     /// <summary>Recording email sender — captures the request; returns a canned provider message id (email has
@@ -107,6 +115,18 @@ public class CommunicationServiceEmailSendThreadTests
         CommunicationType = CommunicationType.Email,
     };
 
+    /// <summary>Authenticated OBO context carrying the email + oid claims <c>SendAsUserAsync</c> reads.</summary>
+    private static HttpContext AuthenticatedUserContext()
+    {
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim("preferred_username", UserEmail),
+            new Claim("oid", "55555555-5555-5555-5555-555555555555"),
+            new Claim("name", "User One"),
+        }, authenticationType: "test");
+        return new DefaultHttpContext { User = new ClaimsPrincipal(identity) };
+    }
+
     private static Mock<IGenericEntityService> EntityServiceCreating()
     {
         var entity = new Mock<IGenericEntityService>();
@@ -118,7 +138,8 @@ public class CommunicationServiceEmailSendThreadTests
         return entity;
     }
 
-    // ── baseline (a): no ThreadId ⇒ the find-or-create resolver runs (unchanged expectation) ──
+    // ── (b regression) no ThreadId ⇒ the find-or-create resolver runs and there is NO direct thread stamp
+    //    (pre-FR-19 behavior preserved byte-for-byte) ──
     [Fact]
     public async Task SendAsync_ForEmailType_WithNoThreadId_UsesFindOrCreateThreadResolver()
     {
@@ -138,8 +159,7 @@ public class CommunicationServiceEmailSendThreadTests
                 It.Is<ThreadResolutionRequest>(req => req.Direction == CommunicationDirection.Outgoing),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        // The email path has no explicit-target stamp branch at all (unlike Message) — never an UpdateAsync
-        // that sets sprk_communicationthread directly.
+        // Without ThreadId the explicit-target branch is not taken — never a direct sprk_communicationthread stamp.
         entity.Verify(
             s => s.UpdateAsync(
                 "sprk_communication", It.IsAny<Guid>(),
@@ -148,19 +168,26 @@ public class CommunicationServiceEmailSendThreadTests
             Times.Never);
     }
 
-    // ── baseline (b) — THE load-bearing pre-FR-19 pin: WithThreadId STILL uses find-or-create; ThreadId is
-    //    currently silently ignored on the email path (see SendCommunicationRequest.ThreadId doc comment:
-    //    "Ignored for Email sends"). Mirrors CommunicationServiceMessageSendTests' explicit-target coverage for
-    //    the Message channel, which behaves DIFFERENTLY (stamps directly via AssignExplicitThreadAsync). ──
+    // ── (a) FR-19 explicit target — shared-mailbox call site: WithThreadId stamps sprk_communicationthread
+    //    DIRECTLY to T and NEVER calls the find-or-create resolver (parity with the Message channel) ──
     [Fact]
-    public async Task SendAsync_ForEmailType_WithThreadId_StillUsesFindOrCreateResolver_ThreadIdCurrentlyIgnored()
+    public async Task SendAsync_ForEmailType_WithThreadId_StampsThreadLookupDirectly_NoFindOrCreate()
     {
         var explicitThreadId = Guid.NewGuid();
         var entity = EntityServiceCreating();
-        var threadResolver = new Mock<IThreadResolver>();
-        threadResolver
-            .Setup(r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+        Guid? updatedCommunicationId = null;
+        Dictionary<string, object>? updatedFields = null;
+        entity.Setup(s => s.UpdateAsync(
+                "sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, fields, _) =>
+            {
+                updatedCommunicationId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        // Strict: the explicit-target branch must bypass find-or-create entirely (any resolver call fails the test).
+        var threadResolver = new Mock<IThreadResolver>(MockBehavior.Strict);
 
         var sut = BuildOutboundEmailSut(new RecordingEmailSender(), entity.Object, threadResolver.Object);
 
@@ -168,22 +195,66 @@ public class CommunicationServiceEmailSendThreadTests
         var response = await sut.SendAsync(request, httpContext: null, CancellationToken.None);
 
         response.CommunicationId.Should().NotBeNull();
+        updatedFields.Should().NotBeNull();
+        updatedFields!["sprk_communicationthread"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(explicitThreadId);
+        updatedCommunicationId.Should().Be(response.CommunicationId);
 
-        // PRE-FR-19 BASELINE: ResolveOutboundThreadAsync (email) never reads request.ThreadId — the
-        // find-or-create resolver runs exactly as it would with no ThreadId supplied at all.
-        threadResolver.Verify(
-            r => r.ResolveAndAssignThreadAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "the email path currently has no explicit-target branch — it always runs the find-or-create ladder");
+        threadResolver.Invocations.Should().BeEmpty(); // find-or-create resolver never called
+    }
 
-        // No direct sprk_communicationthread stamp — the explicit-target path (AssignExplicitThreadAsync) is
-        // Message-channel-only today; email's ThreadId value is accepted on the wire but has no effect.
-        entity.Verify(
-            s => s.UpdateAsync(
+    // ── (both call sites) FR-19 explicit target — OBO (SendMode.User) call site routes through the SAME
+    //    ResolveOutboundThreadAsync, so it also stamps the explicit thread directly ──
+    [Fact]
+    public async Task SendAsUser_ForEmailType_WithThreadId_StampsThreadLookupDirectly_NoFindOrCreate()
+    {
+        var explicitThreadId = Guid.NewGuid();
+        var entity = EntityServiceCreating();
+        Dictionary<string, object>? updatedFields = null;
+        entity.Setup(s => s.UpdateAsync(
+                "sprk_communication", It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) => updatedFields = fields)
+            .Returns(Task.CompletedTask);
+
+        var threadResolver = new Mock<IThreadResolver>(MockBehavior.Strict);
+
+        var sut = BuildOutboundEmailSut(new RecordingEmailSender(), entity.Object, threadResolver.Object);
+
+        var request = EmailRequest() with { SendMode = SendMode.User, ThreadId = explicitThreadId };
+        var response = await sut.SendAsync(request, AuthenticatedUserContext(), CancellationToken.None);
+
+        response.CommunicationId.Should().NotBeNull();
+        updatedFields.Should().NotBeNull();
+        updatedFields!["sprk_communicationthread"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(explicitThreadId);
+
+        threadResolver.Invocations.Should().BeEmpty(); // OBO call site also bypasses find-or-create
+    }
+
+    // ── (c) best-effort / non-fatal (NFR-02): a thread-stamp write failure does NOT fail the already-sent +
+    //    persisted email ──
+    [Fact]
+    public async Task SendAsync_ForEmailType_WithThreadId_WhenStampWriteFails_StillSucceeds()
+    {
+        var explicitThreadId = Guid.NewGuid();
+        var entity = new Mock<IGenericEntityService>();
+        entity.Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+        entity.Setup(s => s.UpdateAsync(
                 "sprk_communication", It.IsAny<Guid>(),
                 It.Is<Dictionary<string, object>>(f => f.ContainsKey("sprk_communicationthread")),
-                It.IsAny<CancellationToken>()),
-            Times.Never,
-            "email currently has no explicit-target stamp path — request.ThreadId is silently ignored (pre-FR-19)");
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("thread stamp boom"));
+
+        var threadResolver = new Mock<IThreadResolver>(MockBehavior.Strict);
+
+        var sut = BuildOutboundEmailSut(new RecordingEmailSender(), entity.Object, threadResolver.Object);
+
+        var request = EmailRequest() with { ThreadId = explicitThreadId };
+        var response = await sut.SendAsync(request, httpContext: null, CancellationToken.None);
+
+        // Send + persist succeeded despite the thread-stamp failure (best-effort swallowed inside AssignExplicitThreadAsync).
+        response.CommunicationId.Should().NotBeNull();
+        threadResolver.Invocations.Should().BeEmpty(); // explicit branch was taken; find-or-create still bypassed
     }
 }

@@ -4,7 +4,7 @@
     <title>FR-19: honor ThreadId on the email send branch (pin email to the active thread)</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>after:001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits the shared `CommunicationService` outbound send path; must add explicit-thread pinning to the email branch WITHOUT altering the default (no-ThreadId) find-or-create behavior (regression-sensitive). Tags include bff-api. FULL gate.</rigor-reason>
     <model-tier>opus</model-tier>

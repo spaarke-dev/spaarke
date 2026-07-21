@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 005 — FR-19 honor `ThreadId` on the email send branch |
-| **Step** | not-started (Wave 5 — last Phase 1 task) |
+| **Task** | Phase 1 COMPLETE ✅ — next: Phase 2 (Wave 6: 010 characterize conversation core) |
+| **Step** | — |
 | **Status** | not-started |
-| **Next Action** | `work on task 005` — serial, **opus**, edits shared `CommunicationService.cs` send path (mirror message branch `AssignExplicitThreadAsync`; no 6th send path, ADR-045). Deps 001 ✅. `/conflict-check` before the BFF PR. Completes Phase 1 backend spine. |
+| **Next Action** | `work on task 010` (characterize `CommunicationTimeline` + `SendEmailDialog`), then Wave 7 (011+012 **parallel** — first real parallel wave). Phase 2 is client/React (Fluent v9); no shared-backend serialization. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001
