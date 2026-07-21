@@ -30,7 +30,7 @@
 | 031 | Deploy BFF + verify publish size & CVE | 2 | STANDARD | sonnet/high | 030 | ✗ (deploy gate) | ✅ |
 | 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | ✅ |
 | 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔄 (repo done; owner site-teardown pending) |
-| 042 | Rewrite external-access architecture + guides | 3 | MINIMAL | sonnet/high | 040 | ✓ Group C | 🔲 |
+| 042 | Rewrite external-access architecture + guides | 3 | MINIMAL | sonnet/high | 040 | ✓ Group C | ✅ |
 | 090 | Project wrap-up | 3 | FULL | sonnet/high | 040,041,042 | ✗ (final gate) | 🔲 |
 
 ## Dependency graph (critical path)

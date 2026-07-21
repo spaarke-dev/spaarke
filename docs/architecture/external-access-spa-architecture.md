@@ -1,22 +1,24 @@
 # External Access SPA Architecture
 
-> **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Updated**: July 20, 2026
+> **Last Reviewed**: 2026-07-20
+> **Reviewed By**: spaarke-SPA-external-access-platform-r1 (task 042 — rewrite to the shipped SWA + CIAM platform)
 > **Status**: Current
-> **Purpose**: Architecture of the Secure Project Workspace — a React 18 SPA for external stakeholders hosted on Power Pages
+> **Purpose**: Architecture of the Secure Project Workspace — a React 18 SPA for external stakeholders hosted on Azure Static Web Apps and authenticated with Microsoft Entra External ID (CIAM)
 
 ---
 
 ## Overview
 
-The External Access SPA is a React 18 single-page application hosted on Power Pages that gives external stakeholders — law firm attorneys, clients, and advisers — a secure workspace for accessing Secure Projects. It is the external-facing complement to the internal Corporate Workspace (LegalWorkspace).
+The External Access SPA is a React 18 single-page application that gives external stakeholders — law firm attorneys, clients, and advisers — a secure workspace for accessing Secure Projects. It is the external-facing complement to the internal Corporate Workspace (LegalWorkspace).
 
-External users are **Azure AD B2B guests** in the main Spaarke workforce tenant. They authenticate with their existing Microsoft 365 credentials (SSO) via MSAL authorization code + PKCE and receive access tokens scoped to the BFF API. The SPA calls the BFF (`Sprk.Bff.Api`) for all data and business logic — there is no direct access to Dataverse from the browser.
+The SPA is hosted on **Azure Static Web Apps (SWA)**. External users are **local accounts in a dedicated Microsoft Entra External ID (CIAM) tenant** (`spaarkeextid`) — **not** Entra B2B guests in the Spaarke workforce tenant. They authenticate against the CIAM authority (`*.ciamlogin.com`) via MSAL authorization code + PKCE and receive access tokens scoped to the BFF API. The SPA calls the BFF (`Sprk.Bff.Api`) for all data and business logic — there is no direct access to Dataverse or SharePoint Embedded from the browser.
 
-The SPA source lives at `src/client/external-spa/`. It is built with Vite, inlined into a single HTML file via `vite-plugin-singlefile`, and deployed as a Dataverse web resource (`sprk_externalworkspace`).
+The external portal is a **pure BFF broker** (ADR-028 Amendment A1): the external user's token authenticates **only** to the BFF and is never exchanged for a downstream Graph/SPE/Dataverse token — there is **no OBO on the external path**. All external-surface SPE and Dataverse access is **app-only / managed identity**. Consequently, **no workforce Entra B2B guest is ever created** for an external user.
 
-> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)**: This SPA intentionally uses MSAL directly with `sessionStorage` rather than `@spaarke/auth` with `localStorage` (the internal v2 contract). Rationale: external B2B guest threat model differs from internal users (kiosk-shared devices possible, shorter session expectations, separate consent flow). Do NOT migrate this SPA to `@spaarke/auth`. Do NOT replicate this `sessionStorage` + direct-MSAL pattern in internal Spaarke surfaces.
+The SPA source lives at `src/client/external-spa/`. It is built with Vite and deployed as a static site to SWA (multi-file `dist/`, clean-URL routing), replacing the retired Power Pages web-resource (`sprk_externalworkspace`, historical).
+
+> **Documented exception to [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)**: This SPA intentionally uses MSAL directly with `sessionStorage` rather than `@spaarke/auth` with `localStorage` (the internal v2 contract). Rationale: the external threat model differs from internal users (shared/kiosk devices possible, shorter session expectations, a separate CIAM identity). Do NOT migrate this SPA to `@spaarke/auth`. Do NOT replicate this `sessionStorage` + direct-MSAL pattern in internal Spaarke surfaces.
 
 ---
 
@@ -25,45 +27,73 @@ The SPA source lives at `src/client/external-spa/`. It is built with Vite, inlin
 | Component | Path | Responsibility |
 |-----------|------|---------------|
 | Entry point | `src/client/external-spa/src/main.tsx` | MSAL initialization, React 18 `createRoot`, `MsalProvider` wrapping |
-| Root shell | `src/client/external-spa/src/App.tsx` | `FluentProvider` (v9 with dark mode), `HashRouter`, `AuthGuard`, routes |
+| Root shell | `src/client/external-spa/src/App.tsx` | `FluentProvider` (v9 with light/dark cascade), **`BrowserRouter`**, `AuthGuard`, routes, in-app 404 view |
 | Home page | `src/client/external-spa/src/pages/WorkspaceHomePage.tsx` | Project list with access levels via `useExternalContext()` |
-| Project page | `src/client/external-spa/src/pages/ProjectPage.tsx` | Tabbed project view (Documents, Events, Tasks, Contacts) |
-| MSAL config | `src/client/external-spa/src/auth/msal-config.ts` | `PublicClientApplication` instance, tenant/client IDs, sessionStorage cache |
+| Project page | `src/client/external-spa/src/pages/ProjectPage.tsx` | Tabbed project view (Documents, To-dos, Contacts) |
+| MSAL config | `src/client/external-spa/src/auth/msal-config.ts` | `PublicClientApplication` instance, CIAM authority + `knownAuthorities`, `sessionStorage` cache |
 | BFF client | `src/client/external-spa/src/auth/bff-client.ts` | `bffApiCall()` with Bearer token attachment |
-| Auth guard | `src/client/external-spa/src/components/AuthGuard.tsx` | Redirects unauthenticated users via MSAL |
-| Config | `src/client/external-spa/src/config.ts` | `BFF_API_URL`, `MSAL_CLIENT_ID`, `MSAL_BFF_SCOPE` |
+| Auth guard | `src/client/external-spa/src/components/AuthGuard.tsx` | Redirects unauthenticated users to CIAM login via MSAL |
+| Config | `src/client/external-spa/src/config.ts` | `BFF_API_URL`, `MSAL_CLIENT_ID`, `MSAL_AUTHORITY`, `MSAL_TENANT_ID`, `MSAL_BFF_SCOPE` (all env-injected) |
+| SWA runtime config | `src/client/external-spa/staticwebapp.config.json` | `navigationFallback` rewrite + `globalHeaders` (CSP/Referrer/nosniff) |
 
 ---
 
 ## Data Flow
 
-1. Browser loads SPA from Power Pages (serves the inlined HTML/JS bundle)
-2. `main.tsx` calls `msalInstance.initialize()` — processes any in-flight auth code redirect response
-3. `AuthGuard` checks MSAL `accounts[]` — triggers redirect to Entra B2B login if empty
-4. After login, MSAL stores tokens in `sessionStorage` (per-tab isolation)
-5. `WorkspaceHomePage` mounts — `useExternalContext()` calls `GET /api/v1/external/me`
-6. `acquireBffToken()` uses `acquireTokenSilent()` with redirect fallback on `InteractionRequiredAuthError`
-7. BFF `ExternalCallerAuthorizationFilter` validates JWT, resolves Dataverse Contact by `preferred_username` claim, loads project participations from Redis (60s TTL, Dataverse fallback)
-8. Response includes `contactId`, `email`, and `projects[]` with access levels
-9. User navigates to project — `ProjectPage` loads documents, events, contacts via BFF
-10. All data routes through BFF API — no direct `/_api/` calls to Dataverse
+1. Browser loads the SPA from the SWA origin (`green-dune-0c4f1221e.7.azurestaticapps.net`). Deep links resolve because SWA `navigationFallback` rewrites unmatched routes to `/index.html`.
+2. `main.tsx` calls `msalInstance.initialize()` — processes any in-flight auth code redirect response.
+3. `AuthGuard` checks MSAL `accounts[]` — triggers redirect to the CIAM login if empty. The intended deep-link route is captured (per-tab `sessionStorage`) before the redirect and restored after auth (with an open-redirect guard restoring only in-app relative paths).
+4. After login, MSAL stores tokens in `sessionStorage` (per-tab isolation).
+5. `WorkspaceHomePage` mounts — `useExternalContext()` calls `GET /api/v1/external/me`.
+6. `acquireBffToken()` uses `acquireTokenSilent()` with redirect fallback on `InteractionRequiredAuthError`.
+7. The BFF validates the CIAM JWT via its `Ciam` scheme, then `ExternalCallerAuthorizationFilter` resolves the Dataverse Contact by the stable CIAM `oid` claim (`Contact.sprk_externalobjectid`) and loads project participations from Redis (60s TTL, Dataverse fallback).
+8. The `/me` response includes `contactId`, `email`, and `projects[]` with access levels (`ViewOnly`/`Collaborate`/`FullAccess`).
+9. User navigates to a project — `ProjectPage` loads documents, to-dos, contacts, and organizations via the BFF.
+10. All data routes through the BFF API — no direct calls to Dataverse or SPE from the browser.
 
 ---
 
-## Identity Model: Entra B2B
+## Identity Model: Microsoft Entra External ID (CIAM)
 
-External users are **Azure AD B2B guest accounts** in the main Spaarke workforce tenant (`a221a95e-6abc-4434-aecc-e48338a1b2f2`). They authenticate with their existing Microsoft 365 credentials — no new account creation, SSO if already signed in.
+External users are **local accounts in a dedicated Entra External ID (CIAM) tenant**, distinct from the Spaarke workforce tenant. This model **supersedes the retired Entra B2B guest model** (ADR-028 Amendment A1).
 
-**Auth flow**: Authorization code + PKCE — tokens stored in `sessionStorage` — every BFF call attaches Bearer token — `ExternalCallerAuthorizationFilter` resolves Contact by email — loads project participations from Redis (60s TTL, falls back to Dataverse `sprk_externalrecordaccess`).
+| Item | Value |
+|------|-------|
+| CIAM external tenant | `spaarkeextid` (`spaarkeextid.onmicrosoft.com`) |
+| CIAM tenant ID | `7052feba-bfc4-43e0-b09e-65014b429131` |
+| CIAM authority (host) | `spaarkeextid.ciamlogin.com` (declared in MSAL `knownAuthorities` — a non-default authority) |
+| SPA MSAL authority | `https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131` |
+| BFF issuer validated | `https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131/v2.0` |
+| Auth flow | Authorization code + PKCE |
 
-**App registrations**:
+**App registrations (in the CIAM tenant):**
 
 | App | Purpose | App ID |
 |-----|---------|--------|
-| `spaarke-external-access-SPA` | SPA client (public, PKCE) | `f306885a-8251-492c-8d3e-34d7b476ffd0` |
-| `SDAP-BFF-SPE-API` | BFF API resource | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
+| External SPA public client | SPA client (public, PKCE) | `bd57e54e-b339-4500-b55c-e451009fd907` |
+| BFF API | Protected web API (scope `SDAP.Access`) | `4a4d5126-91b0-4865-8e3a-134b7209013e` |
+| CIAM Graph provisioner | App-only user provisioning (`User.ReadWrite.All`) | `e63e6eb1-be25-4214-80a8-a6d609034bb9` |
 
-**Limitation**: External users without Microsoft accounts cannot authenticate. Non-Microsoft users would require a B2C configuration.
+The BFF API app exposes App ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e` with scope `SDAP.Access`. It sets `requestedAccessTokenVersion: 2`, so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`), which the BFF validates as `Ciam:Audience`.
+
+**Contact resolution by stable `oid`**: `ExternalCallerAuthorizationFilter` resolves the CIAM caller to a Dataverse Contact by the immutable `oid` claim, stored on `Contact.sprk_externalobjectid` (String/100). Email (`preferred_username` / `upn` / `email`) is a **first-login fallback only** — it then binds the `oid` onto the Contact. Once an `oid` is bound, a mismatched email neither redirects resolution nor grants access. A token carrying neither `oid` nor a usable email is rejected (401).
+
+**Broker-only invariant**: The external user's token is used only to authenticate to the BFF and is never exchanged downstream (no OBO on the external path). All external SPE + Dataverse reads are app-only / managed identity, and no per-external-user workforce B2B guest is provisioned.
+
+---
+
+## BFF Authentication Schemes (additive)
+
+The BFF runs **two** JWT bearer schemes side by side (`Infrastructure/DI/AuthorizationModule.cs`):
+
+| Scheme | Tenant / authority | Applies to |
+|--------|--------------------|-----------|
+| Workforce default (`AddMicrosoftIdentityWebApi`) | Workforce Entra tenant | Internal surfaces, incl. the `/api/v1/external-access` management group |
+| `Ciam` (`AuthSchemes.Ciam`) | Entra External ID (`*.ciamlogin.com`) | The `/api/v1/external` group only, pinned via the named policy `AuthPolicies.CiamExternal` |
+
+The `Ciam` scheme is **additive** — it is appended to the existing workforce authentication builder (no third `AddAuthentication`), so the workforce default scheme is preserved for internal surfaces. The `AuthPolicies.CiamExternal` policy pins `AuthenticationSchemes = ["Ciam"]` + `RequireAuthenticatedUser` on the external route group, so a workforce token is rejected on `/api/v1/external/*` and a CIAM token is rejected on the workforce-default `/api/v1/external-access/*`. The default-scheme `PostConfigure<JwtBearerOptions>` audience-merge does **not** apply to the `Ciam` named options.
+
+Cross-tenant provisioning uses `CiamGraphClientFactory` — an app-only MSAL confidential client built `WithCertificate` (Key Vault cert `ciam-graph-provisioner-cert` in `spaarke-spekvcert`, loaded by name, never a plaintext secret) `WithAuthority(ciamAuthority)` + `AcquireTokenForClient`. It is modeled on `SpeAdminTokenProvider.GetOrCreateMsalApp` per ADR-010 (reuse the established cross-tenant pattern).
 
 ---
 
@@ -71,55 +101,87 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 
 | Plane | What It Controls | Who Manages It |
 |-------|-----------------|----------------|
-| **Plane 1 — Power Pages** | Dataverse record access via parent-chain table permissions | Automatic (cascades from participation record) |
-| **Plane 2 — SPE Files** | SharePoint Embedded container membership | BFF-managed via Graph API on grant/revoke |
-| **Plane 3 — AI Search** | Azure AI Search query scope | BFF constructs `search.in` filter at query time from active participations |
+| **Plane 1 — Dataverse records** | Project + child record access via `sprk_externalrecordaccess` participation | BFF (app-only) — the auth filter resolves participations per request |
+| **Plane 2 — SPE Files** | SharePoint Embedded document content | BFF-brokered **app-only** streaming (no external identity reaches SPE; no synthetic container membership written) |
+| **Plane 3 — AI Search** | Azure AI Search query scope | BFF constructs the query filter at query time from active participations |
 
-**Parent-chain model** (Plane 1): Creating one `sprk_externalrecordaccess` record + assigning the web role grants the contact access to the parent project and all child records (documents, events) automatically. Revoking = deactivating that record. No per-record grants needed.
+**Participation model** (Plane 1): a single active `sprk_externalrecordaccess` record (grantee = the **Contact** person) grants the Contact access to the parent project and its child records. Revoking = deactivating that record.
 
-**Access level enforcement**: Access level (`ViewOnly`, `Collaborate`, `FullAccess`) is embedded in the `/me` response. Client-side capability flags (`canUpload`, `canDownload`, etc.) are UX-only. Actual enforcement is server-side in the BFF via `ExternalCallerAuthorizationFilter` and per-endpoint access checks.
+**Access level enforcement**: The access level (`ViewOnly` = `100000000`, `Collaborate` = `100000001`, `FullAccess` = `100000002`) is embedded in the `/me` response. Client-side capability flags are UX-only. Actual enforcement is server-side in the BFF via `ExternalCallerAuthorizationFilter` and per-endpoint checks (`ExternalCallerContext.HasProjectAccess` / `GetEffectiveRights`). Effective rights: ViewOnly → Read; Collaborate → Read + Create + Write; FullAccess → Read + Create + Write + Delete.
+
+The Redis participation cache (ADR-009, 60s TTL) is invalidated on grant so a new grant is immediately visible.
 
 ---
 
-## BFF Data Endpoints
+## BFF Data Endpoints (`/api/v1/external` — `CiamExternal` policy + `ExternalCallerAuthorizationFilter`)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/external/me` | User context — contactId, email, project access list |
+| `GET` | `/api/v1/external/me` | User context — `contactId`, `email`, project access list |
 | `GET` | `/api/v1/external/projects` | All projects the caller has access to |
 | `GET` | `/api/v1/external/projects/{id}` | Single project record |
-| `GET` | `/api/v1/external/projects/{id}/documents` | Project documents |
-| `GET` | `/api/v1/external/projects/{id}/events` | Project events |
+| `GET` | `/api/v1/external/projects/{id}/documents` | Project documents (metadata) |
+| `GET` | `/api/v1/external/projects/{id}/documents/{documentId}/content` | **Download** document bytes (authz-before-stream, app-only) |
+| `GET` | `/api/v1/external/projects/{id}/todos` | Project to-dos (`sprk_todo`, regarding = project) |
+| `POST` | `/api/v1/external/projects/{id}/todos` | Create a to-do (requires ≥ Collaborate) |
 | `GET` | `/api/v1/external/projects/{id}/contacts` | Project participants |
-| `POST` | `/api/v1/external/projects/{id}/events` | Create event |
-| `PATCH` | `/api/v1/external/events/{id}` | Update event |
+| `GET` | `/api/v1/external/projects/{id}/organizations` | Organizations linked to project contacts |
+| `PATCH` | `/api/v1/external/todos/{id}` | Update a to-do |
 
-**Management endpoints** (internal Corporate Workspace, not the external SPA):
+> **Note**: The to-do routes replaced the former event-based routes (`smart-todo-decoupling-r3`, FR-29). The SPA consumes `sprk_todo`, not `sprk_event`.
+
+**Management endpoints** (internal Corporate Workspace, workforce default scheme — `/api/v1/external-access`):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/external-access/grant` | Grant contact access to project |
-| `POST` | `/api/v1/external-access/revoke` | Revoke contact access |
-| `POST` | `/api/v1/external-access/invite` | Invite new external user |
-| `POST` | `/api/v1/external-access/provision-project` | Provision SPE + infrastructure |
+| `POST` | `/api/v1/external-access/invite-and-grant` | Core-user "Invite to Secure Workspace" — idempotent CIAM onboard **+** grant in one action |
+| `POST` | `/api/v1/external-access/invite` | Onboard only (idempotent CIAM provision) |
+| `POST` | `/api/v1/external-access/grant` | Grant a Contact access to a project |
+| `POST` | `/api/v1/external-access/revoke` | Revoke a Contact's access |
 | `POST` | `/api/v1/external-access/close-project` | Close project + cascade revoke |
+| `POST` | `/api/v1/external-access/provision-project` | Provision SPE + infrastructure |
 
 ---
 
-## Power Pages Hosting Constraints
+## Document Download — Authz-Before-Stream (NFR-03)
 
-| Constraint | Impact |
-|-----------|--------|
-| Single-file SPA hosting | `HashRouter` required — `BrowserRouter` causes 404 on direct URL navigation |
-| No server-side routing | All routes must be hash-based (`#/project/{id}`) |
-| Max parent-chain depth ~4 | Spaarke uses 2-3 levels — well within limit |
-| No polymorphic parent lookups | Use explicit single-type relationships only |
-| Web role assignment has no expiry | Use `sprk_externalrecordaccess.sprk_expirydate` + scheduled deactivation |
-| B2B guests require Microsoft account | Non-Microsoft external users would need B2C |
+`GET /projects/{id}/documents/{documentId}/content` is the R1 file-content path. Its highest-consequence property is **authorization before any storage read**:
 
-**Build output**: `vite-plugin-singlefile` inlines all JS/CSS into a single `dist/index.html` (~800 KB uncompressed, ~1.1 MB base64-encoded in Dataverse). Within the 5 MB web resource limit.
+1. **Project access** — the caller must have a participation record for `{id}` (`HasProjectAccess`), else **403 with no bytes and no Graph call**.
+2. **Document → project scoping** — the requested `documentId` must belong to `{id}` (an app-only Dataverse read that resolves **no** Graph pointer). A mismatch or non-existent document is a uniform 403 (does not leak document existence).
+3. **Only after both checks pass** does the BFF resolve SPE pointers server-side (`DocumentStorageResolver.GetSpePointersAsync`) and stream the content **app-only** via `SpeFileStore.DownloadFileAsync` (`ISpeFileOperations`) — **not** the OBO `DownloadFileAsUserAsync` path.
 
-**Deployment**: `npm run build` followed by `scripts/Deploy-ExternalWorkspaceSpa.ps1` (base64 encode, Dataverse Web API, PublishXml). Not deployed via `pac pages upload-code-site` due to assembly conflict in PAC CLI 1.46.x.
+The endpoint is keyed on `documentId`; **Graph pointers (`driveId`/`driveItemId`) are never added to the client DTO or exposed to the browser** (broker-only). Content is returned as `application/octet-stream` with an attachment filename (no inline rendering of untrusted external content). No synthetic `contact_{guid}` SPE container membership is written on the external path (removed with the broker-only design).
+
+---
+
+## Azure Static Web Apps Hosting
+
+| Item | Value |
+|------|-------|
+| SWA resource | `swa-spaarke-external-spa-dev` (resource group `rg-spaarke-dev`) |
+| Live host | `green-dune-0c4f1221e.7.azurestaticapps.net` |
+| Routing | **`BrowserRouter`** (clean URLs) — no HashRouter |
+| Deep-link resolution | SWA `navigationFallback.rewrite` → `/index.html` (excludes `/assets/*` and static file extensions) |
+| Unknown paths | In-app 404 view (not a silent redirect home) |
+
+**`staticwebapp.config.json`** `globalHeaders`:
+
+```json
+"Referrer-Policy": "no-referrer-or-same-origin",
+"Content-Security-Policy": "frame-ancestors 'self'",
+"X-Content-Type-Options": "nosniff"
+```
+
+**Deployment**: `.github/workflows/deploy-external-spa.yml` (`workflow_dispatch`). The workflow installs with `npm install --legacy-peer-deps` (per root CLAUDE.md §12), builds `src/client/external-spa` with the CIAM `VITE_*` build env, stages `staticwebapp.config.json` into `dist/`, and uploads via `Azure/static-web-apps-deploy` (`skip_app_build: true`). This replaces the retired `scripts/Deploy-ExternalWorkspaceSpa.ps1` (deleted — historical).
+
+> **Retired (historical)**: Power Pages hosting of the external SPA — the `sprk_externalworkspace` web resource, the Power Pages site, `HashRouter`, and `Deploy-ExternalWorkspaceSpa.ps1` — is decommissioned. It is retained here only as historical context; it is not current guidance.
+
+---
+
+## Direct-Office Boundary — Out of Scope (E-3)
+
+Per **ADR-028 Amendment A1 limitation E-3**, **direct-Office features for external users** are **permanently out of scope**: Word/Excel/PowerPoint for-Web co-authoring, desktop open via `webUrl`, user-identity Copilot grounding, and Microsoft Search. These require the user's **own workforce identity** reaching SPE (OBO/delegated), which the CIAM-only broker model deliberately does not provide. A future project needing them for external users must reintroduce workforce B2B guests for those users and file a superseding amendment.
 
 ---
 
@@ -127,24 +189,29 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| Identity provider | Entra B2B guests (not B2C) | External users already have M365 accounts — SSO, no separate tenant | — |
-| Data access path | BFF-only (not Power Pages `/_api/`) | Single auditable path, managed identity auth, no field whitelisting | — |
-| Auth grant type | Authorization code + PKCE (not implicit) | Implicit is deprecated; MSAL handles silent refresh and MFA | — |
-| SPA routing | HashRouter (not BrowserRouter) | Power Pages single-file hosting returns 404 for pushState paths | — |
-| Token storage | sessionStorage (not localStorage) | **Intentional divergence from internal Spaarke surfaces.** External SPA is a B2B portal often used on shared/kiosk workstations — per-tab isolation eliminates token leakage when one guest closes a tab and another opens it in the same browser session. Internal Spaarke surfaces use `localStorage` to achieve true SSO across tabs (different threat model). See [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for the internal binding. | — |
+| Identity provider | Entra External ID (CIAM) local accounts | Azure AD B2C is end-of-sale; CIAM is the successor; broker-only design needs only a BFF-auth identity, no workforce guest | ADR-028 A1 |
+| Broker model | App-only downstream (no OBO on external path) | External token authenticates only to the BFF; keeps external identity out of SPE/Graph/Dataverse | ADR-028 A1 |
+| Hosting | Azure Static Web Apps | Clean-URL routing + CI/CD; replaces Power Pages web-resource | — |
+| Data access path | BFF-only | Single auditable path, app-only auth, no field whitelisting | — |
+| Auth grant type | Authorization code + PKCE | Implicit is deprecated; MSAL handles silent refresh and MFA | — |
+| SPA routing | BrowserRouter + SWA navigationFallback | Clean URLs; deep links resolve via rewrite; unknown paths render in-app 404 | — |
+| Token storage | sessionStorage (not localStorage) | **Intentional divergence from internal surfaces.** Per-tab isolation for shared/kiosk workstations. Internal surfaces use `localStorage` for cross-tab SSO (different threat model). See [`.claude/patterns/auth/spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md). | ADR-028 (documented exception) |
+| BFF CIAM validation | Second `Ciam` JwtBearer scheme, pinned to `/api/v1/external` | Additive to the workforce default; distinct issuer/audience | ADR-028 A1 |
 | Auth filter pattern | Per-endpoint filter (not global middleware) | `ExternalCallerAuthorizationFilter` follows ADR-008 | ADR-008 |
-| Participation cache | Redis 60s TTL | Avoids Dataverse query per BFF call; invalidated on grant/revoke/close | ADR-009 |
+| Participation cache | Redis 60s TTL | Avoids Dataverse query per BFF call; invalidated on grant | ADR-009 |
+| Cross-tenant Graph | `CiamGraphClientFactory` (cert in Key Vault) | Workforce MI cannot reach the CIAM tenant; app-only cert per `SpeAdminTokenProvider` pattern | ADR-010 |
 
 ---
 
 ## Constraints
 
-- **MUST** use HashRouter — BrowserRouter causes 404 on Power Pages
-- **MUST** route all data through BFF API — no direct `/_api/` calls to Dataverse
-- **MUST** use sessionStorage for token cache — per-tab isolation for shared workstations. **Do NOT change this to `localStorage` to match internal surfaces** — the threat model differs (B2B kiosk-shared usage vs internal trusted device).
-- **MUST** enforce access levels server-side in BFF — client-side flags are UX-only
-- **MUST NOT** use Power Pages `/_api/` proxy for data access (single data path through BFF)
-- **MUST NOT** use `pac pages upload-code-site` for deployment (PAC CLI assembly conflict)
+- **MUST** host on Azure Static Web Apps with `navigationFallback` rewrite; use **`BrowserRouter`** (never `HashRouter`).
+- **MUST** authenticate external users against the CIAM authority (`*.ciamlogin.com`) via the `Ciam` scheme; resolve the Contact by stable `oid` (`sprk_externalobjectid`).
+- **MUST** keep the external path broker-only — no OBO, all SPE/Dataverse access app-only; never provision a workforce B2B guest for an external user.
+- **MUST** enforce Dataverse authorization **before** streaming file content; never expose Graph pointers to the browser.
+- **MUST** route all data through the BFF API — no direct Dataverse/SPE calls from the browser.
+- **MUST** use `sessionStorage` for the token cache — per-tab isolation. **Do NOT change this to `localStorage`** or migrate to `@spaarke/auth` (threat model differs).
+- **MUST** enforce access levels server-side in the BFF — client-side flags are UX-only.
 
 ---
 
@@ -152,12 +219,13 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 
 | Pitfall | Symptom | Resolution |
 |---------|---------|------------|
-| BrowserRouter instead of HashRouter | 404 on direct navigation to `/project/{id}` | Always use `HashRouter` — Power Pages cannot handle pushState routing |
-| Implicit grant instead of PKCE | Deprecated flow, token refresh failures | Ensure SPA app registration uses authorization code + PKCE; implicit grant must be disabled |
-| Missing `ExternalCallerAuthorizationFilter` on new endpoint | Endpoint accessible without project access verification | Every `/api/v1/external/*` endpoint must have the filter applied per ADR-008 |
-| Redis cache not invalidated on revoke | Revoked user retains access for up to 60 seconds | Grant/revoke/close operations must explicitly invalidate the Redis participation cache |
-| Stale `dist/index.html` after rebuild | Old SPA version served | Re-run `Deploy-ExternalWorkspaceSpa.ps1` and verify web resource version in Dataverse |
-| SPA exceeds 5 MB web resource limit | Deployment fails | Review bundle size; `vite-plugin-singlefile` output should be ~800 KB; check for unnecessary dependencies |
+| Missing `navigationFallback` with `BrowserRouter` | 404 on direct navigation to `/project/{id}` | `staticwebapp.config.json` must rewrite unmatched routes to `/index.html` (excluding assets) |
+| Forgetting `knownAuthorities` for the CIAM host | MSAL rejects the `*.ciamlogin.com` OIDC metadata | Declare the CIAM authority host in MSAL `knownAuthorities` (it is a non-default authority) |
+| Wrong token-audience config | 401 on all `/api/v1/external/*` calls | `Ciam:Audience` must be the BFF-API **client-id GUID** (`4a4d5126-…`, v2 tokens) |
+| Missing `ExternalCallerAuthorizationFilter` on a new endpoint | Endpoint reachable without participation check | Every `/api/v1/external/*` endpoint applies the filter (ADR-008) |
+| Redis cache not invalidated on grant | New grant not visible for up to 60s | Grant operations must invalidate the Redis participation cache |
+| Reusing the OBO download path on the external surface | Broker-only invariant violated | Use app-only `SpeFileStore.DownloadFileAsync`, never `DownloadFileAsUserAsync` |
+| Resolving Contact by email instead of `oid` | Wrong-Contact resolution / spoofable | Resolve by `oid`; email is a first-login fallback only |
 
 ---
 
@@ -166,21 +234,23 @@ External users are **Azure AD B2B guest accounts** in the main Spaarke workforce
 | Direction | Subsystem | Interface | Notes |
 |-----------|-----------|-----------|-------|
 | Depends on | BFF API | `/api/v1/external/*` endpoints | All data and business logic |
-| Depends on | Entra B2B | MSAL authorization code + PKCE | Guest account authentication |
-| Depends on | Power Pages | Static file hosting (web resource) | SPA deployment target |
+| Depends on | Entra External ID (CIAM) | MSAL authorization code + PKCE | Local-account authentication |
+| Depends on | Azure Static Web Apps | Static site hosting | SPA deployment target |
 | Depends on | Redis | 60s TTL participation cache | Invalidated on grant/revoke/close |
+| Depends on | SharePoint Embedded | App-only content streaming | Broker-only; no external identity reaches SPE |
 | Consumed by | External stakeholders | Browser SPA | Attorneys, clients, advisers |
-| Managed by | Corporate Workspace | `/api/v1/external-access/*` endpoints | Grant, revoke, invite, provision, close |
+| Managed by | Corporate Workspace | `/api/v1/external-access/*` endpoints | Invite-and-grant, grant, revoke, provision, close |
 
 ---
 
 ## Related
 
+- [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Spaarke Auth v2 + **Amendment A1** (CIAM authority, broker-only invariant, E-3 boundary)
 - [uac-access-control.md](uac-access-control.md) — Unified Access Control model (three-plane detail)
-- [sdap-auth-patterns.md](sdap-auth-patterns.md) — Auth patterns including MSAL ssoSilent for code pages
-- [`docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md`](../guides/EXTERNAL-ACCESS-ADMIN-SETUP.md) — Power Pages config, table permissions, site settings
+- [`docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md`](../guides/EXTERNAL-ACCESS-ADMIN-SETUP.md) — CIAM tenant, SWA, BFF, and onboarding configuration
+- [`docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md`](../guides/EXTERNAL-ACCESS-SPA-GUIDE.md) — SPA developer guide
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoint patterns
 
 ---
 
-*Last Updated: April 5, 2026*
+*Last Updated: July 20, 2026*
