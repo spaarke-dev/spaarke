@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-21 (by context-handoff)
+> **Last Updated**: 2026-07-21 (Phase 2 complete — 013 + 014 done + gated)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,20 +10,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave 7 COMPLETE ✅ (011 ConversationView + 012 ConversationWorkspace) — next: Wave 8 (013 in-conversation compose) |
+| **Task** | **Phase 2 COMPLETE ✅** (010,011,012,013,014). Next: Phase 3 / Wave 10 = task 020 (**opus** — extend SendEmailDialog/EmailComposer). |
 | **Step** | — |
-| **Status** | not-started |
-| **Next Action** | `work on task 013` (FR-06 in-conversation compose) — serial, edits ConversationView from 011. Then Wave 9 (014 filters). **Phase-4 hosts wire `ConversationView` into `ConversationWorkspace`'s `renderConversation` seam + supply currentUserSystemUserId.** ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify via scoped tsc/jest. |
+| **Status** | 013 + 014 done + gated; **UNCOMMITTED** (this session's work not yet committed/pushed). |
+| **Next Action** | Commit Phase 2 (013+014), then `work on task 020` (FR-07, **opus tier** — session must be on Opus/Fable). ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify client work via scoped `tsc --noEmit` (expect exactly those 2) + `npm test`, NOT whole-package `npm run build`. |
 
-### Progress this session — 9 tasks ✅ (all gated + committed + PUSHED to PR #664)
-- **Phase 1 (backend spine) COMPLETE**: 001 characterize · 002 FR-18 DTO enrichment · 003 FR-16 list-all-threads · 004 FR-17 naming+rename · 005 FR-19 email ThreadId · 006 doc-drift.
-- **Phase 2 core**: 010 characterize · 011 ConversationView (bubbles) · 012 ConversationWorkspace (two-pane shell).
-- Working tree **CLEAN** — nothing uncommitted. 8 task/chore commits + init/portfolio on `origin/work/messaging-communication-app-r3`. Portfolio Tasks Completed = 9.
+### Progress — 11 tasks ✅ (001–006, 010–014). 9 committed+pushed (PR #664); **013 + 014 committed? NO — uncommitted**
+- **Phase 1 (backend spine) COMPLETE + pushed**: 001–006.
+- **Phase 2 (shared conversation core) COMPLETE**: 010 characterize · 011 bubbles · 012 two-pane shell (all pushed) · **013 in-conversation compose · 014 additive filters (this session, gated, NOT yet committed)**.
+- **013**: added a Teams-style chat input to `ConversationView` sending via existing `sendTimelineMessage({communicationType:'message', threadId, ...})` (ACS branch, ADR-045/046); `pollNow` on-send + on-demand refresh; ~5s poll retained. Gate found 1 Major (double-send on type-during-send) → FIXED (inFlightRef). See `notes/task-013-notes.md`.
+- **014**: added additive filters (Email/Message toggles + word Dropdown) to `ConversationView`; presentational-only over the polled timeline; exported pure helpers `messagePassesFilters`/`extractWordOptions`. Gate verdict Ship (2 Minor fixed). See `notes/task-014-notes.md`.
+- **Files changed this session (uncommitted)**: `ConversationView.tsx`, `ConversationView.types.ts`, 2 new tests (`ConversationView.compose.test.tsx`, `ConversationView.filters.test.tsx`), `notes/task-013-notes.md`, `notes/task-014-notes.md`, `notes/defer-issues.md` (added ISS-003), `tasks/TASK-INDEX.md`, POMLs 013/014, this file. **40 tests pass** for the ConversationView suite.
 
 ### Next Action (explicit)
-`work on task 013` — FR-06 in-conversation compose (chat input sends via existing send path; on-demand + on-send refresh; ~5s polling retained). Serial (edits `ConversationView` from 011, `parallel-safe:false`). Then Wave 9 = task 014 (additive filters). After Phase 2: Phase 3 (020 extend SendEmailDialog, 021 email-in-flow, 022 forward, 023 quick-view, 024 new-thread, 025 title link).
+1. **Commit** this session's Phase-2 work (013+014). 2. **File ISS-003** GitHub issue (`/defer` — push-to-github Step 1.6 blocks on the `{URL}` placeholder in `notes/defer-issues.md`). 3. `work on task 020` — FR-07 extend `SendEmailDialog`/`EmailComposer` (thread id + record link), **opus tier**, serial. Then Wave 11 = 023 + 024 (parallel-safe), 021, 022, 025.
 
 ### Critical Context (carry forward)
+0. **ISS-003 filed → [#669](https://github.com/spaarke-dev/spaarke/issues/669)** — `useThreadPoll.pollNow` swallowed when a poll is in flight → task-013 on-send refresh can miss by ≤5s in a narrow race; fix belongs in the characterized core (NFR-06), deferred.
 1. **Identity contract (FR-02/18)**: bubble alignment keys on `senderSystemUserId` (backend `SentBy`, shipped by task 002; plumbed to client by 011 via `IThreadMessageDto`/`TimelineMessage`/`buildTimeline` mapping). NEVER align on email-string.
 2. **Access model (NFR-01)**: all reads impersonated + shared access-filter; **NO membership-union** (retired). Client renders exactly what server returns; no client-side thread filtering.
 3. **§6.5 Path A exception (task 012, on record for review)**: `ConversationWorkspace` record-mode lists via existing `GET /by-regarding/{entityType}/{id}` (FR-16 `/threads` has no regarding param by design so record-less threads surface in all-mode). Both server-access-filtered.

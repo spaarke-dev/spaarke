@@ -9,10 +9,10 @@
  * exactly as `<CommunicationTimeline/>`/`<EmailComposer/>` do (ADR-028 — no
  * `@spaarke/auth` import here).
  *
- * READ-ONLY: this component renders a thread's messages as bubbles; it does
- * NOT compose/send (that surface is task 013's in-conversation compose box,
- * layered on top of this view separately — one send engine, ADR-045, not
- * duplicated here).
+ * Renders a thread's messages as bubbles AND (task 013 / FR-06) hosts a
+ * minimal Teams-style chat input at the bottom that sends through the EXISTING
+ * send path (`sendTimelineMessage` → `sendCommunication`, ADR-045) on the ACS
+ * Message branch — one send engine, not duplicated. See `ConversationView.tsx`.
  */
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';

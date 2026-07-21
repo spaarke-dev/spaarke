@@ -4,7 +4,7 @@
     <title>In-conversation compose — chat input via the existing send path (FR-06)</title>
     <phase>2 Shared conversation widget core</phase>
     <gate>after:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits the shared-lib ConversationView (.tsx) and wires the ADR-045 send path; behavior-affecting. Code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

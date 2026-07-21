@@ -14,19 +14,40 @@
  * participant, or a legacy row predating task 002) can never resolve as
  * "mine" and always renders left.
  *
- * READ-ONLY: no compose/send box here — that is task 013's in-conversation
- * compose surface, layered separately on top of this view (one send engine,
- * ADR-045 — this component does not duplicate it).
+ * IN-CONVERSATION COMPOSE (task 013 / FR-06): a Teams-style single chat input
+ * sits at the bottom of this view. It sends through the EXISTING send path
+ * (`sendTimelineMessage` → `sendCommunication`, ADR-045) on the ACS Message
+ * branch (`communicationType: 'message'`, ADR-046), stamped onto the active
+ * `threadId` — NO new send implementation and no 6th send path. The full
+ * `<TimelineComposeBox/>` (To/Cc/Bcc/Subject/attachments email composer) does
+ * not fit the bubble UX, so the send WIRING is mirrored here as a minimal chat
+ * input, not the whole component. On a successful send the view refreshes
+ * immediately via the core's `pollNow` (the sender sees their message without
+ * waiting for the ~5s tick); the ~5s interval polling is retained, and a
+ * manual refresh control also forces a poll.
  *
  * Reads persisted records ONLY — no client-side ACS SDK (NFR-04). All
  * network I/O flows through the injected `authenticatedFetch` prop via
- * `communicationTimelineApi.ts` (through the core's `useThreadPoll`); this
- * component never imports `@spaarke/auth` (ADR-028). Fluent UI v9 only —
- * `makeStyles` + `tokens`, dark mode passes through the host `FluentProvider`
- * (ADR-021).
+ * `communicationTimelineApi.ts` (through the core's `useThreadPoll` for reads
+ * and `sendTimelineMessage` for the send); this component never imports
+ * `@spaarke/auth` (ADR-028). Fluent UI v9 only — `makeStyles` + `tokens`, dark
+ * mode passes through the host `FluentProvider` (ADR-021).
  */
 import * as React from 'react';
-import { Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Button,
+  Dropdown,
+  Option,
+  Spinner,
+  Text,
+  Textarea,
+  ToggleButton,
+  Tooltip,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
+import { ArrowClockwiseRegular, SendRegular } from '@fluentui/react-icons';
 import { useThreadPoll } from '../CommunicationTimeline/hooks/useThreadPoll';
 import { buildTimeline, type TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
 import {
@@ -34,6 +55,8 @@ import {
   initialTimelineState,
 } from '../CommunicationTimeline/CommunicationTimeline.reducer';
 import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
+import { sendTimelineMessage } from '../../services/communicationTimelineApi';
+import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { MessageBubble } from './subcomponents/MessageBubble';
 import type { ConversationRenderItem, ConversationViewProps } from './ConversationView.types';
 
@@ -104,6 +127,216 @@ const useStyles = makeStyles({
   },
 });
 
+const useComposeStyles = makeStyles({
+  wrapper: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  inputRow: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+  },
+  input: {
+    flex: 1,
+    minWidth: 0,
+  },
+  feedbackRow: {
+    minHeight: '16px',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  sentText: {
+    color: tokens.colorNeutralForeground3,
+  },
+  failedText: {
+    color: tokens.colorPaletteRedForeground1,
+  },
+});
+
+const useFilterStyles = makeStyles({
+  bar: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  word: {
+    minWidth: '160px',
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Compose bar (task 013 / FR-06)
+// ---------------------------------------------------------------------------
+
+type ComposeStatus = 'idle' | 'sending' | 'sent' | 'failed';
+
+interface ConversationComposeBarProps {
+  threadId: string;
+  authenticatedFetch: AuthenticatedFetchFn;
+  bffBaseUrl?: string;
+  /**
+   * Forces an immediate out-of-band poll — invoked right after a successful
+   * send (so the sender's message appears without waiting for the ~5s tick)
+   * and by the manual refresh control. This is the core's `useThreadPoll`
+   * `pollNow`; the ~5s interval keeps running independently.
+   */
+  onRefresh: () => void;
+}
+
+/**
+ * Minimal Teams-style chat input. Sends via the EXISTING send path
+ * (`sendTimelineMessage` → `sendCommunication`, ADR-045) on the ACS Message
+ * branch (`communicationType: 'message'`, ADR-046), stamped onto `threadId`.
+ * Message sends need only a body — ACS Chat addresses by thread, so no
+ * recipient/subject fields are surfaced here (see `SendCommunicationOptions`).
+ * Local `useState` (a small single-purpose form, not the multi-mode
+ * `<EmailComposer/>` reducer — root CLAUDE.md §11).
+ */
+const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
+  threadId,
+  authenticatedFetch,
+  bffBaseUrl,
+  onRefresh,
+}) => {
+  const styles = useComposeStyles();
+  const [draft, setDraft] = React.useState('');
+  const [status, setStatus] = React.useState<ComposeStatus>('idle');
+  const [errorMessage, setErrorMessage] = React.useState<string | undefined>();
+
+  // Concurrency guard, independent of the DISPLAY `status`. The textarea stays
+  // enabled during a send (Teams-style — the user can start their next line),
+  // so `status` can be reset to 'idle' by typing; that must NOT open a second
+  // send. `inFlightRef` is the real single-flight lock. `mountedRef` prevents
+  // setState-after-unmount from the async continuation on the React-16.14 PCF
+  // target (ADR-022).
+  const inFlightRef = React.useRef(false);
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const canSend = draft.trim().length > 0 && status !== 'sending' && !!threadId;
+
+  const submit = React.useCallback(async () => {
+    const text = draft.trim();
+    if (!text || inFlightRef.current || !threadId) return;
+    inFlightRef.current = true;
+    setStatus('sending');
+    setErrorMessage(undefined);
+    try {
+      await sendTimelineMessage(
+        { communicationType: 'message', threadId, body: text, bodyFormat: 'text' },
+        { authenticatedFetch, bffBaseUrl }
+      );
+      if (!mountedRef.current) return;
+      setDraft('');
+      setStatus('sent');
+      onRefresh(); // optimistic refresh — see onRefresh doc
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setStatus('failed');
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to send message.');
+      // draft intentionally retained so the user can retry with one more Send.
+    } finally {
+      inFlightRef.current = false;
+    }
+  }, [draft, threadId, authenticatedFetch, bffBaseUrl, onRefresh]);
+
+  const handleKeyDown = React.useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enter sends; Shift+Enter inserts a newline; ignore IME composition.
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        void submit();
+      }
+    },
+    [submit]
+  );
+
+  return (
+    <div className={styles.wrapper} role="region" aria-label="Compose message">
+      <div className={styles.inputRow}>
+        <Textarea
+          className={styles.input}
+          value={draft}
+          onChange={(_, data) => {
+            setDraft(data.value);
+            // Clear only TERMINAL feedback (sent/failed) once the user starts a
+            // new message — NEVER collapse an in-flight 'sending' (that would
+            // hide the spinner and re-enable Send mid-flight → double send).
+            setStatus(prev => (prev === 'sent' || prev === 'failed' ? 'idle' : prev));
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder="Type a message"
+          aria-label="Message"
+          resize="vertical"
+        />
+        <Tooltip content="Refresh conversation" relationship="label">
+          <Button
+            appearance="subtle"
+            icon={<ArrowClockwiseRegular />}
+            aria-label="Refresh conversation"
+            onClick={onRefresh}
+          />
+        </Tooltip>
+        <Button
+          appearance="primary"
+          icon={<SendRegular />}
+          aria-label="Send message"
+          disabled={!canSend}
+          onClick={() => void submit()}
+        >
+          Send
+        </Button>
+      </div>
+      {/* No wrapper live region — each transient child is its own live region
+          (role=status → polite, role=alert → assertive) to avoid nested-live-
+          region double announcements (NFR-05). */}
+      <div className={styles.feedbackRow}>
+        {status === 'sending' && (
+          <div role="status">
+            <Spinner size="tiny" label="Sending…" />
+          </div>
+        )}
+        {status === 'sent' && (
+          <Text role="status" size={200} className={styles.sentText}>
+            Sent
+          </Text>
+        )}
+        {status === 'failed' && (
+          <Text role="alert" size={200} className={styles.failedText}>
+            {errorMessage ?? 'Failed to send message.'}
+          </Text>
+        )}
+      </div>
+    </div>
+  );
+};
+
+ConversationComposeBar.displayName = 'ConversationComposeBar';
+
 // ---------------------------------------------------------------------------
 // Pure helpers (no I/O — see ADR-012)
 // ---------------------------------------------------------------------------
@@ -162,6 +395,71 @@ export function buildConversationRenderItems(entries: TimelineEntry[]): Conversa
 }
 
 // ---------------------------------------------------------------------------
+// In-conversation filters (task 014 / FR-09) — purely presentational over the
+// already-polled timeline; NEVER touches the reducer/poll/`buildTimeline`/send.
+// ---------------------------------------------------------------------------
+
+export interface ConversationFilters {
+  /** Show `channelType==='email'` bubbles (incl. teams/sms/notification/null, which fold to 'email'). Default true. */
+  emailEnabled: boolean;
+  /** Show `channelType==='message'` bubbles. Default true. */
+  messageEnabled: boolean;
+  /** Case-insensitive substring; empty string = no word facet. */
+  word: string;
+}
+
+/** Visible plain-text body — strips HTML tags from html bodies so matching/options see words, not markup. */
+function messagePlainBody(message: TimelineMessage): string {
+  const rawBody = message.body ?? '';
+  return message.bodyFormat === 'html' ? rawBody.replace(/<[^>]*>/g, ' ') : rawBody;
+}
+
+/**
+ * Plain-text projection of a message for word-filter MATCHING: folds in the
+ * visible body + `sender` + `senderName`, lowercased. (The sender email is
+ * included for matching, but deliberately excluded from the dropdown OPTIONS
+ * — see `extractWordOptions` — so address fragments like "com" don't pollute
+ * the picker.)
+ */
+export function messageSearchText(message: TimelineMessage): string {
+  return [messagePlainBody(message), message.sender ?? '', message.senderName ?? ''].join(' ').toLowerCase();
+}
+
+/**
+ * Additive AND-of-facets (FR-09): a message renders iff its channel type is
+ * enabled AND (no word filter OR its search text contains the word). Non-
+ * Message channel types all fold to `channelType==='email'` per
+ * `TimelineChannelType`, so they follow the Email toggle. Type strings
+ * unchanged (`COMMUNICATION_TYPE_EMAIL` / `COMMUNICATION_TYPE_MESSAGE`).
+ */
+export function messagePassesFilters(message: TimelineMessage, filters: ConversationFilters): boolean {
+  const typeEnabled = message.channelType === 'message' ? filters.messageEnabled : filters.emailEnabled;
+  if (!typeEnabled) return false;
+  const word = filters.word.trim().toLowerCase();
+  if (!word) return true;
+  return messageSearchText(message).includes(word);
+}
+
+/**
+ * Distinct ≥3-char alphanumeric word options for the filter dropdown, drawn
+ * from the WHOLE (unfiltered) timeline so the option list stays stable as the
+ * user narrows. Sorted + capped so a long thread can't produce an unbounded
+ * dropdown.
+ */
+export function extractWordOptions(messages: TimelineMessage[], cap = 40): string[] {
+  const seen = new Set<string>();
+  for (const m of messages) {
+    // Options come from visible body + display name only — NOT the sender email
+    // address (its domain fragments like "com" would match nearly every row).
+    const optionText = [messagePlainBody(m), m.senderName ?? ''].join(' ').toLowerCase();
+    for (const token of optionText.split(/[^a-z0-9]+/i)) {
+      if (token.length >= 3) seen.add(token);
+    }
+  }
+  return Array.from(seen).sort().slice(0, cap);
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -170,7 +468,14 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
     props;
 
   const styles = useStyles();
+  const filterStyles = useFilterStyles();
   const [state, dispatch] = React.useReducer(communicationTimelineReducer, initialTimelineState);
+
+  // In-conversation filters (task 014 / FR-09). Purely presentational local
+  // state — filtering the rendered set never re-fetches or mutates the core.
+  const [emailEnabled, setEmailEnabled] = React.useState(true);
+  const [messageEnabled, setMessageEnabled] = React.useState(true);
+  const [word, setWord] = React.useState('');
 
   // Refs so the poll hook always reads the freshest cursor without re-subscribing its effect
   // (same pattern as `CommunicationTimeline.tsx`'s thread-id mode).
@@ -208,7 +513,7 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
     [onError]
   );
 
-  useThreadPoll({
+  const { pollNow } = useThreadPoll({
     threadId,
     authenticatedFetch,
     bffBaseUrl,
@@ -221,7 +526,21 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
   });
 
   const timeline = React.useMemo(() => buildTimeline(state.messages), [state.messages]);
-  const renderItems = React.useMemo(() => buildConversationRenderItems(timeline), [timeline]);
+
+  // Additive filters (FR-09) applied to the ALREADY-built timeline before
+  // day-divider grouping, so dividers recompute for the filtered set (no empty-
+  // day headers). `wordOptions` is derived from the UNFILTERED timeline so the
+  // dropdown stays stable as the user narrows.
+  const filters = React.useMemo<ConversationFilters>(
+    () => ({ emailEnabled, messageEnabled, word }),
+    [emailEnabled, messageEnabled, word]
+  );
+  const filteredTimeline = React.useMemo(
+    () => timeline.filter(entry => messagePassesFilters(entry.message, filters)),
+    [timeline, filters]
+  );
+  const renderItems = React.useMemo(() => buildConversationRenderItems(filteredTimeline), [filteredTimeline]);
+  const wordOptions = React.useMemo(() => extractWordOptions(timeline.map(entry => entry.message)), [timeline]);
 
   // Live-region announcement for newly-arrived messages (screen-reader affordance, NFR-05).
   React.useEffect(() => {
@@ -261,7 +580,9 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
 
   const isLoading = state.status === 'idle';
   const isErrorState = state.status === 'error';
-  const isEmpty = state.status === 'ready' && renderItems.length === 0;
+  // Thread genuinely has no messages vs. the current filters hid them all — distinct states (NFR-05).
+  const isThreadEmpty = state.status === 'ready' && timeline.length === 0;
+  const isFilteredEmpty = state.status === 'ready' && timeline.length > 0 && renderItems.length === 0;
 
   return (
     <div className={mergeClasses(styles.root, className)} role="region" aria-label="Conversation">
@@ -272,6 +593,48 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
         <Text role="alert" className={styles.errorBar}>
           {state.error}
         </Text>
+      )}
+
+      {/* Additive in-conversation filters (task 014 / FR-09) — only meaningful once there's a thread to filter. */}
+      {timeline.length > 0 && (
+        <div className={filterStyles.bar} role="group" aria-label="Filter messages">
+          <ToggleButton
+            size="small"
+            checked={emailEnabled}
+            aria-pressed={emailEnabled}
+            aria-label="Show email messages"
+            onClick={() => setEmailEnabled(prev => !prev)}
+          >
+            Email
+          </ToggleButton>
+          <ToggleButton
+            size="small"
+            checked={messageEnabled}
+            aria-pressed={messageEnabled}
+            aria-label="Show chat messages"
+            onClick={() => setMessageEnabled(prev => !prev)}
+          >
+            Message
+          </ToggleButton>
+          <Dropdown
+            className={filterStyles.word}
+            size="small"
+            aria-label="Filter by word"
+            placeholder="All messages"
+            value={word || 'All messages'}
+            selectedOptions={[word]}
+            onOptionSelect={(_, data) => setWord(data.optionValue ?? '')}
+          >
+            <Option value="" text="All messages">
+              All messages
+            </Option>
+            {wordOptions.map(w => (
+              <Option key={w} value={w} text={w}>
+                {w}
+              </Option>
+            ))}
+          </Dropdown>
+        </div>
       )}
 
       <div
@@ -295,9 +658,17 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
           </div>
         )}
 
-        {!isLoading && !isErrorState && isEmpty && (
+        {!isLoading && !isErrorState && isThreadEmpty && (
           <div className={styles.centerState}>
             <Text className={styles.emptyState}>No messages yet.</Text>
+          </div>
+        )}
+
+        {!isLoading && !isErrorState && isFilteredEmpty && (
+          <div className={styles.centerState}>
+            {/* No own live region — this sits inside the role="log" list, which
+                already announces content changes (avoid nested live regions). */}
+            <Text className={styles.emptyState}>No messages match the current filters.</Text>
           </div>
         )}
 
@@ -320,6 +691,13 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
             )
           )}
       </div>
+
+      <ConversationComposeBar
+        threadId={threadId}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
+        onRefresh={pollNow}
+      />
     </div>
   );
 };
