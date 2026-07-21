@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (tasks 011 + 012 COMPLETE = 20 tasks ✅; external-spa BrowserRouter+404 + deep-link-through-login done, tsc/vite green; 014 SWA deploy BLOCKED-ON-DECISION — see below; master @ 80aaafb96)
+> **Last Updated**: 2026-07-20 (task 014 SWA DEPLOY COMPLETE = 21 tasks ✅; Phase 1 + Phase 2 ALL DONE; external-spa CIAM SPA live on green-dune SWA, headers+routing+CORS verified; only Phase 3 (040/041/042/090) remains + the live-E2E spike)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — 20 tasks ✅. All Phase-2 (020-031) + Phase-1 010/011/012/013 done; BFF deployed + CIAM config wired; external-spa BrowserRouter+404+deep-link done (tsc/vite green). |
-| **Step** | 011 ✅ (HashRouter→BrowserRouter + in-app 404 + hash-nav cleanup) + 012 ✅ (deep-link-through-login via sessionStorage return-to). 014 (SWA deploy) BLOCKED-ON-DECISION. |
-| **Status** | 20 ✅ (001-004, 010, 011, 012, 013, 020-031) |
-| **Next Action** | **014 workflow FIXED (Option A ✅) — ready to deploy on owner go.** `deploy-external-spa.yml` now injects the CIAM VITE_* build env (non-secret; overrides `.env.production` `#{...}#`). Verified locally: prod build bakes real `spaarkeextid.ciamlogin.com` authority + SPA client id, ZERO `#{` placeholders leak; staticwebapp headers present. **REMAINING for 014**: (a) OWNER GO to trigger the outward-facing deploy — `gh workflow run deploy-external-spa.yml` (needs secret `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`, set in task 003); (b) post-deploy I curl-verify headers + routing at `https://green-dune-0c4f1221e.7.azurestaticapps.net`; (c) full CIAM sign-in + data-load parity = the deferred live-E2E spike (needs a CIAM test user). NOTE: this deploys a CIAM SPA (Phase-1 B2B premise superseded by 028). Then Phase 3: 040 parity (deps 014,031 ✅) → 041/042 → 090. |
+| **Task** | none active — 21 tasks ✅. **Phase 0 + Phase 1 + Phase 2 ALL COMPLETE.** BFF deployed (spaarke-bff-dev, CIAM config wired, /external/* 401); external-spa CIAM SPA deployed to green-dune SWA (run 29794153346). |
+| **Step** | 014 ✅ — SWA deploy verified headless: 200 + security headers, deep-link /project/:id → 200 (BrowserRouter+navigationFallback), in-app 404, CORS preflight SWA→BFF 204+ACAO, live bundle has real CIAM authority (0 placeholders). Deployed from BRANCH ref (master was stale). |
+| **Status** | 21 ✅ (001-004, 010-014, 020-031) |
+| **Next Action** | **Phase 3 remaining**: **040** end-to-end parity (deps 014✅,031✅) — largely the **live-E2E spike**: full CIAM sign-in + authenticated data-load + through-login deep-link (needs a **CIAM test user**; overlaps DI-030-01). → **041** retire Power Pages site + `Deploy-ExternalWorkspaceSpa.ps1` (irreversible; gated on 040 GREEN) → **042** rewrite external-access architecture/guides (Group C, parallel-safe) → **090** wrap-up (+ `/test-diet` gate). Branch 0 behind master, ~9 ahead (mergeable). **OPEN (defer-issues.md)**: DI-030-01 (live-E2E 2 sub-criteria), DI-025-01 (provisioner hardening), DI-029-01 (ribbon/MDA invite UI). ⚠️ master's `deploy-external-spa.yml` still lacks the CIAM env fix (branch-only) — merge before any master-triggered SWA deploy. |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

@@ -3,7 +3,8 @@
     <title>Deploy external-spa to SWA on existing B2B + verify parity</title>
     <phase>1 Hosting migration + routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE (deployed + host-level parity verified). Deployed external-spa to SWA green-dune-0c4f1221e.7.azurestaticapps.net via deploy-external-spa.yml run 29794153346 (from the branch ref — master lacked 011/012 + the workflow CIAM env, so the earlier owner-triggered master run 29794016922 shipped a broken build that THIS run overwrote). PREMISE NOTE: 014 was scoped "still on Entra B2B" but the SPA was already CIAM-repointed (028), so this deployed a CIAM SPA (Phase 1+2 collapsed) — owner-confirmed. Workflow fix (Option A): build `env:` injects non-secret CIAM VITE_* (overrides .env.production #{...}# placeholders; verified locally + on the live bundle: spaarkeextid.ciamlogin.com authority present, ZERO #{ leaked). VERIFIED HEADLESS: root 200 + security headers (Referrer-Policy, CSP frame-ancestors 'self', X-Content-Type-Options nosniff); deep-link /project/:id → 200 (navigationFallback + BrowserRouter); unknown path → 200 (client-side in-app 404); CORS preflight SWA→BFF /api/v1/external/me → 204 + ACAO=SWA origin + Allow-Methods GET (task 013 runtime-proven). sessionStorage MSAL preserved (NFR-05). Power Pages NOT decommissioned (Phase 3 boundary). REMAINING (live-E2E spike, needs a CIAM test user): full sign-in, authenticated data-load, and through-login deep-link — overlaps task 040 parity + DI-030-01.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deploy + verification</rigor-reason>
     <model-tier>sonnet</model-tier>
