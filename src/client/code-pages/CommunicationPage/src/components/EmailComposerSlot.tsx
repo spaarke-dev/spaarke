@@ -33,7 +33,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { SendEmailPage } from '@spaarke/ui-components';
+import { SendEmailPage, searchUsersAndContacts, createXrmDataService } from '@spaarke/ui-components';
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
 import type {
   CommunicationMode,
@@ -72,6 +72,18 @@ const useStyles = makeStyles({
 export function EmailComposerSlot(props: IEmailComposerSlotProps): React.JSX.Element {
   const styles = useStyles();
 
+  // To/Cc/Bcc directory typeahead. Code Pages run in-session in the Dataverse
+  // host, so contact/user search uses host-context Xrm.WebApi (single-entity,
+  // no OBO/AI/cross-system → Xrm.WebApi, NOT BFF, per
+  // docs/standards/DATA-ACCESS-DECISION-CRITERIA.md). Access-safe: runs under the
+  // user's Dataverse permissions. The engine's RecipientField owns debounce +
+  // min-length + top-N; `createXrmDataService()` resolves Xrm via window/parent.
+  const dataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+
   return (
     <div className={styles.root}>
       {/*
@@ -93,6 +105,7 @@ export function EmailComposerSlot(props: IEmailComposerSlotProps): React.JSX.Ele
         initialSubject={props.initialSubject}
         initialBody={props.initialBody}
         associations={props.associations}
+        onSearchRecipients={handleSearchRecipients}
         onSent={communicationId => props.nav.onSent(communicationId)}
         onClose={props.nav.onClose}
       />

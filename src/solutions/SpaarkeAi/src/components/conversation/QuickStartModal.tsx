@@ -55,7 +55,6 @@ import { GetStartedCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId } from '@spaarke/ai-widgets';
 import {
   launchSurface,
-  launchAssignWorkWizard,
   launchSummarizeFilesWizard,
   launchFindSimilarWizard,
   launchPlaybookIntent,
@@ -91,6 +90,11 @@ export interface QuickStartModalProps {
    * so they open with the files pre-attached. Omitted → wizards open with no seeded files (as before).
    */
   getFileContext?: () => QuickStartFileContext | null;
+  /**
+   * UAT R5-9: open the shared Email Compose modal for the "Send Email" card instead of the
+   * playbook-library web resource. Omitted → falls back to the legacy launchPlaybookIntent route.
+   */
+  onSendEmail?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +124,7 @@ const useStyles = makeStyles({
  * `QuickStartModal` — Fluent v9 Dialog hosting `GetStartedCardsWidget`.
  * Launched from `AssistantToolMenu`'s "Quick Start" entry.
  */
-export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext }) => {
+export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext, onSendEmail }) => {
   const styles = useStyles();
 
   const handleCardClick = React.useCallback(
@@ -155,7 +159,9 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
           break;
 
         case 'assign-work':
-          launchAssignWorkWizard({ bffBaseUrl });
+          // R5-8: route through the hand-off envelope so the session's attached file(s) reach the
+          // Create Work Assignment wizard's Add Files step (registry entry: create-work-assignment).
+          void launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'document-upload-wizard':
@@ -168,7 +174,13 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
           break;
 
         case 'email-compose':
-          launchPlaybookIntent({ bffBaseUrl, intent: 'email-compose' });
+          // R5-9: open the shared Email Compose modal when the host provides the handler;
+          // otherwise fall back to the legacy playbook-library intent route.
+          if (onSendEmail) {
+            onSendEmail();
+          } else {
+            launchPlaybookIntent({ bffBaseUrl, intent: 'email-compose' });
+          }
           break;
 
         case 'meeting-schedule':
@@ -189,7 +201,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
       // pattern #5: don't nest modals from different chrome families).
       onClose();
     },
-    [onClose, getFileContext],
+    [onClose, getFileContext, onSendEmail],
   );
 
   return (

@@ -75,12 +75,23 @@ describe('deriveConnections', () => {
     expect(conns[0].alternatives).toHaveLength(2);
   });
 
-  it('renders confirmed slots when the record is Resolved', () => {
+  it('marks a slot confirmed when the candidate was written (filed), even if the record is not globally Resolved', () => {
+    // Per-candidate `written` is authoritative for filed state (provenance.ts: `written ?? isResolved`):
+    // the engine may file one field while leaving another as a suggestion. A written candidate reads
+    // confirmed regardless of the record-level isResolved flag.
     const doc = docWith({
-      candidates: [mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92)],
+      candidates: [{ ...mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92), written: true }],
     });
-    const conns = deriveConnections(doc, true);
-    expect(conns[0].status).toBe('confirmed');
+    expect(deriveConnections(doc, false)[0].status).toBe('confirmed');
+  });
+
+  it('keeps an unwritten slot suggested even when the record is Resolved (written precedence over isResolved)', () => {
+    // written:false must win over a global isResolved=true — an AI-suggested target on a field the
+    // engine did NOT write stays "to review", not "confirmed".
+    const doc = docWith({
+      candidates: [mkCand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Matter A', 0.92)], // written:false
+    });
+    expect(deriveConnections(doc, true)[0].status).toBe('suggested');
   });
 });
 

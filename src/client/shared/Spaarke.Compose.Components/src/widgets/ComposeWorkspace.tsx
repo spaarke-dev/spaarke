@@ -802,14 +802,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   const handlePushToWord = React.useCallback(async (): Promise<void> => {
     if (!state.documentRef?.speDriveItemId || !effectiveDriveId || !state.etag) return;
-    if (composeDocxAnnotations.length === 0) return;
+    // C3 fix (UAT 2026-07-20): Push-to-Word carried ONLY session comments/anchored annotations — it never
+    // read the pending AI redline marks, so redlines never pushed (comments did). Prepend them (same shape,
+    // mirrors triggerSave's `saveAnnotations` ordering) so a push writes w:ins/w:del too.
+    const redlineAnnotations = editorRef.current?.getRedlineAnnotations?.() ?? [];
+    const pushableAnnotations = [...redlineAnnotations, ...composeDocxAnnotations];
+    if (pushableAnnotations.length === 0) return;
     try {
       await pushAnnotations({
         documentSpeId: state.documentRef.speDriveItemId,
         driveId: effectiveDriveId,
         tenantId,
         ifMatch: state.etag,
-        annotations: composeDocxAnnotations,
+        annotations: pushableAnnotations,
       });
     } catch {
       // The hook surfaces a user-safe error; a push failure must not crash the editing session.
@@ -985,6 +990,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
+      // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
+      // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
+      // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
+      // of an uploaded doc whose ids are all client-minted, otherwise fails with "w14:paraId matches no
+      // paragraph in the retained original"). Read-only (no dirty-flag side effect); empty for a
+      // born-in-editor doc (no snapshot). The server only applies it when an editedParagraphs delta is
+      // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
+      const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
+
       // Pending AI redlines (task 023) → native-markup annotations the SERVER composes onto the authored
       // baseline (replaces the old client reject-baseline reconstruction). Combined with the session's
       // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
@@ -1031,6 +1045,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           sessionId: state.sessionId,
           displayName: state.documentRef.fileName ?? null,
           annotations: saveAnnotations,
+          // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
+          paraIdMap,
           ...(bornInEditorRender
             ? { contentModel: editorRef.current.buildContentModel() }
             : { content: encodeRetained(state.docxBytes!) }),
@@ -1052,6 +1068,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
           // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
           editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
+          // C2: the baseline paraId map so the server can stamp minted ids before synthesizing the delta.
+          paraIdMap,
         };
       }
 
@@ -2044,6 +2062,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
   const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
+  // C3 fix (UAT 2026-07-20): Open-in-Word FLUSHES a save first so Word opens the CURRENT bytes —
+  // including pending AI redlines as native w:ins/w:del. Redlines (and settled edits) only reach SPE via
+  // a save; Open-in-Word used to open the last-PERSISTED bytes, so a redline the user had on screen never
+  // showed in Word (only comments, which a prior push/save had already landed). Gated on unsaved work OR
+  // pending redlines (a clean doc opens immediately). The document id is stable across the flush because
+  // Word-open is only enabled once the doc is already persisted (hasWordDocument), so a create-on-save id
+  // change cannot strand this handler. With C1/C2 fixed, that redline-inclusive save now succeeds.
+  const openInWordFlushed = async (mode: 'web' | 'desktop'): Promise<void> => {
+    if (wordActionsDisabled) return;
+    const hasRedlines = editorRef.current?.hasPendingRedlines?.() ?? false;
+    if (isDirty || hasRedlines) {
+      await triggerSaveRef.current();
+    }
+    if (mode === 'web') {
+      await openInWeb(toolbarDocumentId);
+    } else {
+      await openInDesktop(toolbarDocumentId);
+    }
+  };
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -2178,10 +2216,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
               onOpenInWord={() => {
-                if (!wordActionsDisabled) void openInWeb(toolbarDocumentId);
+                void openInWordFlushed('web');
               }}
               onOpenInWordDesktop={() => {
-                if (!wordActionsDisabled) void openInDesktop(toolbarDocumentId);
+                void openInWordFlushed('desktop');
               }}
               // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
               // draft has no SPE drive-item to write native annotations into yet).

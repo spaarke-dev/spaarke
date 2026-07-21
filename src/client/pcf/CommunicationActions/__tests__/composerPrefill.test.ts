@@ -9,6 +9,7 @@ import { deriveComposerFields, splitRecipients } from '../CommunicationActions/c
 const record = {
   from: 'sender@contoso.com',
   to: 'a@x.com; b@y.com',
+  cc: '',
   subject: 'Quarterly review',
   body: '<p>Original body</p>',
 };

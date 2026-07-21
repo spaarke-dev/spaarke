@@ -39,10 +39,18 @@ import {
   Receipt16Regular,
 } from '@fluentui/react-icons';
 import { authenticatedFetch } from '@spaarke/auth';
-import { SendEmailPage, type ISendEmailPageProps, type EmailComposerMode } from '@spaarke/ui-components';
+import {
+  SendEmailPage,
+  type ISendEmailPageProps,
+  type EmailComposerMode,
+  type IAttachmentItem,
+  searchUsersAndContacts,
+  createXrmDataService,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { deriveComposerFields, type ComposerMode } from './composerPrefill';
+import { fetchSourceAttachments } from './attachmentsSource';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
@@ -192,6 +200,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const [busy, setBusy] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode | null>(null);
   const [prefill, setPrefill] = React.useState<IRecordPrefill | null>(null);
+  // Source-communication attachment documents, offered for inclusion on reply/forward
+  // (task 104). Enumerated once from the record via the shared attachment data model.
+  const [sourceAttachments, setSourceAttachments] = React.useState<IAttachmentItem[]>([]);
   // Which "create from this email" actions the engine flagged (from the provenance
   // signals) — drives the subtle ✨ brand tint on the icon-only create buttons.
   const [suggestedCreates, setSuggestedCreates] = React.useState<Set<CreateKind>>(new Set());
@@ -253,6 +264,14 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       } catch (err) {
         console.warn('[CommunicationActions] prefill retrieve failed:', err);
       }
+      // Enumerate the source communication's attachment documents (best-effort) so
+      // Reply / Reply All / Forward can offer to carry them as files and/or body links.
+      try {
+        const atts = await fetchSourceAttachments(context.webAPI, communicationId, resolveDataverseUrl());
+        if (!cancelled) setSourceAttachments(atts);
+      } catch (err) {
+        console.warn('[CommunicationActions] source attachment enumeration failed:', err);
+      }
     })();
     return () => {
       cancelled = true;
@@ -264,6 +283,18 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     setStatus(null);
     setComposerMode(mode);
   };
+
+  // To/Cc/Bcc directory typeahead. Host-context Xrm.WebApi search over the
+  // systemuser + contact tables (per docs/standards/DATA-ACCESS-DECISION-CRITERIA.md
+  // — single-entity, in-session, no OBO/AI/cross-system → Xrm.WebApi, NOT BFF).
+  // Runs in the user's Dataverse session, so it respects the caller's read
+  // permissions. `createXrmDataService()` is the canonical shared adapter; the
+  // engine's RecipientField owns debounce (300 ms), min-length (≥2), and top-N.
+  const dataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
 
   // Launch a "create from this email" form (Event / To Do / Invoice). R4 launches
   // the target create form; full create-and-link is the Notification-Spine project.
@@ -327,11 +358,16 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     // Reply All reuses the shared 'reply' composer mode (Re:, reply chrome) but with
     // the wider recipient set; '+ New' is a blank 'compose' not tied to this record.
     const sendMode: EmailComposerMode = composerMode === 'replyAll' ? 'reply' : composerMode;
+    // Offer the source attachments on reply/replyAll/forward (not '+ New'). The engine
+    // applies the per-mode attach default (forward → on, reply → off).
+    const carryAttachments = composerMode === 'compose' ? undefined : sourceAttachments;
     return {
       mode: sendMode,
       communicationId: composerMode === 'compose' ? undefined : communicationId,
       authenticatedFetch,
       bffBaseUrl,
+      onSearchRecipients: handleSearchRecipients,
+      initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
         setStatus('Sent.');
@@ -340,7 +376,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl]);
+  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, sourceAttachments]);
 
   if (authError) {
     return (

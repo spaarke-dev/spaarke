@@ -2605,6 +2605,12 @@ public class DataverseWebApiService : IDataverseService
             "QueryContactByEmailAsync is implemented in DataverseServiceClientImpl.");
     }
 
+    public Task<IReadOnlyList<Entity>> QueryContactsByFullNameAsync(string fullName, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryContactsByFullNameAsync is implemented in DataverseServiceClientImpl.");
+    }
+
     public Task<IReadOnlyList<Entity>> QueryContactMembershipsAsync(Guid contactId, CancellationToken ct = default)
     {
         throw new NotImplementedException(

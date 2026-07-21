@@ -315,10 +315,18 @@ public sealed class DocxAnnotationWriter
         /// </summary>
         private (Paragraph Paragraph, int MatchStart) LocateTarget(string target)
         {
+            // C1 fix (UAT 2026-07-20): match through the SAME 1:1 typographic fold the client uses
+            // (ComposeTextFold / MATCH_FOLD). Word/DOCX text carries curly quotes / NBSP / typographic
+            // dashes that the model straightens when it echoes a clause back as target_text (and the editor
+            // may fold on paste); an EXACT ordinal search then misses by a single character and surfaces as
+            // a 422 "tracked change could not be located". The fold is 1:1 (one char in → one out), so the
+            // match offset in the folded text is IDENTICAL to the offset in the original run text — run
+            // isolation (IsolateRange/SplitRunAtOffset) is unaffected, and target.Length is unchanged.
+            var foldedTarget = ComposeTextFold.Fold(target);
             foreach (var paragraph in _body.Descendants<Paragraph>())
             {
                 var text = GetParagraphText(paragraph);
-                var index = text.IndexOf(target, StringComparison.Ordinal);
+                var index = ComposeTextFold.Fold(text).IndexOf(foldedTarget, StringComparison.Ordinal);
                 if (index >= 0)
                 {
                     return (paragraph, index);
