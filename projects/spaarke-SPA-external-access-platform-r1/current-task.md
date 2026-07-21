@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (task 031 BFF DEPLOYED = 18 tasks ✅; merged to master @ 80aaafb96; deploy 47.08 MB/no-CVE/healthz-green; ⚠️ Ciam:* App Service settings unset → /external/* returns 500 [DI-028-01 remaining, owner action]; next 011→012→014)
+> **Last Updated**: 2026-07-20 (task 031 BFF DEPLOYED + CIAM config wired = 18 tasks ✅; merged to master @ 80aaafb96; deploy 47.08 MB/no-CVE/healthz-green; Ciam:* App Service settings set → /external/* now 401 [DI-028-01 fully resolved]; next 011→012→014)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | none active — 18 tasks ✅. All Phase-2 (020-031) + Phase-1 010/013 done; merged to master @ `80aaafb96`; BFF deployed to spaarke-bff-dev. |
-| **Step** | 031 COMPLETE — deployed via Deploy-BffApi.ps1: 47.08 MB compressed (−2.55 vs baseline, ≤60 ✓), no vulnerable pkgs, SHA-256 verified, /healthz 200. ⚠️ CIAM external surface returns 500 (App Service missing Ciam:* settings — DI-028-01 remaining). |
+| **Step** | 031 COMPLETE — deployed via Deploy-BffApi.ps1: 47.08 MB compressed (−2.55 vs baseline, ≤60 ✓), no vulnerable pkgs, SHA-256 verified, /healthz 200. CIAM config wired: 7 Ciam:* App Service settings set (Audience=GUID per manifest v2) → /api/v1/external/* now returns 401 unauthenticated (verified stable). DI-028-01 fully resolved. |
 | **Status** | 18 ✅ (001, 002, 003, 004, 010, 013, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030, 031) |
-| **Next Action** | **(A) OWNER/auth-sensitive — wire `Ciam:*` App Service settings on spaarke-bff-dev** so `/api/v1/external/*` returns 401 (not 500). Values in defer-issues.md DI-028-01 CONFIRMED-AT-DEPLOY note (Instance/TenantId/ClientId/Audience/Domain/GraphProvisioner). Escalated — awaiting go/no-go. **(B) 011 → 012 → 014** — external-spa builds (DI-028-02 fixed): HashRouter→BrowserRouter (011, deps 010 ✅) → deep-link (012) → SWA deploy + parity (014). 011/012 share App.tsx → sequential. Then Phase 3: **040** parity (deps 014,031 ✅) → 041/042 → 090. **OPEN (defer-issues.md)**: DI-028-01 (Ciam App Service config — item A above), DI-030-01 (live-E2E 2 sub-criteria), DI-025-01, DI-029-01 (ribbon/MDA UI). |
+| **Next Action** | **(A) ✅ DONE — Ciam:* App Service settings wired + verified (401).** **(B) 011 → 012 → 014** — external-spa builds (DI-028-02 fixed): HashRouter→BrowserRouter (011, deps 010 ✅) → deep-link (012) → SWA deploy + parity (014). 011/012 share App.tsx → sequential. Then Phase 3: **040** parity (deps 014,031 ✅) → 041/042 → 090. **OPEN (defer-issues.md)**: DI-028-01 (Ciam App Service config — item A above), DI-030-01 (live-E2E 2 sub-criteria), DI-025-01, DI-029-01 (ribbon/MDA UI). |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

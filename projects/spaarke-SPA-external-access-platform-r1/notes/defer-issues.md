@@ -5,7 +5,9 @@
 
 ---
 
-## DI-028-01 — CIAM SPA + BFF-API app registrations (ops prerequisite for live external auth) — ✅ RESOLVED 2026-07-20
+## DI-028-01 — CIAM SPA + BFF-API app registrations + BFF Ciam config (ops prerequisite for live external auth) — ✅ RESOLVED 2026-07-20
+
+- **CIAM BFF CONFIG WIRED + VERIFIED 2026-07-20 (task 031 follow-on)**: set the 7 `Ciam:*` App Service settings on `spaarke-bff-dev` via `az webapp config appsettings set` (double-underscore keys): `Ciam__Instance=https://spaarkeextid.ciamlogin.com`, `Ciam__TenantId=7052feba-…`, `Ciam__ClientId=4a4d5126-…`, `Ciam__Audience=4a4d5126-…` (**GUID — confirmed correct**: the BFF-API app manifest has `requestedAccessTokenVersion: 2`, so v2 tokens carry `aud`=client-ID GUID, not the `api://` URI; App ID URI is `api://4a4d5126-…`, scope `…/SDAP.Access`), `Ciam__Domain=spaarkeextid.onmicrosoft.com`, `Ciam__GraphProvisioner__ClientId=e63e6eb1-be25-4214-80a8-a6d609034bb9`, `Ciam__GraphProvisioner__CertificateName=ciam-graph-provisioner-cert` (KV cert in `spaarke-spekvcert`, thumbprint `938A0ECE…`; loaded from KV by name — NOT a plaintext secret). Result: `/api/v1/external/me` + `/content` now return **401 unauthenticated** (were 500); admin `/invite-and-grant` 401; `/healthz` 200. App Service settings persist across `Deploy-BffApi.ps1` redeploys (script only pushes the zip). Full authenticated sign-in remains the live-E2E Phase-2 spike (needs a CIAM test user).
 
 - **RESOLVED 2026-07-20**: Owner registered both apps in the CIAM tenant + granted the KV role:
   - **Spaarke External BFF API** `4a4d5126-91b0-4865-8e3a-134b7209013e` — exposes scope `SDAP.Access` (App ID URI `api://4a4d5126-…`). → BFF `Ciam:ClientId` + `Ciam:Audience`; `VITE_MSAL_BFF_SCOPE`.
