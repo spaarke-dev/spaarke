@@ -1,13 +1,13 @@
 # Deferred Work & Issues — messaging-communication-app-r3
 
-> Source of truth for deferred/discovered items. Mirror to GitHub Issues via `/defer` before push (per project CLAUDE.md).
-> Status: **not yet filed to GitHub** — file at PR/push time.
+> Source of truth for deferred/discovered items. Mirrored to GitHub Issues (per project CLAUDE.md).
+> Status: **filed to GitHub 2026-07-20** via /push-to-github Step 1.6.
 
-| ID | Type | Summary | Concrete failure without it | Discovered |
-|----|------|---------|-----------------------------|------------|
-| ISS-001 | ISS | `participant=` OData facet in `CommunicationThreadReadService` (~line 524) embeds the address value into the query string WITHOUT `Uri.EscapeDataString` (same class as task-003 W1, which was fixed for the new `ListThreadsAsync` search path only). | A participant address containing `&`, `#`, `+`, `%`, or a space (email `+`-tags are common) breaks out of the OData value → malformed query → Dataverse 400 → 500 to the caller. **Impersonation-contained** (no over-disclosure — any injected clause still runs under the caller's `MSCRMCallerID`), so it's robustness/correctness, not a security leak. Pre-existing (not introduced by R3). | 2026-07-20, task 003 Step 9.5 gate |
+| ID | Type | GitHub | Summary | Concrete failure without it | Discovered |
+|----|------|--------|---------|-----------------------------|------------|
+| ISS-001 | ISS | [#666](https://github.com/spaarke-dev/spaarke/issues/666) | `participant=` OData facet in `CommunicationThreadReadService` (~line 524) embeds the address value into the query string WITHOUT `Uri.EscapeDataString` (same class as task-003 W1, which was fixed for the new `ListThreadsAsync` search path only). | A participant address containing `&`, `#`, `+`, `%`, or a space (email `+`-tags are common) breaks out of the OData value → malformed query → Dataverse 400 → 500 to the caller. **Impersonation-contained** (no over-disclosure — any injected clause still runs under the caller's `MSCRMCallerID`), so it's robustness/correctness, not a security leak. Pre-existing (not introduced by R3). | 2026-07-20, task 003 Step 9.5 gate |
 
-| ISS-002 | ISS | `ThreadResolver.BuildParticipantRollupNameAsync` (FR-17 roll-up) bounded scans (`TopCount` 200 msgs / 500 participants) have no `OrderBy`. | Beyond the caps, WHICH rows are scanned — and thus the shown participant names + "+N" remainder — is not provably stable, so a record-less thread's auto-name could flicker across re-derives on very large threads. Extreme edge; best-effort/non-fatal path; name is cosmetic. | 2026-07-20, task 004 Step 9.5 gate (Info nit) |
+| ISS-002 | ISS | [#667](https://github.com/spaarke-dev/spaarke/issues/667) | `ThreadResolver.BuildParticipantRollupNameAsync` (FR-17 roll-up) bounded scans (`TopCount` 200 msgs / 500 participants) have no `OrderBy`. | Beyond the caps, WHICH rows are scanned — and thus the shown participant names + "+N" remainder — is not provably stable, so a record-less thread's auto-name could flicker across re-derives on very large threads. Extreme edge; best-effort/non-fatal path; name is cosmetic. | 2026-07-20, task 004 Step 9.5 gate (Info nit) |
 
 **Fix approach for ISS-002**: add a deterministic `OrderBy` (e.g. `createdon`) to the message scan in the roll-up so the truncated name is stable regardless of thread size. One-line hardening; not release-blocking.
 
