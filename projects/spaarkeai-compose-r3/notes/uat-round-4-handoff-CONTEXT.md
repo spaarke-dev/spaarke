@@ -59,15 +59,44 @@ Track Changes default-on, Show Styles removed, AI 💡/explanations restored.
 4. **Comments in a Word-style left pane** (user request, deferred — editor-layout change).
 5. **push/merge to master** (user's call) → task **082** flagship gate → **090** wrap-up.
 
-## Research finding (user challenged "1000s use TipTap — how do they do it?")
-Correct challenge. The robust industry approach = model-as-source-of-truth with LOSSLESS docx import/export:
-- **Tiptap Conversion** (`/import-docx` `/export-docx`) — TipTap Pro, **banned by NFR-03**.
-- **SuperDoc** (ProseMirror-based, native docx fidelity + tracked changes) — **AGPLv3**, banned by NFR-03.
-- **Apryse / CKEditor / TinyMCE** — commercial.
-So Spaarke rolled its own (mammoth import + retained-original paraId patch) BECAUSE of NFR-03. That's a
-reasonable compromise; the bug was simply mammoth's empty-paragraph default, now fixed. If fidelity issues
-persist beyond this, the strategic question is whether NFR-03 should be amended to allow a licensed
-high-fidelity converter (§6.5 ADR-tension candidate) — but the mammoth fix likely makes that unnecessary.
+## ARCHITECTURE FINDING (IMPORTANT — user challenged "why are we using mammoth?")
+
+The user pushed twice: (1) "1000s use TipTap — this can't be unique"; (2) "not all editor companies use
+TipTap Pro/AGPL — why are we using mammoth?" BOTH challenges are correct. My first framing (that all
+alternatives are NFR-03-banned) was WRONG — corrected below.
+
+**What serious docx editors actually do** (NONE use mammoth for editing):
+- License a commercial engine (Apryse/PDFTron, Syncfusion, TX Text Control, CKEditor/TinyMCE paid), OR
+- Build their own OOXML parser/serializer (lossless import into the editor model + write back).
+- **Tiptap Conversion** (`/import-docx` `/export-docx`) — TipTap Pro (NFR-03 blocks).
+- **SuperDoc** (ProseMirror-based, native docx + tracked changes) — AGPLv3 (NFR-03 blocks).
+
+**Why Spaarke uses mammoth**: free, permissive (BSD), easy, CLIENT-SIDE. The design is clever — it NEVER
+serializes the editor back to .docx; the server PATCHES the retained-original bytes in place (by paraId),
+so mammoth's lossiness never corrupts the SAVED bytes. The flaw: the patch depends on mammoth's paragraph
+list aligning with the original, and mammoth's paragraph-dropping breaks that. mammoth is a SEMANTIC
+CONTENT-EXTRACTION tool (its own docs: "unlikely to be perfect for more complicated documents"), not a
+round-trip editor front-end. The `ignoreEmptyParagraphs` fix patches today's symptom; mammoth will likely
+keep leaking fidelity on complex docs (numbering, nested tables, fields, text boxes).
+
+**THE STRATEGIC FIX (within NFR-03 — no TipTap Pro, no AGPL needed):** move docx→editor conversion
+SERVER-SIDE and emit **paraId-tagged HTML the client loads directly** — eliminating mammoth AND the fragile
+client↔server paraId reconciliation AND raising fidelity. The BFF is already .NET, already opens the .docx
+with the OpenXML SDK, and already extracts paraIds (ParaIdPreParser). Permissive high-fidelity library for
+exactly this: **OpenXmlPowerTools** (Microsoft Public License / Ms-PL — NOT AGPL, NOT commercial-only;
+maintained .NET fork: github.com/Codeuctivity/OpenXmlPowerTools). Eric White's HtmlConverter is the
+reference. This is the real answer to "why are we fighting this."
+
+**PENDING DECISION (user was about to answer when we compacted):** I offered to write a short design
+proposal / ADR-tension note for "replace client-side mammoth with server-side paraId-tagged
+OpenXmlPowerTools conversion" as the durable fix — a proper design pass + ADR, NOT a UAT-round slip-in.
+Two-track recommendation: (1) ship the mammoth `ignoreEmptyParagraphs:false` fix now to unblock UAT;
+(2) do the server-side-conversion architecture as the durable class-of-bug elimination. AWAIT user's
+answer on whether to write the ADR-tension note.
+
+Sources: github.com/mwilliamson/mammoth.js (design philosophy) · npmjs.com/package/mammoth ·
+ericwhite.com/blog/transform-docx-to-htmlcss-with-high-fidelity-using-powertools-for-open-xml ·
+github.com/Codeuctivity/OpenXmlPowerTools · tiptap.dev/product/conversion · github.com/JoeConyers/SuperDoc
 
 ## Sample docs (user-provided repro fixtures)
 `projects/spaarkeai-compose-r3/notes/sample-docs/` — CIPO letter is the key repro (tables+tabs+empties).
