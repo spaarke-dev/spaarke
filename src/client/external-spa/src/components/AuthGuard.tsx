@@ -14,10 +14,12 @@
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
 import { MSAL_BFF_SCOPE } from '../config';
+import { captureReturnTo, consumeReturnTo } from '../auth/msal-auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -31,16 +33,33 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
 
   const { instance, inProgress } = useMsal();
   const isAuthenticated = useIsAuthenticated();
+  const navigate = useNavigate();
 
   React.useEffect(() => {
     // Only trigger login when MSAL has finished all in-progress interactions
     // and the user is not authenticated. Prevents duplicate redirect loops.
     if (!isAuthenticated && inProgress === InteractionStatus.None) {
+      // Preserve the intended deep link (e.g. an emailed /project/{id}) across the redirect.
+      captureReturnTo();
       void instance.loginRedirect({
         scopes: [MSAL_BFF_SCOPE],
       });
     }
   }, [isAuthenticated, inProgress, instance]);
+
+  React.useEffect(() => {
+    // After authentication completes, restore the intended deep link once (react-router soft
+    // nav, replacing history so the back button does not re-enter the login flow). Only safe
+    // in-app relative paths are restored (consumeReturnTo validates). No-ops for the default
+    // path or when MSAL already landed the user on the intended route.
+    if (isAuthenticated && inProgress === InteractionStatus.None) {
+      const target = consumeReturnTo();
+      const current = window.location.pathname + window.location.search;
+      if (target && target !== current) {
+        navigate(target, { replace: true });
+      }
+    }
+  }, [isAuthenticated, inProgress, navigate]);
 
   // While MSAL is processing (startup, redirect callback, silent token refresh, etc.)
   if (inProgress !== InteractionStatus.None) {
