@@ -9,8 +9,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | W9 remediation SHIPPED — all 4 defects fixed/built, merged to master (PR #663 `9000fe2c3`), **BFF DEPLOYED to spaarke-bff-dev** (hash-verify 4/4, healthz 200, routes live). Awaiting owner UAT re-verify + PCF import. |
-| **Active** | OWNER runbook: import `CommunicationAttachmentsSolution_v1.0.0.zip` + swap OOB subgrid; UAT re-verify #7/#4/#5 + D-1 fresh email (webhook-KV) + Tier 2/3, B-4/5, H-8. |
+| **Phase** | W9 SHIPPED + DEPLOYED (PR #663 `9000fe2c3`). W9 verified in prod (#7 body-ref → Ambiguous ✅; #2 PCF imports ✅ after XSD/apostrophe fix `f35d29077`). **W10 (UAT round 2) POMLs authored — READY TO EXECUTE.** |
+| **Active (NEXT SESSION)** | Execute **Wave 10** via task-execute (FULL rigor, same flow as W9). Tasks 101–105 in `tasks/`. Decisions locked: **B1(102)=Suggest-only**; **C1(105) mockup APPROVED** → https://claude.ai/code/artifact/3c1eaf58-8b56-4417-9819-0a1aed1dace7. Feedback source: `notes/UAT-ROUND2-FEEDBACK.md`. Suggested order: 101+102+103/104+105 (101/102/105 independent; 103+104 share EmailComposer — sequence). Dispatch each via task-execute; verify + gate + commit each (the W9 pattern worked well). |
 | **Done (W9)** | 091 #7 `d6d03f6cb`; 092 #4/#5 `070e6e663` (+M2 hardening); 093 #2 PCF `2d56cf8e0`. Synced origin/master (72 commits, 0 conflicts) `dd57cb659`. Merged PR #663. Deployed BFF (build 47MB pkg, hash-verified). |
 | **Owner UAT re-verify (all live on dev)** | #7: email subject=matter#A + body=DIFFERENT matter#B → expect **Ambiguous** (both surfaced). #4: Save-to-SharePoint → open archived Document → opens as .eml with attachments, name ends `.eml`. #5+webhook-KV: one fresh inbound email (D-1) → archived .eml Document gains Document-Profile fields + first HMAC webhook validates. Plus Tier 2/3 PCF UI, B-4/B-5, H-8. |
 | **Open decisions** | Cert 170c98e1 pfx in %TEMP% → KV or leave (owner). PCF `CommunicationAttachments` import + form swap (owner maker). |

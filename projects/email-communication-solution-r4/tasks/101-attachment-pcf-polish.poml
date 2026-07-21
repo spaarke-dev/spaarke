@@ -1,0 +1,65 @@
+<task id="101" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationAttachments PCF — preview prev/next nav + list styling + design-standards doc (UAT R2 A1/A2)</title>
+    <phase>Wave 10 — UAT round 2 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>093</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, docs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a shipped PCF (.tsx) + adds a docs standard; PCF build+pack+deploy. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Two owner refinements to the `CommunicationAttachments` PCF (`src/client/pcf/CommunicationAttachments/`), from
+    UAT round 2 (`projects/email-communication-solution-r4/notes/UAT-ROUND2-FEEDBACK.md` A1/A2). The PCF works
+    (imports, lists attachments, opens `RichFilePreviewDialog`); these are polish.
+
+    A1 — the preview modal is missing the prev/next "1 of N" browse. `RichFilePreviewDialog` already supports it
+    via `navigationTotal` / `currentIndex` / `onNavigate` (see `SemanticSearchControl` which wires all three). Wire
+    it so opening an attachment lets the user page through the FILTERED attachment list (inline images excluded)
+    without closing the modal — `onNavigate(delta)` moves the current index and re-resolves the preview URL for the
+    new attachment's `sprk_document`.
+
+    A2 — match the list to the Spaarke system style. The section header ("Attachments") and rows must use:
+    header = 14px Segoe (Fluent `tokens.fontSizeBase300`), weight 600 (`tokens.fontWeightSemibold`), color #242424
+    (`tokens.colorNeutralForeground1`); row height 20px; row top-padding 4px, bottom-padding 4px. Use Fluent v9
+    THEME TOKENS (ADR-021), NOT hardcoded hex — #242424 IS `colorNeutralForeground1` in light and must remain
+    theme-correct in dark. Then CODIFY this as a reusable standard in docs (owner: "this should be in our design
+    standards documentation").
+  </prompt>
+
+  <goal>
+    Opening an attachment preview supports prev/next paging across the filtered attachment list; the header + rows
+    match the Spaarke system style via Fluent tokens (theme-correct in light + dark); and a design-standards doc
+    codifies the section-header + list-row token spec for reuse across Spaarke surfaces.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RichFilePreviewDialog` is mounted with `navigationTotal` = filtered attachment count, `currentIndex` = the opened row's index, and `onNavigate` that moves the index and re-resolves the preview URL for the new attachment's document.</criterion>
+    <criterion testable="true">Prev/next disabled/wraps correctly at the ends (match SemanticSearchControl's behavior); inline-image attachments remain excluded from both the list and the nav sequence.</criterion>
+    <criterion testable="true">Header uses `tokens.fontSizeBase300` + `tokens.fontWeightSemibold` + `tokens.colorNeutralForeground1` (no hardcoded #242424); rows are 20px tall with 4px top + 4px bottom padding, via `makeStyles`/`tokens`.</criterion>
+    <criterion testable="true">Dark theme still renders correctly (header/rows legible; no hardcoded colors) — verified in the harness or by token inspection.</criterion>
+    <criterion testable="true">A design-standards doc (`docs/standards/UI-DESIGN-STANDARDS.md`, new or an existing standards doc if a better home exists) documents the Spaarke "section header" + "list row" token spec (font size/weight/color token names, row height, padding) with the Fluent-token mapping. Linked from `src/client/pcf/CLAUDE.md`.</criterion>
+    <criterion testable="true">`npm run build:prod` clean (bundle ≤ ~600KB); jest green (add/adjust a test for the nav wiring); version bumped in all 5 locations (→ 1.1.0); solution ZIP repacked + validated (type-66 only, no apostrophes in manifest per the R2 XSD fix).</criterion>
+    <criterion testable="true">§11: reuses `RichFilePreviewDialog` nav (no new modal); no new BFF surface.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>ADR-021: Fluent v9 theme tokens only — never hardcode the #242424 / 14px literals in component styles; use the token names so both themes work.</constraint>
+    <constraint>Manifest description-keys stay generic + apostrophe-free (R2 XSD `noAposStringType` fix — do NOT reintroduce project/internal narrative into shipped manifest metadata).</constraint>
+    <constraint>Follow `/pcf-deploy`: build:prod, copy out→Solution, pack.ps1, unmanaged, publisher Spaarke/sprk_.</constraint>
+  </constraints>
+
+  <notes>
+    Nav exemplar: `src/client/pcf/SemanticSearchControl` (ListView.tsx mounts RichFilePreviewDialog with nav props;
+    services/SemanticSearchApiService.ts fetchPreviewUrl). The design-standards doc doubles as the home for future
+    Spaarke UI token conventions. Deploy remainder (import + form) = owner, consistent with 093.
+  </notes>
+</task>

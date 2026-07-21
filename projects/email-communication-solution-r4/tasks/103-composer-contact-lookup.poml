@@ -1,0 +1,63 @@
+<task id="103" project="email-communication-solution-r4">
+  <metadata>
+    <title>EmailComposer — contact-table lookup/autocomplete on To/CC/BCC (UAT R2 D3)</title>
+    <phase>Wave 10 — UAT round 2 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020,021,060</dependencies>
+    <blocks>—</blocks>
+    <tags>frontend, communication, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the shared EmailComposer + its hosts (client .tsx); wires a Dataverse/BFF contact search. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 2 D3 (`notes/UAT-ROUND2-FEEDBACK.md`): the EmailComposer To/CC/BCC address fields do NOT look up the
+    contact table — the user must type raw addresses with no autocomplete. Wire recipient autocomplete against
+    Dataverse contacts.
+
+    The composer already exposes an `onSearchRecipients` seam (added task 060) — it is the intended hook. The gap
+    is that the HOSTS mounting the composer don't supply a real contact search. Wire `onSearchRecipients` to a
+    contact lookup (by name / email prefix) so typing in an address field suggests matching contacts (display name
+    + email) and selecting one fills the recipient.
+
+    First IDENTIFY the composer's recipient contract (`EmailComposer` + `SendEmailDialog`/`SendEmailPage` wrappers
+    in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`) and the `onSearchRecipients`
+    signature/return shape, and WHICH hosts mount it (CommunicationActions PCF, dialogs). Then decide the query
+    surface: host-context `Xrm.WebApi` contact search vs a BFF endpoint (per `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`
+    — a simple contact typeahead in an MDA/PCF host is a strong `Xrm.WebApi` case; a code-page host may need BFF).
+    Implement the search + wire it into each host that mounts the composer.
+  </prompt>
+
+  <goal>
+    Typing in To/CC/BCC suggests matching Dataverse contacts (name + email) with debounced autocomplete; selecting
+    one adds it as a recipient. Wired in every host that mounts the EmailComposer, via the existing
+    `onSearchRecipients` seam — no new composer prop contract.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">The `onSearchRecipients` seam is supplied with a real contact search in each host that mounts the composer (enumerate them); typing ≥N chars returns matching contacts (display name + email).</criterion>
+    <criterion testable="true">Selecting a suggestion adds the contact as a recipient (email resolved); free-typed addresses still work (autocomplete is additive, not mandatory).</criterion>
+    <criterion testable="true">Search is debounced + bounded (top-N), and access-safe (respects the caller's read permissions — Xrm.WebApi in host context, or an auth-scoped BFF endpoint).</criterion>
+    <criterion testable="true">The data-access choice (Xrm.WebApi vs BFF) is stated + justified per DATA-ACCESS-DECISION-CRITERIA.md.</criterion>
+    <criterion testable="true">Unit tests for the search wiring + selection (mirror existing EmailComposer tests); `npm run build`/`build:prod` clean for touched packages/PCFs; version bump + repack any PCF host that changed.</criterion>
+    <criterion testable="true">ADR-028: any BFF call uses `@spaarke/auth` `authenticatedFetch`; no new PublicClientApplication; §11 reuse (extend the existing seam, no new composer API).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Do NOT change the `EmailComposer` public prop contract — wire the EXISTING `onSearchRecipients` seam at the host level.</constraint>
+    <constraint>Prefer host-context `Xrm.WebApi` for MDA/PCF hosts (DATA-ACCESS-DECISION-CRITERIA.md); only add/route through a BFF endpoint if a code-page host genuinely needs it — and reuse an existing contact/entity-search endpoint if one exists (§11) rather than adding a new one.</constraint>
+    <constraint>Fluent v9 only (ADR-021); theme-correct suggestion UI.</constraint>
+  </constraints>
+
+  <notes>
+    Start by reading the composer's recipient sub-component + `onSearchRecipients` type. The address field may
+    already render suggestions if a search is supplied — in which case this is purely host wiring + the contact
+    query. Confirm before building a new suggestion UI.
+  </notes>
+</task>

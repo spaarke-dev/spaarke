@@ -1,0 +1,69 @@
+<task id="102" project="email-communication-solution-r4">
+  <metadata>
+    <title>Association Engine — contact-name matching in subject/body (Suggest-only) (UAT R2 B1)</title>
+    <phase>Wave 10 — UAT round 2 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>015,091</dependencies>
+    <blocks>—</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds an Association Engine capability (a rung / deterministic matcher); BFF-touching; correctness + precision-sensitive. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 2 B1 (`notes/UAT-ROUND2-FEEDBACK.md`): an email whose BODY named two contacts already in the system
+    ("Working on this file will be Eyal Iffergan and Sara Chen") did NOT surface them. Today contacts match ONLY
+    when they are the sender/recipient (ParticipantCorrelationRung / rung 2). Owner wants contacts NAMED in the
+    subject/body to surface too.
+
+    OWNER DECISION (2026-07-20): contact-name matches are SUGGEST-ONLY — surface for the reviewer to confirm,
+    never auto-file. (This is structurally guaranteed regardless: `sprk_regardingperson` is a FALLBACK field in
+    `AssociationStatusMapper` — a contact match never auto-files by itself. So emitting these matches cannot change
+    auto-file behavior.)
+
+    Add deterministic contact-name matching over the normalized envelope (subject + body + attachment text):
+    extract candidate PERSON-NAME tokens (a run of 2+ capitalized name tokens), resolve them by EXACT full-name
+    lookup against `contact` records (fullname / firstname+lastname), and emit `sprk_regardingperson` matches at a
+    Suggested-band confidence. Precision guards are ESSENTIAL — a single common name is far too weak; require a
+    2-token (first + last) match against an existing contact, and gate on a minimum length. Mirror the retrieve/
+    verify discipline + precision guards of `RecordNameMatchRung` (rung 3.5), but for contacts (which are NOT in
+    the records index — use a Dataverse contact query).
+  </prompt>
+
+  <goal>
+    A contact already in the system, named by full name in the subject/body, surfaces as a Suggested
+    `sprk_regardingperson` candidate (the reviewer confirms/dismisses — matching the C1 "Suggested" section). No
+    auto-file behavior change; the mapper/ladder are unchanged; precision guards prevent common-name false matches.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">The engine extracts candidate full-name tokens (≥2 capitalized tokens) from subject + body + attachment and resolves each by exact full-name match against existing `contact` records.</criterion>
+    <criterion testable="true">A matched contact emits a `sprk_regardingperson` `RungMatch` at a Suggested-band confidence (below the auto-file threshold; and the field is a mapper fallback → never auto-files) with provenance naming where it matched (subject/body/attachment).</criterion>
+    <criterion testable="true">Precision guards: a single-token name, or a name that resolves to NO contact, emits nothing. Covered by unit tests (e.g. "Sara" alone → no match; "Sara Chen" matching a contact → match; "Sara Chen" matching no contact → no match).</criterion>
+    <criterion testable="true">The email-1 scenario: body "Eyal Iffergan and Sara Chen" (both existing contacts) → two Suggested `sprk_regardingperson` candidates. Regression test (ADR-038 KEEP-path, boundary-mocked contact lookup).</criterion>
+    <criterion testable="true">No auto-file behavior change (contact is a fallback field); `AssociationStatusMapper` untouched. Existing 516 Communication tests still green.</criterion>
+    <criterion testable="true">§10: publish-size + delta (≤60) reported; no new HIGH CVE; §11 Placement Justification (extend engine; reuse/extend `ICommunicationDataverseService` for the contact query — no new service unless genuinely absent).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Envelope-only (ADR-045) — never `Microsoft.Graph.Message`.</constraint>
+    <constraint>Reuse/extend `ICommunicationDataverseService` for the contact-by-name query (add a method there if none exists, justified ≤2 sentences) — do NOT add a new service (§11). Contacts are NOT in `spaarke-records-index`, so this is a Dataverse query, not a RecordSearch call.</constraint>
+    <constraint>Suggest-only: do NOT add `contact` to the mapper's auto-file-eligible set; do NOT change the ladder.</constraint>
+    <constraint>Best-effort/non-fatal (NFR-06); regex extraction bounded with a timeout (mirror RecordNameMatchRung / ExplicitReferenceRung).</constraint>
+    <constraint>Register any new rung as a concrete `IAssociationRung` singleton (ADR-010), self-gated by an `Enabled` kill-switch bound via IOptionsMonitor (parity with rungs 3.5/4/5).</constraint>
+  </constraints>
+
+  <notes>
+    Design choice for the implementer: a NEW deterministic rung (e.g. `ContactNameMatchRung`) mirroring
+    `RecordNameMatchRung`'s structure is the cleanest fit (records-index rung can't serve contacts). Confirm the
+    contact query surface on `ICommunicationDataverseService`; ParticipantCorrelationRung already queries contacts
+    by email — extend that Dataverse client with a by-name query. Common-name false-positive risk is the main
+    design hazard — bias toward precision (full-name exact match) over recall.
+  </notes>
+</task>

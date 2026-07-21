@@ -1,0 +1,63 @@
+<task id="104" project="email-communication-solution-r4">
+  <metadata>
+    <title>EmailComposer — include attachment documents (links and/or files) on Reply / Reply All / Forward (UAT R2 D1/D2)</title>
+    <phase>Wave 10 — UAT round 2 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020,021,044</dependencies>
+    <blocks>—</blocks>
+    <tags>frontend, communication, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies the shared EmailComposer reply/forward flows + Actions PCF handlers; touches the send/attachment contract. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12, FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 2 D1/D2 (`notes/UAT-ROUND2-FEEDBACK.md`): Reply, Reply All, and Forward give no way to include the
+    original communication's attachment DOCUMENTS — as links and/or attached files. Add that option.
+
+    Context: the send path already accepts attachments via `SendCommunicationRequest.AttachmentDocumentIds`
+    (the communication's `sprk_communicationattachment` → `sprk_document` records). The gap is UX + wiring: when the
+    user Replies/Forwards, the composer should offer to carry the source communication's attachments — as
+    document LINKS in the body and/or as attached FILES on the outgoing email.
+
+    IDENTIFY the reply/forward entry points (EmailComposer wrappers + the CommunicationActions PCF Reply/Forward/
+    ReplyAll handlers) and how they seed the draft today. Then add an attachment-include affordance: list the
+    source communication's attachments with per-item toggles (or an "include attachments" control) offering
+    "link" and/or "attach file", and thread the chosen document ids into the send request (`AttachmentDocumentIds`)
+    and/or insert document links into the body. Forward should default to including; Reply/Reply All should offer
+    but not force.
+  </prompt>
+
+  <goal>
+    Reply / Reply All / Forward let the user include the source communication's attachment documents — as body
+    links and/or attached files — with the selected document ids flowing into the send request. Forward defaults
+    to include; replies offer it opt-in.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">On Reply / Reply All / Forward, the composer surfaces the source communication's attachments (name + type) with per-item include toggles offering "link" and/or "attach file".</criterion>
+    <criterion testable="true">Selected attachments' document ids flow into `SendCommunicationRequest.AttachmentDocumentIds` (attach-file path) and/or document links are inserted into the body (link path).</criterion>
+    <criterion testable="true">Forward defaults to including the source attachments; Reply/Reply All default to NOT including but offer the control.</criterion>
+    <criterion testable="true">The attachment list is read via the established path (the CommunicationAttachments/attachment data model — `sprk_communicationattachment` → `sprk_document`); no new BFF endpoint if an existing one serves it (§11).</criterion>
+    <criterion testable="true">Unit tests for reply/forward attachment inclusion (selection → request payload; forward default include; reply default exclude); `npm run build:prod` clean; version bump + repack the Actions PCF if changed.</criterion>
+    <criterion testable="true">ADR-028 auth via `@spaarke/auth`; Fluent v9 (ADR-021); §11 reuse (extend composer/send flow, no new send contract field beyond the existing `AttachmentDocumentIds`).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Reuse `SendCommunicationRequest.AttachmentDocumentIds` — do NOT invent a new attachment field on the send contract.</constraint>
+    <constraint>Fluent v9 only; theme-correct include UI.</constraint>
+    <constraint>Do NOT duplicate attachment-fetch logic — reuse whatever the CommunicationAttachments PCF / composer already use to enumerate a communication's attachments.</constraint>
+    <constraint>Best-effort: an attachment that can't be resolved is skipped with a message, not a hard failure of the send.</constraint>
+  </constraints>
+
+  <notes>
+    Coordinate with 101/093 (the attachment data path) and 103 (composer changes) — 103 and 104 both touch the
+    composer/hosts; sequence them or reconcile if run in parallel. Confirm the reply/forward seed logic before
+    building; the composer may already accept initial attachments, making this mostly UX + wiring.
+  </notes>
+</task>

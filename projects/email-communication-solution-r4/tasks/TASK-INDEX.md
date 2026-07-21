@@ -59,7 +59,12 @@
 | 091 | Association Engine — deterministic body/attachment reference-number extraction (UAT #7) | W9 | bff-api, communication | FR-10,14 | 015,030 | 090 | true | FULL | ✅ (`d6d03f6cb`: reference-number extraction + EXACT `referenceNumbers` filter merged with whole-text retrieval → body/attachment refs resolve regardless of ranking; Suggest-only (RecordNameMatch kind, auto-file eligibility UNCHANGED — verified); email-1 → Ambiguous. +4 regression tests (split-index whole-text-miss/exact-filter-hit); 511 Comm tests green; publish 45.68MB (+0.38, ≤60); 0 new HIGH CVE. Step 9.5 gate: 0 Critical/0 blocking, ADR-045/013/010/038+§11 clean. 2 non-blocking Info follow-ups noted.) |
 | 092 | Archive: faithful .eml (embed attachments) + on-demand Document-Profile enqueue + display-name/content-type (UAT #4,#5) | W9 | bff-api, communication | FR-06,07 | 044 | 090 | true | FULL | ✅ (`070e6e663`: ArchiveToSpeAsync embeds attachments via SpeFileStore facade (best-effort/NFR-06) → faithful .eml; display-name carries .eml; content-type message/rfc822 inferred from path; on-demand ArchiveExistingAsync now enqueues Document Profile (#5 gap) at parity w/ send/inbound. M2 hardening: EmlGenerationService empty-coalesces Message-Id (draft no longer 500s) +regression test. 515 Comm +22 Eml/embed tests green; publish 45.68MB (~0, ≤60); 0 new HIGH CVE. Gate READY-TO-COMMIT, 0 Critical/High, ADR-007/045/010/038+§10/§11 clean. Follow-ups: M1 test KEEP-path @/test-diet; L1 send-path embed no-op by ordering.) |
 | 093 | Communication Attachments preview PCF — replace OOB subgrid, open Document Preview modal (UAT #2) | W9 | pcf, frontend, dataverse, deploy | FR-17 | 042,043,044 | 090 | true | FULL | ✅ (`2d56cf8e0`: new `CommunicationAttachments` virtual PCF reuses shared `RichFilePreviewDialog` + BFF `/api/documents/{id}/preview-url`; webAPI-query binding; inline-images filtered; .eml→open-links. Auth @spaarke/auth authReady-gated (INV-7). build:prod 442KiB; 25/25 jest; solution ZIP v1.0.0 type-66-only. Gate READY-TO-COMMIT (0 Critical/High, ADR-028/022/021/§11 clean) + M1/L1/L2 fixes applied. **Deploy remainder = owner: import ZIP + swap OOB subgrid on form.**) |
-| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093 | — | **false** | STANDARD | 🔲 (HELD until W9 remediation closes) |
+| 101 | CommunicationAttachments PCF — preview prev/next nav + list styling + design-standards doc (R2 A1/A2) | W10 | pcf, frontend, docs | FR-17 | 093 | 090 | true | FULL | 🔲 |
+| 102 | Association Engine — contact-name matching in subject/body, Suggest-only (R2 B1) | W10 | bff-api, communication | FR-10 | 015,091 | 090,105 | true | FULL | 🔲 |
+| 103 | EmailComposer — contact-table lookup/autocomplete on To/CC/BCC (R2 D3) | W10 | frontend, communication | FR-12 | 020,021,060 | 090 | true | FULL | 🔲 |
+| 104 | EmailComposer — include attachment docs (links/files) on Reply/Reply-All/Forward (R2 D1/D2) | W10 | frontend, communication | FR-12,13 | 020,021,044 | 090 | true | FULL | 🔲 |
+| 105 | CommunicationConnections PCF — UX rebuild per approved mockup (R2 C1) | W10 | pcf, frontend, dataverse | FR-17 | 042,043 | 090 | true | FULL | 🔲 |
+| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105 | — | **false** | STANDARD | 🔲 (HELD until W9+W10 remediation closes) |
 
 ---
 
@@ -78,7 +83,8 @@
 | **W6** | 060, 061 → 062 | W2 (021/022) + W4 (043) | Caller migration |
 | **W7** | 070, 071, 072, 073, 075, 076 (‖); 074 after 072 | W0 | *Parallel track, deadline-driven; runs alongside W1–W6* |
 | **W8** | 080, 081, 082 | W1–W7 substantially complete | Per-file doc targets parallel |
-| **W9** (post-UAT remediation) | 091, 092 (‖ BFF); 093 (PCF) | ship + owner UAT | 091/092 disjoint-ish in `CommunicationService`/Engine — sequence to avoid churn; 093 independent. All FULL rigor. |
+| **W9** (post-UAT remediation) | 091, 092 (‖ BFF); 093 (PCF) | ship + owner UAT | 091/092 disjoint-ish in `CommunicationService`/Engine — sequence to avoid churn; 093 independent. All FULL rigor. **✅ ALL SHIPPED + DEPLOYED (PR #663).** |
+| **W10** (UAT round 2) | 101 (PCF), 102 (BFF engine), 103+104 (composer — share files, sequence), 105 (PCF, per approved mockup) | W9 shipped + owner UAT-R2 | 101/102/105 mutually independent; 103+104 both touch EmailComposer (reconcile/sequence). B1(102)=Suggest-only; C1(105) mockup approved. All FULL rigor. |
 
 **Max concurrency**: 6 agents/wave. `.claude/`-touching tasks (005) + gate (050) + wrap-up (090) run main-session, sequential.
 
