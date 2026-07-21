@@ -17,13 +17,28 @@ public sealed record ThreadAttachmentRef(
 /// reply pointer + attachment references — the columns the timeline renders. <see cref="Privilege"/> is composed
 /// metadata carried from the access-filter decision (it NEVER gated the read — ADR-015 / owner decision 2026-07-16);
 /// the timeline may surface it as a badge. Only messages the caller may read are ever projected here.
+/// <para>
+/// <b>Sender-identity enrichment (R3 task 002 / FR-18/FR-02):</b> <see cref="Direction"/>, <see cref="SentBy"/>, and
+/// <see cref="SentByName"/> are PROJECTED METADATA read from the SAME already-impersonated, already-access-filtered
+/// row as every other field here — they are NOT a second query, a directory lookup, or an access gate. The R3
+/// Teams-style bubble UI derives mine-right/others-left alignment from the <see cref="SentBy"/> systemuserid (not
+/// from email-string matching) and renders <see cref="Direction"/> + <see cref="SentByName"/>. Because these fields
+/// ride the visible-row projection, a row the caller may not see (excluded by impersonation or dropped by the shared
+/// filter) contributes NONE of them to the output (no over-disclosure — NFR-01).
+/// </para>
 /// </summary>
+/// <param name="Direction"><c>sprk_direction</c> choice: Incoming=100000000, Outgoing=100000001; null when unset.</param>
+/// <param name="SentBy">The sender's Dataverse <c>systemuserid</c> from <c>_sprk_sentby_value</c>; null when unset.</param>
+/// <param name="SentByName">The sender's display name from <c>sprk_sentbyname</c>; null when unset.</param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
     int? BodyFormat,
     int? CommunicationType,
     string? From,
+    int? Direction,
+    Guid? SentBy,
+    string? SentByName,
     DateTimeOffset? SentAt,
     DateTimeOffset? CreatedOn,
     string? InReplyTo,
@@ -34,9 +49,11 @@ public sealed record ThreadMessageDto(
 /// Thread-read endpoint result: the access-filtered, ordered message list for a thread (task 050 / FR-11).
 /// <see cref="Count"/> == <c>Messages.Count</c> (the readable subset returned on this page).
 /// <see cref="Name"/> (the thread's <c>sprk_name</c>) is populated by the by-regarding read (R2 task 010/020,
-/// FR-01/FR-03 — the record-level grouped view needs a label per collapsible group) and left <c>null</c> by the
-/// R1 per-thread read (<c>ReadThreadAsync</c>) — that surface is placed directly on the thread form, which already
-/// displays the thread's name via the host record header, so fetching it there would be redundant.
+/// FR-01/FR-03 — the record-level grouped view needs a label per collapsible group) AND, since R3 task 002 / FR-18,
+/// by the R1 per-thread read (<c>ReadThreadAsync</c>) as well — the R3 conversation surface renders the thread label
+/// inline rather than relying on the host record header. The name is read via a single IMPERSONATED projection on
+/// <c>sprk_communicationthread</c>, so a caller who cannot see the thread record gets <c>null</c> (fail closed — no
+/// existence leak).
 /// </summary>
 public sealed record ThreadReadResult(
     Guid ThreadId,

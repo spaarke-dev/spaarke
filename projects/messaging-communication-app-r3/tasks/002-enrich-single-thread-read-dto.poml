@@ -4,7 +4,7 @@
     <title>FR-18: enrich single-thread read DTO with Direction + sender identity + thread Name</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>after:001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits the shared, correctness-critical `CommunicationThreadReadService` + read models on the impersonated read path; the enriched DTO is the contract the entire R3 bubble UI (FR-02) keys on. Tags include bff-api. FULL gate (code-review + adr-check at Step 9.5).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -14,7 +14,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// The BFF read model for the polling timeline (task 050 / FR-11): thread-read (a thread's messages) and
 /// unread-count (readable messages since a caller's last-seen marker). Both are the ~5s poll surface for every
 /// open form, so both are lightweight by construction — projected columns, paged, NO ACS call (Dataverse is the
-/// record), and bounded to two impersonated queries per read regardless of message count (NFR-07).
+/// record), and bounded to a FIXED number of impersonated queries per read regardless of message count (NFR-07 —
+/// no per-row fan-out). Thread-read issues at most three O(1) queries: the message page, one bulk attachment query
+/// for the visible page, and (R3 task 002 / FR-18) one thread-name projection for the inline label.
 ///
 /// <para><b>Access model (owner decision 2026-07-16, <c>notes/access-model-decision.md</c>):</b> record-level read
 /// access is Dataverse's job — every read issues the <c>sprk_communication</c> query IMPERSONATED
@@ -53,6 +55,10 @@ public sealed class CommunicationThreadReadService
     private const string InReplyToField = "sprk_inreplyto";
     private const string InternalOnlyField = "sprk_isinternalonly";
     private const string PrivilegeField = "sprk_privilegeclassification";
+    // Sender-identity enrichment (R3 task 002 / FR-18) — projected metadata over the already-visible row.
+    private const string DirectionField = "sprk_direction";            // choice: Incoming=100000000, Outgoing=100000001
+    private const string SentByValue = "_sprk_sentby_value";           // systemuser lookup value
+    private const string SentByNameField = "sprk_sentbyname";          // denormalized sender display name
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -115,6 +121,7 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField,
+            DirectionField, SentByValue, SentByNameField,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
@@ -139,25 +146,17 @@ public sealed class CommunicationThreadReadService
         var attachmentsByMessage = await LoadAttachmentsAsync(
             visible.Select(v => v.Parsed.MessageId).ToList(), callerSystemUserId, ct);
 
-        var messages = visible.Select(v => new ThreadMessageDto(
-            MessageId: v.Parsed.MessageId,
-            Body: v.Parsed.Body,
-            BodyFormat: v.Parsed.BodyFormat,
-            CommunicationType: v.Parsed.CommunicationType,
-            From: v.Parsed.From,
-            SentAt: v.Parsed.SentAt,
-            CreatedOn: v.Parsed.CreatedOn,
-            InReplyTo: v.Parsed.InReplyTo,
-            Privilege: (int)v.Decision.Privilege,
-            Attachments: attachmentsByMessage.TryGetValue(v.Parsed.MessageId, out var atts)
-                ? atts
-                : Array.Empty<ThreadAttachmentRef>())).ToList();
+        var messages = visible.Select(v => BuildDto(v.Parsed, v.Decision, attachmentsByMessage)).ToList();
+
+        // Thread label (R3 task 002 / FR-18): one bounded IMPERSONATED projection on sprk_communicationthread by id.
+        // Impersonated, so a caller who cannot see the thread record gets null — no existence leak (fail closed).
+        var name = await ReadThreadNameAsync(threadId, callerSystemUserId, ct);
 
         _logger.LogDebug(
             "[THREAD-READ] thread={ThreadId} caller={Caller} returned={Returned} (impersonated={Impersonated}, hidden-internal-only={Hidden})",
             threadId, callerSystemUserId, messages.Count, rows.Count, rows.Count - messages.Count);
 
-        return new ThreadReadResult(ThreadId: threadId, Name: null, Messages: messages, Count: messages.Count);
+        return new ThreadReadResult(ThreadId: threadId, Name: name, Messages: messages, Count: messages.Count);
     }
 
     /// <summary>
@@ -454,6 +453,7 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField,
+            DirectionField, SentByValue, SentByNameField,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, ThreadLookupValue,
         });
         var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
@@ -487,6 +487,9 @@ public sealed class CommunicationThreadReadService
             BodyFormat: parsed.BodyFormat,
             CommunicationType: parsed.CommunicationType,
             From: parsed.From,
+            Direction: parsed.Direction,
+            SentBy: parsed.SentBy,
+            SentByName: parsed.SentByName,
             SentAt: parsed.SentAt,
             CreatedOn: parsed.CreatedOn,
             InReplyTo: parsed.InReplyTo,
@@ -523,6 +526,21 @@ public sealed class CommunicationThreadReadService
         }
 
         return systemUserId;
+    }
+
+    // ── thread label (single bounded impersonated projection) ───────────────────────────────────────
+
+    /// <summary>
+    /// Reads the thread's <c>sprk_name</c> via a single IMPERSONATED projection on <c>sprk_communicationthread</c>
+    /// by id (R3 task 002 / FR-18). One bounded O(1) query (not a per-row fan-out — NFR-07 preserved). Because it
+    /// is impersonated, a caller who cannot see the thread record gets <c>null</c> back rather than the name —
+    /// fail closed, no existence leak (NFR-06).
+    /// </summary>
+    private async Task<string?> ReadThreadNameAsync(Guid threadId, Guid callerSystemUserId, CancellationToken ct)
+    {
+        var odata = $"$select={ThreadNameField}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+        return rows.Count > 0 ? TryString(rows[0], ThreadNameField) : null;
     }
 
     // ── attachments (single bulk query per read) ────────────────────────────────────────────────────
@@ -596,6 +614,9 @@ public sealed class CommunicationThreadReadService
             BodyFormat = TryInt(row, BodyFormatField),
             CommunicationType = TryInt(row, TypeField),
             From = TryString(row, FromField),
+            Direction = TryInt(row, DirectionField),
+            SentBy = TryGuid(row, SentByValue),
+            SentByName = TryString(row, SentByNameField),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),
@@ -611,6 +632,9 @@ public sealed class CommunicationThreadReadService
         public int? BodyFormat { get; init; }
         public int? CommunicationType { get; init; }
         public string? From { get; init; }
+        public int? Direction { get; init; }
+        public Guid? SentBy { get; init; }
+        public string? SentByName { get; init; }
         public DateTimeOffset? SentAt { get; init; }
         public DateTimeOffset? CreatedOn { get; init; }
         public string? InReplyTo { get; init; }

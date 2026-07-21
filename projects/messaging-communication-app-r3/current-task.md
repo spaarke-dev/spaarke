@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 002 — FR-18 enrich single-thread read DTO (Direction + sender identity + Name) |
-| **Step** | not-started (Wave 2) |
+| **Task** | 003 — FR-16 `GET /communications/threads` + `ListThreadsAsync` (list-all incl. record-less) |
+| **Step** | not-started (Wave 3) |
 | **Status** | not-started |
-| **Next Action** | `work on task 002` — serial (edits shared `CommunicationThreadReadService.cs`; `/conflict-check` before the BFF PR). Deps 001 ✅. |
+| **Next Action** | `work on task 003` — serial, **opus/xhigh**, correctness-critical (impersonated, access-filtered, NO membership-union; seam tests DoD). Deps 002 ✅. `/conflict-check` before the BFF PR. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001

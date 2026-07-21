@@ -14,7 +14,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | ID | Title | Phase | Status | Rigor/Tier/Effort | Deps | Parallel |
 |----|-------|-------|--------|-------------------|------|----------|
 | 001 | Characterize existing communication read + send flows | 1 | ✅ | STANDARD/sonnet/high | none | Wave 1 |
-| 002 | FR-18 enrich single-thread read DTO (Direction + sender identity + Name) | 1 | 🔲 | FULL/opus/high | 001 | serial |
+| 002 | FR-18 enrich single-thread read DTO (Direction + sender identity + Name) | 1 | ✅ | FULL/opus/high | 001 | serial |
 | 003 | FR-16 `GET /communications/threads` + `ListThreadsAsync` + seam tests | 1 | 🔲 | FULL/opus/**xhigh** | 002 | serial |
 | 004 | FR-17 participant naming in `ThreadResolver` + BFF rename endpoint | 1 | 🔲 | FULL/opus/high | 001 | serial |
 | 005 | FR-19 honor `ThreadId` on email send branch | 1 | 🔲 | FULL/opus/high | 001 | serial |

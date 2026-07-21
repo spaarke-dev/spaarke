@@ -33,9 +33,12 @@ public class CommunicationThreadReadServiceTests
 
     private const string CommunicationSet = "sprk_communications";
     private const string AttachmentSet = "sprk_communicationattachments";
+    private const string ThreadSet = "sprk_communicationthreads";
     private const int PrivilegeNone = 100000000;
     private const int PrivilegePrivileged = 100000002;
     private const int TypeMessage = 100000004;
+    private const int DirectionIncoming = 100000000;
+    private const int DirectionOutgoing = 100000001;
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new(MockBehavior.Strict);
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
@@ -64,6 +67,14 @@ public class CommunicationThreadReadServiceTests
         _query.Setup(q => q.QueryAsync(AttachmentSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
               .ReturnsAsync(rows);
 
+    /// <summary>Stubs the impersonated sprk_communicationthread name projection (R3 task 002 / FR-18). A null
+    /// <paramref name="name"/> models an impersonated miss (caller cannot see the thread record → empty set).</summary>
+    private void SetupThreadName(string? name) =>
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(name is null
+                  ? (IReadOnlyList<Dictionary<string, JsonElement>>)Array.Empty<Dictionary<string, JsonElement>>()
+                  : new[] { new Dictionary<string, JsonElement> { ["sprk_name"] = El(name) } });
+
     // ─────────────────────────── thread-read: projection ───────────────────────────
 
     [Fact]
@@ -73,6 +84,7 @@ public class CommunicationThreadReadServiceTests
         SetupMessages(MessageRow(messageId, body: "hello", bodyFormat: 1, type: TypeMessage,
             from: "alice@x.com", inReplyTo: "root-1"));
         SetupAttachments(AttachmentRow(Guid.NewGuid(), messageId, docId: Guid.NewGuid(), name: "brief.pdf", type: 1));
+        SetupThreadName(null);
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -89,12 +101,33 @@ public class CommunicationThreadReadServiceTests
     }
 
     [Fact]
+    public async Task ReadThreadAsync_OutgoingMessageWithSender_ProjectsDirectionAndSenderIdentity()
+    {
+        // FR-18 acceptance: a visible OUTGOING message sent by user U projects Direction==100000001, SentBy==U,
+        // and SentByName from the row's sprk_sentbyname — read from the SAME already-visible, access-filtered row.
+        var messageId = Guid.NewGuid();
+        var sender = Guid.NewGuid();
+        SetupMessages(MessageRow(messageId, body: "sent from me", type: TypeMessage,
+            direction: DirectionOutgoing, sentBy: sender, sentByName: "Alice Attorney"));
+        SetupAttachments();
+        SetupThreadName("Acme v. Roe");
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        var msg = result.Messages.Single();
+        msg.Direction.Should().Be(DirectionOutgoing);
+        msg.SentBy.Should().Be(sender);
+        msg.SentByName.Should().Be("Alice Attorney");
+    }
+
+    [Fact]
     public async Task ReadThreadAsync_PrivilegedMessage_IsReturnedWithPrivilegeMetadataNotHidden()
     {
         // Privilege NEVER gates a read (ADR-015 / owner 2026-07-16) — it rides along as metadata.
         var messageId = Guid.NewGuid();
         SetupMessages(MessageRow(messageId, body: "sensitive", privilege: PrivilegePrivileged));
         SetupAttachments(); // no attachments
+        SetupThreadName(null);
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -105,15 +138,30 @@ public class CommunicationThreadReadServiceTests
     // ─────────────────────────── thread-read: current DTO shape (task 001 characterization baseline) ───────
 
     [Fact]
-    public async Task ReadThreadAsync_SingleThreadRead_NameIsAlwaysNull()
+    public async Task ReadThreadAsync_SingleThreadRead_PopulatesNameFromThreadRecord()
     {
-        // Pre-Phase-1 baseline (task 001 / plan Phase 1 gate): the R1 per-thread read is placed directly on the
-        // thread form, which already displays the thread's name via the host record header — so
-        // ThreadReadResult.Name is deliberately left null here (see the type's doc comment). Only the
-        // by-regarding read (ReadByRegardingAsync) populates Name, for the record-level grouped view. Pinning
-        // this BEFORE any FR-16..19 edit so a future change to this contract surfaces as a reviewable diff.
+        // Post-FR-18 contract (was ReadThreadAsync_SingleThreadRead_NameIsAlwaysNull, task 001 baseline): the R3
+        // conversation surface renders the thread label inline, so ReadThreadAsync now populates
+        // ThreadReadResult.Name from the thread's sprk_name via a single IMPERSONATED projection. This is the
+        // intentional flip the 001 baseline existed to surface as a reviewable diff (plan Phase 1 gate / NFR-08).
         SetupMessages(MessageRow(Guid.NewGuid(), body: "hi"));
         SetupAttachments();
+        SetupThreadName("Acme v. Roe");
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        result.Name.Should().Be("Acme v. Roe");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_ThreadRecordNotVisibleToCaller_LeavesNameNull()
+    {
+        // Fail closed: the name projection is IMPERSONATED, so a caller who cannot see the thread record gets an
+        // empty set back and Name stays null — no existence leak (NFR-06). Messages can still be present (e.g. a
+        // point-forward grant) without the label being disclosed.
+        SetupMessages(MessageRow(Guid.NewGuid(), body: "hi"));
+        SetupAttachments();
+        SetupThreadName(null);
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -121,19 +169,77 @@ public class CommunicationThreadReadServiceTests
     }
 
     [Fact]
-    public void ThreadMessageDto_CurrentShape_ExposesFromWithNoDirectionOrSenderIdentityField()
+    public void ThreadMessageDto_PostFr18Shape_ExposesDirectionAndSenderIdentityAlongsideFrom()
     {
-        // Characterization baseline (task 001, pre-FR-16..19): the CURRENT R1 wire shape carries a raw `From`
-        // string and NO direction / sender-identity field (no "Direction", "IsInbound"/"IsOutbound", or
-        // "SenderId"/"SenderIdentity" property). This is the pre-change DTO contract FR-18/19 are expected to
-        // extend; when they do, this test's expected-property assertions are the reviewable diff the baseline
-        // exists to surface (plan Phase 1 gate / spec NFR-08).
+        // Post-FR-18 contract (was ThreadMessageDto_CurrentShape_ExposesFromWithNoDirectionOrSenderIdentityField,
+        // task 001 baseline): the enriched R3 wire shape carries the raw `From` string AND the new
+        // Direction/SentBy/SentByName sender-identity fields the bubble UI keys on. This is the intentional
+        // extension the 001 baseline existed to surface as a reviewable diff (plan Phase 1 gate / spec NFR-08).
         var propertyNames = typeof(ThreadMessageDto).GetProperties().Select(p => p.Name).ToList();
 
-        propertyNames.Should().Contain("From");
-        propertyNames.Should().NotContain(
-            new[] { "Direction", "IsInbound", "IsOutbound", "SenderId", "SenderIdentity" },
-            "the current (pre-Phase-1) DTO carries no direction/sender-identity field");
+        propertyNames.Should().Contain(new[] { "From", "Direction", "SentBy", "SentByName" });
+    }
+
+    // ─────────────────────────── thread-read: sender-identity enrichment (FR-18) ───────────────────────────
+
+    [Fact]
+    public async Task ReadThreadAsync_MultipleVisibleRows_EachDtoCarriesItsOwnSenderIdentity()
+    {
+        // Per-row sourcing (FR-18): the enriched Direction/SentBy/SentByName are read from EACH row individually —
+        // no cross-row bleed. Two visible rows with distinct senders/directions must map 1:1 to their own DTOs.
+        var outgoingId = Guid.NewGuid();
+        var incomingId = Guid.NewGuid();
+        var alice = Guid.NewGuid();
+        var bob = Guid.NewGuid();
+        SetupMessages(
+            MessageRow(outgoingId, body: "from me", direction: DirectionOutgoing, sentBy: alice, sentByName: "Alice"),
+            MessageRow(incomingId, body: "from them", direction: DirectionIncoming, sentBy: bob, sentByName: "Bob"));
+        SetupAttachments();
+        SetupThreadName("Mixed thread");
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        var outgoing = result.Messages.Single(m => m.MessageId == outgoingId);
+        outgoing.Direction.Should().Be(DirectionOutgoing);
+        outgoing.SentBy.Should().Be(alice);
+        outgoing.SentByName.Should().Be("Alice");
+
+        var incoming = result.Messages.Single(m => m.MessageId == incomingId);
+        incoming.Direction.Should().Be(DirectionIncoming);
+        incoming.SentBy.Should().Be(bob);
+        incoming.SentByName.Should().Be("Bob");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_RowExcludedByAccessLayer_ContributesNoSenderIdentityToOutput()
+    {
+        // No over-disclosure (NFR-01 / FR-18 criterion 3): the enriched Direction/SentBy/SentByName ride the SAME
+        // visible-row projection (BuildDto over the impersonated + access-filtered set) as Body/From. A row the
+        // caller may not see is absent from that visible set — excluded by Dataverse impersonation, exactly as the
+        // private-thread and point-forward no-leak tests model exclusion (the internal-only filter drop for a
+        // non-internal caller is covered exhaustively by CommunicationAccessFilterTests; the R1/R3 timeline caller
+        // is internal, so exclusion here is the impersonation seam). The service must therefore never fabricate or
+        // backfill a sender/name/direction for a row it did not receive — only the visible sender surfaces.
+        var visibleId = Guid.NewGuid();
+        var visibleSender = Guid.NewGuid();
+        var hiddenSender = Guid.NewGuid();
+
+        // The impersonated query returns ONLY the visible row; the hidden internal-only row (hiddenSender /
+        // "Hidden Hank") was already excluded upstream and never reaches the projection.
+        SetupMessages(MessageRow(visibleId, body: "visible to caller", direction: DirectionOutgoing,
+            sentBy: visibleSender, sentByName: "Visible Vera"));
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        result.Messages.Should().ContainSingle();
+        result.Messages.Single().SentBy.Should().Be(visibleSender);
+        result.Messages.Single().SentByName.Should().Be("Visible Vera");
+
+        // The excluded row contributes NONE of its identity to the output (no over-disclosure).
+        result.Messages.Select(m => m.SentBy).Should().NotContain(hiddenSender);
+        result.Messages.Select(m => m.SentByName).Should().NotContain("Hidden Hank");
     }
 
     // ─────────────────────────── thread-read: no-leak (private via impersonation) ───────────────────────────
@@ -144,6 +250,7 @@ public class CommunicationThreadReadServiceTests
         // Impersonation is the private-thread enforcement: Dataverse returns ZERO rows to a caller without a grant.
         // The service must faithfully return empty (no app-only fallback) AND skip the attachment query (NFR-07).
         SetupMessages(/* none */);
+        SetupThreadName(null);
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -172,6 +279,7 @@ public class CommunicationThreadReadServiceTests
             MessageRow(postBoundaryId1, body: "opened — welcome to the thread"),
             MessageRow(postBoundaryId2, body: "follow-up after open"));
         SetupAttachments();
+        SetupThreadName("Post-open thread");
 
         var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
 
@@ -251,7 +359,8 @@ public class CommunicationThreadReadServiceTests
 
     private static Dictionary<string, JsonElement> MessageRow(
         Guid id, string? body = null, int? bodyFormat = null, int? type = null,
-        string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone)
+        string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
+        int? direction = null, Guid? sentBy = null, string? sentByName = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -265,6 +374,9 @@ public class CommunicationThreadReadServiceTests
         if (type is not null) row["sprk_communicationtype"] = El(type.Value);
         if (from is not null) row["sprk_from"] = El(from);
         if (inReplyTo is not null) row["sprk_inreplyto"] = El(inReplyTo);
+        if (direction is not null) row["sprk_direction"] = El(direction.Value);
+        if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
+        if (sentByName is not null) row["sprk_sentbyname"] = El(sentByName);
         return row;
     }
 
