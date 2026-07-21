@@ -249,7 +249,12 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           } else if (dispatched.consumerType === "chat-summarize") {
             // R4-11: after a summary, offer "Ask about these files" alongside the server
             // Create-a-matter / Draft-a-response chips (replaces the old "Summarize again").
-            nextChips = [...serverChips, buildAskAboutFilesChip()];
+            // R6-1: also offer "Revise document" when a file is indexed (getAppendedLocalChips).
+            nextChips = [
+              ...serverChips,
+              buildAskAboutFilesChip(),
+              ...(getAppendedLocalChips?.() ?? []),
+            ];
           }
           if (nextChips.length > 0) {
             setConsumerChips(nextChips);
@@ -306,6 +311,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       getActiveSourceFile,
       getSessionId,
       onCorrespondenceDraft,
+      getAppendedLocalChips,
     ]
   );
 

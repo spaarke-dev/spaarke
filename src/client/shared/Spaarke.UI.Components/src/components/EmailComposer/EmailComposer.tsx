@@ -118,10 +118,11 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalXXL,
   },
 
-  // `dialog` — compact, bounded width; body editor sized for shorter messages.
+  // `dialog` — bounded width; R6-4 (UAT 2026-07-21): widened 600 → 760 to match the standard
+  // Spaarke email surface (the 960px page composer) more closely without going full-page.
   dialog: {
     width: '100%',
-    maxWidth: '600px',
+    maxWidth: '760px',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
@@ -357,7 +358,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         readOnly={state.readOnly}
         required={!props.allowEmptyBody}
         errorMessage={fieldErrors.body}
-        minHeight={props.mount === 'dialog' ? 140 : 220}
+        minHeight={props.mount === 'dialog' ? 200 : 220}
       />
 
       <div className={styles.section} role="region" aria-label="Attachments">
