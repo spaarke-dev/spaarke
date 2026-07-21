@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 1 COMPLETE ✅ — next: Phase 2 (Wave 6: 010 characterize conversation core) |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | `work on task 010` (characterize `CommunicationTimeline` + `SendEmailDialog`), then Wave 7 (011+012 **parallel** — first real parallel wave). Phase 2 is client/React (Fluent v9); no shared-backend serialization. |
+| **Task** | Wave 7 (PARALLEL) — 011 ConversationView bubbles + 012 two-pane shell/thread list |
+| **Step** | dispatching 2 agents |
+| **Status** | in-progress |
+| **Next Action** | Run 011 + 012 in parallel (different components); gates each; build-verify. **011 must plumb FR-18 `SentBy` through `IThreadMessageDto`/`TimelineMessage` and align on it (NOT email-string) — backend already ships it (task 002).** buildTimeline has NO day-grouping today (net-new in 011). ⚠️ pre-existing worktree build gap: `@spaarke/auth`/`@spaarke/sdap-client` sibling dist unbuilt — breaks whole-package `npm run build` on 2 unrelated wizard files; verify components via scoped tsc/jest. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001

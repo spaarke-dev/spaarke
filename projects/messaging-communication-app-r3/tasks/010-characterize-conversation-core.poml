@@ -4,7 +4,7 @@
     <title>Characterize CommunicationTimeline conversation core + SendEmailDialog before extending</title>
     <phase>2 Shared conversation widget core</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Test authoring only — adds characterization/baseline tests around existing components; no production code change. STANDARD per rigor table (new test files, no .cs/.ts/.tsx behavior change), but tags include testing so quality gates apply per §8 TEST-MODIFYING row.</rigor-reason>
     <model-tier>sonnet</model-tier>
