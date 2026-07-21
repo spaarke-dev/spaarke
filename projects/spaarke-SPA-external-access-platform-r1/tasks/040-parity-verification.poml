@@ -1,0 +1,142 @@
+<task id="040" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>End-to-end parity verification (SWA + CIAM)</title>
+    <phase>3 Cutover &amp; decommission</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification pass over already-shipped surface (no new code); gate before decommission</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>E2E verification</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="verification gate before decommission">false</parallel-safe>
+    <deps>014,031</deps>
+    <tags>testing, e2e-test</tags>
+    <estimated-effort>1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run an end-to-end parity pass on SWA + CIAM: a core user invites an outside-counsel Contact, the attorney sets a password via SSPR and signs in through CIAM, then sees the assigned Project's documents/events/tasks and can download a document; an unauthorized download is blocked with 403 (no bytes); clean-URL deep links resolve directly and through login; and NO workforce B2B guest was created for the external user. This is verification only—do not modify code; file any parity gap vs the Power Pages baseline and STOP before the decommission task (041).
+  </prompt>
+
+  <role>
+    You are a QA + integration engineer running an end-to-end functional verification of the
+    migrated Spaarke external Secure Project Workspace on Azure Static Web Apps (SWA) hosting +
+    Microsoft Entra External ID (CIAM) identity. You exercise the shipped surface as a real user
+    would; you do not add features or redesign anything. Your job is to prove parity with the
+    Power Pages baseline BEFORE the decommission task (041) removes the fallback path.
+  </role>
+
+  <goal>
+    Run an end-to-end functional pass on SWA + CIAM proving the migrated portal is at parity with
+    the Power Pages baseline: a core user invites an outside-counsel Contact → the attorney sets a
+    password via SSPR → signs in through CIAM → sees the assigned Project, its documents (and can
+    download a document), its events, and its tasks; an UNAUTHORIZED download is blocked (403, no
+    bytes); clean-URL deep links resolve both directly and through the login redirect; and NO
+    workforce B2B guest was created for the external user. Any parity gap vs the Power Pages
+    baseline STOPS the cutover before task 041.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 moved hosting to SWA (BrowserRouter + navigationFallback + security headers) on the
+      existing B2B identity; Phase 2 swapped identity to CIAM (second "Ciam" JwtBearer scheme,
+      admin-initiated provisioner, oid resolution, invite trigger, app-only document download,
+      dropped synthetic SPE membership). This task is the parity gate that must be GREEN before the
+      Power Pages site + `Deploy-ExternalWorkspaceSpa.ps1` are retired (task 041). The three-plane
+      `sprk_externalrecordaccess` authorization model and the SPA feature set are unchanged; this
+      run confirms the migrated front door (host + IdP) preserves the baseline behavior end to end.
+      The broker-only invariant means no workforce B2B guest should ever be minted for an external
+      user — verifying its absence is part of the parity definition.
+    </background>
+    <relevant-files>
+      <file status="reference">src/client/external-spa/src/App.tsx (BrowserRouter + in-app 404 — deep-link behavior under test)</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs (project/documents/events/tasks + content download endpoints under test)</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs (invite/onboard path under test)</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs (oid resolution + authz-before-stream under test)</file>
+      <file status="reference">projects/spaarke-SPA-external-access-platform-r1/README.md (graduation criteria this run must satisfy)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: verification only. This task exercises and observes the shipped surface; it MUST NOT
+      modify production code, alter the authorization model, or change the SPA feature set to make
+      a check pass. If a check fails, file the gap (see escalation) rather than patching in place.
+    </constraint>
+    <constraint source="spec-NFR-02">
+      SCOPE: broker-only invariant. The run MUST confirm no workforce Entra B2B guest was created
+      for the external user and that the external token was never exchanged downstream (no OBO on
+      the external path). Presence of a B2B guest is a parity failure, not a pass.
+    </constraint>
+    <constraint source="spec-NFR-03">
+      SCOPE: download authorization. The run MUST confirm authz-before-stream: an unauthorized
+      Contact's download attempt returns 403 with NO document bytes streamed.
+    </constraint>
+    <constraint source="ADR-021">
+      SCOPE: UI verification. The SPA (including the in-app 404 and project views) MUST render
+      correctly in both light and dark Fluent v9 themes during the pass — tokens resolve, no
+      hardcoded colors, readable in dark mode.
+    </constraint>
+    <constraint source="parity-baseline">
+      SCOPE: the pass/fail bar. Parity is defined against the Power Pages baseline feature behavior
+      (Documents, Events, Tasks, Contacts, download). Any behavior available on the baseline but
+      missing/broken on SWA+CIAM is a parity gap that blocks task 041.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Confirm the environment: SPA served from the SWA origin (not Power Pages), BFF `/api/v1/external` group pinned on the "Ciam" scheme, and the CIAM tenant reachable. Record the origins/authorities used.</step>
+    <step>As a core user, invoke the "Invite to Secure Workspace" trigger for an outside-counsel Contact at a specific access level; confirm the CIAM account is provisioned (or reused idempotently), `sprk_externalobjectid` is populated, the access record is created, and the onboarding email is sent.</step>
+    <step>As the invited attorney, complete SSPR (Email OTP "Forgot password") to set a password, then sign in via the CIAM hosted flow.</step>
+    <step>Verify the attorney sees the assigned Project and its Documents, Events, and Tasks; download a document and confirm the bytes are received via the app-only content endpoint (keyed on documentId, no Graph pointers exposed to the browser).</step>
+    <step>Attempt a download the attorney is NOT authorized for (a document/project outside their grant); confirm 403 with no bytes returned (authz-before-stream).</step>
+    <step>Verify clean-URL deep links: navigate directly to `/project/{id}` (resolves via navigationFallback) and navigate to the same deep link while unauthenticated (login redirect returns to the intended route).</step>
+    <step>Inspect the workforce Entra tenant and confirm NO B2B guest was created for the external user; confirm no synthetic `contact_{guid}` SPE container membership was written by the grant.</step>
+    <step>Compare each observed behavior against the Power Pages baseline and the README graduation criteria; record PASS/FAIL per criterion in the task notes.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="invite-to-signin-to-download">Core user invites the Contact → attorney sets password via SSPR → signs in via CIAM → sees the assigned Project and downloads a document successfully.</test>
+    <test name="unauthorized-download-blocked">An unauthorized Contact's download attempt returns 403 with no document bytes (authz-before-stream, NFR-03).</test>
+    <test name="deep-link-direct-and-through-login">A `/project/{id}` deep link resolves on direct navigation (navigationFallback) AND returns to the intended route after the login redirect.</test>
+    <test name="dark-mode-adr-021">The SPA views (project view + in-app 404) render correctly under `webDarkTheme` (ADR-021) — tokens resolve, no hardcoded colors, readable in dark mode.</test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If any parity gap vs the Power Pages baseline is found (a baseline behavior missing or broken on SWA+CIAM, a B2B guest created, an unauthorized download returning bytes, or a deep link failing to resolve), STOP before task 041 (decommission) and file the gap per root CLAUDE.md §6. Do NOT mark this verification complete or allow decommission to proceed while any gap remains — the Power Pages fallback must stay in place until parity is GREEN.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>A parity verification record in the task notes: PASS/FAIL per README graduation criterion, with the origins/authorities exercised</output>
+    <output>Evidence for the unauthorized-download 403 (no bytes) and the no-B2B-guest assertion</output>
+    <output>Any parity gaps filed per the escalation trigger (blocking task 041)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All README graduation criteria pass in the end-to-end run on SWA + CIAM (invite → SSPR → CIAM sign-in → Project + Documents/Events/Tasks visible → document download).</criterion>
+    <criterion testable="true">An unauthorized Contact's document download returns 403 with NO document bytes streamed (negative case).</criterion>
+    <criterion testable="true">No workforce Entra B2B guest was created for the external user during the run (negative case).</criterion>
+    <criterion testable="true">Clean-URL deep links resolve both on direct navigation and through the login redirect.</criterion>
+    <criterion testable="true">Any parity gap found is filed and the run is NOT recorded as complete (task 041 stays blocked) until the gap is resolved (negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Verification-only task — no new component surface, so no justification block. This is the hard
+    gate before the irreversible decommission in task 041; a GREEN result here is the precondition
+    for task 041 to run. Deps 014 (Phase 1 SWA deploy/parity) and 031 (Phase 2 CIAM cutover) must
+    be complete before this pass is meaningful.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

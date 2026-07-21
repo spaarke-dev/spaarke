@@ -133,8 +133,6 @@ const useStyles = makeStyles({
 // Types
 // ---------------------------------------------------------------------------
 
-type ProjectTab = 'overview' | 'calendar' | 'contacts';
-
 interface ProjectPageParams {
   id: string;
   [key: string]: string | undefined;

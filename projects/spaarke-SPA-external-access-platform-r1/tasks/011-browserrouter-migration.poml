@@ -1,0 +1,114 @@
+<task id="011" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Migrate HashRouter to BrowserRouter + in-app 404</title>
+    <phase>1 Hosting migration + routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies SPA routing (.tsx)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-patterned React routing change</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="shares App.tsx with 012">false</parallel-safe>
+    <deps>010</deps>
+    <tags>frontend, react, typescript</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Migrate `src/client/external-spa/src/App.tsx` from `HashRouter` to `BrowserRouter` and replace the catch-all `Navigate to="/"` with an in-app not-found (404) route, so clean-URL deep links resolve under the SWA `navigationFallback` (task 010) and unknown paths render an explicit in-app 404 rather than silently redirecting home. Keep the sessionStorage MSAL cache and anchor the 404 view to the existing external-spa Fluent v9 components (PageContainer / SectionCard / Text) in both light and dark themes.
+  </prompt>
+
+  <role>
+    You are a React front-end engineer making a routing change to the Spaarke external-spa.
+    You follow the existing external-spa component conventions and do not redesign the UI.
+  </role>
+
+  <goal>
+    Change `src/client/external-spa/src/App.tsx` from `HashRouter` to `BrowserRouter` and
+    replace the catch-all `Navigate to="/"` with an in-app not-found (404) route, so that
+    clean-URL deep links resolve under the SWA `navigationFallback` (task 010) and unknown
+    paths render an in-app 404 instead of silently redirecting home.
+  </goal>
+
+  <context>
+    <background>
+      App.tsx currently uses `HashRouter` (chosen for Power Pages single-page hosting) and
+      `&lt;Route path="*" element={&lt;Navigate to="/" replace /&gt;} /&gt;`. Moving to SWA lets the SPA
+      use clean URLs. With BrowserRouter, deep links only resolve because task 010 adds the SWA
+      navigationFallback rewrite; and unknown paths should render an explicit in-app 404 rather
+      than a silent redirect, so a genuinely bad path is visible. Phase 1 stays on Entra B2B so
+      any routing regression is attributable to routing, not the IdP.
+    </background>
+    <relevant-files>
+      <file status="modify">src/client/external-spa/src/App.tsx</file>
+      <file status="reference">src/client/external-spa/src/components/PageContainer.tsx (visual shell for the 404 view)</file>
+      <file status="reference">src/client/external-spa/src/components/SectionCard.tsx (existing card styling to anchor the 404 look)</file>
+      <file status="reference">src/client/external-spa/staticwebapp.config.json (task 010 — the host rewrite this depends on)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: token storage. Keep the sessionStorage MSAL cache (ADR-028 external-SPA exception);
+      do NOT change token storage to localStorage as part of this routing change.
+    </constraint>
+    <constraint source="spec-FR-02">
+      SCOPE: the router + catch-all route. MUST use `BrowserRouter`; MUST render an in-app
+      not-found route for unknown paths. MUST NOT use BrowserRouter without the SWA
+      navigationFallback rewrite (delivered by task 010, this task's dependency).
+    </constraint>
+    <constraint source="ADR-021">
+      SCOPE: any 404 view markup. Use Fluent UI v9 components + theme tokens (no hardcoded
+      colors); the 404 view must render correctly in both light and dark themes.
+    </constraint>
+    <constraint source="visual-anchor">
+      SCOPE: the 404 view. Anchor visual direction to the existing external-spa components
+      (PageContainer / SectionCard / Text); do NOT redesign the shell or introduce new styling systems.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>src/client/external-spa/src/App.tsx</file>
+      <file>src/client/external-spa/src/components/PageContainer.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Replace the `HashRouter` import + usage in App.tsx with `BrowserRouter` (keep the AppShell-inside-router structure so `useNavigate` still works).</step>
+    <step>Replace the catch-all `&lt;Route path="*" element={&lt;Navigate to="/" replace /&gt;} /&gt;` with an in-app not-found route rendering a small Fluent v9 404 view anchored to the existing external-spa look (PageContainer / SectionCard / Text), with a link back to `/`.</step>
+    <step>Update the stale HashRouter comments in App.tsx (the JSDoc still says "HashRouter (required for Power Pages...)") to reflect BrowserRouter + SWA hosting.</step>
+    <step>Confirm no other file imports HashRouter or relies on hash-based (`#/`) URLs.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="deep-link-renders-app">Direct navigation to `/project/{id}` renders the ProjectPage (app shell), NOT the in-app 404 — validating BrowserRouter + host navigationFallback.</test>
+    <test name="unknown-path-404">Navigation to an unknown path (e.g. `/does-not-exist`) renders the in-app 404 view, not a silent redirect to `/`.</test>
+    <test name="dark-mode-adr-021">The 404 view renders correctly under `webDarkTheme` (ADR-021) — tokens resolve, no hardcoded colors, readable in dark mode.</test>
+  </ui-tests>
+
+  <outputs>
+    <output>App.tsx using BrowserRouter with an in-app not-found route</output>
+    <output>Updated JSDoc/comments reflecting BrowserRouter + SWA hosting</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">App.tsx imports and uses `BrowserRouter` (no remaining `HashRouter` import or usage).</criterion>
+    <criterion testable="true">Direct deep-link navigation to `/project/{id}` resolves to the app (renders ProjectPage), not the 404 view.</criterion>
+    <criterion testable="true">An unknown path renders the in-app 404 view (not `Navigate to="/"`).</criterion>
+    <criterion testable="true">The 404 view renders correctly in both light and dark themes with no console errors.</criterion>
+    <criterion testable="true">MSAL token storage remains sessionStorage — no switch to localStorage introduced (negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only task (no new component surface) — no justification block. Deep-link resolution
+    depends on task 010's navigationFallback being deployed; test both with the host rewrite in place.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

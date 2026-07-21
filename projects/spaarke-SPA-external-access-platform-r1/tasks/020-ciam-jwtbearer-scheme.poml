@@ -1,0 +1,102 @@
+<task id="020" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Add second "Ciam" JwtBearer scheme to AuthorizationModule</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Appended AuthSchemes.Ciam ("Ciam") JwtBearer scheme to the EXISTING workforce authentication builder in AuthorizationModule.cs (no new AddAuthentication — still exactly 2 calls; workforce default preserved). Authority built as {Instance}{TenantId}/v2.0 (*.ciamlogin.com) from a new "Ciam" config section in appsettings.template.json (non-secret #{CIAM_*}# placeholders). ValidateIssuer/Audience/Lifetime/IssuerSigningKey all true. Default-scheme PostConfigure audience-merge is named to JwtBearerDefaults ("Bearer") only, so it does not apply to "Ciam" (no extra guard needed). Build 0 errors; publish 47.03 MB (<=60). code-review + adr-check clean. Live-token tests deferred to task 030. Task 021 pins AuthSchemes.Ciam on /api/v1/external.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive scheme wiring on the BFF (tags: auth); modifies shared AuthorizationModule</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-sensitive scheme wiring (tags: auth)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies AuthorizationModule shared with 013/021</parallel-safe-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>0.5-1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Register a second JwtBearer authentication scheme named "Ciam" in the BFF's AuthorizationModule, targeting the Entra External ID (CIAM) authority (`*.ciamlogin.com`), alongside the existing workforce JwtBearer scheme. Add a `Ciam` configuration section mirroring `AzureAd`. The scheme MUST be appended via the builder returned by the single existing `AddAuthentication` call — do NOT add a second/third `AddAuthentication`. The default-scheme `PostConfigure` audience-merge MUST NOT apply to the "Ciam" scheme.
+  </prompt>
+
+  <role>
+    You are a BFF auth engineer wiring an additive JwtBearer scheme for a distinct external identity provider (CIAM), preserving the existing workforce token-validation path unchanged.
+  </role>
+
+  <goal>
+    A JwtBearer scheme named "Ciam" (authority resolved from a new `Ciam` config section, `*.ciamlogin.com`) is registered in `AuthorizationModule.cs` by appending `.AddJwtBearer("Ciam", ...)` to the existing authentication builder; a `Ciam` config section mirroring `AzureAd` exists in `appsettings.template.json`; and the default-scheme `PostConfigure&lt;JwtBearerOptions&gt;` audience-merge (AuthorizationModule.cs:62) is NOT applied to the "Ciam" scheme.
+  </goal>
+
+  <context>
+    <background>
+      R1 migrates the external portal from Entra B2B guests to Entra External ID (CIAM). External callers present tokens issued by the CIAM authority, which the existing workforce JwtBearer scheme cannot validate (different issuer/authority/audience). Per ADR-028 Amendment A1, external users MUST authenticate against `*.ciamlogin.com` via a second JwtBearer scheme. This task adds only the scheme + config; task 021 pins it onto the `/api/v1/external` endpoint group. The existing `AddAuthentication` sets the workforce scheme as default; the CIAM scheme is additive and must not disturb the default or the workforce PostConfigure audience-merge.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: external identity validation. The "Ciam" scheme MUST validate against the CIAM authority (`*.ciamlogin.com`) per Amendment A1 — a distinct issuer from the workforce tenant. Workforce token validation MUST remain unchanged.</constraint>
+    <constraint source="spec-FR-07">Scope: the AddAuthentication call. Append the CIAM scheme via the builder returned by the single existing `AddAuthentication(...)` — MUST NOT add a second or third `AddAuthentication` (which would reset the default scheme).</constraint>
+    <constraint source="spec-FR-07">Scope: the PostConfigure audience-merge at AuthorizationModule.cs:62. The default-scheme `PostConfigure&lt;JwtBearerOptions&gt;` audience-merge MUST NOT be applied to the "Ciam" scheme (guard by scheme name / options.SchemeName).</constraint>
+    <constraint source="NFR-06">Scope: any CIAM credential/config. No plaintext secrets in `appsettings*.json` — Key Vault references only in production; the `Ciam` section carries non-secret authority/audience identifiers.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) with the ≤60 MB ceiling confirmed (NFR-01).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>Existing workforce JwtBearer scheme + `RagApiKey` named scheme in AuthorizationModule; no `AddPolicyScheme`/issuer-forwarding exists.</existing>
+    <extension>No — the workforce scheme validates a single authority/audience and cannot also validate the CIAM issuer; add the "Ciam" scheme alongside it (additive).</extension>
+    <cost-of-doing-nothing>Without the "Ciam" scheme, CIAM tokens fail validation and the entire external surface either 401s or is unauthenticated-reachable — the migrated portal cannot authenticate any external user.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `AuthorizationModule.cs` to locate the single `AddAuthentication(...)` call, the workforce `AddJwtBearer` registration, and the `PostConfigure&lt;JwtBearerOptions&gt;` audience-merge at ~line 62.</step>
+    <step>Add a `Ciam` config section to `appsettings.template.json` mirroring the `AzureAd` shape (authority/instance, tenant, audience/client id) with non-secret placeholders.</step>
+    <step>Append `.AddJwtBearer("Ciam", options => { ... })` to the builder returned by the existing `AddAuthentication(...)` (do NOT introduce another `AddAuthentication`), binding options from the `Ciam` config section and the `*.ciamlogin.com` authority.</step>
+    <step>Guard the default-scheme PostConfigure audience-merge so it does NOT run for the "Ciam" scheme (e.g. check the options/scheme name before merging).</step>
+    <step>Build the BFF and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the additive scheme cannot be appended without a second `AddAuthentication` (which would reset the default scheme and disturb workforce validation), STOP and escalate per root CLAUDE.md §6 rather than adding a second `AddAuthentication`.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>A "Ciam" JwtBearer scheme registered in AuthorizationModule.cs (appended to the existing builder).</output>
+    <output>A `Ciam` config section mirroring `AzureAd` in appsettings.template.json (non-secret).</output>
+    <output>PostConfigure audience-merge guarded to exclude the "Ciam" scheme.</output>
+    <output>BFF publish-size report (compressed size + diff vs baseline).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid CIAM-authority token authenticates successfully under the "Ciam" scheme.</criterion>
+    <criterion testable="true">A token with an invalid/unexpected issuer is rejected with 401 under the "Ciam" scheme.</criterion>
+    <criterion testable="true">Workforce token validation on existing/internal endpoints is unchanged (still validates under the workforce default scheme).</criterion>
+    <criterion testable="true">Negative: the default-scheme PostConfigure audience-merge is NOT applied to the "Ciam" scheme.</criterion>
+    <criterion testable="true">Negative: no second/third `AddAuthentication` call is introduced (the CIAM scheme is appended to the existing builder).</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This task adds only the scheme + config; task 021 pins `AuthenticationSchemes=["Ciam"]` onto the `/api/v1/external` group. Depends on task 001 for the CIAM tenant/authority identifiers recorded in `config/environments.json`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

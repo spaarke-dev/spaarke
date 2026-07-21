@@ -3,7 +3,7 @@ import { FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentu
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
 import { HashRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { resolveCodePageTheme, setupCodePageThemeListener, setUserThemePreference } from '@spaarke/ui-components';
+import { resolveCodePageTheme, setupCodePageThemeListener, setUserThemePreference } from '@spaarke/ui-components/utils/themeStorage';
 import { APP_VERSION } from './config';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';

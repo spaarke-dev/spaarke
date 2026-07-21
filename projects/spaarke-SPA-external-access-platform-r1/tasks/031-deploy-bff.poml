@@ -1,0 +1,90 @@
+<task id="031" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Deploy BFF + verify publish size &amp; CVE</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + verification following the bff-deploy runbook</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy + verification</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>deploy step</parallel-safe-reason>
+    <deps>030</deps>
+    <tags>deploy, azure, bff-api</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF via the `bff-deploy` skill. Report the compressed publish size (ceiling ≤60 MB, baseline ~49.63 MB incl. PDBs) with the diff vs baseline, and run `dotnet list package --vulnerable --include-transitive` to confirm no new HIGH-severity CVE. If the publish size crosses the escalation thresholds, STOP and justify.
+  </prompt>
+
+  <role>
+    You are a release engineer deploying the BFF and running the mandatory §10 publish-size + CVE verification gates.
+  </role>
+
+  <goal>
+    The BFF (`Sprk.Bff.Api`) is deployed via the `bff-deploy` skill; the compressed publish size is reported with the diff vs the ~49.63 MB baseline and confirmed ≤60 MB; and `dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity CVE.
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 adds config + a second JwtBearer scheme + a cross-tenant Graph client + a thin download endpoint + email template — all expected to be small. §10 BFF Hygiene requires every BFF-touching project to verify compressed publish size (≤60 MB ceiling; ~49.63 MB baseline incl. PDBs) and no new HIGH CVE before deploy. This task runs the deployment + those gates prescriptively after tests (task 030) pass.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project-NFR-01">Scope: publish-size gate. MUST report absolute compressed publish size + diff vs the ~49.63 MB baseline (state the PDB convention); ceiling ≤60 MB. A ≥+5 MB single-task delta or ≥55 MB cumulative requires explicit justification; ≥60 MB is a HARD STOP.</constraint>
+    <constraint source="project-NFR-04">Scope: CVE gate. `dotnet list package --vulnerable --include-transitive` MUST show no new HIGH-severity CVE.</constraint>
+    <constraint source="ADR-028">Scope: deploy config. CIAM/credential config uses Key Vault references / MI — no plaintext secrets deployed to App Service settings.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification summary in the PR/deploy notes (cite `.claude/constraints/bff-extensions.md`) alongside the size + CVE report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and measure the compressed output; compute the diff vs the ~49.63 MB baseline.</step>
+    <step>Run `dotnet list package --vulnerable --include-transitive` and confirm no new HIGH-severity CVE.</step>
+    <step>If the size crosses an escalation threshold (≥+5 MB single-task delta or ≥55 MB cumulative), STOP and record justification before deploying; HARD STOP at ≥60 MB.</step>
+    <step>Deploy the BFF via the `bff-deploy` skill.</step>
+    <step>Record the deploy result, absolute size + diff, and the CVE result in task/PR notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the compressed publish size is ≥55 MB cumulative or the single-task delta is ≥+5 MB, STOP and justify (or escalate at ≥60 MB) per root CLAUDE.md §10 / §6 before deploying.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>Deployed BFF (Sprk.Bff.Api) via bff-deploy.</output>
+    <output>Publish-size report: absolute compressed size + diff vs baseline (≤60 MB).</output>
+    <output>CVE report: no new HIGH-severity vulnerability.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The BFF deploys successfully via the `bff-deploy` skill.</criterion>
+    <criterion testable="true">The compressed publish size is reported with the diff vs baseline and is ≤60 MB.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">Negative: no plaintext secret is deployed to App Service settings (KV references / MI only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy/verification task — no §11 component justification required. Depends on task 030 (tests pass). Runs the mandatory §10 publish-size + CVE gates for the Phase-2 BFF changes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

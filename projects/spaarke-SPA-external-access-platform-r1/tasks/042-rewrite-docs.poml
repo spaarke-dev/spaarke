@@ -1,0 +1,117 @@
+<task id="042" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Rewrite external-access architecture + guides for CIAM/SWA</title>
+    <phase>3 Cutover &amp; decommission</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation rewrite (no code)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe reason="docs-only; touches architecture + guide docs not shared with parallel tasks">true</parallel-safe>
+    <deps>040</deps>
+    <tags>docs</tags>
+    <estimated-effort>0.5-1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Rewrite `docs/architecture/external-access-spa-architecture.md`, `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md`, and `docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md` to match the shipped SWA + CIAM implementation: SWA hosting (BrowserRouter + navigationFallback + security headers), the "Ciam" JwtBearer scheme with oid-based Contact resolution, admin-initiated onboarding (invite trigger, `isSignUpAllowed=false`, SSPR), broker-only app-only document download, and the RETIRED Power Pages + B2B-guest path. Code is the source of truth—document what was built; do not change code or propose new design.
+  </prompt>
+
+  <role>
+    You are a technical writer + architect updating Spaarke's external-access documentation to
+    match the shipped SWA + CIAM implementation. Code is the source of truth; the docs lag and you
+    bring them current. You do not change code — you document what was built.
+  </role>
+
+  <goal>
+    Rewrite `docs/architecture/external-access-spa-architecture.md`,
+    `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md`, and `docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md`
+    to reflect the migrated platform: Azure Static Web Apps hosting (BrowserRouter + navigationFallback
+    + security headers), Microsoft Entra External ID (CIAM) identity (second "Ciam" JwtBearer scheme,
+    resolve Contact by `oid`), admin-initiated onboarding (invite trigger, `isSignUpAllowed=false`,
+    SSPR), broker-only app-only document download, and the RETIRED Power Pages + B2B-guest path.
+  </goal>
+
+  <context>
+    <background>
+      The migration moved hosting from Power Pages to Azure Static Web Apps and identity from Entra
+      B2B guests to Entra External ID (CIAM), broker-only, and added admin-initiated onboarding + an
+      app-only document download. Tasks 040/041 verified parity and decommissioned the Power Pages
+      path. The three external-access docs still describe the old Power Pages hosting and B2B-guest
+      identity model, so they are now stale and must be rewritten to reflect the CIAM/SWA reality —
+      including the ADR-028 Amendment A1 identity model and the E-3 direct-Office boundary. Per root
+      CLAUDE.md §2, code is the source of truth; these docs must not carry Power Pages/B2B
+      instructions as current guidance.
+    </background>
+    <relevant-files>
+      <file status="modify">docs/architecture/external-access-spa-architecture.md</file>
+      <file status="modify">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md</file>
+      <file status="modify">docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file status="reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (+Amendment A1 — CIAM identity model)</file>
+      <file status="reference">src/client/external-spa/staticwebapp.config.json (SWA hosting facts to document)</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (CIAM scheme, provisioner, download — source of truth)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: the three external-access docs. Docs MUST reflect code as source of truth: no stale
+      Power Pages or Entra B2B-guest instructions may remain as current guidance. The documented
+      identity model MUST be CIAM (Entra External ID), and hosting MUST be SWA.
+    </constraint>
+    <constraint source="spec-FR-14">
+      SCOPE: content accuracy. The rewrite MUST document SWA hosting, CIAM identity, admin-initiated
+      onboarding, and broker-only app-only download, and MUST remove Power Pages-as-current
+      hosting/deploy instructions.
+    </constraint>
+    <constraint source="ADR-028-A1">
+      SCOPE: identity model. The identity model documented MUST match ADR-028 Amendment A1 — resolve
+      Contact by `oid` (`sprk_externalobjectid`), broker-only (no OBO on the external path, no
+      per-user B2B guest), with the E-3 direct-Office boundary noted as permanently out of scope.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read the three target docs and the ADR-028 (+Amendment A1) identity model; inventory every Power Pages / B2B-guest statement that is now stale.</step>
+    <step>Rewrite `docs/architecture/external-access-spa-architecture.md` to describe SWA hosting (BrowserRouter + navigationFallback + security headers), the CIAM "Ciam" JwtBearer scheme pinned on the `/api/v1/external` group, oid-based Contact resolution, broker-only app-only SPE/Dataverse access + document download, and the retired Power Pages/B2B path.</step>
+    <step>Rewrite `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` to describe CIAM tenant/app setup, SSPR, `isSignUpAllowed=false`, and the admin-initiated "Invite to Secure Workspace" onboarding flow (no Power Pages / B2B invitation steps).</step>
+    <step>Rewrite `docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md` to reflect the SWA-hosted SPA, CIAM sign-in + SSPR password set, deep-link behavior, and document download; remove Power Pages hosting/deploy guidance.</step>
+    <step>Cross-check all three docs against each other and the code for consistency (authority, scheme name, oid field, endpoint shape); ensure no residual Power Pages-as-current instruction remains.</step>
+  </steps>
+
+  <outputs>
+    <output>Rewritten `docs/architecture/external-access-spa-architecture.md` (SWA + CIAM + broker-only + retired Power Pages)</output>
+    <output>Rewritten `docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md` (CIAM tenant/app + admin-initiated onboarding)</output>
+    <output>Rewritten `docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md` (SWA-hosted SPA + CIAM sign-in + download)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three docs reflect CIAM identity, SWA hosting, and admin-initiated onboarding (invite trigger, SSPR, `isSignUpAllowed=false`).</criterion>
+    <criterion testable="true">No residual Power Pages-as-current hosting/deploy instructions remain in any of the three docs (negative case).</criterion>
+    <criterion testable="true">The documented identity model is CIAM (Entra External ID) with Contact resolution by `oid` and the broker-only invariant — not Entra B2B guests.</criterion>
+    <criterion testable="true">The E-3 direct-Office boundary (per ADR-028 Amendment A1) is noted as out of scope in the architecture doc.</criterion>
+    <criterion testable="true">The three docs are internally consistent (authority, "Ciam" scheme, `sprk_externalobjectid`, download endpoint) with no contradictions (negative case — no conflicting statements).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Documentation-only task — no new component surface, so no justification block. Code is the
+    source of truth (root CLAUDE.md §2); document what was built, do not propose new design.
+    Parallel-safe (group C) — touches only these three docs, not shared with other parallel tasks.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

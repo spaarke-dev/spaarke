@@ -1,0 +1,85 @@
+<task id="021" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Pin the "Ciam" scheme on the /api/v1/external endpoint group</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Added AuthPolicies.CiamExternal ("CiamExternal") + registered the policy in AuthorizationModule (AuthenticationSchemes=[AuthSchemes.Ciam] + RequireAuthenticatedUser) — mirrors the existing RagApiKey named-policy precedent. Pinned it on the /api/v1/external group via .RequireAuthorization(AuthPolicies.CiamExternal) in ExternalAccessEndpoints.cs. Internal /api/v1/external-access group LEFT on workforce default .RequireAuthorization() (no CIAM pin) — verified. Child project-data endpoints only .AddExternalCallerAuthorizationFilter() (no stacked RequireAuthorization), so the group CIAM pin applies cleanly + additively to the filter (ADR-008). Refreshed stale "B2B guest"/"Power Pages" comments to CIAM. Negative cases (workforce→external 401, CIAM→internal 401) are by-construction; asserted in task 030. Build 0 errors; publish 45.69 MB compressed (≤60, no package delta). code-review + adr-check clean.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth routing change on the external surface (tags: auth)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth routing (tags: auth)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies ExternalAccessEndpoints.cs</parallel-safe-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Pin `AuthenticationSchemes=["Ciam"]` on the `.RequireAuthorization(...)` of the `/api/v1/external` endpoint group in ExternalAccessEndpoints.cs, so external endpoints accept only CIAM-issued tokens. Leave the internal `/api/v1/external-access` management group on the workforce default scheme (no CIAM pinning).
+  </prompt>
+
+  <role>
+    You are a BFF auth engineer scoping the CIAM scheme to exactly the external caller group while keeping internal management endpoints on workforce identity.
+  </role>
+
+  <goal>
+    The `/api/v1/external` group's `.RequireAuthorization(...)` specifies `AuthenticationSchemes = ["Ciam"]` (via a policy with that scheme), so only CIAM tokens authenticate there; the internal `/api/v1/external-access` group continues to authenticate on the workforce default scheme with no CIAM pinning.
+  </goal>
+
+  <context>
+    <background>
+      Task 020 registers the additive "Ciam" JwtBearer scheme. This task routes it: the public external caller group (`/api/v1/external`, ~line 38 in ExternalAccessEndpoints.cs) must validate CIAM tokens only, while the internal management group (`/api/v1/external-access`, ~line 67 — used by core users / admin flows such as invite/grant) stays on the workforce default. Pinning the scheme prevents a workforce token from reaching external endpoints and a CIAM token from reaching internal management endpoints.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the external caller group. Per Amendment A1 the `/api/v1/external` group MUST authenticate only against the CIAM scheme; pin `AuthenticationSchemes=["Ciam"]` on its `.RequireAuthorization(...)`.</constraint>
+    <constraint source="spec-FR-07">Scope: the internal management group. The `/api/v1/external-access` group MUST remain on the workforce default scheme — do NOT pin "Ciam" onto it.</constraint>
+    <constraint source="ADR-008">Scope: endpoint authorization. Keep the per-endpoint `ExternalCallerAuthorizationFilter` on external endpoints; the scheme pin is additive to (not a replacement for) the filter.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read ExternalAccessEndpoints.cs and identify the `/api/v1/external` group (~line 38) and the internal `/api/v1/external-access` group (~line 67), noting each group's current `.RequireAuthorization(...)`.</step>
+    <step>Pin `AuthenticationSchemes = ["Ciam"]` on the `/api/v1/external` group's `.RequireAuthorization(...)` (via an authorization policy specifying that scheme).</step>
+    <step>Confirm the internal `/api/v1/external-access` group's authorization is left on the workforce default scheme (no CIAM pinning).</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <outputs>
+    <output>`/api/v1/external` group pinned to `AuthenticationSchemes=["Ciam"]`.</output>
+    <output>Internal `/api/v1/external-access` group unchanged (workforce default scheme).</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A valid CIAM token authenticates on an `/api/v1/external/*` endpoint; a workforce token does NOT authenticate there (negative case).</criterion>
+    <criterion testable="true">A valid workforce token authenticates on an `/api/v1/external-access/*` management endpoint; a CIAM token does NOT authenticate there (negative case).</criterion>
+    <criterion testable="true">The `ExternalCallerAuthorizationFilter` remains applied on external endpoints (scheme pin is additive).</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only task — no §11 component justification required (no new surface), but the §10 BFF Hygiene note (Placement Justification + publish-size report) still applies. Depends on task 020 registering the "Ciam" scheme.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

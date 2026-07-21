@@ -1,0 +1,110 @@
+<task id="012" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Preserve deep link through the login redirect</title>
+    <phase>1 Hosting migration + routing</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-adjacent SPA change</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard MSAL state handling</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="shares App.tsx/auth with 011">false</parallel-safe>
+    <deps>011</deps>
+    <tags>frontend, auth, react</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Carry an emailed deep link (e.g. `/project/{id}`) through the MSAL login redirect via `state` and/or `redirectStartPage` and restore it on return, so an unauthenticated user lands on the intended route AFTER authenticating instead of on `/`. Only restore in-app relative paths, guard against redirect loops, and keep the sessionStorage MSAL cache and the broker-only redirect flow unchanged.
+  </prompt>
+
+  <role>
+    You are a React + MSAL front-end engineer working on the Spaarke external-spa auth flow.
+    You follow existing external-spa auth conventions and do not redesign the UI or change the IdP.
+  </role>
+
+  <goal>
+    Ensure an emailed deep link (e.g. `/project/{id}`) lands the user on the intended route
+    AFTER authentication, by carrying the intended path through the MSAL login redirect
+    (`state` and/or `redirectStartPage`) and restoring it on return.
+  </goal>
+
+  <context>
+    <background>
+      With BrowserRouter (task 011), an unauthenticated hit on `/project/{id}` triggers
+      `AuthGuard`'s `loginRedirect`, which navigates away to Entra and returns to the app's
+      redirect URI — currently losing the originally requested path (user lands on `/`).
+      To make emailed deep links usable, the intended route must survive the redirect via
+      MSAL `state` (or `redirectStartPage`) and be restored after MSAL finishes processing the
+      auth-code response. Phase 1 stays on the EXISTING Entra B2B identity, so any regression
+      here is attributable to routing/auth-state handling, not the IdP.
+    </background>
+    <relevant-files>
+      <file status="modify">src/client/external-spa/src/auth/msal-auth.ts</file>
+      <file status="modify">src/client/external-spa/src/components/AuthGuard.tsx</file>
+      <file status="reference">src/client/external-spa/src/auth/msal-config.ts (msalInstance + redirect config)</file>
+      <file status="reference">src/client/external-spa/src/App.tsx (BrowserRouter + routes from task 011)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: token storage. Do NOT change the sessionStorage MSAL cache (ADR-028 external-SPA
+      exception) — this task only carries route state through the redirect.
+    </constraint>
+    <constraint source="ADR-028">
+      SCOPE: the auth flow. Preserve the broker-only, redirect-based MSAL flow; do NOT switch
+      interaction modes or introduce OBO/token exchange. Keep authority/scopes in config
+      (do not hardcode) so Phase 2 can repoint to CIAM without touching this logic.
+    </constraint>
+    <constraint source="visual-anchor">
+      SCOPE: any interim UI (spinner). Reuse the existing AuthGuard spinner pattern; do NOT
+      redesign the loading/redirect UX.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/external-spa/src/components/AuthGuard.tsx</file>
+      <file>src/client/external-spa/src/auth/msal-auth.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Capture the intended route (current `window.location.pathname + search`) when AuthGuard / acquireBffToken triggers a login or token redirect, passing it via MSAL `state` (or set `redirectStartPage`) on `loginRedirect`/`acquireTokenRedirect`.</step>
+    <step>On redirect return, read the preserved `state`/start page after MSAL finishes processing the response and navigate (react-router) to the intended route once, replacing history so back-button doesn't loop.</step>
+    <step>Guard against redirect loops and against navigating to an untrusted absolute URL — only restore in-app relative paths.</step>
+    <step>Verify the default (no deep link) case still lands on `/` and does not double-navigate.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="deeplink-through-login">Unauthenticated hit on `/project/{id}` triggers login redirect; after auth returns, the app lands on `/project/{id}` (not `/`).</test>
+    <test name="no-deeplink-default">Unauthenticated hit on `/` returns to `/` after login with no extra navigation.</test>
+    <test name="dark-mode-adr-021">The interim redirect spinner renders correctly under `webDarkTheme` (ADR-021).</test>
+  </ui-tests>
+
+  <outputs>
+    <output>msal-auth.ts + AuthGuard.tsx carrying and restoring the intended route through the login redirect</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An unauthenticated hit on `/project/{id}` returns to `/project/{id}` after the login redirect completes.</criterion>
+    <criterion testable="true">The default no-deep-link path still returns to `/` after login (negative case — no spurious redirect target).</criterion>
+    <criterion testable="true">Only in-app relative paths are restored; an untrusted absolute URL in state is NOT navigated to (negative/safety case).</criterion>
+    <criterion testable="true">No redirect loop occurs; history is replaced so the browser back button does not re-trigger login.</criterion>
+    <criterion testable="true">MSAL token storage remains sessionStorage — unchanged (negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only task (no new component surface) — no justification block. Still on Entra B2B in
+    Phase 1; authority/scopes stay in config so the Phase 2 CIAM repoint does not touch this logic.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

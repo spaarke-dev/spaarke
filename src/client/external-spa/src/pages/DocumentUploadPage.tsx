@@ -31,11 +31,9 @@ import {
   Text,
   MessageBar,
   MessageBarBody,
-  Spinner,
-  Badge,
   Button,
 } from '@fluentui/react-components';
-import { CheckmarkCircleRegular, DocumentRegular, ArrowUploadRegular } from '@fluentui/react-icons';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '@spaarke/ui-components/components/Wizard';
 import type {

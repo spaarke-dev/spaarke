@@ -5,18 +5,19 @@ using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 namespace Sprk.Bff.Api.Api.Filters;
 
 /// <summary>
-/// Endpoint filter that resolves the authenticated Azure AD B2B guest's
+/// Endpoint filter that resolves the authenticated external (Entra External ID / CIAM) caller's
 /// Dataverse Contact and project participation data from the already-validated JWT identity.
 ///
-/// ASP.NET Core's Microsoft.Identity.Web middleware (AddMicrosoftIdentityWebApi) validates
-/// the Azure AD JWT before this filter runs, so HttpContext.User is already populated.
-/// This filter resolves the Dataverse Contact record by email claim and loads participation data.
+/// The "Ciam" JwtBearer scheme (task 020, pinned on /api/v1/external in task 021) validates the CIAM
+/// JWT before this filter runs, so HttpContext.User is already populated. This filter resolves the
+/// Dataverse Contact by the stable CIAM <c>oid</c> claim (Contact.sprk_externalobjectid) per ADR-028
+/// Amendment A1, using email only as a first-login fallback that then binds the oid.
 ///
 /// On success: sets <see cref="ExternalCallerContext"/> on HttpContext.Items for downstream handlers.
-/// On failure: returns 401 (missing claims) or 403 (Contact not found in Dataverse).
+/// On failure: returns 401 (missing identity claims) or 403 (Contact not found in Dataverse).
 ///
 /// ADR-008: Endpoint filter pattern — no global middleware.
-/// ADR-009: Redis-first access data caching with 60s TTL.
+/// ADR-009: Redis-first access data caching with 60s TTL (keyed under the CIAM tenant `tid`).
 /// ADR-010: Concrete type injection — no unnecessary interfaces.
 /// </summary>
 public static class ExternalCallerAuthorizationFilterExtensions
@@ -57,17 +58,23 @@ public class ExternalCallerAuthorizationFilter : IEndpointFilter
         var httpContext = context.HttpContext;
         var user = httpContext.User;
 
-        // Azure AD B2B guest tokens include the user's home-tenant UPN as preferred_username.
-        // This is the email the guest uses to authenticate (e.g. alice@contoso.com).
-        // Fall back to upn, standard email, and the simple "email" claim if preferred_username is absent.
+        // Stable identity: the CIAM 'oid' (immutable directory object id) is the canonical link to the
+        // Dataverse Contact (Contact.sprk_externalobjectid) per ADR-028 Amendment A1. Check both the raw
+        // 'oid' claim and the mapped objectidentifier URI (claim mapping varies by scheme config).
+        var oid = user.FindFirstValue("oid")
+            ?? user.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier");
+
+        // Email/UPN is used only as a first-login fallback that then binds the oid onto the Contact.
         var email = user.FindFirstValue("preferred_username")
             ?? user.FindFirstValue("upn")
             ?? user.FindFirstValue(ClaimTypes.Email)
             ?? user.FindFirstValue("email");
 
-        if (string.IsNullOrEmpty(email))
+        // Escalation (task 023): a CIAM token with neither oid nor a usable email cannot be resolved
+        // or first-login-bound — reject rather than guess an identity.
+        if (string.IsNullOrEmpty(oid) && string.IsNullOrEmpty(email))
         {
-            _logger.LogWarning("[EXT-AUTH] No email/UPN claim found in Azure AD B2B token");
+            _logger.LogWarning("[EXT-AUTH] CIAM token missing both oid and email/UPN identity claims");
             return Results.Problem(
                 statusCode: 401,
                 title: "Unauthorized",
@@ -75,13 +82,15 @@ public class ExternalCallerAuthorizationFilter : IEndpointFilter
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        // Resolve the Dataverse Contact ID from the email claim.
-        // B2B guest users must have a Contact record in Dataverse with a matching emailaddress1 field.
-        var contactId = await _participationService.ResolveContactByEmailAsync(email, httpContext.RequestAborted);
+        // Resolve the Dataverse Contact by stable oid (email as first-login fallback that binds the oid).
+        // Once a Contact is bound to an oid, a mismatched email neither redirects resolution nor grants access.
+        var contactId = await _participationService.ResolveExternalContactAsync(oid, email, httpContext.RequestAborted);
 
         if (!contactId.HasValue)
         {
-            _logger.LogWarning("[EXT-AUTH] Cannot resolve Dataverse Contact for email {Email}", email);
+            _logger.LogWarning(
+                "[EXT-AUTH] Cannot resolve Dataverse Contact (oid present: {HasOid}, email present: {HasEmail})",
+                !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
             return ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found");
         }
 
@@ -91,14 +100,15 @@ public class ExternalCallerAuthorizationFilter : IEndpointFilter
         var participations = await _participationService.GetParticipationsAsync(contactId.Value, httpContext.RequestAborted);
 
         _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} ({Email}) authenticated — {Count} active project participations",
-            contactId.Value, email, participations.Count);
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — {Count} active project participations",
+            contactId.Value, !string.IsNullOrEmpty(oid), participations.Count);
 
         // Store ExternalCallerContext on HttpContext for downstream handlers.
         httpContext.Items[ExternalCallerContext.HttpContextItemsKey] = new ExternalCallerContext
         {
             ContactId = contactId.Value,
-            Email = email,
+            Email = email ?? string.Empty,
+            Oid = oid,
             Participations = participations
         };
 

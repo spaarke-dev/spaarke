@@ -163,6 +163,45 @@ public sealed class RegistrationEmailService
     }
 
     /// <summary>
+    /// Sends a CIAM onboarding email to an admin-provisioned external user.
+    /// R1 has no admin-delivered permanent password: the email directs the user to set their own
+    /// password via SSPR ("Forgot password") the first time they sign in.
+    /// Sent via the existing CommunicationService → shared-mailbox app-only pipeline (unchanged).
+    /// </summary>
+    public async Task SendCiamOnboardingEmailAsync(
+        string recipientEmail,
+        string firstName,
+        string portalUrl,
+        CancellationToken cancellationToken = default)
+    {
+        var templateHtml = await LoadTemplateAsync("CiamOnboardingTemplate.html");
+
+        var body = templateHtml
+            .Replace("{{FirstName}}", Encode(firstName))
+            .Replace("{{Email}}", Encode(recipientEmail))
+            .Replace("{{PortalUrl}}", portalUrl)
+            .Replace("{{SupportEmail}}", SupportEmail)
+            .Replace("{{Year}}", DateTime.UtcNow.Year.ToString());
+
+        var request = new SendCommunicationRequest
+        {
+            To = [recipientEmail],
+            Subject = "Welcome to the Spaarke Portal — Set Your Password",
+            Body = body,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = FromMailbox,
+            SendMode = SendMode.SharedMailbox,
+            CorrelationId = $"reg-ciam-onboarding-{recipientEmail}"
+        };
+
+        _logger.LogInformation(
+            "Sending CIAM onboarding email | Recipient: {Recipient}",
+            recipientEmail);
+
+        await _communicationService.SendAsync(request, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
     /// Sends an expiration warning email 3 days before demo access expires.
     /// </summary>
     public async Task SendExpirationWarningAsync(

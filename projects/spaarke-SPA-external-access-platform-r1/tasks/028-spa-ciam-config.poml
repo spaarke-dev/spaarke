@@ -1,0 +1,91 @@
+<task id="028" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Point the external-spa at the CIAM authority</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE (config deliverable). Repointed the external-spa MSAL config at the CIAM authority, config-driven: added VITE_MSAL_AUTHORITY (full CIAM authority URL) → config.ts MSAL_AUTHORITY; msal-config.ts authority = MSAL_AUTHORITY + knownAuthorities=[new URL(authority).host] (required for *.ciamlogin.com). Preserved cacheLocation:'sessionStorage' (documented ADR-028 exception) + direct PublicClientApplication — NO @spaarke/auth, NO localStorage for tokens (verified via grep: @spaarke/auth appears only in explanatory comments; localStorage only powers the dark-mode theme toggle). Updated .env.development (CIAM authority + tenant real; SPA client-id/scope = TODO markers pending CIAM app regs), .env.production (#{MSAL_AUTHORITY}# added), .env.example. Fixed a pre-existing type error in scope: removed storeAuthStateInCookie (invalid in @azure/msal-browser@^5.5.0 CacheOptions). My auth/config files type-check clean (verified). Acceptance 1-4 met at config level; #5 (dark-mode UI) deferred (no --chrome). TWO follow-ups filed in notes/defer-issues.md: DI-028-01 (CIAM SPA + BFF-API app registrations — ops prerequisite for live auth, cannot mint headlessly), DI-028-02 (pre-existing external-spa build breakage: @spaarke/ui-components subpaths + appinsights unresolved — blocks task 014, out of 028 scope). Live CIAM login is the deferred Phase-2 E2E per spec (non-blocking).</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>SPA auth configuration change on the external identity surface (tags: auth)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>SPA auth config change</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies SPA auth config</parallel-safe-reason>
+    <deps>020</deps>
+    <tags>frontend, auth, react</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Point the external-spa MSAL configuration at the Entra External ID (CIAM) authority and BFF scope (`config.ts`, `auth/msal-config.ts`, `auth/msal-auth.ts`). Preserve the SPA's `sessionStorage` per-tab isolation — the documented ADR-028 exception. Do NOT migrate to `@spaarke/auth` or `localStorage`.
+  </prompt>
+
+  <role>
+    You are a frontend auth engineer repointing the external SPA's direct-MSAL configuration from the workforce/B2B authority to the CIAM authority, keeping the per-tab sessionStorage exception intact.
+  </role>
+
+  <goal>
+    The external-spa's MSAL config (`config.ts`, `auth/msal-config.ts`, `auth/msal-auth.ts`) targets the CIAM authority (`*.ciamlogin.com`) and the BFF API scope, resolved from config; the SPA authenticates against CIAM; token storage remains `sessionStorage` (per-tab isolation preserved).
+  </goal>
+
+  <context>
+    <background>
+      The external SPA uses direct MSAL (`PublicClientApplication`) with `sessionStorage` for per-tab isolation — a documented ADR-028 exception (external portal is exempted from `@spaarke/auth`). Task 020 registers the BFF's "Ciam" scheme; this task repoints the SPA at the matching CIAM authority + scope so the tokens it acquires validate on the `/api/v1/external` group. Authority/scope/redirect must stay config-driven (Teams-readiness + future Legal Front Door). The sessionStorage cache and direct-MSAL usage MUST be preserved — do NOT switch to `@spaarke/auth` or `localStorage`.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/src/config.ts</file>
+      <file>src/client/external-spa/src/auth/msal-config.ts</file>
+      <file>src/client/external-spa/src/auth/msal-auth.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: token storage. MUST keep `sessionStorage` per-tab isolation (documented ADR-028 external-SPA exception) — MUST NOT migrate to `@spaarke/auth` or `localStorage`.</constraint>
+    <constraint source="ADR-028">Scope: the authority. The SPA MUST authenticate against the CIAM authority (`*.ciamlogin.com`) per Amendment A1, matching the BFF "Ciam" scheme.</constraint>
+    <constraint source="spec-scope">Scope: config-driven values. Authority, redirect URIs, and BFF scope MUST stay in config (not hardcoded) to preserve Teams-readiness and the future onboarding-agnostic hook.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/client/external-spa/src/auth/msal-config.ts</file>
+      <file>src/client/external-spa/src/config.ts</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `config.ts`, `auth/msal-config.ts`, and `auth/msal-auth.ts` to locate the current authority, client id, scope, and the `sessionStorage` cache configuration.</step>
+    <step>Repoint the authority to the CIAM authority (`*.ciamlogin.com`) and set the BFF API scope, sourcing values from config (from task 001 CIAM tenant/authority identifiers).</step>
+    <step>Confirm the MSAL cache location remains `sessionStorage` and the SPA continues to use direct MSAL (no `@spaarke/auth`, no `localStorage`).</step>
+    <step>Build the SPA to confirm the config compiles/type-checks.</step>
+  </steps>
+
+  <ui-tests>
+    <test>CIAM login redirect + return: an unauthenticated load redirects to the CIAM authority and returns to the SPA authenticated.</test>
+    <test>Dark mode (ADR-021): the SPA's auth/landing surface renders correctly in Fluent v9 dark mode.</test>
+  </ui-tests>
+
+  <outputs>
+    <output>external-spa MSAL config targeting the CIAM authority + BFF scope (config-driven).</output>
+    <output>Preserved `sessionStorage` per-tab isolation.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The SPA authenticates against the CIAM authority (`*.ciamlogin.com`).</criterion>
+    <criterion testable="true">Token storage remains `sessionStorage` (per-tab isolation preserved).</criterion>
+    <criterion testable="true">Negative: the SPA does NOT use `@spaarke/auth` and does NOT use `localStorage` for token storage.</criterion>
+    <criterion testable="true">Authority/redirect/scope are read from config, not hardcoded.</criterion>
+    <criterion testable="true">The auth/landing surface renders correctly in Fluent v9 dark mode (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Modify-only — no §11 component justification required (external portal is the existing surface). Not a BFF task; no §10 publish-size report. Depends on task 020 (matching "Ciam" BFF scheme) and task 001 (CIAM authority identifiers).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

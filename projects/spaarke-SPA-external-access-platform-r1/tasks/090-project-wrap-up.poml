@@ -1,0 +1,127 @@
+<task id="090" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Project wrap-up</title>
+    <phase>3 Cutover &amp; decommission</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Runs quality gates + repo-cleanup + test-diet; final closing task</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestration of closing gates</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="final task; touches project README/plan + runs gates">false</parallel-safe>
+    <deps>040,041,042</deps>
+    <tags>quality, testing</tags>
+    <estimated-effort>0.5-1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Run the project-close quality gates and close spaarke-SPA-external-access-platform-r1: `/code-review` + `/adr-check` (fix criticals), `/test-diet` reconciliation + `/repo-cleanup`, then mark README + plan Complete, append lessons-learned, confirm all tasks are ✅ and ADR-028 Amendment A1 is applied (concise + full), and confirm no new HIGH CVE and BFF publish size ≤60 MB (baseline ~49.63 MB). Do NOT close the project with any outstanding critical finding.
+  </prompt>
+
+  <role>
+    You are the project-close orchestrator for spaarke-SPA-external-access-platform-r1. You run the
+    final quality gates, reconcile tests, tidy the repo, and mark the project complete only if every
+    gate is clean. You do not add features; you close the project rigorously.
+  </role>
+
+  <goal>
+    Run the final quality gates and close the project: code-review + adr-check (fix criticals),
+    test-diet reconciliation + repo-cleanup, then update README + plan to Complete, append
+    lessons-learned, confirm all tasks are ✅, confirm ADR-028 Amendment A1 is applied, and confirm
+    no new HIGH CVE and BFF publish size ≤60 MB.
+  </goal>
+
+  <context>
+    <background>
+      This is the final task. Phases 0–2 delivered the SWA + CIAM migration (hosting, identity,
+      provisioner, invite trigger, oid resolution, app-only download, dropped synthetic SPE
+      membership); Phase 3 tasks 040/041/042 verified parity, decommissioned Power Pages, and
+      rewrote the docs. This task runs the closing gates: `/code-review` + `/adr-check` on the
+      project's code, `/test-diet` (project-close reconciliation per ADR-038) + `/repo-cleanup`,
+      then flips project status to Complete. Because this project touched the BFF, the close must
+      confirm the BFF §10 obligations held: no new HIGH CVE and publish size ≤60 MB (baseline
+      ~49.63 MB). ADR-028 Amendment A1 (CIAM sanctioned for the external surface) must be confirmed
+      applied to both the concise and full ADR files.
+    </background>
+    <relevant-files>
+      <file status="modify">projects/spaarke-SPA-external-access-platform-r1/README.md (Status → Complete; graduation criteria checked)</file>
+      <file status="modify">projects/spaarke-SPA-external-access-platform-r1/plan.md (Status → Complete)</file>
+      <file status="modify">projects/spaarke-SPA-external-access-platform-r1/notes/lessons-learned.md (append)</file>
+      <file status="reference">projects/spaarke-SPA-external-access-platform-r1/tasks/TASK-INDEX.md (all tasks ✅)</file>
+      <file status="reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (confirm Amendment A1 applied)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: closing gates + project status files. This task runs gates and updates project
+      tracking docs; it MUST NOT introduce new feature code. Fix only critical findings surfaced by
+      the gates.
+    </constraint>
+    <constraint source="ADR-038">
+      SCOPE: test reconciliation. `/test-diet` MUST run as the project-close reconciliation
+      (build-vs-maintain classifier); it is read-only and emits `git rm`/`git mv` for the reviewer —
+      do not auto-execute deletions without review.
+    </constraint>
+    <constraint source="CLAUDE.md-§10">
+      SCOPE: BFF close obligations. MUST confirm no new HIGH CVE (`dotnet list package --vulnerable
+      --include-transitive`) and BFF compressed publish size ≤60 MB (baseline ~49.63 MB); report the
+      absolute size + diff.
+    </constraint>
+    <constraint source="ADR-028-A1">
+      SCOPE: ADR application. MUST confirm ADR-028 Amendment A1 is applied to both the concise
+      (`.claude/adr/`) and full (`docs/adr/`) ADR-028 files before marking the project complete.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Run `/code-review` + `/adr-check` on the project's code; fix critical findings (or escalate per the escalation trigger if a critical finding cannot be resolved).</step>
+    <step>Run `/test-diet` (project-close reconciliation per ADR-038) and `/repo-cleanup`; act on the reviewer-facing output.</step>
+    <step>Update `README.md` → Status: Complete, and check off all graduation criteria.</step>
+    <step>Update `plan.md` → Status: Complete.</step>
+    <step>Append the project's lessons-learned to `notes/lessons-learned.md`.</step>
+    <step>Verify all tasks are ✅ in `tasks/TASK-INDEX.md`; confirm ADR-028 Amendment A1 is applied (concise + full); confirm no new HIGH CVE and BFF publish size ≤60 MB (report absolute + diff).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `/code-review` or `/adr-check` surface a critical unresolved finding (including a new HIGH CVE, a publish size &gt;60 MB, or an unapplied ADR-028 Amendment A1), STOP and escalate per root CLAUDE.md §6 / §6.5 rather than marking the project complete. The project MUST NOT be closed with an outstanding critical finding.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>Code-review + adr-check results with any critical findings resolved</output>
+    <output>test-diet reconciliation report + repo-cleanup result</output>
+    <output>README.md + plan.md marked Complete; graduation criteria checked; lessons-learned appended</output>
+    <output>Confirmation: all tasks ✅, ADR-028 A1 applied, no new HIGH CVE, publish size ≤60 MB (absolute + diff)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/code-review`, `/adr-check`, `/test-diet`, and `/repo-cleanup` all ran, with the test-diet report produced and criticals resolved.</criterion>
+    <criterion testable="true">README.md and plan.md are marked Status: Complete with all graduation criteria checked.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` has the project's lessons-learned appended.</criterion>
+    <criterion testable="true">All tasks are ✅ in TASK-INDEX.md and ADR-028 Amendment A1 is confirmed applied (concise + full).</criterion>
+    <criterion testable="true">No new HIGH CVE is present and BFF publish size is ≤60 MB (absolute + diff reported).</criterion>
+    <criterion testable="true">The project is NOT marked complete while any critical code-review/adr-check finding remains outstanding (negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Closing task — no new component surface, so no justification block. Prescriptive because the
+    close sequence (gates → cleanup → status flip) must run in order and the status flip is the
+    gate-guarded final step. Depends on tasks 040 (parity), 041 (decommission), and 042 (docs)
+    being complete.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

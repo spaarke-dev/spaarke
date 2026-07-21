@@ -1,0 +1,99 @@
+<task id="027" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Add app-only external document download endpoint (authz-before-stream)</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. Added GET /api/v1/external/projects/{id:guid}/documents/{documentId:guid}/content in ExternalProjectDataEndpoints under AddExternalCallerAuthorizationFilter. AUTHZ-BEFORE-STREAM (the highest-consequence property) enforced by construction: (1) callerContext.HasProjectAccess(projectId) → 403; (2) new ExternalDataService.GetDocumentProjectAndNameAsync (app-only Dataverse read of sprk_documents._sprk_project_value) → 403 if the document's project ≠ the URL project OR the doc doesn't exist (uniform 403, no existence leak). ONLY after both pass: IDocumentStorageResolver.GetSpePointersAsync(documentId) then the EXISTING app-only SpeFileStore.DownloadFileAsync(driveId,itemId) — so an unauthorized caller triggers NO pointer resolution and NO Graph call (no bytes). Broker-only: app-only DownloadFileAsync, NOT the OBO DownloadFileAsUserAsync. No new SpeFileStore/DriveItemOperations download method. No driveId/driveItemId returned or added to any DTO (ExternalProjectDtos untouched). Response: Results.File(stream, application/octet-stream, fileDownloadName) — attachment forces download of untrusted content (no inline render); stream disposed by FileStreamHttpResult. Post-authz storage states (SdapProblemException: document_not_found 404 / no_file_attached + mapping_missing_* 409) mapped with stable code. Audit-logged (contact/doc/project). Build 0 errors; publish 45.69 MB (≤60, no new package). code-review+adr-check clean. Negative 403/no-bytes case asserted in task 030.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>External data-egress endpoint; authz-before-stream is the highest-consequence property</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified endpoint reusing an existing app-only method</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Authz-before-stream correctness is the highest-consequence property; brownfield root-cause care required</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>modifies ExternalProjectDataEndpoints</parallel-safe-reason>
+    <deps>021, 023</deps>
+    <tags>bff-api</tags>
+    <estimated-effort>1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a new `GET /api/v1/external/projects/{projectId}/documents/{documentId}/content` endpoint in `ExternalProjectDataEndpoints`, under `AddExternalCallerAuthorizationFilter`. Enforce authorization (`HasProjectAccess(projectId)` + document→project scoping) BEFORE resolving any pointers or calling Graph, then reuse `DocumentStorageResolver.GetSpePointersAsync(documentId)` + the existing app-only `SpeFileStore.DownloadFileAsync(driveId, itemId)` to stream the bytes. Do NOT add a new download method to SpeFileStore, do NOT use OBO `DownloadFileAsUserAsync`, and do NOT return `driveId`/`driveItemId` to the client.
+  </prompt>
+
+  <role>
+    You are a BFF engineer adding a thin, authz-first external download endpoint that reuses the existing app-only SPE download method and never exposes Graph pointers to the browser.
+  </role>
+
+  <goal>
+    A new `GET /api/v1/external/projects/{projectId}/documents/{documentId}/content` endpoint exists in `ExternalProjectDataEndpoints` under `AddExternalCallerAuthorizationFilter` that (1) enforces `HasProjectAccess(projectId)` + document→project scoping BEFORE any pointer resolution or Graph read, then (2) resolves pointers via `DocumentStorageResolver.GetSpePointersAsync(documentId)` and streams bytes via the existing app-only `SpeFileStore.DownloadFileAsync(driveId, itemId)`; no new SpeFileStore download method is added and no Graph pointer is returned to the client.
+  </goal>
+
+  <context>
+    <background>
+      R1 makes the migrated portal usable by adding document download. Per FR-12/FR-13 and ADR-028 Amendment A1, the endpoint is broker-only app-only: the external user's token authenticates only to the BFF; the BFF streams content app-only. `SpeFileStore.DownloadFileAsync(driveId, itemId)` (Infrastructure/Graph/SpeFileStore.cs:81) already exists (app-only) — reuse it; do not add a new download method. The endpoint is keyed on `documentId`; pointers (`driveId`/`driveItemId`) are resolved server-side via `DocumentStorageResolver.GetSpePointersAsync` and MUST NOT be added to `ExternalProjectDtos` or returned to the browser. The highest-consequence property is authz-before-stream: authorization MUST be enforced before any Graph read so an unauthorized caller gets 403 with no bytes and no Graph call.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028-A1">Scope: the download path. App-only only — MUST NOT use the OBO `DownloadFileAsUserAsync` path; the external user's token is never exchanged downstream (broker-only). MUST NOT return `driveId`/`driveItemId` to the client or add them to `ExternalProjectDtos`.</constraint>
+    <constraint source="project-NFR-03">Scope: the endpoint ordering. Authorization (`HasProjectAccess(projectId)` + document→project scoping) MUST be enforced BEFORE any pointer resolution or Graph content read; an unauthorized caller receives 403 with no bytes and no Graph call.</constraint>
+    <constraint source="spec-FR-12">Scope: reuse. MUST reuse the existing app-only `SpeFileStore.DownloadFileAsync(driveId, itemId)` + `DocumentStorageResolver.GetSpePointersAsync(documentId)` — MUST NOT add a new download method to `SpeFileStore`/`DriveItemOperations`.</constraint>
+    <constraint source="ADR-008">Scope: endpoint authorization. The endpoint MUST sit under `AddExternalCallerAuthorizationFilter` on the `/api/v1/external` group.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`SpeFileStore.DownloadFileAsync(driveId, itemId)` app-only already exists (Infrastructure/Graph/SpeFileStore.cs:81); `DocumentStorageResolver.GetSpePointersAsync` resolves pointers server-side.</existing>
+    <extension>Reuse the method — the only new surface is a thin external endpoint that composes authorization + pointer resolution + the existing download; no new download method.</extension>
+    <cost-of-doing-nothing>Without an external download endpoint, external users cannot download documents — a metadata-only portal is not shippable.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `ExternalProjectDataEndpoints.cs` for the existing external endpoint patterns (filter application, `HasProjectAccess`, DTO shapes) and `SpeFileStore.cs:81` for the app-only `DownloadFileAsync` signature.</step>
+    <step>Add the `GET /api/v1/external/projects/{projectId}/documents/{documentId}/content` route under `AddExternalCallerAuthorizationFilter`.</step>
+    <step>FIRST enforce authorization: verify `HasProjectAccess(projectId)` for the resolved external Contact AND that `documentId` belongs to `projectId` (document→project scoping). Return 403 (ProblemDetails) if either fails — before any pointer resolution.</step>
+    <step>Only after authorization passes, resolve pointers via `DocumentStorageResolver.GetSpePointersAsync(documentId)` and stream bytes via `SpeFileStore.DownloadFileAsync(driveId, itemId)`.</step>
+    <step>Return the content stream with appropriate content-type/disposition; do NOT include `driveId`/`driveItemId` in any response body or DTO.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <outputs>
+    <output>New app-only external content download endpoint keyed on `documentId`, authz-before-stream.</output>
+    <output>No new SpeFileStore download method; no pointer fields added to DTOs.</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An authorized Contact (project access + document in project) downloads the document's bytes.</criterion>
+    <criterion testable="true">Negative: an unauthorized Contact receives 403 with NO bytes and NO Graph call (authorization enforced before any pointer resolution / Graph read).</criterion>
+    <criterion testable="true">Negative: a document not belonging to the requested project returns 403 (document→project scoping).</criterion>
+    <criterion testable="true">Negative: no new download method is added to `SpeFileStore`/`DriveItemOperations` (the existing `DownloadFileAsync` is reused).</criterion>
+    <criterion testable="true">Negative: `ExternalProjectDtos` gains no `driveId`/`driveItemId` field and the response never returns Graph pointers.</criterion>
+    <criterion testable="true">Negative: the endpoint does not use the OBO `DownloadFileAsUserAsync` path (app-only only).</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 021 (external group pinned to CIAM) and task 023 (oid Contact resolution so `HasProjectAccess` has a resolved Contact). Authz-before-stream negative case is also asserted in task 030.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

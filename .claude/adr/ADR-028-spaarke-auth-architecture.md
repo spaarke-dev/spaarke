@@ -31,10 +31,34 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST NOT** add `accessToken: string` or `token: string` props/fields anywhere in client code (except where required by third-party SDK contracts — Power BI `IReportEmbedConfiguration`, MSAL.js result objects — these are NOT Spaarke BFF tokens)
 - **MUST NOT** use `useState`/`useEffect` to snapshot a token (root cause of the 401-after-refresh bug v2 fixes)
 - **MUST NOT** write raw `fetch(url, { headers: { Authorization: \`Bearer ${...}\` } })` template literals — use `authenticatedFetch`. Limited D-AUTH-7 exceptions: SSE (EventSource ReadableStream), XHR uploads, Dataverse Web API direct calls (BFF-scoped wrapper would route wrong host), External SPA out-of-scope. Each carries `// Auth v2 (D-AUTH-7):` justification comment.
-- **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal surfaces). External Workspace SPA is exempted — B2B portal uses sessionStorage for per-tab isolation
+- **MUST NOT** instantiate `PublicClientApplication` directly outside `@spaarke/auth` (internal surfaces). External Workspace SPA is exempted — the external portal uses direct MSAL + sessionStorage for per-tab isolation and authenticates against the **Entra External ID (CIAM) authority** per **Amendment A1** (not workforce B2B)
 - **MUST NOT** reference removed symbols: `BridgeStrategy`, `XrmStrategy`, `window.__SPAARKE_BFF_TOKEN__`, `tokenBridge.ts`, `publishToken`, `bffAuthProvider` (deleted in v2)
 - **MUST NOT** add `/debug/*` endpoints on the BFF (all removed in v2)
 - **MUST NOT** add plaintext secrets to `appsettings*.json` — Key Vault references only (production); dev OK with plain values
+
+## Amendment A1 (2026-07-19): Entra External ID for the External Portal Surface
+
+> **Status**: Accepted (resolution path **B — amendment**, per root CLAUDE.md §6.5). **Driver project**: `spaarke-SPA-external-access-platform-r1`. **Owner-accepted** 2026-07-19. Full draft + rationale: [`projects/spaarke-SPA-external-access-platform-r1/adr-028-amendment-draft.md`](../../projects/spaarke-SPA-external-access-platform-r1/adr-028-amendment-draft.md).
+
+**Why**: Azure AD B2C is end-of-sale; Entra External ID (CIAM) is the successor. The external portal is migrating off Power Pages + B2B guests to a custom SPA (Azure Static Web Apps) + Entra External ID. A Phase-0 spike (GREEN) established the portal is a **pure BFF-broker** — the external user's identity never reaches SPE/Graph; all external-surface SPE + Dataverse access is app-only / managed identity — so a CIAM identity used only to authenticate to the BFF is sufficient and **no per-external-user workforce B2B guest is required** for document read/download.
+
+### New MUST rules (external portal surface only)
+
+- **MUST** authenticate external portal users against a dedicated **Entra External ID (CIAM) tenant** authority (`*.ciamlogin.com`), distinct from the workforce tenant, validated by a **second JwtBearer scheme** pinned to the `/api/v1/external` endpoint group. This supersedes the B2B-guest identity model for the external-SPA surface.
+- **MUST** resolve the CIAM-authenticated caller to a Dataverse `Contact` by **stable `oid`** (`sprk_externalobjectid`), and enforce authorization server-side via `sprk_externalrecordaccess` (three-plane model). Downstream authorization is **unchanged**.
+- **MUST** keep all external-surface SPE + Dataverse access **app-only / managed identity** (BFF-brokered). The external user's token is used **only** to authenticate to the BFF and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the external path**). When document content is exposed, the BFF **MUST** stream it app-only via `FileStorageContainer.Selected` + `ReadContent`.
+- **MUST**, when external self-registration is eventually enabled, use Entra External ID **self-service sign-up user flows** (R1 is admin-initiated only; sign-up is disabled via `isSignUpAllowed=false` until a future project enables it).
+
+### New MUST NOT rules
+
+- **MUST NOT** require or provision a per-external-user Entra **B2B guest** object in the workforce tenant for document read/download (eliminated by the broker-only design).
+- **MUST NOT** federate the External ID tenant back to internal/workforce identities in a way that reintroduces cross-tenant guest coupling, without a further amendment.
+
+### Documented boundary (limitation E-3)
+
+**Direct-Office features for external users** — Word/Excel/PowerPoint **for Web co-authoring**, **desktop open via `webUrl`**, **user-identity Copilot grounding**, and **Microsoft Search** — REQUIRE the user's own workforce identity reaching SPE (OBO/delegated) and are therefore **not available to CIAM-only external users**. These remain **out of scope**. A future project needing them for external users must reintroduce workforce B2B guests for those users and file a superseding amendment.
+
+> **Note**: A separate full `docs/adr/ADR-028-*.md` does not currently exist (the "Full version" links are aspirational); this concise ADR is the canonical ADR-028 and carries Amendment A1.
 
 ## Documented MI exceptions
 
@@ -122,7 +146,8 @@ services.PostConfigure<JwtBearerOptions>(opts => {
 
 - **Task 040** (rotate AzureAd + AgentToken secrets to Key Vault refs) — deferred; dev env has low blast radius. Revisit at prod-readiness planning.
 - **Phase D** (CSP middleware, Continuous Access Evaluation, claims hardening for oid-as-canonical-identity, step-up auth, refresh token rotation test) — spun out as `auth-v3-hardening` project. Not blocking v2 deliverables.
-- **DPoP, multi-SP privilege separation, HSM-backed keys, cryptographic audit chaining, B2C portal, mobile clients** — out of v2 scope. Evaluated in audit doc §6.
+- **DPoP, multi-SP privilege separation, HSM-backed keys, cryptographic audit chaining, mobile clients** — out of v2 scope. Evaluated in audit doc §6.
+- **B2C portal** — **Azure AD B2C remains out of scope** (end-of-sale). Per **Amendment A1 (2026-07-19)**, **Microsoft Entra External ID (CIAM) is now IN scope for the external portal surface** (see Amendment A1 section).
 
 ## Source Documentation
 

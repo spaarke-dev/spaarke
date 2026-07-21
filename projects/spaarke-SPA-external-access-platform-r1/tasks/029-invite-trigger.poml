@@ -1,0 +1,102 @@
+<task id="029" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Core-user "Invite to Secure Workspace" trigger</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE (server deliverable). §11 placement DECISION: added a thin server-side orchestration endpoint POST /api/v1/external-access/invite-and-grant (the "thin command that calls invite+grant" the task permits) rather than a client that orchestrates two calls — rationale: atomic one-action, server-enforced invariants (Contact grantee + audited grant), unit-testable (030). Reuses invite (025) + grant (026) cores via EXTRACTION (DRY, no duplication): extracted InviteExternalUserEndpoint.ProvisionAsync (resolve/create Contact + idempotent CIAM provision + persist oid + email → (contactId,status)) and GrantExternalAccessEndpoint.CreateGrantAsync (audited sprk_externalrecordaccess + cache invalidation) + ResolveCallerSystemUserId; /invite and /grant now delegate to these. New endpoint composes ProvisionAsync → CreateGrantAsync(grantee=contactId, NOT sprk_assignedoutsidecounsel; AccountId is record-keeping only). Grant audited (sprk_grantedby from caller oid), fired only by the explicit action. Broker-only onboard (no B2B guest). Partial-failure handled (onboard-ok/grant-fail → 500 + contactId + safe re-run). New DTO InviteAndGrantResponse. Registered on the internal management group. Build 0 errors; publish 45.69 MB (≤60, no new package). code-review+adr-check clean. Criteria 1/3/4 met server-side; #2 live sign-in + #5 dark-mode ribbon UI DEFERRED (DI-029-01: needs a Dataverse ribbon/MDA button — not buildable in a .NET session — + DI-028-01 CIAM app regs). Negative cases asserted in task 030.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires an internal action to the CIAM provisioner + grant; onboarding blast radius</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an internal action to the provisioner</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>new command surface + wiring</parallel-safe-reason>
+    <deps>025</deps>
+    <tags>dataverse, ribbon, frontend</tags>
+    <estimated-effort>1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Provide an internal-facing action that a Spaarke core user fires to onboard AND grant a specific attorney Contact to a Project at an access level in one step. Reuse the existing `/api/v1/external-access/invite` + `/grant` management surface where possible, or add a thin Matter/Project command that calls it. The grantee is a Contact (person), NOT `sprk_assignedoutsidecounsel` (the firm/org lookup). Grant stays explicit + audited — never auto-fired by a field edit.
+  </prompt>
+
+  <role>
+    You are a Power Platform + frontend engineer wiring an internal core-user action to the existing external-access invite/grant management surface, targeting a person Contact rather than a firm.
+  </role>
+
+  <goal>
+    A Spaarke core user can, in one internal-facing action, onboard (idempotent, via task 025) and grant a specific attorney Contact to a Project at an access level — implemented by reusing the existing `/api/v1/external-access/invite` + `/grant` management endpoints (or a thin Matter/Project command that calls them); the grant is explicit and audited (`sprk_grantedby`) and is never auto-fired by a field edit.
+  </goal>
+
+  <context>
+    <background>
+      FR-11 requires a core-user "Invite to Secure Workspace" trigger — the primary R1 onboarding entry point. The management surface (`/api/v1/external-access/invite` + `/grant`, internal group on the workforce default scheme) already exists; task 025 makes `invite` create a CIAM account idempotently and task 026 keeps `/grant` clean. This task exposes a core-user action (reuse the management surface, or a thin Matter/Project command) that fires onboard + grant for a person Contact. Critically, the grantee is the attorney Contact — NOT `sprk_assignedoutsidecounsel` (the firm/org lookup). Grant stays explicit + audited; auto-invite-on-firm-assignment is explicitly out of scope.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the grantee identity. The grantee MUST be a Contact (person), NOT `sprk_assignedoutsidecounsel` (the firm/org lookup) — never grant the org.</constraint>
+    <constraint source="spec-FR-11">Scope: the action semantics. The trigger MUST fire onboard (idempotent — task 025) + grant in one core-user action; the grant MUST remain explicit + audited (`sprk_grantedby`) and MUST NOT be auto-fired by a field edit.</constraint>
+    <constraint source="CLAUDE.md-§11">Scope: new command surface. Prefer reusing the existing `/external-access/invite`+`/grant` management surface; only add a thin Matter/Project command if reuse is clearly insufficient.</constraint>
+    <constraint source="ADR-028">Scope: onboarding path. Onboarding routes through the broker-only CIAM provisioner (task 025) — no workforce B2B guest is created for the invited Contact.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>The `/api/v1/external-access/invite` + `/grant` management surface already exists (internal group, workforce scheme).</existing>
+    <extension>Reuse where possible — expose a core-user action that calls the existing invite+grant; add only a thin Matter/Project command if reuse alone cannot present the action to core users.</extension>
+    <cost-of-doing-nothing>Without the invite trigger, core users cannot onboard outside counsel — the primary R1 use case fails.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `ExternalAccessEndpoints.cs`, `InviteExternalUserEndpoint.cs`, and `GrantExternalAccessEndpoint.cs` to confirm the request contracts for invite + grant and that they key off a Contact.</step>
+    <step>Decide placement (§11): reuse the existing management surface via a core-user action, or add a thin Matter/Project command that calls invite+grant — document the decision.</step>
+    <step>Implement the core-user action so it collects the target Project + attorney Contact + access level and fires invite (idempotent onboard) then grant in one flow; ensure the grantee is the Contact, not the firm lookup.</step>
+    <step>Confirm the grant records `sprk_grantedby` (audited) and is only fired by the explicit action (not by any field-change trigger).</step>
+    <step>Validate the end-to-end path against the existing endpoints (a core user invokes → onboard + grant).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no per-attorney Contact exists at the firm, the flow MUST create/resolve the Contact (person) and grant that Contact — do NOT grant the org (`sprk_assignedoutsidecounsel`). If the required Contact cannot be resolved or created, escalate per root CLAUDE.md §6 rather than granting a firm-level lookup.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test>Render: the core-user invite action/command renders and collects Project + Contact + access level.</test>
+    <test>Dark mode (ADR-021): the action surface renders correctly in Fluent v9 dark mode.</test>
+  </ui-tests>
+
+  <outputs>
+    <output>A core-user "Invite to Secure Workspace" action firing onboard (idempotent) + grant for an attorney Contact.</output>
+    <output>Placement decision (reuse management surface vs thin command) documented.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A core user invites an attorney Contact to a Project at an access level in one action → onboard (idempotent) + grant.</criterion>
+    <criterion testable="true">After the action, the attorney can sign in via CIAM and see the granted Project.</criterion>
+    <criterion testable="true">Negative: the grantee is the Contact (person), NOT `sprk_assignedoutsidecounsel` (the firm/org lookup).</criterion>
+    <criterion testable="true">Negative: the grant is explicit + audited (`sprk_grantedby`) and is NOT auto-fired by a field edit.</criterion>
+    <criterion testable="true">The action surface renders correctly in Fluent v9 dark mode (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 025 (CIAM provisioner behind invite). Auto-invite-on-firm-assignment is explicitly out of scope. Final placement (reuse vs thin command) decided at task time per §11.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
