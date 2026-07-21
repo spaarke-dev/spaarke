@@ -16,7 +16,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 001 | Characterize existing communication read + send flows | 1 | ✅ | STANDARD/sonnet/high | none | Wave 1 |
 | 002 | FR-18 enrich single-thread read DTO (Direction + sender identity + Name) | 1 | ✅ | FULL/opus/high | 001 | serial |
 | 003 | FR-16 `GET /communications/threads` + `ListThreadsAsync` + seam tests | 1 | ✅ | FULL/opus/**xhigh** | 002 | serial |
-| 004 | FR-17 participant naming in `ThreadResolver` + BFF rename endpoint | 1 | 🔲 | FULL/opus/high | 001 | serial |
+| 004 | FR-17 participant naming in `ThreadResolver` + BFF rename endpoint | 1 | ✅ | FULL/opus/high | 001 | serial |
 | 005 | FR-19 honor `ThreadId` on email send branch | 1 | 🔲 | FULL/opus/high | 001 | serial |
 | 006 | Doc-drift fix `docs/data-model/sprk_communication.md` | 1 | ✅ | MINIMAL/sonnet/high | none | Wave 1 (A) |
 | 010 | Characterize `CommunicationTimeline` core + `SendEmailDialog` | 2 | 🔲 | STANDARD/sonnet/high | none | serial |

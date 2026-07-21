@@ -62,6 +62,17 @@ public interface IThreadResolver
     /// <c>sprk_communicationthread</c> (see <see cref="ThreadResolver"/> XML doc for the full recommendation).
     /// </remarks>
     Task ReDeriveThreadNameAsync(Guid threadId, CancellationToken ct = default);
+
+    /// <summary>
+    /// FR-17 rename (task 004): sets <c>sprk_name</c> AND flips the naming-edited marker
+    /// (<c>sprk_nameisautoderived</c> → Edited/<c>false</c>) in ONE write, so a later
+    /// <see cref="ReDeriveThreadNameAsync"/> short-circuits at the marker gate and never overwrites the
+    /// user-chosen name (edit-preserve). Returns the persisted (trimmed + truncated) name. This BFF write is the
+    /// ONLY marker-flip path — the rename routes through the BFF, NEVER a Dataverse plugin (hard MUST NOT).
+    /// Unlike <see cref="ReDeriveThreadNameAsync"/> this is a user action and is NOT best-effort: a write failure
+    /// propagates to the caller (the rename endpoint) rather than being swallowed. A blank name is rejected.
+    /// </summary>
+    Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default);
 }
 
 /// <summary>

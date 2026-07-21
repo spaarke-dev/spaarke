@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 004 — FR-17 participant naming in `ThreadResolver` + BFF rename endpoint |
-| **Step** | not-started (Wave 4) |
+| **Task** | 005 — FR-19 honor `ThreadId` on the email send branch |
+| **Step** | not-started (Wave 5 — last Phase 1 task) |
 | **Status** | not-started |
-| **Next Action** | `work on task 004` — serial, **opus**, edits shared `ThreadResolver.cs` + `CommunicationEndpoints.cs` (extends unwired `ReDeriveThreadNameAsync`; NO plugin; edit-preserve via `sprk_nameisautoderived`). Deps 001 ✅. `/conflict-check` before the BFF PR. |
+| **Next Action** | `work on task 005` — serial, **opus**, edits shared `CommunicationService.cs` send path (mirror message branch `AssignExplicitThreadAsync`; no 6th send path, ADR-045). Deps 001 ✅. `/conflict-check` before the BFF PR. Completes Phase 1 backend spine. |
 
 ### Files Modified This Session (Wave 1 — completed)
 - `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs` - Extended (2 characterization tests) - task 001

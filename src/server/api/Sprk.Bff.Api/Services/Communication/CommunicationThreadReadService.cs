@@ -688,6 +688,25 @@ public sealed class CommunicationThreadReadService
         return rows.Count > 0 ? TryString(rows[0], ThreadNameField) : null;
     }
 
+    // ── rename authorization (single bounded impersonated existence check) ──────────────────────────
+
+    /// <summary>
+    /// FR-17 rename authorization (task 004): returns <c>true</c> iff <paramref name="caller"/> may SEE the thread
+    /// record, via a single IMPERSONATED existence projection on <c>sprk_communicationthread</c> by id (Dataverse
+    /// row-level security is the ONLY gate — ownership, role depth, BU, teams, sharing, hierarchy). The rename
+    /// endpoint uses this to refuse (403) a rename of a thread the caller cannot see — a caller MUST NOT rename a
+    /// thread they cannot see (ADR-028 / NFR-01). Because it is impersonated, a caller with no read access simply
+    /// gets zero rows (no existence leak — NFR-06). Fail-closed: an unresolved caller throws 403 (no app-only
+    /// fallback that would widen access).
+    /// </summary>
+    public async Task<bool> CanCallerSeeThreadAsync(Guid threadId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        var odata = $"$select={ThreadPkField}&$filter={ThreadPkField} eq {threadId}&$top=1";
+        var rows = await _query.QueryAsync(ThreadSet, odata, callerSystemUserId, ct);
+        return rows.Count > 0;
+    }
+
     // ── attachments (single bulk query per read) ────────────────────────────────────────────────────
 
     private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>>> LoadAttachmentsAsync(

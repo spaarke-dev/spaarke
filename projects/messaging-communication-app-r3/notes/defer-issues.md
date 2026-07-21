@@ -7,6 +7,12 @@
 |----|------|---------|-----------------------------|------------|
 | ISS-001 | ISS | `participant=` OData facet in `CommunicationThreadReadService` (~line 524) embeds the address value into the query string WITHOUT `Uri.EscapeDataString` (same class as task-003 W1, which was fixed for the new `ListThreadsAsync` search path only). | A participant address containing `&`, `#`, `+`, `%`, or a space (email `+`-tags are common) breaks out of the OData value → malformed query → Dataverse 400 → 500 to the caller. **Impersonation-contained** (no over-disclosure — any injected clause still runs under the caller's `MSCRMCallerID`), so it's robustness/correctness, not a security leak. Pre-existing (not introduced by R3). | 2026-07-20, task 003 Step 9.5 gate |
 
+| ISS-002 | ISS | `ThreadResolver.BuildParticipantRollupNameAsync` (FR-17 roll-up) bounded scans (`TopCount` 200 msgs / 500 participants) have no `OrderBy`. | Beyond the caps, WHICH rows are scanned — and thus the shown participant names + "+N" remainder — is not provably stable, so a record-less thread's auto-name could flicker across re-derives on very large threads. Extreme edge; best-effort/non-fatal path; name is cosmetic. | 2026-07-20, task 004 Step 9.5 gate (Info nit) |
+
+**Fix approach for ISS-002**: add a deterministic `OrderBy` (e.g. `createdon`) to the message scan in the roll-up so the truncated name is stable regardless of thread size. One-line hardening; not release-blocking.
+
+**Note (task 004, spec-intent confirmed, NOT a defer)**: the rename endpoint authorizes on **read-visibility** (`CanCallerSeeThreadAsync`, impersonated) per FR-17's literal "do NOT let a caller rename a thread they cannot **see**". A caller with only a read-share can rename the shared thread label — consistent with the module's impersonated-read-as-authz pattern. If write-privilege gating is desired instead, that's a spec change, not a bug.
+
 **Fix approach for ISS-001**: apply `Uri.EscapeDataString` to the participant literal after quote-doubling at the embed point (mirror the task-003 W1 fix), OR add a whole-value encoding contract to the `RetrieveMultipleImpersonatedAsync` seam so every caller is covered. Out of task-003 scope (task 003 fixed only its own new search path).
 
 **Note for deploy/UAT** (not a defer — a verify item, tracked in `task-003-notes.md`): the composite-cursor GUID `lt` comparison (FR-16 paging) is validated against the seam mock; confirm real Dataverse OData GUID-ordering semantics during deploy/UAT (Phase 6 task 050).

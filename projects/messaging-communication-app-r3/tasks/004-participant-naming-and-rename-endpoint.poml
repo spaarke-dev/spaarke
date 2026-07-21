@@ -4,7 +4,7 @@
     <title>FR-17: participant-based thread naming in ThreadResolver + BFF rename endpoint (edit-preserve)</title>
     <phase>1 Backend read/thread spine</phase>
     <gate>after:001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint + edit to the shared ThreadResolver naming logic; the edit-preserve invariant (a user rename MUST survive re-derive) is correctness-critical and hard MUST NOT use a plugin. Tags include bff-api. FULL gate.</rigor-reason>
     <model-tier>opus</model-tier>
