@@ -291,7 +291,10 @@ describe('emailComposerReducer', () => {
 // ---------------------------------------------------------------------------
 
 describe('task 104 — attachment inclusion on reply/forward', () => {
-  const stateWith = (attachments: IAttachmentItem[], overrides: Partial<EmailComposerState> = {}): EmailComposerState => ({
+  const stateWith = (
+    attachments: IAttachmentItem[],
+    overrides: Partial<EmailComposerState> = {}
+  ): EmailComposerState => ({
     ...initialState(baseProps({ mode: 'compose' })),
     attachments,
     ...overrides,
@@ -316,9 +319,7 @@ describe('task 104 — attachment inclusion on reply/forward', () => {
     });
 
     it('honors an explicit selected override from the host', () => {
-      const state = initialState(
-        baseProps({ mode: 'reply', initialAttachments: [{ ...carried[0], selected: true }] })
-      );
+      const state = initialState(baseProps({ mode: 'reply', initialAttachments: [{ ...carried[0], selected: true }] }));
       expect(state.attachments[0].selected).toBe(true);
     });
   });
@@ -374,10 +375,21 @@ describe('task 104 — attachment inclusion on reply/forward', () => {
 
     it('appends chosen document links to the HTML body (link path)', () => {
       const req = mapStateToSendRequest(
-        stateWith([att('a1', { fileName: 'contract.pdf', documentId: 'doc-1', selected: false, linkSelected: true, linkUrl: 'https://x/doc-1' })], {
-          body: '<p>See below.</p>',
-          bodyFormat: 'HTML',
-        })
+        stateWith(
+          [
+            att('a1', {
+              fileName: 'contract.pdf',
+              documentId: 'doc-1',
+              selected: false,
+              linkSelected: true,
+              linkUrl: 'https://x/doc-1',
+            }),
+          ],
+          {
+            body: '<p>See below.</p>',
+            bodyFormat: 'HTML',
+          }
+        )
       );
       expect(req.body).toContain('<p>See below.</p>');
       expect(req.body).toContain('href="https://x/doc-1"');

@@ -100,10 +100,30 @@ describe('CommunicationAttachmentsApp', () => {
     // Two previewable file rows + one inline image (filtered upstream) + one
     // .eml (routes to download, excluded from the modal nav sequence).
     const navRows = [
-      { sprk_communicationattachmentid: 'a', sprk_name: 'A.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-a' },
-      { sprk_communicationattachmentid: 'b', sprk_name: 'B.docx', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-b' },
-      { sprk_communicationattachmentid: 'i', sprk_name: 'Pic.png', sprk_attachmenttype: AttachmentType.InlineImage, [DOC]: 'doc-i' },
-      { sprk_communicationattachmentid: 'e', sprk_name: 'Msg.eml', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-e' },
+      {
+        sprk_communicationattachmentid: 'a',
+        sprk_name: 'A.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-a',
+      },
+      {
+        sprk_communicationattachmentid: 'b',
+        sprk_name: 'B.docx',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-b',
+      },
+      {
+        sprk_communicationattachmentid: 'i',
+        sprk_name: 'Pic.png',
+        sprk_attachmenttype: AttachmentType.InlineImage,
+        [DOC]: 'doc-i',
+      },
+      {
+        sprk_communicationattachmentid: 'e',
+        sprk_name: 'Msg.eml',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-e',
+      },
     ];
     renderApp(makeContext(navRows));
 

@@ -256,12 +256,21 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
   sectionLast: { borderBottom: 'none' },
-  secHead: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, marginBottom: tokens.spacingVerticalS },
+  secHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginBottom: tokens.spacingVerticalS,
+  },
   dot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
   dotDecide: { backgroundColor: tokens.colorPaletteMarigoldForeground1 },
   dotFiled: { backgroundColor: tokens.colorPaletteGreenForeground1 },
   dotSuggest: { backgroundColor: tokens.colorBrandForeground1 },
-  secTitle: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  secTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
   secCount: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
   secHint: {
     color: tokens.colorNeutralForeground2,
@@ -338,13 +347,25 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     flexWrap: 'wrap',
   },
-  recNum: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightRegular },
-  typeTag: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightRegular },
+  recNum: {
+    color: tokens.colorNeutralForeground2,
+    fontVariantNumeric: 'tabular-nums',
+    fontWeight: tokens.fontWeightRegular,
+  },
+  typeTag: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightRegular,
+  },
   recWhy: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
   rowActs: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end' },
 
   confHigh: { color: tokens.colorPaletteGreenForeground1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
-  confMedium: { color: tokens.colorPaletteMarigoldForeground1, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
+  confMedium: {
+    color: tokens.colorPaletteMarigoldForeground1,
+    whiteSpace: 'nowrap',
+    fontVariantNumeric: 'tabular-nums',
+  },
   confLow: { color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' },
 
   linkRow: { paddingTop: tokens.spacingVerticalM },
@@ -358,7 +379,13 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalM,
     borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  legendItem: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
+  legendItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
   legendSw: { width: '9px', height: '9px', borderRadius: '50%', flexShrink: 0 },
 
   empty: { color: tokens.colorNeutralForeground3, padding: tokens.spacingVerticalM },
@@ -742,20 +769,14 @@ function EditorBody({
 
   // Client-side in-session dismissals (never-filed matches → hide needs no write).
   const [dismissed, setDismissed] = React.useState<ReadonlySet<string>>(new Set());
-  const onDismiss = React.useCallback(
-    (key: string) => setDismissed(prev => new Set(prev).add(key)),
-    []
-  );
+  const onDismiss = React.useCallback((key: string) => setDismissed(prev => new Set(prev).add(key)), []);
 
   const grouped = groupConnectionsByAction(connections, aiSuggestions, confirmedFields, dismissed);
   const { needsDecision, filed, suggested, aiSuggested } = grouped;
 
   // Effective primary: the explicitly-designated field if it's confirmed, else the
   // first filed slot in priority order (connections are SLOT_META-sorted).
-  const effectivePrimary =
-    primaryField && filed.some(c => c.field === primaryField)
-      ? primaryField
-      : filed[0]?.field;
+  const effectivePrimary = primaryField && filed.some(c => c.field === primaryField) ? primaryField : filed[0]?.field;
 
   const suggestedCount = suggested.length + aiSuggested.length;
   const hasRows = needsDecision.length > 0 || filed.length > 0 || suggestedCount > 0;
@@ -864,9 +885,7 @@ function EditorBody({
                 onDismiss={onDismiss}
               />
             ))}
-            {suggestedCount === 0 && (
-              <Text className={s.recWhy}>No suggestions right now.</Text>
-            )}
+            {suggestedCount === 0 && <Text className={s.recWhy}>No suggestions right now.</Text>}
             {!readOnly && (
               <div className={s.linkRow}>
                 <Menu>
