@@ -36,6 +36,7 @@ export const LOCAL_CHIP = {
   sendAsEmail: "local:send-as-email",
   saveToDocument: "local:save-to-document",
   askAboutFiles: "local:ask-about-files",
+  reviseInCompose: "local:revise-in-compose",
 } as const;
 
 export type LocalChipActionId = (typeof LOCAL_CHIP)[keyof typeof LOCAL_CHIP];
@@ -66,4 +67,13 @@ export function buildPostDraftLocalChips(): ConsumerChip[] {
  */
 export function buildAskAboutFilesChip(): ConsumerChip {
   return { label: "Ask about these files", bindingId: LOCAL_CHIP.askAboutFiles, requiresAttachments: true };
+}
+
+/**
+ * R5-1 — "Revise in Compose" as an inline action card, in line with the post-attach cards
+ * (Summarize this file / Create a matter / Draft a response) instead of a separate button in
+ * the files tray. Opens the attached file(s) in the Compose editor. Requires attachments.
+ */
+export function buildReviseInComposeChip(): ConsumerChip {
+  return { label: "Revise in Compose", bindingId: LOCAL_CHIP.reviseInCompose, requiresAttachments: true };
 }
