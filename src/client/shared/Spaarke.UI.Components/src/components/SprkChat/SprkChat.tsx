@@ -190,19 +190,20 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
   },
-  // Chip strip — visible only when files.length > 0. Horizontal wrap to handle
-  // up to MAX_ATTACHMENTS (5) chips across narrow panes.
+  // Chip strip — visible only when files.length > 0. R5-4: now an INLINE group inside the
+  // controls row (no own padding/full-width), wrapping across up to MAX_ATTACHMENTS (5) chips.
   chipStrip: {
-    display: 'flex',
+    display: 'inline-flex',
     flexWrap: 'wrap',
-    ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM, '0', tokens.spacingHorizontalM),
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
   },
-  // FR-09: single horizontal row containing [ Prompt ▾ ] [ + Attach ] above the
-  // input box. `spacingHorizontalS` gap between items per FR-09 acceptance.
+  // FR-09 + R5-4: one wrapping row holding [ Prompt ▾ ] [ + Attach ] AND the attached-file pills,
+  // above the input box. `flexWrap` lets the pills flow onto additional lines on narrow panes.
   controlsStrip: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalM),
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
@@ -236,8 +237,13 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
   },
+  // R5-4: compact dismiss (×) inside the pill — smaller footprint so the pill reads tighter.
   attachmentChipDismiss: {
-    minWidth: 'auto',
+    minWidth: '16px',
+    maxWidth: '16px',
+    height: '16px',
+    ...shorthands.padding('0'),
+    fontSize: tokens.fontSizeBase200,
   },
 });
 
@@ -2656,75 +2662,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         FR-06: Input remains editable on cold load (handleSend guards `!session`).
       */}
       <div className={styles.inputZone} data-testid="chat-input-zone">
-        {/* Region 1: chip strip — visible only when files have been attached */}
-        {attachmentFiles.length > 0 && (
-          <div className={styles.chipStrip} role="list" aria-label="Attached files" data-testid="attachment-chip-strip">
-            {attachmentFiles.map((file, index) => {
-              const isError = file.status === 'error';
-              const chipClassName = isError
-                ? `${styles.attachmentChip} ${styles.attachmentChipError}`
-                : styles.attachmentChip;
-              const statusNode =
-                file.status === 'extracting' ? (
-                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                ) : file.status === 'ready' ? (
-                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                ) : (
-                  <WarningRegular
-                    aria-label="Extraction failed"
-                    data-testid={`attachment-chip-status-error-${index}`}
-                  />
-                );
-
-              const chipBody = (
-                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
-                  <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
-                    {statusNode}
-                  </span>
-                  <span className={styles.attachmentChipFilename} title={file.filename}>
-                    {file.filename}
-                  </span>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<DismissRegular />}
-                    onClick={() => {
-                      // R5 task 020 / D2-11: notify host BEFORE local splice so
-                      // it can capture the chip metadata for the manifest +
-                      // session-files index cleanup cascade. Host failures do
-                      // NOT block the local removal — orphaned manifest/index
-                      // entries are bounded by the session-end cleanup
-                      // HostedService (R5 task 007).
-                      if (onAttachmentRemoved) {
-                        try {
-                          onAttachmentRemoved(file, index);
-                        } catch {
-                          // Host failures must not block the local chip removal.
-                        }
-                      }
-                      removeAttachmentFile(index);
-                    }}
-                    aria-label={`Remove ${file.filename}`}
-                    title={`Remove ${file.filename}`}
-                    className={styles.attachmentChipDismiss}
-                    data-testid={`attachment-chip-dismiss-${index}`}
-                  />
-                </div>
-              );
-
-              // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error ? (
-                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
-                  {chipBody}
-                </Tooltip>
-              ) : (
-                chipBody
-              );
-            })}
-          </div>
-        )}
-
-        {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
+        {/* R5-4 (UAT 2026-07-20): the attached-file pills share ONE wrapping row with the
+            controls (paperclip / prompt) instead of taking a separate full-width strip above —
+            "this row can be used by the uploaded file(s)". Controls first, then the pills. */}
         <div
           className={styles.controlsStrip}
           role="toolbar"
@@ -2753,6 +2693,78 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             title="Attach files (text, markdown, PDF, DOCX)"
             data-testid="strip-attach-button"
           />
+
+          {attachmentFiles.length > 0 && (
+            <span
+              className={styles.chipStrip}
+              role="list"
+              aria-label="Attached files"
+              data-testid="attachment-chip-strip"
+            >
+              {attachmentFiles.map((file, index) => {
+                const isError = file.status === 'error';
+                const chipClassName = isError
+                  ? `${styles.attachmentChip} ${styles.attachmentChipError}`
+                  : styles.attachmentChip;
+                const statusNode =
+                  file.status === 'extracting' ? (
+                    <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                  ) : file.status === 'ready' ? (
+                    <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
+                  ) : (
+                    <WarningRegular
+                      aria-label="Extraction failed"
+                      data-testid={`attachment-chip-status-error-${index}`}
+                    />
+                  );
+
+                const chipBody = (
+                  <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
+                    <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
+                      {statusNode}
+                    </span>
+                    <span className={styles.attachmentChipFilename} title={file.filename}>
+                      {file.filename}
+                    </span>
+                    <Button
+                      appearance="subtle"
+                      size="small"
+                      icon={<DismissRegular />}
+                      onClick={() => {
+                        // R5 task 020 / D2-11: notify host BEFORE local splice so
+                        // it can capture the chip metadata for the manifest +
+                        // session-files index cleanup cascade. Host failures do
+                        // NOT block the local removal — orphaned manifest/index
+                        // entries are bounded by the session-end cleanup
+                        // HostedService (R5 task 007).
+                        if (onAttachmentRemoved) {
+                          try {
+                            onAttachmentRemoved(file, index);
+                          } catch {
+                            // Host failures must not block the local chip removal.
+                          }
+                        }
+                        removeAttachmentFile(index);
+                      }}
+                      aria-label={`Remove ${file.filename}`}
+                      title={`Remove ${file.filename}`}
+                      className={styles.attachmentChipDismiss}
+                      data-testid={`attachment-chip-dismiss-${index}`}
+                    />
+                  </div>
+                );
+
+                // For error chips, wrap in a Tooltip exposing the parse error.
+                return isError && file.error ? (
+                  <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                    {chipBody}
+                  </Tooltip>
+                ) : (
+                  chipBody
+                );
+              })}
+            </span>
+          )}
         </div>
 
         {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
