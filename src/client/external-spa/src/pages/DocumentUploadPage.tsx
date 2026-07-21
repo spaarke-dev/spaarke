@@ -25,14 +25,7 @@
  */
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  MessageBar,
-  MessageBarBody,
-  Button,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Button } from '@fluentui/react-components';
 import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '@spaarke/ui-components/components/Wizard';

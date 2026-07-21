@@ -90,7 +90,14 @@ import {
   Card,
   Badge,
 } from '@fluentui/react-components';
-import { ChevronDown16Regular, MailRegular, PeopleChatRegular, PhoneRegular, AlertRegular, ChatRegular } from '@fluentui/react-icons';
+import {
+  ChevronDown16Regular,
+  MailRegular,
+  PeopleChatRegular,
+  PhoneRegular,
+  AlertRegular,
+  ChatRegular,
+} from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
 // Package import from `@spaarke/ui-components` — mirrors `DataverseEntityViewWidget.tsx`
@@ -468,7 +475,10 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         <Popover trapFocus>
           <PopoverTrigger disableButtonEnhancement>
             <Button
-              className={mergeClasses(styles.filterChipButton, dateRangeDisplay ? styles.filterChipButtonActive : undefined)}
+              className={mergeClasses(
+                styles.filterChipButton,
+                dateRangeDisplay ? styles.filterChipButtonActive : undefined
+              )}
               appearance="subtle"
               size="small"
               iconPosition="after"

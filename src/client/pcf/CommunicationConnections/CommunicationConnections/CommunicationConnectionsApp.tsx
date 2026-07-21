@@ -95,7 +95,13 @@ const useStyles = makeStyles({
     fontWeight: tokens.fontWeightSemibold,
   },
   grow: { flex: 1 },
-  primaryRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: tokens.spacingHorizontalM, minWidth: 0 },
+  primaryRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalM,
+    minWidth: 0,
+  },
   primaryNumber: {
     color: tokens.colorBrandForegroundLink,
     fontWeight: tokens.fontWeightSemibold,

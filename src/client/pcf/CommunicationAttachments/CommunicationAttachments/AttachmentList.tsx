@@ -144,12 +144,7 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
               content={isEml ? 'Email message — opens/downloads' : fileTypeLabel(item.name)}
               relationship="label"
             >
-              <Badge
-                className={s.typeBadge}
-                appearance="outline"
-                color={isEml ? 'brand' : 'informative'}
-                size="small"
-              >
+              <Badge className={s.typeBadge} appearance="outline" color={isEml ? 'brand' : 'informative'} size="small">
                 {isEml ? 'Email' : fileTypeLabel(item.name)}
               </Badge>
             </Tooltip>

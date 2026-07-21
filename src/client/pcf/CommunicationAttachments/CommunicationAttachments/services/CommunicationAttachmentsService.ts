@@ -78,10 +78,7 @@ export function fileTypeLabel(name: string): string {
 
 /** Minimal WebAPI surface this service consumes (keeps the class test-friendly). */
 export interface IAttachmentsWebApi {
-  retrieveMultipleRecords(
-    entityLogicalName: string,
-    options?: string
-  ): Promise<{ entities: IAttachmentRecord[] }>;
+  retrieveMultipleRecords(entityLogicalName: string, options?: string): Promise<{ entities: IAttachmentRecord[] }>;
 }
 
 export class CommunicationAttachmentsService {

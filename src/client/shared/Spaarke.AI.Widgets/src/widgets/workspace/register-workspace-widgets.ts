@@ -753,7 +753,8 @@ registerWorkspaceWidget(
   },
   () =>
     import('@spaarke/communication-components').then(m => ({
-      default: m.CommunicationsWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+      default:
+        m.CommunicationsWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
     })),
   tableWidgetVisibility
 );

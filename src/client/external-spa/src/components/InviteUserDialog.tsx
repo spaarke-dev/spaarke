@@ -374,9 +374,8 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
             {successData && (
               <div className={styles.successDetails}>
                 <Text size={300} className={styles.detailValue}>
-                  The user's workspace account is being provisioned and an onboarding
-                  email has been sent with sign-in instructions. No invitation code is
-                  required — they can sign in directly once provisioning completes.
+                  The user's workspace account is being provisioned and an onboarding email has been sent with sign-in
+                  instructions. No invitation code is required — they can sign in directly once provisioning completes.
                 </Text>
               </div>
             )}

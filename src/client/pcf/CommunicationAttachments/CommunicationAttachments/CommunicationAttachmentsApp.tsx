@@ -119,7 +119,10 @@ function resolveCommunicationId(context: ComponentFramework.Context<IInputs>): s
  * applies inside `getApiBaseUrl` — both config paths now produce a host-only base.
  */
 function normalizeBffBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+  return raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
 }
 
 /** Open a URL in a new tab, preferring the desktop protocol URL when present. */
@@ -143,10 +146,7 @@ export interface ICommunicationAttachmentsAppProps {
   version: string;
 }
 
-export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppProps> = ({
-  context,
-  version,
-}) => {
+export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppProps> = ({ context, version }) => {
   const s = useStyles();
 
   const showVersionFooter = context.parameters.showVersionFooter?.raw !== false;

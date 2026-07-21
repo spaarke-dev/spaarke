@@ -210,7 +210,13 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
           onSearch={onSearchRecipients}
           disabled={disabled || isSending}
         />
-        <RecipientField label="Cc" value={cc} onChange={setCc} onSearch={onSearchRecipients} disabled={disabled || isSending} />
+        <RecipientField
+          label="Cc"
+          value={cc}
+          onChange={setCc}
+          onSearch={onSearchRecipients}
+          disabled={disabled || isSending}
+        />
         <RecipientField
           label="Bcc"
           value={bcc}
