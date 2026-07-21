@@ -17,7 +17,7 @@
 ## Deploy note
 - **Deployed `sprk_spaarkeai`** to dev (R6-1/2/4/5a/6 + the shared email/lookup fixes it bundles).
 - **R6-3** is already live via master's "Fix #4".
-- **The shared recipient-email fix (R6-5b)** also fixes the STANDARD email modal, but that surface (`sprk_communicationpage` / EmailComposerSlot) was **not separately redeployed this round** — the fix is in the merged shared source and applies on its next deploy. Say the word and I'll build + deploy CommunicationPage to make it live there now.
+- **The shared recipient-email fix (R6-5b) is now LIVE on the standard modal too.** The standard "New Email" modal is the **CommunicationActions PCF** (`cc_Spaarke.Controls.CommunicationActions`, mounts `SendEmailPage`), NOT the `sprk_communicationpage` code page (which doesn't exist in this env). Rebuilt that PCF (v1.1.3 → **1.1.4**, `build:prod`, shared-lib `dist/` refreshed via `prebuild:prod`) and imported + published to SPAARKE DEV 1. Commit `ffa0ddb16`.
 
 ## Tests
 76 SpaarkeAi + 73 redline tests pass. Commits squashed into `d3428b930` (merged origin/master).
