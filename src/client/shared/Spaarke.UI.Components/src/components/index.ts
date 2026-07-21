@@ -234,3 +234,16 @@ export * from './ConversationView';
 // current user's systemuserid. All-mode -> FR-16 list; record-mode -> existing
 // by-regarding read (CLAUDE.md §6.5 Path A exception, both server-access-filtered).
 export * from './ConversationWorkspace';
+
+// MessageQuickView - Fluent v9 Popover: 200-char message preview (email shows
+// to/from/date/subject) + an open→pin action that calls the host-wired `onPin`,
+// which drives ConversationView's new `scrollToMessage(id)` imperative handle
+// (forwardRef) to scroll + transiently highlight the bubble (task 023, FR-05).
+export * from './MessageQuickView';
+
+// NewThreadModal - Fluent v9 modal to start (find-or-create) a 1:1 direct thread
+// via POST /threads/direct; reuses RecipientField/BodyEditor/AssociationChips
+// (no dup impl). Optional regarding (read-only AssociationChips) + optional body
+// (posted as the first Message via the existing send engine). name/description
+// omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
+export * from './NewThreadModal';

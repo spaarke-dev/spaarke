@@ -48,6 +48,25 @@ export interface ConversationViewProps {
 }
 
 /**
+ * Imperative handle exposed by `<ConversationView />` via `React.forwardRef`
+ * + `useImperativeHandle` (task 023, FR-05). Minimal + additive: it does NOT
+ * change the component's scroll model — it only lets a host (e.g. a
+ * `MessageQuickView` "open→pin" action, a search result, or the right-pane
+ * PCF) jump the already-rendered list to a specific message and flash a
+ * transient highlight on it. `forwardRef` is transparent to existing callers
+ * that pass no ref (`<ConversationView .../>` keeps working unchanged).
+ */
+export interface ConversationViewHandle {
+  /**
+   * Scrolls the bubble whose `TimelineMessage.id === messageId` into view and
+   * applies a transient highlight (auto-clears after ~1.5s). No-op when the
+   * id is not currently rendered (e.g. hidden by the in-conversation filters,
+   * or not in this thread) — never throws.
+   */
+  scrollToMessage(messageId: string): void;
+}
+
+/**
  * Own-bubble delivery status. The read-model (`ThreadMessageDto`) carries no
  * delivery-status field today — every message this view renders is already a
  * PERSISTED row (a successful send), so the only status this view can

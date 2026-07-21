@@ -318,3 +318,74 @@ export async function getThreadUnreadCount(
 
   return (await response.json()) as IThreadListUnreadCountDto;
 }
+
+// ---------------------------------------------------------------------------
+// startDirectThread — POST /api/communications/threads/direct (FR-09/FR-11)
+// ---------------------------------------------------------------------------
+//
+// FIND-OR-CREATE a 1:1 Direct (record-less) thread with another Spaarke user.
+// The `<NewThreadModal />` create surface (task 024, FR-11) calls this on submit
+// and hands the returned `threadId` to the shell's thread-selection callback.
+//
+// Contract shape mirrors the BFF DTOs field-for-field (camelCase, ASP.NET STJ):
+//   - Request `StartDirectThreadRequest`  → `{ otherParticipantSystemUserId }`
+//   - Response `StartDirectThreadResponse` → `{ threadId, callerSystemUserId, otherParticipantSystemUserId }`
+// (`Sprk.Bff.Api/Services/Communication/Models/StartDirectThread{Request,Response}.cs`).
+//
+// IMPORTANT — the endpoint is deliberately NARROW (task 043 / FR-09): it is a
+// pure find-or-create of a two-party thread HANDLE keyed on the caller +
+// exactly ONE other `systemuserid`. It does NOT carry a thread name/description,
+// a regarding (record) association, a recipient LIST, or a first-message body.
+// The caller is resolved SERVER-side (never client-supplied). Ordered-pair
+// dedup means submitting the same participant twice reuses the SAME thread — so
+// this wrapper needs no client-side de-duplication or a second create path
+// (task 024 escalation trigger: the client MUST NOT hand-roll either).
+// ---------------------------------------------------------------------------
+
+/** Mirrors `StartDirectThreadRequest` — the other participant's `systemuserid`. */
+export interface IStartDirectThreadRequestDto {
+  /** The other participant's Dataverse `systemuserid` GUID (a resolved Spaarke user). */
+  otherParticipantSystemUserId: string;
+}
+
+/** Mirrors `StartDirectThreadResponse` — the new-or-reused thread id (+ echoed party ids). */
+export interface IStartDirectThreadResultDto {
+  /** The Direct thread's `sprk_communicationthreadid` — new or reused (find-or-create). */
+  threadId: string;
+  /** The caller's `systemuserid` (echoed for client convenience). */
+  callerSystemUserId: string;
+  /** The other participant's `systemuserid` (echoed for client convenience). */
+  otherParticipantSystemUserId: string;
+}
+
+/**
+ * Starts (or reuses) a 1:1 Direct thread with another Spaarke user
+ * (`POST /api/communications/threads/direct`). Find-or-create + server-resolved
+ * caller — see the block comment above. Throws {@link CommunicationThreadListError}
+ * on any non-2xx response (parsed ProblemDetails per ADR-019), exactly like the
+ * read wrappers in this module.
+ */
+export async function startDirectThread(
+  request: IStartDirectThreadRequestDto,
+  client: IThreadListApiClientOptions
+): Promise<IStartDirectThreadResultDto> {
+  if (!request.otherParticipantSystemUserId) {
+    throw new Error('startDirectThread: otherParticipantSystemUserId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('startDirectThread: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, '/api/communications/threads/direct');
+  const response = await client.authenticatedFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ otherParticipantSystemUserId: request.otherParticipantSystemUserId }),
+  });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+
+  return (await response.json()) as IStartDirectThreadResultDto;
+}

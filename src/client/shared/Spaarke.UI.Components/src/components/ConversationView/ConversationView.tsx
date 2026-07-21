@@ -58,7 +58,7 @@ import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTime
 import { sendTimelineMessage } from '../../services/communicationTimelineApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { MessageBubble } from './subcomponents/MessageBubble';
-import type { ConversationRenderItem, ConversationViewProps } from './ConversationView.types';
+import type { ConversationRenderItem, ConversationViewHandle, ConversationViewProps } from './ConversationView.types';
 
 // ---------------------------------------------------------------------------
 // Styles (ADR-021 — semantic tokens only, no hardcoded colors)
@@ -109,6 +109,25 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
+  },
+  // Stable DOM anchor wrapping each MessageBubble so `scrollToMessage(id)` can
+  // find + flash it (task 023 / FR-05). MessageBubble itself is untouched.
+  messageAnchor: {
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: tokens.borderRadiusMedium,
+    transitionProperty: 'background-color, outline-color',
+    transitionDuration: tokens.durationSlow,
+    transitionTimingFunction: tokens.curveEasyEase,
+    outlineWidth: tokens.strokeWidthThick,
+    outlineStyle: 'solid',
+    outlineColor: 'transparent',
+  },
+  // Transient open→pin highlight — semantic tokens only (ADR-021), adapts to
+  // light/dark via the host FluentProvider. Auto-cleared after ~1.5s.
+  messageAnchorHighlight: {
+    backgroundColor: tokens.colorNeutralBackground3Selected,
+    outlineColor: tokens.colorBrandStroke1,
   },
   dividerLabel: {
     color: tokens.colorNeutralForeground3,
@@ -344,6 +363,9 @@ ConversationComposeBar.displayName = 'ConversationComposeBar';
 /** Distance-from-bottom (px) within which the list is still considered "at bottom" for auto-scroll purposes. */
 const AUTO_SCROLL_THRESHOLD_PX = 48;
 
+/** How long the open→pin highlight stays lit before it clears (task 023 / FR-05). */
+const PIN_HIGHLIGHT_MS = 1500;
+
 /**
  * Mine/others alignment — STRICTLY sender-identity (`senderSystemUserId`),
  * never email-string matching (FR-02/FR-18). A message with no resolvable
@@ -463,7 +485,7 @@ export function extractWordOptions(messages: TimelineMessage[], cap = 40): strin
 // Component
 // ---------------------------------------------------------------------------
 
-export const ConversationView: React.FC<ConversationViewProps> = props => {
+export const ConversationView = React.forwardRef<ConversationViewHandle, ConversationViewProps>((props, ref) => {
   const { threadId, currentUserSystemUserId, authenticatedFetch, bffBaseUrl, pollIntervalMs, onError, className } =
     props;
 
@@ -578,6 +600,48 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
     }
   }, [renderItems.length]);
 
+  // ── open→pin scroll-to-message (task 023 / FR-05) ──────────────────────────
+  // A per-message DOM anchor map + a transient-highlight id. Minimal + additive:
+  // the auto-scroll model above is untouched; this only lets a host jump to and
+  // flash one already-rendered bubble via the imperative handle below.
+  const anchorRefs = React.useRef<Map<string, HTMLDivElement>>(new Map());
+  const [highlightedId, setHighlightedId] = React.useState<string | null>(null);
+  const highlightTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setAnchorRef = React.useCallback(
+    (messageId: string) => (el: HTMLDivElement | null) => {
+      if (el) anchorRefs.current.set(messageId, el);
+      else anchorRefs.current.delete(messageId);
+    },
+    []
+  );
+
+  React.useEffect(
+    () => () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    },
+    []
+  );
+
+  React.useImperativeHandle(
+    ref,
+    (): ConversationViewHandle => ({
+      scrollToMessage: (messageId: string) => {
+        const el = anchorRefs.current.get(messageId);
+        if (!el) return; // not rendered (filtered out / different thread) — never throw
+        // Guard: jsdom (and any host that hasn't polyfilled it) may not implement
+        // scrollIntoView — the highlight still applies regardless.
+        if (typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+        setHighlightedId(messageId);
+        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = setTimeout(() => setHighlightedId(null), PIN_HIGHLIGHT_MS);
+      },
+    }),
+    []
+  );
+
   const isLoading = state.status === 'idle';
   const isErrorState = state.status === 'error';
   // Thread genuinely has no messages vs. the current filters hid them all — distinct states (NFR-05).
@@ -682,12 +746,22 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
                 </Text>
               </div>
             ) : (
-              <MessageBubble
+              <div
                 key={item.key}
-                message={item.entry.message}
-                isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
-              />
+                ref={setAnchorRef(item.entry.message.id)}
+                data-message-id={item.entry.message.id}
+                data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
+                className={mergeClasses(
+                  styles.messageAnchor,
+                  highlightedId === item.entry.message.id && styles.messageAnchorHighlight
+                )}
+              >
+                <MessageBubble
+                  message={item.entry.message}
+                  isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
+                  status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
+                />
+              </div>
             )
           )}
       </div>
@@ -700,6 +774,6 @@ export const ConversationView: React.FC<ConversationViewProps> = props => {
       />
     </div>
   );
-};
+});
 
 ConversationView.displayName = 'ConversationView';

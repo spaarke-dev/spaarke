@@ -4,7 +4,7 @@
     <title>MessageQuickView popover (200-char) with open→pin scroll/highlight (FR-05)</title>
     <phase>3 Email-in-flow + quick-view + new-thread</phase>
     <gate>after:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New .tsx popover in the shared lib; interaction (open→pin scroll/highlight) with a11y surface. Code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

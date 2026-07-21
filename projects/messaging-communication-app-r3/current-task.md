@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 2 COMPLETE ✅. **Task 020 (FR-07) COMPLETE ✅ + gated.** Next: **MERGE origin/master** (54 behind, EmailComposer diverged), THEN Phase 3 Wave 11 (023 + 024) / 021 / 022. |
+| **Task** | Phase 2 ✅ · 020 ✅ · master MERGED ✅ · **Wave 11 (023 + 024) COMPLETE ✅ + gated.** Next: 021 (email-in-flow, deps 011+020), 022 (forward, deps 020), 025 (title link). |
 | **Step** | — |
-| **Status** | 013,014,020 committed. **🛑 branch is 54 commits behind origin/master; master has email-r4 EmailComposer changes overlapping task 020's files — merge master before PR + before 021/022.** |
-| **Next Action** | **Merge origin/master into this branch** (resolve `EmailComposer.tsx` vs email-r4 `423e9c7b8` reply/forward-attachments; my task-020 edits are additive), re-run EmailComposer tests, then continue Phase 3. Tasks 021 (email-in-flow) + 022 (forward) also edit EmailComposer — do them AFTER the merge, not before. ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify via scoped `tsc --noEmit` + `npm test`, NOT whole-package `npm run build`. |
+| **Status** | 013,014,020 + merge (2fabf2e64) committed. **023 + 024 done + gated, about to commit.** 6 tasks done this session. **NOT pushed** to PR #664 yet. |
+| **Next Action** | Commit Wave 11 (023+024), then `work on task 021` (FR-04 email-in-flow compact block + open→modal, deps 011+020) — edits ConversationView + reuses SendEmailDialog (task 020's thread/regarding/recordLink props). Then 022 (forward mode), 025 (conversation title → record-scoped modal link). ⚠️ post-merge: `mapStateToSendRequest` lives in `EmailComposer.reducer.ts` now. ⚠️ worktree build gap: verify via scoped `tsc --noEmit` + `npm test`, NOT whole-package build. |
 
 ### Progress — 11 tasks ✅ (001–006, 010–014). 9 committed+pushed (PR #664); **013 + 014 committed? NO — uncommitted**
 - **Phase 1 (backend spine) COMPLETE + pushed**: 001–006.

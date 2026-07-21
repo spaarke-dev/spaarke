@@ -4,7 +4,7 @@
     <title>NewThreadModal — optional record association + name + description; find-or-create via POST /threads/direct (FR-11)</title>
     <phase>3 Email-in-flow + quick-view + new-thread</phase>
     <gate>after:012</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New .tsx modal in the shared lib; calls a BFF endpoint (find-or-create) with auth; drives thread creation across surfaces. Code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
