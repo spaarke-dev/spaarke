@@ -17,6 +17,10 @@
  *   - Format `name` as "Full Name (email)" for disambiguation.
  *   - Short-circuit when the query is empty / < 2 chars (no API call).
  *   - Throw on Web API failure (caller decides how to surface).
+ *   - Tag each result's `ILookupItem.entityType` ('systemuser'/'contact') at
+ *     the source table (task 060, FR-10) — `RecipientField` surfaces this
+ *     onto `IRecipient.entityType` so a directory-resolved recipient carries
+ *     its typed identity through to the caller.
  */
 import type { IDataService } from '../types/serviceInterfaces';
 import type { ILookupItem } from '../types/LookupTypes';
@@ -75,6 +79,7 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: formatName(e['fullname'] as string, e['internalemailaddress'] as string | undefined),
+    entityType: 'systemuser' as const,
   }));
 }
 
@@ -104,6 +109,7 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: formatName(e['fullname'] as string, e['emailaddress1'] as string | undefined),
+    entityType: 'contact' as const,
   }));
 }
 

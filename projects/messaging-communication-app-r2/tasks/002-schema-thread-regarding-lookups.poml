@@ -2,7 +2,7 @@
   <metadata>
     <title>Schema: `sprk_communicationthread` typed-regarding **all-11** lookups (mirror `RegardingFieldMap.All`) + new Lookup discriminator + naming-edited marker + default-thread marker</title>
     <phase>W0 — Schema + Foundation + ADR</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <deps>001</deps>
     <blocks>010, 070, 071</blocks>
@@ -124,6 +124,10 @@
   </acceptance-criteria>
 
   <notes>
+    **COMPLETED 2026-07-19 (STANDARD, sonnet@high).** Authored the schema-creation artifact (live apply DEFERRED — Dataverse MCP unavailable this session; owner/next-session applies + MCP-verifies, exactly R1's owner-created + agent-verified pattern). Deliverables: idempotent describe-before-write PowerShell script `scripts/Deploy-ThreadRegardingSchema.ps1` + maker-ready inventory/decision note `notes/002-thread-regarding-schema.md`.
+
+    Delta = 14 new ADDITIVE columns on `sprk_communicationthread`: 11 typed `sprk_regarding{...}` lookups (mirror `RegardingFieldMap.All` verbatim) + NEW Lookup discriminator `sprk_regardingrecordtype_ref` → `sprk_recordtype_ref` + `sprk_nameisautoderived` (Boolean, default Auto, for 071) + `sprk_isdefaultthread` (Boolean, default No, for 070). Discriminator named `_ref` because the plain `sprk_regardingrecordtype` name is the in-use Text field (MUST-NOT-RETYPE); `sprk_regardingrecordtype_ref` satisfies RegardingResolver's dynamic discovery predicate (`referencedEntity=='sprk_recordtype_ref'` && `columnName.includes('regardingrecordtype')`, ResolverWriteHandler.ts:342-345) so 071 binds it with zero code change. Existing Text field untouched (script step [0] guards it); no category/tags/description (Q2). §11 justification in the note.
+
     Depends on 001 (the confirmed delta + verbatim `RegardingFieldMap.All`). Blocks 010 (reads over the thread's regarding), 070 (default-thread marker), 071 (naming-edited marker + RegardingResolver placement binds the new Lookup discriminator).
 
     The single most important property is non-breaking: the Text `sprk_regardingrecordtype` MUST survive untouched — ThreadResolver, membership derivation, and timeline filters all read it. The Lookup discriminator is a NEW field, not a retype. If any tool pushes toward retyping the Text field, STOP — that is the forbidden breaking change (NFR-04, spec Out-of-Scope).

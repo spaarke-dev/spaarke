@@ -115,7 +115,7 @@ public class DataverseWebApiClient : IDisposable
         return request;
     }
 
-    public async Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)
+    public virtual async Task<T?> RetrieveAsync<T>(string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)
     {
         var query = select != null ? $"?$select={select}" : "";
         var url = $"{entitySetName}({id}){query}";
@@ -129,7 +129,7 @@ public class DataverseWebApiClient : IDisposable
         return await response.Content.ReadFromJsonAsync<T>(cancellationToken: cancellationToken);
     }
 
-    public async Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
+    public virtual async Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
     {
         _logger.LogDebug("POST {EntitySetName}", entitySetName);
 
@@ -149,7 +149,7 @@ public class DataverseWebApiClient : IDisposable
         throw new InvalidOperationException("Failed to extract entity ID from response");
     }
 
-    public async Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
+    public virtual async Task UpdateAsync(string entitySetName, Guid id, object entity, CancellationToken cancellationToken = default)
     {
         var url = $"{entitySetName}({id})";
 
@@ -172,7 +172,7 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
+    public virtual async Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null, int? top = null, int? skip = null, CancellationToken cancellationToken = default)
     {
         var queryParams = new List<string>();
         if (filter != null) queryParams.Add($"$filter={filter}");

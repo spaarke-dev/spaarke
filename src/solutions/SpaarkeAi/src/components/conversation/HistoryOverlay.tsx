@@ -167,7 +167,9 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   itemTitle: {
-    fontWeight: tokens.fontWeightSemibold,
+    // R5-5 (UAT 2026-07-20): smaller + not bold — the list read too heavy.
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground1,
     overflow: "hidden",
     textOverflow: "ellipsis",

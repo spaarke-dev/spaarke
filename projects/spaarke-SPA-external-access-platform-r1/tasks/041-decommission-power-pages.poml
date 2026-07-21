@@ -1,0 +1,118 @@
+<task id="041" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Retire Power Pages site + web-resource deploy script</title>
+    <phase>3 Cutover &amp; decommission</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Irreversible retirement — prescriptive; gated on parity</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Irreversible retirement — prescriptive</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="irreversible; gated on parity">false</parallel-safe>
+    <deps>040</deps>
+    <tags>deploy, cleanup</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    After task 040 parity is confirmed GREEN, retire the legacy Power Pages hosting path so the SPA is served ONLY from Azure Static Web Apps: delete `scripts/Deploy-ExternalWorkspaceSpa.ps1`, retire the `sprk_externalworkspace` Power Pages site config, and verify no repo, workflow, or pipeline reference to the retired path remains. This step is irreversible in practice—do NOT proceed if any parity gap remains; leave the Power Pages fallback in place and escalate.
+  </prompt>
+
+  <role>
+    You are a DevOps engineer performing a controlled, irreversible decommission of the legacy
+    Power Pages hosting path for the Spaarke external Secure Project Workspace, now that the SWA +
+    CIAM front door is verified at parity. You act prescriptively and conservatively: you remove
+    only the legacy path, and only after parity (task 040) is confirmed GREEN.
+  </role>
+
+  <goal>
+    After parity is confirmed (task 040), retire the legacy Power Pages hosting path so the SPA is
+    served ONLY from Azure Static Web Apps: remove the `sprk_externalworkspace` Power Pages site
+    config and delete `scripts/Deploy-ExternalWorkspaceSpa.ps1`, then verify nothing in the repo
+    or deploy pipeline still references the retired path.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 stood up SWA hosting (superseding the Power Pages web-resource deploy) and Phase 2
+      swapped identity to CIAM; task 040 verified end-to-end parity on SWA + CIAM. This task closes
+      the migration by removing the now-redundant Power Pages front door: the
+      `Deploy-ExternalWorkspaceSpa.ps1` script (the web-resource deploy path) and the
+      `sprk_externalworkspace` Power Pages site config. Because Power Pages is the fallback host,
+      this step MUST NOT run unless task 040 parity is GREEN — otherwise the external portal could
+      be left with no working host. This is irreversible in practice (site config + script removal),
+      hence prescriptive execution.
+    </background>
+    <relevant-files>
+      <file status="remove">scripts/Deploy-ExternalWorkspaceSpa.ps1 (Power Pages web-resource deploy path — delete)</file>
+      <file status="remove">Power Pages `sprk_externalworkspace` site config (retire the site)</file>
+      <file status="reference">src/client/external-spa/staticwebapp.config.json (the SWA host that remains the sole path)</file>
+      <file status="reference">.github/workflows/ (the SWA deploy workflow that supersedes the script)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: legacy Power Pages path only. Remove ONLY the Power Pages site config and the
+      `Deploy-ExternalWorkspaceSpa.ps1` script. Do NOT touch the SWA config, the SWA deploy
+      workflow, the external-spa source, or the BFF surface.
+    </constraint>
+    <constraint source="parity-gate">
+      SCOPE: precondition. MUST NOT decommission unless task 040 parity is GREEN. If any parity
+      gap remains, STOP (see escalation) and leave the Power Pages path in place.
+    </constraint>
+    <constraint source="spec-FR-14">
+      SCOPE: end state. After this task the SPA MUST serve only from SWA; the web-resource deploy
+      path MUST be removed; no repo or pipeline reference to the retired Power Pages path may remain
+      dangling.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>scripts/Deploy-ExternalWorkspaceSpa.ps1</file>
+      <file>src/client/external-spa/staticwebapp.config.json</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Confirm task 040 parity is GREEN (all graduation criteria passed, no filed gap outstanding). If not GREEN, STOP per the escalation trigger and do not proceed.</step>
+    <step>Grep the repo for references to `Deploy-ExternalWorkspaceSpa`, `sprk_externalworkspace`, and Power Pages web-resource deploy of the external-spa, to enumerate everything that must be updated or removed.</step>
+    <step>Delete `scripts/Deploy-ExternalWorkspaceSpa.ps1`.</step>
+    <step>Retire the Power Pages `sprk_externalworkspace` site config (remove the site / take it out of service per the Power Pages admin path).</step>
+    <step>Update or remove any remaining repo references (docs pointers are handled in task 042; here ensure no scripts, workflows, or config still invoke the retired path) so nothing points at the removed script or retired site.</step>
+    <step>Verify the SPA is served solely from the SWA origin and that no build/deploy pipeline still depends on the Power Pages path.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Do NOT decommission unless task 040 parity is GREEN. If any parity gap remains — a failed graduation criterion, an outstanding filed gap, or an unverifiable claim — STOP and escalate per root CLAUDE.md §6, leaving the Power Pages site + `Deploy-ExternalWorkspaceSpa.ps1` in place. This step is effectively irreversible; never run it on an unproven parity state.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>`scripts/Deploy-ExternalWorkspaceSpa.ps1` deleted</output>
+    <output>Power Pages `sprk_externalworkspace` site retired</output>
+    <output>Task notes recording the grep sweep results and confirmation the SPA serves only from SWA</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`scripts/Deploy-ExternalWorkspaceSpa.ps1` is removed from the repo.</criterion>
+    <criterion testable="true">The Power Pages `sprk_externalworkspace` site is retired (no longer serving the external-spa).</criterion>
+    <criterion testable="true">The SPA is served only from the SWA origin (no remaining Power Pages hosting path).</criterion>
+    <criterion testable="true">No broken references to the retired script or site remain in repo scripts, workflows, or config (negative case).</criterion>
+    <criterion testable="true">The task did NOT proceed while task 040 parity was non-GREEN (negative case — decommission is gated on a GREEN parity result).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Removal-only task — no new component surface, so no justification block. Doc rewrites (removing
+    Power Pages-as-current instructions) are task 042; this task removes the executable/deploy
+    path. Prescriptive because the removal is irreversible in practice and gated on the parity
+    result from task 040.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

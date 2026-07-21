@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/staticwebapp.config.json",
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/assets/*",
+      "/*.{css,js,map,ico,png,svg,gif,jpg,jpeg,webp,json,txt,woff,woff2,ttf,eot}"
+    ]
+  },
+  "globalHeaders": {
+    "Referrer-Policy": "no-referrer-or-same-origin",
+    "Content-Security-Policy": "frame-ancestors 'self'",
+    "X-Content-Type-Options": "nosniff"
+  }
+}

@@ -55,7 +55,6 @@ import { GetStartedCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId } from '@spaarke/ai-widgets';
 import {
   launchSurface,
-  launchCreateProjectWizard,
   launchAssignWorkWizard,
   launchSummarizeFilesWizard,
   launchFindSimilarWizard,
@@ -67,11 +66,36 @@ import { getBffBaseUrl } from '../../config/runtimeConfig';
 // Props
 // ---------------------------------------------------------------------------
 
+/**
+ * The current chat session's uploaded-file context (UAT R4-12). Read at card-click time so a
+ * wizard launched from Quick Start opens PRE-SEEDED with the files the user has attached — parity
+ * with the draft-in-chat surface-launch path (`ConversationPane.handleSurfaceLaunch`). Carried BY
+ * REFERENCE only (session id + session file ids + display names); the wizard fetches the binary via
+ * `GET /api/ai/chat/sessions/{sessionId}/documents/{fileId}/content` (never inline binary — the
+ * surface-handoff envelope invariant).
+ */
+export interface QuickStartFileContext {
+  sessionId: string | null;
+  fileIds: string[];
+  fileNames: string[];
+}
+
 export interface QuickStartModalProps {
   /** Whether the Quick Start modal is open. */
   open: boolean;
   /** Close request (dismiss, Escape, scrim click, or after a card launches a wizard). */
   onClose: () => void;
+  /**
+   * UAT R4-12: returns the session's attached-file context at click time (or null when none).
+   * Threaded into `launchSurface` for the envelope-based wizards (create-matter / create-project)
+   * so they open with the files pre-attached. Omitted → wizards open with no seeded files (as before).
+   */
+  getFileContext?: () => QuickStartFileContext | null;
+  /**
+   * UAT R5-9: open the shared Email Compose modal for the "Send Email" card instead of the
+   * playbook-library web resource. Omitted → falls back to the legacy launchPlaybookIntent route.
+   */
+  onSendEmail?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,22 +125,38 @@ const useStyles = makeStyles({
  * `QuickStartModal` — Fluent v9 Dialog hosting `GetStartedCardsWidget`.
  * Launched from `AssistantToolMenu`'s "Quick Start" entry.
  */
-export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose }) => {
+export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext, onSendEmail }) => {
   const styles = useStyles();
 
   const handleCardClick = React.useCallback(
     (cardId: GetStartedCardId): void => {
       const bffBaseUrl = getBffBaseUrl();
 
+      // UAT R4-12: the session's attached files, carried by reference into the envelope-based
+      // wizards so they open pre-seeded. Null → no files (as before). See handleSurfaceLaunch parity.
+      const fileCtx = getFileContext?.() ?? null;
+      const surfaceFileArgs =
+        fileCtx && fileCtx.fileIds.length > 0
+          ? {
+              fileIds: fileCtx.fileIds,
+              source: fileCtx.sessionId ? { sessionId: fileCtx.sessionId } : undefined,
+              provenance: fileCtx.fileNames.length > 0 ? { sourceFiles: fileCtx.fileNames } : undefined,
+            }
+          : {};
+
       switch (cardId) {
         case 'create-matter-wizard':
           // The one Get-Started card with a SURFACE_LAUNCH_REGISTRY entry —
-          // launch through the shipped 012 hand-off envelope.
-          void launchSurface({ consumerType: 'create-matter', bffBaseUrl });
+          // launch through the shipped 012 hand-off envelope, now carrying the
+          // session's attached files (R4-12) so the wizard opens pre-attached.
+          void launchSurface({ consumerType: 'create-matter', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'create-project-wizard':
-          launchCreateProjectWizard({ bffBaseUrl });
+          // R4-12: create-project also reads the handoff envelope (CreateProjectWizard main.tsx
+          // wires initialFileRefs) and has a SURFACE_LAUNCH_REGISTRY entry — route it through the
+          // SAME launchSurface envelope (not the file-less Path-B launcher) so files flow in too.
+          void launchSurface({ consumerType: 'create-project', bffBaseUrl, ...surfaceFileArgs });
           break;
 
         case 'assign-work':
@@ -133,7 +173,13 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose 
           break;
 
         case 'email-compose':
-          launchPlaybookIntent({ bffBaseUrl, intent: 'email-compose' });
+          // R5-9: open the shared Email Compose modal when the host provides the handler;
+          // otherwise fall back to the legacy playbook-library intent route.
+          if (onSendEmail) {
+            onSendEmail();
+          } else {
+            launchPlaybookIntent({ bffBaseUrl, intent: 'email-compose' });
+          }
           break;
 
         case 'meeting-schedule':
@@ -154,7 +200,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose 
       // pattern #5: don't nest modals from different chrome families).
       onClose();
     },
-    [onClose],
+    [onClose, getFileContext, onSendEmail],
   );
 
   return (

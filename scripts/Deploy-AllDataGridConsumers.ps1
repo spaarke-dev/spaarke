@@ -100,6 +100,15 @@ $Consumers = @(
         WebResource = 'sprk_kpiassessmentspage.html'
     }
     [PSCustomObject]@{
+        # messaging-communication-app-r2 task 040 (FR-11) — standalone global
+        # All-Communications DataGrid page. Widget/launcher/deep-link only; no
+        # sitemap entry in R2 (owner Q-B). Reuses grid config e1826c4c-… (NFR-05).
+        Name        = 'sprk_communicationspage'
+        SolutionDir = 'src\solutions\sprk_communicationspage'
+        DistFile    = 'index.html'
+        WebResource = 'sprk_communicationspage.html'
+    }
+    [PSCustomObject]@{
         Name        = 'LegalWorkspace'
         SolutionDir = 'src\solutions\LegalWorkspace'
         DistFile    = 'corporateworkspace.html'

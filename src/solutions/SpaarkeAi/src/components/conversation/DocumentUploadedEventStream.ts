@@ -196,7 +196,7 @@ export function formatClassificationMessage(data: EventClassificationData): stri
 }
 
 /** Coerce a `string | string[] | {…}[]` field into a flat list of display strings. */
-function toDisplayList(value: unknown): string[] {
+export function toDisplayList(value: unknown): string[] {
   if (typeof value === 'string') {
     return value.trim().length > 0 ? [value.trim()] : [];
   }

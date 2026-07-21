@@ -7,9 +7,13 @@
  * ADR-012), so these are ADR-038 domain-logic behavior contracts
  * (MAINTAIN-class), not scaffolding.
  */
-import { buildTimeline, mapThreadMessageDtoToTimelineMessage } from '../CommunicationTimeline.buildTimeline';
+import {
+  buildTimeline,
+  mapThreadMessageDtoToTimelineMessage,
+  mapRegardingReadResultToGroups,
+} from '../CommunicationTimeline.buildTimeline';
 import type { TimelineMessage } from '../CommunicationTimeline.types';
-import type { IThreadMessageDto } from '../../../services/communicationTimelineApi';
+import type { IRegardingReadResultDto, IThreadMessageDto } from '../../../services/communicationTimelineApi';
 
 function msg(id: string, overrides: Partial<TimelineMessage> = {}): TimelineMessage {
   return {
@@ -207,5 +211,101 @@ describe('mapThreadMessageDtoToTimelineMessage', () => {
       { id: 'att-1', documentId: 'doc-1', fileName: 'contract.pdf', attachmentType: 100000000 },
       { id: 'att-2', documentId: undefined, fileName: undefined, attachmentType: undefined },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapRegardingReadResultToGroups (R2 task 020, FR-03 — regarding-mode grouping)
+// ---------------------------------------------------------------------------
+
+describe('mapRegardingReadResultToGroups', () => {
+  function threadDto(
+    threadId: string,
+    name: string | null,
+    messages: IThreadMessageDto[] = []
+  ): IRegardingReadResultDto['threads'][number] {
+    return { threadId, name, messages, count: messages.length };
+  }
+
+  function messageDto(id: string, overrides: Partial<IThreadMessageDto> = {}): IThreadMessageDto {
+    return {
+      messageId: id,
+      body: `body-${id}`,
+      bodyFormat: 100000001,
+      communicationType: 100000000,
+      from: `sender-${id}@example.com`,
+      sentAt: null,
+      createdOn: null,
+      inReplyTo: null,
+      privilege: 0,
+      attachments: [],
+      ...overrides,
+    };
+  }
+
+  function regardingDto(
+    threads: IRegardingReadResultDto['threads']
+  ): IRegardingReadResultDto {
+    return {
+      entityType: 'sprk_matter',
+      recordId: 'record-1',
+      threads,
+      threadCount: threads.length,
+      messageCount: threads.reduce((sum, t) => sum + t.count, 0),
+    };
+  }
+
+  it('returns an empty array when the record has no threads', () => {
+    expect(mapRegardingReadResultToGroups(regardingDto([]))).toEqual([]);
+  });
+
+  it('maps each thread to a group carrying its name and message count', () => {
+    const result = mapRegardingReadResultToGroups(
+      regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])])
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].threadId).toBe('t1');
+    expect(result[0].name).toBe('Matter — Acme');
+    expect(result[0].messageCount).toBe(1);
+    expect(result[0].messages).toHaveLength(1);
+    expect(result[0].messages[0].id).toBe('m1');
+  });
+
+  it('falls back to a placeholder label when the thread name is null', () => {
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', null)]));
+    expect(result[0].name).toBe('Untitled thread');
+  });
+
+  it('falls back to a placeholder label when the thread name is blank', () => {
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', '   ')]));
+    expect(result[0].name).toBe('Untitled thread');
+  });
+
+  it("maps each group's messages via mapThreadMessageDtoToTimelineMessage (reused, not re-implemented)", () => {
+    const result = mapRegardingReadResultToGroups(
+      regardingDto([threadDto('t1', 'Thread A', [messageDto('m1', { communicationType: 100000004 })])])
+    );
+    // channelType 'message' only comes from mapThreadMessageDtoToTimelineMessage's own mapping —
+    // proves this function delegates rather than re-deriving the DTO -> domain mapping.
+    expect(result[0].messages[0].channelType).toBe('message');
+  });
+
+  it('orders groups by most-recent message activity, newest first', () => {
+    const older = threadDto('older', 'Older thread', [messageDto('m1', { sentAt: '2026-07-01T09:00:00Z' })]);
+    const newer = threadDto('newer', 'Newer thread', [messageDto('m2', { sentAt: '2026-07-01T11:00:00Z' })]);
+
+    const result = mapRegardingReadResultToGroups(regardingDto([older, newer]));
+
+    expect(result.map(g => g.threadId)).toEqual(['newer', 'older']);
+  });
+
+  it('treats a thread with no messages as having no activity (sorts last)', () => {
+    const withMessages = threadDto('active', 'Active thread', [messageDto('m1', { sentAt: '2026-07-01T09:00:00Z' })]);
+    const empty = threadDto('empty', 'Empty thread', []);
+
+    const result = mapRegardingReadResultToGroups(regardingDto([empty, withMessages]));
+
+    expect(result.map(g => g.threadId)).toEqual(['active', 'empty']);
   });
 });

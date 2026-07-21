@@ -2,7 +2,7 @@
   <metadata>
     <title>Thread naming re-derive (`BuildTopic` re-derives `sprk_name` unless user-edited, marker-gated) + place RegardingResolver PCF on the thread form (0 code)</title>
     <phase>W7 — Auto-Threading + Thread Naming</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <deps>002, 070</deps>
     <blocks></blocks>
@@ -152,6 +152,14 @@
 
     ADR-046 path-C is already the project's chosen resolution (reuse RegardingResolver + a bindable Lookup discriminator). If placement surfaces a new tension, use the §6.5 protocol rather than introducing a second mechanism.
   </notes>
+
+  <completion-notes date="2026-07-19">
+    (a) Added `IThreadResolver.ReDeriveThreadNameAsync(Guid threadId, ct)` + `ThreadResolver.BuildTopicFromRegardingAnchor` — marker-gated re-derive (`sprk_nameisautoderived` true/missing=Auto re-derives; false=Edited preserves, no clobber), master-thread guard (`sprk_regardingrecordtype=="systemuser"` short-circuits, honoring the 070 flag), CREATE paths now stamp the marker `true` explicitly, NFR-02 non-fatal swallow, no-op when derived name unchanged.
+    (b) Placement instructions authored at `projects/messaging-communication-app-r2/notes/071-regarding-resolver-thread-placement.md` (entity="sprk_communicationthread", bind regardingRecordType→sprk_regardingrecordtype_ref + regardingRecordNameField→sprk_regardingrecordname, explicit regardingTargets=11-entity RegardingFieldMap.All list). Live apply DEFERRED to owner (MCP unavailable), per this project's build-and-defer-live pattern.
+    Marker-flip ambiguity (step 4) DECIDED and documented explicitly (not guessed): neither the regarding-change re-derive trigger nor the name-edit marker-flip is wired, since both would-be triggers are client-side `Xrm.WebApi` writes that bypass the BFF. Recommended follow-on: a Dataverse plugin on Update of `sprk_communicationthread`. Documented in the method's XML doc + the placement note.
+    +14 tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ThreadResolverTests.cs` (568 Communication tests pass, 554 baseline + 14, 8 pre-existing skips; 070's tests untouched/still green). Build clean; publish delta ≈0 (46.24 MB excl-PDB, stash-isolated pre/post comparison); no new CVE. code-review + adr-check: 0 Critical findings. `/conflict-check`: silent pass.
+  </completion-notes>
+</task>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

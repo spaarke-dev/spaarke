@@ -275,15 +275,17 @@ describe('Suggested Next Steps cards — "More" affordance (task 043 / FR-G1)', 
     expect(screen.getByTestId('consumer-chips-more')).toBeInTheDocument();
   });
 
-  it('clicking "More" opens the existing sprk_playbooklibrary modal via Xrm.Navigation (no new modal)', () => {
+  it('clicking "More" opens the Quick Start modal (P1-8 — the playbook library is retired)', () => {
     renderPane();
     deliverChips([{ target_binding_id: 'b-summarize-all', chip_label: 'Summarize all?' }]);
 
+    expect(screen.queryByTestId('quick-start-modal')).not.toBeInTheDocument();
+
     fireEvent.click(screen.getByTestId('consumer-chips-more'));
 
-    expect(navigateToSpy).toHaveBeenCalledTimes(1);
-    const [navTarget] = navigateToSpy.mock.calls[0];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((navTarget as any).webresourceName).toBe('sprk_playbooklibrary');
+    // P1-8 (UAT 2026-07-18): the chips' "More…" affordance now opens Quick Start, NOT the
+    // retired sprk_playbooklibrary web resource. So it opens the in-app modal, not Xrm.Navigation.
+    expect(screen.getByTestId('quick-start-modal')).toBeInTheDocument();
+    expect(navigateToSpy).not.toHaveBeenCalled();
   });
 });

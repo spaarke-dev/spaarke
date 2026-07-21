@@ -2,7 +2,7 @@
   <metadata>
     <title>Participant-index write at capture/send — populate `sprk_communicationparticipant` junction rows (message grain)</title>
     <phase>W5 — Participant Index + Person Filter (CC-2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>9</estimated-hours>
     <deps>003,004</deps>
     <blocks>051,060</blocks>

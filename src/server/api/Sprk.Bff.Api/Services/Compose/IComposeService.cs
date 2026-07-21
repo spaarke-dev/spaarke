@@ -582,6 +582,19 @@ public sealed record SaveComposeDocumentRequest
     /// shape the push-annotations path uses (reuse, not a parallel contract).
     /// </summary>
     public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
+
+    /// <summary>
+    /// C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
+    /// paragraph in document order carrying its <c>w14:paraId</c> + reject-state text. When present,
+    /// <see cref="SaveAsync"/> runs <see cref="ComposeBaselineParaIdStamper"/> to stamp any MINTED ids
+    /// (assigned on Load by <see cref="ParaIdPreParser"/> but never written into the source bytes, or
+    /// client-minted on an uploaded doc) physically onto the resolved baseline's id-LESS paragraphs
+    /// BEFORE the E1 synthesizer/E2 anchoring resolve against it — so an edit/accept on such a paragraph
+    /// no longer fails with "w14:paraId matches no paragraph in the retained original". Text-verified +
+    /// fill-gaps-only + count-gated (never a wrong write). Null/empty on an older client → the stamper is
+    /// skipped and behavior is unchanged.
+    /// </summary>
+    public IReadOnlyList<ComposeBaselineParaId>? ParaIdMap { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>

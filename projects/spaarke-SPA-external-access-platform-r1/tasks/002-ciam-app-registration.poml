@@ -1,0 +1,98 @@
+<task id="002" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Register CIAM-tenant app for Graph user management</title>
+    <phase>0 Foundations</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. App 'Spaarke CIAM Graph Provisioner' (client e63e6eb1-be25-4214-80a8-a6d609034bb9) registered single-tenant in the CIAM tenant; Graph app permission User.ReadWrite.All admin-consented (owner). Credential = certificate: private key in Key Vault spaarke-spekvcert (cert 'ciam-graph-provisioner-cert', thumbprint 938A0ECE160B3D6BE07751638F1B5B282B524F92, expires 2028-07-20); public .cer uploaded to the app (keyCredential id f3e09e97-f34f-4872-ad0f-3a48a4d37d3c). No plaintext secret in repo. Recorded in config/spaarke-resources.yaml (external_identity) + config/environments.json (dev.ciam.graphProvisionerClientId). BFF loads the cert from KV at runtime in task 022.</status-note>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config/infra task with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>App registration + credential setup per runbook</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>auth-sensitive credential provisioning</parallel-safe-reason>
+    <deps>001</deps>
+    <tags>azure, auth, config</tags>
+    <estimated-effort>0.5-1 day (ops-gated on CIAM tenant + admin consent)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Register an application inside the CIAM tenant (from task 001) with Microsoft Graph application permission `User.ReadWrite.All`, admin-consented, so the BFF can create and manage CIAM external users cross-tenant. Decide and store the credential — prefer Managed-Identity-as-Federated-Identity-Credential if GA, otherwise a certificate in Key Vault. Record the app-registration identifiers in config/environments.json with no plaintext secrets.
+  </prompt>
+
+  <role>
+    You are a cloud identity engineer registering a Graph-management app in a CIAM tenant and provisioning its credential per Spaarke's secret-stewardship rules. You treat credential material as auth-sensitive and never emit plaintext secrets.
+  </role>
+
+  <goal>
+    An app registration exists IN the CIAM tenant with Graph application permission `User.ReadWrite.All` (admin-consented); the credential is decided (Managed-Identity-as-Federated-Identity-Credential if GA, else a certificate stored in Key Vault) and stored; the app (client) ID and credential reference (KV secret/cert reference or MI-FIC config) are recorded in `config/environments.json`.
+  </goal>
+
+  <context>
+    <background>
+      The BFF's admin-initiated CIAM provisioner (Phase 2) calls Graph `POST /users` cross-tenant to mint external accounts. The existing `GraphClientFactory` is single-tenant and cannot reach the CIAM tenant; the cross-tenant client will be modeled on `SpeAdmin/SpeAdminTokenProvider.GetOrCreateMsalApp` (per-authority `WithAuthority` + Key-Vault secret). Because Graph application permissions must be consented in the resource tenant, the app registration MUST live in the CIAM tenant — a workforce managed identity cannot hold cross-tenant Graph app permissions. Credential choice is an open Phase-2 verification item: MI-as-FIC (preview) is preferred if GA at build time; otherwise default to a certificate in Key Vault (NFR-06). This task produces the identifiers/credential the Phase-2 Graph client binds to.
+    </background>
+    <relevant-files>
+      <file>config/environments.json</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminTokenProvider.cs</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the CIAM app credential. No plaintext secrets — MUST NOT store a secret value in source or config; store a Key Vault reference (or configure MI-as-FIC) only.</constraint>
+    <constraint source="project">Scope: where the Graph app permission lives. A workforce managed identity cannot hold Graph app permissions cross-tenant — the app registration MUST live in the CIAM tenant, not the workforce tenant.</constraint>
+    <constraint source="spec">Scope: Graph permission surface. The app MUST hold Graph application permission `User.ReadWrite.All` and it MUST be admin-consented in the CIAM tenant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Confirm task 001 completed (CIAM tenant + authority recorded in `config/environments.json`).</step>
+    <step>Read the CIAM app-registration runbook in `docs/guides/auth-deployment-setup.md` and the credential guidance in `.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md`; review `SpeAdminTokenProvider.cs` to confirm the credential shape the Phase-2 client will consume.</step>
+    <step>Register the application IN the CIAM tenant; capture the application (client) ID.</step>
+    <step>Add Microsoft Graph application permission `User.ReadWrite.All` and grant admin consent in the CIAM tenant.</step>
+    <step>Decide the credential: if Managed-Identity-as-Federated-Identity-Credential is GA/acceptable at build time, configure MI-as-FIC; otherwise default to a certificate in Key Vault and note the decision.</step>
+    <step>Store the credential (Key Vault cert/secret reference, or MI-FIC federation config) — never a plaintext secret.</step>
+    <step>Record the app (client) ID and the credential reference in `config/environments.json`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Managed-Identity-as-Federated-Identity-Credential is not GA or not acceptable at build time, default to a certificate stored in Key Vault and document the credential-mechanism decision in the task notes. Do NOT block the project on MI-FIC availability (Phase-2 spike is non-blocking).</trigger>
+  </escalation>
+
+  <outputs>
+    <output>An app registration in the CIAM tenant with `User.ReadWrite.All` (admin-consented).</output>
+    <output>Credential provisioned and stored (Key Vault cert/secret reference or MI-FIC config) — no plaintext secret.</output>
+    <output>App (client) ID + credential reference recorded in `config/environments.json`.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An app registration exists in the CIAM tenant with Graph application permission `User.ReadWrite.All` granted admin consent.</criterion>
+    <criterion testable="true">A credential is provisioned — either MI-as-FIC configured, or a certificate stored in Key Vault — and its reference is recorded in `config/environments.json`.</criterion>
+    <criterion testable="true">Negative: no plaintext secret appears in source, `config/environments.json`, or any committed file (only a Key Vault reference / MI-FIC config).</criterion>
+    <criterion testable="true">Negative: the Graph app permission is NOT registered against a workforce-tenant managed identity — it lives on the CIAM-tenant app registration.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 001 (needs the CIAM tenant). Credential mechanism is a documented Phase-2 verification item — default to cert-in-KV if MI-FIC is not GA. The Phase-2 cross-tenant CIAM Graph client (modeled on `SpeAdminTokenProvider`) binds to the identifiers produced here.
+  </notes>
+
+  <justification>
+    <existing>`GraphClientFactory` is single-tenant and cannot reach the CIAM tenant; no existing app registration holds cross-tenant Graph user-management permission.</existing>
+    <extension>No — a Graph application permission must be consented in the resource (CIAM) tenant, so it MUST live on an app registration inside the CIAM tenant; the workforce factory/MI cannot be extended to hold it.</extension>
+    <cost-of-doing-nothing>Without it the BFF cannot create or manage CIAM users (`POST /users`), so admin-initiated onboarding cannot mint any external credential and the entire Phase-2 provisioner is blocked.</cost-of-doing-nothing>
+  </justification>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

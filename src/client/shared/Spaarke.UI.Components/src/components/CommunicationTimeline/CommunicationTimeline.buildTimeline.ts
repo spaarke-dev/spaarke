@@ -23,10 +23,11 @@
  * (plausible for `Message`-channel rows once thread continuity stamps GUIDs)
  * does indentation appear.
  */
-import type { IThreadMessageDto } from '../../services/communicationTimelineApi';
+import type { IRegardingReadResultDto, IThreadMessageDto } from '../../services/communicationTimelineApi';
 import {
   BODY_FORMAT_PLAIN_TEXT,
   COMMUNICATION_TYPE_MESSAGE,
+  type RegardingThreadGroup,
   type TimelineMessage,
 } from './CommunicationTimeline.types';
 
@@ -128,4 +129,53 @@ export function buildTimeline(messages: TimelineMessage[]): TimelineEntry[] {
   }
 
   return [...messages].sort(byTime).map(message => ({ message, depth: computeDepth(message) }));
+}
+
+// ---------------------------------------------------------------------------
+// Regarding mode — DTO → group mapping (R2 task 020, FR-03)
+// ---------------------------------------------------------------------------
+
+/** Shown when a thread's `sprk_name` is null/blank rather than rendering an empty group header. */
+const UNNAMED_THREAD_LABEL = 'Untitled thread';
+
+/**
+ * Maps the `by-regarding` endpoint's response (task 010) into the collapsible
+ * groups the regarding-mode Timeline renders (task 020). Each group's
+ * `messages` uses the SAME `mapThreadMessageDtoToTimelineMessage` mapping the
+ * thread-id mode already uses — the group's expanded body then calls
+ * `buildTimeline` on those messages exactly like the thread-id mode does, so
+ * there is only ONE interleave/nesting engine (no fork, ADR-012/§11).
+ *
+ * Design decision — group ordering: groups are ordered by their most recent
+ * message's timestamp, NEWEST first (falling back to the thread's position in
+ * the server response — oldest-created first — for a thread with no
+ * messages). Rationale: a record's most recently active conversation is the
+ * one a user opening the record view is almost always looking for; the
+ * server's own thread order (createdon asc) is a construction order, not a
+ * relevance order. This is a presentational sort, not an access decision
+ * (NFR-03 — no message is added, removed, or hidden by this step).
+ */
+export function mapRegardingReadResultToGroups(result: IRegardingReadResultDto): RegardingThreadGroup[] {
+  const groups = result.threads.map(thread => {
+    const messages = thread.messages.map(mapThreadMessageDtoToTimelineMessage);
+    return {
+      threadId: thread.threadId,
+      name: thread.name && thread.name.trim().length > 0 ? thread.name : UNNAMED_THREAD_LABEL,
+      messageCount: thread.count,
+      messages,
+    };
+  });
+
+  function latestActivity(group: RegardingThreadGroup): number {
+    let latest = 0;
+    for (const m of group.messages) {
+      const raw = m.sentOn ?? m.createdOn;
+      if (!raw) continue;
+      const parsed = Date.parse(raw);
+      if (!Number.isNaN(parsed) && parsed > latest) latest = parsed;
+    }
+    return latest;
+  }
+
+  return [...groups].sort((a, b) => latestActivity(b) - latestActivity(a));
 }

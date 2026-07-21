@@ -228,7 +228,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
       const displayName = match ? item.name.slice(0, match.index).trim() : undefined;
       const existingEmails = new Set(value.map(r => r.email.toLowerCase()));
       if (!existingEmails.has(email.toLowerCase())) {
-        onChange([...value, { email, displayName, resolved: true, sourceId: item.id }]);
+        onChange([...value, { email, displayName, resolved: true, sourceId: item.id, entityType: item.entityType }]);
       }
       setDraft('');
       setResults([]);

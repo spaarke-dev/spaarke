@@ -2,7 +2,7 @@
   <metadata>
     <title>`participant=` facet on the filtered `query` endpoint — join the `sprk_communicationparticipant` junction (message grain)</title>
     <phase>W5 — Participant Index + Person Filter (CC-2)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <deps>011,050</deps>
     <blocks>080</blocks>
@@ -128,6 +128,14 @@
 
   <notes>
     Depends on 011 (the `query` endpoint + other facets) + 050 (the junction must be populated to match against). Blocks 080 (the `participant=` seam tests + 11-entity/access-parity pass). This is a read-only facet add — it does NOT edit the shared persist path (that is 050), so it is `parallel-safe:true`; still `/conflict-check` for merge-order since it shares `Services/Communication/` files. The negative access case is the load-bearing property: a person match must never bypass the 2-rule filter.
+
+    **COMPLETED 2026-07-19.** Replaced the task-011 501 stub in `CommunicationThreadReadService.QueryCommunicationsAsync` with `BuildParticipantClauseAsync`: a resolved-person GUID matches `_sprk_systemuser_value`/`_sprk_contact_value` (any role, FK-backed, not text-LIKE); a non-GUID value matches `sprk_addresstext` by exact equality (Q-D unresolved external parties), escaped via `EscapeODataString` (doubles embedded quotes — standard OData V4 literal escaping). The junction query resolves CANDIDATE `sprk_communication` ids only — those ids feed the SAME `QueryVisibleMessagesAsync` impersonated read + `ICommunicationAccessFilter` every other facet uses, so a candidate the caller cannot see is silently dropped there (no second access mechanism, no leak). No junction match → an always-false clause (`sprk_communicationid eq 00000000-…`) so the caller sees a graceful empty result, never an error; `participant=` composes as AND with thread/regarding/channel/from/to; malformed (not a GUID and >400 chars) → 400.
+
+    Tests: removed the now-obsolete 501-stub test; added 7 in `CommunicationFilteredQueryTests.cs` — resolved-person join, unresolved-address exact match, AND-composition with another facet, no-junction-match graceful degrade, **NEGATIVE ACCESS** (a junction-matched candidate id the impersonated `sprk_communication` read does not return is NOT surfaced — proves the junction never bypasses Dataverse's native row-level security), malformed→400, blank→no-op. Net +6 tests (560 pass / 0 fail / 8 pre-existing skip; was 554).
+
+    Gates: `dotnet build` clean. Publish 46.24 MB compressed excl. PDBs (50.66 MB incl.) vs ~46.99 MB baseline — delta ≈0 (no new package). `dotnet list package --vulnerable --include-transitive`: no vulnerable packages. code-review + adr-check (self-executed, Step 9.5): 0 Critical / 0 Warning-blocking findings — access-filter parity confirmed, role-exact/FK-backed confirmed, OData injection safe, reuse-not-fork confirmed, §11 correctly N/A (pure modification). Noted (non-blocking): `CommunicationThreadReadService.cs` is now 643 lines (pre-existing condition, above the 500-line review threshold before this task too). `/conflict-check`: SILENT PASS — master's new commits (assistant-r1 UAT work) don't touch `Services/Communication/`.
+
+    **Live junction dependency**: task 003's `sprk_communicationparticipant` schema and task 050's write path are both build-and-defer-live (MCP unavailable this project). This task's join is compiled against the field logical-name strings from `notes/003-communicationparticipant-schema.md` and unit-tested against the mocked Dataverse boundary (`IImpersonatedCommunicationQuery`); it has NOT been live-verified against a real Dataverse instance. Owner gate: after running 003's deploy script + confirming 050's write path live, live-verify `participant=` end-to-end (resolved person, unresolved address, and the negative-access case against real record-level security) before relying on it in production.
   </notes>
 
   <execution>

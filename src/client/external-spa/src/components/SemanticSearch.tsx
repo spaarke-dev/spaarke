@@ -23,8 +23,10 @@
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   makeStyles,
+  shorthands,
   tokens,
   Button,
   Input,
@@ -89,14 +91,12 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
     padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalM}`,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground2,
-      borderColor: tokens.colorNeutralStroke1,
+      ...shorthands.borderColor(tokens.colorNeutralStroke1),
     },
   },
   resultHeader: {
@@ -304,6 +304,7 @@ interface SearchResultCardProps {
 
 const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, canNavigate, projectId }) => {
   const styles = useStyles();
+  const navigate = useNavigate();
 
   const documentName = result.name ?? 'Untitled Document';
   const highlights = (result.highlights ?? []).slice(0, 3);
@@ -312,11 +313,10 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, canNavigate
 
   const handleNavigateToDocument = () => {
     if (!canNavigate || !result.documentId) return;
-    // Navigate to the project page where the document lives.
-    // The hash router path is #/project/:id — the user can then find the document
-    // in the Documents tab. We do not have a per-document deep-link in this SPA.
-    const projectHash = `#/project/${resultProjectId}`;
-    window.location.hash = projectHash.replace('#', '');
+    // Navigate to the project page where the document lives (BrowserRouter clean URL
+    // /project/:id). The user can then find the document in the Documents tab — there
+    // is no per-document deep-link in this SPA.
+    navigate(`/project/${resultProjectId}`);
   };
 
   return (

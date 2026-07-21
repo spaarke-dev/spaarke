@@ -14,4 +14,14 @@ public static class AuthPolicies
     /// endpoints that must be invoked by automation only.
     /// </summary>
     public const string RagApiKey = "RagApiKey";
+
+    /// <summary>
+    /// CIAM-only policy for the external Secure Project Workspace surface (task 021 · ADR-028
+    /// Amendment A1). Binds the "Ciam" JwtBearer scheme (<see cref="AuthSchemes.Ciam"/>, task 020)
+    /// so ONLY Entra External ID (CIAM) tokens authenticate on the <c>/api/v1/external</c> group;
+    /// a workforce (default-scheme) token does NOT authenticate there. Pinned via
+    /// <c>.RequireAuthorization(AuthPolicies.CiamExternal)</c>. The internal
+    /// <c>/api/v1/external-access</c> management group stays on the workforce default scheme.
+    /// </summary>
+    public const string CiamExternal = "CiamExternal";
 }

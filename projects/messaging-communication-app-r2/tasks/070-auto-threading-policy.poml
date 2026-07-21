@@ -2,7 +2,7 @@
   <metadata>
     <title>Auto-threading policy — 3-tier `IThreadResolver` (subject → per-record default → per-user master) + `default-thread` marker; characterization-test existing flows first</title>
     <phase>W7 — Auto-Threading + Thread Naming</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <deps>002</deps>
     <blocks>071</blocks>

@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-07-19 — messaging-communication-app-r2 · ADR-048 Communication Participant Index)
+
+- **Added — `ADR-048` Communication Participant Index** (concise `.claude/adr/ADR-048-communication-participant-index.md` + full `docs/adr/ADR-048-communication-participant-index.md`; both ADR INDEXes → Accepted). Codifies the message-grain `sprk_communicationparticipant` junction (task 003 schema) + the **ADR-034 path-C comply-with-intent** resolution (two typed lookups `sprk_systemuser` XOR `sprk_contact` for a 2-target identity, vs ADR-034's 6-target Guid+type tuple — not an amendment). Authored main-session per §3 write boundary (messaging-communication-app-r2 task 004). Sibling ADR-047 remains reserved for `spaarke-notification-spine-r1` (not claimed). Note: `docs/adr/INDEX.md` was also missing the ADR-046 row (R1 omission) — not back-filled here.
+
 ### Fixed + Changed + Added (2026-07-16 — project-setup pipeline modernization; POML template drift)
 Trigger: `spaarkeai-compose-r3` project-pipeline run hit a stale POML template. Full audit + recommendations in [`AUDIT-FINDINGS-PIPELINE-MODERNIZATION-2026-07-16.md`](AUDIT-FINDINGS-PIPELINE-MODERNIZATION-2026-07-16.md); source finding in `projects/spaarkeai-compose-r3/notes/FINDING-poml-template-drift.md`.
 - **Fixed — `templates/task-execution.template.md` demoted to a lean pointer (v3.0)**. The v2.0/Dec-2025 fossil was missing every modern task-metadata field (`model-tier`, `effort`, `rigor`, `gate`, `parallel-*`, `deps`, `justification`, `steps mode`, `escalation`, `ui-tests`) and carried dead paths (`docs/projects/`, `Spe.Bff.Api`, `docs/reference/adr/`, `docs/ai-knowledge/`). Now a current copy-paste skeleton + field-semantics table pointing at `task-create` as the single source of truth. Kills the drift class (finding rec B).
