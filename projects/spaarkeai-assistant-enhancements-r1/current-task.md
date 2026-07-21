@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation — R6 fully shipped + deployed; awaiting owner's next UAT pass (will re-check R4-7 / R4-9 if they persist) |
+| **Mode** | UAT remediation — R7 fully shipped + deployed + merged; awaiting owner's next UAT pass. Open: R4-7 / R4-9 (need repro) + R7-5b append (owner decision). |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`f69a2ad46`**, merged to **origin/master**. Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed (dev)** | `sprk_spaarkeai` (R6, rebuilt from merged source); **CommunicationActions PCF v1.1.4** (`cc_Spaarke.Controls.CommunicationActions` — the STANDARD "New Email" modal, now has the R6-5 recipient-email fix); R5 wizard code pages (`sprk_createeventwizard`/`…workassignmentwizard`/`…summarizefileswizard`/`sprk_findsimilar`). **BFF unchanged** across R4/R5/R6. |
-| **Next Action** | Wait for owner's next UAT pass. **Only open items: R4-7 + R4-9** (need repro — see below). Optional cleanup: establish shared modal-width tokens (R6-4 recommendation — no single modal-width standard exists today). Rule: `/worktree-sync` before any BFF deploy (none has been needed all stream). |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`5b952439e`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **Deployed (dev)** | `sprk_spaarkeai` (**R7** — rebuilt from merged source, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4/R5/R6/R7** (`compose-draft-document` capability was already Active in the dev catalog — statecode=0). |
+| **Next Action** | Wait for owner's next UAT pass. **Open items: R4-7, R4-9** (need repro), **R7-5b** (append drafted content INTO the open Compose tab — needs a shared-lib Spaarke.Compose.Components append mode; owner chose "append"; NOT in this deploy — see R7 note). Rule: `/worktree-sync` before any BFF deploy (none needed all stream). |
 
 ### Only open items (both need an owner repro; NO code written yet)
 - **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.
