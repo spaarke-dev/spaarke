@@ -1,5 +1,6 @@
 # Communication Workspace — R3
 
+> **Portfolio**: [Project #665](https://github.com/spaarke-dev/spaarke/issues/665) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board](https://github.com/users/spaarke-dev/projects/2)
 > **Last Updated**: 2026-07-20
 >
 > **Status**: In Progress
