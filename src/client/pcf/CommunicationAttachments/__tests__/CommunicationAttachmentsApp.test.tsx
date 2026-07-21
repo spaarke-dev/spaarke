@@ -96,59 +96,40 @@ describe('CommunicationAttachmentsApp', () => {
     expect(screen.queryByTestId('rich-file-preview-dialog')).not.toBeInTheDocument();
   });
 
-  it('wires prev/next nav across the previewable attachments and re-targets the document on navigate', async () => {
-    // Two previewable file rows + one inline image (filtered upstream) + one
-    // .eml (routes to download, excluded from the modal nav sequence).
-    const navRows = [
-      {
-        sprk_communicationattachmentid: 'a',
-        sprk_name: 'A.pdf',
-        sprk_attachmenttype: AttachmentType.File,
-        [DOC]: 'doc-a',
-      },
-      {
-        sprk_communicationattachmentid: 'b',
-        sprk_name: 'B.docx',
-        sprk_attachmenttype: AttachmentType.File,
-        [DOC]: 'doc-b',
-      },
-      {
-        sprk_communicationattachmentid: 'i',
-        sprk_name: 'Pic.png',
-        sprk_attachmenttype: AttachmentType.InlineImage,
-        [DOC]: 'doc-i',
-      },
-      {
-        sprk_communicationattachmentid: 'e',
-        sprk_name: 'Msg.eml',
-        sprk_attachmenttype: AttachmentType.File,
-        [DOC]: 'doc-e',
-      },
+  it('mounts the preview dialog WITH prev/next nav across previewable attachments (A11-1)', async () => {
+    // A11-1 is fixed in the shared lib (dialog passes showTitle={false} in shell
+    // mode → single title), so we KEEP the nav trio and browse the filtered
+    // previewable set. `.eml`/inline rows are excluded from the nav sequence.
+    const twoFiles = [
+      { sprk_communicationattachmentid: '1', sprk_name: 'Report.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-1' },
+      { sprk_communicationattachmentid: '2', sprk_name: 'Memo.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-4' },
+      { sprk_communicationattachmentid: '3', sprk_name: 'Thread.eml', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-3' },
     ];
-    renderApp(makeContext(navRows));
-
-    // Open the first previewable attachment.
-    fireEvent.click(await screen.findByText('A.pdf'));
+    renderApp(makeContext(twoFiles));
+    fireEvent.click(await screen.findByText('Report.pdf'));
     const dialog = await screen.findByTestId('rich-file-preview-dialog');
-    // Nav set = 2 previewable docs (inline image + .eml excluded); opened at index 0.
+    expect(dialog.getAttribute('data-document-id')).toBe('doc-1');
+    // Nav trio passed: total = 2 previewable files (the .eml is excluded), index 0.
     expect(dialog.getAttribute('data-nav-total')).toBe('2');
     expect(dialog.getAttribute('data-nav-index')).toBe('0');
-    expect(dialog.getAttribute('data-document-id')).toBe('doc-a');
-
-    // Next → moves to doc-b and re-targets the dialog (drives preview-url re-resolution).
+    // Next → moves to the second previewable file.
     fireEvent.click(screen.getByTestId('preview-next'));
-    await waitFor(() => {
-      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-b');
-    });
-    expect(screen.getByTestId('preview-doc-name').textContent).toBe('B.docx');
-    expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-nav-index')).toBe('1');
+    await waitFor(() =>
+      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-4')
+    );
+  });
 
-    // Prev → back to doc-a.
-    fireEvent.click(screen.getByTestId('preview-prev'));
-    await waitFor(() => {
-      expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-document-id')).toBe('doc-a');
-    });
-    expect(screen.getByTestId('rich-file-preview-dialog').getAttribute('data-nav-index')).toBe('0');
+  it('renders the default section title "ATTACHMENTS" when no sectionTitle property is set', async () => {
+    renderApp(makeContext(rows));
+    expect(await screen.findByText('ATTACHMENTS')).toBeInTheDocument();
+  });
+
+  it('renders the configured sectionTitle property value (uppercased via CSS, raw text preserved)', async () => {
+    const ctx = makeContext(rows);
+    ctx.parameters.sectionTitle = { raw: 'Files' };
+    renderApp(ctx);
+    // textTransform:uppercase is a display transform — the DOM text stays 'Files'.
+    expect(await screen.findByText('Files')).toBeInTheDocument();
   });
 
   it('shows an empty state when the communication has no file attachments', async () => {

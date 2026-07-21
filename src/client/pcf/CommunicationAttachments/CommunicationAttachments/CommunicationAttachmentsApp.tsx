@@ -59,13 +59,24 @@ const useStyles = makeStyles({
   },
   // Spaarke section-header standard (docs/standards/UI-DESIGN-STANDARDS.md):
   // 14px (fontSizeBase300) · semibold (fontWeightSemibold) · neutral foreground 1
-  // (colorNeutralForeground1 — #242424 in light, theme-correct in dark). Token
-  // names ONLY (ADR-021) — no hardcoded hex/px.
+  // (colorNeutralForeground1 — #242424 in light, theme-correct in dark) · 20px
+  // height · 4px top/bottom padding (spacingVerticalXS). Token names ONLY
+  // (ADR-021) — no hardcoded hex/px.
+  //
+  // ALL-CAPS via `textTransform` per owner UAT R3 A11-5 (an explicit,
+  // documented deviation from the standard's "do NOT uppercase" note — the
+  // owner asked for caps on this control specifically). Uppercasing is a
+  // display transform, so the underlying property value is preserved.
   sectionHeader: {
+    display: 'block',
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     lineHeight: tokens.lineHeightBase300,
+    minHeight: '20px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    textTransform: 'uppercase',
   },
   grow: { flex: 1 },
   empty: { padding: tokens.spacingHorizontalL, color: tokens.colorNeutralForeground3 },
@@ -153,6 +164,12 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   const s = useStyles();
 
   const showVersionFooter = context.parameters.showVersionFooter?.raw !== false;
+  // Section title (A11-4) — an INPUT manifest property (not bound): the label is
+  // a control-configuration concern, identical for every communication record,
+  // so it belongs on the control instance, not on a per-record column. Defaults
+  // to "ATTACHMENTS" when the maker leaves it blank. Rendered ALL CAPS (A11-5)
+  // via the `sectionHeader` style's textTransform.
+  const sectionTitle = (context.parameters.sectionTitle?.raw ?? '').trim() || 'ATTACHMENTS';
   const communicationId = React.useMemo(() => resolveCommunicationId(context), [context]);
 
   // ── Auth bootstrap (ADR-028 async-init-in-component; INV-7) ───────────────
@@ -250,25 +267,25 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   // ── Preview modal ─────────────────────────────────────────────────────────
   const [previewItem, setPreviewItem] = React.useState<IAttachmentItem | null>(null);
 
-  // Navigation set for the modal's prev/next "N of M" browse (A1).
-  // Built from the already-filtered `items` (inline images excluded upstream by
-  // the service). Email-message attachments (.eml/.msg) route to download/open
-  // and NEVER render in the inline modal (owner decision #4), so they are
-  // excluded from the modal nav sequence too — every navigable index resolves
-  // to a document the modal can actually preview. Rows without a document
-  // lookup are likewise unnavigable.
-  const navItems = React.useMemo(() => items.filter(i => !!i.documentId && !isEmailMessageAttachment(i)), [items]);
-
-  // 0-based position of the currently-previewed attachment inside `navItems`.
-  const previewIndex = React.useMemo(
-    () => (previewItem ? navItems.findIndex(i => i.attachmentId === previewItem.attachmentId) : -1),
-    [previewItem, navItems]
+  // A11-1 (double-header fix): the double header was a SHARED-LIB issue — in
+  // navigation mode `RichFilePreviewDialog` wraps the renderer in
+  // `RecordNavigationModalShell` (smart-todo-r4 task 011), and BOTH the shell
+  // and the renderer drew the document title (two identical `<h2>`s). Fixed in
+  // `@spaarke/ui-components` by having the dialog pass `showTitle={false}` to
+  // the renderer in shell mode (shell owns the single title). With that fix we
+  // KEEP the prev/next "N of M" browse (the A1 nicety) AND a single title.
+  //
+  // `navItems` = the modal-previewable attachments only. `.eml`/`.msg` route to
+  // download (owner decision #4) and rows without a documentId can't preview, so
+  // both are excluded from the browse sequence to keep every index resolvable.
+  const navItems = React.useMemo(
+    () => items.filter(i => !!i.documentId && !isEmailMessageAttachment(i)),
+    [items]
   );
-
-  // Move the modal to a different attachment. The shell clamps prev/next at the
-  // ends (no wrap — matches SemanticSearchControl); we guard bounds defensively.
-  // Swapping `previewItem` changes the dialog's `documentId` prop, which the
-  // renderer uses to re-resolve the preview URL for the new document.
+  const previewIndex = React.useMemo(
+    () => (previewItem ? navItems.findIndex(i => i.documentId === previewItem.documentId) : -1),
+    [navItems, previewItem]
+  );
   const handlePreviewNavigate = React.useCallback(
     (nextIndex: number): void => {
       if (nextIndex < 0 || nextIndex >= navItems.length) return;
@@ -341,7 +358,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   return (
     <div className={s.root}>
       <div className={s.header}>
-        <Text className={s.sectionHeader}>Attachments</Text>
+        <Text className={s.sectionHeader}>{sectionTitle}</Text>
         <div className={s.grow} />
         {items.length > 0 && (
           <Badge appearance="tint" color="informative">
@@ -378,7 +395,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
           documentType={fileTypeLabel(previewItem.name)}
           onClose={() => setPreviewItem(null)}
           navigationTotal={navItems.length}
-          currentIndex={previewIndex >= 0 ? previewIndex : undefined}
+          currentIndex={previewIndex}
           onNavigate={handlePreviewNavigate}
           fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
           onOpenFile={mode => {

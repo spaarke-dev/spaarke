@@ -27,7 +27,7 @@
  * OUT — they render in the email body, not as downloadable file attachments.
  */
 
-import { AttachmentType, IAttachmentItem, IAttachmentRecord } from '../types';
+import { AttachmentType, IAttachmentItem, IAttachmentRecord, IDocumentRecord } from '../types';
 
 const DOC_VALUE = '_sprk_document_value';
 const DOC_FORMATTED = '_sprk_document_value@OData.Community.Display.V1.FormattedValue';
@@ -48,7 +48,21 @@ export function projectAttachmentRecord(record: IAttachmentRecord): IAttachmentI
     attachmentType: typeof record.sprk_attachmenttype === 'number' ? record.sprk_attachmenttype : null,
     documentId: rawDoc ? cleanGuid(rawDoc) : null,
     documentName: record[DOC_FORMATTED] ?? null,
+    // Enriched by `enrichUploadStatus` after the document read; false until then.
+    uploaded: false,
   };
+}
+
+/**
+ * True when a `sprk_document` has an uploaded SPE file — the signal behind the
+ * per-row upload-status indicator (A11-2/A11-3). Uses the SAME fields the BFF
+ * itself treats as "stored in SPE": a non-empty `sprk_graphitemid` (the SPE
+ * drive-item id), OR the Dataverse `sprk_hasfile` flag being true. No new BFF
+ * call — these columns are read via `context.webAPI`.
+ */
+export function isDocumentUploaded(record: IDocumentRecord): boolean {
+  const itemId = (record.sprk_graphitemid ?? '').trim();
+  return itemId.length > 0 || record.sprk_hasfile === true;
 }
 
 /**
@@ -78,7 +92,10 @@ export function fileTypeLabel(name: string): string {
 
 /** Minimal WebAPI surface this service consumes (keeps the class test-friendly). */
 export interface IAttachmentsWebApi {
-  retrieveMultipleRecords(entityLogicalName: string, options?: string): Promise<{ entities: IAttachmentRecord[] }>;
+  retrieveMultipleRecords<T = IAttachmentRecord>(
+    entityLogicalName: string,
+    options?: string
+  ): Promise<{ entities: T[] }>;
 }
 
 export class CommunicationAttachmentsService {
@@ -101,9 +118,48 @@ export class CommunicationAttachmentsService {
       `&$filter=_sprk_communication_value eq ${id}` +
       `&$orderby=createdon asc`;
 
-    const result = await this.webApi.retrieveMultipleRecords('sprk_communicationattachment', query);
+    const result = await this.webApi.retrieveMultipleRecords<IAttachmentRecord>(
+      'sprk_communicationattachment',
+      query
+    );
     const projected = (result.entities ?? []).map(projectAttachmentRecord);
-    return filterFileAttachments(projected);
+    const files = filterFileAttachments(projected);
+    await this.enrichUploadStatus(files);
+    return files;
+  }
+
+  /**
+   * Enrich each attachment with its document's SPE upload status (A11-2/A11-3).
+   * Reads `sprk_hasfile` + `sprk_graphitemid` for the referenced `sprk_document`
+   * records in ONE additional `context.webAPI` read (an OR-filter over the
+   * distinct document ids) — NOT a BFF call, and NOT a per-row query. Mutates
+   * `items` in place. Failures degrade gracefully: rows keep `uploaded = false`
+   * (rendered as "not uploaded") rather than breaking the whole list.
+   */
+  private async enrichUploadStatus(items: IAttachmentItem[]): Promise<void> {
+    const docIds = Array.from(
+      new Set(items.map(i => i.documentId).filter((d): d is string => typeof d === 'string' && d.length > 0))
+    );
+    if (docIds.length === 0) return;
+
+    const filter = docIds.map(id => `sprk_documentid eq ${id}`).join(' or ');
+    const query = `?$select=sprk_documentid,sprk_hasfile,sprk_graphitemid&$filter=${filter}`;
+
+    try {
+      const res = await this.webApi.retrieveMultipleRecords<IDocumentRecord>('sprk_document', query);
+      const uploadedById = new Map<string, boolean>();
+      for (const doc of res.entities ?? []) {
+        uploadedById.set(cleanGuid(doc.sprk_documentid), isDocumentUploaded(doc));
+      }
+      for (const item of items) {
+        if (item.documentId) {
+          item.uploaded = uploadedById.get(cleanGuid(item.documentId)) ?? false;
+        }
+      }
+    } catch (err) {
+      // Non-fatal — leave uploaded=false so the list still renders.
+      console.warn('[CommunicationAttachments] upload-status enrichment failed:', err);
+    }
   }
 }
 

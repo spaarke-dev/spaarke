@@ -11,16 +11,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, shorthands, Text, Link, Badge, Tooltip } from '@fluentui/react-components';
-import {
-  DocumentRegular,
-  DocumentPdfRegular,
-  DocumentTextRegular,
-  TableRegular,
-  SlideTextRegular,
-  ImageRegular,
-  MailRegular,
-  OpenRegular,
-} from '@fluentui/react-icons';
+import { CloudCheckmark20Filled, CloudDismiss20Filled, OpenRegular } from '@fluentui/react-icons';
 import { IAttachmentItem } from './types';
 import { isEmailMessageAttachment, fileTypeLabel } from './services/CommunicationAttachmentsService';
 
@@ -45,6 +36,12 @@ const useStyles = makeStyles({
   },
   rowDisabled: { cursor: 'default', ':hover': { backgroundColor: 'transparent' } },
   icon: { fontSize: '20px', color: tokens.colorNeutralForeground2, flexShrink: 0 },
+  // Upload-status indicator (A11-2/A11-3) — SPE cloud glyph, colored via
+  // semantic palette tokens so it stays legible in light + dark (ADR-021).
+  // Green = the row's document has an uploaded SPE file; red = not uploaded.
+  uploadIcon: { fontSize: '20px', flexShrink: 0 },
+  uploadedYes: { color: tokens.colorPaletteGreenForeground1 },
+  uploadedNo: { color: tokens.colorPaletteRedForeground1 },
   nameWrap: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
   nameLink: {
     fontWeight: tokens.fontWeightSemibold,
@@ -63,42 +60,6 @@ const useStyles = makeStyles({
   typeBadge: { flexShrink: 0 },
 });
 
-type IconComponent = typeof DocumentRegular;
-
-export function getFileIcon(name: string): IconComponent {
-  const dot = name.lastIndexOf('.');
-  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
-  switch (ext) {
-    case 'pdf':
-      return DocumentPdfRegular;
-    case 'doc':
-    case 'docx':
-    case 'rtf':
-    case 'odt':
-    case 'txt':
-      return DocumentTextRegular;
-    case 'xls':
-    case 'xlsx':
-    case 'csv':
-      return TableRegular;
-    case 'ppt':
-    case 'pptx':
-      return SlideTextRegular;
-    case 'jpg':
-    case 'jpeg':
-    case 'png':
-    case 'gif':
-    case 'bmp':
-    case 'svg':
-      return ImageRegular;
-    case 'eml':
-    case 'msg':
-      return MailRegular;
-    default:
-      return DocumentRegular;
-  }
-}
-
 export interface IAttachmentListProps {
   items: readonly IAttachmentItem[];
   /** Fired when a row (with a resolvable document) is activated. */
@@ -111,7 +72,11 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
   return (
     <div className={s.list} role="list" aria-label="Communication attachments">
       {items.map(item => {
-        const Icon = getFileIcon(item.name);
+        const isUploaded = item.uploaded === true;
+        // Left slot = SPE upload-status glyph (A11-2/A11-3), replacing the old
+        // file-type glyph. Green cloud-check = uploaded; red cloud-dismiss = not.
+        const UploadIcon = isUploaded ? CloudCheckmark20Filled : CloudDismiss20Filled;
+        const uploadLabel = isUploaded ? 'File uploaded to SharePoint' : 'File not uploaded to SharePoint';
         const isEml = isEmailMessageAttachment(item);
         // Read-only never gates opening: this is a preview/open viewer with no
         // mutating actions. A row is openable whenever it resolves a document.
@@ -124,7 +89,12 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
             className={canOpen ? s.row : `${s.row} ${s.rowDisabled}`}
             onClick={canOpen ? () => onActivate(item) : undefined}
           >
-            <Icon className={s.icon} aria-hidden="true" />
+            <Tooltip content={uploadLabel} relationship="label">
+              <UploadIcon
+                className={`${s.uploadIcon} ${isUploaded ? s.uploadedYes : s.uploadedNo}`}
+                aria-label={uploadLabel}
+              />
+            </Tooltip>
             <div className={s.nameWrap}>
               {canOpen ? (
                 <Link

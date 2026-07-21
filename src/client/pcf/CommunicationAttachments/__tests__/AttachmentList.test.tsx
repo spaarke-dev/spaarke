@@ -53,6 +53,37 @@ describe('AttachmentList', () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
   });
 
+  it('renders a green "uploaded" upload-status icon when the document has an SPE file', () => {
+    const uploaded: IAttachmentItem[] = [
+      {
+        attachmentId: '1',
+        name: 'Report.pdf',
+        attachmentType: 100000000,
+        documentId: 'doc-1',
+        documentName: null,
+        uploaded: true,
+      },
+    ];
+    renderWithProvider(<AttachmentList items={uploaded} onActivate={jest.fn()} />);
+    expect(screen.getByLabelText('File uploaded to SharePoint')).toBeInTheDocument();
+    expect(screen.queryByLabelText('File not uploaded to SharePoint')).not.toBeInTheDocument();
+  });
+
+  it('renders a red "not uploaded" upload-status icon when the document has no SPE file (default)', () => {
+    // `uploaded` omitted → treated as not uploaded.
+    renderWithProvider(<AttachmentList items={items} onActivate={jest.fn()} />);
+    expect(screen.getAllByLabelText('File not uploaded to SharePoint').length).toBe(items.length);
+    expect(screen.queryByLabelText('File uploaded to SharePoint')).not.toBeInTheDocument();
+  });
+
+  it('keeps the right-side type pill (PDF/XLSX/Email) alongside the upload-status icon', () => {
+    renderWithProvider(<AttachmentList items={items} onActivate={jest.fn()} />);
+    // Type pills unchanged by A11-2/A11-3.
+    expect(screen.getByText('PDF')).toBeInTheDocument();
+    expect(screen.getByText('XLSX')).toBeInTheDocument();
+    expect(screen.getByText('Email')).toBeInTheDocument();
+  });
+
   it('does not enable a row whose document lookup is missing', () => {
     const onActivate = jest.fn();
     const orphan: IAttachmentItem[] = [
