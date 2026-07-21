@@ -64,9 +64,9 @@
 | 103 | EmailComposer — contact-table lookup/autocomplete on To/CC/BCC (R2 D3) | W10 | frontend, communication | FR-12 | 020,021,060 | 090 | true | FULL | ✅ (`c55838518`) · onSearchRecipients wired at hosts via Xrm.WebApi; CommunicationActions v1.1.2 |
 | 104 | EmailComposer — include attachment docs (links/files) on Reply/Reply-All/Forward (R2 D1/D2) | W10 | frontend, communication | FR-12,13 | 020,021,044 | 090 | true | FULL | ✅ (`423e9c7b8`) · Attach+Link toggles; Forward-include/Reply-exclude; reuses AttachmentDocumentIds; CommunicationActions v1.1.3 |
 | 105 | CommunicationConnections PCF — UX rebuild per approved mockup (R2 C1) | W10 | pcf, frontend, dataverse | FR-17 | 042,043 | 090 | true | FULL | ✅ (`085c4ac9e`) · group-by-action UX; data contract unchanged; v1.3.0 |
-| 111 | CommunicationAttachments PCF — double-header fix + upload-status icon + configurable title + OOB styling (R3 A) | W11 | pcf, frontend | FR-17 | 101 | 090 | true | FULL | 🔲 |
-| 112 | CommunicationConnections PCF — spacing, title prop+styling, remove open-icon/matched-because, full-viewport modal, Done→Save footer (R3 B) | W11 | pcf, frontend, dataverse | FR-17 | 105 | 090 | true | FULL | 🔲 |
-| 113 | CommunicationActions PCF — 20x20 icons, right-align icon buttons, Create Event/To Do/Link Invoice as modals (R3 C) | W11 | pcf, frontend, communication | FR-12,13 | 103,104 | 090 | true | FULL | 🔲 |
+| 111 | CommunicationAttachments PCF — double-header fix + upload-status icon + configurable title + OOB styling (R3 A) | W11 | pcf, frontend | FR-17 | 101 | 090 | true | FULL | ✅ (`5d999e6a0`) · shared-lib RichFilePreview `showTitle` fix (single title + nav restored); green/red SPE icon; ATTACHMENTS title; v1.2.0 |
+| 112 | CommunicationConnections PCF — spacing, title prop+styling, remove open-icon/matched-because, full-viewport modal, Done→Save footer (R3 B) | W11 | pcf, frontend, dataverse | FR-17 | 105 | 090 | true | FULL | ✅ (`eee9a6f64`) · RELATED RECORDS title; full-modal + Save footer; data contract unchanged; v1.4.0 |
+| 113 | CommunicationActions PCF — 20x20 icons, right-align icon buttons, Create Event/To Do/Link Invoice as modals (R3 C) | W11 | pcf, frontend, communication | FR-12,13 | 103,104 | 090 | true | FULL | ✅ (`f802abee6`) · 20x20 right-aligned icons; create-as-modal via swappable launchCreate seam; v1.2.0 |
 | 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105,111-113 | — | **false** | STANDARD | 🔲 (HELD until W9+W10+W11 remediation closes) |
 
 ---
