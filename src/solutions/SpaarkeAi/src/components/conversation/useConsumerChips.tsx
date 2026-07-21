@@ -55,6 +55,11 @@ import {
   buildCorrespondenceComposeHtml,
 } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
+import {
+  isLocalChip,
+  buildPostDraftLocalChips,
+  buildAskAboutFilesChip,
+} from "./localActionChips";
 
 export interface ConsumerChipsDeps {
   bffBaseUrl: string;
@@ -83,6 +88,24 @@ export interface ConsumerChipsDeps {
    * TEXT path (ConversationPane.handleSurfaceLaunch). Null when no file is active.
    */
   getActiveSourceFile?: () => { sessionFileId: string; fileName?: string } | null;
+  /**
+   * UAT R4-6 / R4-11: handler for a client-only "local action" chip (a chip whose
+   * bindingId is `local:*` — Send as email / Save to document / Ask about these
+   * files). These are NOT dispatch bindings; the host routes them to the editor
+   * bridges / a prompt nudge instead of `dispatchConsumer`. See `localActionChips.ts`.
+   */
+  onLocalChipAction?: (actionId: string) => void;
+  /**
+   * UAT R5-1: extra client-only local chips to APPEND when a chip carrier delivers a card set
+   * (e.g. the post-attach classify chips) — used for "Revise in Compose". Returns [] when not
+   * applicable (e.g. no indexed file). Kept a getter so it reads current attachment state.
+   */
+  getAppendedLocalChips?: () => ReadonlyArray<ConsumerChip>;
+  /**
+   * UAT R5-9: notified with the raw draft-correspondence result whenever "Draft a response" runs,
+   * so the host can seed the Send-as-email modal (subject / body / suggested recipients) from it.
+   */
+  onCorrespondenceDraft?: (result: Record<string, unknown>) => void;
   /**
    * task 043 / FR-G1: the deterministic, preference-keyed DISPLAY reorder
    * input (see `chipDisplayOrder.ts`). Omitted/absent → the chips render in
@@ -129,6 +152,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     inject,
     openLibraryModal,
     getActiveSourceFile,
+    onLocalChipAction,
+    getAppendedLocalChips,
+    onCorrespondenceDraft,
     chipDisplayPreference,
   } = deps;
 
@@ -190,6 +216,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // The transcript gets a short confirmation instead of the raw draft.
           const isCorrespondence = !isSurfaceLaunch && isCorrespondenceDraft(dispatched.result);
           if (isCorrespondence) {
+            // R5-9: hand the raw draft to the host so a subsequent "Send as email" chip can seed
+            // the Email Compose modal (subject / body / suggested recipients).
+            onCorrespondenceDraft?.(dispatched.result as Record<string, unknown>);
             const html = buildCorrespondenceComposeHtml(dispatched.result as Record<string, unknown>);
             dispatch("workspace", {
               type: "widget_load",
@@ -207,8 +236,23 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
             );
           }
-          if (dispatched.chips && dispatched.chips.length > 0) {
-            setConsumerChips(dispatched.chips);
+          // Re-arm the strip from the completed Binding's server chips, AUGMENTED with the
+          // client-only local next-actions for specific outcomes (UAT R4-6 / R4-11). The
+          // dispatchable actions ("Create a matter", "Draft a response") stay server-declared
+          // on the binding's sprk_chiptransitions; local chips add the non-binding companions.
+          const serverChips = dispatched.chips ?? [];
+          let nextChips: ReadonlyArray<ConsumerChip> = serverChips;
+          if (isCorrespondence) {
+            // R4-6: after "Draft a response" opens a Compose tab, offer Send-as-email +
+            // Save-to-document (client bridges) before the server "Create a matter" chip.
+            nextChips = [...buildPostDraftLocalChips(), ...serverChips];
+          } else if (dispatched.consumerType === "chat-summarize") {
+            // R4-11: after a summary, offer "Ask about these files" alongside the server
+            // Create-a-matter / Draft-a-response chips (replaces the old "Summarize again").
+            nextChips = [...serverChips, buildAskAboutFilesChip()];
+          }
+          if (nextChips.length > 0) {
+            setConsumerChips(nextChips);
           }
 
           // Surface-launch disposition (assistant-enhancements-r1 task 013): the
@@ -261,6 +305,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       bffBaseUrl,
       getActiveSourceFile,
       getSessionId,
+      onCorrespondenceDraft,
     ]
   );
 
@@ -270,12 +315,20 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
    */
   const handleConsumerChipClick = React.useCallback(
     (chip: ConsumerChip): void => {
+      // UAT R4-6 / R4-11: a `local:*` chip is a client bridge / prompt nudge, NOT a Binding —
+      // consume the strip and route to the host handler instead of dispatchConsumer (which would
+      // fail on a non-existent binding). See localActionChips.ts.
+      if (isLocalChip(chip.bindingId)) {
+        setConsumerChips([]);
+        onLocalChipAction?.(chip.bindingId);
+        return;
+      }
       runBindingDispatch(chip.bindingId, {
         slots: chip.prefillSlots,
         requiresAttachments: chip.requiresAttachments,
       });
     },
-    [runBindingDispatch]
+    [runBindingDispatch, onLocalChipAction]
   );
 
   /**
@@ -310,12 +363,18 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     [rankedConsumerChips, sessionAttachmentCount, handleConsumerChipClick, openLibraryModal]
   );
 
-  const acceptChips = React.useCallback((raw: unknown): void => {
-    const parsed = parseConsumerChips(raw);
-    if (parsed.length > 0) {
-      setConsumerChips(parsed);
-    }
-  }, []);
+  const acceptChips = React.useCallback(
+    (raw: unknown): void => {
+      const parsed = parseConsumerChips(raw);
+      if (parsed.length > 0) {
+        // R5-1: append client-only local chips (e.g. "Revise in Compose") to the delivered
+        // card set so they sit in line with the post-attach cards, not as a separate button.
+        const appended = getAppendedLocalChips?.() ?? [];
+        setConsumerChips(appended.length > 0 ? [...parsed, ...appended] : parsed);
+      }
+    },
+    [getAppendedLocalChips]
+  );
 
   const resetForSession = React.useCallback((): void => {
     setConsumerChips([]);

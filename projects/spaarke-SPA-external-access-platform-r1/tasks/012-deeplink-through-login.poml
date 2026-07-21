@@ -3,7 +3,8 @@
     <title>Preserve deep link through the login redirect</title>
     <phase>1 Hosting migration + routing</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE. Deep-link preserved through the MSAL login/token redirect via a per-tab sessionStorage return-to (msal-auth.ts: captureReturnTo/consumeReturnTo/safeRelativePath; AuthGuard.tsx: capture before loginRedirect + restore effect on isAuthenticated with navigate(replace:true)). safeRelativePath guards open-redirect (rejects absolute//protocol-relative/scheme/backslash). Complements MSAL's built-in navigateToLoginRequestUrl (default true) — no-ops if MSAL already restored; deterministic otherwise. Directional deviation (noted): used sessionStorage return-to rather than MSAL `state`, because reading MSAL `state` in msal-react depends on event/handleRedirectPromise timing; sessionStorage is deterministic + per-tab (consistent with the app's sessionStorage MSAL cache). Did NOT touch msal-config.ts (reference) — authority/scopes/sessionStorage/knownAuthorities unchanged (ADR-028); Phase-2 CIAM repoint needs no change here. tsc 0; vite build OK. Step 9.5 code-review+adr-check clean. Browser ui-tests deferred to task 014 SWA deploy.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-adjacent SPA change</rigor-reason>
     <model-tier>sonnet</model-tier>

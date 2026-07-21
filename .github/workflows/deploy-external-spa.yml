@@ -30,8 +30,21 @@ jobs:
         working-directory: src/client/external-spa
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
+      # Vite gives real process env vars the highest priority, so these VITE_* values
+      # OVERRIDE the #{...}# placeholders in .env.production at build time (no separate
+      # token-substitution step needed). All values are NON-SECRET identifiers (NFR-06)
+      # sourced from config/environments.json dev.ciam + the CIAM app registrations
+      # (DI-028-01). CIAM repoint per task 028; matches the BFF Ciam:* settings on
+      # spaarke-bff-dev (Ciam:Audience = the BFF-API client-id GUID, v2 tokens).
+      # Promote to GitHub repository variables (vars.*) if/when a second environment is added.
       - name: Build (Vite production)
         working-directory: src/client/external-spa
+        env:
+          VITE_BFF_API_URL: https://spaarke-bff-dev.azurewebsites.net
+          VITE_MSAL_AUTHORITY: https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131
+          VITE_MSAL_CLIENT_ID: bd57e54e-b339-4500-b55c-e451009fd907
+          VITE_MSAL_TENANT_ID: 7052feba-bfc4-43e0-b09e-65014b429131
+          VITE_MSAL_BFF_SCOPE: api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access
         run: npm run build
 
       # staticwebapp.config.json lives at the project root (source of truth) but the SWA

@@ -3,7 +3,8 @@
     <title>Deploy BFF + verify publish size &amp; CVE</title>
     <phase>2 Identity + provisioning + document content</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE. Deployed current merged master (80aaafb96) to spaarke-bff-dev (rg-spaarke-dev, Linux) via hardened scripts/Deploy-BffApi.ps1. Package 47.08 MB compressed (−2.55 MB vs 49.63 baseline; ≤60 ✓). SHA-256 hash-verify: all 4 critical files matched (genuine replacement). /healthz 200. CVE gate: "has no vulnerable packages" (no new HIGH/Critical). No plaintext secret added to App Service settings (criterion 4 ✓). Route-registration verified: /api/v1/external-access/invite-and-grant → 401 (admin route registered + workforce auth). KNOWN GAP (not a 031 failure — DI-028-01 remaining): /api/v1/external/me + /content return 500 (not 401) because the deployed App Service has NO Ciam:* app settings, so the "Ciam" JwtBearer scheme can't build its authority/metadata → InvalidOperationException on challenge. The #{CIAM_*}# placeholders were never substituted into App Service config. Wiring the Ciam:* settings is the live-CIAM-surface enablement (auth-sensitive; escalated to owner) — the deferred live-E2E Phase-2 spike.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deploy + verification following the bff-deploy runbook</rigor-reason>
     <model-tier>sonnet</model-tier>

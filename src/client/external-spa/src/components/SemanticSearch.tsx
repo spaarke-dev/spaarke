@@ -23,6 +23,7 @@
  */
 
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   makeStyles,
   shorthands,
@@ -303,6 +304,7 @@ interface SearchResultCardProps {
 
 const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, canNavigate, projectId }) => {
   const styles = useStyles();
+  const navigate = useNavigate();
 
   const documentName = result.name ?? 'Untitled Document';
   const highlights = (result.highlights ?? []).slice(0, 3);
@@ -311,11 +313,10 @@ const SearchResultCard: React.FC<SearchResultCardProps> = ({ result, canNavigate
 
   const handleNavigateToDocument = () => {
     if (!canNavigate || !result.documentId) return;
-    // Navigate to the project page where the document lives.
-    // The hash router path is #/project/:id — the user can then find the document
-    // in the Documents tab. We do not have a per-document deep-link in this SPA.
-    const projectHash = `#/project/${resultProjectId}`;
-    window.location.hash = projectHash.replace('#', '');
+    // Navigate to the project page where the document lives (BrowserRouter clean URL
+    // /project/:id). The user can then find the document in the Documents tab — there
+    // is no per-document deep-link in this SPA.
+    navigate(`/project/${resultProjectId}`);
   };
 
   return (

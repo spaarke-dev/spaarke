@@ -1338,6 +1338,8 @@ public static class ComposeEndpoints
             ContentModel = body.ContentModel,
             // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
             Annotations = body.Annotations,
+            // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before synthesis.
+            ParaIdMap = body.ParaIdMap,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1396,6 +1398,9 @@ public static class ComposeEndpoints
             ContentModel = body.ContentModel,
             // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
             Annotations = body.Annotations,
+            // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
+            // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
+            ParaIdMap = body.ParaIdMap,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -2013,7 +2018,13 @@ public sealed record SaveComposeDocumentBody(
     /// blank / browse-local — no retained original). The server RENDERS the high-fidelity <c>.docx</c> from
     /// it (styles + style-linked multi-level numbering + tables + minted paraId). Mutually exclusive with
     /// <see cref="Content"/> / <see cref="BaselineVersionId"/>.</summary>
-    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    /// <summary>C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
+    /// paragraph in document order (<c>{ index, paraId, text }</c>). Lets the server stamp minted ids
+    /// physically onto the baseline's id-less paragraphs before the synthesizer resolves (see
+    /// <see cref="SaveComposeDocumentRequest.ParaIdMap"/> / <c>ComposeBaselineParaIdStamper</c>).
+    /// Optional — an older client omits it and the stamp is skipped.</summary>
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(

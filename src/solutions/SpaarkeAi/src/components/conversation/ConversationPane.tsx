@@ -25,7 +25,7 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
@@ -49,7 +49,7 @@ import { AssistantToolMenu } from "./AssistantToolMenu";
 import { MyAssistantDialog } from "../assistant/MyAssistantDialog";
 import { useMyAssistant } from "../assistant/useMyAssistant";
 import { CommandHelpPanel } from "./CommandHelpPanel";
-import { HelpAffordance } from "./HelpAffordance";
+// R5-3 (UAT 2026-07-20): HelpAffordance ("?" icon) removed from the UI; /help still opens the panel.
 import { useInjectionQueue } from "./useInjectionQueue";
 import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
@@ -77,10 +77,11 @@ import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./compos
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
-import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import { formatEventOutputMarkdown, toDisplayList } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
+import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
 import {
   detectReviseThisDocumentIntent,
   REVISE_MOUNT_ASK_MESSAGE,
@@ -384,6 +385,19 @@ export function ConversationPane(): React.JSX.Element {
   // here), so the SNS cards' "More" affordance reaches it through a ref
   // rather than reordering hook declarations.
   const openLibraryModalRef = React.useRef<() => void>(() => undefined);
+  // UAT R4-6 / R4-11: local-action chips (Send as email / Save to document / Ask about these
+  // files) route here. `handleDocAction` (the reused editor/email bridges) is declared further
+  // below, so the chip strip reaches it through a ref rather than reordering hook declarations.
+  const localChipActionRef = React.useRef<(actionId: string) => void>(() => undefined);
+  // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
+  // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
+  // (subject / body / suggested recipients) captured from the last "Draft a response" result.
+  const lastCorrespondenceDraftRef = React.useRef<Record<string, unknown> | null>(null);
+  const [emailSeed, setEmailSeed] = React.useState<{
+    initialTo?: string[];
+    initialSubject?: string;
+    initialBody?: string;
+  } | null>(null);
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
@@ -397,6 +411,18 @@ export function ConversationPane(): React.JSX.Element {
     enqueueAssistantMessage: injection.enqueue,
     inject: injection.inject,
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
+    // UAT R4-6 / R4-11: local-action chips route through the ref to `handleLocalChipAction` (below).
+    onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
+    // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
+    // least one file is indexed. Reads the promoted-files ref so it reflects current state.
+    getAppendedLocalChips: React.useCallback(
+      () => (promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      []
+    ),
+    // R5-9: remember the last drafted correspondence so "Send as email" can seed the modal.
+    onCorrespondenceDraft: React.useCallback((result: Record<string, unknown>) => {
+      lastCorrespondenceDraftRef.current = result;
+    }, []),
     // UAT 2026-07-19: the post-classify "Create a matter" chip carries the uploaded file into the
     // wizard (parity with the text path) — read the session's active source doc.
     getActiveSourceFile: React.useCallback(
@@ -451,6 +477,24 @@ export function ConversationPane(): React.JSX.Element {
     },
     [bffBaseUrl, getSessionId]
   );
+
+  // UAT R4-12: the session's attached-file context for Quick Start wizards. Unlike the chip/text
+  // surface-launch (which carries the single ACTIVE source file), Quick Start carries ALL promoted
+  // session files (the user expects both uploaded files to reach the wizard). By reference only —
+  // session id + session file ids + display names; the wizard fetches binaries itself. Null when none.
+  const getQuickStartFileContext = React.useCallback((): {
+    sessionId: string | null;
+    fileIds: string[];
+    fileNames: string[];
+  } | null => {
+    const entries = Array.from(promotedFileIdsByNameRef.current.entries());
+    if (entries.length === 0) return null;
+    return {
+      sessionId: getSessionId(),
+      fileIds: entries.map(([, sessionFileId]) => sessionFileId),
+      fileNames: entries.map(([fileName]) => fileName),
+    };
+  }, [getSessionId]);
 
   // ── P1-1 (UAT 2026-07-18): cold-open get-started cards ────────────────────
   // Three quick-start actions on the welcome stage, each reusing an EXISTING
@@ -819,6 +863,49 @@ export function ConversationPane(): React.JSX.Element {
     },
     [summarizeBindingId, chips, injection, dispatch, composeSave]
   );
+
+  // UAT R4-6 / R4-11 — local-action chips (Send as email / Save to document / Ask about these files).
+  // Each REUSES an existing affordance (CLAUDE.md §11), never a net-new capability:
+  //  - Send as email     → the `draft-email` Email-widget bridge (handleDocAction)
+  //  - Save to document   → the `add-to-dms` Compose create-on-save bridge (handleDocAction)
+  //  - Ask about these files → an honest prompt nudge: the files are already attached to the session,
+  //    so the user's next chat turn is grounded in them — no capability is faked or dispatched.
+  const handleLocalChipAction = React.useCallback(
+    (actionId: string): void => {
+      switch (actionId) {
+        case LOCAL_CHIP.sendAsEmail: {
+          // R5-9: open the shared Email Compose modal, seeded from the last drafted correspondence
+          // (subject / body / suggested recipients). Falls back to a blank composer if none.
+          const draft = lastCorrespondenceDraftRef.current;
+          setEmailSeed({
+            initialSubject:
+              draft && typeof draft.subject === "string" ? draft.subject : undefined,
+            initialBody: draft && typeof draft.body === "string" ? draft.body : undefined,
+            initialTo: draft ? toDisplayList(draft.recipients_suggestion) : undefined,
+          });
+          return;
+        }
+        case LOCAL_CHIP.saveToDocument:
+          handleDocAction("add-to-dms");
+          return;
+        case LOCAL_CHIP.askAboutFiles:
+          injection.enqueue(
+            makeLocalAssistantMessage(
+              "Ask me anything about the attached file(s) — type your question below and I'll answer using their contents."
+            )
+          );
+          return;
+        case LOCAL_CHIP.reviseInCompose:
+          // R5-1: same on-demand open-in-Compose the files tray used to trigger.
+          handleReviseInCompose();
+          return;
+        default:
+          return;
+      }
+    },
+    [handleDocAction, injection, handleReviseInCompose]
+  );
+  localChipActionRef.current = handleLocalChipAction;
 
   // FIX #7a — the save-completed conduit handler (registered on the bridge below). ComposeWorkspace
   // calls it after a successful create-on-save with the persisted document's id + filename. We inject
@@ -1305,6 +1392,19 @@ export function ConversationPane(): React.JSX.Element {
     startNewSession();
   }, [clearChatSession, startNewSession]);
 
+  // R5-5 (UAT 2026-07-20): selecting a History entry must LOAD that session's transcript.
+  // Previously `onSelectSession={setChatSessionId}` only updated the id in state — nothing
+  // re-read it, so nothing happened. Adopt the selected id AND remount SprkChat (bump the
+  // remount key) so its mount-effect resumes THIS session (resumeSession → loadHistory fetches
+  // the transcript). Same remount seam as handleNewSession, minus the clear.
+  const handleSelectHistorySession = React.useCallback(
+    (sessionId: string) => {
+      setChatSessionId(sessionId);
+      startNewSession();
+    },
+    [setChatSessionId, startNewSession]
+  );
+
   // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
   // A completed side-effect's OutcomeCard renders DECLARED next-step chips
   // (the Binding's `sprk_chiptransitions`, threaded C#→SSE→TS via SprkChat's
@@ -1424,7 +1524,7 @@ export function ConversationPane(): React.JSX.Element {
           // Tools (left→right, Claude-Code style). History is now an icon-only trigger.
           <>
             <HistoryMenu
-              onSelectSession={setChatSessionId}
+              onSelectSession={handleSelectHistorySession}
               bffBaseUrl={bffBaseUrl}
               authenticatedFetch={authenticatedFetch}
             />
@@ -1544,9 +1644,9 @@ export function ConversationPane(): React.JSX.Element {
               // decision-1 (UAT 2026-07-19): give the files their own collapsible section — a
               // dropdown lists each filename when there's more than one.
               files={attachments.attachmentChips}
-              // R4-4 (UAT 2026-07-19): open the attached file(s) in Compose on demand (replaces the
-              // removed auto-open-on-attach). Only offered once at least one file is indexed/promoted.
-              onRevise={attachments.promotedCount > 0 ? handleReviseInCompose : undefined}
+              // R5-1 (UAT 2026-07-20): "Revise in Compose" moved OUT of this tray row and into an
+              // in-line action card alongside the post-attach cards (see getAppendedLocalChips +
+              // LOCAL_CHIP.reviseInCompose). No onRevise button here anymore.
             />
           )}
 
@@ -1647,7 +1747,8 @@ export function ConversationPane(): React.JSX.Element {
               // Preview modal for that document (savedPreview metadata carries the id per message).
               onOpenSavedPreview={handleOpenSavedPreview}
             />
-            <HelpAffordance onClick={() => commands.setHelpPanelOpen(true)} />
+            {/* R5-3 (UAT 2026-07-20): the floating "?" HelpAffordance was removed — no longer
+                accurate/useful. The /help slash command still opens CommandHelpPanel below. */}
             <CommandHelpPanel
               open={commands.helpPanelOpen}
               onClose={() => commands.setHelpPanelOpen(false)}
@@ -1657,7 +1758,32 @@ export function ConversationPane(): React.JSX.Element {
       </div>
 
       {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
-      <QuickStartModal open={quickStartOpen} onClose={() => setQuickStartOpen(false)} />
+      <QuickStartModal
+        open={quickStartOpen}
+        onClose={() => setQuickStartOpen(false)}
+        getFileContext={getQuickStartFileContext}
+        // R5-9: Quick Start "Send Email" opens the shared Email Compose modal (blank), not the
+        // playbook-library web resource. Close Quick Start first so the two modals don't stack.
+        onSendEmail={() => {
+          setQuickStartOpen(false);
+          setEmailSeed({});
+        }}
+      />
+
+      {/* R5-9 (UAT 2026-07-20): the shared Email Compose modal (SendEmailDialog → EmailComposer).
+          Opened by the post-Draft "Send as email" chip (seeded from the draft) and the Quick Start
+          "Send Email" card (blank). Client-only — the send runs inside the engine via authenticatedFetch. */}
+      <SendEmailDialog
+        open={emailSeed !== null}
+        onClose={() => setEmailSeed(null)}
+        initialTo={emailSeed?.initialTo}
+        initialSubject={emailSeed?.initialSubject}
+        initialBody={emailSeed?.initialBody}
+        initialBodyFormat="PlainText"
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
+        onSent={() => setEmailSeed(null)}
+      />
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
 

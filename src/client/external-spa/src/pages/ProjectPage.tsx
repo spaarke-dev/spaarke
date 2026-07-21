@@ -433,7 +433,7 @@ export const ProjectPage: React.FC = () => {
     if (projectError.status === 403) {
       return (
         <PageContainer>
-          <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Access Denied' }]} />
+          <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Access Denied' }]} />
           <MessageBar intent="warning">
             <MessageBarBody>
               You do not have permission to view this project. If you believe this is an error, please contact the
@@ -447,7 +447,7 @@ export const ProjectPage: React.FC = () => {
     if (projectError.status === 404) {
       return (
         <PageContainer>
-          <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Project Not Found' }]} />
+          <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Project Not Found' }]} />
           <MessageBar intent="error">
             <MessageBarBody>
               The project could not be found. It may have been closed or the link may be incorrect.
@@ -459,7 +459,7 @@ export const ProjectPage: React.FC = () => {
 
     return (
       <PageContainer>
-        <NavigationBar items={[{ label: 'My Workspace', href: '#/' }, { label: 'Error' }]} />
+        <NavigationBar items={[{ label: 'My Workspace', href: '/' }, { label: 'Error' }]} />
         <MessageBar intent="error">
           <MessageBarBody>Failed to load project: {projectError.message}</MessageBarBody>
         </MessageBar>
@@ -485,7 +485,7 @@ export const ProjectPage: React.FC = () => {
     <PageContainer>
       {/* Breadcrumb */}
       <NavigationBar
-        items={[{ label: 'My Workspace', href: '#/' }, { label: project.sprk_referencenumber ?? project.sprk_name }]}
+        items={[{ label: 'My Workspace', href: '/' }, { label: project.sprk_referencenumber ?? project.sprk_name }]}
       />
 
       {/* Page header: reference number as title + page-level icon row */}

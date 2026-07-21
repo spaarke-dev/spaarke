@@ -11,9 +11,16 @@
  * host-injected upload path — no such prop exists in task 020's props
  * contract (§5.4 has no `uploadService`), so locally-picked files are tracked
  * for display/cap purposes but are excluded from the outbound send payload
- * (`EmailComposer.tsx` `mapStateToSendRequest` filters on `documentId`)
- * until a future task wires an upload callback. This is a documented scope
- * boundary, not a bug — see task 020 Decisions Made.
+ * (`mapStateToSendRequest` filters on `documentId`) until a future task wires
+ * an upload callback. This is a documented scope boundary, not a bug — see task
+ * 020 Decisions Made.
+ *
+ * REPLY / FORWARD attachment inclusion (task 104, D1/D2): for a source-carried
+ * attachment (has a `documentId`) in reply/replyAll/forward mode, the row shows
+ * two per-item toggles — "Attach" (thread the `documentId` into the send
+ * request's `AttachmentDocumentIds`) and, when a `linkUrl` is resolvable, "Link"
+ * (insert a hyperlink to the document into the body at send time). Forward
+ * defaults Attach ON; replies default both OFF (the seeding lives in the reducer).
  */
 import * as React from 'react';
 import {
@@ -73,6 +80,8 @@ export interface IAttachmentListProps {
   onAdd: (item: IAttachmentItem) => void;
   onRemove: (id: string) => void;
   onToggleSelected: (id: string) => void;
+  /** Toggle the body-link inclusion for a source attachment (task 104). */
+  onToggleLink?: (id: string) => void;
   readOnly?: boolean;
   errorMessage?: string;
 }
@@ -124,6 +133,11 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
+  includeToggles: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -137,11 +151,18 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   onAdd,
   onRemove,
   onToggleSelected,
+  onToggleLink,
   readOnly,
   errorMessage,
 }) => {
   const styles = useStyles();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // A source-carried attachment (has a Document id) in reply/replyAll/forward mode
+  // exposes the per-item include toggles (task 104). Locally-picked files (no
+  // documentId yet) and compose mode do not.
+  const showIncludeToggles = (item: IAttachmentItem): boolean =>
+    !readOnly && (mode === 'reply' || mode === 'forward') && !!item.documentId;
 
   const includedItems = items.filter(a => a.selected !== false);
   const totalBytes = includedItems.reduce((sum, a) => sum + a.sizeBytes, 0);
@@ -216,14 +237,6 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
 
             {sectionItems.map(item => (
               <div key={item.id} className={styles.row}>
-                {mode === 'forward' && (
-                  <Checkbox
-                    checked={item.selected !== false}
-                    onChange={() => onToggleSelected(item.id)}
-                    disabled={readOnly}
-                    aria-label={`Include ${item.fileName} in forward`}
-                  />
-                )}
                 <DocumentRegular aria-hidden="true" />
                 <Text size={200} className={styles.rowName} title={item.fileName}>
                   {item.fileName}
@@ -232,6 +245,24 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
                   {SOURCE_LABELS[item.source]}
                 </Badge>
                 <Text size={100}>{formatBytes(item.sizeBytes)}</Text>
+                {showIncludeToggles(item) && (
+                  <div className={styles.includeToggles}>
+                    <Checkbox
+                      label="Attach"
+                      checked={item.selected !== false}
+                      onChange={() => onToggleSelected(item.id)}
+                      aria-label={`Attach ${item.fileName} as a file`}
+                    />
+                    {item.linkUrl && (
+                      <Checkbox
+                        label="Link"
+                        checked={item.linkSelected === true}
+                        onChange={() => onToggleLink?.(item.id)}
+                        aria-label={`Insert a link to ${item.fileName} in the message body`}
+                      />
+                    )}
+                  </div>
+                )}
                 {!readOnly && (
                   <Button
                     appearance="subtle"

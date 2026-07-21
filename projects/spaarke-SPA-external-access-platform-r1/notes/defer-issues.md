@@ -5,7 +5,9 @@
 
 ---
 
-## DI-028-01 — CIAM SPA + BFF-API app registrations (ops prerequisite for live external auth) — ✅ RESOLVED 2026-07-20
+## DI-028-01 — CIAM SPA + BFF-API app registrations + BFF Ciam config (ops prerequisite for live external auth) — ✅ RESOLVED 2026-07-20
+
+- **CIAM BFF CONFIG WIRED + VERIFIED 2026-07-20 (task 031 follow-on)**: set the 7 `Ciam:*` App Service settings on `spaarke-bff-dev` via `az webapp config appsettings set` (double-underscore keys): `Ciam__Instance=https://spaarkeextid.ciamlogin.com`, `Ciam__TenantId=7052feba-…`, `Ciam__ClientId=4a4d5126-…`, `Ciam__Audience=4a4d5126-…` (**GUID — confirmed correct**: the BFF-API app manifest has `requestedAccessTokenVersion: 2`, so v2 tokens carry `aud`=client-ID GUID, not the `api://` URI; App ID URI is `api://4a4d5126-…`, scope `…/SDAP.Access`), `Ciam__Domain=spaarkeextid.onmicrosoft.com`, `Ciam__GraphProvisioner__ClientId=e63e6eb1-be25-4214-80a8-a6d609034bb9`, `Ciam__GraphProvisioner__CertificateName=ciam-graph-provisioner-cert` (KV cert in `spaarke-spekvcert`, thumbprint `938A0ECE…`; loaded from KV by name — NOT a plaintext secret). Result: `/api/v1/external/me` + `/content` now return **401 unauthenticated** (were 500); admin `/invite-and-grant` 401; `/healthz` 200. App Service settings persist across `Deploy-BffApi.ps1` redeploys (script only pushes the zip). Full authenticated sign-in remains the live-E2E Phase-2 spike (needs a CIAM test user).
 
 - **RESOLVED 2026-07-20**: Owner registered both apps in the CIAM tenant + granted the KV role:
   - **Spaarke External BFF API** `4a4d5126-91b0-4865-8e3a-134b7209013e` — exposes scope `SDAP.Access` (App ID URI `api://4a4d5126-…`). → BFF `Ciam:ClientId` + `Ciam:Audience`; `VITE_MSAL_BFF_SCOPE`.
@@ -13,6 +15,7 @@
   - BFF managed identity granted **Key Vault Secrets User** on `spaarke-spekvcert` (unblocks the task-022 cert load for 031).
   - Wired into repo 2026-07-20: `.env.development`, `config/environments.json` (dev.ciam.spaClientId/bffApiClientId/bffApiScope + deploy-substitution mapping), `config/spaarke-resources.yaml` (external_identity.app_registrations.bff_api + .spa_client).
   - REMAINING (verify at deploy): the deploy pipeline must substitute the BFF `#{CIAM_*}#` placeholders from the mapping recorded in `environments.json` dev.ciam; confirm the v2 `aud` (client-id GUID vs `api://…`) against a live token. Live E2E sign-in is the deferred Phase-2 spike.
+  - **CONFIRMED AT DEPLOY 2026-07-20 (task 031)**: after deploying to `spaarke-bff-dev`, `GET /api/v1/external/me` + the external `/content` route return **500 (not 401)** while admin `/api/v1/external-access/invite-and-grant` returns 401. Verified root cause: `az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev` shows **NO `Ciam:*` settings** — the "Ciam" JwtBearer scheme builds authority `https://{Ciam:Instance}/{Ciam:TenantId}/v2.0` from null config → `InvalidOperationException` on challenge → 500. **Fix (owner action, auth-sensitive)**: set App Service `Ciam:*` settings — `Ciam:Instance=https://spaarkeextid.ciamlogin.com`, `Ciam:TenantId=7052feba-bfc4-43e0-b09e-65014b429131`, `Ciam:ClientId=4a4d5126-91b0-4865-8e3a-134b7209013e`, `Ciam:Audience=api://4a4d5126-…` (confirm GUID-vs-URI vs a live token), `Ciam:Domain=spaarkeextid.onmicrosoft.com`, `Ciam:GraphProvisioner:ClientId=<provisioner app e63e6eb1-…>`, `Ciam:GraphProvisioner:CertificateName=<KV cert name>` (cert from KV by name — not a plaintext secret). Then `/api/v1/external/*` should be 401 unauthenticated; full sign-in is the live-E2E spike (task 040 parity).
 
 - **Discovered**: 2026-07-19 (task 028).
 - **Concrete failing behavior**: The external SPA is now config-pointed at the CIAM authority, but

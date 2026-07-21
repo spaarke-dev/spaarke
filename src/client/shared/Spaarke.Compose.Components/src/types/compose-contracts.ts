@@ -366,6 +366,22 @@ export interface ComposeEditedParagraph {
   text: string;
 }
 
+/**
+ * C2 fix (UAT 2026-07-20): one entry of the ordered load-time paraId map the save sends so the server
+ * can stamp MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
+ * synthesizer resolves (mirror of the server `Sprk.Bff.Api.Services.Compose.ComposeBaselineParaId`).
+ * Built from the LOAD-TIME snapshot (document order), so `text` is the BASELINE (reject-state) text —
+ * the server's verification key that prevents stamping an id onto the wrong paragraph. Tier 3.
+ */
+export interface ComposeBaselineParaId {
+  /** Zero-based document-order position of this paragraph. */
+  index: number;
+  /** The editor's `w14:paraId` for this paragraph (8-hex). */
+  paraId: string;
+  /** The paragraph's LOAD-TIME reject-state text (verification key). Tier 3 (document content). */
+  text: string;
+}
+
 /** Block kind — mirrors the server `ComposeBlockKind` (string enum). */
 export type ComposeBlockKind = 'Paragraph' | 'Heading' | 'ListItem' | 'Table';
 

@@ -21,7 +21,13 @@ import TableCell from '@tiptap/extension-table-cell';
 import { COMPOSE_R3_PARAID } from '../widgets/paraIdExtension';
 import { InsertionMark } from '../widgets/marks/InsertionMark';
 import { DeletionMark } from '../widgets/marks/DeletionMark';
-import { stampParaIds, captureParaIdSnapshot, collectEditedParagraphs, buildContentModel } from './docxBridge';
+import {
+  stampParaIds,
+  captureParaIdSnapshot,
+  collectEditedParagraphs,
+  buildContentModel,
+  buildBaselineParaIdMap,
+} from './docxBridge';
 import type { ParaIdMapEntry } from '../types/compose-contracts';
 
 function makeEditor(content = '<p></p>'): Editor {
@@ -165,5 +171,31 @@ describe('buildContentModel (FR-01a)', () => {
     const text = (model.blocks[0].runs ?? []).map(r => r.text).join('');
     expect(text).toBe(' this.');
     editor.destroy();
+  });
+});
+
+// C2 fix (UAT 2026-07-20) — the baseline paraId map the save sends so the server can stamp minted ids
+// physically onto the retained-original baseline. Pure over a snapshot Map (no editor needed).
+describe('buildBaselineParaIdMap — the C2 save-time paraId map (UAT 2026-07-20)', () => {
+  it('projects the load-time snapshot to ordered {index, paraId, text} entries in document order', () => {
+    const snapshot = new Map<string, string>([
+      ['1A2B3C4D', 'First clause.'],
+      ['1E5EC15C', 'Second clause the source left id-less.'],
+      ['0FF1CE12', 'Third clause.'],
+    ]);
+
+    const map = buildBaselineParaIdMap(snapshot);
+
+    expect(map).toEqual([
+      { index: 0, paraId: '1A2B3C4D', text: 'First clause.' },
+      { index: 1, paraId: '1E5EC15C', text: 'Second clause the source left id-less.' },
+      { index: 2, paraId: '0FF1CE12', text: 'Third clause.' },
+    ]);
+  });
+
+  it('returns [] for an absent or empty snapshot (born-in-editor — the server renders its ids)', () => {
+    expect(buildBaselineParaIdMap(null)).toEqual([]);
+    expect(buildBaselineParaIdMap(undefined)).toEqual([]);
+    expect(buildBaselineParaIdMap(new Map())).toEqual([]);
   });
 });

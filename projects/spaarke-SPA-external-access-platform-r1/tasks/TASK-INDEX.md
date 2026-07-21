@@ -12,10 +12,10 @@
 | 003 | Provision Azure Static Web Apps resource + CI/CD scaffold | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
 | 004 | Add `Contact.sprk_externalobjectid` Dataverse field | 0 | STANDARD | sonnet/high | none | ✓ Group A | ✅ |
 | 010 | Author `staticwebapp.config.json` + SWA deploy workflow | 1 | FULL | sonnet/high | 003 | ✗ (shared workflow/config) | ✅ |
-| 011 | Migrate HashRouter → BrowserRouter + in-app 404 | 1 | FULL | sonnet/high | 010 | ✗ (shares App.tsx) | 🔲 |
-| 012 | Preserve deep link through the login redirect | 1 | FULL | sonnet/high | 011 | ✗ (shares App.tsx/auth) | 🔲 |
+| 011 | Migrate HashRouter → BrowserRouter + in-app 404 | 1 | FULL | sonnet/high | 010 | ✗ (shares App.tsx) | ✅ |
+| 012 | Preserve deep link through the login redirect | 1 | FULL | sonnet/high | 011 | ✗ (shares App.tsx/auth) | ✅ |
 | 013 | Add SWA origin to BFF CORS + SPA redirect URIs | 1 | FULL | sonnet/high | 003 | ✗ (shares Program/AuthModule) | ✅ |
-| 014 | Deploy external-spa to SWA on existing B2B + verify parity | 1 | STANDARD | sonnet/high | 010,011,012,013 | ✗ (deploy gate) | 🔲 |
+| 014 | Deploy external-spa to SWA on existing B2B + verify parity | 1 | STANDARD | sonnet/high | 010,011,012,013 | ✗ (deploy gate) | ✅ |
 | 020 | Add second "Ciam" JwtBearer scheme | 2 | FULL | **opus**/high | 001 | ✗ (shares AuthModule) | ✅ |
 | 021 | Pin "Ciam" scheme on `/api/v1/external` group | 2 | FULL | **opus**/high | 020 | ✗ (shares ExternalAccessEndpoints) | ✅ |
 | 022 | Build cross-tenant CIAM Graph client | 2 | FULL | **opus**/high | 002 | ✗ (new client + DI) | ✅ |
@@ -27,10 +27,10 @@
 | 028 | Point external-spa at the CIAM authority | 2 | FULL | sonnet/high | 020 | ✗ (SPA auth config) | ✅ |
 | 029 | Core-user "Invite to Secure Workspace" trigger | 2 | FULL | sonnet/high | 025 | ✗ (new command + wiring) | ✅ |
 | 030 | Unit tests for CIAM external-access surface | 2 | FULL (TEST) | sonnet/high | 020,021,022,023,025,026,027 | ✗ (spans files) | ✅ |
-| 031 | Deploy BFF + verify publish size & CVE | 2 | STANDARD | sonnet/high | 030 | ✗ (deploy gate) | 🔲 |
-| 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | 🔲 |
-| 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔲 |
-| 042 | Rewrite external-access architecture + guides | 3 | MINIMAL | sonnet/high | 040 | ✓ Group C | 🔲 |
+| 031 | Deploy BFF + verify publish size & CVE | 2 | STANDARD | sonnet/high | 030 | ✗ (deploy gate) | ✅ |
+| 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | ✅ |
+| 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔄 (repo done; owner site-teardown pending) |
+| 042 | Rewrite external-access architecture + guides | 3 | MINIMAL | sonnet/high | 040 | ✓ Group C | ✅ |
 | 090 | Project wrap-up | 3 | FULL | sonnet/high | 040,041,042 | ✗ (final gate) | 🔲 |
 
 ## Dependency graph (critical path)

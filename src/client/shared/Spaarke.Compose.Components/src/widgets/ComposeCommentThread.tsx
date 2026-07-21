@@ -277,7 +277,9 @@ export function ComposeCommentThread(props: ComposeCommentThreadProps): React.JS
       <div className={styles.list}>
         {threadsState.threads.length === 0 ? (
           <Text size={200} className={styles.empty} data-testid="compose-comment-thread-empty">
-            No comments yet.
+            {/* U2 (UAT 2026-07-20): a bit more context than the bare "No comments yet." */}
+            No comments yet. Select a passage in the document, then add a comment — it will appear here, anchored to
+            that text, and you can reply to build a thread.
           </Text>
         ) : (
           threadsState.threads.map(thread => (

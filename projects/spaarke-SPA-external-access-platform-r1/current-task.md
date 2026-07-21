@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (task 030 COMPLETE + DI-028-02 RESOLVED = 17 tasks ✅; external-spa builds again; next 011→012→014 or 031)
+> **Last Updated**: 2026-07-20 (040 parity GREEN + 041 repo-half + 042 docs in-progress = 22 tasks ✅/🔄; owner live-verified CIAM sign-in + scoping + new-grant propagation; REMAINING: owner Power-Pages SITE teardown [041 irreversible], 042 docs [subagent running], 090 wrap-up)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — 17 tasks ✅. All Phase-2 feature code + tests (020-030) + Phase-1 010/013 done; DI-028-01 (CIAM app regs) + DI-028-02 (external-spa build) RESOLVED. |
-| **Step** | 030 COMPLETE (6 tests/7 cases green; centerpiece authz-before-stream 403/no-Graph asserted); DI-028-02 fixed → external-spa `tsc`+`vite build` pass |
-| **Status** | 17 ✅ (001, 002, 003, 004, 010, 013, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030) |
-| **Next Action** | Two ready fronts: **(a) 031** — deploy BFF + verify publish size & CVE (deps 030 ✅; runtime prereqs met: KV 'Secrets User' granted, CIAM config wired). Deploy gate → sequential/solo. **(b) 011 → 012 → 014** — external-spa now builds (DI-028-02 fixed), so HashRouter→BrowserRouter (011, deps 010 ✅) → deep-link (012) → deploy to SWA + parity (014) is unblocked. 011/012 share App.tsx → sequential. Then Phase 3: **040** parity (deps 014,031) → 041/042 → 090. **OPEN (notes/defer-issues.md)**: DI-030-01 (2 sub-criteria → live-E2E spike, §6.5 Path-A), DI-025-01 (provisioner partial-failure hardening, post-R1), DI-029-01 (ribbon/MDA UI for invite-and-grant). |
+| **Task** | 041 in-progress (repo half done) + 042 docs (subagent running). 21 ✅ + 040 ✅ = 22 done. Phase 0/1/2 complete; BFF + SPA live + owner-verified. |
+| **Step** | 040 ✅ parity GREEN (owner: CIAM sign-in + correct scoping + new-grant propagation; agent: headers/routing/CORS/build). 041 repo half ✅ (script deleted, refs cleaned). 042 docs rewrite dispatched to subagent. |
+| **Status** | 22 ✅/🔄 (001-004, 010-014, 020-031, 040 ✅; 041 🔄 repo-done; 042 🔄 in progress) |
+| **Next Action** | **REMAINING**: **(1) OWNER — retire the `sprk_externalworkspace` Power Pages SITE / web resource in the maker portal** (041 irreversible half; agent can't do headlessly — OR agent can deactivate the web resource via Dataverse API on confirmation). **(2) 042 docs** — subagent rewriting the 3 external-access docs (SWA+CIAM); main session reviews + commits on completion. **(3) 090 wrap-up** (deps 040,041,042; runs `/test-diet` gate) — the final task. Branch pushed; 0 behind master. **OPEN (defer-issues.md)**: DI-030-01 (live-E2E 2 sub-criteria — invalid-issuer/real-oid-logic), DI-025-01, DI-029-01. ⚠️ master's `deploy-external-spa.yml` DOES now have the CIAM env fix (merged @ 4774c893c). |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.

@@ -83,7 +83,11 @@ describe('deriveReplyState', () => {
   it('carries associations forward and is editable', () => {
     expect(patch.associations).toEqual(source.associations);
     expect(patch.readOnly).toBe(false);
-    expect(patch.attachments).toEqual([]);
+  });
+
+  it('offers the source attachments but defaults them off (task 104 — reply opt-in)', () => {
+    expect(patch.attachments).toHaveLength(source.attachments?.length ?? 0);
+    expect(patch.attachments?.every(a => a.selected === false && a.linkSelected === false)).toBe(true);
   });
 });
 

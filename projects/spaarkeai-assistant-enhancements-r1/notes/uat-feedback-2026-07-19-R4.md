@@ -36,11 +36,19 @@
 | R4-3 composer ×2 height | ✅ shipped `02a7bcd65` (inputMinRows 3→6) |
 | R4-4 revert auto-Compose + "Revise in Compose" tray action | ✅ shipped `db2473558` |
 | R4-5 files in tray | ✅ RESOLVED — owner confirmed both files show in the tray ("2 files attached … (2 indexed)"). Not a bug. |
-| R4-6 post-Draft next-action cards (Send email / Save / Create matter) | ⏳ TODO — needs the 3 actions to exist as chips/bindings; medium |
+| R4-6 post-Draft next-action cards (Send email / Save / Create matter) | ✅ shipped 2026-07-20 — **Create a matter** rides the `draft-correspondence` binding's `sprk_chiptransitions` (live catalog PATCH, no deploy → 89cd91f6…); **Send as email** + **Save to document** are client-only local-action chips (`localActionChips.ts`) reusing the existing `draft-email` / `add-to-dms` editor bridges. Appended after "Draft a response" opens the Compose tab. |
 | R4-7 empty "Actions available" header | ⏳ deferred — owner will re-capture the repro next session |
 | R4-8 no history | ✅ shipped `1888646ab` (BFF) — root cause: `GET /api/ai/chat/sessions` was a STUB returning `new List<>()`. Implemented `ListRecentSessionsAsync` (Cosmos query, tenant partition, ORDER BY lastActivity DESC, projected title) + wired the endpoint to return a top-level array. BFF deployed to dev + hash-verified + health passed; merged to master. |
 | R4-9 Context inconsistent | ⏳ deferred — owner will re-capture the repro next session |
 | R4-10 summarize spinner | ✅ shipped `5a75e0b42` — `useConsumerChips.dispatching` drives a "Working…" spinner + composer lock across any chip capability (Summarize included) |
-| R4-11 post-summarize cards ("Summarize again" only) | ⏳ NEXT — the next-step chips come from the summarize binding's `sprk_chiptransitions` (server catalog). Needs a decision on the replacement set (proposed: Create a matter · Draft a response · Ask about these files) then a live PATCH — no code deploy |
-| R4-6 post-Draft next-action cards (Send email / Save / Create matter) | ⏳ NEXT — Create-a-matter exists (surface-launch); Send-as-email + Save-to-document need to exist as actions/bindings first. Medium |
-| R4-12 wizard context (uploaded files) | ⏳ NEXT (larger) — thread the session's uploaded files into the wizard handoff seed so Quick Start wizards start with the current context. Owner: important (we offer the option, so it must be integrated) |
+| R4-11 post-summarize cards ("Summarize again" only) | ✅ shipped 2026-07-20 — owner-chosen set **Create a matter · Draft a response · Ask about these files**. Create-a-matter + Draft-a-response are live `chat-summarize` `sprk_chiptransitions` (catalog PATCH, no deploy → 89cd91f6…/ f7dc4a00…); "Ask about these files" is a local prompt-nudge chip (files already attached → the next chat turn is grounded). Replaces the self-referential "Summarize again". |
+| R4-12 wizard context (uploaded files) | ✅ shipped 2026-07-20 — `QuickStartModal.getFileContext` threads ALL promoted session files (`fileIds`/`source.sessionId`/`provenance.sourceFiles`) into `launchSurface` for **create-matter** + **create-project** (both read `initialFileRefs`). Zero shared-lib change — the handoff envelope + wizard read-side already existed. create-project switched from the file-less Path-B launcher to `launchSurface`. Summarize/other Quick Start cards use a separate file mechanism (documentIds URL) — not threaded this round. |
+
+## R4 round-2 close-out (2026-07-20)
+
+Owner directive: "build both now" (R4-6 + R4-12) + R4-11 card set. Delivered as **client-only (SpaarkeAi) + two live catalog PATCHes — NO BFF deploy**:
+- **Catalog (live, no deploy):** `chat-summarize` → [Create a matter, Draft a response]; `draft-correspondence` → [Create a matter]. Verified by read-back. Note: `ConsumerRoutingService` may cache bindings — if UAT still shows old chips, a BFF restart clears the cache.
+- **New client module** `localActionChips.ts`: `local:*` sentinel chips routed by `useConsumerChips.handleConsumerChipClick` → `onLocalChipAction` (never a fake Binding dispatch); post-Draft (Send/Save) + post-Summarize (Ask) companions injected via chip augmentation.
+- **Tests:** 23 pass across useConsumerChips.surface-launch (+3 local-chip tests), QuickStartModal (+R4-12 file-threading test), ConversationPane.consumer-chips (stale "More"→playbook test realigned to Quick Start). Also fixed a pre-existing stale test.
+- **Deployed:** `sprk_spaarkeai` to dev (2026-07-20).
+- **Still open:** R4-7 / R4-9 (owner re-capture repro).

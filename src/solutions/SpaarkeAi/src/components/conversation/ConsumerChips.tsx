@@ -50,8 +50,10 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
+    // R5-2 (UAT 2026-07-20): breathing room between the action-confirmation messages
+    // (File attached / classified / summarized) above and the follow-on action cards.
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalS,
   },
   // Ranked actionable CARD (task 043): a bordered, rounded surface (not the
   // former circular pill) so each next-step reads as a discrete card in a

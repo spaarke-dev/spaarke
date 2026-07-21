@@ -26,11 +26,16 @@ import { isEmailMessageAttachment, fileTypeLabel } from './services/Communicatio
 
 const useStyles = makeStyles({
   list: { display: 'flex', flexDirection: 'column', ...shorthands.overflow('auto'), flex: 1 },
+  // Spaarke list-row standard (docs/standards/UI-DESIGN-STANDARDS.md):
+  // 20px min row height · 4px top + 4px bottom padding (spacingVerticalXS).
+  // Token names ONLY (ADR-021) — no hardcoded px.
   row: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalM,
-    paddingBlock: tokens.spacingVerticalS,
+    minHeight: '20px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
     paddingInline: tokens.spacingHorizontalL,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',

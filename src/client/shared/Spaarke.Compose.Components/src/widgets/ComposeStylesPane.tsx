@@ -107,7 +107,10 @@ export function ComposeStylesPane(props: ComposeStylesPaneProps): React.JSX.Elem
       </div>
       {doc.styles.length === 0 ? (
         <Text size={200} className={styles.empty} data-testid="compose-styles-pane-empty">
-          This document has no styled paragraphs yet.
+          {/* U2 (UAT 2026-07-20): explain what this pane is FOR when it's empty (the prior one-liner
+              read as "nothing here"). */}
+          No paragraph styles to apply yet. When this document uses named styles — like “Heading 1”, “Heading 2”, or a
+          firm’s custom style — they appear here so you can apply one to the paragraph your cursor is in.
         </Text>
       ) : (
         <div className={styles.list} role="listbox" aria-label="Existing document styles">

@@ -54,7 +54,7 @@ What a Spaarke operator can DO when R1 ships:
 
 6. **Create records reliably from chat** — "create a matter / a to-do / an event" **draft in chat, then commit in a pre-seeded wizard** with real dropdowns and no dead-ends (fixes the R2 UAT create-flow failures; §10). The Assistant never guesses a closed value set, and never claims an action it didn't actually complete (§4).
 
-**R1.5 (designed, sequenced immediately after R1):** the full **proactive-push capability** — the Assistant surfaces a grounded, gated suggestion while the user is idle (Azure SignalR + durable outbox + Daily-Briefing producer, §14.1a). Sequenced after R1 so proactive suggestions launch into create flows that actually work.
+**R1.5 (designed here; per owner decision 2026-07-20 its requirements are COMBINED INTO `spaarke-notification-spine-r1`, not a standalone release):** the full **proactive-push capability** — the Assistant surfaces a grounded, gated suggestion while the user is idle (Azure SignalR + durable outbox + Daily-Briefing producer, §14.1a). The design remains authoritative here (§1.5, §7, §12.5, §14.1a/§14.1b, §15.4); the **build** moves to `spaarke-notification-spine-r1` (which owns Layers A–C and now also the `kind=suggestion` consumer — §6 path (i)). This R1 project ships the reactive create-flows that R1.5 later surfaces proactively; R1 carries no R1.5 build work.
 
 **Out of R1/R1.5 (designed, deferred):** broader proactive producers (filing deadlines, new arrivals), other notification kinds on the shared spine (§14.1b), and Follow-Through surfaced outside the Assistant (on records / workspace widgets).
 

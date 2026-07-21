@@ -145,6 +145,11 @@ public class ComposeService : IComposeService
     // behind the SpeFileStore facade. Optional + defaults to a fresh instance (stateless, thread-safe) so
     // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
     private readonly DocxAnnotationReader _annotationReader;
+    // C2 fix (UAT 2026-07-20): stamps the client's minted paraIds physically onto the resolved baseline's
+    // id-less paragraphs BEFORE the synthesizer resolves — completing the "apply physically" step
+    // ParaIdPreParser mints but never wrote into the bytes. Pure/stateless; optional + defaults to a
+    // fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeBaselineParaIdStamper _baselineParaIdStamper;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -161,7 +166,8 @@ public class ComposeService : IComposeService
         ParaIdPreParser? paraIdPreParser = null,
         ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
         ComposeDocumentRenderer? documentRenderer = null,
-        DocxAnnotationReader? annotationReader = null)
+        DocxAnnotationReader? annotationReader = null,
+        ComposeBaselineParaIdStamper? baselineParaIdStamper = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -177,6 +183,7 @@ public class ComposeService : IComposeService
         // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
         // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
         _annotationReader = annotationReader ?? new DocxAnnotationReader();
+        _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -513,6 +520,26 @@ public class ComposeService : IComposeService
 
         byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
+
+        // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's
+        // id-less paragraphs BEFORE the synthesizer/annotation writer resolve against it. This completes
+        // the "apply minted ids physically" step ParaIdPreParser mints but never wrote into the source
+        // bytes (its own remark) — without it, editing/accepting a redline on an originally-id-less
+        // paragraph (or any paragraph of an uploaded doc, whose ids are all client-minted) fails with
+        // "w14:paraId matches no paragraph in the retained original". Text-verified + fill-gaps-only +
+        // count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
+        // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
+        // Gated on an EditedParagraphs delta being present: the stamp only matters for the synthesizer's
+        // paraId resolution, and running it on a clean/annotation-only save would needlessly rewrite the
+        // bytes and break the FR-06a byte-identical clean-save invariant (ComposeServiceUploadFidelityTests).
+        // Skipped on the born-in-editor path (ContentModel present → the renderer already mints ids into
+        // the bytes it authors; the client sends no map there).
+        if (request.ContentModel is null
+            && request.EditedParagraphs is { Count: > 0 }
+            && request.ParaIdMap is { Count: > 0 })
+        {
+            contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
+        }
 
         if (request.EditedParagraphs is { Count: > 0 })
         {
