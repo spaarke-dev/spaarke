@@ -48,7 +48,13 @@ describe('filterFileAttachments', () => {
   it('removes inline-image attachments and keeps files + untyped rows', () => {
     const items: IAttachmentItem[] = [
       { attachmentId: '1', name: 'a.pdf', attachmentType: AttachmentType.File, documentId: 'd1', documentName: null },
-      { attachmentId: '2', name: 'logo.png', attachmentType: AttachmentType.InlineImage, documentId: 'd2', documentName: null },
+      {
+        attachmentId: '2',
+        name: 'logo.png',
+        attachmentType: AttachmentType.InlineImage,
+        documentId: 'd2',
+        documentName: null,
+      },
       { attachmentId: '3', name: 'note.txt', attachmentType: null, documentId: 'd3', documentName: null },
     ];
     const filtered = filterFileAttachments(items);
@@ -113,8 +119,18 @@ describe('CommunicationAttachmentsService.getFileAttachments', () => {
 
   it('returns projected file attachments with inline images removed', async () => {
     const { api } = makeWebApi([
-      { sprk_communicationattachmentid: '1', sprk_name: 'a.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'd1' },
-      { sprk_communicationattachmentid: '2', sprk_name: 'logo.png', sprk_attachmenttype: AttachmentType.InlineImage, [DOC]: 'd2' },
+      {
+        sprk_communicationattachmentid: '1',
+        sprk_name: 'a.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'd1',
+      },
+      {
+        sprk_communicationattachmentid: '2',
+        sprk_name: 'logo.png',
+        sprk_attachmenttype: AttachmentType.InlineImage,
+        [DOC]: 'd2',
+      },
     ]);
     const svc = new CommunicationAttachmentsService(api);
     const items = await svc.getFileAttachments('comm-1');

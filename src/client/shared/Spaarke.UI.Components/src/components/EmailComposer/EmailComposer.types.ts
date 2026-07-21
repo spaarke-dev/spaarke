@@ -82,10 +82,27 @@ export interface IAttachmentItem {
   /** Raw browser File — present only for freshly-picked 'local' items pre-upload. */
   file?: File;
   /**
-   * Forward-mode inclusion checkbox. `undefined`/`true` = included;
-   * `false` = user deselected. Only meaningful when `mode === 'forward'`.
+   * Attach-file inclusion checkbox. `undefined`/`true` = included as an attached
+   * FILE (its `documentId` flows into `SendCommunicationRequest.AttachmentDocumentIds`);
+   * `false` = user deselected. Meaningful on `forward` AND `reply`/`replyAll`
+   * (task 104): forward defaults these to `true`, replies default them to `false`.
    */
   selected?: boolean;
+  /**
+   * Body-link inclusion checkbox (task 104, D1/D2). `true` = insert a hyperlink to
+   * this document into the outgoing message body at send time (see
+   * `buildBodyWithAttachmentLinks`). Only offered when `linkUrl` is resolvable;
+   * an item toggled on but missing `linkUrl` is skipped best-effort (never a hard
+   * send failure).
+   */
+  linkSelected?: boolean;
+  /**
+   * Optional host-resolved URL to the document, used by the body-link path. The
+   * engine is context-agnostic (ADR-012) and never builds this itself — the host
+   * (e.g. the CommunicationActions PCF) supplies it (a Dataverse record deep-link
+   * to the `sprk_document`). Absent → the "link" toggle is not offered for the item.
+   */
+  linkUrl?: string;
 }
 
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
@@ -228,6 +245,7 @@ export type EmailComposerAction =
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
+  | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }
   | { type: 'END_SEND' }
@@ -269,6 +287,15 @@ export interface IEmailComposerProps {
   /** Default `['wizard','related','local','spe']` when `wizardContext` present, else `['local','related','spe']`. */
   attachmentSources?: IComposerAttachmentSource[];
   wizardContext?: IWizardContext;
+  /**
+   * Source-communication attachments offered for inclusion on reply/replyAll/forward
+   * (task 104, D1/D2). Used by hosts that seed via the `initial*` props rather than
+   * `sourceRecord` (e.g. the CommunicationActions PCF, which derives Re:/Fwd: fields
+   * itself). Each item's attach-file default is applied per mode when `selected` is
+   * left `undefined`: forward → included, reply/replyAll → offered-but-off. Ignored
+   * when `sourceRecord` is supplied (that path derives attachments from the record).
+   */
+  initialAttachments?: IAttachmentItem[];
 
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */

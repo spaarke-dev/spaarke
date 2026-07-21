@@ -32,6 +32,7 @@ import {
   applyRegardingSelection,
   advanceAssociationStatus,
   persistOverrideReason,
+  unlinkRegarding,
   _resetNavPropCacheForTests,
   type IResolverWriteContext,
 } from '../CommunicationConnections/handlers/ConnectionsWriteHandler';
@@ -158,6 +159,38 @@ describe('advanceAssociationStatus', () => {
   it('is a no-op (success) without a persisted host record', async () => {
     const ctx = mkCtx({ hostRecordId: undefined });
     const res = await advanceAssociationStatus(ctx);
+    expect(res.success).toBe(true);
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+});
+
+describe('unlinkRegarding', () => {
+  it('nulls exactly ONE typed lookup (the unlinked entity) and touches no sibling', async () => {
+    const ctx = mkCtx();
+    const fetchMock = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+
+    const res = await unlinkRegarding(ctx, 'sprk_matter', fetchMock as unknown as typeof fetch);
+
+    expect(res.success).toBe(true);
+    // Single updateRecord that nulls ONLY the matter nav-prop — additive-safe removal.
+    const payload = (ctx.webApi.updateRecord as jest.Mock).mock.calls[0][2];
+    expect(payload).toEqual({ 'sprk_RegardingMatter@odata.bind': null });
+    // Exactly one nulled bind — never a bulk clear-and-set.
+    const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
+    expect(nulledBinds).toHaveLength(1);
+  });
+
+  it('errors when the host entity has no regarding lookup for that type', async () => {
+    const ctx = mkCtx();
+    const fetchMock = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+    const res = await unlinkRegarding(ctx, 'sprk_project', fetchMock as unknown as typeof fetch);
+    expect(res.success).toBe(false);
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op (success) without a persisted host record', async () => {
+    const ctx = mkCtx({ hostRecordId: undefined });
+    const res = await unlinkRegarding(ctx, 'sprk_matter', jest.fn() as unknown as typeof fetch);
     expect(res.success).toBe(true);
     expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
   });

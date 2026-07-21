@@ -1,8 +1,10 @@
-$version = "1.2.1"
+$version = "1.3.0"
 $solutionName = "CommunicationConnectionsSolution"
-$outputPath = "bin"
+# Anchor output to the script dir — .NET compression APIs resolve relative paths
+# against the PROCESS cwd (not PowerShell's Set-Location), so use an absolute path.
+$outputPath = Join-Path $PSScriptRoot "bin"
 if (-not (Test-Path $outputPath)) { New-Item -ItemType Directory -Path $outputPath | Out-Null }
-$zipPath = "$outputPath/${solutionName}_v${version}.zip"
+$zipPath = Join-Path $outputPath "${solutionName}_v${version}.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')

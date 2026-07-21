@@ -35,9 +35,8 @@ import {
 } from '@fluentui/react-components';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
-import type { SendCommunicationOptions } from '../../services/communicationApi';
 
-import { emailComposerReducer, initialState, validateState } from './EmailComposer.reducer';
+import { emailComposerReducer, initialState, validateState, mapStateToSendRequest } from './EmailComposer.reducer';
 import type {
   EmailComposerState,
   IEmailComposerHandle,
@@ -54,31 +53,8 @@ import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 
 // ---------------------------------------------------------------------------
-// Mapping: engine state → sendCommunication() request
+// Attachment source defaults
 // ---------------------------------------------------------------------------
-
-function mapStateToSendRequest(state: EmailComposerState): SendCommunicationOptions {
-  return {
-    to: state.to.map(r => r.email),
-    cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
-    bcc: state.bcc.length > 0 ? state.bcc.map(r => r.email) : undefined,
-    subject: state.subject,
-    body: state.body,
-    bodyFormat: state.bodyFormat === 'HTML' ? 'html' : 'text',
-    // `attachmentDocumentIds` correctly carries `sprk_document` GUIDs (R4 W0
-    // owner decision, 2026-07-14 — NO rename; see communicationApi.ts
-    // file-level note). Only items with a resolved `documentId` AND not
-    // forward-deselected are sent; locally-picked files without a resolved
-    // Document yet are excluded (see AttachmentList.tsx doc comment).
-    attachmentDocumentIds: state.attachments
-      .filter(a => a.selected !== false && a.documentId)
-      .map(a => a.documentId as string),
-    archiveToSpe: state.archiveToSpe,
-    associations: state.associations,
-    sendMode: state.sendMode,
-    fromMailbox: state.fromMailbox,
-  };
-}
 
 function defaultAttachmentSources(
   attachmentSources: IComposerAttachmentSource[] | undefined,
@@ -392,6 +368,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onAdd={item => dispatch({ type: 'ADD_ATTACHMENT', item })}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
+          onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
           readOnly={state.readOnly}
           errorMessage={fieldErrors.attachments}
         />

@@ -42,4 +42,19 @@ public enum RungKind
     /// and NOT an AI rung.
     /// </summary>
     RecordNameMatch = 6,
+
+    /// <summary>
+    /// Rung 3.6 — deterministic CONTACT-NAME match (email-r4 UAT R2 B1, owner spec 2026-07-20). Extracts
+    /// candidate PERSON-NAME phrases (a run of 2+ Title-Case tokens) from the envelope (subject + body +
+    /// attachment text) and resolves each by EXACT full-name lookup against existing <c>contact</c> records
+    /// (contacts are NOT in the records index → a Dataverse query, not a RecordSearch). Closes the gap that
+    /// let a contact NAMED in the body ("Working on this file will be Eyal Iffergan and Sara Chen") never
+    /// surface — today contacts match only as sender/recipient (rung 2). Runs in the deterministic pass but
+    /// is <b>SUGGEST-ONLY, never auto-file</b>: it emits <c>sprk_regardingperson</c> — a FALLBACK field the
+    /// mapper structurally excludes from auto-file — at a Suggested-band confidence (below the 0.85 threshold),
+    /// and is (like <see cref="RecordNameMatch"/>) NOT in the mapper's auto-file-eligible set and NOT an AI
+    /// rung. Precision guard: a 2-token full name that EXACTLY matches an existing contact (a single common
+    /// name, or a name resolving to no contact, matches nothing) — bias to precision over recall.
+    /// </summary>
+    ContactNameMatch = 7,
 }
