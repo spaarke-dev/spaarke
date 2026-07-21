@@ -61,10 +61,7 @@ export function buildDocumentLinkUrl(dataverseUrl: string, documentId: string): 
  * attached nor linked). `sizeBytes` is 0 (the intersection row carries no size;
  * the composer's size cap tolerates unknown sizes).
  */
-export function projectSourceAttachment(
-  record: ISourceAttachmentRecord,
-  dataverseUrl: string
-): IAttachmentItem | null {
+export function projectSourceAttachment(record: ISourceAttachmentRecord, dataverseUrl: string): IAttachmentItem | null {
   const documentId = cleanGuid(record[DOC_VALUE]);
   if (!documentId) return null;
   return {

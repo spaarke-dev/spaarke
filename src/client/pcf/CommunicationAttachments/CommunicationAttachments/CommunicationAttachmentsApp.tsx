@@ -257,10 +257,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   // excluded from the modal nav sequence too — every navigable index resolves
   // to a document the modal can actually preview. Rows without a document
   // lookup are likewise unnavigable.
-  const navItems = React.useMemo(
-    () => items.filter(i => !!i.documentId && !isEmailMessageAttachment(i)),
-    [items]
-  );
+  const navItems = React.useMemo(() => items.filter(i => !!i.documentId && !isEmailMessageAttachment(i)), [items]);
 
   // 0-based position of the currently-previewed attachment inside `navItems`.
   const previewIndex = React.useMemo(

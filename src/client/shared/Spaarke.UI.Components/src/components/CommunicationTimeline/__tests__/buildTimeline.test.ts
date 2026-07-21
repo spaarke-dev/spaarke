@@ -243,9 +243,7 @@ describe('mapRegardingReadResultToGroups', () => {
     };
   }
 
-  function regardingDto(
-    threads: IRegardingReadResultDto['threads']
-  ): IRegardingReadResultDto {
+  function regardingDto(threads: IRegardingReadResultDto['threads']): IRegardingReadResultDto {
     return {
       entityType: 'sprk_matter',
       recordId: 'record-1',
@@ -260,9 +258,7 @@ describe('mapRegardingReadResultToGroups', () => {
   });
 
   it('maps each thread to a group carrying its name and message count', () => {
-    const result = mapRegardingReadResultToGroups(
-      regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])])
-    );
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])]));
 
     expect(result).toHaveLength(1);
     expect(result[0].threadId).toBe('t1');

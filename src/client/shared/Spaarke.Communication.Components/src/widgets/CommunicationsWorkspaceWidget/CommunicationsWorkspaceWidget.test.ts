@@ -22,7 +22,11 @@
  * @see projects/messaging-communication-app-r2/tasks/030-workspace-widget-upgrade.poml
  */
 
-import { aggregateChannelCounts, buildCommunicationsHostFilters, CommunicationChannel } from './CommunicationsWorkspaceWidget';
+import {
+  aggregateChannelCounts,
+  buildCommunicationsHostFilters,
+  CommunicationChannel,
+} from './CommunicationsWorkspaceWidget';
 
 describe('aggregateChannelCounts', () => {
   it('counts records per sprk_communicationtype value', () => {
@@ -56,9 +60,17 @@ describe('buildCommunicationsHostFilters', () => {
   });
 
   it('emits an "in" condition for selected channels', () => {
-    const conditions = buildCommunicationsHostFilters(new Set([CommunicationChannel.Email, CommunicationChannel.SMS]), '', '');
+    const conditions = buildCommunicationsHostFilters(
+      new Set([CommunicationChannel.Email, CommunicationChannel.SMS]),
+      '',
+      ''
+    );
     expect(conditions).toEqual([
-      { attribute: 'sprk_communicationtype', operator: 'in', value: [CommunicationChannel.Email, CommunicationChannel.SMS] },
+      {
+        attribute: 'sprk_communicationtype',
+        operator: 'in',
+        value: [CommunicationChannel.Email, CommunicationChannel.SMS],
+      },
     ]);
   });
 
@@ -69,7 +81,9 @@ describe('buildCommunicationsHostFilters', () => {
 
   it('emits a "between" condition for a genuine range', () => {
     const conditions = buildCommunicationsHostFilters(new Set(), '2026-07-01', '2026-07-10');
-    expect(conditions).toEqual([{ attribute: 'sprk_sentat', operator: 'between', value: ['2026-07-01', '2026-07-10'] }]);
+    expect(conditions).toEqual([
+      { attribute: 'sprk_sentat', operator: 'between', value: ['2026-07-01', '2026-07-10'] },
+    ]);
   });
 
   it('emits "on-or-after" for a from-only range', () => {
@@ -83,7 +97,11 @@ describe('buildCommunicationsHostFilters', () => {
   });
 
   it('composes channel + date conditions together', () => {
-    const conditions = buildCommunicationsHostFilters(new Set([CommunicationChannel.Email]), '2026-07-01', '2026-07-10');
+    const conditions = buildCommunicationsHostFilters(
+      new Set([CommunicationChannel.Email]),
+      '2026-07-01',
+      '2026-07-10'
+    );
     expect(conditions).toEqual([
       { attribute: 'sprk_communicationtype', operator: 'in', value: [CommunicationChannel.Email] },
       { attribute: 'sprk_sentat', operator: 'between', value: ['2026-07-01', '2026-07-10'] },
