@@ -29,14 +29,14 @@ import {
   Text,
 } from '@fluentui/react-components';
 import {
-  ArrowReply16Regular,
-  ArrowReplyAll16Regular,
-  ArrowForward16Regular,
-  Mail16Regular,
-  CloudArrowUp16Regular,
-  CalendarLtr16Regular,
-  CheckmarkCircle16Regular,
-  Receipt16Regular,
+  ArrowReply20Regular,
+  ArrowReplyAll20Regular,
+  ArrowForward20Regular,
+  Mail20Regular,
+  CloudArrowUp20Regular,
+  CalendarLtr20Regular,
+  CheckmarkCircle20Regular,
+  Receipt20Regular,
 } from '@fluentui/react-icons';
 import { authenticatedFetch } from '@spaarke/auth';
 import {
@@ -51,6 +51,7 @@ import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { deriveComposerFields, type ComposerMode } from './composerPrefill';
 import { fetchSourceAttachments } from './attachmentsSource';
+import { launchCreate, type CreateKind } from './launchCreate';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,
@@ -62,14 +63,9 @@ const SendEmailPageR16 = SendEmailPage as unknown as React.ComponentType<ISendEm
 // sprk_communicationtype = Email (task-002 verified) — the only interactive channel.
 const COMMUNICATION_TYPE_EMAIL = 100000000;
 
-// "Create from this email" → target entity logical name (moved here from the
-// Connections PCF — these are actions on the email, not association review).
-const CREATE_TARGET_ENTITY = {
-  event: 'sprk_event',
-  todo: 'sprk_todo',
-  invoice: 'sprk_invoice',
-} as const;
-type CreateKind = keyof typeof CREATE_TARGET_ENTITY;
+// "Create from this email" flows. Target-entity mapping + the modal launch itself
+// live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
+// swappable without touching the button call sites (UAT R3 C11-3, owner requirement).
 
 /**
  * Parse the association provenance JSON and decide which "create from this email"
@@ -108,15 +104,26 @@ const useStyles = makeStyles({
   },
   bar: { flexWrap: 'wrap', flexGrow: 1 },
   // Match the OOB command-bar typography — 14px, regular weight (the default
-  // ToolbarButton renders heavier/larger than the native bar).
+  // ToolbarButton renders heavier/larger than the native bar). C11-1: icon slot
+  // pinned to 20×20 to match the OOB command-bar icon sizing.
   toolbarBtn: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightRegular,
+    '& .fui-Button__icon': { fontSize: '20px', width: '20px', height: '20px' },
+    '& svg': { fontSize: '20px', width: '20px', height: '20px' },
+  },
+  // Icon-only actions (C11-1): 20×20 glyphs.
+  iconBtn: {
+    '& .fui-Button__icon': { fontSize: '20px', width: '20px', height: '20px' },
+    '& svg': { fontSize: '20px', width: '20px', height: '20px' },
   },
   rightGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
+  // C11-2: the divider + icon-only cluster are right-aligned within the toolbar.
+  // `marginInlineStart:auto` on the divider consumes the free space so the divider and
+  // the icon group hug the toolbar's right edge (labelled buttons keep their left placement).
+  dividerPush: { marginInlineStart: 'auto' },
   // Suggested-by-engine create icons get a subtle brand tint (the icon-only ✨ cue).
   suggestedIcon: { color: tokens.colorBrandForeground1 },
-  grow: { flex: 1 },
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBottom: tokens.spacingVerticalXS },
   dialogSurface: { maxWidth: '900px', width: '90vw', height: '85vh', padding: 0 },
   dialogBody: { height: '100%', display: 'block' },
@@ -296,29 +303,15 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     [dataService]
   );
 
-  // Launch a "create from this email" form (Event / To Do / Invoice). R4 launches
-  // the target create form; full create-and-link is the Notification-Spine project.
+  // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
+  // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
+  // the OOB `navigateTo` dialog can later be swapped for a custom Fluent dialog
+  // WITHOUT editing these call sites (owner requirement). R4 launches the target
+  // create form; full create-and-link is the Notification-Spine project.
   const handleCreate = React.useCallback((kind: CreateKind) => {
-    const xrm = getXrm();
-    const entityName = CREATE_TARGET_ENTITY[kind];
-    const onLaunchError = (err: unknown) =>
-      console.warn('[CommunicationActions] create-from-email launch failed:', err);
-    try {
-      if (typeof xrm?.Navigation?.openForm === 'function') {
-        Promise.resolve(xrm.Navigation.openForm({ entityName, useQuickCreateForm: true })).catch(onLaunchError);
-      } else if (typeof xrm?.Navigation?.navigateTo === 'function') {
-        Promise.resolve(
-          xrm.Navigation.navigateTo(
-            { pageType: 'entityrecord', entityName },
-            { target: 2, width: { value: 60, unit: '%' }, height: { value: 80, unit: '%' } }
-          )
-        ).catch(onLaunchError);
-      } else {
-        setError('Create is unavailable in this host.');
-      }
-    } catch (err) {
-      onLaunchError(err);
-    }
+    launchCreate(kind, {
+      onError: err => console.warn('[CommunicationActions] create-from-email launch failed:', err),
+    });
   }, []);
 
   const handleArchive = React.useCallback(() => {
@@ -418,7 +411,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           {/* Left group — the email verbs (icon + label). All open the composer. */}
           <ToolbarButton
             className={s.toolbarBtn}
-            icon={<ArrowReply16Regular />}
+            icon={<ArrowReply20Regular />}
             disabled={composeDisabled}
             onClick={() => openComposer('reply')}
           >
@@ -426,7 +419,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           </ToolbarButton>
           <ToolbarButton
             className={s.toolbarBtn}
-            icon={<ArrowReplyAll16Regular />}
+            icon={<ArrowReplyAll20Regular />}
             disabled={composeDisabled}
             onClick={() => openComposer('replyAll')}
           >
@@ -434,7 +427,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           </ToolbarButton>
           <ToolbarButton
             className={s.toolbarBtn}
-            icon={<ArrowForward16Regular />}
+            icon={<ArrowForward20Regular />}
             disabled={composeDisabled}
             onClick={() => openComposer('forward')}
           >
@@ -442,22 +435,22 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           </ToolbarButton>
           <ToolbarButton
             className={s.toolbarBtn}
-            icon={<Mail16Regular />}
+            icon={<Mail20Regular />}
             disabled={disabled}
             onClick={() => openComposer('compose')}
           >
             New
           </ToolbarButton>
 
-          {/* Spacer pushes the record/email action icons to the far right (Outlook-web style). */}
-          <div className={s.grow} />
-          <ToolbarDivider />
+          {/* C11-2: divider + icon-only cluster are pushed to the toolbar's far right. */}
+          <ToolbarDivider className={s.dividerPush} />
 
           {/* Right group — record/email actions (icon-only, tooltip). ✨ = engine-suggested. */}
           <div className={s.rightGroup}>
             <Tooltip content="Save to SharePoint" relationship="label">
               <ToolbarButton
-                icon={<CloudArrowUp16Regular />}
+                className={s.iconBtn}
+                icon={<CloudArrowUp20Regular />}
                 aria-label="Save to SharePoint"
                 disabled={disabled}
                 onClick={handleArchive}
@@ -468,7 +461,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
               relationship="label"
             >
               <ToolbarButton
-                icon={<CalendarLtr16Regular className={suggestedCreates.has('event') ? s.suggestedIcon : undefined} />}
+                className={s.iconBtn}
+                icon={<CalendarLtr20Regular className={suggestedCreates.has('event') ? s.suggestedIcon : undefined} />}
                 aria-label="Create Event"
                 disabled={disabled}
                 onClick={() => handleCreate('event')}
@@ -479,8 +473,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
               relationship="label"
             >
               <ToolbarButton
+                className={s.iconBtn}
                 icon={
-                  <CheckmarkCircle16Regular className={suggestedCreates.has('todo') ? s.suggestedIcon : undefined} />
+                  <CheckmarkCircle20Regular className={suggestedCreates.has('todo') ? s.suggestedIcon : undefined} />
                 }
                 aria-label="Create To Do"
                 disabled={disabled}
@@ -492,7 +487,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
               relationship="label"
             >
               <ToolbarButton
-                icon={<Receipt16Regular className={suggestedCreates.has('invoice') ? s.suggestedIcon : undefined} />}
+                className={s.iconBtn}
+                icon={<Receipt20Regular className={suggestedCreates.has('invoice') ? s.suggestedIcon : undefined} />}
                 aria-label="Link Invoice"
                 disabled={disabled}
                 onClick={() => handleCreate('invoice')}
@@ -500,7 +496,6 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
             </Tooltip>
           </div>
         </Toolbar>
-        <div className={s.grow} />
         {showVersionFooter && <Text className={s.versionText}>v{version}</Text>}
       </div>
 
