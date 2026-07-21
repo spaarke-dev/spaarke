@@ -42,6 +42,11 @@ public static class CommunicationModule
         // flag is an operational kill-switch (no redeploy). Deterministic exact-name matcher (email-r4 UAT).
         services.Configure<RecordNameMatchOptions>(configuration.GetSection(RecordNameMatchOptions.SectionName));
 
+        // Contact-name match (rung 3.6) options. Bound from "Communication:ContactNameMatch"; the Enabled flag
+        // is an operational kill-switch (no redeploy). Deterministic exact full-name→contact matcher, suggest-only
+        // (email-r4 UAT R2 B1).
+        services.Configure<ContactNameMatchOptions>(configuration.GetSection(ContactNameMatchOptions.SectionName));
+
         // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
         // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
         // attachment text (ITextExtractor) into the envelope before association so records named only in an
@@ -162,6 +167,13 @@ public static class CommunicationModule
         // review; NEVER auto-files (mapper excludes it from auto-file eligibility). Consumes IRecordMatchingAi
         // (ADR-013) from a per-evaluation scope. Registered unconditionally; self-gated by Communication:RecordNameMatch:Enabled.
         services.AddSingleton<IAssociationRung, RecordNameMatchRung>();        // rung 3.5 — record-name/number match
+        // rung 3.6 — deterministic CONTACT-NAME match (email-r4 UAT R2 B1, 2026-07-20). Extracts Title-Case
+        // full-name phrases from subject/body/attachment and resolves each by EXACT fullname→contact lookup
+        // (ICommunicationDataverseService.QueryContactsByFullNameAsync — contacts are NOT in the records index).
+        // SUGGEST-ONLY: emits sprk_regardingperson (a mapper FALLBACK field) at a Suggested-band confidence and
+        // is NOT auto-file-eligible, so it never auto-files. Registered unconditionally; self-gated by
+        // Communication:ContactNameMatch:Enabled.
+        services.AddSingleton<IAssociationRung, ContactNameMatchRung>();       // rung 3.6 — contact-name match
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
