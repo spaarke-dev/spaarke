@@ -2676,102 +2676,103 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             composer bottom tray (SprkChatInput toolbarLeadingSlot). The strip is
             hidden entirely when it would be empty (no Prompt button, no pills). */}
         {(!hidePromptMenu || attachmentFiles.length > 0) && (
-        <div
-          className={styles.controlsStrip}
-          role="toolbar"
-          aria-label="Chat input actions"
-          data-testid="chat-input-controls-strip"
-        >
-          {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
+          <div
+            className={styles.controlsStrip}
+            role="toolbar"
+            aria-label="Chat input actions"
+            data-testid="chat-input-controls-strip"
+          >
+            {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
               suppressible per host — the slash menu is still reachable via `/`. */}
-          {!hidePromptMenu && (
-            <Button
-              appearance="subtle"
-              icon={<PromptRegular />}
-              onClick={handlePromptMenuButtonClick}
-              disabled={isStreaming}
-              aria-label="Open slash commands"
-              title="Open slash commands (/)"
-              data-testid="strip-prompt-menu-button"
-            />
-          )}
+            {!hidePromptMenu && (
+              <Button
+                appearance="subtle"
+                icon={<PromptRegular />}
+                onClick={handlePromptMenuButtonClick}
+                disabled={isStreaming}
+                aria-label="Open slash commands"
+                title="Open slash commands (/)"
+                data-testid="strip-prompt-menu-button"
+              />
+            )}
 
-          {attachmentFiles.length > 0 && (
-            <span
-              className={styles.chipStrip}
-              role="list"
-              aria-label="Attached files"
-              data-testid="attachment-chip-strip"
-            >
-              {attachmentFiles.map((file, index) => {
-                const isError = file.status === 'error';
-                const chipClassName = isError
-                  ? `${styles.attachmentChip} ${styles.attachmentChipError}`
-                  : styles.attachmentChip;
-                // UAT 2026-07-21: the leading "ready" checkmark was removed —
-                // a ready pill shows just its filename (the pill's presence IS
-                // the "ready" signal). The in-progress spinner and error warning
-                // remain, since those states are not otherwise conveyed.
-                const statusNode =
-                  file.status === 'extracting' ? (
-                    <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                  ) : file.status === 'error' ? (
-                    <WarningRegular
-                      aria-label="Extraction failed"
-                      data-testid={`attachment-chip-status-error-${index}`}
-                    />
-                  ) : null;
+            {attachmentFiles.length > 0 && (
+              <span
+                className={styles.chipStrip}
+                role="list"
+                aria-label="Attached files"
+                data-testid="attachment-chip-strip"
+              >
+                {attachmentFiles.map((file, index) => {
+                  const isError = file.status === 'error';
+                  const chipClassName = isError
+                    ? `${styles.attachmentChip} ${styles.attachmentChipError}`
+                    : styles.attachmentChip;
+                  // UAT 2026-07-21: the leading "ready" checkmark was removed —
+                  // a ready pill shows just its filename (the pill's presence IS
+                  // the "ready" signal). The in-progress spinner and error warning
+                  // remain, since those states are not otherwise conveyed.
+                  const statusNode =
+                    file.status === 'extracting' ? (
+                      <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                    ) : file.status === 'error' ? (
+                      <WarningRegular
+                        aria-label="Extraction failed"
+                        data-testid={`attachment-chip-status-error-${index}`}
+                      />
+                    ) : null;
 
-                const chipBody = (
-                  <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
-                    {statusNode !== null && (
-                      <span className={styles.attachmentChipStatus}>
-                        {statusNode}
+                  const chipBody = (
+                    <div
+                      key={file.id}
+                      className={chipClassName}
+                      role="listitem"
+                      data-testid={`attachment-chip-${index}`}
+                    >
+                      {statusNode !== null && <span className={styles.attachmentChipStatus}>{statusNode}</span>}
+                      <span className={styles.attachmentChipFilename} title={file.filename}>
+                        {file.filename}
                       </span>
-                    )}
-                    <span className={styles.attachmentChipFilename} title={file.filename}>
-                      {file.filename}
-                    </span>
-                    <Button
-                      appearance="subtle"
-                      size="small"
-                      icon={<DismissCircle16Filled />}
-                      onClick={() => {
-                        // R5 task 020 / D2-11: notify host BEFORE local splice so
-                        // it can capture the chip metadata for the manifest +
-                        // session-files index cleanup cascade. Host failures do
-                        // NOT block the local removal — orphaned manifest/index
-                        // entries are bounded by the session-end cleanup
-                        // HostedService (R5 task 007).
-                        if (onAttachmentRemoved) {
-                          try {
-                            onAttachmentRemoved(file, index);
-                          } catch {
-                            // Host failures must not block the local chip removal.
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissCircle16Filled />}
+                        onClick={() => {
+                          // R5 task 020 / D2-11: notify host BEFORE local splice so
+                          // it can capture the chip metadata for the manifest +
+                          // session-files index cleanup cascade. Host failures do
+                          // NOT block the local removal — orphaned manifest/index
+                          // entries are bounded by the session-end cleanup
+                          // HostedService (R5 task 007).
+                          if (onAttachmentRemoved) {
+                            try {
+                              onAttachmentRemoved(file, index);
+                            } catch {
+                              // Host failures must not block the local chip removal.
+                            }
                           }
-                        }
-                        removeAttachmentFile(index);
-                      }}
-                      aria-label={`Remove ${file.filename}`}
-                      title={`Remove ${file.filename}`}
-                      className={styles.attachmentChipDismiss}
-                      data-testid={`attachment-chip-dismiss-${index}`}
-                    />
-                  </div>
-                );
+                          removeAttachmentFile(index);
+                        }}
+                        aria-label={`Remove ${file.filename}`}
+                        title={`Remove ${file.filename}`}
+                        className={styles.attachmentChipDismiss}
+                        data-testid={`attachment-chip-dismiss-${index}`}
+                      />
+                    </div>
+                  );
 
-                // For error chips, wrap in a Tooltip exposing the parse error.
-                return isError && file.error ? (
-                  <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
-                    {chipBody}
-                  </Tooltip>
-                ) : (
-                  chipBody
-                );
-              })}
-            </span>
-          )}
-        </div>
+                  // For error chips, wrap in a Tooltip exposing the parse error.
+                  return isError && file.error ? (
+                    <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                      {chipBody}
+                    </Tooltip>
+                  ) : (
+                    chipBody
+                  );
+                })}
+              </span>
+            )}
+          </div>
         )}
 
         {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
