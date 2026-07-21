@@ -5,15 +5,28 @@
  * Renders each `IAttachmentItem` as name + type. Inline-image attachments are
  * expected to be filtered out UPSTREAM (by `filterFileAttachments`); this
  * component renders whatever it is given. `.eml`/`.msg` rows are badged "Email"
- * and carry an external-open affordance — the parent routes them to
- * download/open rather than the inline preview modal.
+ * as a type label but otherwise behave like any other attachment — the parent
+ * opens them in the same in-modal preview (UAT R4 B12-4).
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, shorthands, Text, Link, Badge, Tooltip } from '@fluentui/react-components';
-import { CloudCheckmark20Filled, CloudDismiss20Filled, OpenRegular } from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, shorthands, Text, Link, Badge, Tooltip } from '@fluentui/react-components';
+import { CloudCheckmark20Filled, CloudDismiss20Filled } from '@fluentui/react-icons';
 import { IAttachmentItem } from './types';
 import { isEmailMessageAttachment, fileTypeLabel } from './services/CommunicationAttachmentsService';
+
+/**
+ * Maps a row's `uploaded` boolean to its Fluent color token (B12-3 contract):
+ * GREEN (`colorPaletteGreenForeground1`) when the document has an uploaded SPE
+ * file, RED (`colorPaletteRedForeground1`) when not. Exported so the green/red
+ * mapping is unit-testable independently of the griffel style layer. The color
+ * MUST be applied to the Fluent icon via `mergeClasses` (not string
+ * concatenation) — a hand-concatenated className is re-merged by the icon and
+ * the color atomic class is dropped (root cause of the "all dark clouds" bug).
+ */
+export function uploadStatusColorToken(uploaded: boolean): string {
+  return uploaded ? tokens.colorPaletteGreenForeground1 : tokens.colorPaletteRedForeground1;
+}
 
 const useStyles = makeStyles({
   list: { display: 'flex', flexDirection: 'column', ...shorthands.overflow('auto'), flex: 1 },
@@ -35,7 +48,6 @@ const useStyles = makeStyles({
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   rowDisabled: { cursor: 'default', ':hover': { backgroundColor: 'transparent' } },
-  icon: { fontSize: '20px', color: tokens.colorNeutralForeground2, flexShrink: 0 },
   // Upload-status indicator (A11-2/A11-3) — SPE cloud glyph, colored via
   // semantic palette tokens so it stays legible in light + dark (ADR-021).
   // Green = the row's document has an uploaded SPE file; red = not uploaded.
@@ -86,12 +98,12 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
           <div
             key={item.attachmentId}
             role="listitem"
-            className={canOpen ? s.row : `${s.row} ${s.rowDisabled}`}
+            className={canOpen ? s.row : mergeClasses(s.row, s.rowDisabled)}
             onClick={canOpen ? () => onActivate(item) : undefined}
           >
             <Tooltip content={uploadLabel} relationship="label">
               <UploadIcon
-                className={`${s.uploadIcon} ${isUploaded ? s.uploadedYes : s.uploadedNo}`}
+                className={mergeClasses(s.uploadIcon, isUploaded ? s.uploadedYes : s.uploadedNo)}
                 aria-label={uploadLabel}
               />
             </Tooltip>
@@ -116,14 +128,13 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({ items, onActiva
               )}
             </div>
             <Tooltip
-              content={isEml ? 'Email message — opens/downloads' : fileTypeLabel(item.name)}
+              content={isEml ? 'Email message' : fileTypeLabel(item.name)}
               relationship="label"
             >
               <Badge className={s.typeBadge} appearance="outline" color={isEml ? 'brand' : 'informative'} size="small">
                 {isEml ? 'Email' : fileTypeLabel(item.name)}
               </Badge>
             </Tooltip>
-            {isEml && <OpenRegular className={s.icon} aria-label="Opens externally" />}
           </div>
         );
       })}

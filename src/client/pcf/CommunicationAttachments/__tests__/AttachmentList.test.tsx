@@ -6,8 +6,8 @@
 
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { AttachmentList } from '../CommunicationAttachments/AttachmentList';
+import { FluentProvider, webLightTheme, tokens } from '@fluentui/react-components';
+import { AttachmentList, uploadStatusColorToken } from '../CommunicationAttachments/AttachmentList';
 import { IAttachmentItem } from '../CommunicationAttachments/types';
 
 const renderWithProvider = (ui: React.ReactElement) =>
@@ -82,6 +82,37 @@ describe('AttachmentList', () => {
     expect(screen.getByText('PDF')).toBeInTheDocument();
     expect(screen.getByText('XLSX')).toBeInTheDocument();
     expect(screen.getByText('Email')).toBeInTheDocument();
+  });
+
+  // ── B12-3: green/red upload-status color mapping ─────────────────────────
+  describe('upload-status color mapping (B12-3)', () => {
+    it('maps the uploaded boolean to GREEN when uploaded and RED when not', () => {
+      expect(uploadStatusColorToken(true)).toBe(tokens.colorPaletteGreenForeground1);
+      expect(uploadStatusColorToken(false)).toBe(tokens.colorPaletteRedForeground1);
+      // The two states MUST resolve to distinct tokens (the regression was both
+      // rendering the same neutral/dark color).
+      expect(uploadStatusColorToken(true)).not.toBe(uploadStatusColorToken(false));
+    });
+
+    it('renders the uploaded and not-uploaded icons with DISTINCT color classes (mergeClasses fix)', () => {
+      // Root cause of the "all dark clouds" bug: the color class was passed to the
+      // Fluent icon via string concatenation, which the icon re-merged and dropped,
+      // making both states render an identical (colorless) class. With mergeClasses
+      // the two states carry different class strings.
+      const uploaded: IAttachmentItem = {
+        attachmentId: '1', name: 'a.pdf', attachmentType: 100000000, documentId: 'd1', documentName: null, uploaded: true,
+      };
+      const notUploaded: IAttachmentItem = { ...uploaded, attachmentId: '2', uploaded: false };
+
+      const { container } = renderWithProvider(
+        <AttachmentList items={[uploaded, notUploaded]} onActivate={jest.fn()} />
+      );
+      const yes = container.querySelector('[aria-label="File uploaded to SharePoint"]');
+      const no = container.querySelector('[aria-label="File not uploaded to SharePoint"]');
+      expect(yes).not.toBeNull();
+      expect(no).not.toBeNull();
+      expect(yes!.getAttribute('class')).not.toBe(no!.getAttribute('class'));
+    });
   });
 
   it('does not enable a row whose document lookup is missing', () => {
