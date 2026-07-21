@@ -2,7 +2,7 @@
   <metadata>
     <title>BFF by-regarding read endpoint (entity-set-agnostic, impersonation + 2-rule filter per FR-01)</title>
     <phase>W1 — BFF Reads (CC-3)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <deps>002</deps>
     <blocks>020,080</blocks>

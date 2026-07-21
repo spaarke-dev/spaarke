@@ -24,6 +24,7 @@ import {
   TableColumnDefinition,
   createTableColumn,
   makeStyles,
+  shorthands,
   tokens,
   Button,
   Spinner,
@@ -88,9 +89,7 @@ const useStyles = makeStyles({
   gridContainer: {
     width: '100%',
     overflowX: 'auto',
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
   },
   documentName: {

@@ -2,7 +2,7 @@
   <metadata>
     <title>Standalone All-Communications page `src/solutions/sprk_communicationspage/` (~50-line shell copying `sprk_invoicespage/src/main.tsx`) bound to grid config `e1826c4c-…`; register in `Deploy-AllDataGridConsumers.ps1`; widget/launcher only — NO permanent sitemap entry in R2</title>
     <phase>W4 — Standalone Page + Grid Polish (Surface 2) — ship it</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <deps></deps>
     <blocks></blocks>

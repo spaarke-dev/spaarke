@@ -2,7 +2,7 @@
   <metadata>
     <title>Schema: `sprk_communicationparticipant` junction (message grain) — 6 fields (communication lookup, systemuser, contact, role {From,To,Cc,Bcc}, addresstext, isresolved) + primary name</title>
     <phase>W0 — Schema + Foundation + ADR</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <deps>001</deps>
     <blocks>050, 051</blocks>
@@ -133,6 +133,8 @@
     The field set is LOCKED (spec FR-08, 2026-07-18) — do not extend it. Message grain only (Q-A): the parent is `sprk_communication`; thread participation is derived by rollup, so do NOT add a thread lookup. Unresolved external rows (Q-D) are first-class: both person lookups null + addresstext + isresolved=false MUST be creatable so `participant=` never silently omits external parties.
 
     The ADR-034 path-C decision (two typed lookups vs the tuple) is DOCUMENTED by task 004's ADR, not decided here — this task builds the owner-approved locked schema. Align the field semantics to `ParticipantReference.cs` so task 050's write is a clean map.
+
+    ✅ COMPLETED 2026-07-19 (STANDARD, sonnet@high). Schema fully authored; LIVE APPLY DEFERRED (MCP unavailable — describe-before-write gate). Deliverables: `scripts/Deploy-CommunicationParticipantSchema.ps1` (idempotent Web-API create script — entity + 3 N:1 lookups + sprk_role local Choice + addresstext + isresolved + primary name + publish + verify) and `notes/003-communicationparticipant-schema.md` (maker-ready inventory + §11 justification + ADR-034 path-C rationale + live-apply gate). Org-owned + Cascade-delete parent lookup mirror `sprk_communicationattachment`; person lookups use RemoveLink (provenance/back-fill). sprk_role = From/To/Cc/Bcc = 100000000/1/2/3 (local option set on net-new entity → no collision). Owner/next-session must run the script (add `-SolutionUniqueName`) and record actual sprk_role ints before 050/051 rely on it. Unblocks 050 + 051.
   </notes>
 
   <execution>

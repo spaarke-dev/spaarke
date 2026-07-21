@@ -130,9 +130,9 @@ export const PlaybookLibraryPage: React.FC = () => {
   // Determine display mode based on intent query param
   const mode: 'browse' | 'intent' = intent ? 'intent' : 'browse';
 
-  // Breadcrumb navigation (href-based for HashRouter — NavigationBar uses <a href>)
+  // Breadcrumb navigation (href-based — NavigationBar uses <a href>; clean BrowserRouter URLs)
   const breadcrumbs: BreadcrumbNavItem[] = React.useMemo(
-    () => [{ label: 'Home', href: '#/' }, { label: 'Playbook Library' }],
+    () => [{ label: 'Home', href: '/' }, { label: 'Playbook Library' }],
     []
   );
 

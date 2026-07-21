@@ -36,6 +36,15 @@ public class RecordNameMatchOptions
     public int MaxCandidates { get; set; } = 10;
 
     /// <summary>
+    /// Max distinct reference-number candidate tokens (incl. case variants) extracted from the envelope and
+    /// fed to the EXACT <c>referenceNumbers</c> server-side filter (email-r4 UAT #7). Bounds the OData filter
+    /// length; a body/attachment reference resolves its record via this exact filter regardless of keyword
+    /// ranking (default 20).
+    /// </summary>
+    [Range(1, 100)]
+    public int MaxReferenceCandidates { get; set; } = 20;
+
+    /// <summary>
     /// Minimum length (chars, after normalization) a record NAME must have to be eligible for containment
     /// matching. Guards against a short/common name false-matching arbitrary email text (default 5).
     /// </summary>

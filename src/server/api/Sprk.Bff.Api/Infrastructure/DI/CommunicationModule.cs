@@ -202,6 +202,21 @@ public static class CommunicationModule
         services.AddSingleton<IThreadKeyStrategy, MessagingThreadKeyStrategy>();
         services.AddSingleton<IThreadResolver, ThreadResolver>();
 
+        // Participant-index writer (messaging-communication-app-r2 task 050 / FR-08 / ADR-048). Writes the
+        // queryable sprk_communicationparticipant junction at MESSAGE grain — one row per (message ×
+        // person/address × role {From,To,Cc,Bcc}) — at BOTH persist points: outbound send (CommunicationService)
+        // and inbound capture (email: IncomingCommunicationProcessor; chat: MessagingIngestor). Placement
+        // Justification (root §10 / §11): lives inside Services/Communication/ behind the ADR-045 boundary;
+        // REUSES the existing email→contact resolver (ICommunicationDataverseService.QueryContactByEmailAsync)
+        // that ParticipantCorrelationRung uses — NO new resolver, NO new AI dependency, NO new NuGet (publish-size
+        // delta ≈0). Registered UNCONDITIONALLY (ADR-010 / ADR-032 — all three call sites consume it best-effort;
+        // no feature gate → no asymmetric registration, no Null-Object peer required). Best-effort / non-fatal +
+        // idempotent: it never throws, so a junction-write failure never fails a send or drops a captured message
+        // (NFR-02), and re-processing the same message writes no duplicate rows. Singleton — its deps
+        // (ICommunicationDataverseService + IGenericEntityService) are singletons; mirrors the enrichment/thread
+        // resolvers the same three call sites already inject.
+        services.AddSingleton<CommunicationParticipantIndexer>();
+
         // Messaging attachment materialization (messaging-communication-app-r1 task 070 / FR-14). The net-new
         // messaging step that materializes a chat file: ACS/file → SPE (SpeFileStore facade, ADR-007) →
         // governed sprk_document (sprk_document.sprk_communication lookup) → sprk_communicationattachment

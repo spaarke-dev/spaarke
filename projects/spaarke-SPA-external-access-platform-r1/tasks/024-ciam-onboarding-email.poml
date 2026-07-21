@@ -1,0 +1,91 @@
+<task id="024" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Add CIAM onboarding email template + send method</title>
+    <phase>2 Identity + provisioning + document content</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Extends the existing email pipeline with one template + method; no auth surface</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends existing email pipeline</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-safe-reason>additive template + method, no shared-file contention with other Phase-2 tasks</parallel-safe-reason>
+    <deps>none</deps>
+    <tags>bff-api</tags>
+    <estimated-effort>0.5 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a new embedded `CiamOnboardingTemplate.html` email template and a `SendCiamOnboardingEmailAsync` method to `RegistrationEmailService`, reusing the existing `CommunicationService`/`EmailChannelSender` shared-mailbox app-only pipeline unchanged. The email instructs the provisioned user to set their password via SSPR ("Forgot password"). Do not add a new transport.
+  </prompt>
+
+  <role>
+    You are a BFF engineer extending the existing branded-email pipeline with one onboarding template + send method, reusing the established Type-1 registration email pattern.
+  </role>
+
+  <goal>
+    A new embedded `Services/Registration/EmailTemplates/CiamOnboardingTemplate.html` and a `SendCiamOnboardingEmailAsync(...)` method on `RegistrationEmailService` produce a branded onboarding email via the existing `CommunicationService` → shared-mailbox app-only send pipeline (unchanged); the email content directs the recipient to set a password via SSPR ("Forgot password").
+  </goal>
+
+  <context>
+    <background>
+      Admin-initiated CIAM onboarding (task 025) creates an account with a temp password + force-change and relies on SSPR (Email OTP) for the user to set their own password. The user needs a branded email telling them the portal URL and how to set their password via "Forgot password". `RegistrationEmailService` already sends five branded templates (Acknowledgement, AdminNotification, ExpirationWarning, Expired, Welcome) through `CommunicationService`/`EmailChannelSender` on an app-only shared mailbox. This task adds one more template + send method reusing that pipeline; task 025 calls it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+      <file status="new">src/server/api/Sprk.Bff.Api/Services/Registration/EmailTemplates/CiamOnboardingTemplate.html</file>
+      <file status="reference">src/server/api/Sprk.Bff.Api/Services/Registration/EmailTemplates/WelcomeTemplate.html</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-08">Scope: the send pipeline. Reuse `RegistrationEmailService` → `CommunicationService`/`EmailChannelSender` app-only shared-mailbox transport UNCHANGED — add only a template + a `SendCiamOnboardingEmailAsync` method. Do NOT introduce a new transport.</constraint>
+    <constraint source="spec-FR-06">Scope: the email body. The onboarding email MUST instruct the user to set their password via SSPR ("Forgot password") — R1 has no admin-delivered permanent password.</constraint>
+    <constraint source="ADR-028">Scope: email send auth. The send path is app-only / managed identity (shared mailbox) — no external user token involved.</constraint>
+    <constraint source="project">Scope: this BFF task. State the §10 BFF Hygiene Placement Justification in the PR description (cite `.claude/constraints/bff-extensions.md`), and report BFF compressed publish size + diff vs baseline (~49.63 MB) confirming the ≤60 MB ceiling (NFR-01).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`RegistrationEmailService` + five branded templates on the `CommunicationService`/`EmailChannelSender` app-only pipeline.</existing>
+    <extension>Yes — add one `CiamOnboardingTemplate.html` + a `SendCiamOnboardingEmailAsync` method; the send pipeline is unchanged.</extension>
+    <cost-of-doing-nothing>Without the onboarding email, a CIAM-provisioned user has no way to learn the portal URL or how to set a password / sign in — onboarding produces an unusable account.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationEmailService.cs</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Read `RegistrationEmailService.cs` and an existing template (e.g. `WelcomeTemplate.html`) to learn the embedded-resource loading, token substitution, and send-method conventions.</step>
+    <step>Author `EmailTemplates/CiamOnboardingTemplate.html` (branded), with tokens for recipient name, portal URL, and SSPR "Forgot password" instructions; register it as an embedded resource consistent with the other templates.</step>
+    <step>Add `SendCiamOnboardingEmailAsync(...)` to `RegistrationEmailService`, loading the new template, substituting tokens, and sending via the existing `CommunicationService`/`EmailChannelSender` pipeline unchanged.</step>
+    <step>Build and run `dotnet publish -c Release`; record compressed size + diff vs the ~49.63 MB baseline.</step>
+  </steps>
+
+  <outputs>
+    <output>`CiamOnboardingTemplate.html` embedded template (branded, SSPR instructions).</output>
+    <output>`SendCiamOnboardingEmailAsync` method on RegistrationEmailService (pipeline reused).</output>
+    <output>BFF publish-size report (compressed size + diff).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SendCiamOnboardingEmailAsync` produces a branded email via the existing shared-mailbox app-only pipeline (no new transport introduced).</criterion>
+    <criterion testable="true">The template renders all required tokens (recipient, portal URL, SSPR "Forgot password" instructions) with no unresolved placeholders.</criterion>
+    <criterion testable="true">Negative: the send path uses app-only / managed-identity auth — no external user token is used.</criterion>
+    <criterion testable="true">BFF compressed publish size is reported with diff and stays ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Startable in parallel-group B (no deps). Consumed by task 025 (provisioner calls the send method). Extends the existing email pattern — no new transport.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

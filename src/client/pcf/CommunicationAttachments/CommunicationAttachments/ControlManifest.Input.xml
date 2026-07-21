@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.0.0" display-name-key="Communication Attachments" description-key="Virtual PCF: attachment list for sprk_communication. Replaces the OOB attachment subgrid — lists the communication's sprk_communicationattachment rows (name + type; inline-image types filtered out) and on row click opens the shared RichFilePreviewDialog for that attachment's sprk_document (preview URL via BFF; .eml/message-rfc822 routes to download/open). Auth via @spaarke/auth (ADR-028). Place in the OOB form where the attachment subgrid was." control-type="virtual">
+    <external-service-usage enabled="true">
+      <domain>*.azurewebsites.net</domain>
+      <domain>login.microsoftonline.com</domain>
+    </external-service-usage>
+    <!-- PLACEMENT ANCHOR (bound): bind to any text column on the sprk_communication form
+         (e.g. sprk_name). The bound value is NOT read — it only anchors the field control
+         on the form. The communication record id is resolved from the page context, and the
+         attachment rows are queried via context.webAPI (see design note in the PCF). -->
+    <property name="boundField" display-name-key="Placement Field" description-key="Bind to any text column on the form (e.g. sprk_name). Used only as a placement anchor; the control reads the communication id from page context and queries attachments via the Web API." of-type="SingleLine.Text" usage="bound" required="false" />
+    <!-- Input: BFF API base URL (falls back to Dataverse env var sprk_BffApiBaseUrl). -->
+    <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL. When empty, resolved from the Dataverse environment variable sprk_BffApiBaseUrl." of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Input: Azure AD tenant ID (falls back to sprk_TenantId). -->
+    <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID. When empty, resolved from the Dataverse environment variable sprk_TenantId." of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Input: Client (PCF) application ID for MSAL (falls back to sprk_MsalClientId). -->
+    <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication. When empty, resolved from the Dataverse environment variable sprk_MsalClientId." of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Input: BFF application ID for scope construction (falls back to sprk_BffApiAppId). -->
+    <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction. When empty, resolved from the Dataverse environment variable sprk_BffApiAppId." of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Version footer toggle. When true (default), the version footer renders at the bottom of the control. -->
+    <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="When true (default), displays the PCF version footer at the bottom of the control. Set to false to hide it on production forms." of-type="TwoOptions" usage="input" required="false" default-value="true" />
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <!-- Platform-provided libraries: DO NOT bundle (ADR-022) -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+      <uses-feature name="Navigation" required="true" />
+    </feature-usage>
+  </control>
+</manifest>

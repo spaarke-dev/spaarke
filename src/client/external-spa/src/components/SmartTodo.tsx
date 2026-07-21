@@ -32,6 +32,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  shorthands,
   tokens,
   Text,
   Button,
@@ -99,9 +100,7 @@ const useStyles = makeStyles({
     padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalS}`,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },

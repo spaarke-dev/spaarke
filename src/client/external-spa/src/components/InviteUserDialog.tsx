@@ -373,30 +373,11 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
 
             {successData && (
               <div className={styles.successDetails}>
-                {successData.invitationCode && (
-                  <div className={styles.detailRow}>
-                    <Text size={200} className={styles.detailLabel}>
-                      Invitation code
-                    </Text>
-                    <Text size={200} className={styles.invitationCode}>
-                      {successData.invitationCode}
-                    </Text>
-                  </div>
-                )}
-                {successData.expiryDate && (
-                  <div className={styles.detailRow}>
-                    <Text size={200} className={styles.detailLabel}>
-                      Expires
-                    </Text>
-                    <Text size={200} className={styles.detailValue}>
-                      {new Date(successData.expiryDate).toLocaleDateString(undefined, {
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric',
-                      })}
-                    </Text>
-                  </div>
-                )}
+                <Text size={300} className={styles.detailValue}>
+                  The user's workspace account is being provisioned and an onboarding
+                  email has been sent with sign-in instructions. No invitation code is
+                  required — they can sign in directly once provisioning completes.
+                </Text>
               </div>
             )}
           </div>

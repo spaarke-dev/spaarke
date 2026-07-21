@@ -18,8 +18,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
-      "@spaarke/ui-components": ["../../shared/Spaarke.UI.Components/src/index.ts"],
-      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/src/*"],
+      "@spaarke/ui-components": ["../shared/Spaarke.UI.Components/src/index.ts"],
+      "@spaarke/ui-components/*": ["../shared/Spaarke.UI.Components/src/*"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]
     },

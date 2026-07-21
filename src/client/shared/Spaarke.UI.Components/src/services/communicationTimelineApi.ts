@@ -6,9 +6,12 @@
  * `GET /api/communications/threads/{threadId}/unread-count`) plus a thin
  * `sendTimelineMessage` delegate over the existing `sendCommunication()`
  * send path (task 051). Consumed by `<CommunicationTimeline />` (task 060).
+ * R2 task 020 (FR-03) adds `readByRegarding` — the `GET /api/communications/
+ * by-regarding/{entityType}/{id}` wrapper backing regarding mode.
  *
  * Read-model shapes below mirror the BFF's `ThreadReadResult` /
- * `ThreadMessageDto` / `ThreadAttachmentRef` / `UnreadCountResult` records
+ * `ThreadMessageDto` / `ThreadAttachmentRef` / `UnreadCountResult` /
+ * `RegardingReadResult` records
  * (`Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs`)
  * EXACTLY, field-for-field, camelCase (ASP.NET default STJ casing). Do not
  * add fields the BFF does not return — this file is a pass-through, not a
@@ -70,9 +73,16 @@ export interface IThreadMessageDto {
   attachments: IThreadAttachmentRefDto[];
 }
 
-/** Mirrors `ThreadReadResult` — the access-filtered, ordered message page. */
+/**
+ * Mirrors `ThreadReadResult` — the access-filtered, ordered message page.
+ * `name` (`sprk_name`) is populated by the by-regarding read (R2 task 020,
+ * FR-03 — the collapsible group header label) and `null` on the R1 per-thread
+ * read (`readThread` below never needed it — that surface is placed directly
+ * on the thread form, which already shows the name via the record header).
+ */
 export interface IThreadReadResultDto {
   threadId: string;
+  name: string | null;
   messages: IThreadMessageDto[];
   count: number;
 }
@@ -82,6 +92,20 @@ export interface IUnreadCountResultDto {
   threadId: string;
   since: string | null;
   unreadCount: number;
+}
+
+/**
+ * Mirrors `RegardingReadResult` (R2 task 010 / FR-01) — ALL of a regarding
+ * record's threads, each in the `IThreadReadResultDto` shape above (entity-
+ * set-agnostic across the 11 ADR-024 families; see
+ * `Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs`).
+ */
+export interface IRegardingReadResultDto {
+  entityType: string;
+  recordId: string;
+  threads: IThreadReadResultDto[];
+  threadCount: number;
+  messageCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +258,54 @@ export async function getUnreadCount(
   }
 
   return (await response.json()) as IUnreadCountResultDto;
+}
+
+// ---------------------------------------------------------------------------
+// readByRegarding — GET /api/communications/by-regarding/{entityType}/{id}
+// (R2 task 020 / FR-03 — the regarding-mode Timeline's read wrapper)
+// ---------------------------------------------------------------------------
+
+function resolveByRegardingUrl(base: string | undefined, entityType: string, id: string): string {
+  const path = `/api/communications/by-regarding/${encodeURIComponent(entityType)}/${encodeURIComponent(id)}`;
+  if (!base) return path;
+  return base.replace(/\/+$/, '') + path;
+}
+
+/**
+ * Reads ALL of a regarding record's threads + their access-filtered messages
+ * (task 010's `by-regarding` endpoint) — the read model behind the regarding-
+ * mode `<CommunicationTimeline mode="regarding" />` (task 020). Same
+ * typed-error contract as {@link readThread}/{@link getUnreadCount}: throws
+ * {@link CommunicationTimelineReadError} on any non-2xx response.
+ *
+ * NFR-03: the response is already access-filtered server-side (impersonation
+ * + the shared internal-only/privilege filter) — this wrapper is a thin
+ * pass-through, exactly like {@link readThread}. It performs NO client-side
+ * filtering of the result.
+ */
+export async function readByRegarding(
+  entityType: string,
+  id: string,
+  client: ICommunicationTimelineApiClientOptions
+): Promise<IRegardingReadResultDto> {
+  if (!entityType) {
+    throw new Error('readByRegarding: entityType is required.');
+  }
+  if (!id) {
+    throw new Error('readByRegarding: id is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('readByRegarding: authenticatedFetch is required.');
+  }
+
+  const url = resolveByRegardingUrl(client.bffBaseUrl, entityType, id);
+  const response = await client.authenticatedFetch(url, { method: 'GET' });
+
+  if (!response.ok) {
+    throw await CommunicationTimelineReadError.fromResponse(response);
+  }
+
+  return (await response.json()) as IRegardingReadResultDto;
 }
 
 // ---------------------------------------------------------------------------

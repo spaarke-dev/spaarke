@@ -40,6 +40,7 @@ public sealed class CommunicationService
     private readonly IThreadResolver? _threadResolver;
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -62,6 +63,12 @@ public sealed class CommunicationService
     /// Direct-thread message via the impersonated read, task 050). No-op for a non-Direct thread. Optional so
     /// existing unit constructions keep compiling; production DI always supplies it.
     /// </param>
+    /// <param name="participantIndexer">
+    /// Participant-index writer (task 050 / FR-08 / ADR-048) — invoked best-effort after a message persists to
+    /// write the (message × person/address × role) <c>sprk_communicationparticipant</c> rows the <c>participant=</c>
+    /// facet (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies
+    /// it. Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never fails the send.
+    /// </param>
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -76,7 +83,8 @@ public sealed class CommunicationService
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
-        IDirectThreadAccessService? directThreadAccess = null)
+        IDirectThreadAccessService? directThreadAccess = null,
+        CommunicationParticipantIndexer? participantIndexer = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -90,6 +98,7 @@ public sealed class CommunicationService
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
+        _participantIndexer = participantIndexer;
         _options = options.Value;
         _logger = logger;
     }
@@ -202,6 +211,11 @@ public sealed class CommunicationService
                 detail: ex.Message,
                 statusCode: 500);
         }
+
+        // 6. Enqueue Document Profile (AppOnlyDocumentAnalysis) for the on-demand archived .eml, at parity
+        // with the outbound-send path (SendAsync) and the auto-inbound path (UAT #5). Best-effort/non-fatal —
+        // EnqueueDocumentAnalysisAsync swallows and logs any failure internally.
+        await EnqueueDocumentAnalysisAsync(archiveDocumentId, Guid.NewGuid().ToString(), ct);
 
         return new ArchiveCommunicationResult
         {
@@ -582,6 +596,16 @@ public sealed class CommunicationService
                         "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
                         correlationId, communicationId.Value);
                 }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. The sender
+            // is already resolved to a systemuser (ResolveMessageSenderAsync), so its row carries sprk_systemuser
+            // directly (no redundant lookup); recipients resolve via the shared email→contact resolver.
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderEmail, senderParticipant,
+                    request.To, request.Cc, request.Bcc, ct);
             }
 
             // The response carries only the tracking record id + status — NO ACS token or admin capability
@@ -1198,6 +1222,15 @@ public sealed class CommunicationService
                 }
             }
 
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (no pre-resolved sender identity on this path).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderResult.Email, null,
+                    request.To, request.Cc, request.Bcc, cancellationToken);
+            }
+
             return new SendCommunicationResponse
             {
                 CommunicationId = communicationId,
@@ -1493,6 +1526,16 @@ public sealed class CommunicationService
                 }
             }
 
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (the sender's typed identity is already on the
+            // record's sprk_sentby lookup; the junction is additive and back-fillable).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, userEmail, null,
+                    request.To, request.Cc, request.Bcc, ct);
+            }
+
             return new SendCommunicationResponse
             {
                 CommunicationId = communicationId,
@@ -1776,12 +1819,20 @@ public sealed class CommunicationService
         CancellationToken ct,
         int emailDirection = 100000001) // default Sent — send-path callers are always outbound
     {
-        // 1. Generate the archival artifact via the channel archiver seam (dispatch by
-        // CommunicationType — ADR-045 rule 4). Email resolves to .eml generation.
-        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
-            .GenerateEml(request, partialResponse);
+        // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
+        // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
+        // — ADR-045 rule 4) WITH those attachments embedded, so opening the .eml reproduces the original
+        // email intact (UAT #4 — faithful original). The attachments are STILL archived separately as
+        // sprk_document records elsewhere; both copies exist by design.
+        var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
 
-        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml
+        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
+            .GenerateEml(request, partialResponse, emlAttachments);
+
+        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml.
+        // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
+        // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
+        // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
         var driveId = _options.ArchiveContainerId;
         if (string.IsNullOrWhiteSpace(driveId))
         {
@@ -1800,7 +1851,9 @@ public sealed class CommunicationService
         // 3. Create sprk_document record linking to the archived file
         var document = new DataverseEntity("sprk_document")
         {
-            ["sprk_documentname"] = $"Archived: {TruncateTo(request.Subject, 180)}",
+            // Display name carries the generated .eml file name (not a bare "Archived: {subject}" with no
+            // extension) so it reads as an email file in the DMS (UAT #4b). sprk_filename is unchanged.
+            ["sprk_documentname"] = TruncateTo(emlResult.FileName, 200),
             ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
@@ -1822,6 +1875,88 @@ public sealed class CommunicationService
             documentId, communicationId);
 
         return documentId;
+    }
+
+    /// <summary>
+    /// Fetches each attachment's bytes from SPE — via its own <c>sprk_graphdriveid</c>/<c>sprk_graphitemid</c>,
+    /// through the <see cref="SpeFileStore"/> facade (ADR-007, never a raw Graph client) — and projects them to
+    /// <see cref="EmlAttachment"/> for embedding in the archived .eml (UAT #4 faithful original). Best-effort per
+    /// attachment (NFR-06): a single attachment that lacks an SPE reference or fails to download is logged and
+    /// skipped; the .eml still archives with the body plus the attachments that succeeded, and the send/receive
+    /// flow never fails on it. Independent of the SEPARATE per-attachment <c>sprk_document</c> archival (which is
+    /// unchanged) — both copies exist by design.
+    /// </summary>
+    private async Task<List<EmlAttachment>> FetchEmlAttachmentsForEmbedAsync(Guid communicationId, CancellationToken ct)
+    {
+        var result = new List<EmlAttachment>();
+
+        EntityCollection attachments;
+        try
+        {
+            var query = new QueryExpression("sprk_communicationattachment")
+            {
+                ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid"),
+                Criteria =
+                {
+                    Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
+                },
+            };
+            attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to query attachments for .eml embedding (non-fatal) | CommunicationId: {CommunicationId}",
+                communicationId);
+            return result;
+        }
+
+        foreach (var att in attachments.Entities)
+        {
+            // Embed EVERY attachment that is stored in SPE, regardless of whether it also has a separate
+            // sprk_document — the embed is independent of the standalone archival.
+            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(itemId)) continue;
+
+            // Prefer the attachment's own drive id; fall back to the archive container.
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            if (string.IsNullOrEmpty(driveId)) continue;
+
+            var fileName = att.GetAttributeValue<string>("sprk_name") ?? "attachment";
+
+            try
+            {
+                await using var content = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                if (content is null)
+                {
+                    _logger.LogWarning(
+                        "Attachment '{FileName}' returned no content for .eml embedding (skipped) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                        fileName, communicationId, itemId);
+                    continue;
+                }
+
+                using var ms = new MemoryStream();
+                await content.CopyToAsync(ms, ct);
+
+                result.Add(new EmlAttachment
+                {
+                    FileName = fileName,
+                    Content = ms.ToArray(),
+                    ContentType = InferContentType(fileName),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to download attachment '{FileName}' for .eml embedding (skipped, non-fatal) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                    fileName, communicationId, itemId);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -2272,5 +2407,38 @@ public sealed class CommunicationService
                 "Internet-Message-Id stamp failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
                 communicationId, correlationId);
         }
+    }
+
+    /// <summary>
+    /// Writes the participant index (task 050 / FR-08 / ADR-048) for a persisted OUTBOUND message — one
+    /// <c>sprk_communicationparticipant</c> row per (message × person/address × role {From,To,Cc,Bcc}). Reuses
+    /// the shared <see cref="CommunicationParticipantIndexer"/> (which itself reuses the email→contact resolver;
+    /// no second resolver). The indexer is best-effort / non-fatal (it never throws) + idempotent, so a
+    /// junction-write failure never fails an already-sent + persisted message (NFR-02). No-op when the indexer
+    /// is not composed (test constructions that predate it).
+    /// </summary>
+    private Task WriteParticipantIndexAsync(
+        Guid communicationId,
+        string? fromAddress,
+        ParticipantReference? fromResolved,
+        string[]? to,
+        string[]? cc,
+        string[]? bcc,
+        CancellationToken ct)
+    {
+        if (_participantIndexer is null)
+            return Task.CompletedTask;
+
+        return _participantIndexer.WriteParticipantsAsync(
+            communicationId,
+            new CommunicationParticipantSet
+            {
+                FromAddress = fromAddress,
+                FromResolved = fromResolved,
+                To = to,
+                Cc = cc,
+                Bcc = bcc,
+            },
+            ct);
     }
 }

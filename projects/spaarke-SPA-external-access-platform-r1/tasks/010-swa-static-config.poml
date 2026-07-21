@@ -1,0 +1,128 @@
+<task id="010" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Author staticwebapp.config.json + SWA deploy workflow</title>
+    <phase>1 Hosting migration + routing</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <status-note>2026-07-20 COMPLETE (executed by a parallel subagent, reviewed + committed by main session). Created src/client/external-spa/staticwebapp.config.json: navigationFallback rewrite→/index.html excluding /assets/* + static extensions (SPA deep-link support for the BrowserRouter migration in task 011); globalHeaders Referrer-Policy + CSP frame-ancestors 'self' (FR-04 explicit frame directive; no X-Frame-Options — CSP is the modern replacement) + X-Content-Type-Options nosniff. Reused the existing task-003 deploy-external-spa.yml scaffold (§11) and added ONE step to stage staticwebapp.config.json into dist/ before upload (Vite has no public/ dir so it isn't copied automatically; the SWA runtime only reads the config from the deployed content root). No /api reverse-proxy (BFF is a separate origin). Trigger stays workflow_dispatch (push/path auto-deploy is task 014). JSON + YAML validated (parse clean). Notes: notes/task-010-swa-config.md. No BFF/tests touched; no build run (external-spa build breakage DI-028-02 is unrelated + pre-existing).</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploy config + CI workflow (ci-workflows hot path)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config authoring following SWA conventions</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe reason="shares .github/workflows + config with 003/014">false</parallel-safe>
+    <deps>003</deps>
+    <tags>azure, deploy, ci-cd</tags>
+    <estimated-effort>0.5-1 dev-day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author `src/client/external-spa/staticwebapp.config.json` with a `navigationFallback` rewrite to `/index.html` (excluding static asset paths) plus `Referrer-Policy: no-referrer-or-same-origin` and an explicit CSP `frame-ancestors`, AND a GitHub Actions SWA deploy workflow under `.github/workflows/` that builds and deploys the external-spa, superseding (but not deleting) the Power Pages `scripts/Deploy-ExternalWorkspaceSpa.ps1` path. Use `npm install --legacy-peer-deps` (not `npm ci`) and the production build script; read the build command and output dir from the repo rather than assuming them.
+  </prompt>
+
+  <role>
+    You are a DevOps + frontend-hosting engineer configuring Azure Static Web Apps (SWA)
+    hosting for the Spaarke external-spa. You author deploy configuration and CI workflow
+    following SWA conventions; you do not redesign the SPA.
+  </role>
+
+  <goal>
+    Produce a `staticwebapp.config.json` for `src/client/external-spa/` that (a) rewrites all
+    unknown paths to `/index.html` via `navigationFallback` so BrowserRouter deep links resolve,
+    and (b) sends security headers (`Referrer-Policy: no-referrer-or-same-origin` and an explicit
+    CSP `frame-ancestors`); AND a GitHub Actions SWA deploy workflow under `.github/workflows/`
+    that builds and deploys the external-spa, superseding `scripts/Deploy-ExternalWorkspaceSpa.ps1`
+    (the Power Pages web-resource deploy path).
+  </goal>
+
+  <context>
+    <background>
+      The external-spa currently ships to Power Pages as a web resource via
+      `scripts/Deploy-ExternalWorkspaceSpa.ps1` and uses HashRouter (task 011 flips it to
+      BrowserRouter). BrowserRouter deep links (e.g. `/project/{id}`) only resolve if the host
+      rewrites unknown paths to the SPA entry — on SWA that is `navigationFallback`. Phase 1
+      runs on the EXISTING Entra B2B identity so any routing regression is attributable to
+      routing, not the IdP. This task authors ONLY the SWA config + workflow; the routing code
+      change is task 011 and the actual deploy/parity verification is task 014.
+    </background>
+    <relevant-files>
+      <file status="new">src/client/external-spa/staticwebapp.config.json</file>
+      <file status="new">.github/workflows/ (new SWA deploy workflow, e.g. deploy-external-spa-swa.yml)</file>
+      <file status="reference">scripts/Deploy-ExternalWorkspaceSpa.ps1 (the Power Pages path this supersedes)</file>
+      <file status="reference">src/client/external-spa/package.json (build script for the workflow)</file>
+      <file status="reference">src/client/external-spa/vite.config.ts (build output dir)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">
+      SCOPE: the SWA config and workflow. BrowserRouter requires a `navigationFallback`
+      rewrite to `/index.html` (excluding static asset paths) AND the app must render an
+      in-app 404 for unknown routes (the in-app 404 itself is task 011). MUST provide the
+      navigationFallback rewrite here so 011's routing has a working host.
+    </constraint>
+    <constraint source="spec-FR-04">
+      SCOPE: the response headers block. MUST emit `Referrer-Policy` (`no-referrer-or-same-origin`)
+      and an explicit CSP `frame-ancestors`. MUST NOT emit an `X-Frame-Options` that conflicts
+      with the CSP `frame-ancestors` directive.
+    </constraint>
+    <constraint source="spec-scope">
+      SCOPE: deploy path only. The workflow supersedes `scripts/Deploy-ExternalWorkspaceSpa.ps1`
+      but does NOT delete it — decommission of the Power Pages path is Phase 3 (task not in this batch).
+    </constraint>
+    <constraint source="CLAUDE.md-node">
+      SCOPE: the workflow's install step. Use `npm install --legacy-peer-deps --no-audit --no-fund`,
+      NOT `npm ci`, and build with the production build script (not a bare `npm run build` if a
+      prod script exists).
+    </constraint>
+  </constraints>
+
+  <justification>
+    <existing>Deploy-ExternalWorkspaceSpa.ps1 (Power Pages web-resource deploy path) is the only existing deploy mechanism for the external-spa.</existing>
+    <extension>No — the SWA hosting model differs fundamentally from the Power Pages web-resource model (static-host rewrites + header config vs. Dataverse web resource upload); the PowerShell script cannot be extended into a SWA deploy.</extension>
+    <cost-of-doing-nothing>Without `staticwebapp.config.json`, BrowserRouter deep links 404 on direct navigation (no navigationFallback rewrite) and the SWA sends no Referrer-Policy / CSP frame-ancestors headers, leaving FR-02 and FR-04 unmet and Teams-readiness framing unowned.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md</file>
+      <file>src/client/external-spa/package.json</file>
+      <file>src/client/external-spa/vite.config.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Read `src/client/external-spa/package.json` and `vite.config.ts` to determine the build command and the build output directory (SWA `app_location` / `output_location`).</step>
+    <step>Author `src/client/external-spa/staticwebapp.config.json` with a `navigationFallback` block rewriting unknown paths to `/index.html`, excluding static asset globs (e.g. `/assets/*`, `*.{js,css,ico,png,svg,woff2}`).</step>
+    <step>Add a `globalHeaders` (or route-level headers) block emitting `Referrer-Policy: no-referrer-or-same-origin` and a `Content-Security-Policy` with an explicit `frame-ancestors` directive. Do not add a conflicting `X-Frame-Options`.</step>
+    <step>Add a `responseOverrides` 404 mapping only if needed to route to the SPA entry; otherwise rely on navigationFallback + the in-app 404 (task 011).</step>
+    <step>Author the `.github/workflows/` SWA deploy workflow (Azure/static-web-apps-deploy action) that installs deps with `npm install --legacy-peer-deps --no-audit --no-fund`, builds the external-spa, and deploys the build output to the SWA. Use the SWA deployment token from a repository secret; do not hardcode secrets.</step>
+    <step>Verify the JSON is valid and the workflow YAML parses; cross-check `app_location`/`output_location` against the actual Vite output dir.</step>
+  </steps>
+
+  <outputs>
+    <output>src/client/external-spa/staticwebapp.config.json with navigationFallback + security headers</output>
+    <output>.github/workflows/ SWA deploy workflow that builds + deploys the external-spa</output>
+    <output>Task notes recording the build command, output dir, and the secret name used for the SWA token</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`navigationFallback` in staticwebapp.config.json rewrites an unknown path (e.g. `/project/abc`) to `/index.html`, while static asset paths are excluded from the rewrite.</criterion>
+    <criterion testable="true">Response headers config emits `Referrer-Policy: no-referrer-or-same-origin` AND a Content-Security-Policy containing an explicit `frame-ancestors` directive.</criterion>
+    <criterion testable="true">No `X-Frame-Options` header is emitted that conflicts with the CSP `frame-ancestors` directive (negative case).</criterion>
+    <criterion testable="true">The workflow builds the external-spa and deploys it to SWA; it uses `npm install --legacy-peer-deps` (NOT `npm ci`) and references the SWA token from a secret (no hardcoded secret — negative case).</criterion>
+    <criterion testable="true">`scripts/Deploy-ExternalWorkspaceSpa.ps1` is NOT deleted by this task (decommission is Phase 3 — negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Phase 1 deliberately stays on Entra B2B. The output dir and build command MUST be read from
+    the repo, not assumed. The in-app 404 route lives in task 011; this task only guarantees the
+    host rewrites so that route can render.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

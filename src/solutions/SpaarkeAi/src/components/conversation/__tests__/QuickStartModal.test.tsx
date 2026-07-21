@@ -4,13 +4,16 @@
  * Verifies:
  *   1. Renders the existing `GetStartedCardsWidget` card library when open;
  *      renders nothing when closed.
- *   2. Clicking "Create Matter" launches via the shipped 012 hand-off
- *      envelope (`launchSurface({ consumerType: 'create-matter', ... })`) —
- *      the ONE Get-Started card with a `SURFACE_LAUNCH_REGISTRY` entry.
- *   3. Clicking a non-registry card (e.g. "Create Project" / "Assign Work")
- *      reuses the existing `@spaarke/ui-components` wizard launcher — NOT
- *      `launchSurface` (which would be a silent no-op for an unmapped
- *      consumertype).
+ *   2. Clicking "Create Matter" or "Create Project" launches via the shipped
+ *      012 hand-off envelope (`launchSurface({ consumerType, ... })`) — both are
+ *      `SURFACE_LAUNCH_REGISTRY` entries, and both read the session file context
+ *      threaded in for UAT R4-12.
+ *   3. Clicking a non-registry card (e.g. "Assign Work" / "Send Email") reuses
+ *      the existing `@spaarke/ui-components` wizard launcher — NOT `launchSurface`
+ *      (which would be a silent no-op for an unmapped consumertype).
+ *   3b. UAT R4-12: when a `getFileContext` is supplied, the create-matter /
+ *      create-project launch carries the session's `fileIds` / `source.sessionId`
+ *      / `provenance.sourceFiles` into the envelope.
  *   4. Any card click closes the modal.
  *   5. Renders in light AND dark theme without crashing (ADR-021 semantic-
  *      token parity).
@@ -68,12 +71,17 @@ function renderModal(props?: {
   open?: boolean;
   onClose?: () => void;
   theme?: typeof webLightTheme;
+  getFileContext?: () => { sessionId: string | null; fileIds: string[]; fileNames: string[] } | null;
 }): { onClose: jest.Mock } {
   const theme = props?.theme ?? webLightTheme;
   const onClose = (props?.onClose as jest.Mock) ?? jest.fn();
   render(
     <FluentProvider theme={theme}>
-      <QuickStartModal open={props?.open ?? true} onClose={onClose} />
+      <QuickStartModal
+        open={props?.open ?? true}
+        onClose={onClose}
+        getFileContext={props?.getFileContext}
+      />
     </FluentProvider>,
   );
   return { onClose };
@@ -127,18 +135,44 @@ describe("QuickStartModal", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('launches "Create Project" via the existing wizard launcher, NOT launchSurface', async () => {
+  it('launches "Create Project" via the 012 hand-off envelope (launchSurface, R4-12)', async () => {
     const onClose = jest.fn();
     renderModal({ onClose });
     const user = userEvent.setup();
 
     await user.click(screen.getByText("Create Project"));
 
-    expect(mockLaunchCreateProjectWizard).toHaveBeenCalledTimes(1);
-    expect(mockLaunchCreateProjectWizard).toHaveBeenCalledWith({
+    // R4-12: create-project is a SURFACE_LAUNCH_REGISTRY entry and its wizard reads the
+    // handoff envelope, so it now routes through launchSurface (carrying session files when
+    // present) rather than the file-less Path-B launchCreateProjectWizard.
+    expect(mockLaunchSurface).toHaveBeenCalledTimes(1);
+    expect(mockLaunchSurface).toHaveBeenCalledWith({
+      consumerType: "create-project",
       bffBaseUrl: "https://test-bff.example.com",
     });
-    expect(mockLaunchSurface).not.toHaveBeenCalled();
+    expect(mockLaunchCreateProjectWizard).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("threads the session file context into create-matter / create-project (R4-12)", async () => {
+    const onClose = jest.fn();
+    const getFileContext = () => ({
+      sessionId: "sess-123",
+      fileIds: ["file-a", "file-b"],
+      fileNames: ["a.pdf", "b.docx"],
+    });
+    renderModal({ onClose, getFileContext });
+    const user = userEvent.setup();
+
+    await user.click(screen.getByText("Create Matter"));
+
+    expect(mockLaunchSurface).toHaveBeenCalledWith({
+      consumerType: "create-matter",
+      bffBaseUrl: "https://test-bff.example.com",
+      fileIds: ["file-a", "file-b"],
+      source: { sessionId: "sess-123" },
+      provenance: { sourceFiles: ["a.pdf", "b.docx"] },
+    });
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

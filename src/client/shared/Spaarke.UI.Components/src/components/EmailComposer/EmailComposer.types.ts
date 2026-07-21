@@ -112,8 +112,21 @@ export interface IRecipient {
   email: string;
   displayName?: string;
   resolved?: boolean;
-  /** Originating `ILookupItem.id` when `resolved === true` (audit/debug only). */
+  /**
+   * Originating `ILookupItem.id` when `resolved === true`. Together with
+   * {@link entityType}, this identifies the resolved `contact`/`systemuser`
+   * record (task 060, FR-10) — previously "audit/debug only"; now also
+   * consumed by callers (e.g. `TimelineComposeBox`) that want to know a
+   * recipient resolved to a typed Dataverse identity rather than free text.
+   */
   sourceId?: string;
+  /**
+   * Dataverse logical name of the resolved record (`contact`/`systemuser`),
+   * mirrored from `ILookupItem.entityType` when `resolved === true` (task 060,
+   * FR-10). Undefined for free-text recipients. Additive/optional — existing
+   * callers that never set it are unaffected.
+   */
+  entityType?: 'contact' | 'systemuser';
 }
 
 // ---------------------------------------------------------------------------
