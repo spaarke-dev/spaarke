@@ -47,6 +47,42 @@ function splitTokens(raw: string): string[] {
     .filter(s => s.length > 0);
 }
 
+/**
+ * Resolve a directory result into the email address + display name to commit
+ * as a recipient (task 123 / UAT R4 C12-1).
+ *
+ * Order of resolution:
+ *   1. `item.email` — the FIRST-CLASS email field (`userLookup.ts` now populates
+ *      it from `internalemailaddress` / `emailaddress1`). Authoritative.
+ *   2. Fallback: parse the email out of the `"Full Name (email)"` display
+ *      string, for callers that don't set `item.email`.
+ *
+ * Returns `null` when NO valid email can be resolved (e.g. a contact with no
+ * `emailaddress1`). A `null` result MUST NOT be turned into a recipient — the
+ * previous code fell back to using the bare display name (e.g. "ralph") as the
+ * recipient value, which then failed validation. Such rows are rendered
+ * non-selectable instead.
+ */
+function resolveRecipientEmail(item: ILookupItem): { email: string; displayName?: string } | null {
+  const parenMatch = item.name.match(/\(([^)]+)\)\s*$/);
+  const displayFromName = parenMatch ? item.name.slice(0, parenMatch.index).trim() || undefined : undefined;
+
+  const explicit = item.email?.trim();
+  if (explicit && EMAIL_RE.test(explicit)) {
+    // Prefer the display-name segment of "Name (email)"; else the whole name.
+    return { email: explicit, displayName: displayFromName ?? (item.name.trim() || undefined) };
+  }
+
+  if (parenMatch) {
+    const parsed = parenMatch[1].trim();
+    if (EMAIL_RE.test(parsed)) {
+      return { email: parsed, displayName: displayFromName };
+    }
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -117,6 +153,19 @@ const useStyles = makeStyles({
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
     },
+  },
+  resultItemDisabled: {
+    cursor: 'default',
+    color: tokens.colorNeutralForegroundDisabled,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1,
+    },
+  },
+  noEmailHint: {
+    marginLeft: 'auto',
+    paddingLeft: tokens.spacingHorizontalS,
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
   },
   errorText: {
     color: tokens.colorPaletteRedForeground1,
@@ -221,11 +270,14 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
   const handleSelectResult = React.useCallback(
     (item: ILookupItem) => {
-      // ILookupItem.name is formatted "Full Name (email)" (userLookup.ts) —
-      // extract the email; fall back to the whole name if no email is present.
-      const match = item.name.match(/\(([^)]+)\)\s*$/);
-      const email = match ? match[1] : item.name;
-      const displayName = match ? item.name.slice(0, match.index).trim() : undefined;
+      // Resolve to the contact's actual email (first-class `item.email`, else
+      // parsed from the "Full Name (email)" display string). A result with no
+      // usable email is NON-SELECTABLE — never commit the display name as the
+      // recipient value (task 123 / UAT R4 C12-1: the "Invalid email address:
+      // {name}" bug).
+      const resolved = resolveRecipientEmail(item);
+      if (!resolved) return;
+      const { email, displayName } = resolved;
       const existingEmails = new Set(value.map(r => r.email.toLowerCase()));
       if (!existingEmails.has(email.toLowerCase())) {
         onChange([...value, { email, displayName, resolved: true, sourceId: item.id, entityType: item.entityType }]);
@@ -332,24 +384,40 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
 
       {showResults && (
         <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
-          {results.map(item => (
-            <div
-              key={item.id}
-              className={styles.resultItem}
-              role="option"
-              aria-selected={false}
-              tabIndex={0}
-              onClick={() => handleSelectResult(item)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleSelectResult(item);
+          {results.map(item => {
+            // A result with no resolvable email cannot become a valid recipient —
+            // render it clearly non-selectable rather than letting a click commit
+            // the display name as an invalid recipient (task 123 / UAT R4 C12-1).
+            const selectable = resolveRecipientEmail(item) !== null;
+            return (
+              <div
+                key={item.id}
+                className={mergeClasses(styles.resultItem, !selectable && styles.resultItemDisabled)}
+                role="option"
+                aria-selected={false}
+                aria-disabled={!selectable}
+                tabIndex={selectable ? 0 : -1}
+                onClick={selectable ? () => handleSelectResult(item) : undefined}
+                onKeyDown={
+                  selectable
+                    ? e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          handleSelectResult(item);
+                        }
+                      }
+                    : undefined
                 }
-              }}
-            >
-              <Text size={200}>{item.name}</Text>
-            </div>
-          ))}
+              >
+                <Text size={200}>{item.name}</Text>
+                {!selectable && (
+                  <Text size={200} className={styles.noEmailHint}>
+                    no email address
+                  </Text>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 

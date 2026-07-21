@@ -31,7 +31,9 @@ describe('searchUsersAsLookup — entityType tagging', () => {
 
     const result = await searchUsersAsLookup(dataService, 'jane');
 
-    expect(result).toEqual([{ id: 'user-1', name: 'Jane Attorney (jane@example.com)', entityType: 'systemuser' }]);
+    expect(result).toEqual([
+      { id: 'user-1', name: 'Jane Attorney (jane@example.com)', email: 'jane@example.com', entityType: 'systemuser' },
+    ]);
   });
 });
 
@@ -44,7 +46,9 @@ describe('searchContactsAsLookup — entityType tagging', () => {
 
     const result = await searchContactsAsLookup(dataService, 'erin');
 
-    expect(result).toEqual([{ id: 'contact-1', name: 'Erin Example (erin@example.com)', entityType: 'contact' }]);
+    expect(result).toEqual([
+      { id: 'contact-1', name: 'Erin Example (erin@example.com)', email: 'erin@example.com', entityType: 'contact' },
+    ]);
   });
 });
 
