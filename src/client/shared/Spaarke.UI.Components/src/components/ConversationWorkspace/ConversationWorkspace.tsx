@@ -156,7 +156,9 @@ const DefaultConversationPane: React.FC<{ threadId?: string }> = ({ threadId }) 
   const styles = useStyles();
   return (
     <div className={styles.placeholder} role="region" aria-label="Conversation">
-      <Text>{threadId ? `Conversation placeholder for thread ${threadId}.` : 'Select a thread to view the conversation.'}</Text>
+      <Text>
+        {threadId ? `Conversation placeholder for thread ${threadId}.` : 'Select a thread to view the conversation.'}
+      </Text>
     </div>
   );
 };
@@ -274,7 +276,10 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
             // error the whole list on one thread's unread-count call failing — just
             // leave that row's indicator absent and surface the failure for
             // telemetry/debugging visibility instead of swallowing it entirely.
-            console.warn(`ConversationWorkspace: unread-count fetch failed for thread ${visibleRows[idx].threadId}`, res.reason);
+            console.warn(
+              `ConversationWorkspace: unread-count fetch failed for thread ${visibleRows[idx].threadId}`,
+              res.reason
+            );
           }
         });
         return next;
@@ -336,11 +341,15 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     [visibleRows, unreadCounts]
   );
 
-  const rightPane = selectedThreadId
-    ? renderConversation
-      ? renderConversation({ threadId: selectedThreadId, authenticatedFetch, bffBaseUrl })
-      : <DefaultConversationPane threadId={selectedThreadId} />
-    : <DefaultConversationPane />;
+  const rightPane = selectedThreadId ? (
+    renderConversation ? (
+      renderConversation({ threadId: selectedThreadId, authenticatedFetch, bffBaseUrl })
+    ) : (
+      <DefaultConversationPane threadId={selectedThreadId} />
+    )
+  ) : (
+    <DefaultConversationPane />
+  );
 
   return (
     <div className={mergeClasses(styles.root, className)}>

@@ -195,11 +195,7 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
           )}
           {isOwn && status && (
             <Text className={mergeClasses(styles.statusText, status === 'failed' ? styles.statusFailed : undefined)}>
-              {status === 'failed' ? (
-                <ErrorCircleRegular fontSize={12} />
-              ) : (
-                <CheckmarkCircleRegular fontSize={12} />
-              )}{' '}
+              {status === 'failed' ? <ErrorCircleRegular fontSize={12} /> : <CheckmarkCircleRegular fontSize={12} />}{' '}
               {statusLabel(status)}
             </Text>
           )}

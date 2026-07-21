@@ -701,13 +701,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         </div>
       )}
 
-      <div
-        ref={listRef}
-        className={styles.list}
-        role="log"
-        aria-label="Conversation messages"
-        onScroll={handleScroll}
-      >
+      <div ref={listRef} className={styles.list} role="log" aria-label="Conversation messages" onScroll={handleScroll}>
         {isLoading && (
           <div className={styles.centerState}>
             <Spinner size="small" label="Loading conversation…" />

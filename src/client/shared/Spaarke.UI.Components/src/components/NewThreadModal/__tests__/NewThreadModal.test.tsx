@@ -73,7 +73,12 @@ function makeFetch(opts: IFakeFetchOptions = {}) {
       }
       return Promise.resolve({ ok: true, json: async () => ({ communicationId: 'comm-1' }) } as Response);
     }
-    return Promise.resolve({ ok: false, status: 404, headers: { get: () => '' }, json: async () => ({}) } as unknown as Response);
+    return Promise.resolve({
+      ok: false,
+      status: 404,
+      headers: { get: () => '' },
+      json: async () => ({}),
+    } as unknown as Response);
   });
 }
 
@@ -218,7 +223,9 @@ describe('NewThreadModal — validation', () => {
 
 describe('NewThreadModal — error handling', () => {
   it('surfaces a create failure inline, keeps the dialog open, and does not select a thread', async () => {
-    const fetchImpl = makeFetch({ directError: { status: 400, detail: 'Cannot start a direct thread with yourself.' } });
+    const fetchImpl = makeFetch({
+      directError: { status: 400, detail: 'Cannot start a direct thread with yourself.' },
+    });
     const { onThreadCreated, onDismiss, onError } = renderModal({}, fetchImpl);
 
     await addSpaarkeUser();

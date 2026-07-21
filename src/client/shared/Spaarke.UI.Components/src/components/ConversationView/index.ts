@@ -7,10 +7,6 @@
  * (per the parallel file-ownership boundary with task 012).
  */
 export { ConversationView, isOwnMessage, buildConversationRenderItems } from './ConversationView';
-export type {
-  ConversationViewProps,
-  ConversationRenderItem,
-  MessageBubbleStatus,
-} from './ConversationView.types';
+export type { ConversationViewProps, ConversationRenderItem, MessageBubbleStatus } from './ConversationView.types';
 export { MessageBubble } from './subcomponents/MessageBubble';
 export type { IMessageBubbleProps } from './subcomponents/MessageBubble';

@@ -89,7 +89,11 @@ describe('MessageQuickView', () => {
   it('strips HTML markup from an html body before previewing', async () => {
     const user = userEvent.setup();
     renderQuickView({
-      message: message({ body: '<p>Hello <strong>bold</strong> world</p>', bodyFormat: 'html', channelType: 'message' }),
+      message: message({
+        body: '<p>Hello <strong>bold</strong> world</p>',
+        bodyFormat: 'html',
+        channelType: 'message',
+      }),
     });
     await openPopover(user);
     expect(await screen.findByText('Hello bold world')).toBeInTheDocument();

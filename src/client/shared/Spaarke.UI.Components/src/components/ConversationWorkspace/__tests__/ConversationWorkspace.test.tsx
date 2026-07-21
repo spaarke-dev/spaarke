@@ -68,9 +68,7 @@ function makeAuthenticatedFetch(options: IMockFetchOptions = {}) {
     if (/\/api\/communications\/threads(\?|$)/.test(url)) {
       const parsed = new URL(url, 'https://bff.example.com');
       const search = parsed.searchParams.get('search');
-      const threads = search
-        ? allThreads.filter(t => t.name.toLowerCase().includes(search.toLowerCase()))
-        : allThreads;
+      const threads = search ? allThreads.filter(t => t.name.toLowerCase().includes(search.toLowerCase())) : allThreads;
       return jsonResponse({ threads, count: threads.length, nextPageToken: null, hasMore: false });
     }
     return jsonResponse({ title: 'Not Found' }, 404);
@@ -105,7 +103,7 @@ describe('ConversationWorkspace — mount-agnostic (FR-01)', () => {
     expect(authenticatedFetch.mock.calls.some(([u]) => u.includes('/by-regarding/'))).toBe(false);
   });
 
-  it('record mode (regarding present): lists ONLY that record\'s threads via by-regarding, never FR-16 /threads', async () => {
+  it("record mode (regarding present): lists ONLY that record's threads via by-regarding, never FR-16 /threads", async () => {
     const { authenticatedFetch } = renderWorkspace({ regarding: { entityType: 'sprk_matter', id: 'rec1' } });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
@@ -174,9 +172,7 @@ describe('ConversationWorkspace — selection + renderConversation seam', () => 
     renderWorkspace({ renderConversation });
 
     await waitFor(() => expect(screen.getByTestId('conv')).toHaveTextContent('t1'));
-    expect(renderConversation).toHaveBeenCalledWith(
-      expect.objectContaining({ threadId: 't1', bffBaseUrl: undefined })
-    );
+    expect(renderConversation).toHaveBeenCalledWith(expect.objectContaining({ threadId: 't1', bffBaseUrl: undefined }));
   });
 
   it('renders the built-in placeholder pane when renderConversation is omitted', async () => {

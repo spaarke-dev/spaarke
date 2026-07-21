@@ -227,13 +227,7 @@ export const MessageQuickView: React.FC<IMessageQuickViewProps> = ({
   const subjectValue = subject ?? '';
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={handleOpenChange}
-      positioning={positioning}
-      withArrow={withArrow}
-      trapFocus
-    >
+    <Popover open={open} onOpenChange={handleOpenChange} positioning={positioning} withArrow={withArrow} trapFocus>
       <PopoverTrigger disableButtonEnhancement>{trigger}</PopoverTrigger>
       <PopoverSurface className={styles.surface} aria-label="Message preview">
         {!message ? (

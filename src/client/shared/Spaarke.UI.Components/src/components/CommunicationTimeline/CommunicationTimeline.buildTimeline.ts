@@ -51,7 +51,8 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     // remains unchanged for existing MessageRow consumers.
     senderSystemUserId: dto.sentBy,
     senderName: dto.sentByName,
-    direction: dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
+    direction:
+      dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
     sentOn: dto.sentAt ?? dto.createdOn,
     createdOn: dto.createdOn,
     body: dto.body,
