@@ -100,6 +100,7 @@ import {
 import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
+import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
@@ -729,6 +730,20 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedForeground1,
       textDecorationLine: 'line-through',
     },
+    // Item 4 (UAT round-4): the LIVE Track Changes decoration overlay. Same green-underline /
+    // red-strike redline look as the AI marks above, but DISTINCT classes so they do NOT inherit the
+    // AI-rationale lightbulb `::before` (a user's own edit carries no rationale popover). These style
+    // ProseMirror decoration spans/widgets, not schema marks — pure view (see TrackChangesExtension.ts).
+    '& .compose-track-insertion': {
+      color: tokens.colorPaletteGreenForeground1,
+      textDecorationLine: 'underline',
+    },
+    '& .compose-track-deletion': {
+      color: tokens.colorPaletteRedForeground1,
+      textDecorationLine: 'line-through',
+      // The deleted text is a non-editable widget reinserted for display only.
+      userSelect: 'none',
+    },
     // U1 R2 (UAT 2026-07-20): a small lightbulb at the FRONT of each pending redline signals "click me
     // for the rationale". A redline renders as a deletion span (struck original) immediately followed by
     // an insertion span (new text) — the rule below puts ONE bulb on whichever span comes first and
@@ -1187,6 +1202,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // against it to find the dirty paragraphs the server deltas onto the retained original.
     const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
+    // Item 4 (UAT round-4): live Track Changes decoration overlay. The extension is configured ONCE
+    // (stable options) — `getBaseline` reads the load-time snapshot ref live, so the redline tracks
+    // edits without re-registering the plugin. Enabled state is driven via a transaction meta (below),
+    // NOT via re-configuring the extension. See TrackChangesExtension.ts for the decoration-not-mark
+    // design rationale (edits stay real content → persist via the existing collectEditedParagraphs path).
+    const trackChangesExtension = React.useMemo(
+      () =>
+        TrackChangesExtension.configure({
+          initialEnabled: false,
+          getBaseline: () => paraIdSnapshotRef.current,
+        }),
+      []
+    );
+    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(false);
+
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
     // signature before mammoth, or via the mammoth-throw fallback). The editor
@@ -1336,6 +1366,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
+        trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
@@ -1590,6 +1621,18 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       });
     }, [editor]);
 
+    // Item 4 (UAT round-4): flip the Track Changes overlay. The enabled flag lives in BOTH React
+    // state (drives the toolbar's pressed style) AND the plugin state (drives `decorations`), kept in
+    // sync here — the toggle dispatches a transaction meta so ProseMirror re-runs `decorations`
+    // immediately (a ref change alone would not repaint).
+    const toggleTrackChanges = React.useCallback((): void => {
+      setTrackChangesEnabled(prev => {
+        const next = !prev;
+        if (editor) editor.view.dispatch(editor.state.tr.setMeta(trackChangesPluginKey, { enabled: next }));
+        return next;
+      });
+    }, [editor]);
+
     // ----- FIX #9 — track whether the editor surface has more content below ---
     // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
     // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
@@ -1753,6 +1796,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          trackChangesEnabled={trackChangesEnabled}
+          onToggleTrackChanges={toggleTrackChanges}
         />
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
