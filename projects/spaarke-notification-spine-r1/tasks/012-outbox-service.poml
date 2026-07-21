@@ -4,7 +4,7 @@
     <title>Outbox Write/Read/Expire Service — Layer B Durable Store</title>
     <phase>1 Layer B + Contract + ADR-047</phase>
     <gate>blocked-until:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF service implementation touching `.cs` in `Sprk.Bff.Api`, with a seam-test DoD obligation (ADR-038) — meets the FULL-rigor bar per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

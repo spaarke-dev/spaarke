@@ -11,9 +11,9 @@
 | ID | Title | Phase | Status | Deps | Tier/Effort | Rigor | Parallel |
 |----|-------|-------|--------|------|-------------|-------|----------|
 | 001 | SignalR footprint spike (FR-01) | 0 | ✅ | none | opus/high | STANDARD | none (blocking gate) |
-| 010 | Author ADR-047 (concise + full) | 1 | 🔲 | 001 | opus/high | STANDARD | ❌ main-session (.claude/) |
+| 010 | Author ADR-047 (concise + full) | 1 | ✅ | 001 | opus/high | STANDARD | ❌ main-session (.claude/) |
 | 011 | Outbox table schema (FR-02) | 1 | ✅ | none | sonnet/high | STANDARD | Group P1 |
-| 012 | Outbox service (FR-02) | 1 | 🔲 | 011 | sonnet/high | FULL | — |
+| 012 | Outbox service (FR-02) | 1 | ✅ | 011 | sonnet/high | FULL | — |
 | 013 | Envelope contract + kind taxonomy (FR-03/10) | 1 | ✅ | none | sonnet/high | FULL | Group P1 |
 | 020 | SignalR delivery service + negotiate (FR-04) | 2 | 🔲 | 001,012,013 | opus/high | FULL | — |
 | 021 | Shared client subscriber library (FR-05) | 2 | 🔲 | 020,013 | sonnet/high | FULL | — |

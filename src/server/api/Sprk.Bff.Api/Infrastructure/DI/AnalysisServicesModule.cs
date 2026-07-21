@@ -315,6 +315,14 @@ public static class AnalysisServicesModule
         // B1 — NotificationService (deps: IGenericEntityService, ILogger — both unconditional).
         services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
 
+        // spaarke-notification-spine-r1 task 012 — OutboxService (deps: IGenericEntityService,
+        // ILogger, TimeProvider — all unconditional). Layer B durable-store CRUD over
+        // sprk_notificationoutbox (task 011); no kill switch — every notification producer needs a
+        // durable place to write before any delivery mechanism (SignalR, task 020) is attempted.
+        // Registered here (not a new module) per CLAUDE.md §11 — mirrors the NotificationService B1
+        // promotion above (same "CRUD-only deps happen to live near AI/chat consumers" shape).
+        services.AddSingleton<Sprk.Bff.Api.Services.Notifications.OutboxService>();
+
         // B4 — IChatDataverseRepository + ChatDataverseRepository
         // (deps: IGenericEntityService, ILogger — all unconditional).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
