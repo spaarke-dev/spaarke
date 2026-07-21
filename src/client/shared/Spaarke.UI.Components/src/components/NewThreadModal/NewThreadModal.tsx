@@ -66,14 +66,8 @@ import { RecipientField, BodyEditor, AssociationChips } from '../EmailComposer';
 import type { IRecipient, EmailComposerBodyFormat } from '../EmailComposer';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { ILookupItem } from '../../types/LookupTypes';
-import {
-  sendCommunication,
-  type ICommunicationAssociation,
-} from '../../services/communicationApi';
-import {
-  startDirectThread,
-  type IThreadListApiClientOptions,
-} from '../../services/communicationThreadListApi';
+import { sendCommunication, type ICommunicationAssociation } from '../../services/communicationApi';
+import { startDirectThread, type IThreadListApiClientOptions } from '../../services/communicationThreadListApi';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -234,14 +228,11 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   // — a single `ICommunicationAssociation` rendered read-only via `AssociationChips`
   // and carried onto the first message's send payload. No second regarding path.
   const associations = React.useMemo<ICommunicationAssociation[]>(
-    () =>
-      regarding
-        ? [{ entityType: regarding.entityType, entityId: regarding.id, entityName: regarding.name }]
-        : [],
+    () => (regarding ? [{ entityType: regarding.entityType, entityId: regarding.id, entityName: regarding.name }] : []),
     [regarding]
   );
 
-  const regardingLabel = regarding ? regarding.name ?? regarding.entityType : '';
+  const regardingLabel = regarding ? (regarding.name ?? regarding.entityType) : '';
 
   const resetState = React.useCallback(() => {
     setParticipants([]);
@@ -305,10 +296,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
     // ── Step 1: find-or-create the thread ──────────────────────────────────
     let created;
     try {
-      created = await startDirectThread(
-        { otherParticipantSystemUserId: participant.sourceId as string },
-        client
-      );
+      created = await startDirectThread({ otherParticipantSystemUserId: participant.sourceId as string }, client);
     } catch (err) {
       // Create failure (fatal): stay open, surface the error, no selection.
       const error = toError(err, 'Failed to create the conversation.');

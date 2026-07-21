@@ -191,9 +191,7 @@ describe('ConversationView email-in-flow (FR-04)', () => {
   });
 
   it('degrades gracefully with fallbacks when subject/from/to are missing (no crash)', async () => {
-    const messages = [
-      dto('email1', { communicationType: EMAIL, subject: null, from: null, to: [], sentBy: USER_1 }),
-    ];
+    const messages = [dto('email1', { communicationType: EMAIL, subject: null, from: null, to: [], sentBy: USER_1 })];
     renderView({ authenticatedFetch: buildFetch(messages) as unknown as ConversationViewProps['authenticatedFetch'] });
 
     // aria-label uses the fallbacks: "Email: (no subject), from Unknown sender".

@@ -216,12 +216,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
       )}
 
       {status === 'ready' && rows.length > 0 && (
-        <div
-          className={styles.list}
-          role="list"
-          aria-label="Conversation threads"
-          onKeyDown={handleListKeyDown}
-        >
+        <div className={styles.list} role="list" aria-label="Conversation threads" onKeyDown={handleListKeyDown}>
           {rows.map(row => {
             const isSelected = row.threadId === selectedThreadId;
             const isFocused = row.threadId === focusedThreadId;

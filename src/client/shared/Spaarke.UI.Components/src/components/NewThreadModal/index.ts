@@ -5,7 +5,4 @@
  * task must NOT edit `src/components/index.ts`).
  */
 export { NewThreadModal, default } from './NewThreadModal';
-export type {
-  INewThreadModalProps,
-  INewThreadModalRegarding,
-} from './NewThreadModal';
+export type { INewThreadModalProps, INewThreadModalRegarding } from './NewThreadModal';

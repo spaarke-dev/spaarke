@@ -54,7 +54,8 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     // R3 task 021 (FR-04) — email-in-flow block fields, additive pass-through.
     subject: dto.subject,
     to: dto.to ?? [],
-    direction: dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
+    direction:
+      dto.direction === DIRECTION_INCOMING ? 'incoming' : dto.direction === DIRECTION_OUTGOING ? 'outgoing' : null,
     sentOn: dto.sentAt ?? dto.createdOn,
     createdOn: dto.createdOn,
     body: dto.body,

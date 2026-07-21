@@ -240,9 +240,11 @@ describe('useRegardingPoll', () => {
   });
 
   function setup(overrides: Partial<UseRegardingPollOptions> = {}) {
-    const authenticatedFetch = jest.fn().mockResolvedValue(
-      jsonResponse({ entityType: 'sprk_matter', recordId: 'r1', threads: [], threadCount: 0, messageCount: 0 })
-    );
+    const authenticatedFetch = jest
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ entityType: 'sprk_matter', recordId: 'r1', threads: [], threadCount: 0, messageCount: 0 })
+      );
     const onLoading = jest.fn();
     const onGroups = jest.fn();
     const onError = jest.fn();
