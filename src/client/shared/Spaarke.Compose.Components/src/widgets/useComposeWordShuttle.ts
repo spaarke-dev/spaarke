@@ -215,21 +215,58 @@ export function redlineMarksToDocxAnnotations(
   author: string,
   timestamp: string
 ): DocxAnnotationInput[] {
-  const byRef = new Map<string, RedlineAccumulator>();
-  const order: string[] = [];
+  const result: DocxAnnotationInput[] = [];
+  // The paraId-bearing block node types (mirror the server's per-`<w:p>` annotation search).
+  const BLOCK_TYPES = new Set(['paragraph', 'heading']);
 
-  const visit = (node: RedlineJsonNode | null | undefined): void => {
+  // Fix #1 (UAT 2026-07-20): accumulate insertion/deletion text per ledgerRef WITHIN A SINGLE BLOCK, and
+  // flush that block's annotations before moving on. Previously the accumulation was global per ledgerRef,
+  // so a redline spanning >1 editor paragraph (e.g. when the AI target didn't resolve and the mark fell
+  // back to the user's raw multi-paragraph selection) emitted ONE `targetText` that concatenated two
+  // `<w:p>` bodies. The server's `DocxAnnotationWriter.LocateTarget` searches ONE paragraph at a time, so
+  // a cross-paragraph target is present in no single paragraph → TargetNotFound → 422. Splitting per block
+  // makes every emitted `targetText` live inside a single paragraph (single-paragraph redlines are
+  // unchanged — identical output). Block order = document order, preserving the apply sequence.
+  const flushBlock = (byRef: Map<string, RedlineAccumulator>, order: string[]): void => {
+    for (const ref of order) {
+      const acc = byRef.get(ref)!;
+      const targetText = acc.deletionText.length > 0 ? acc.deletionText : undefined;
+      // Insertion FIRST (anchored to the still-live original), then Deletion — see JSDoc.
+      if (acc.insertionText.length > 0) {
+        result.push({
+          kind: DocxTrackChangeKind.Insertion,
+          targetText: targetText ?? null,
+          newText: acc.insertionText,
+          author,
+          date: timestamp,
+        });
+      }
+      if (acc.deletionText.length > 0) {
+        result.push({
+          kind: DocxTrackChangeKind.Deletion,
+          targetText: acc.deletionText,
+          author,
+          date: timestamp,
+        });
+      }
+    }
+  };
+
+  // Collect the redline text of a SINGLE block's inline content into block-scoped accumulators.
+  const collectBlockInlines = (
+    node: RedlineJsonNode | null | undefined,
+    byRef: Map<string, RedlineAccumulator>,
+    order: string[]
+  ): void => {
     if (!node) return;
     if (node.type === 'text' && typeof node.text === 'string' && node.text.length > 0 && node.marks) {
       for (const mark of node.marks) {
         if (mark.type !== 'insertion' && mark.type !== 'deletion') continue;
         const ledgerRef = typeof mark.attrs?.ledgerRef === 'string' ? mark.attrs.ledgerRef : '';
         if (!ledgerRef) continue;
-        // FR-24 (spaarkeai-compose-r3 task 050): an IMPORTED existing Word revision (ledgerRef prefixed
-        // `imported:`) already lives in the retained-original baseline the dirty save deltas onto — it
-        // rides that baseline (survival proven by task 052) and MUST NOT be re-emitted here as a new
-        // annotation, or the save would double-write it. AI-suggested redlines (no `imported:` prefix)
-        // are unaffected. Kept in sync with IMPORTED_LEDGER_PREFIX in importedRevisions.ts.
+        // FR-24 (task 050): an IMPORTED existing Word revision (`imported:` prefix) already lives in the
+        // retained-original baseline the dirty save deltas onto — it MUST NOT be re-emitted or the save
+        // double-writes it. Kept in sync with IMPORTED_LEDGER_PREFIX in importedRevisions.ts.
         if (ledgerRef.startsWith('imported:')) continue;
         let acc = byRef.get(ledgerRef);
         if (!acc) {
@@ -241,33 +278,24 @@ export function redlineMarksToDocxAnnotations(
         else acc.deletionText += node.text;
       }
     }
-    if (node.content) for (const child of node.content) visit(child);
+    if (node.content) for (const child of node.content) collectBlockInlines(child, byRef, order);
   };
-  visit(docJson as RedlineJsonNode);
 
-  const result: DocxAnnotationInput[] = [];
-  for (const ref of order) {
-    const acc = byRef.get(ref)!;
-    const targetText = acc.deletionText.length > 0 ? acc.deletionText : undefined;
-    // Insertion FIRST (anchored to the still-live original), then Deletion — see JSDoc.
-    if (acc.insertionText.length > 0) {
-      result.push({
-        kind: DocxTrackChangeKind.Insertion,
-        targetText: targetText ?? null,
-        newText: acc.insertionText,
-        author,
-        date: timestamp,
-      });
+  // Walk the doc to each block (descending through doc/table/row/cell containers); each block gets its
+  // OWN accumulators, flushed before the next block so no annotation ever spans a paragraph.
+  const walkBlocks = (node: RedlineJsonNode | null | undefined): void => {
+    if (!node) return;
+    if (typeof node.type === 'string' && BLOCK_TYPES.has(node.type)) {
+      const byRef = new Map<string, RedlineAccumulator>();
+      const order: string[] = [];
+      collectBlockInlines(node, byRef, order);
+      flushBlock(byRef, order);
+      return; // a block's inline content is fully handled — do not descend further into it
     }
-    if (acc.deletionText.length > 0) {
-      result.push({
-        kind: DocxTrackChangeKind.Deletion,
-        targetText: acc.deletionText,
-        author,
-        date: timestamp,
-      });
-    }
-  }
+    if (node.content) for (const child of node.content) walkBlocks(child);
+  };
+  walkBlocks(docJson as RedlineJsonNode);
+
   return result;
 }
 

@@ -87,7 +87,6 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
-  Lightbulb16Regular,
   TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
@@ -716,6 +715,24 @@ const useStyles = makeStyles({
       color: tokens.colorPaletteRedForeground1,
       textDecorationLine: 'line-through',
     },
+    // U1 R2 (UAT 2026-07-20): a small lightbulb at the FRONT of each pending redline signals "click me
+    // for the rationale". A redline renders as a deletion span (struck original) immediately followed by
+    // an insertion span (new text) — the rule below puts ONE bulb on whichever span comes first and
+    // SUPPRESSES the duplicate on the insertion half of a deletion→insertion pair, so a pair shows a
+    // single cue. Semantic token color; no text-decoration bleed onto the glyph.
+    '& .compose-mark-insertion::before, & .compose-mark-deletion::before': {
+      content: '"\\1F4A1"', // 💡
+      fontSize: '0.8em',
+      marginRight: '2px',
+      color: tokens.colorNeutralForeground3,
+      textDecorationLine: 'none',
+      cursor: 'pointer',
+      userSelect: 'none',
+      verticalAlign: 'baseline',
+    },
+    '& .compose-mark-deletion + .compose-mark-insertion::before': {
+      content: 'none', // the pair's cue already sits on the leading deletion span
+    },
     '& .compose-mark-comment-anchor': {
       backgroundColor: tokens.colorPaletteYellowBackground2,
       color: tokens.colorNeutralForeground1,
@@ -856,31 +873,38 @@ const useStyles = makeStyles({
   // width) so the cited rationale — the primary trust cue (design §6.2) — is fully READABLE instead of a
   // clipped single line in the compact single-row bubble the popover used to borrow. Semantic tokens only
   // (ADR-021 dark-mode-correct); positioned at the click point by `contextMenuPopup`.
+  // U1 (UAT 2026-07-20 R2): a responsive CARD — sizes to its content (up to a viewport-safe max),
+  // never the former clipped single-row bubble. Semantic tokens only (ADR-021 dark-mode-correct);
+  // positioned at the click point by `contextMenuPopup`.
   redlinePopover: {
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalXS,
-    width: '320px',
-    maxWidth: 'min(320px, 92vw)',
+    width: 'max-content',
+    minWidth: '220px',
+    maxWidth: 'min(360px, 92vw)',
     padding: tokens.spacingHorizontalM,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
     boxShadow: tokens.shadow16,
   },
-  // The "Suggested edit" header row — a note icon + label so the rationale reads as an AI suggestion.
-  redlineHeader: {
+  // U1 R2: the confidence band is now the compact HEADER (the "Suggested edit" label was removed at the
+  // operator's request), with a little padding + a hairline divider below it separating it from the
+  // rationale body. The §6.2 anti-rubber-stamp safeguards are UNCHANGED — a low-band edit still shows its
+  // explicit "Needs review" cue here and its Accept button stays demoted below.
+  redlineTopBar: {
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXS,
-    color: tokens.colorNeutralForeground2,
+    flexWrap: 'wrap',
+    rowGap: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalXXS,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
   },
-  redlineHeaderIcon: {
-    color: tokens.colorBrandForeground1,
-    flexShrink: 0,
-  },
-  // U1: the cited rationale — now WRAPS to as many lines as needed (up to a scrollable cap) instead of
-  // the former single-line ellipsis truncation that hid most of the explanation.
+  // U1: the cited rationale — WRAPS to as many lines as needed (up to a scrollable cap) instead of the
+  // former single-line ellipsis truncation that hid most of the explanation.
   redlineHeadline: {
     display: 'block',
     width: '100%',
@@ -1875,21 +1899,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                 >
                   {clicked ? (
                     <>
-                      {/* U1 (UAT 2026-07-20): a clear "Suggested edit" header + the FULL cited rationale
-                          (wraps, scrolls if long) — the primary trust cue, no longer clipped to one line
-                          nor cluttered with the internal ledger id. */}
-                      <div className={styles.redlineHeader}>
-                        <Lightbulb16Regular className={styles.redlineHeaderIcon} aria-hidden="true" />
-                        <Text size={200} weight="semibold">
-                          Suggested edit
-                        </Text>
-                      </div>
-                      <Text size={300} className={styles.redlineHeadline} data-testid="compose-redline-rationale">
-                        {clicked.rationale && clicked.rationale.trim().length > 0
-                          ? clicked.rationale.trim()
-                          : 'Suggested edit'}
-                      </Text>
-                      <div className={styles.redlineSecondaryRow} data-testid="compose-redline-confidence-band">
+                      {/* U1 R2 (UAT 2026-07-20): the confidence band is the compact header (the "Suggested
+                          edit" label was removed at the operator's request), with padding + a divider below
+                          it. The §6.2 anti-rubber-stamp safeguards are unchanged — a low-band edit still
+                          shows "Needs review" and its Accept stays demoted below. */}
+                      <div className={styles.redlineTopBar} data-testid="compose-redline-confidence-band">
                         <Badge size="small" appearance="tint" color={confidenceBandColor(clicked.confidenceBand)}>
                           {confidenceBandLabel(clicked.confidenceBand)}
                         </Badge>
@@ -1903,6 +1917,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
                           </Text>
                         ) : null}
                       </div>
+                      {/* The FULL cited rationale (wraps, scrolls if long) — no internal ledger id. */}
+                      <Text size={300} className={styles.redlineHeadline} data-testid="compose-redline-rationale">
+                        {clicked.rationale && clicked.rationale.trim().length > 0
+                          ? clicked.rationale.trim()
+                          : 'Suggested edit'}
+                      </Text>
                     </>
                   ) : null}
                   <div className={styles.redlineActions}>

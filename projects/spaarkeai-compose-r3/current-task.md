@@ -4,17 +4,29 @@
 > **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — R3 DEPLOYED to spaarkedev1; UAT found 3 bugs + 1 UX ask (2026-07-19). FIX NEXT.
+## ▶️ RESUME HERE — 3 UAT rounds FIXED + deployed + MERGED TO MASTER (2026-07-21). Re-UAT round 3 next.
 
-**All implementation + the full deploy are DONE.** BFF `spaarke-bff-dev` (hash-verified, healthz green, compose routes 401) + client `sprk_spaarkeai` (published) are LIVE on spaarkedev1. Worktree synced to master (`93fb2d31f`), 0 behind, NOT merged to master (owner's call). Tasks 025/081 ✅.
+**Full handoff: [`notes/uat-handoff-2026-07-21.md`](notes/uat-handoff-2026-07-21.md).** Everything through UAT round 3
+is committed AND merged to master. Worktree = origin/master = main-repo master = `6c60586ac` (0 uncommitted /
+unpushed / unmerged / behind).
 
-**⚠️ FIRST BROWSER UAT SURFACED REAL BUGS — full detail + triage in [`notes/uat-feedback-2026-07-19.md`](notes/uat-feedback-2026-07-19.md). Fix order (all CLIENT-side `Spaarke.Compose.Components`; BFF unchanged; re-deploy `sprk_spaarkeai` after):**
-- **P1 — `insertBefore` DOM crash → "Compose failed to load"** on mount / clicking A (styles, 043) or Comments (044). **Leading cause:** the client-wire fix (`8f2cec4a6`) made `importedRevisions`/`importedComments` LIVE, so `applyImportedRevisions`/`applyImportedCommentAnchors` now run at mount and insert a mark at an INVALID position → `insertBefore` throws. Headless tests are green (real-DOM-only). Fix: bounds-check + per-mark try-catch-skip in `importedRevisions.ts`/`importedComments.ts`; don't crash the mount on one unplaceable mark. (The amber "target text not found" banner is FR-19 working, NOT a bug.)
-- **P2 — Save: "content is required and must be non-empty"** on a born-in-editor AI-drafted doc. `triggerSave` should send `{contentModel}` (create-on-save). Trace `ComposeWorkspace.triggerSave` 4-case classification for a workspace-tab AI draft — likely mis-classified so it sends neither content nor contentModel.
-- **P3 — Word "Open in Web"/"Open in Desktop" not activated** — likely gated on a saved doc (blocked by P2) or a wiring gap. Re-check after P2.
-- **UX-1 — add "Save" to the Word dropdown** (duplicate of the toolbar save; users look there). Small `ComposeFormatToolbar.tsx` add.
+**Deployed on spaarkedev1:** `sprk_spaarkeai` (client) LIVE with ALL compose fixes through round 3
+(Dataverse-content-verified). BFF `spaarke-bff-dev` = round-2 build (47.08 MB, hash-verified) with C1 fold +
+C2 stamper — round-3 was client-only, so **no further BFF deploy needed for compose**. (Master also carries
+another project's BFF Communication-engine work, NOT yet deployed — that team deploys it; not our concern.)
 
-**After UAT fixes:** re-build + re-deploy `sprk_spaarkeai` (BFF unchanged), re-UAT (082), then 090 wrap-up (code-review, adr-check, /test-diet, lessons-learned).
+**Fixes shipped (detail in commit messages + handoff note):**
+- Round 1 (`e31f99cf2`/`c1f57cb54`): P1 BubbleMenu insertBefore crash · P2 born-in-editor 2nd-save baseline · P3 Word-open · UX-1 Save-in-Word-dropdown.
+- Round 2 (`ef36acfcc`): C1 save-422 typographic fold · **C2 KEYSTONE** accept→save paraId abort (`ComposeBaselineParaIdStamper` stamps minted paraIds onto the baseline at save) · C3 redlines→Word · U1 rationale card · U2 empty-states.
+- Round 3 (`50045ccc7`): **Fix #1** cross-paragraph save-422 (per-block annotation split) · **Fix #4** client "target not found" whitespace-collapse fallback · U1 R2 (💡 on redline + responsive card, confidence-header, no "Suggested edit" label).
+
+**Tests:** BFF compose 266/266; client compose 358/358 (parallel AND --runInBand).
+
+**NEXT:** (1) re-UAT round 3 on spaarkedev1 (hard-refresh first). (2) KNOWN CAVEAT: Fix #1 solved CROSS-paragraph
+422; if a save still 422s on INTRA-paragraph whitespace drift, the server `DocxAnnotationWriter.LocateTarget`
+needs the same whitespace-tolerant match Fix #4 gave the client (BFF change → BFF deploy) — get the TraceId.
+(3) A genuine AI paraphrase still correctly REFUSES to place (FR-19; not a bug). (4) After sign-off → task 082
+flagship gate (`ui-test`) → 090 wrap-up.
 
 ### ⬇️ (prior) ALL IMPLEMENTATION COMPLETE (2026-07-19)
 
