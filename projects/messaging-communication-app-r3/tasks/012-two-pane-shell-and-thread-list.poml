@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Two-pane conversation shell + thread list, mount-agnostic (FR-01/10)</title>
+    <phase>2 Shared conversation widget core</phase>
+    <gate>after:010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx shell component in the shared lib mounted across all three surfaces; consumes the FR-16 list endpoint. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composition over existing pieces (thread list + ConversationView); well-specified mount contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010, 003</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the shared two-pane conversation shell: a thread-list pane on the left and `ConversationView` on the right, mount-agnostic (inline / standalone code page / record-scoped modal). It takes an OPTIONAL regarding filter (`entityType` + `id`); when supplied, only that record's threads are listed. The thread list shows each thread's name + an unread indicator, a word-filter dropdown, and a create-thread (＋) affordance. It consumes the FR-16 `GET /api/communications/threads` endpoint via the injected `authenticatedFetch`. Reuse `UnreadIndicator.tsx` from the core. The SAME component renders in all three mounts.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>A `ConversationWorkspace` shell that lists threads (name + unread + word-filter + create ＋) and renders the selected thread in `ConversationView`; mount-agnostic with an optional `regarding` prop; empty/loading/error states; keyboard + ARIA; light + dark via host FluentProvider.</goal>
+  <context>
+    <background>FR-01 defines a single shared widget usable inline (workspace), as a standalone code page, and as a record-scoped modal — the difference is only the optional `regarding` filter and the mount host, not the component. FR-16 provides `GET /api/communications/threads` (all threads incl. record-less, paged/searchable by name). The thread list intentionally shows only name + unread (per FR-10) — no last-message preview. Create-thread (＋) opens the NewThreadModal built in task 024 (wire the callback prop here; the modal itself lands later).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/UnreadIndicator.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx</file>
+    </relevant-files>
+    <dependencies>010 (characterization). 003 backend/schema (participant junction — thread names + unread derive from it). ConversationView from 011 for the right pane; if 011 not yet merged, stub the right pane behind the same prop contract and integrate once available. FR-16 endpoint from Phase 1.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-01">Same component renders in all three mounts (inline / code page / record modal); the only difference is the optional `regarding` (`entityType`+`id`) prop and the host wrapper.</constraint>
+    <constraint source="FR-10">Thread list rows show name + unread indicator ONLY (no preview text); provide a word-filter dropdown and a create-thread ＋ affordance.</constraint>
+    <constraint source="FR-16">Consume `GET /api/communications/threads` (paged/searchable by name). In record mode, pass the regarding filter so only that record's threads return.</constraint>
+    <constraint source="NFR-01">Reads are access-filtered server-side; the client MUST NOT hand-compute a membership union or infer threads the server did not return.</constraint>
+    <constraint source="ADR-028">All BFF calls via the injected `authenticatedFetch` prop (`@spaarke/auth` supplied by the host, not imported here).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Keyboard nav across list + pane; ARIA list/listitem semantics; empty/loading/error states.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Workspace widget shell" location="src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx">Reference for how the widget mounts + wires props; keep type string `communications-list`.</pattern>
+      <pattern name="Unread indicator" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/UnreadIndicator.tsx">Reuse for the thread-list unread marker.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the FR-16 endpoint contract (list shape: threadId, name, unread signal, regarding fields, paging). Confirm how record-filtering is expressed.</step>
+    <step order="2">Create `ConversationWorkspace/` with `ConversationWorkspace.tsx` and a `subcomponents/ThreadList.tsx` (rows = name + `UnreadIndicator`; word-filter dropdown; create ＋ button calling an `onCreateThread` prop).</step>
+    <step order="3">Add an optional `regarding?: { entityType, id }` prop; when present, pass it to the list fetch so only that record's threads return; when absent, list all (incl. record-less).</step>
+    <step order="4">Selecting a thread renders it in `ConversationView` on the right; maintain selected-thread state; default-select the first/most-recent thread.</step>
+    <step order="5">Implement empty (no threads), loading, and error states for the list pane; ARIA list semantics + keyboard selection.</step>
+    <step order="6">Export from the lib index; write component tests (record-mode filters to one record's threads, all-mode lists record-less, word filter narrows, ＋ invokes callback, empty/loading/error, dark mode).</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If FR-16's list contract cannot express the record filter (or returns unfiltered threads in record mode), STOP and escalate — the client MUST NOT filter access client-side (NFR-01).</trigger>
+  </escalation>
+  <justification>
+    <existing>`CommunicationsWorkspaceWidget.tsx` is a single-pane workspace widget; there is no two-pane shell that lists threads (incl. record-less) beside a conversation.</existing>
+    <extension>No — the widget wraps content for the workspace; the shell is the reusable two-pane host that the widget, code page, and modal all mount. It is new shared surface, not a modification of the widget.</extension>
+    <cost-of-doing-nothing>Without the shell, FR-01's single mount-agnostic widget does not exist; each surface would fork its own layout and the record-less thread list (FR-16) has no home.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/ConversationWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/subcomponents/ThreadList.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/__tests__/ConversationWorkspace.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The SAME component renders in all three mounts (inline / code page / record modal) — proven by a test that mounts it with and without the `regarding` prop.</criterion>
+    <criterion testable="true">Record mode (`regarding` present) shows ONLY that record's threads; all-mode lists threads incl. record-less.</criterion>
+    <criterion testable="true">Thread rows show name + unread indicator only (no preview); word-filter dropdown narrows the list; ＋ invokes the `onCreateThread` callback.</criterion>
+    <criterion testable="true">Selecting a thread renders it in ConversationView; a default thread is selected on load.</criterion>
+    <criterion testable="true">Empty / loading / error states for the list pane; ARIA list semantics + keyboard selection (NFR-05).</criterion>
+    <criterion testable="true">All list fetches go through the injected `authenticatedFetch` (ADR-028); no client-side membership union (NFR-01).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Mount-agnostic"><steps><step>Mount with no regarding prop; then mount with regarding={entityType,id}</step></steps><expected>Both render the two-pane layout; record mode lists only that record's threads.</expected></test>
+    <test name="Thread list content"><steps><step>Render a list with unread + read threads</step><step>Type in the word filter</step><step>Click ＋</step></steps><expected>Rows show name + unread only; filter narrows; ＋ fires onCreateThread.</expected></test>
+    <test name="Empty / loading / error"><steps><step>Render each list state</step></steps><expected>Distinct UI per state.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-01/10 and FR-16. Anchor layout to `CommunicationsWorkspaceWidget.tsx` mount conventions; keep type string `communications-list`. Do NOT build the NewThreadModal here — only wire the ＋ callback (modal is task 024).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

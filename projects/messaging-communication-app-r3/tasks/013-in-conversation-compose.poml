@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="messaging-communication-app-r3">
+  <metadata>
+    <title>In-conversation compose — chat input via the existing send path (FR-06)</title>
+    <phase>2 Shared conversation widget core</phase>
+    <gate>after:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the shared-lib ConversationView (.tsx) and wires the ADR-045 send path; behavior-affecting. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring an existing send call + refresh into an existing component; no new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationView from task 011 — same files; must serialize after 011.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a chat input to `ConversationView` that sends a message via the EXISTING send path (`sendCommunication` on the ACS message branch — NO new send implementation, ADR-045). On send, optimistically refresh (auto-refresh) and also provide an on-demand refresh affordance; the ~5s polling from the core is retained. Reuse `TimelineComposeBox.tsx` if it fits; otherwise mirror it. Do NOT add a 6th send path.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>ConversationView gains a compose input that sends through the existing send path, refreshes the thread on send + on demand, retains ~5s polling, and handles sending/sent/failed and disabled/empty-input states with keyboard + ARIA support.</goal>
+  <context>
+    <background>FR-06 requires in-conversation compose that reuses the existing send path (`sendCommunication`, already thread-aware). The core already polls ~5s; this adds an input plus an explicit refresh and an on-send refresh so the sender sees their message immediately without waiting for the next poll. `TimelineComposeBox.tsx` already exists in the core subcomponents — reuse it if its contract fits the bubble view.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+    </relevant-files>
+    <dependencies>011 (ConversationView) merged. The existing `sendCommunication` send path (ADR-045) present in master.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-045">Compose sends via the EXISTING send path (`sendCommunication`); NO 6th send implementation. Message sends stay on the ACS branch (ADR-046).</constraint>
+    <constraint source="FR-06">On send: auto-refresh; also expose an on-demand refresh; retain ~5s polling from the core (do not disable it).</constraint>
+    <constraint source="ADR-028">Send/refresh go through the injected `authenticatedFetch` (context-agnostic component).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Keyboard send (Enter), disabled state on empty input, ARIA labels; sending/sent/failed feedback.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-send-engine.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing compose box" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/TimelineComposeBox.tsx">Reuse for the input; it already targets the existing send path.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read `TimelineComposeBox.tsx` and the `sendCommunication` contract; confirm it is thread-aware (targets the active thread id).</step>
+    <step order="2">Mount the compose input at the bottom of ConversationView; wire submit to the existing `sendCommunication` for the active thread on the ACS message branch.</step>
+    <step order="3">On successful send, trigger an immediate refresh (re-poll / merge) so the sender's message appears without waiting for the ~5s tick; keep the ~5s polling running.</step>
+    <step order="4">Add an on-demand refresh affordance (button) that forces a poll.</step>
+    <step order="5">Handle sending/sent/failed states (retry on failed); disable on empty input; Enter-to-send; ARIA labels.</step>
+    <step order="6">Update/extend ConversationView tests: send invokes existing path with active thread id, refresh fires on send, polling still active, failed-send retry, disabled-empty, dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If the existing `sendCommunication` cannot target the active thread without a new endpoint/branch, STOP and escalate — do NOT introduce a second send path (ADR-045).</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/__tests__/ConversationView.compose.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Compose submit invokes the EXISTING send path (`sendCommunication`) for the active thread; no new send function/endpoint is introduced.</criterion>
+    <criterion testable="true">On send, the thread refreshes immediately (message appears) AND ~5s polling remains active; an on-demand refresh control forces a poll.</criterion>
+    <criterion testable="true">Sending / sent / failed states shown; failed send is retryable; input disabled when empty; Enter sends.</criterion>
+    <criterion testable="true">ARIA labels on input + send/refresh; keyboard operable (NFR-05).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Send via existing path + refresh"><steps><step>Type a message and press Enter</step><step>Observe the send call + thread refresh</step></steps><expected>Existing send path called with active thread id; new message appears without waiting for the next poll; polling still running.</expected></test>
+    <test name="On-demand refresh"><steps><step>Click the refresh control</step></steps><expected>A poll is forced.</expected></test>
+    <test name="Empty input disabled + failed retry"><steps><step>Clear input; attempt send</step><step>Force a send failure</step></steps><expected>Send disabled when empty; failed send shows a retry.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-06 and ADR-045/046. Reuse `TimelineComposeBox.tsx`; do NOT create a new send implementation.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

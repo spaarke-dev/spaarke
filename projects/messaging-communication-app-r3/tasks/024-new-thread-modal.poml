@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="messaging-communication-app-r3">
+  <metadata>
+    <title>NewThreadModal — optional record association + name + description; find-or-create via POST /threads/direct (FR-11)</title>
+    <phase>3 Email-in-flow + quick-view + new-thread</phase>
+    <gate>after:012</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx modal in the shared lib; calls a BFF endpoint (find-or-create) with auth; drives thread creation across surfaces. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composition of existing recipient/body parts + a single BFF call; well-specified contract (`StartDirectThreadRequest/Response`).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build `NewThreadModal`: a Fluent v9 modal to create a record-less-or-record-associated thread. Fields: OPTIONAL record association (regarding), name, description; it REUSES the existing recipient and body composer parts (`RecipientField`, `BodyEditor`) rather than re-implementing them. On submit, it calls `POST /threads/direct` (`StartDirectThreadRequest` → `StartDirectThreadResponse`) which FINDS-OR-CREATES the thread (idempotent for the same participant set), then selects the resulting thread in the shell. All calls via `authenticatedFetch` (ADR-028).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>A `NewThreadModal` reachable from the shell's ＋ affordance: optional regarding + name + description + reused recipient/body parts; find-or-create via `POST /threads/direct`; returns/selects the thread; empty/loading/error + validation states; keyboard + ARIA; dark-mode compliant.</goal>
+  <context>
+    <background>FR-11 lets a user create a thread that may be record-less (no regarding) or record-associated. Recipients + body are the same composer parts used by EmailComposer (`RecipientField.tsx`, `BodyEditor.tsx`) — reuse them, don't duplicate. The backend `POST /threads/direct` returns an existing thread for the same participant set (find-or-create) so duplicate threads aren't created. On success the shell (task 012) selects the returned thread via its `onCreateThread`/selection callback.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/RecipientField.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/BodyEditor.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/ConversationWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+    </relevant-files>
+    <dependencies>012 (shell + ＋ callback) merged. Backend `POST /threads/direct` (`StartDirectThreadRequest/Response`) available; if the endpoint/contract is absent, escalate.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-11">Record association is OPTIONAL (record-less threads allowed); name + description fields; reuse recipient/body composer parts; find-or-create via `POST /threads/direct`.</constraint>
+    <constraint source="ADR-028">The find-or-create call goes through the injected `authenticatedFetch` (`@spaarke/auth` supplied by host).</constraint>
+    <constraint source="ADR-024">If a record association is chosen, use the EXISTING regarding mechanism (`AssociationChips`) — no second mechanism.</constraint>
+    <constraint source="NFR-06">Reuse `RecipientField`/`BodyEditor` (no duplicate recipient/body impl); keep type strings.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Field validation, keyboard nav, ARIA labels; empty/loading/error + submit-in-flight states.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-024-regarding-family.md</file>
+    </files>
+    <patterns>
+      <pattern name="Recipient/body parts" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/">Reuse `RecipientField` + `BodyEditor`; do not re-implement.</pattern>
+      <pattern name="Association chips" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx">Existing regarding-association UI for the optional record association.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the `POST /threads/direct` contract (`StartDirectThreadRequest`/`StartDirectThreadResponse`) via `communicationTimelineApi.ts` or the BFF endpoint; confirm find-or-create semantics + the response thread id.</step>
+    <step order="2">Create `NewThreadModal/NewThreadModal.tsx`: optional `AssociationChips` (regarding), name + description inputs, reused `RecipientField` + `BodyEditor`.</step>
+    <step order="3">Wire submit → `POST /threads/direct` via `authenticatedFetch`; on success, call the shell's selection callback with the returned thread id.</step>
+    <step order="4">Add validation (required participants for a direct thread), submit-in-flight disable, and error surfacing; distinct empty/loading/error states.</step>
+    <step order="5">Keyboard nav + ARIA on the modal; focus management on open/close.</step>
+    <step order="6">Wire the shell's ＋ (task 012 `onCreateThread`) to open this modal.</step>
+    <step order="7">Export from the lib index; tests: optional-regarding create, find-or-create returns existing thread (no duplicate), validation blocks empty participants, error surfaced, dark mode.</step>
+    <step order="8">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="9">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="10">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If `POST /threads/direct` does not implement find-or-create (would create duplicate threads for the same participants), STOP and escalate — the client MUST NOT hand-roll de-duplication or a second create path.</trigger>
+  </escalation>
+  <justification>
+    <existing>No modal exists to create a record-less thread; `AssociationChips`/`RecipientField`/`BodyEditor` exist as parts but there is no create-thread surface.</existing>
+    <extension>No — this composes existing parts into a new create surface; the parts are reused, but the modal itself is net-new (there is nothing to extend).</extension>
+    <cost-of-doing-nothing>FR-11 (create a record-less thread from the UI) is impossible; the shell's ＋ affordance has nothing to open.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/NewThreadModal.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/NewThreadModal/__tests__/NewThreadModal.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Record association is OPTIONAL — a thread can be created with no regarding (record-less) and with a regarding via the existing `AssociationChips` mechanism.</criterion>
+    <criterion testable="true">Recipient + body are the REUSED `RecipientField` / `BodyEditor` parts (not re-implemented).</criterion>
+    <criterion testable="true">Submit calls `POST /threads/direct` via `authenticatedFetch`; find-or-create returns the existing thread for the same participant set (no duplicate created).</criterion>
+    <criterion testable="true">On success the shell selects the returned thread; validation blocks submit with no participants; loading/error/in-flight states shown.</criterion>
+    <criterion testable="true">Keyboard nav + ARIA + focus management (NFR-05).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Create record-less thread"><steps><step>Open modal, add participants, name, description, no regarding, submit</step></steps><expected>POST /threads/direct called; returned thread selected in the shell.</expected></test>
+    <test name="Find-or-create idempotent"><steps><step>Submit the same participant set twice</step></steps><expected>The existing thread is returned; no duplicate created.</expected></test>
+    <test name="Validation"><steps><step>Submit with no participants</step></steps><expected>Submit blocked with a validation message.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-11. Reuse recipient/body parts + AssociationChips; find-or-create is the backend's job (`POST /threads/direct`).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

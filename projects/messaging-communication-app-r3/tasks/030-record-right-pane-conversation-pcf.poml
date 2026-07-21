@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Record right-pane conversation PCF (Surface 1) — preview + counter + quick-view + record-filtered modal</title>
+    <phase>4 Surfaces</phase>
+    <gate>code-review + adr-check at Step 9.5; ui-test</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New PCF control (net-new surface dir); Path-A-on-OOB-form blast radius; touches .ts/.tsx; opens a record-filtered modal navigating away from the PCF — correctness-sensitive host integration.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New PCF with high blast radius (host-form embedding, Path-A ADR-026 exception, modal launch/return semantics). High-judgment mirroring of CommunicationTimelineRegarding without forking it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New, isolated PCF directory under src/client/pcf/; shares no files with 031/032/033. Backend deps (011/012/023) already merged.</parallel-reason>
+    <deps>011, 012, 023</deps>
+    <tags>pcf, react, fluent-ui, e2e-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a NEW record right-pane conversation PCF that mirrors the existing `CommunicationTimelineRegarding` PCF pattern (do NOT fork or copy its timeline body). It renders a compact preview — max 3 threads, last 5 communications, default thread auto-expanded — plus a footer counter ("N of M") and per-message quick-view. When the user opens/expands, it launches the Phase-2 shared two-pane conversation widget as a record-FILTERED modal (regarding = the host record). Reuse the shared widget as-is; the PCF is a thin host wrapper only.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in PCF controls (Path-A on OOB form), Vite code pages, and the Spaarke DataGrid web-resource framework.</role>
+
+  <goal>Deliver FR-13: a record-scoped right-pane PCF that previews a record's conversations (top 3 threads / last 5 comms / default auto-expanded), shows a footer counter and per-message quick-view, and opens the shared conversation widget as a modal filtered to the host record — navigable across threads without returning to the PCF.</goal>
+
+  <context>
+    <background>Surface 1 of R3. The conversation core, `ConversationView`, two-pane shell, and `MessageQuickView` are built in Phase 2/3 (deps 011/012/023) and live in the shared libs. This task is the record-form HOST: a PCF placed on OOB forms (Matter pilot first, all 11 regarding-family entities eventually) that previews and then launches the shared widget as a record-filtered modal. Mirror the structure of `CommunicationTimelineRegarding` (a placement-bound regarding timeline PCF) — its manifest, host-context wiring, `@spaarke/auth` bootstrap, and FluentProvider ownership — but present the compact preview + counter + modal-launch, not the vertical timeline. ADR-026 Path-A exception applies (same one R2's `CommunicationTimeline*` PCFs established) — cite in the deploy PR, not here.</background>
+    <relevant-files>
+      <file>src/client/pcf/CommunicationTimelineRegarding/** — canonical PCF to mirror (manifest, index.ts lifecycle, host-context, auth bootstrap, FluentProvider)</file>
+      <file>src/client/pcf/MatterHeader/** — host wrapper reference (control/ layout, Solution/ packaging)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/** — shared conversation core / ConversationView / two-pane shell to MOUNT (do not reimplement)</file>
+      <file>src/client/pcf/CLAUDE.md — PCF module rules</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md — record-scoped modal pattern</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md — build/pack/deploy reference (build in 034)</file>
+    </relevant-files>
+    <dependencies>011 (shared two-pane widget / ConversationView), 012 (thread list + shell), 023 (MessageQuickView popover). All merged before this task.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-026">Right-pane PCF on OOB form is the Path-A exception R2's CommunicationTimeline* PCFs already established. Do NOT introduce a Custom Page / full-page custom control. Cite the exception in the deploy PR (034).</constraint>
+    <constraint source="ADR-021">Dark mode passes through the host FluentProvider; use Fluent v9 semantic tokens only — no hardcoded colors. Mirror how CommunicationTimelineRegarding owns/receives the theme.</constraint>
+    <constraint source="ADR-028">All BFF calls go through `@spaarke/auth` `authenticatedFetch`. Do not add a second fetch/auth path.</constraint>
+    <constraint source="NFR-06">Reuse-first: mount the shared conversation widget; do NOT reimplement bubbles/thread-list/quick-view. Do NOT add a second regarding mechanism — pass the host record's `entityType`+`id` as the regarding filter.</constraint>
+    <constraint source="spec-FR-13">Preview is bounded: max 3 threads, last 5 communications, default thread auto-expanded. Footer shows "N of M". Opening launches the shared widget as a modal filtered to the host record.</constraint>
+    <constraint source="PCF-build">Production build is `npm run build:prod` (NOT `npm run build`). The actual solution build/deploy happens in task 034.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Record-form PCF (mirror)" location="src/client/pcf/CommunicationTimelineRegarding/**">Manifest + index.ts init/updateView/destroy lifecycle, host-context/regarding extraction, `@spaarke/auth` bootstrap, FluentProvider theme ownership. Mirror the structure; render the preview + modal-launch, not the timeline.</pattern>
+      <pattern name="Shared conversation widget (mount)" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**">The two-pane conversation widget + ConversationView + MessageQuickView. Mount it with a regarding filter; never reimplement.</pattern>
+      <pattern name="Record-scoped modal" location="docs/standards/MODAL-DECISION-CRITERIA.md + .claude/patterns/ui/record-modal-selection.md">How to launch the record-filtered conversation modal from a PCF.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load knowledge (ADR-026/021/028, MODAL-DECISION-CRITERIA, src/client/pcf/CLAUDE.md) and characterize `CommunicationTimelineRegarding` — read its manifest, index.ts lifecycle, host-context/regarding extraction, auth bootstrap, and FluentProvider ownership.</step>
+    <step order="2">Scaffold the new PCF directory under `src/client/pcf/` (new control + manifest + pcfproj + Solution/), mirroring CommunicationTimelineRegarding's structure and dependencies. Bind to a regarding-capable field the same way (do NOT invent a new regarding mechanism).</step>
+    <step order="3">Extract the host record `entityType`+`id` from the PCF context (same as the mirror). Build the compact preview React tree: fetch/read the record's threads via the shared read API (through `@spaarke/auth`), render max 3 threads, last 5 comms, default thread auto-expanded, wired to the shared `MessageQuickView` for per-message quick-view.</step>
+    <step order="4">Render the footer counter ("N of M") from the read result. Add the open/expand affordance that launches the shared two-pane conversation widget as a modal filtered to the host record's regarding (`entityType`+`id`), per MODAL-DECISION-CRITERIA.</step>
+    <step order="5">Confirm the modal mount lets the user navigate across threads WITHOUT returning to the PCF (the shared widget owns thread navigation once open). Verify FluentProvider/dark-mode passthrough and `@spaarke/auth` usage.</step>
+    <step order="6">Write component tests for the preview bounding (3 threads / 5 comms / default-expanded), the counter, and the modal-launch handoff. Run `npm run build:prod` to verify the control compiles clean (no lint/type errors).</step>
+    <step order="7">Run the ui-tests defined below against a Matter form. Fix any console errors and dark-mode regressions.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md` (this task 🔲 → ✅). Document any deviation from the mirror pattern or any modal-return quirk in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the PCF context cannot supply the host record's regarding `entityType`+`id` in the form/binding used by CommunicationTimelineRegarding (so the modal cannot be record-filtered), STOP and escalate rather than inventing a second regarding mechanism (ADR-024 / NFR-06).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CommunicationTimelineRegarding` — the regarding TIMELINE PCF (vertical rows, no preview/counter/modal-launch, no two-pane conversation).</existing>
+    <extension>No — it is a different presentation (bounded preview + counter + modal launch of the conversation widget), but MIRROR its host-wrapper pattern rather than fork its timeline body. A shared control cannot serve both intents without conflating the timeline and conversation surfaces.</extension>
+    <cost-of-doing-nothing>FR-13 (Surface 1) has no host: a record's form would have no way to preview conversations or open the shared conversation widget filtered to that record.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build (npm run build:prod)</tool>
+    <tool name="pac">PCF/solution scaffold + pack</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/{NewConversationPcf}/** (manifest, control, Solution, tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new PCF exists under `src/client/pcf/` mirroring CommunicationTimelineRegarding's manifest/lifecycle/auth/FluentProvider structure; it compiles under `npm run build:prod` with no lint/type errors.</criterion>
+    <criterion testable="true">Placed on a Matter form, the PCF renders a preview bounded to max 3 threads and last 5 communications with the default thread auto-expanded.</criterion>
+    <criterion testable="true">A footer counter renders "N of M" reflecting the record's actual thread/comm counts.</criterion>
+    <criterion testable="true">Each message exposes the shared `MessageQuickView` popover (per-message quick-view).</criterion>
+    <criterion testable="true">Opening/expanding launches the shared two-pane conversation widget as a modal filtered to the host record (regarding entityType+id); the user can navigate across threads inside the modal without returning to the PCF.</criterion>
+    <criterion testable="true">No new regarding mechanism and no reimplemented bubbles/thread-list/quick-view are introduced (mounts the shared widget) — NFR-06.</criterion>
+    <criterion testable="true">All BFF/read calls go through `@spaarke/auth` `authenticatedFetch` (ADR-028); no second fetch path.</criterion>
+    <criterion testable="true">Dark mode via host FluentProvider (ADR-021): semantic tokens adapt; no hardcoded colors; no console errors on the Matter form.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Renders on Matter form (preview + counter)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matterId}</url>
+      <steps>
+        <step>Open a Matter record that has communications; locate the right-pane conversation PCF</step>
+        <step>Confirm the preview shows at most 3 threads and the last 5 comms with the default thread auto-expanded</step>
+        <step>Confirm the footer counter shows "N of M"</step>
+        <step>Hover/click a message to open the quick-view popover</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Preview is bounded (≤3 threads / ≤5 comms), default thread expanded, counter reads "N of M", quick-view opens, console clean.</expected>
+    </test>
+    <test name="Opens record-filtered modal and navigates threads">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matterId}</url>
+      <steps>
+        <step>Click the open/expand affordance</step>
+        <step>Confirm the shared two-pane conversation widget opens as a modal showing ONLY this Matter's threads</step>
+        <step>Select a different thread inside the modal and confirm it loads without the modal closing / returning to the PCF</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Modal opens filtered to the record; thread navigation happens entirely inside the modal; no forced return to the PCF; console clean.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle the model-driven app into dark mode</step>
+        <step>Re-open the PCF preview and the conversation modal</step>
+      </steps>
+      <expected>Semantic tokens adapt in both the preview and the modal; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>ADR-026 Path-A exception (same as R2 CommunicationTimeline* PCFs) is cited in the deploy PR (034), not here. PCF prod build = `npm run build:prod` (NOT `npm run build`). Solution build/pack/deploy is task 034. Reference spec FR-13.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge first; follow task-execute.</protocol>
+  </execution>
+</task>

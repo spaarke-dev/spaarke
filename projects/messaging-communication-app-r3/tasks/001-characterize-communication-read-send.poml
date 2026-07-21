@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Characterize existing Communication read + send paths (baseline tests)</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds characterization tests only — no production `.cs`/`.ts` edits. Locks the pre-change behavior of the shared Services/Communication read + send paths before the correctness-critical Phase-1 edits (002-005) touch them.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against a well-understood existing surface; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds only test files; touches no shared production source. But it is the baseline gate for 002-005, so it runs first.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, integration-test, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Author baseline/characterization tests that pin the CURRENT observable behavior of `CommunicationThreadReadService` (single-thread read, by-regarding read, filtered query) and of the outbound send path (email branch `ResolveOutboundThreadAsync` + message branch `AssignExplicitThreadAsync`) BEFORE any Phase-1 edit. These tests establish a green baseline so the FR-16/17/18/19 edits surface as intentional, reviewable diffs and so the access invariants (impersonated, access-filtered, NO membership-union) are guarded against regression.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs + Dataverse Web API + impersonation.</role>
+  <goal>New/extended test files under `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/` (and, where a composition invariant is best expressed end-to-end, `tests/integration/seam/Communication/`) that assert: (a) the read DTO's current shape (`ThreadMessageDto` carries `From` string, NO `Direction`/sender-identity; `ReadThreadAsync` returns `ThreadReadResult.Name == null`); (b) reads run impersonated through `IImpersonatedCommunicationQuery` + the shared `ICommunicationAccessFilter` with NO membership-union dependency; (c) the email send path currently find-or-creates a thread and does NOT honor `request.ThreadId`; (d) the message send path stamps an explicit `ThreadId` via `AssignExplicitThreadAsync`. All new tests pass (green) against the unedited tree.</goal>
+  <context>
+    <background>Plan §Phase 1 and spec NFR-08 require characterizing the existing read/send flows BEFORE extending the shared `Services/Communication/**` files (edited by 002-005). Risk R2 in plan.md: these files are shared with r1/r2/email-r4; characterization-first is the mitigation. The baseline both documents the pre-change contract (DTO shape, `Name==null`, email ignoring `ThreadId`) that FR-18/19 will deliberately change, and hard-guards the load-bearing access invariant (impersonation + shared filter, no union) that MUST NOT change.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationByRegardingReadTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationFilteredQueryTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceMessageSendTests.cs</file>
+      <file>tests/integration/seam/Communication/CommunicationWorkspaceReadSeamTests.cs</file>
+    </relevant-files>
+    <dependencies>None. This is the first Phase-1 task and gates 002-005.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-038">Author under the KEEP paths only: unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/`; any end-to-end composition invariant in `tests/integration/seam/Communication/`. Do NOT introduce new test paths.</constraint>
+    <constraint source="ADR-038">MUST NOT use `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, or constructor null-check tests (banned B1-B4). Use the existing `IImpersonatedCommunicationQuery` test seam that `CommunicationThreadReadServiceTests` already uses.</constraint>
+    <constraint source="project">Characterization ONLY — do NOT modify any file under `src/`. If a behavior cannot be observed without a source change, record it as an escalation, do not change source.</constraint>
+    <constraint source="project">The no-membership-union invariant (retired 2026-07-16) MUST be asserted structurally (no dependency on `IThreadPrivateGrantProvider`/any membership seam), mirroring the guard already in `CommunicationWorkspaceReadSeamTests`.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Impersonated-read test seam" location="tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs">Stub `IImpersonatedCommunicationQuery`; assert access-filter composition without transport mocks.</pattern>
+      <pattern name="No-union structural guard" location="tests/integration/seam/Communication/CommunicationWorkspaceReadSeamTests.cs">NetArchTest-style constructor-shape assertion that the read service takes no membership-resolution dependency.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the three read methods (`ReadThreadAsync`, `ReadByRegardingAsync`, `QueryCommunicationsAsync`) and the two send-thread resolvers (`ResolveOutboundThreadAsync` email path, `AssignExplicitThreadAsync` message path). Enumerate the observable behaviors Phase 1 will change vs must preserve.</step>
+    <step order="2">Add read-path characterization asserting the CURRENT DTO shape: `ThreadMessageDto` has `From` and no direction/sender-identity fields; `ReadThreadAsync` sets `Name == null`; by-regarding populates `Name` from the thread row. Reuse the existing stub-query harness.</step>
+    <step order="3">Add/confirm the impersonation + shared-access-filter invariant: reads issue the query with the caller's systemuserid and pass results through `ICommunicationAccessFilter`; internal-only rows are hidden from a non-internal caller; unresolved caller fails closed (403).</step>
+    <step order="4">Add the no-membership-union structural guard (constructor-shape assertion) if not already covered for the exact service under test.</step>
+    <step order="5">Add send-path characterization: email send with NO `ThreadId` find-or-creates via `IThreadResolver` (does NOT stamp an explicit thread); message send WITH `ThreadId` stamps it via the explicit-target path. Assert the email path currently does NOT special-case `request.ThreadId` (the behavior FR-19 will add).</step>
+    <step order="6">Run the full test project; confirm all new tests are green on the unedited tree.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test` for the affected test project; verify 0 new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</step>
+    <step order="8">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 001 to ✅.</step>
+    <step order="9">Document any behavior that could not be characterized without a source change, plus the baseline snapshot, in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation><trigger>If capturing a baseline behavior would require editing production source (`src/**`), STOP — do not change source in this task; record the gap and escalate per root CLAUDE.md §6.</trigger></escalation>
+  <tools><tool name="dotnet">Build+test</tool><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/*.cs (new/extended characterization)</output>
+    <output type="test">tests/integration/seam/Communication/*.cs (if an end-to-end invariant is added)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the unedited tree, when the new characterization tests run, then all pass (green baseline).</criterion>
+    <criterion testable="true">Given a single-thread read, when `ReadThreadAsync` returns, then a test asserts `ThreadReadResult.Name == null` and each `ThreadMessageDto` exposes `From` with NO direction/sender-identity field (current shape).</criterion>
+    <criterion testable="true">Given a non-internal caller, when a thread contains an internal-only row, then the read hides that row via the shared `ICommunicationAccessFilter` (impersonation + 2-rule filter, asserted).</criterion>
+    <criterion testable="true">Given an unresolved caller (no Dataverse systemuserid), when a read is attempted, then it fails closed (403) with no app-only fallback.</criterion>
+    <criterion testable="true">Given the read service under test, when its constructor dependencies are inspected, then no membership-union/`IThreadPrivateGrantProvider` dependency is present (structural no-union guard).</criterion>
+    <criterion testable="true">Given an email send with NO `ThreadId`, when the send completes, then thread resolution goes through the find-or-create `IThreadResolver` path (NOT an explicit stamp) — the pre-FR-19 behavior.</criterion>
+    <criterion testable="true">Given a message send WITH `ThreadId`, when the send completes, then the explicit-target stamp path (`AssignExplicitThreadAsync`) is exercised.</criterion>
+    <criterion testable="true">No `src/**` file is modified by this task.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; delta reported (expected ≈0, tests-only) in task notes/PR (per .claude/constraints/bff-extensions.md).</criterion>
+    <criterion testable="true">All tests pass; 0 new HIGH CVE (dotnet list package --vulnerable --include-transitive).</criterion>
+  </acceptance-criteria>
+  <notes>Placement Justification MUST be stated in the PR (cite .claude/constraints/bff-extensions.md) — tests-only, publish delta ≈0. Reference spec NFR-08 (characterize before extending). This baseline gates FR-16/17/18/19 (tasks 002-005).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="messaging-communication-app-r3">
+  <metadata>
+    <title>FR-18: enrich single-thread read DTO with Direction + sender identity + thread Name</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>after:001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the shared, correctness-critical `CommunicationThreadReadService` + read models on the impersonated read path; the enriched DTO is the contract the entire R3 bubble UI (FR-02) keys on. Tags include bff-api. FULL gate (code-review + adr-check at Step 9.5).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared-backend edit on the access-critical read path; the sender-identity contract must be exactly what the UI bubble layer needs and must not open a privilege/privacy leak.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared CommunicationThreadReadService.cs + CommunicationThreadReadModels.cs — same files touched by 003/004/005; serialize.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, backend</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Enrich the single-thread read DTO (`ThreadMessageDto`) with `Direction` (from `sprk_direction`) and sender identity (`sprk_sentby` systemuserid + `sprk_sentbyname` display name), and populate `ThreadReadResult.Name` on `ReadThreadAsync` by reading the thread's `sprk_name`. The enrichment rides the SAME impersonated read + shared access-filter path; it adds projected columns only — it introduces no new query, no new access mechanism, and never widens what a caller can see.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs + Dataverse Web API + impersonation.</role>
+  <goal>`ThreadMessageDto` gains a `Direction` field (nullable int mapping `sprk_direction`: Incoming=100000000, Outgoing=100000001) and sender-identity fields (`SentBy` Guid? from `_sprk_sentby_value`, `SentByName` string? from `sprk_sentbyname`). `ReadThreadAsync` returns `ThreadReadResult.Name` populated from the thread's `sprk_name`. All three read projections (`ReadThreadAsync`, `ReadByRegardingAsync`, `QueryCommunicationsAsync`) select the added columns so the enriched fields are present everywhere the DTO is produced. Unit tests assert the new fields are projected and access-filtered identically to the existing fields.</goal>
+  <context>
+    <background>Spec FR-18 + FR-02: the Teams-style bubble UI derives mine-right/others-left alignment from SENDER IDENTITY (systemuserid), not from email-string matching, and renders direction + a thread label. Today `ThreadMessageDto` carries only `From` (free text) and `ReadThreadAsync` sets `Name = null` (see the model's doc comment — it was left null because the R1 thread-form surface showed the name via the host header; the R3 conversation surface needs it inline). `sprk_communication` already has `sprk_direction` (choice) and `sprk_sentby` (systemuser lookup) + `sprk_sentbyname` — no schema change is required, only projection.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>001 (baseline pins the pre-enrichment DTO shape so this change is a reviewable diff).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Access model (NFR-01, correctness-critical): the enrichment MUST ride the existing impersonated query (`IImpersonatedCommunicationQuery`) + the shared `ICommunicationAccessFilter`. MUST NOT add a second query, a person-directory lookup that bypasses impersonation, or any membership-union. Sender-identity fields are projected from the already-visible row only.</constraint>
+    <constraint source="ADR-024">Reuse existing `sprk_communication` columns (`sprk_direction`, `sprk_sentby`, `sprk_sentbyname`). Do NOT introduce a second identity/regarding mechanism.</constraint>
+    <constraint source="project">Privilege/privacy: the enriched sender fields are surfaced ONLY for rows the caller may already see; the change MUST NOT reveal a sender/name for a filtered-out (internal-only) row (NFR-01 no over-disclosure).</constraint>
+    <constraint source="ADR-038">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/`; assert projection + access-filter parity of the new fields (KEEP-path unit tests).</constraint>
+    <constraint source="ADR-028">No client-contract change; the DTO is returned through the existing authenticated endpoints.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Projected-column read + parse" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">`ParseMessageRow` + the `select` column list are the single place to add `sprk_direction`, `_sprk_sentby_value`, `sprk_sentbyname`; `BuildDto`/`ThreadMessageDto` carry them forward.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add the new fields to `ThreadMessageDto` (`Direction` int?, `SentBy` Guid?, `SentByName` string?). Update the record's doc comment to state they are projected metadata over an already-visible row (never a gate).</step>
+    <step order="2">Add `sprk_direction`, `_sprk_sentby_value` (lookup value), `sprk_sentbyname` to the `select` lists in all three read paths (`ReadThreadAsync`, `QueryVisibleMessagesAsync`, and the message projection in `ReadByRegardingAsync`) and to `ParseMessageRow` / `ParsedMessage`.</step>
+    <step order="3">Populate the fields in `BuildDto` and in the inline DTO construction inside `ReadThreadAsync`.</step>
+    <step order="4">Populate `ThreadReadResult.Name` in `ReadThreadAsync`: read the thread's `sprk_name` (single impersonated projection on `sprk_communicationthread` by id, or fold into the existing flow) and return it. Keep it null-safe (empty thread / no visible messages still returns without leaking existence).</step>
+    <step order="5">Verify the sender fields are only ever set on rows that survive the access filter (they are projected from `ParsedMessage`, which is already filtered) — add a negative test proving a hidden internal-only row contributes no sender/name to the output.</step>
+    <step order="6">Update `CommunicationThreadReadServiceTests` (and by-regarding/filtered-query tests as needed) to assert the enriched projection + access parity; update the 001 baseline assertions that intentionally changed (Name now populated; Direction/sender present).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; measure BFF publish size; run the CVE scan.</step>
+    <step order="8">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 002 to ✅.</step>
+    <step order="9">Document the DTO contract (field names/types + option-set integers) + publish delta in `projects/messaging-communication-app-r3/notes/` for the UI phases (FR-02/18) to consume.</step>
+  </steps>
+  <escalation><trigger>If the read DTO / sender-identity contract this task can produce differs from what the UI bubble layer (FR-02/18) needs — e.g. the UI requires a resolved display name or avatar the impersonated row does not carry, forcing a second lookup — STOP and escalate per root CLAUDE.md §6 (do NOT add a directory lookup that bypasses impersonation to close the gap).</trigger></escalation>
+  <tools><tool name="dotnet">Build+test</tool><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationThreadReadServiceTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a thread with a visible outgoing message sent by user U, when `ReadThreadAsync` returns, then that message's DTO has `Direction == 100000001`, `SentBy == U`, and `SentByName` == the row's `sprk_sentbyname`.</criterion>
+    <criterion testable="true">Given a thread named "Acme v. Roe", when `ReadThreadAsync` returns, then `ThreadReadResult.Name == "Acme v. Roe"` (no longer null).</criterion>
+    <criterion testable="true">Given a non-internal caller and a thread containing an internal-only row, when the read returns, then the hidden row contributes NO `SentBy`/`SentByName`/`Direction` to the output (no over-disclosure).</criterion>
+    <criterion testable="true">Given the by-regarding and filtered-query reads, when they return, then their `ThreadMessageDto`s also carry the enriched `Direction`/`SentBy`/`SentByName` fields (contract is uniform across all read paths).</criterion>
+    <criterion testable="true">Given the enrichment, when the code is inspected, then it adds ONLY projected columns to the existing impersonated query + shared filter — no new query, directory lookup, or membership-union is introduced.</criterion>
+    <criterion testable="true">Given an unresolved caller, when a read is attempted, then it still fails closed (403) — enrichment did not weaken caller resolution.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; delta reported in task notes/PR (per .claude/constraints/bff-extensions.md).</criterion>
+    <criterion testable="true">All tests pass; 0 new HIGH CVE (dotnet list package --vulnerable --include-transitive).</criterion>
+  </acceptance-criteria>
+  <notes>Placement Justification MUST be stated in the PR (cite .claude/constraints/bff-extensions.md): enriches an existing DTO in-place on the existing read path — no new component, no new AI/package/worker; publish delta expected ≈0. Reference spec FR-18 / FR-02. No `&lt;justification&gt;` element: this enriches the existing `ThreadMessageDto`/`ThreadReadResult` rather than adding a new model type.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

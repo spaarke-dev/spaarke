@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Extend SendEmailDialog / EmailComposer — thread id + regarding record auto-association + record link (FR-07)</title>
+    <phase>3 Email-in-flow + quick-view + new-thread</phase>
+    <gate>after:010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the shared send UI (ADR-045 blast radius across every send surface); auto-association touches the regarding mechanism (ADR-024). Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared send UI with high blast radius; ADR-045/ADR-024 correctness; additive-extension discipline on a widely-consumed component demands architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared SendEmailDialog / EmailComposer consumed by many surfaces; must serialize.</parallel-reason>
+    <deps>010</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Additively extend `SendEmailDialog` / `EmailComposer` to accept (1) an optional thread id, (2) an optional regarding record for AUTO-ASSOCIATION, and (3) an optional embedded record link rendered in the composer. Opening the composer from within the conversation MUST auto-associate the resulting email to the active thread (pairs with backend FR-19, which honors `ThreadId` on the email send branch). Reuse the EXISTING send path and the EXISTING regarding mechanism (ADR-024) — do NOT create a second association mechanism. All new props are OPTIONAL and default to current behavior (no regression for existing callers, validated by task 010's characterization).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>SendEmailDialog/EmailComposer gain optional `threadId`, `regarding`, and `recordLink` props: when opened from a conversation, the sent email carries the active `ThreadId` and auto-associates to the regarding record via the existing association mechanism; a record link renders in the composer. Existing callers are unaffected.</goal>
+  <context>
+    <background>ADR-045 makes `SendEmailDialog`/`EmailComposer` + `sendCommunication` the single send engine. R3 needs an email launched from the conversation to (a) pin to the active thread (backend FR-19 honors `ThreadId`) and (b) auto-associate to the record via the existing regarding family (ADR-024) — using `AssociationChips.tsx`, not a new mechanism. The extension must be additive: every existing caller (with no thread/regarding) keeps its current behavior, guarded by the characterization from task 010.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+    </relevant-files>
+    <dependencies>010 (characterization of SendEmailDialog) merged. Backend FR-19 (honor `ThreadId` on email send) — this task supplies the client `ThreadId`; if the send payload cannot carry it, escalate.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-045">Reuse the EXISTING send path (`sendCommunication`); no 6th send implementation. Extension of `SendEmailDialog`/`EmailComposer` is additive only.</constraint>
+    <constraint source="ADR-024">Auto-association uses the EXISTING regarding family / association mechanism (`AssociationChips`, the 11 typed lookups + discriminator). MUST NOT introduce a second association mechanism.</constraint>
+    <constraint source="FR-07/FR-19">Opening from the composer auto-associates the email to the active thread; the send payload carries `ThreadId` so the backend pins it (FR-19).</constraint>
+    <constraint source="NFR-08">Do not change existing behavior for callers that pass no thread/regarding — validate against task 010's characterization.</constraint>
+    <constraint source="ADR-028">All BFF calls via the injected `authenticatedFetch`.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-send-engine.md</file>
+      <file>.claude/adr/ADR-024-regarding-family.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Association chips" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/subcomponents/AssociationChips.tsx">Existing regarding-association UI — reuse for auto-association; do not add a parallel one.</pattern>
+      <pattern name="Send dialog" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx">The wrapper to extend additively.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read SendEmailDialog / EmailComposer / EmailComposer.types + AssociationChips; confirm how the send payload is built and whether it already carries `ThreadId` and a regarding association.</step>
+    <step order="2">Add OPTIONAL props: `threadId?`, `regarding?: {entityType,id}`, `recordLink?` to the types + wrapper. Default behavior when absent = today's behavior.</step>
+    <step order="3">When `regarding` is present, pre-populate the association via the existing `AssociationChips` mechanism (no new mechanism); when `threadId` is present, include it in the send payload for FR-19.</step>
+    <step order="4">Render the embedded `recordLink` in the composer when provided (semantic-token styling).</step>
+    <step order="5">Verify the send payload carries `ThreadId`; if the payload/schema cannot, fire escalation (do not build a second association path).</step>
+    <step order="6">Extend tests: with thread+regarding → payload carries ThreadId + association pre-populated; without → identical to characterized baseline (no regression); record link renders; dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If auto-association would require a SECOND association mechanism (rather than the existing ADR-024 regarding family / AssociationChips), STOP and escalate. Likewise if the send payload cannot carry `ThreadId` without a new send branch (ADR-045).</trigger>
+  </escalation>
+  <justification>
+    <existing>`SendEmailDialog.tsx` + `EmailComposer.tsx` already exist and already associate + send; `AssociationChips.tsx` already implements regarding association.</existing>
+    <extension>Yes — this is a pure additive extension of existing files (new optional props), not a new component. No new-file justification required beyond an optional props type addition to `EmailComposer.types.ts`.</extension>
+    <cost-of-doing-nothing>Without it, an email opened from a conversation cannot pin to the active thread or auto-associate to the record — FR-07 fails and FR-19's `ThreadId` is never supplied by any caller.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/SendEmailDialog.threadRecord.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">New props (`threadId`, `regarding`, `recordLink`) are OPTIONAL; when omitted, behavior matches task 010's characterized baseline exactly (no regression).</criterion>
+    <criterion testable="true">Opening from the composer with a `regarding` auto-associates via the EXISTING mechanism (AssociationChips) — no second association mechanism added (ADR-024).</criterion>
+    <criterion testable="true">When `threadId` is supplied, the send payload carries `ThreadId` (pairs with backend FR-19); the existing send path is used (ADR-045).</criterion>
+    <criterion testable="true">The embedded record link renders in the composer when `recordLink` is provided.</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass, including the no-regression characterization run.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Auto-associate + thread pin"><steps><step>Open SendEmailDialog with threadId=T1 and regarding={matter,M1}</step><step>Send</step></steps><expected>Association pre-populated via AssociationChips; send payload carries ThreadId=T1.</expected></test>
+    <test name="No-regression for existing callers"><steps><step>Open SendEmailDialog with no thread/regarding</step></steps><expected>Behavior identical to characterized baseline.</expected></test>
+    <test name="Record link renders"><steps><step>Provide recordLink</step></steps><expected>Link renders in the composer.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-07/FR-19, ADR-045, ADR-024. Additive only — the characterization from task 010 is the regression guard. Anchor the record-link styling to existing composer chips.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

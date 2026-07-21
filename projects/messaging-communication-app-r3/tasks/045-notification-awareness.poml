@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="messaging-communication-app-r3">
+  <metadata>
+    <title>New-communication awareness — emit + consume notification-spine communication-arrived</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>blocked</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF producer/consumer wiring + frontend awareness; tags include bff-api. FULL gates mandatory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New cross-system contract (notification spine) with an unresolved producer/consumer API; requires careful contract handling + degrade path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a BFF producer/consumer to shared Services/Communication + a frontend badge/toast; conflicts with other BFF/UI edits, and depends on an external spine.</parallel-reason>
+    <deps>003</deps>
+    <tags>bff-api, frontend</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-22: emit and consume the notification-spine communication-arrived kind so a new communication drives an unread badge + toast (awareness only). Content stays on polling (NFR-03). BLOCKED: the notification spine is NOT in master — it lives in email-communication-solution-r4/projects/spaarke-notification-spine-r1. Confirm the producer/consumer contract at P1; if the spine is unavailable, DEGRADE to polling-only and escalate — do NOT invent a contract.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>When a new communication arrives, emit a communication-arrived notification via the spine and consume it in the client to raise an unread badge + toast — awareness only. The message content continues to load via ~5s polling; the spine never becomes the content channel.</goal>
+  <context>
+    <background>FR-22 adds new-communication awareness on top of the existing polling model. NFR-03: polling is retained for content; the notification spine is for AWARENESS ONLY. The spine (communication-arrived kind) is owner-committed but NOT yet in master; its producer trigger (on-capture vs on-send) and consumer API are an Unresolved Question to resolve at P1. This task is status=blocked until the spine contract is confirmed / the spine lands.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/**</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.Communication.Components/**</file>
+      <file>../email-communication-solution-r4/projects/spaarke-notification-spine-r1 (external — spine source)</file>
+    </relevant-files>
+    <dependencies>Task 003 (participant junction). Notification spine spaarke-notification-spine-r1 (NOT in master — owner-committed).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-03">Spine is for AWARENESS ONLY. Content MUST continue to load via polling; MUST NOT move content delivery onto the spine.</constraint>
+    <constraint source="spec-FR-22">Emit + consume communication-arrived → unread badge + toast. No other notification kinds in scope.</constraint>
+    <constraint source="ADR-028">All BFF calls via @spaarke/auth authenticatedFetch.</constraint>
+    <constraint source="contract-integrity">Use the spine's ACTUAL producer/consumer contract confirmed against spaarke-notification-spine-r1. MUST NOT invent a contract; if unavailable, degrade to polling-only + escalate.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>../email-communication-solution-r4/projects/spaarke-notification-spine-r1 (spine contract, when available)</file>
+    </files>
+    <patterns>
+      <pattern name="awareness-badge-toast" location="Spaarke.Communication.Components / workspace widget">Consume the arrival signal to increment an unread badge + raise a toast; do not fetch content from the signal.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">P1 gate: confirm the notification-spine is available in this worktree/master and its communication-arrived producer trigger + consumer API. If NOT available, degrade to polling-only and escalate — do NOT proceed with an invented contract.</step>
+    <step order="2">Emit communication-arrived from the BFF at the confirmed trigger point (state Placement Justification per bff-extensions.md; reuse the spine producer, do not add a parallel notification mechanism).</step>
+    <step order="3">Consume the signal in the client → increment the unread badge + raise a toast. Content still polls (~5s) unchanged.</step>
+    <step order="4">Add BFF unit tests for the emit path + a component test that a consumed communication-arrived raises the badge/toast while content continues to poll.</step>
+    <step order="5">Run dotnet publish -c Release, verify ≤60 MB compressed + 0 new HIGH CVE.</step>
+    <step order="6">Build/verify; run ui-test; update TASK-INDEX.md 045 to complete; document the confirmed spine contract + any deviations/degrade decision in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the notification spine is not available in master or its producer/consumer contract cannot be confirmed against spaarke-notification-spine-r1, STOP: degrade to polling-only (no invented signal) and escalate the dependency per CLAUDE.md §6.</trigger>
+  </escalation>
+  <justification>
+    <existing>No communication-arrived producer/consumer exists in this project; the spine is a separate, owner-committed system.</existing>
+    <extension>No — this is a new consumer (and a thin producer call) of an external spine; there is no existing awareness channel to extend. It reuses the spine rather than adding a parallel notification mechanism.</extension>
+    <cost-of-doing-nothing>Without it, FR-22 fails: a new communication produces no badge/toast; success criterion 10 fails.</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Edit, Bash, Skill(conflict-check), Skill(ui-test), Skill(task-execute)</tools>
+  <outputs>
+    <output type="code">BFF communication-arrived emit + client consume → badge/toast</output>
+    <output type="test">BFF unit test (emit) + component test (consume → badge/toast, content still polls)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Emitting communication-arrived drives an unread badge + toast in the client.</criterion>
+    <criterion testable="true">Content STILL loads via ~5s polling after the signal — the spine is not the content channel (NFR-03).</criterion>
+    <criterion testable="true">The producer/consumer contract used matches the actual spaarke-notification-spine-r1 contract (no invented API).</criterion>
+    <criterion testable="true">If the spine is unavailable, the feature degrades to polling-only and the dependency is escalated — no fabricated signal ships.</criterion>
+    <criterion testable="true">Publish ≤60 MB compressed; 0 new HIGH CVE; BFF tests updated.</criterion>
+  </acceptance-criteria>
+  <notes>BFF task: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB compressed + 0 new HIGH CVE + update tests. status=blocked/gate=blocked — do not start until the spine lands / contract is confirmed at P1. Run /conflict-check before any PR touching Services/Communication. Reference spec FR-22 + NFR-03 + Unresolved Question (spine contract).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

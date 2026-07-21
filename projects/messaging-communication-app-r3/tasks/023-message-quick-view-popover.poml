@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="messaging-communication-app-r3">
+  <metadata>
+    <title>MessageQuickView popover (200-char) with open→pin scroll/highlight (FR-05)</title>
+    <phase>3 Email-in-flow + quick-view + new-thread</phase>
+    <gate>after:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx popover in the shared lib; interaction (open→pin scroll/highlight) with a11y surface. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copy the `AiSummaryPopover` pattern with different content; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build `MessageQuickView`: a Fluent v9 popover that shows a compact preview of a message (body truncated to 200 characters; for an email → to / from / date / subject) with an "open→pin" action that scrolls the conversation to the full message and highlights it. Copy the interaction/structure of `AiSummaryPopover.tsx` (positioning, focus management, dismissal) but render message-preview content, not AI-summary content.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>A `MessageQuickView` popover: 200-char preview (email → to/from/date/subject), open→pin action that scrolls to + highlights the full message; empty/error handled; focus-trapped, keyboard-dismissible, ARIA-labeled; dark-mode compliant.</goal>
+  <context>
+    <background>FR-05 needs a lightweight preview a user can pop from a message reference (e.g., in the right-pane PCF or a search result) without navigating the whole conversation, plus an open→pin that jumps to and highlights the message in the flow. `AiSummaryPopover.tsx` is the proven popover pattern in the lib; copy its mechanics (Fluent Popover, positioning, focus/dismiss) and swap the content.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts</file>
+    </relevant-files>
+    <dependencies>011 (ConversationView) — the pin action scrolls/highlights a bubble there; expose a scroll-to-message handle from ConversationView if not already present.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-05">Preview truncates body to 200 characters; for an email show to / from / date / subject; the open→pin action scrolls to and highlights the full message.</constraint>
+    <constraint source="NFR-06">Copy the `AiSummaryPopover` pattern (do not fork its content); reuse timeline types for the message shape; keep type strings.</constraint>
+    <constraint source="ADR-021">Fluent v9 Popover + semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Focus-trapped popover, keyboard open/dismiss (Esc), ARIA-labeled; highlight is announced/visible.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Popover reference" location="src/client/shared/Spaarke.UI.Components/src/components/AiSummaryPopover/AiSummaryPopover.tsx">Copy positioning, focus management, and dismissal; replace content with the 200-char message preview.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read `AiSummaryPopover.tsx` to capture the popover mechanics (trigger, positioning, focus, dismiss).</step>
+    <step order="2">Create `MessageQuickView/MessageQuickView.tsx`: 200-char body truncation; for emails render to/from/date/subject; graceful fallback for missing fields.</step>
+    <step order="3">Add an open→pin action that calls a `scrollToMessage(id)` handle on ConversationView and applies a transient highlight to the target bubble.</step>
+    <step order="4">If ConversationView has no scroll-to-message handle, add one (ref/imperative or callback) — minimal, additive.</step>
+    <step order="5">Focus trap, Esc-dismiss, ARIA labels; empty/error preview states.</step>
+    <step order="6">Export from the lib index; tests: 200-char truncation, email field rendering, open→pin scrolls + highlights, keyboard dismiss, dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If wiring open→pin requires a large refactor of ConversationView's scroll model (not a small additive handle), STOP and confirm scope before proceeding.</trigger>
+  </escalation>
+  <justification>
+    <existing>`AiSummaryPopover.tsx` is a popover for AI summaries — different content/behavior (no 200-char message preview, no open→pin scroll).</existing>
+    <extension>No — the content and pin interaction differ fundamentally; copy the popover pattern into a new `MessageQuickView` rather than overloading the AI popover.</extension>
+    <cost-of-doing-nothing>FR-05 (200-char quick-view + open→pin) has no home; users cannot preview or jump-to a message without a full navigation.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/MessageQuickView/MessageQuickView.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/MessageQuickView/__tests__/MessageQuickView.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Preview truncates the body to 200 characters; for an email it shows to / from / date / subject; missing fields degrade gracefully.</criterion>
+    <criterion testable="true">open→pin scrolls the conversation to the full message AND applies a transient highlight to it.</criterion>
+    <criterion testable="true">Popover is focus-trapped, Esc-dismissible, ARIA-labeled; empty/error preview states handled (NFR-05).</criterion>
+    <criterion testable="true">Copies the `AiSummaryPopover` pattern (not forked content); reuses timeline types.</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="200-char preview"><steps><step>Open the quick-view on a long message</step></steps><expected>Body truncated to 200 chars; email shows to/from/date/subject.</expected></test>
+    <test name="Open→pin scroll + highlight"><steps><step>Click open→pin</step></steps><expected>Conversation scrolls to the message and highlights it.</expected></test>
+    <test name="Keyboard dismiss"><steps><step>Open popover; press Esc</step></steps><expected>Popover dismisses; focus returns to trigger.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-05. Anchor the popover mechanics to `AiSummaryPopover.tsx`; content is the message preview + pin.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

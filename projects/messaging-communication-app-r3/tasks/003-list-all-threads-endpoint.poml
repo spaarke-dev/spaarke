@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="messaging-communication-app-r3">
+  <metadata>
+    <title>FR-16: GET /api/communications/threads — list all threads (incl. record-less), impersonated + access-filtered, no membership-union</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>after:002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New endpoint + new service method on the correctness-critical impersonated read path; brownfield edit of shared files; the negative-access/no-over-disclosure cases are non-negotiable (NFR-01). ADR-038 seam tests are DoD. FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access-model correctness on a shared read surface; the "record-less parity without a membership-union" requirement is the exact failure mode the retired union re-introduces if reasoned sloppily.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared CommunicationThreadReadService.cs + CommunicationEndpoints.cs + CommunicationModule.cs — same files touched by 002/004; serialize.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api, backend, integration-test</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Add `GET /api/communications/threads` and `CommunicationThreadReadService.ListThreadsAsync` — a paged, name-searchable list of ALL threads the caller may see, INCLUDING record-less (Direct / non-record-anchored) threads, queried IMPERSONATED (`MSCRMCallerID`) so Dataverse row-level security decides visibility, with the shared access model applied. It MUST NOT hand-compute a membership-union (retired 2026-07-16). Register the service (already scoped) and map the endpoint with the existing `CommunicationAuthorizationFilter`. Add seam tests in `tests/integration/seam/Communication/`.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs + Dataverse Web API + impersonation.</role>
+  <goal>A new `ListThreadsAsync(ClaimsPrincipal caller, string? search, int? top, string? skiptoken-or-page, CancellationToken)` on `CommunicationThreadReadService` that queries `sprk_communicationthreads` IMPERSONATED (via `IImpersonatedCommunicationQuery`), optionally filters by name (`sprk_name` contains/startswith `search`), pages the result, and returns a paged DTO of thread summaries (id, name, threadtype, and enough for the left-pane list). It returns record-anchored AND record-less threads because the impersonated thread query is not scoped to any regarding lookup. A new `GET /api/communications/threads` endpoint maps to it with `.AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;()`. Seam tests in `tests/integration/seam/Communication/` prove record-less inclusion, access parity, a negative-access case, paging, and name search.</goal>
+  <context>
+    <background>Spec FR-16 + Success Criterion 5: the workspace left pane and standalone code page need to list ALL of a user's threads, including first-class record-less threads. Every existing read is record-anchored: `ReadByRegardingAsync` queries a typed `sprk_regarding{type}` lookup, so a Direct/record-less thread (`sprk_threadtype = Direct`, no regarding) is invisible to it. There is no list-all read today. The access-model decision (r1 `notes/access-model-decision.md`, 2026-07-16) retired the hand-computed "MembershipResolver(anchor) ∪ overlay grants" union: record-level visibility is Dataverse's job under impersonation. This task must achieve record-less parity the SAME way — impersonated thread query — not by resurrecting a union.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file>tests/integration/seam/Communication/CommunicationWorkspaceReadSeamTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationByRegardingReadTests.cs</file>
+    </relevant-files>
+    <dependencies>002 (DTO/read path settled first — this task adds a peer read method and should not race the DTO edit).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Access model (NFR-01, correctness-critical): the thread list MUST be issued IMPERSONATED via `IImpersonatedCommunicationQuery` (MSCRMCallerID = caller systemuserid). MUST NOT hand-compute a membership-union or take any dependency on a membership-resolution seam (`IThreadPrivateGrantProvider`, `IThreadMembershipDerivationService`, etc.) for this read. Fail closed on an unresolved caller (403), no app-only fallback.</constraint>
+    <constraint source="project">Record-less inclusion: the impersonated thread query MUST NOT be scoped to any `sprk_regarding{type}` lookup (that would exclude Direct/record-less threads). Any per-user master (`sprk_regardingrecordtype = "systemuser"`) handling matches existing ThreadResolver semantics.</constraint>
+    <constraint source="ADR-038">Seam tests in `tests/integration/seam/Communication/` are the Definition of Done for this read endpoint (dispatch/read spine). Extend `CommunicationWorkspaceReadSeamTests` or add a sibling; reuse the existing impersonated-query stub harness (no `Mock&lt;HttpMessageHandler&gt;`).</constraint>
+    <constraint source="bff-extensions">New endpoint + method inside `Services/Communication/` behind the ADR-045 boundary. State Placement Justification in the PR; measure publish ≤60 MB compressed (baseline ~46 MB); no new package/AI dependency/background worker.</constraint>
+    <constraint source="ADR-028">Endpoint requires auth (group `.RequireAuthorization()` + `CommunicationAuthorizationFilter`); caller resolved server-side, never client-supplied.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Impersonated thread query" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">`ReadByRegardingAsync` step 1 shows the impersonated `sprk_communicationthreads` query shape + row parsing; `ListThreadsAsync` drops the regarding filter and adds name-search + paging.</pattern>
+      <pattern name="Endpoint mapping" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">The `GET /by-regarding/{entityType}/{id}` + `GET /` mappings are the template for a new `GET /threads` route (mind the route collision with `/threads/{threadId}/messages` — a bare `/threads` GET is distinct).</pattern>
+      <pattern name="No-union structural guard" location="tests/integration/seam/Communication/CommunicationWorkspaceReadSeamTests.cs">Extend the constructor-shape assertion to cover the new list read too.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Design the paged result DTO (thread summary: id, name, threadtype, optional last-activity/createdon for ordering) in `CommunicationThreadReadModels.cs` — a `ThreadListResult` with the page items + paging token/flag. Keep it minimal for the left-pane list.</step>
+    <step order="2">Implement `ListThreadsAsync`: resolve caller (fail-closed 403); build an impersonated `sprk_communicationthreads` query with `$select` = id/name/threadtype (+ ordering column), NO regarding filter; apply an optional `sprk_name` search predicate (escape the value, use contains/startswith); apply `$top` (normalized/bounded like the existing `MaxThreads`) + paging.</step>
+    <step order="3">Confirm record-less threads are included (no regarding scoping) and that private threads the caller has no grant for are simply absent from the impersonated set (no union computed). Do NOT post-filter by regarding.</step>
+    <step order="4">Add name search + paging semantics (page size bound + skiptoken or page index — follow the existing normalization helpers). Order deterministically (e.g. createdon/last-activity desc) so paging is stable.</step>
+    <step order="5">Map `GET /api/communications/threads` in `CommunicationEndpoints.cs` with `.AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;()`, `?search=`, `?top=`, paging query params, `Produces&lt;ThreadListResult&gt;` + 400/403; resolve caller from `HttpContext.User`. Verify no route conflict with the existing `/threads/{threadId}/messages` and `POST /threads/direct`.</step>
+    <step order="6">Confirm DI: `CommunicationThreadReadService` is already registered scoped in `CommunicationModule.cs` — no new registration needed unless a new dependency is introduced (prefer none).</step>
+    <step order="7">Write seam tests in `tests/integration/seam/Communication/`: (a) record-less thread appears in the list for a caller who can see it; (b) access parity — the list equals what the impersonated set returns for that caller; (c) NEGATIVE — a thread a caller cannot see is absent (no over-disclosure); (d) paging returns stable pages; (e) name search filters by `sprk_name`; (f) structural no-union guard for the new read.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; measure BFF publish size; run the CVE scan.</step>
+    <step order="9">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 003 to ✅.</step>
+    <step order="10">Document the endpoint contract + paging/search semantics + publish delta in `projects/messaging-communication-app-r3/notes/` for Phase 4 Surface 2.</step>
+  </steps>
+  <escalation><trigger>If the shared access model cannot express record-less access parity through the impersonated thread query alone — i.e. correct visibility appears to require a hand-computed membership-union — STOP and escalate per root CLAUDE.md §6 / §6.5. Do NOT reintroduce the retired union.</trigger></escalation>
+  <justification>
+    <existing>`CommunicationThreadReadService.ReadByRegardingAsync` — the closest neighbor; queries threads by a typed `sprk_regarding{type}` lookup (record-anchored only).</existing>
+    <extension>No — `ReadByRegardingAsync` is structurally record-scoped; a record-less/Direct thread carries no regarding lookup and is invisible to it. A new method + endpoint is required; the impersonation + access-filter pipeline is reused (not forked).</extension>
+    <cost-of-doing-nothing>The workspace left pane (FR-16) and the standalone code page (FR-14) have nothing to call — record-less threads are invisible to every existing read, so a user's Direct conversations never appear anywhere in R3.</cost-of-doing-nothing>
+  </justification>
+  <tools><tool name="dotnet">Build+test</tool><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</output>
+    <output type="test">tests/integration/seam/Communication/*.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a caller who can see a record-less (Direct) thread T, when `GET /api/communications/threads` is called, then T appears in the list.</criterion>
+    <criterion testable="true">Given a caller, when the list returns, then it equals the set the impersonated `sprk_communicationthreads` query returns for that caller (access parity) — no post-hoc regarding scoping.</criterion>
+    <criterion testable="true">Given a thread P the caller has NO access to, when the caller lists threads, then P is absent (negative-access; no over-disclosure) and no membership-union was computed.</criterion>
+    <criterion testable="true">Given `?search=acme`, when the list returns, then only threads whose `sprk_name` matches "acme" are returned (name search), with the value safely escaped.</criterion>
+    <criterion testable="true">Given more threads than the page size, when paging through with the returned token/index, then pages are stable and non-overlapping under a deterministic order.</criterion>
+    <criterion testable="true">Given an unresolved caller, when the endpoint is called, then it returns 403 (fail-closed, no app-only fallback).</criterion>
+    <criterion testable="true">Given the new read method, when its dependencies are inspected, then it takes no membership-resolution/`IThreadPrivateGrantProvider` dependency (structural no-union guard, seam test).</criterion>
+    <criterion testable="true">Given the new `GET /threads` route, when the app starts, then it does not collide with `/threads/{threadId}/messages` or `POST /threads/direct` (routing resolves unambiguously).</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; delta reported in task notes/PR (per .claude/constraints/bff-extensions.md).</criterion>
+    <criterion testable="true">All tests pass; 0 new HIGH CVE (dotnet list package --vulnerable --include-transitive).</criterion>
+  </acceptance-criteria>
+  <notes>Placement Justification MUST be stated in the PR (cite .claude/constraints/bff-extensions.md): new endpoint + method inside `Services/Communication/`, reusing the impersonation + shared-filter pipeline; no new package/AI/worker; publish delta ≈0. Reference spec FR-16 + Success Criterion 5. Run `/conflict-check` before opening the PR (shared `Services/Communication/**`).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Doc-drift fix: sprk_communication.md missing Message=100000004 + R1 messaging columns</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation-only correction of a data-model reference file to match shipped code (the CommunicationType enum + R1 messaging columns). No source, no tests, no runtime surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical doc reconciliation against the code enum + as-built schema; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, dataverse</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Correct `docs/data-model/sprk_communication.md`: its `sprk_communicationtype` choice list is missing `Message = 100000004` (present in the shipped `CommunicationType` enum), and the doc omits the R1 messaging columns added by messaging-communication-app-r1 (e.g. the ACS message/thread id columns and the thread lookup). Reconcile the doc to the code + as-built schema; do not touch any source.</prompt>
+  <role>SPAARKE platform developer / documentarian. Code is the source of truth; fix the doc to match code.</role>
+  <goal>`docs/data-model/sprk_communication.md` lists `sprk_communicationtype` option `100000004: Message` alongside the existing four, and documents the R1 messaging columns present in code (ACS message id / ACS thread id / the `sprk_communicationthread` lookup and any other R1 messaging additions actually in the schema), each with logical name, type, and a short description. The review header/date is updated to note this R3 correction.</goal>
+  <context>
+    <background>Spec §External Dependencies + plan Phase 1 deliverables call out a doc-drift fix: `docs/data-model/sprk_communication.md` is missing `Message = 100000004` and R1 messaging columns. The shipped enum `src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs` has `Email=100000000, TeamsMessage=100000001, SMS=100000002, Notification=100000003, Message=100000004`, but the doc's `sprk_communicationtype` row lists only the first four. R1 also added messaging columns to `sprk_communication` (ACS ids, thread lookup) that the doc does not describe.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+    </relevant-files>
+    <dependencies>None — independent doc fix (parallel group A).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Documentation-only: do NOT modify any file under `src/`, `tests/`, or `.claude/`. Fix the doc to match code (Code-wins per root CLAUDE.md §2).</constraint>
+    <constraint source="project">Verify each added column/option against actual code or the as-built schema before writing it — do NOT invent columns. Where a column exists in code but its exact Dataverse attributes are unverifiable from the repo, describe conservatively and flag it in notes.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="CommunicationType source of truth" location="src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs">The enum is the authoritative option-set integer list for `sprk_communicationtype`.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Diff the doc's `sprk_communicationtype` options against `CommunicationType.cs`; confirm `Message = 100000004` is the missing value.</step>
+    <step order="2">Grep the code for R1 messaging columns on `sprk_communication` (ACS message id, ACS thread id, the `sprk_communicationthread` lookup, and any other R1 messaging additions actually referenced) to build the verified list of missing columns.</step>
+    <step order="3">Add the `100000004: Message` option to the `sprk_communicationtype` row and add table rows for each verified missing R1 column (logical name, schema name, type, short description).</step>
+    <step order="4">Update the doc's review header (Last Reviewed date + a one-line note crediting the R3 doc-drift correction).</step>
+    <step order="5">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 006 to ✅.</step>
+    <step order="6">Record any column that could not be fully verified from the repo in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation><trigger>If a purportedly-missing R1 column cannot be confirmed from code or the as-built schema in the repo, STOP short of inventing it — document the gap in notes and escalate per root CLAUDE.md §6 rather than guessing attributes.</trigger></escalation>
+  <tools><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="doc">docs/data-model/sprk_communication.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the corrected doc, when the `sprk_communicationtype` options are read, then `100000004: Message` is listed alongside Email/Teams Message/SMS/Notification (matches `CommunicationType.cs`).</criterion>
+    <criterion testable="true">Given the corrected doc, when the `sprk_communication` field table is read, then each verified R1 messaging column (ACS message id, ACS thread id, `sprk_communicationthread` lookup, and any other verified R1 addition) is documented with logical name, type, and description.</criterion>
+    <criterion testable="true">Given the change, when the diff is inspected, then only `docs/data-model/sprk_communication.md` (and this project's notes/TASK-INDEX) is modified — no `src/`, `tests/`, or `.claude/` file changes.</criterion>
+    <criterion testable="true">Given the review header, when read, then it reflects the R3 doc-drift correction date/note.</criterion>
+  </acceptance-criteria>
+  <notes>Docs-only task — no BFF publish-size or CVE criteria apply. Reference spec §External Dependencies (doc-drift fix) + plan Phase 1. Parallel-safe (group A) — independent of the backend tasks.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load the doc + code source of truth first; follow task-execute at MINIMAL rigor.</protocol></execution>
+</task>

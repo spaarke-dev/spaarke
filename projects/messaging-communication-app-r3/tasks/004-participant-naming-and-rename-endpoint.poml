@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="messaging-communication-app-r3">
+  <metadata>
+    <title>FR-17: participant-based thread naming in ThreadResolver + BFF rename endpoint (edit-preserve)</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>after:001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint + edit to the shared ThreadResolver naming logic; the edit-preserve invariant (a user rename MUST survive re-derive) is correctness-critical and hard MUST NOT use a plugin. Tags include bff-api. FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared ThreadResolver edit + a rename write endpoint; the marker-gated edit-preserve semantics and the "no plugin" boundary need careful reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared ThreadResolver.cs + CommunicationEndpoints.cs — same files touched by 003/005; serialize.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, backend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Give record-less threads a participant-derived name by rolling up the message-grain `sprk_communicationparticipant` junction inside `ThreadResolver` (extend the existing but unwired `ReDeriveThreadNameAsync` naming path), and add a BFF rename endpoint that sets `sprk_name` and flips `sprk_nameisautoderived` to Edited so the auto-derive never overwrites a user-chosen name. NO Dataverse plugin — the rename routes through the BFF (hard MUST NOT).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs + Dataverse Web API + impersonation.</role>
+  <goal>(1) `ThreadResolver` derives a participant-based name for a record-less thread (no regarding anchor) by aggregating the thread's participants from the `sprk_communicationparticipant` junction (person display names / addresses), replacing the current generic "Conversation"/"Messages" fallback for the record-less case; the existing marker gate (`sprk_nameisautoderived`) still preserves an Edited name. (2) A new BFF endpoint (e.g. `PATCH /api/communications/threads/{threadId}/name` or `POST .../rename`) sets `sprk_name` on `sprk_communicationthread` AND sets `sprk_nameisautoderived = false` (Edited) in one write. (3) Unit tests cover auto-name-from-participants, rename-persists, and re-derive-does-NOT-overwrite-an-Edited-name.</goal>
+  <context>
+    <background>Spec FR-17 + Success Criterion 6: a record-less thread should auto-name from its participants and be renamable, with edit-preserve holding across a later re-derive. `ThreadResolver` already has an UNWIRED, marker-gated `ReDeriveThreadNameAsync` (reads `sprk_nameisautoderived`: Edited=false preserves, Auto/null re-derives) and a `BuildTopicFromRegardingAnchor` fallback that returns "Conversation" for the record-less case — there is no participant roll-up yet. The `sprk_communicationparticipant` junction (R2 tasks 003/050) holds one row per (message × person/address × role); rolling it up to the thread gives the participant set. Owner decision: rename is a BFF endpoint, NOT a plugin (the resolver's own doc comment notes the trigger/marker-flip wiring was deferred because client-side Dataverse writes bypass the BFF — this task supplies the BFF rename path).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Threads/IThreadResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ThreadResolverTests.cs</file>
+    </relevant-files>
+    <dependencies>001 (baseline pins the current naming fallback + resolver behavior).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">HARD MUST NOT: no Dataverse plugin. The rename (and any marker flip) routes through the BFF endpoint only.</constraint>
+    <constraint source="project">Edit-preserve (correctness-critical): once `sprk_nameisautoderived = false` (Edited), `ReDeriveThreadNameAsync` MUST NOT overwrite `sprk_name`. The rename endpoint sets the marker to Edited atomically with the name write. The master-thread guard (`sprk_regardingrecordtype = "systemuser"`) and legacy-null-as-Auto semantics MUST be preserved unchanged.</constraint>
+    <constraint source="ADR-024">Participant roll-up REUSES the existing `sprk_communicationparticipant` junction (R2 003/050) — do NOT introduce a second participant/regarding mechanism. Naming derives from the junction, not from a new person store.</constraint>
+    <constraint source="project">Re-derive stays best-effort / non-fatal (NFR-02) as today — a naming failure never fails send/capture.</constraint>
+    <constraint source="ADR-038">Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/` (extend `ThreadResolverTests`) for the naming roll-up + edit-preserve; the rename endpoint gets an integration/contract test.</constraint>
+    <constraint source="ADR-028">Rename endpoint requires auth (`CommunicationAuthorizationFilter`); caller resolved server-side. The write authorizes against the caller's access to the thread (do NOT let a caller rename a thread they cannot see).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Marker-gated re-derive" location="src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs">`ReDeriveThreadNameAsync` — extend its naming computation for the record-less (no-anchor) branch to roll up participants; keep the master-thread guard + Edited-marker gate intact.</pattern>
+      <pattern name="Participant junction query" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs">`BuildParticipantClauseAsync` shows the `sprk_communicationparticipant` columns (`_sprk_systemuser_value`, `_sprk_contact_value`, `sprk_addresstext`, `_sprk_communication_value`) — the roll-up joins these to the thread's messages.</pattern>
+      <pattern name="Rename endpoint template" location="src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs">`StartDirectThreadAsync` shows caller-resolution + a write endpoint shape; mirror for the rename write.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a participant roll-up helper: given a thread id, read its messages' participants from `sprk_communicationparticipant` (bounded scan), collect distinct person display names / addresses, and build a stable, truncated name (e.g. "Alice, Bob, +2") for the record-less case. Decide ordering deterministically.</step>
+    <step order="2">Wire the roll-up into `ReDeriveThreadNameAsync`'s no-anchor branch (currently `BuildTopicFromRegardingAnchor` → "Conversation"): when there is no regarding anchor, derive from participants; keep the anchor branch as-is. Preserve the master-thread guard and the Edited/legacy-null marker gate exactly.</step>
+    <step order="3">Add a rename method (on `IThreadResolver` or a thin rename service) that writes `sprk_name` + `sprk_nameisautoderived = false` in one `UpdateAsync`.</step>
+    <step order="4">Map the BFF rename endpoint (e.g. `POST /api/communications/threads/{threadId}/rename` with a `{ name }` body, or `PATCH .../name`) in `CommunicationEndpoints.cs` with `.AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;()`; validate non-blank name (400) and authorize the caller against the thread (403 if not visible/permitted); return the updated name.</step>
+    <step order="5">Confirm no plugin is introduced anywhere; the marker flip happens only in the BFF rename write.</step>
+    <step order="6">Extend `ThreadResolverTests`: auto-name from participants for a record-less thread; rename sets name + Edited marker; `ReDeriveThreadNameAsync` on an Edited thread is a no-op (name preserved); master-thread + legacy-null cases still behave. Add a rename-endpoint integration/contract test (incl. the negative auth case).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; measure BFF publish size; run the CVE scan.</step>
+    <step order="8">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 004 to ✅.</step>
+    <step order="9">Document the naming roll-up rule + rename contract + publish delta in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation><trigger>If edit-preserve cannot be guaranteed via `sprk_nameisautoderived` alone — e.g. an existing client-side write path could re-derive over an Edited name without hitting the marker gate — STOP and escalate per root CLAUDE.md §6 (do NOT reach for a plugin to enforce it; that is a hard MUST NOT).</trigger></escalation>
+  <justification>
+    <existing>`ThreadResolver.ReDeriveThreadNameAsync` (unwired, regarding-anchor-only naming) and the `sprk_nameisautoderived` marker — the closest neighbor for naming; there is NO rename endpoint today.</existing>
+    <extension>Extend the resolver for participant naming (reuse the marker + junction). The rename ENDPOINT is genuinely new — it cannot be an extension because rename is a client-initiated write that currently has no BFF surface, and a plugin (the only alternative trigger) is a hard MUST NOT.</extension>
+    <cost-of-doing-nothing>Record-less threads show a generic "Conversation"/"Messages" name and cannot be renamed at all (FR-17 fails), and edit-preserve never fires because nothing flips the marker without a forbidden plugin.</cost-of-doing-nothing>
+  </justification>
+  <tools><tool name="dotnet">Build+test</tool><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/ThreadResolverTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a record-less thread with participants Alice and Bob and no regarding anchor, when the name is derived, then `sprk_name` reflects the participants (e.g. "Alice, Bob") rather than the generic "Conversation".</criterion>
+    <criterion testable="true">Given a caller who can see thread T, when they POST the rename endpoint with name "Case strategy", then `sprk_name == "Case strategy"` and `sprk_nameisautoderived == false` (Edited) after the write.</criterion>
+    <criterion testable="true">Given a thread with `sprk_nameisautoderived == false`, when `ReDeriveThreadNameAsync` runs, then `sprk_name` is NOT overwritten (edit-preserve holds).</criterion>
+    <criterion testable="true">Given a per-user master thread (`sprk_regardingrecordtype == "systemuser"`), when re-derive runs, then it is skipped (master-thread guard preserved) and the participant roll-up is not attempted.</criterion>
+    <criterion testable="true">Given a rename request with a blank name, when the endpoint is called, then it returns 400; given a caller who cannot see the thread, then it returns 403 (no rename of an inaccessible thread).</criterion>
+    <criterion testable="true">Given the whole change, when the diff is inspected, then NO Dataverse plugin is added; the marker flip occurs only in the BFF rename write.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; delta reported in task notes/PR (per .claude/constraints/bff-extensions.md).</criterion>
+    <criterion testable="true">All tests pass; 0 new HIGH CVE (dotnet list package --vulnerable --include-transitive).</criterion>
+  </acceptance-criteria>
+  <notes>Placement Justification MUST be stated in the PR (cite .claude/constraints/bff-extensions.md): extends the existing resolver + adds one write endpoint inside `Services/Communication/`; no new package/AI/worker; publish delta ≈0. Reference spec FR-17 + Success Criterion 6. Run `/conflict-check` before opening the PR (shared `ThreadResolver.cs`/`CommunicationEndpoints.cs`).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

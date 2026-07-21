@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="messaging-communication-app-r3">
+  <metadata>
+    <title>FR-19: honor ThreadId on the email send branch (pin email to the active thread)</title>
+    <phase>1 Backend read/thread spine</phase>
+    <gate>after:001</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the shared `CommunicationService` outbound send path; must add explicit-thread pinning to the email branch WITHOUT altering the default (no-ThreadId) find-or-create behavior (regression-sensitive). Tags include bff-api. FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared send-path edit on the canonical send engine (ADR-045); must mirror the message path precisely and stay best-effort/non-fatal without regressing the existing email threading.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared CommunicationService.cs send path — same file family touched across Phase 1; serialize.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, backend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Make the EMAIL send branch honor `request.ThreadId` the same way the MESSAGE branch already does: when `ThreadId` is supplied, stamp the email's `sprk_communicationthread` directly to that thread (mirror `AssignExplicitThreadAsync`), bypassing the find-or-create resolver; when `ThreadId` is absent, behave exactly as today (find-or-create via `ResolveOutboundThreadAsync`). Extend the existing branch only — no new send path (ADR-045).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in ASP.NET Core Minimal APIs + Dataverse Web API + impersonation.</role>
+  <goal>The email outbound path (`ResolveOutboundThreadAsync`, called from the shared-mailbox branch at ~line 1072 and the `SendAsUserAsync` OBO branch at ~line 1378) checks `request.ThreadId` first: if present, it stamps the thread directly (reusing the existing `AssignExplicitThreadAsync` explicit-target path, incl. the task-043 message-access grant) and skips find-or-create; if absent, it falls through to the current `IThreadResolver.ResolveAndAssignThreadAsync`. Behavior stays best-effort / non-fatal (NFR-02). Unit tests cover both the explicit-ThreadId email case and the no-ThreadId regression case.</goal>
+  <context>
+    <background>Spec FR-19 + Success Criterion 4: when a user sends an email from the in-conversation composer, it must pin to the active thread. The MESSAGE branch already does this: `ResolveOutboundMessageThreadAsync` calls `AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, ...)` when `request.ThreadId.HasValue`, else find-or-create. The EMAIL path (`ResolveOutboundThreadAsync`) does NOT check `request.ThreadId` — it always calls the find-or-create resolver. `SendCommunicationRequest.ThreadId` already exists and is documented as the "respond into the current thread" explicit target. This task brings the email branch to parity by mirroring the message path's explicit-stamp, reusing the SAME `AssignExplicitThreadAsync` helper (do not duplicate it).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceMessageSendTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</file>
+    </relevant-files>
+    <dependencies>001 (baseline pins the pre-change email behavior — no-ThreadId find-or-create — so the regression case is explicit).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-045">No new send path and no new thread-assignment mechanism — extend the EXISTING email branch and REUSE the existing `AssignExplicitThreadAsync` (the same helper the message path uses). Dispatch still flows through the existing `CommunicationChannelDispatcher`.</constraint>
+    <constraint source="project">Regression guard (correctness-critical): an email sent WITHOUT `ThreadId` MUST behave byte-for-byte as today (find-or-create via `ResolveOutboundThreadAsync`). Only the `ThreadId.HasValue` case changes.</constraint>
+    <constraint source="project">Best-effort / non-fatal (NFR-02): a thread-stamp failure MUST NOT fail an already-sent + persisted email (matches the existing explicit-stamp try/catch).</constraint>
+    <constraint source="ADR-046">Message sends stay on the ACS branch; this task changes only the email branch — do not alter the message path.</constraint>
+    <constraint source="ADR-038">Update unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/` for both branches (explicit-ThreadId email + no-ThreadId regression).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Explicit-target stamp (mirror this)" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">`ResolveOutboundMessageThreadAsync` → `if (request.ThreadId.HasValue) return await AssignExplicitThreadAsync(...)` is the exact shape to mirror in `ResolveOutboundThreadAsync`; `AssignExplicitThreadAsync` (best-effort, chains the task-043 grant) is REUSED, not re-implemented.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read `ResolveOutboundThreadAsync` (email path) and `ResolveOutboundMessageThreadAsync` + `AssignExplicitThreadAsync` (message path) to confirm the exact reuse shape.</step>
+    <step order="2">In `ResolveOutboundThreadAsync`, add an early branch: `if (request.ThreadId.HasValue) { await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct); return; }` before the find-or-create resolver call. Ensure `AssignExplicitThreadAsync` (which returns `Guid?` and chains the grant) is reused as-is; keep the method's void/best-effort contract consistent with its callers.</step>
+    <step order="3">Confirm BOTH email call sites (shared-mailbox branch ~1072 and `SendAsUserAsync` ~1378) route through `ResolveOutboundThreadAsync`, so the single edit covers both; if a call site bypasses it, apply the same guard there.</step>
+    <step order="4">Verify the no-ThreadId path is unchanged (still `IThreadResolver.ResolveAndAssignThreadAsync`) and the change is inside the existing best-effort try/catch (a stamp failure does not fail the send).</step>
+    <step order="5">Add/extend unit tests: (a) email send WITH `ThreadId` stamps `sprk_communicationthread` to that thread (explicit path, no find-or-create); (b) email send WITHOUT `ThreadId` still find-or-creates (regression); (c) a stamp failure is swallowed (non-fatal).</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; measure BFF publish size; run the CVE scan.</step>
+    <step order="7">Update `projects/messaging-communication-app-r3/tasks/TASK-INDEX.md` status for 005 to ✅.</step>
+    <step order="8">Document the change (both call sites covered; regression preserved) + publish delta in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation><trigger>If honoring `ThreadId` on the email branch cannot reuse `AssignExplicitThreadAsync` without changing its signature/semantics or the message path — i.e. parity would require a new/forked thread-assignment path — STOP and escalate per root CLAUDE.md §6.5 (ADR-045 forbids a second send/assignment path).</trigger></escalation>
+  <tools><tool name="dotnet">Build+test</tool><tool name="terminal">shell</tool></tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/CommunicationServiceTests.cs</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given an email send with `request.ThreadId = T`, when the send completes, then `sprk_communication.sprk_communicationthread` is stamped to T via the explicit-target path (no find-or-create resolver call).</criterion>
+    <criterion testable="true">Given an email send with `request.ThreadId == null`, when the send completes, then thread resolution still runs the find-or-create `IThreadResolver` path exactly as before (regression preserved).</criterion>
+    <criterion testable="true">Given an email send with `ThreadId = T` where the thread stamp write fails, when the send completes, then the already-sent + persisted email is NOT failed (best-effort / non-fatal).</criterion>
+    <criterion testable="true">Given both email call sites (shared-mailbox send and `SendAsUserAsync` OBO send), when each is exercised with a `ThreadId`, then both stamp the explicit thread (the guard covers both paths).</criterion>
+    <criterion testable="true">Given the diff, when inspected, then it reuses the existing `AssignExplicitThreadAsync` and adds no new send path or thread-assignment mechanism (ADR-045); the message/ACS branch is unchanged.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; delta reported in task notes/PR (per .claude/constraints/bff-extensions.md).</criterion>
+    <criterion testable="true">All tests pass; 0 new HIGH CVE (dotnet list package --vulnerable --include-transitive).</criterion>
+  </acceptance-criteria>
+  <notes>Placement Justification MUST be stated in the PR (cite .claude/constraints/bff-extensions.md): extends an existing branch in `CommunicationService`, reusing an existing helper; no new component/package/AI/worker; publish delta ≈0. Reference spec FR-19 + Success Criterion 4. No `&lt;justification&gt;` element — pure modification of an existing method (adds no new surface). Run `/conflict-check` before the PR (shared `CommunicationService.cs`).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

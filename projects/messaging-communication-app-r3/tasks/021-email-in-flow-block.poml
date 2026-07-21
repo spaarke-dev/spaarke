@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Email-in-flow compact block + single "Email" indicator + open→modal (FR-04)</title>
+    <phase>3 Email-in-flow + quick-view + new-thread</phase>
+    <gate>after:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits shared-lib ConversationView message renderer (.tsx); wires the email modal. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Presentation branch in the bubble renderer + open-modal wiring to the already-extended dialog; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the ConversationView message renderer from task 011 — same files; must serialize.</parallel-reason>
+    <deps>011, 020</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Render an email-in-flow as a COMPACT block within the conversation: subject + from + to, with a SINGLE "Email" indicator (not one-per-recipient) and an open-icon that launches the email modal (`SendEmailDialog`, extended in task 020) in read/detail mode for that email. Message-type bubbles keep their normal bubble rendering; only Email-type communications render as this compact block. Do not add a second "Email" badge anywhere in the flow.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>ConversationView renders email-type communications as a compact block (subject/from/to) with exactly one "Email" indicator + an open-icon that opens the email modal; message-type stays as chat bubbles; empty/error handled; keyboard + ARIA; dark-mode compliant.</goal>
+  <context>
+    <background>FR-04 wants email to be a first-class in-flow object that is visually distinct from chat bubbles: a compact block with subject/from/to and a single "Email" indicator, plus an open affordance that launches the real composer/detail modal. Task 020 extended `SendEmailDialog` to accept thread id + regarding; opening from here passes the active thread + record so the modal is context-aware. The channel type comes from `COMMUNICATION_TYPE_EMAIL`.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/MessageBubble.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/ChannelBadge.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+    </relevant-files>
+    <dependencies>011 (ConversationView) + 020 (extended SendEmailDialog) merged.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-04">Email renders as a compact block (subject/from/to) with a SINGLE "Email" indicator and an open-icon → email modal. No per-recipient or duplicate email badges.</constraint>
+    <constraint source="ADR-045">The open action reuses the extended `SendEmailDialog` (existing send engine) — no new modal/send path.</constraint>
+    <constraint source="NFR-06">Reuse the existing channel-type constants + `ChannelBadge` styling where sensible; keep type strings.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Open-icon keyboard-operable + ARIA-labeled; the block is a labeled region.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-045-communication-send-engine.md</file>
+    </files>
+    <patterns>
+      <pattern name="Channel badge" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/ChannelBadge.tsx">Reference for the single Email indicator styling.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">In ConversationView's message renderer, branch on channel type: `COMMUNICATION_TYPE_EMAIL` → compact email block; else → bubble.</step>
+    <step order="2">Build `subcomponents/EmailInFlowBlock.tsx`: subject + from + to (truncate to), a single "Email" indicator, and an open-icon button.</step>
+    <step order="3">Wire the open-icon to launch the extended `SendEmailDialog` for that email, passing the active thread id + regarding record so the modal is context-aware.</step>
+    <step order="4">Ensure only ONE "Email" indicator per block; handle missing subject/from/to gracefully (fallbacks).</step>
+    <step order="5">Keyboard + ARIA on the open-icon; label the block region.</step>
+    <step order="6">Tests: email-type renders as block (not bubble) with one indicator; open-icon launches modal with thread+record context; message-type unaffected; missing-field fallbacks; dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If the timeline DTO does not carry subject/from/to for an email-in-flow, STOP and escalate to Phase 1 (FR-18 enrichment) rather than deriving recipients from an unverified source.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/EmailInFlowBlock.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/__tests__/ConversationView.emailInFlow.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Email-type communications render as a compact block (subject/from/to), NOT as a chat bubble; message-type communications remain chat bubbles.</criterion>
+    <criterion testable="true">Exactly one "Email" indicator per block (no per-recipient duplication).</criterion>
+    <criterion testable="true">The open-icon launches the extended `SendEmailDialog` with the active thread id + regarding record; no new modal/send path.</criterion>
+    <criterion testable="true">Missing subject/from/to degrade gracefully with fallbacks; open-icon keyboard-operable + ARIA-labeled (NFR-05).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Email renders as compact block"><steps><step>Render a timeline with one email + one message</step></steps><expected>Email is a compact subject/from/to block with a single Email indicator; message is a bubble.</expected></test>
+    <test name="Open-icon launches modal"><steps><step>Click the open-icon on the email block</step></steps><expected>Extended SendEmailDialog opens with active thread + regarding context.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-04. Reuse `ChannelBadge` for the single Email indicator; open action reuses task 020's extended dialog.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

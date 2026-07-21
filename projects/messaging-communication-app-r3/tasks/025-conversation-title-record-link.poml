@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Conversation title links to the associated record via record-scoped modal (FR-12)</title>
+    <phase>3 Email-in-flow + quick-view + new-thread</phase>
+    <gate>after:012</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits shared shell/ConversationView header (.tsx); opens a record via the sanctioned modal path (MODAL-DECISION-CRITERIA). Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Header link + record-scoped modal open following the documented decision criteria; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shell/ConversationView header from tasks 011/012 — same files; must serialize.</parallel-reason>
+    <deps>011, 012</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Make the conversation title a LINK to the associated record: clicking it opens that record in the record-scoped modal per `docs/standards/MODAL-DECISION-CRITERIA.md` (do NOT invent a bespoke iframe/modal). Threads with NO associated record render a plain (non-link) title. The record-open mechanism is host-provided (injected callback / navigation service) so the shared component stays context-agnostic — do not import `Xrm` into the shared lib.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>The conversation header title is a link when the thread has a regarding record (opens it via the sanctioned record-scoped modal) and plain text when record-less; keyboard + ARIA; dark-mode compliant; the shared component stays context-agnostic (host supplies the open-record capability).</goal>
+  <context>
+    <background>FR-12 links the conversation title to its record. `MODAL-DECISION-CRITERIA.md` governs how a record is opened (OOB `Xrm.Navigation.navigateTo` vs proprietary vs browse-shell) — for a single record this is the OOB `navigateTo` record-scoped modal. Since `ConversationView`/shell are context-agnostic shared components (no `Xrm`), the host injects an `onOpenRecord(entityType, id)` callback; the PCF/code-page wrappers wire it to the correct navigation. Record-less threads have no regarding and render a plain title.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/ConversationWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </relevant-files>
+    <dependencies>011 (ConversationView header) + 012 (shell with thread/regarding data) merged.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-12">Title links to the associated record and opens it in the record-scoped modal; record-less threads render a plain (non-link) title.</constraint>
+    <constraint source="MODAL-DECISION-CRITERIA">Open a single record via the sanctioned OOB `Xrm.Navigation.navigateTo` record-scoped modal path; do NOT build a bespoke iframe/modal (iframe-embedding is an anti-pattern).</constraint>
+    <constraint source="ADR-012">Shared component stays context-agnostic — no `Xrm`/`ComponentFramework` import; the host injects an `onOpenRecord(entityType, id)` capability.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Title link keyboard-operable + ARIA-labeled; plain title is non-interactive/announced as text.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Record-scoped modal" location="docs/standards/MODAL-DECISION-CRITERIA.md">Decision criteria for opening a single record via OOB navigateTo; the shared component delegates via an injected callback.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read `MODAL-DECISION-CRITERIA.md` + `record-modal-selection.md`; confirm the single-record open is the OOB `navigateTo` record-scoped modal and that the shared lib delegates via a host callback.</step>
+    <step order="2">Add an optional `onOpenRecord?(entityType, id)` prop to the shell/ConversationView header contract; render the title as a Fluent link ONLY when the thread has a regarding record AND the callback is provided.</step>
+    <step order="3">Clicking the link calls `onOpenRecord(entityType, id)`; the host wrapper (PCF/code page — later phase) wires it to `Xrm.Navigation.navigateTo`.</step>
+    <step order="4">Record-less threads (no regarding) render a plain, non-interactive title.</step>
+    <step order="5">Keyboard + ARIA on the link; ensure no `Xrm` import enters the shared lib.</step>
+    <step order="6">Tests: record thread → title is a link, click invokes `onOpenRecord` with correct entityType/id; record-less → plain title; no callback → plain title; dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If opening the record cleanly requires the shared component to import `Xrm` or embed an iframe (violating context-agnosticism / MODAL-DECISION-CRITERIA), STOP and escalate — delegate via a host callback instead.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/__tests__/ConversationView.titleLink.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A thread with a regarding record renders the title as a link; clicking it invokes the injected `onOpenRecord(entityType, id)` with the correct values.</criterion>
+    <criterion testable="true">A record-less thread (or one with no `onOpenRecord` provided) renders a plain, non-interactive title.</criterion>
+    <criterion testable="true">The record open follows MODAL-DECISION-CRITERIA (OOB record-scoped modal via host); the shared lib imports NO `Xrm` and embeds no iframe.</criterion>
+    <criterion testable="true">Title link keyboard-operable + ARIA-labeled (NFR-05).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Record thread title links"><steps><step>Render a thread with regarding={matter,M1} and an onOpenRecord spy</step><step>Click the title</step></steps><expected>onOpenRecord('matter','M1') invoked.</expected></test>
+    <test name="Record-less thread plain title"><steps><step>Render a record-less thread</step></steps><expected>Title is plain text, not a link.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-12 + `docs/standards/MODAL-DECISION-CRITERIA.md`. The shared component delegates record-open via an injected callback (context-agnostic); host wrappers wire OOB `navigateTo` in Phase 4.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

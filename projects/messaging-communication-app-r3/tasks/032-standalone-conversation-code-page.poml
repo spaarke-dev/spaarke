@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Standalone conversation code page (Surface 2b) — Vite page rendering the shared two-pane conversation</title>
+    <phase>4 Surfaces</phase>
+    <gate>code-review + adr-check at Step 9.5; ui-test</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New Vite code page (net-new surface + main.tsx entry + auth bootstrap); touches .tsx; standalone auth/theme host integration is regression-sensitive.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New code page mirroring the established Vite code-page scaffold (`sprk_communicationspage`) to mount an existing shared widget; exact files + entry pattern named, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New code-page directory under src/solutions/; shares no files with 030/031/033.</parallel-reason>
+    <deps>012</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a NEW standalone Vite conversation code page (React 18 SPA) that renders the Phase-2 shared two-pane conversation widget full-page, with the standard Spaarke auth bootstrap and FluentProvider. Mirror the existing `sprk_communicationspage` code-page scaffold (Vite config, index.html, main.tsx entry, packaging) but render the CONVERSATION widget, not the grid. Mount the shared widget; do not reimplement it.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in PCF controls (Path-A on OOB form), Vite code pages, and the Spaarke DataGrid web-resource framework.</role>
+
+  <goal>Deliver FR-14b: a standalone Vite code page that renders the shared two-pane conversation widget (record-less capable) with auth + dark-mode, giving the workspace-independent standalone surface described in FR-14.</goal>
+
+  <context>
+    <background>Surface 2b of R3. `sprk_communicationspage` is the existing Vite code page that renders the communications GRID (email/list lens). This task adds a SEPARATE standalone page rendering the CONVERSATION lens (the shared two-pane widget) — different content, so a new page, not an edit of the grid page. Mirror the grid page's Vite scaffold (`vite.config.ts`, `index.html`, `src/main.tsx`, `package.json`) and the code-page auth bootstrap pattern (React 18 SPA with `@spaarke/auth`), then mount the Phase-2 shared conversation widget. Deploy is task 034.</background>
+    <relevant-files>
+      <file>src/solutions/sprk_communicationspage/** — existing Vite code-page scaffold to mirror (vite.config.ts, index.html, src/main.tsx)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/** — the shared two-pane conversation widget to mount</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md — (code-page deploy is task 034 via code-page-deploy)</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md — mount sources / dual-use pattern</file>
+    </relevant-files>
+    <dependencies>012 (shared two-pane conversation widget). Merged before this task.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">Reuse-first: mount the shared conversation widget; do NOT reimplement it. Do NOT create a second grid default or workspace widget — this is a distinct standalone conversation surface.</constraint>
+    <constraint source="ADR-021">Dark mode via the page's FluentProvider; Fluent v9 semantic tokens only.</constraint>
+    <constraint source="ADR-028">Auth via `@spaarke/auth` bootstrap; all BFF calls via `authenticatedFetch`.</constraint>
+    <constraint source="Vite-install">Use `npm install --legacy-peer-deps --no-audit --no-fund` for the Vite page (NOT `npm ci`) per repo CLAUDE.md §12.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vite code-page scaffold (mirror)" location="src/solutions/sprk_communicationspage/**">Vite config, index.html, src/main.tsx React 18 entry + `@spaarke/auth` bootstrap + FluentProvider. Mirror the scaffold; render the conversation widget instead of the grid.</pattern>
+      <pattern name="Shared conversation widget (mount)" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**">Two-pane conversation to mount full-page; record-less capable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load knowledge (SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL, ADR-021/028). Read the `sprk_communicationspage` scaffold — vite.config.ts, index.html, src/main.tsx, package.json — to capture the code-page auth/theme bootstrap pattern.</step>
+    <step order="2">Scaffold a NEW code-page directory under `src/solutions/` (e.g. `sprk_communicationconversationpage`) mirroring the grid page's Vite config, index.html, and `main.tsx` React 18 + `@spaarke/auth` bootstrap + FluentProvider.</step>
+    <step order="3">Render the Phase-2 shared two-pane conversation widget full-page (record-less/workspace mode). Mount it; do not reimplement.</step>
+    <step order="4">Install deps with `npm install --legacy-peer-deps --no-audit --no-fund`; run the Vite production build and confirm it compiles clean.</step>
+    <step order="5">Run the ui-tests below against the standalone page. Fix console errors / dark-mode regressions.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (032 🔲 → ✅). Document any scaffold deviation in `projects/messaging-communication-app-r3/notes/`. Deploy is task 034.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the standalone page's auth bootstrap cannot obtain a token via `@spaarke/auth` outside the model-driven host context (so BFF reads fail), STOP and escalate rather than adding a second auth path (ADR-028).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`sprk_communicationspage` — the existing Vite code page rendering the communications GRID (email/list lens).</existing>
+    <extension>No — the standalone conversation page renders DIFFERENT content (the conversation lens / two-pane widget), not the grid; a single page cannot serve both lenses full-page. It mirrors the grid page's scaffold but is a separate surface.</extension>
+    <cost-of-doing-nothing>FR-14b (standalone conversation surface) has no host: there would be no workspace-independent way to open the shared conversation widget full-page.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build (Vite; npm install --legacy-peer-deps --no-audit --no-fund)</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/{sprk_communicationconversationpage}/** (vite.config.ts, index.html, src/main.tsx)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A new Vite code page exists under `src/solutions/` (separate from `sprk_communicationspage`) that builds clean via the Vite production build.</criterion>
+    <criterion testable="true">The page renders the Phase-2 shared two-pane conversation widget full-page, including a record-less thread listed by participant name.</criterion>
+    <criterion testable="true">The shared widget is mounted, not reimplemented; no second grid default or workspace widget is introduced (NFR-06).</criterion>
+    <criterion testable="true">Auth uses the `@spaarke/auth` bootstrap; all BFF calls go through `authenticatedFetch` (ADR-028).</criterion>
+    <criterion testable="true">Dark mode via the page FluentProvider (ADR-021): semantic tokens adapt; no console errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Standalone page renders shared conversation">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=webresource&amp;webresourceName=sprk_communicationconversationpage</url>
+      <steps>
+        <step>Open the standalone conversation code page</step>
+        <step>Confirm the two-pane conversation (thread list + conversation) renders full-page</step>
+        <step>Confirm a record-less thread appears, named by participants</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Full-page two-pane conversation renders; record-less thread listed by participant name; console clean.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>Semantic tokens adapt; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Deploy is task 034 (via code-page-deploy). Vite installs: `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci`). Reference spec FR-14 (14b).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge first; follow task-execute.</protocol>
+  </execution>
+</task>

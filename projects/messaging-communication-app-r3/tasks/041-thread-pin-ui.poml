@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Thread pin/favorite UI + persistence to the pin field</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>after:040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared React thread-list component (.tsx) with persistence to Dataverse; FULL per CLAUDE.md §8 (modifying .tsx, shared surface).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI + persistence against an existing field; no architectural or access-model judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Needs the 040 field to exist; also touches the shared thread-list component built in Phase 2 (task 012).</parallel-reason>
+    <deps>040, 012</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+  <prompt>Add a pin/favorite affordance to the thread list: a pin toggle per thread that persists to the sprk_communicationthread pin field created in task 040, and orders/marks pinned threads. Pin only — no archive, no mute. Light + dark mode via host FluentProvider.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Deliver FR-24: a user can pin/unpin a thread from the thread list; the state persists to the 040 field and survives reload; pinned threads are visually marked (and sorted to the top). Reuse the existing thread-list component from task 012; do not fork it.</goal>
+  <context>
+    <background>FR-24 is pin-only (archive + mute out of R3 scope). The thread list (name + unread + word-filter + create-thread) was built in Phase 2 task 012 as part of the shared two-pane widget. This task adds the pin control + persistence against the field task 040 created.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**</file>
+      <file>src/client/shared/Spaarke.Communication.Components/**</file>
+      <file>projects/messaging-communication-app-r3/notes/ (pin field logical name from task 040)</file>
+    </relevant-files>
+    <dependencies>Task 040 (pin field in target env). Task 012 (thread-list component + widget shell).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR-24">Pin only. Do NOT add archive/mute/tag controls.</constraint>
+    <constraint source="NFR-06">Reuse the thread-list component from task 012; do NOT create a second thread-list or a second widget. Keep type string communications-list + section id communications.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens; pin control renders correctly in light + dark through the host FluentProvider.</constraint>
+    <constraint source="ADR-028">Persist pin state via the BFF/webApi using @spaarke/auth authenticatedFetch (or the host webApi shim in embedded mode); no direct unauthenticated calls.</constraint>
+    <constraint source="NFR-05">Pin control is keyboard-reachable with an accessible label/aria-pressed reflecting pinned state.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+    <patterns>
+      <pattern name="thread-list" location="task 012 output in Spaarke.UI.Components / Spaarke.Communication.Components">Existing thread-list row; add a pin toggle to the row without forking the component.</pattern>
+      <pattern name="pin-persistence" location="communicationTimelineApi.ts / webApi">Write sprk_ispinned on sprk_communicationthread via the existing data-access path.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the task-040 note for the exact pin field logical name; read the task-012 thread-list component to find the row render + data source.</step>
+    <step order="2">Add a pin toggle to each thread-list row (pinned/unpinned icon, aria-pressed), reflecting the field value on load.</step>
+    <step order="3">Wire the toggle to persist to the pin field (Xrm.WebApi or BFF per DATA-ACCESS-DECISION-CRITERIA); optimistic UI with rollback on failure.</step>
+    <step order="4">Sort/mark pinned threads to the top of the list (or a pinned group); keep unread + word-filter behavior intact.</step>
+    <step order="5">Add component tests: pin persists + survives a reload; unpin clears it; light/dark render.</step>
+    <step order="6">Build/verify (npm run build for the shared lib); run ui-test for pin/unpin persistence; update TASK-INDEX.md 041 to complete; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the task-040 field name is unavailable or the thread-list from task 012 is not present, STOP and escalate rather than creating a new field or a second thread list.</trigger>
+  </escalation>
+  <justification>
+    <existing>Thread-list row exists (task 012); pin field exists (task 040).</existing>
+    <extension>Yes — extend the existing thread-list row with a pin control; no new component.</extension>
+    <cost-of-doing-nothing>Without this, FR-24 has a field but no way for a user to pin/unpin; success criterion 12 fails.</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Edit, Bash, Skill(ui-test), Skill(task-execute)</tools>
+  <outputs>
+    <output type="code">Thread-list pin toggle + persistence in Spaarke.UI.Components / Spaarke.Communication.Components</output>
+    <output type="test">Component test: pin persists + reload survives</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A pin toggle appears on each thread-list row and reflects the stored pin state on load.</criterion>
+    <criterion testable="true">Pinning a thread writes the 040 pin field; the state survives a full reload.</criterion>
+    <criterion testable="true">Unpinning clears the field and removes the pinned marker.</criterion>
+    <criterion testable="true">Pinned threads are visually distinguished (marked and/or sorted to the top); unread + word-filter behavior is unchanged.</criterion>
+    <criterion testable="true">Pin control is keyboard-operable with aria-pressed reflecting state; renders correctly in light + dark.</criterion>
+    <criterion testable="true">Negative: no archive/mute/tag control was added; no second thread-list or widget was created (type string communications-list retained).</criterion>
+  </acceptance-criteria>
+  <ui-tests>Pin a thread → reload → still pinned; unpin → reload → not pinned; verify dark-mode render.</ui-tests>
+  <notes>Not a BFF-service task, but persistence path must use authenticatedFetch/webApi (ADR-028). Reference spec FR-24. Pin field name comes from task 040 notes.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

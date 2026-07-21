@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Deploy Phase 4 surfaces — right-pane PCF + standalone code page + sprk_communicationspage + web-resource (Matter pilot)</title>
+    <phase>4 Surfaces</phase>
+    <gate>Deploy gate — surfaces load in target env; PCF versions bumped</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment/orchestration task (build + pack + import); no new source logic. Prescriptive sequence; verification-focused.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deployment orchestration following pcf-deploy / code-page-deploy / dataverse-deploy skills; exact skills + sequence named.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate — depends on 030-033; must run after all Phase 4 surfaces are built and merged.</parallel-reason>
+    <deps>030, 031, 032, 033</deps>
+    <tags>deploy, pcf, dataverse</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the Phase 4 surfaces to the target environment, Matter pilot first: the record right-pane conversation PCF (030), the standalone conversation code page (032), the completed `sprk_communicationspage` grid (033), and the "Email &amp; Messages" form onLoad web-resource + tab (033). Bump the PCF version in ALL required locations, confirm the footer shows the new version, and verify each surface loads in the target env.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in PCF controls (Path-A on OOB form), Vite code pages, and the Spaarke DataGrid web-resource framework.</role>
+
+  <goal>All Phase 4 surfaces deployed and loading in the target environment on the Matter pilot: right-pane PCF (version bumped, footer shows it), standalone conversation code page, `sprk_communicationspage` grid, and the "Email &amp; Messages" tab web-resource — with ADR-006/ADR-026 tensions cited in the deploy PR.</goal>
+
+  <context>
+    <background>Deploy gate for Phase 4. All four surfaces (030 PCF, 031 workspace widget — shipped via the shared lib, 032 standalone code page, 033 grid tab) are built and merged. This task packages and imports the deployable artifacts (PCF solution, code page web-resource, `sprk_communicationspage`, form onLoad web-resource + tab) into the target env, Matter pilot first. The workspace widget (031) rides in the shared lib and needs no separate solution import here unless the SpaarkeAi bundle is republished — coordinate. Follow the deploy skills in the prescribed sequence; bump the PCF version everywhere and confirm the footer version.</background>
+    <relevant-files>
+      <file>src/client/pcf/{NewConversationPcf}/** — PCF solution to pack + import (from 030)</file>
+      <file>src/solutions/{sprk_communicationconversationpage}/** — standalone code page to deploy (from 032)</file>
+      <file>src/solutions/sprk_communicationspage/** — grid page to deploy (from 033)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md — PCF build/pack/import + version-bump locations</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md — grid web-resource / form wiring deploy</file>
+    </relevant-files>
+    <dependencies>030 (PCF), 031 (workspace widget in shared lib), 032 (standalone code page), 033 (grid tab + onLoad web-resource). All merged before deploy.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="PCF-build">Production build uses `npm run build:prod` (NOT `npm run build`). Bump the PCF version in ALL required locations (manifest ControlManifest + solution) so the footer reflects the new version.</constraint>
+    <constraint source="ADR-006">Cite the ADR-006 Path-C tension (DataGrid web-resource framework for the "Email &amp; Messages" tab) in the deploy PR description.</constraint>
+    <constraint source="ADR-026">Cite the ADR-026 Path-A tension (right-pane conversation PCF on OOB form, same exception as R2's CommunicationTimeline* PCFs) in the deploy PR description.</constraint>
+    <constraint source="pilot">Deploy to the Matter pilot first; validate before broadening to the other 10 regarding-family entities.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+    </files>
+    <patterns>
+      <pattern name="PCF deploy" location="docs/guides/PCF-DEPLOYMENT-GUIDE.md">Build (build:prod) → pack solution → import; version-bump locations; footer version confirmation.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Load the deploy skills (`pcf-deploy`, `code-page-deploy`, `dataverse-deploy`) and PCF-DEPLOYMENT-GUIDE. Confirm 030/031/032/033 are merged and green.</step>
+    <step order="2">Bump the right-pane conversation PCF version in ALL required locations (ControlManifest + solution). Run `npm run build:prod` for the PCF.</step>
+    <step order="3">Invoke `pcf-deploy` to pack + import the right-pane conversation PCF solution into the target env.</step>
+    <step order="4">Invoke `code-page-deploy` to build + deploy the standalone conversation code page (032) and the completed `sprk_communicationspage` grid (033) web-resources.</step>
+    <step order="5">Invoke `dataverse-deploy` to import the "Email &amp; Messages" form onLoad web-resource + the Matter form tab (033), and any solution components (form/web-resource) — Matter pilot form first.</step>
+    <step order="6">Verify each surface LOADS in the target env on a Matter record: right-pane PCF preview (footer shows the NEW version), standalone code page, `sprk_communicationspage` grid, "Email &amp; Messages" tab record-scoped grid. Note the workspace widget (031) ships via the shared lib bundle — confirm it renders if the SpaarkeAi bundle was republished.</step>
+    <step order="7">Open the deploy PR citing the ADR-006 (Path C) and ADR-026 (Path C) tensions. Update `tasks/TASK-INDEX.md` (034 🔲 → ✅). Document deploy outcomes / version numbers / any pilot issue in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a surface fails to load in the target env (import error, PCF version not reflected in the footer, or the grid tab shows unscoped/no data), STOP the pilot broadening and escalate with the failing surface + import log before deploying to the other 10 entities.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Deployment task — no new component. Packages + imports artifacts from 030/032/033.</existing>
+    <extension>N/A — deploy/orchestration only; no new surface authored here.</extension>
+    <cost-of-doing-nothing>Without deploy, the Phase 4 surfaces exist only in source and never reach the target env / Matter pilot.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build (npm run build:prod)</tool>
+    <tool name="pac">PCF/solution pack + import</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Deployed solutions/web-resources in the target env (no new source)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The right-pane conversation PCF version is bumped in ALL required locations and the PCF footer shows the new version in the target env.</criterion>
+    <criterion testable="true">The right-pane PCF loads on a Matter record and opens the record-filtered conversation modal in the target env.</criterion>
+    <criterion testable="true">The standalone conversation code page loads in the target env.</criterion>
+    <criterion testable="true">`sprk_communicationspage` and the "Email &amp; Messages" tab load and show a record-scoped grid on a Matter record in the target env.</criterion>
+    <criterion testable="true">The deploy PR description cites the ADR-006 (Path C) and ADR-026 (Path C) tensions.</criterion>
+    <criterion testable="true">Deployment is validated on the Matter pilot before broadening to the other 10 regarding-family entities.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deploy gate — depends on 030-033. Skills: `pcf-deploy`, `code-page-deploy`, `dataverse-deploy`. PCF prod build = `npm run build:prod` (NOT `npm run build`). Cite ADR-006/ADR-026 tensions in the deploy PR. Matter pilot first. Reference spec FR-13/14/15 + ADR Tensions §ADR-006/ADR-026.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge first; follow task-execute. Prescriptive deploy sequence.</protocol>
+  </execution>
+</task>

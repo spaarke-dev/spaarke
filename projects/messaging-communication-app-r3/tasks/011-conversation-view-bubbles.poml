@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="messaging-communication-app-r3">
+  <metadata>
+    <title>ConversationView — Teams-style bubbles keyed on sender identity (FR-02/03)</title>
+    <phase>2 Shared conversation widget core</phase>
+    <gate>after:010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx presentation component in the shared lib; blast radius across all three R3 surfaces; correctness-critical mine/others alignment. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified presentation over a characterized core; copy `SprkChatMessage.tsx` bubble CSS. No architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010, 002</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build `ConversationView`: a Teams-style chat-bubble renderer that consumes the enriched single-thread read DTO (FR-18: `Direction` + sender identity `systemuserid` + display `Name`) and the characterized conversation core. Bubbles align mine-right / others-left keyed STRICTLY on sender identity (`systemuserid`), NOT on email-string matching. Chronological newest-at-bottom, day dividers, sender labels, and message status (sent/delivered/failed) on the user's own bubbles. Reuse the core reducer/poll/`buildTimeline` — do NOT fork them. Anchor bubble visuals to `SprkChat/SprkChatMessage.tsx`.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>A `ConversationView` component that renders a single thread's timeline as chat bubbles: own messages right-aligned with status, others left-aligned with sender label; day dividers; chronological newest-at-bottom; empty/loading/error states; keyboard + ARIA for the chat flow (NFR-05); light + dark via host FluentProvider.</goal>
+  <context>
+    <background>The existing `MessageRow.tsx` renders vertical timeline rows with no bubble/alignment concept. FR-02 requires a Teams-style bubble flow where alignment is derived from WHO sent the message (the caller's own `systemuserid` vs the message sender's `systemuserid`), per the FR-18 enriched DTO. `buildTimeline`, the reducer, and the poll hooks stay the shared core; `ConversationView` is a new presentation layer over them. Bubble CSS/layout is mirrored from `SprkChatMessage.tsx`.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationTimelineApi.ts</file>
+    </relevant-files>
+    <dependencies>010 (characterization baseline) landed. FR-18 enriched DTO (`Direction` + sender `systemuserid` + `Name`) available from Phase 1 (task 002 backend). If FR-18 fields are absent, escalate — do NOT fall back to email-string matching.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-02/FR-18">Mine-right/others-left alignment derives from SENDER IDENTITY (`systemuserid`), NOT email-string matching. The caller supplies the current user's `systemuserid`; alignment = message.senderSystemUserId === currentUserSystemUserId.</constraint>
+    <constraint source="NFR-06">Reuse the conversation CORE (reducer, ~5s poll, `buildTimeline`) — NO fork. Keep type strings (`COMMUNICATION_TYPE_EMAIL/MESSAGE`).</constraint>
+    <constraint source="NFR-08">Do not extend before task 010's characterization is green; treat the core as a stable dependency.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; light + dark via host FluentProvider; no hardcoded colors.</constraint>
+    <constraint source="ADR-028">Any data access is via the injected `authenticatedFetch` prop (context-agnostic component; no `@spaarke/auth` import).</constraint>
+    <constraint source="NFR-05">Keyboard navigation, ARIA roles/labels for the chat log, and screen-reader support for the message flow; empty/loading/error states.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bubble CSS reference" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessage.tsx">Mirror bubble shape, alignment, spacing, and token usage — do NOT fork the send logic.</pattern>
+      <pattern name="Conversation core" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**">Consume reducer/poll/`buildTimeline`; ConversationView is a new view over the same state.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the FR-18 DTO shape (Direction + sender `systemuserid` + `Name`) as exposed through `communicationTimelineApi.ts` / the timeline types; confirm the sender-identity field exists. If absent, fire escalation.</step>
+    <step order="2">Create `ConversationView/` with `ConversationView.tsx`, `ConversationView.types.ts`, and a `subcomponents/MessageBubble.tsx` mirroring `SprkChatMessage.tsx` bubble styling.</step>
+    <step order="3">Consume the characterized core: feed the reducer/poll output through `buildTimeline`, then render bubbles. Do not re-implement grouping.</step>
+    <step order="4">Alignment: right for `senderSystemUserId === currentUserSystemUserId`, left otherwise. Render sender label on others' bubbles; render status (sent/delivered/failed) on own bubbles only.</step>
+    <step order="5">Add day dividers between day boundaries; chronological newest-at-bottom; auto-scroll to bottom on mount and on new incoming (respect user scroll-up).</step>
+    <step order="6">Implement empty, loading, and error states; add ARIA (log role, per-bubble labels), keyboard focus order, and screen-reader announcements for new messages (NFR-05).</step>
+    <step order="7">Export from the component index; write component tests (alignment from sender id, day dividers, status on own bubbles only, empty/loading/error, dark mode).</step>
+    <step order="8">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="9">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="10">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If the enriched DTO (FR-18) lacks the sender identity (`systemuserid`) needed for alignment, STOP and escalate. Do NOT fall back to email-string matching — that violates FR-02/18.</trigger>
+  </escalation>
+  <justification>
+    <existing>`CommunicationTimeline/subcomponents/MessageRow.tsx` — a vertical timeline row with no bubble shape, no mine/others alignment, no per-message status.</existing>
+    <extension>No — MessageRow is a fundamentally different presentation (vertical rows). ConversationView is a new bubble presentation over the SAME core state; it does not modify or replace MessageRow.</extension>
+    <cost-of-doing-nothing>Without ConversationView there is no Teams-style bubble flow: FR-02 fails and the vertical timeline cannot render mine-right/others-left or per-message status.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/MessageBubble.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/__tests__/ConversationView.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Alignment derives ONLY from sender `systemuserid`: a message whose `senderSystemUserId === currentUserSystemUserId` renders right; all others render left. No code path compares email strings for alignment.</criterion>
+    <criterion testable="true">Status (sent/delivered/failed) renders on own bubbles only; sender label renders on others' bubbles only.</criterion>
+    <criterion testable="true">Chronological newest-at-bottom with day dividers between day boundaries; auto-scroll to newest on mount / new message, respecting user scroll-up.</criterion>
+    <criterion testable="true">Empty, loading, and error states render distinctly; ARIA log role + per-bubble labels + keyboard focus order present (NFR-05).</criterion>
+    <criterion testable="true">Reuses the core reducer/poll/`buildTimeline` (no fork); type strings unchanged.</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Mine-right / others-left from sender identity"><steps><step>Render ConversationView with currentUserSystemUserId=U1 and messages from U1 and U2 (same-ish emails to prove email is not used)</step><step>Inspect alignment classes</step></steps><expected>U1 bubbles right-aligned with status; U2 bubbles left-aligned with sender label.</expected></test>
+    <test name="Day dividers + newest-at-bottom"><steps><step>Render messages spanning two calendar days</step></steps><expected>A day divider separates them; latest message is at the bottom.</expected></test>
+    <test name="Empty / loading / error"><steps><step>Render each state</step></steps><expected>Distinct empty, loading, and error UI.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode via FluentProvider</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-02/03 and FR-18. Anchor visual style to `SprkChat/SprkChatMessage.tsx` (bubble shape/alignment) — NOT to "clean/modern". Alignment correctness is the highest-value assertion.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

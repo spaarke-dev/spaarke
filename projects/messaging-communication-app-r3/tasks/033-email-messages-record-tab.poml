@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="messaging-communication-app-r3">
+  <metadata>
+    <title>"Email &amp; Messages" record tab (FR-15) — record-filtered DataGrid via form onLoad + sprk_regarding{type} hostFilter</title>
+    <phase>4 Surfaces</phase>
+    <gate>code-review + adr-check at Step 9.5; ui-test</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches a shared DataGrid web-resource surface + a form onLoad script that scopes access by regarding; incorrect scoping is a correctness/over-disclosure risk; ADR-006 tension (Path C).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Completes an existing grid page and wires a form onLoad hostFilter using the sanctioned DataGrid framework; exact overlay + config guide named, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Works on `sprk_communicationspage` + the form onLoad script; shares no files with 030/031/032.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, dataverse</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deliver the "Email &amp; Messages" record tab: a record-filtered DataGrid (email/list lens) mounted as a web-resource grid driven by a form `onLoad` script that applies the `sprk_regarding{type}` hostFilter for the host record. Complete and prepare `sprk_communicationspage` for deploy. Use the sanctioned DataGrid web-resource framework (NOT a PCF). Wire all 11 regarding-family entities, Matter as the pilot first.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in PCF controls (Path-A on OOB form), Vite code pages, and the Spaarke DataGrid web-resource framework.</role>
+
+  <goal>Deliver FR-15: an "Email &amp; Messages" tab on the record form that renders the communications DataGrid scoped to the current record via a form `onLoad` script passing a `sprk_regarding{type}` hostFilter, using the DataGrid framework; complete `sprk_communicationspage` ready for deploy (034); Matter piloted, structure covers all 11 entities.</goal>
+
+  <context>
+    <background>The DataGrid framework (`&lt;DataGrid configId=… hostFilters={…} />`) is the sanctioned shared React web-resource that supersedes the retired PCF grid. `sprk_communicationspage` is the code page that hosts the grid. This task adds an "Email &amp; Messages" form tab that mounts that grid and, via a form `onLoad` script, passes a `hostFilters` condition on the record's `sprk_regarding{type}` lookup so the grid shows only that record's communications (email/list lens). The overlay (`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts`) applies `hostFilters` (arbitrary `HostFilterCondition` column conditions) into the top-level fetchXml — confirm it carries the `sprk_regarding{type}` column condition. ADR-006 tension (Path C): this is web-resource-via-framework, not a bespoke JS web resource — cite in the deploy PR. Matter is the pilot; the tab/script structure must generalize to all 11 regarding-family entities.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts — hostFilters overlay; confirm it carries sprk_regarding{type}</file>
+      <file>src/solutions/sprk_communicationspage/** — the grid code page to complete + deploy</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md — framework architecture</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md — author a sprk_gridconfiguration + host wiring recipe</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md — Xrm.WebApi vs BFF for the grid data path</file>
+    </relevant-files>
+    <dependencies>None. R2 regarding lookups (`sprk_regarding{type}`) already applied in target env.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">Use the sanctioned DataGrid web-resource framework — NOT a PCF and NOT a bespoke JS web resource. Form-`onLoad` record-scoping is within the framework (Path C tension; cite in the deploy PR).</constraint>
+    <constraint source="NFR-06">Do NOT create a second grid-config default. Reuse the existing communications grid configuration; the email/list lens is the existing grid, not a new one.</constraint>
+    <constraint source="ADR-024">Scope via the existing `sprk_regarding{type}` lookup discriminator — no second regarding mechanism.</constraint>
+    <constraint source="ADR-021">Dark mode via host FluentProvider; Fluent v9 semantic tokens.</constraint>
+    <constraint source="spec-FR-15">Record-filtered grid via form `onLoad` + `hostFilters` (no PCF). All 11 regarding-family entities; Matter piloted first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="hostFilters overlay" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/fetchXmlOverlay.ts">Applies `hostFilters` (HostFilterCondition column conditions) into fetchXml. Pass a `sprk_regarding{type}` condition from the form onLoad to scope the grid to the record.</pattern>
+      <pattern name="DataGrid host wiring" location="docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md">Author the grid config + mount the grid web-resource on a form tab; drive hostFilters from a form onLoad script.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load knowledge (SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE, DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE, DATA-ACCESS-DECISION-CRITERIA, ADR-006). Inspect `fetchXmlOverlay.ts` and CONFIRM `hostFilters` can carry a `sprk_regarding{type}` column condition into the fetchXml. If it cannot, fire the escalation trigger.</step>
+    <step order="2">Complete `sprk_communicationspage` so it renders the communications DataGrid (email/list lens) using the EXISTING grid configuration (no new default), accepting `hostFilters` from the host.</step>
+    <step order="3">Author the form `onLoad` script that reads the current record's entity type + id and constructs the `sprk_regarding{type}` hostFilter condition, then mounts / passes it to the grid web-resource on the "Email &amp; Messages" tab. Make the script generalize across the 11 regarding-family entities (parameterize the `{type}` column).</step>
+    <step order="4">Add the "Email &amp; Messages" tab to the Matter form (pilot) hosting the grid web-resource wired to the onLoad script. Confirm the grid shows only the record's communications.</step>
+    <step order="5">Verify dark-mode passthrough and that the data path follows DATA-ACCESS-DECISION-CRITERIA. Build the grid web-resource / code page.</step>
+    <step order="6">Run the ui-tests below on a Matter form. Fix console errors / scoping errors.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md` (033 🔲 → ✅). Document the ADR-006 Path-C tension note (for the deploy PR) and any overlay/onLoad deviation in `projects/messaging-communication-app-r3/notes/`. Deploy is task 034.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `hostFilters` / the fetchXmlOverlay cannot carry the `sprk_regarding{type}` column condition passed from the form onLoad (so the grid cannot be record-scoped without modifying the shared framework), STOP and escalate rather than authoring a bespoke web-resource filter or a second grid mechanism.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`sprk_communicationspage` grid page + the shared DataGrid framework + the existing communications grid configuration all exist.</existing>
+    <extension>Yes — this COMPLETES the existing `sprk_communicationspage` and wires an existing grid via a form onLoad hostFilter; the only new artifact is the thin form onLoad script + tab. No new grid config default, no new component.</extension>
+    <cost-of-doing-nothing>Without the onLoad hostFilter wiring, the "Email &amp; Messages" tab (FR-15) cannot show a record-scoped communications grid — the record form has no email/list lens.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build grid web-resource / code page</tool>
+    <tool name="pac">Solution component (web-resource / form)</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/sprk_communicationspage/** (completed) + form onLoad script (web-resource)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`fetchXmlOverlay.ts` is confirmed to carry a `sprk_regarding{type}` column condition via `hostFilters` (or the escalation was fired).</criterion>
+    <criterion testable="true">`sprk_communicationspage` renders the communications DataGrid using the EXISTING grid configuration (no new default) and accepts `hostFilters` from the host.</criterion>
+    <criterion testable="true">A form `onLoad` script constructs the `sprk_regarding{type}` hostFilter from the current record and scopes the grid to that record; it parameterizes `{type}` so it generalizes across all 11 regarding-family entities.</criterion>
+    <criterion testable="true">On a Matter form, the "Email &amp; Messages" tab shows ONLY that Matter's communications (email/list lens) via the web-resource grid — no PCF, no bespoke web resource (ADR-006 Path C).</criterion>
+    <criterion testable="true">No second regarding mechanism and no second grid-config default are introduced (ADR-024 / NFR-06).</criterion>
+    <criterion testable="true">Dark mode via host FluentProvider (ADR-021): semantic tokens adapt; no console errors.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Email &amp; Messages tab renders record-scoped grid">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={matterId}</url>
+      <steps>
+        <step>Open a Matter record with communications and select the "Email &amp; Messages" tab</step>
+        <step>Confirm the DataGrid renders only this Matter's communications (email/list lens)</step>
+        <step>Confirm records from OTHER matters are NOT shown (regarding scoping holds)</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Grid shows only the record's communications via the hostFilter; no cross-record leakage; console clean.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>Semantic tokens adapt in the grid tab; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>ADR-006 tension is Path C (sanctioned DataGrid web-resource framework, form-onLoad scoping within-framework) — cite in the deploy PR (034), not a violation. No PCF for this tab. Matter is the pilot; structure covers all 11 regarding-family entities. Deploy = task 034. Reference spec FR-15 + ADR Tensions §ADR-006.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge first; follow task-execute.</protocol>
+  </execution>
+</task>

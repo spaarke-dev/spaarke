@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="messaging-communication-app-r3">
+  <metadata>
+    <title>SpaarkeAI workspace widget (Surface 2a) — render shared two-pane conversation; keep communications-list / section communications</title>
+    <phase>4 Surfaces</phase>
+    <gate>code-review + adr-check at Step 9.5; ui-test</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in a SpaarkeAi hot-path shared lib; upgrade-in-place of a registered workspace widget with fixed type/section strings — regression-sensitive.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends an existing, well-specified widget by swapping its body to mount the shared conversation widget; exact files + type strings are named, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits only the CommunicationsWorkspaceWidget + its registry entry; shares no files with 030/032/033.</parallel-reason>
+    <deps>012</deps>
+    <tags>frontend, react, spaarkeai, fluent-ui</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Upgrade the existing `CommunicationsWorkspaceWidget` IN PLACE so it renders the Phase-2 shared two-pane conversation widget (thread list + ConversationView) instead of its current body. KEEP the widget type string `communications-list` and section id `communications` exactly — this is an upgrade, not a new registration. Do not add a second widget or a second registry entry.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in PCF controls (Path-A on OOB form), Vite code pages, and the Spaarke DataGrid web-resource framework.</role>
+
+  <goal>Deliver FR-14a: the SpaarkeAI workspace widget renders the shared two-pane conversation (record-less capable), preserving the `communications-list` type string and `communications` section id, so the workspace surfaces conversations through the same shared component as the other surfaces.</goal>
+
+  <context>
+    <background>Surface 2a of R3. `CommunicationsWorkspaceWidget` already exists and is registered in `WorkspaceWidgetRegistry` under type `communications-list` (section `communications`). Phase 2 (dep 012) built the shared two-pane conversation widget + thread list. This task swaps the widget body to mount that shared component, keeping the registration identity intact so the workspace layout, saved dashboards, and section wiring continue to resolve it. This touches the SpaarkeAi hot-path — coordinate per `projects/INDEX.md` before opening the PR.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx — the widget to upgrade in place</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.test.ts — existing tests to update</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts — registration (keep type/section strings)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/** — the shared two-pane conversation widget to mount</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md — widget model / two-wrapper architecture</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md — archetypes / dual-use pattern</file>
+    </relevant-files>
+    <dependencies>012 (shared two-pane conversation widget + thread list). Merged before this task.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">KEEP the widget type string `communications-list` and section id `communications` — upgrade in place. Do NOT create a second widget or a second registry entry. Do NOT add a second grid/workspace default.</constraint>
+    <constraint source="ADR-021">Dark mode passes through the host FluentProvider; Fluent v9 semantic tokens only.</constraint>
+    <constraint source="ADR-028">All BFF calls via `@spaarke/auth` `authenticatedFetch`.</constraint>
+    <constraint source="reuse">Mount the shared conversation widget from Phase 2; do NOT reimplement thread list / bubbles inside the widget.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Workspace widget (upgrade in place)" location="src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx">Existing registered widget; keep type `communications-list` + section `communications`; swap body to mount the shared conversation widget.</pattern>
+      <pattern name="Registry (keep identity)" location="src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts">Do not add a new entry; verify the existing entry still resolves after the body swap.</pattern>
+      <pattern name="Shared conversation widget (mount)" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**">Two-pane conversation to mount; record-less capable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Load knowledge (SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL, BUILD-A-NEW-WORKSPACE-WIDGET, ADR-021/028). Read the current `CommunicationsWorkspaceWidget.tsx` and its registry entry; confirm the type string `communications-list` + section id `communications`.</step>
+    <step order="2">Swap the widget body to mount the Phase-2 shared two-pane conversation widget (thread list + ConversationView), in record-less/workspace mode (no forced regarding filter). Keep the component's exported name and props contract compatible so the registry entry is unchanged.</step>
+    <step order="3">Verify FluentProvider/dark-mode passthrough and that all reads go through `@spaarke/auth`. Confirm no second registry entry and no changed type/section strings.</step>
+    <step order="4">Update `CommunicationsWorkspaceWidget.test.ts` and the registry test to assert the type string / section id are unchanged and that the shared conversation widget mounts. Run the shared-lib build/tests.</step>
+    <step order="5">Run the ui-tests below in the SpaarkeAI workspace. Fix console errors / dark-mode regressions.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (031 🔲 → ✅). Document any SpaarkeAi hot-path coordination or prop-contract deviation in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If mounting the shared widget requires changing the widget's registered type string, section id, or exported props contract (breaking the registry resolution or saved dashboards), STOP and escalate — NFR-06 forbids a second widget/identity.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CommunicationsWorkspaceWidget` (registered under `communications-list` / section `communications`) already exists.</existing>
+    <extension>Yes — this EXTENDS the existing widget in place (body swap to mount the shared conversation widget); no new component or registration is created.</extension>
+    <cost-of-doing-nothing>N/A — extension of an existing surface, no new-surface justification required. Without the upgrade, the workspace widget would not render the R3 conversation experience (FR-14a).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build/test shared libs</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx (+ tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CommunicationsWorkspaceWidget` renders the Phase-2 shared two-pane conversation widget (thread list + ConversationView), including a record-less thread listed by participant name.</criterion>
+    <criterion testable="true">The widget's registered type string remains exactly `communications-list` and its section id remains exactly `communications`; `WorkspaceWidgetRegistry` has NO new entry (asserted by test).</criterion>
+    <criterion testable="true">No second workspace widget or grid default is introduced (NFR-06); bubbles/thread-list are mounted, not reimplemented.</criterion>
+    <criterion testable="true">All reads go through `@spaarke/auth` `authenticatedFetch` (ADR-028).</criterion>
+    <criterion testable="true">Dark mode via host FluentProvider (ADR-021): semantic tokens adapt; no console errors in the workspace.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Workspace widget renders shared conversation">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=custom&amp;name=sprk_spaarkeai_workspace</url>
+      <steps>
+        <step>Open the SpaarkeAI workspace with a layout that includes the communications section</step>
+        <step>Confirm the widget renders the two-pane conversation (thread list + conversation)</step>
+        <step>Confirm a record-less thread appears in the list, named by participants</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>The shared two-pane conversation renders inside the workspace widget; record-less thread listed by participant name; console clean.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle the workspace into dark mode</step>
+      </steps>
+      <expected>Semantic tokens adapt in the widget; no hardcoded light-only colors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>SpaarkeAi hot-path: coordinate via `projects/INDEX.md` / `/conflict-check` before opening the PR. Keep type string `communications-list` + section id `communications` (NFR-06). Reference spec FR-14 (14a).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge first; follow task-execute.</protocol>
+  </execution>
+</task>

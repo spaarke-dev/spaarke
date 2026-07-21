@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Project wrap-up — quality gates, cleanup, test-diet, README/plan Complete, lessons-learned</title>
+    <phase>6 Deploy + wrap-up</phase>
+    <gate>after:050</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Final gate — touches many files + runs the mandatory quality gates (code-review, adr-check, test-diet). FULL per CLAUDE.md §7 project-close gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting final review + gate reconciliation across the whole project; strongest tier for the close-out judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final gate — must run after every prior task; touches README, plan, TASK-INDEX, notes.</parallel-reason>
+    <deps>040, 041, 042, 043, 044, 045, 046, 050</deps>
+    <tags>documentation, testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+  <prompt>MANDATORY final task. Run /code-review + /adr-check on the project code; run /repo-cleanup projects/messaging-communication-app-r3; run /test-diet (project-close gate per ADR-038); set README + plan to Complete (check all graduation criteria, add Completed Date + changelog); append notes/lessons-learned.md; verify all tasks are ✅ in TASK-INDEX.md.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Close the project cleanly: quality gates run and clean (or exceptions documented), repo hygiene applied, tests reconciled against the ADR-038 build-vs-maintain classifier, README + plan marked Complete with graduation criteria checked, lessons-learned captured, and TASK-INDEX fully reconciled.</goal>
+  <context>
+    <background>This is the 090-wrapup task, so task-execute Step 11 invokes /test-diet BEFORE marking the project complete (CLAUDE.md §7 project-close test-diet gate). The wrap-up PR must cite the test-diet report or document the skip rationale. All prior tasks (040–050) must be complete; FR-25 (046) may be deferred/dropped — reconcile its status honestly.</background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r3/README.md</file>
+      <file>projects/messaging-communication-app-r3/plan.md</file>
+      <file>projects/messaging-communication-app-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/messaging-communication-app-r3/notes/</file>
+    </relevant-files>
+    <dependencies>All prior tasks (040–050 + Phases 1–4). Task 046 may be deferred/dropped — reconcile.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="CLAUDE.md-§7">Run /test-diet before marking the project complete; the wrap-up PR MUST cite the test-diet report or document the skip rationale.</constraint>
+    <constraint source="ADR-038">/test-diet reconciles project tests against the build-vs-maintain classifier; MAINTAIN-class tests stay at KEEP path, SCAFFOLDING-class deleted; the skill is read-only (emits git rm/mv for the reviewer).</constraint>
+    <constraint source="graduation">Set README + plan to Complete only after all graduation/success criteria are checked (or documented as deferred with rationale — e.g. FR-25/046, or FR-22/045 if degraded).</constraint>
+    <constraint source="no-new-surface">This task authors no new application surface; no §11 justification required.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/messaging-communication-app-r3/spec.md (§Success Criteria)</file>
+    </files>
+    <patterns>
+      <pattern name="project-close" location="task-execute Step 11 + test-diet + repo-cleanup skills">Run gates → cleanup → test-diet → mark Complete → lessons-learned.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review across the project's code changes; resolve or document (path-A exception) any Critical/ADR findings.</step>
+    <step order="2">Run /adr-check across the project; reconcile violations (fix / documented exception / amendment per CLAUDE.md §6.5). Confirm the two Path-C ADR tensions (ADR-006, ADR-026) are cited.</step>
+    <step order="3">Run /repo-cleanup projects/messaging-communication-app-r3 — validate structure + remove ephemeral files.</step>
+    <step order="4">Run /test-diet (project-close gate) — reconcile tests added/modified against the ADR-038 classifier; capture the report to notes/test-diet-report.md; the wrap-up PR cites it.</step>
+    <step order="5">Verify all 13 spec §Success Criteria; check each graduation criterion in README (mark deferred items — e.g. 046/FR-25, 045/FR-22 if degraded — with explicit rationale).</step>
+    <step order="6">Set README + plan Status to Complete; add Completed Date + a changelog entry.</step>
+    <step order="7">Append projects/messaging-communication-app-r3/notes/lessons-learned.md (what worked, what to change, spine-dependency + privilege/privacy learnings).</step>
+    <step order="8">Verify every task row is ✅ (or explicitly deferred/dropped with rationale) in TASK-INDEX.md; reset current-task.md to "none". Build/verify gates green; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If /code-review or /adr-check surfaces an unresolved Critical/ADR violation that is not a documented exception, STOP and escalate per CLAUDE.md §6.5 rather than marking the project Complete.</trigger>
+  </escalation>
+  <tools>Read, Edit, Bash, Skill(code-review), Skill(adr-check), Skill(repo-cleanup), Skill(test-diet), Skill(task-execute)</tools>
+  <outputs>
+    <output type="doc">README + plan set to Complete (Completed Date + changelog)</output>
+    <output type="doc">projects/messaging-communication-app-r3/notes/lessons-learned.md</output>
+    <output type="doc">projects/messaging-communication-app-r3/notes/test-diet-report.md</output>
+    <output type="doc">TASK-INDEX.md fully reconciled</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">/code-review + /adr-check ran; all Critical/ADR findings are fixed or documented as path-A exceptions (incl. the two Path-C tensions cited).</criterion>
+    <criterion testable="true">/repo-cleanup ran and the project structure is compliant (no ephemeral files).</criterion>
+    <criterion testable="true">/test-diet ran; notes/test-diet-report.md exists and the wrap-up PR cites it.</criterion>
+    <criterion testable="true">README + plan Status = Complete with Completed Date + changelog; all graduation criteria checked or deferred-with-rationale (046/FR-25 and 045/FR-22 reconciled honestly).</criterion>
+    <criterion testable="true">notes/lessons-learned.md appended; every TASK-INDEX row is ✅ or explicitly deferred/dropped; current-task.md reset to "none".</criterion>
+  </acceptance-criteria>
+  <notes>Final gate. No new BFF surface authored → no publish-size gate here (task 050 owns the release NFR verification). Reference spec §Success Criteria + CLAUDE.md §7 project-close test-diet gate. Reconcile FR-25 (046) and FR-22 (045) statuses honestly — deferred/degraded is acceptable if documented.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="messaging-communication-app-r3">
+  <metadata>
+    <title>In-conversation additive filters — word dropdown + Email/Message type toggles (FR-09)</title>
+    <phase>2 Shared conversation widget core</phase>
+    <gate>after:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits shared-lib ConversationView / shell (.tsx); behavior-affecting filter logic across surfaces. Code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-side additive filtering over already-loaded timeline; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationView/shell from tasks 011/012 — same files; must serialize after them.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, react</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add additive in-conversation filters to `ConversationView`: a word-filter dropdown and Email / Message type toggles. Filters are ADDITIVE (combine with AND-of-active-facets semantics: a message is shown if it matches the active word filter AND its type is among the enabled type toggles). Filtering is a presentation concern over the already-polled timeline — do NOT change the reducer/poll or the send path. Keep the `COMMUNICATION_TYPE_EMAIL/MESSAGE` type strings.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>ConversationView gains additive filters (word dropdown + Email/Message toggles) that narrow the rendered bubbles without mutating the underlying timeline state, with an empty-filtered-result state, keyboard + ARIA, and dark-mode compliance.</goal>
+  <context>
+    <background>FR-09 requires additive in-conversation filters. "Additive" means the toggles/word filter combine — enabling both Email and Message shows both; disabling Message hides message-type bubbles; the word dropdown further narrows by keyword. Filtering happens client-side over the timeline the core already loaded; the core reducer/poll/`buildTimeline` are untouched.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts</file>
+    </relevant-files>
+    <dependencies>011 (ConversationView) merged. Type constants `COMMUNICATION_TYPE_EMAIL=100000000` / `COMMUNICATION_TYPE_MESSAGE=100000004` from the timeline types.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="FR-09">Filters are additive: word (dropdown) + Email/Message type toggles combine; a bubble renders only if it passes all active facets.</constraint>
+    <constraint source="NFR-06">Do not fork or mutate the core reducer/poll/`buildTimeline`; filtering is a render-layer concern. Keep type strings.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; light + dark via host FluentProvider.</constraint>
+    <constraint source="NFR-05">Filter controls keyboard-operable + ARIA-labeled; distinct empty-filtered-result state.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type constants" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts">Use `COMMUNICATION_TYPE_EMAIL/MESSAGE` + `TimelineChannelType` for the type toggles.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a filter bar to ConversationView: a word-filter dropdown and Email/Message toggle chips (both enabled by default).</step>
+    <step order="2">Derive the rendered bubble set from the timeline via a pure filter: include a message iff its channel type is in the enabled set AND (no word filter OR body/subject/sender matches the selected word).</step>
+    <step order="3">Ensure filtering is purely presentational — underlying timeline state, polling, and send are unaffected; toggling filters never re-fetches.</step>
+    <step order="4">Add a distinct "no messages match filters" empty state (separate from the thread-empty state).</step>
+    <step order="5">Keyboard + ARIA on the filter controls.</step>
+    <step order="6">Extend tests: additive combination (both on, one off, word narrows), empty-filtered state, state untouched by filtering, dark mode.</step>
+    <step order="7">Run component tests/build (`npm run build` for the non-PCF package + vitest).</step>
+    <step order="8">Update TASK-INDEX.md 🔲 → ✅.</step>
+    <step order="9">Document deviations in `projects/messaging-communication-app-r3/notes/`.</step>
+  </steps>
+  <escalation>
+    <trigger>If FR-09 "additive" is genuinely ambiguous between AND-of-facets and OR-of-facets for a real edge case, STOP and confirm with the owner rather than guessing.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/__tests__/ConversationView.filters.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Word dropdown + Email/Message toggles combine additively; a bubble renders only when it passes all active facets.</criterion>
+    <criterion testable="true">Disabling Message hides message-type bubbles; disabling Email hides email-in-flow blocks; both on shows both.</criterion>
+    <criterion testable="true">Filtering is presentational — no re-fetch, no reducer/poll mutation; clearing filters restores the full set.</criterion>
+    <criterion testable="true">Distinct "no messages match filters" empty state; filter controls keyboard-operable + ARIA-labeled (NFR-05).</criterion>
+    <criterion testable="true">Type strings unchanged (`COMMUNICATION_TYPE_EMAIL/MESSAGE`).</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — semantic tokens only.</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Additive type toggles"><steps><step>Render mixed email + message timeline</step><step>Disable Message</step><step>Re-enable, disable Email</step></steps><expected>Only the enabled type(s) render each time; both-on shows all.</expected></test>
+    <test name="Word filter narrows"><steps><step>Select a word in the dropdown</step></steps><expected>Only bubbles matching the word (and enabled type) render.</expected></test>
+    <test name="Empty-filtered state"><steps><step>Apply filters that match nothing</step></steps><expected>Distinct no-match empty state.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Toggle dark mode</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors.</expected></test>
+  </ui-tests>
+  <notes>Reference spec FR-09. Filtering is a render concern only — never touch the core state/poll/send.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

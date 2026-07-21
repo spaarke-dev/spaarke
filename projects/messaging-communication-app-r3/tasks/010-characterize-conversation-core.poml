@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Characterize CommunicationTimeline conversation core + SendEmailDialog before extending</title>
+    <phase>2 Shared conversation widget core</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Test authoring only — adds characterization/baseline tests around existing components; no production code change. STANDARD per rigor table (new test files, no .cs/.ts/.tsx behavior change), but tags include testing so quality gates apply per §8 TEST-MODIFYING row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical characterization of well-specified existing components; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Author characterization (golden-master) tests that pin the CURRENT observable behavior of the conversation core (`CommunicationTimeline` reducer, `~5s` polling via `useThreadPoll`/`useRegardingPoll`, `buildTimeline`) and of `SendEmailDialog`, so that Phase 2/3 extensions can be made without silent regression. This is NFR-08's "characterize before extending" gate. Do NOT modify any production file. Do NOT delete or weaken existing tests.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in React 18 + Fluent UI v9 + Spaarke shared component libs.</role>
+  <goal>A green baseline test suite that captures current behavior of the conversation core and SendEmailDialog: reducer state transitions, poll cursor/incremental-merge behavior, `buildTimeline` grouping/nesting, and the SendEmailDialog render + send-invocation contract. These tests become the safety net for tasks 011-025.</goal>
+  <context>
+    <background>The conversation core is production code merged from R1/R2 (`CommunicationTimeline/**`) and the send engine is from email-communication-solution-r4 (`SendEmailDialog`). R3 extends the core into a bubble `ConversationView` and extends `SendEmailDialog` (thread id + record link). Per NFR-08 and CLAUDE.md, characterization tests MUST exist before those extensions land. Existing `__tests__` folders already have some coverage; this task fills the gaps that Phase 2/3 will rely on (reducer transitions, poll incremental merge, buildTimeline day-boundary/nesting, SendEmailDialog invoked-send contract).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.reducer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.buildTimeline.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/CommunicationTimeline.types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/hooks/useThreadPoll.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/hooks/useRegardingPoll.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/__tests__/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/</file>
+    </relevant-files>
+    <dependencies>None. This is the foundation task for Phase 2/3.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-08">Characterize `CommunicationTimeline` + `SendEmailDialog` BEFORE any Phase 2/3 extension; do not change production behavior in this task.</constraint>
+    <constraint source="NFR-06">Reuse-first: these tests document the core so it is reused (not forked). Keep the existing type strings (`COMMUNICATION_TYPE_EMAIL=100000000`, `COMMUNICATION_TYPE_MESSAGE=100000004`).</constraint>
+    <constraint source="ADR-038">Follow the testing strategy: component/behavior tests over mock-heavy internals; no `Mock&lt;HttpMessageHandler&gt;`-style tests; inject `authenticatedFetch` via props as the seam.</constraint>
+    <constraint source="ADR-028">Where a poll/send test needs a fetch, inject a fake `authenticatedFetch` prop — do NOT import `@spaarke/auth` into tests of these context-agnostic components.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Conversation core" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**">Reducer + `buildTimeline` + poll hooks — the exact units to characterize.</pattern>
+      <pattern name="Existing test style" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatMessage.test.tsx">Reference RTL + vitest conventions used in this lib.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the reducer, `buildTimeline`, both poll hooks, and `SendEmailDialog`; read existing `__tests__` to find coverage gaps (do NOT duplicate what is already asserted).</step>
+    <step order="2">Add reducer characterization tests: initial state, append/merge on incremental poll, de-dup by message id, error/loading transitions. Assert the CURRENT behavior exactly (golden master).</step>
+    <step order="3">Add `buildTimeline` characterization tests: chronological ordering, day-boundary grouping, `inReplyTo` nesting degradation when no in-thread parent matches, email-vs-message channel mapping.</step>
+    <step order="4">Add poll-hook characterization tests using fake timers + injected `authenticatedFetch`: ~5s interval cadence, cursor advance on `createdOn`, no duplicate emit. Do not assert a brittle exact ms value beyond the documented ~5s.</step>
+    <step order="5">Add `SendEmailDialog` characterization tests: renders composer, invokes the existing send path with the expected payload shape, close/cancel behavior. Capture the current prop contract so task 020 can extend it additively.</step>
+    <step order="6">Run the component tests/build (`npm run build` for the non-PCF `Spaarke.UI.Components` package + `vitest`); ensure all green.</step>
+    <step order="7">Update TASK-INDEX.md 🔲 → ✅ for this task.</step>
+    <step order="8">Document any behavior that surprised you (undocumented edge cases) in `projects/messaging-communication-app-r3/notes/` for Phase 2/3 authors.</step>
+  </steps>
+  <escalation>
+    <trigger>If characterization reveals the core already couples to email-string matching for identity (rather than a `systemuserid`), STOP and record it — FR-02/18 depend on sender-identity alignment and task 011 must not inherit an email-string assumption.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React + run vitest</tool>
+    <tool name="terminal">shell</tool>
+  </tools>
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/__tests__/CommunicationTimeline.characterize.reducer.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/__tests__/CommunicationTimeline.characterize.buildTimeline.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/__tests__/CommunicationTimeline.characterize.poll.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/SendEmailDialog.characterize.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Reducer characterization: initial, append/merge, de-dup, loading, and error transitions each asserted against current behavior.</criterion>
+    <criterion testable="true">`buildTimeline` characterization: chronological order, day grouping, `inReplyTo` nesting degradation, and email/message channel mapping asserted.</criterion>
+    <criterion testable="true">Poll characterization (fake timers + injected `authenticatedFetch`): ~5s cadence, cursor advance, no duplicate emit; loading and error states covered.</criterion>
+    <criterion testable="true">`SendEmailDialog` characterization: renders, invokes existing send path with expected payload, cancel/close behavior; empty/loading/error render paths covered.</criterion>
+    <criterion testable="true">No production file modified; no existing test deleted or weakened; full suite green.</criterion>
+    <criterion testable="true">Dark mode passes via host FluentProvider (ADR-021) — any rendered component test wraps in FluentProvider; no hardcoded colors introduced (semantic tokens only).</criterion>
+    <criterion testable="true">Component tests pass.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="SendEmailDialog renders (baseline)"><steps><step>Mount SendEmailDialog inside a FluentProvider with a fake authenticatedFetch</step><step>Observe render</step></steps><expected>Dialog + composer render without error; send button present.</expected></test>
+    <test name="Dark Mode Compliance (ADR-021)"><steps><step>Wrap the rendered SendEmailDialog in a dark-theme FluentProvider</step><step>Verify semantic tokens adapt</step></steps><expected>No hardcoded colors; renders under dark theme.</expected></test>
+  </ui-tests>
+  <notes>Reference spec NFR-08 and FR-02/18. This is a safety net, not new behavior — pin current behavior exactly. Anchor render tests to the conventions in `SprkChat/__tests__/SprkChatMessage.test.tsx`.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge files first; follow task-execute.</protocol></execution>
+</task>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Thread pin field — additive Dataverse schema on sprk_communicationthread</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Additive Dataverse schema only (one new boolean/two-option field); no application code, no ADR-sensitive surface. Deterministic Web-API + solution work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical schema creation following the dataverse-create-schema recipe; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, fields</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+  <prompt>Add a single additive pin field to the existing sprk_communicationthread table so FR-24 thread pin has a backing store. No plugin, no dependent columns, no destructive change. Field is per-thread (pin state on the thread record). Deploy via solution import to the target env.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Create and deploy one additive field on sprk_communicationthread that persists thread pin/favorite state, so task 041 (pin UI) has a field to read/write. The field MUST be additive (no data migration, no change to existing columns) and MUST ship in the R3 solution.</goal>
+  <context>
+    <background>FR-24 delivers thread pin/favorite (pin only; archive + mute are out of R3 scope). The spec §11 new-component table confirms no existing field backs pin ("sprk_communicationthread pin field — Existing overlap: none"). This task creates only the field; the UI + persistence wiring is task 041.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </relevant-files>
+    <dependencies>None. sprk_communicationthread already exists in the target env (R1/R2 schema).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR-24">Pin only. Do NOT add archive, mute, or category/tag fields — those are explicitly out of R3 scope.</constraint>
+    <constraint source="spec-scope">Additive only: MUST NOT alter, rename, or delete any existing sprk_communicationthread column; MUST NOT require a data migration.</constraint>
+    <constraint source="ADR-024">Do not introduce a second regarding/association mechanism; this is a scalar pin flag on the thread, nothing more.</constraint>
+    <constraint source="MUST-NOT-plugin">No Dataverse plugin. Pin state is written by the BFF/client per task 041, not by server-side plugin logic.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="additive-field" location="dataverse-create-schema skill">Create a single attribute via Web API metadata, add to the R3 solution, export/import. Prefer a Boolean (Two Options) column, publisher-prefixed sprk_.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Load .claude/skills/dataverse-create-schema/SKILL.md and confirm the sprk_communicationthread logical name + existing columns in the target env (do not collide with an existing pin field).</step>
+    <step order="2">Create one additive attribute on sprk_communicationthread — a Boolean (Two Options) column (suggested schema name sprk_ispinned, display "Pinned", default false). Confirm publisher prefix sprk_ and that it is NOT required.</step>
+    <step order="3">Add the new attribute to the R3 solution and publish customizations.</step>
+    <step order="4">Export the solution and import to the target env; verify the column is present and queryable via Web API.</step>
+    <step order="5">Update docs/data-model/sprk_communication.md (or the thread data-model doc) to document the new pin field. Record the exact logical name in projects/messaging-communication-app-r3/notes/ so task 041 references the same name.</step>
+    <step order="6">Build/verify: query the column via Web API returns the field with default false. Update TASK-INDEX.md 040 to complete. Document any deviations (e.g. chosen field name differs from suggestion) in projects/messaging-communication-app-r3/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a pin/favorite field already exists on sprk_communicationthread, STOP creating a duplicate — reuse it and record the decision in notes/ instead.</trigger>
+  </escalation>
+  <justification>
+    <existing>No pin/favorite field exists on sprk_communicationthread (spec §11 table confirms "Existing overlap: none").</existing>
+    <extension>No — there is no scalar flag to extend; a new additive column is the minimal backing store.</extension>
+    <cost-of-doing-nothing>Without this field, FR-24 pin has nowhere to persist; task 041 pin toggles would be non-durable and lost on reload.</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Bash, PowerShell, Skill(dataverse-create-schema), Skill(task-execute)</tools>
+  <outputs>
+    <output type="schema">sprk_communicationthread additive pin field (e.g. sprk_ispinned)</output>
+    <output type="doc">docs/data-model/sprk_communication.md updated with the pin field</output>
+    <output type="note">projects/messaging-communication-app-r3/notes/ — exact pin field logical name for task 041</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A single Boolean (Two Options) sprk_-prefixed pin field exists on sprk_communicationthread in the target env, default false, not required.</criterion>
+    <criterion testable="true">The field is queryable via Web API and returns false for existing thread records (no data migration needed).</criterion>
+    <criterion testable="true">No existing sprk_communicationthread column was altered, renamed, or deleted.</criterion>
+    <criterion testable="true">No archive, mute, or tag/category field was added (negative: R3-out-of-scope fields absent).</criterion>
+    <criterion testable="true">The exact pin field logical name is recorded in notes/ and the data-model doc for task 041 to consume.</criterion>
+  </acceptance-criteria>
+  <notes>Dataverse schema task (not BFF): no publish-size gate applies. Reference spec FR-24 and §11 new-component table. Record the exact chosen logical name so task 041 does not guess.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>
