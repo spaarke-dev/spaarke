@@ -279,9 +279,26 @@ public sealed class AssociationStatusMapper
 
         foreach (var fw in fieldWinners)
         {
-            // Record the winner, plus any runner-up that participates in a high-confidence conflict.
-            var relevant = fw.Conflict ? fw.Targets.Where(t => t.FullConfidence >= fw.ConflictFloor).ToList()
-                                       : new List<TargetAgg> { fw.Winner };
+            // Which targets to surface in the review trace for this field.
+            List<TargetAgg> relevant;
+            if (fw.Conflict)
+            {
+                // High-confidence conflict (2+ targets each ≥ threshold) → surface each conflicting
+                // target so the review UI can present the Ambiguous choice.
+                relevant = fw.Targets.Where(t => t.FullConfidence >= fw.ConflictFloor).ToList();
+            }
+            else
+            {
+                // No high-confidence conflict, but a field can still carry MULTIPLE valid review
+                // candidates below the auto-file threshold — e.g. two contacts both named in the body
+                // each emit a Suggested-band sprk_regardingperson match (R4 UAT-R2-B1). Surface EVERY
+                // candidate worth reviewing (≥ the suggest floor), not just the single winner, so the
+                // reviewer sees and picks among all of them. Owner principle: "surface all matches, user
+                // picks primary; never auto-dedup." Only the winner is WRITTEN (a single-value lookup
+                // can hold one); the rest are review-only (Written = false).
+                relevant = fw.Targets.Where(t => t.FullConfidence >= SuggestFloor).ToList();
+                if (relevant.Count == 0) relevant.Add(fw.Winner);
+            }
 
             foreach (var t in relevant)
             {
