@@ -1021,9 +1021,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         hasRedlines: hasRedlines && typeof getRedlines === 'function',
         getRedlineAnnotations: () => (typeof getRedlines === 'function' ? getRedlines.call(editorRef.current) : []),
       });
+      // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
+      // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
+      // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an
+      // older editor build without the handle.
+      const commentThreadAnnotations =
+        typeof editorRef.current.getCommentThreadAnnotations === 'function'
+          ? editorRef.current.getCommentThreadAnnotations()
+          : [];
       // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
       // so concat order only affects the ins/del sequence the bridge already ordered correctly.
-      const saveAnnotations: DocxAnnotationInput[] = [...redlineAnnotations, ...commentAnnotations];
+      const saveAnnotations: DocxAnnotationInput[] = [
+        ...redlineAnnotations,
+        ...commentAnnotations,
+        ...commentThreadAnnotations,
+      ];
 
       // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
       // iterate (not spread) to avoid a call-stack overflow on large documents.

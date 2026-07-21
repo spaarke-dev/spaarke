@@ -119,3 +119,19 @@ export function composeCommentThreadsToDocxAnnotations(
   }
   return result;
 }
+
+/**
+ * Item 5b (UAT round-4, FR-23): the SAVE-side projection — like
+ * {@link composeCommentThreadsToDocxAnnotations} but EXCLUDING threads whose id is in
+ * `importedThreadIds` (threads seeded from the retained original's own `w:comment`s). Those already
+ * ride the retained baseline on save, so re-emitting them would DUPLICATE the comment in the output.
+ * Only session-authored (or otherwise non-imported) threads are persisted as new `w:comment`s. The
+ * host (`ComposeEditor.getCommentThreadAnnotations`) supplies the imported id set from the load-time
+ * `initialThreads`.
+ */
+export function composeSessionCommentThreadsToDocxAnnotations(
+  threads: readonly ComposeCommentThreadModel[],
+  importedThreadIds: ReadonlySet<string>
+): DocxAnnotationInput[] {
+  return composeCommentThreadsToDocxAnnotations(threads.filter(t => !importedThreadIds.has(t.id)));
+}

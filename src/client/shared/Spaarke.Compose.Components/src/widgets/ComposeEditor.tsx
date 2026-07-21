@@ -93,6 +93,10 @@ import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
+import {
+  composeSessionCommentThreadsToDocxAnnotations,
+  type ComposeCommentThreadModel,
+} from './ComposeCommentThread.types';
 import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
@@ -541,6 +545,16 @@ export interface ComposeEditorHandle {
 
   /** True when the editor currently holds one or more PENDING redlines (drives the Save path). */
   hasPendingRedlines(): boolean;
+
+  /**
+   * Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's NEW (session-authored) threads
+   * mapped to {@link DocxAnnotationInput}[] (`w:comment`) via `composeCommentThreadsToDocxAnnotations`.
+   * The host appends these to the save `annotations` list so panel comments persist as native Word
+   * comments (previously they lived only in React state and vanished on reload). IMPORTED threads
+   * (seeded from the retained original's own `w:comment`s) are EXCLUDED — they already ride the
+   * retained baseline, so re-emitting them would duplicate. Empty when no session comments exist.
+   */
+  getCommentThreadAnnotations(): DocxAnnotationInput[];
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -1218,6 +1232,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // (set atomically with `docxBytes` on a fresh mount, per the prop's own contract).
     const initialCommentThreads = React.useMemo(() => groupImportedComments(importedComments), [importedComments]);
 
+    // Item 5b (UAT round-4, FR-23): the comment-thread panel owns its thread state (survives
+    // open/close). To PERSIST panel comments on save, the panel reports its live threads up via
+    // `onThreadsChanged` into this ref; the imperative `getCommentThreadAnnotations()` maps the
+    // SESSION-authored ones (excluding imported threads, which ride the retained original) to
+    // `w:comment` annotations. A ref (not state) keeps this off the render path — save reads the
+    // latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
+    const commentThreadsRef = React.useRef<readonly ComposeCommentThreadModel[]>(initialCommentThreads);
+    const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
+      commentThreadsRef.current = threads;
+    }, []);
+
     // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
     // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
     // state; the two panels are never coupled). Its FAB is pinned to the OPPOSITE (top-left) corner of
@@ -1626,6 +1651,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         getRedlineAnnotations: () =>
           editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
+        // Item 5b (UAT round-4, FR-23): panel comments → `w:comment` annotations, EXCLUDING imported
+        // threads (they already ride the retained-original baseline; re-emitting would duplicate). The
+        // imported id set is the load-time `initialCommentThreads` (seeded from the doc's own comments).
+        getCommentThreadAnnotations: () =>
+          composeSessionCommentThreadsToDocxAnnotations(
+            commentThreadsRef.current,
+            new Set(initialCommentThreads.map(t => t.id))
+          ),
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.
@@ -1744,6 +1777,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           author={commentAuthor}
           pendingRange={pendingCommentRange}
           onThreadCreated={() => setPendingCommentRange(null)}
+          onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
         />
         {/* ===================================================================
