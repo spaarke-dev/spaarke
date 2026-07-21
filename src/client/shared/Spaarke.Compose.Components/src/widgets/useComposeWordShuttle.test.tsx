@@ -37,6 +37,7 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToDocxAnnotations,
   anchoredAnnotationsToPriorAnchors,
+  redlineMarksToDocxAnnotations,
   DocxTrackChangeKind,
 } from './useComposeWordShuttle';
 import { ComposeToolbar } from './ComposeToolbar';
@@ -239,5 +240,67 @@ describe('ComposeToolbar — Push to Word action (gap 3.1)', () => {
   it('does not render the button when no push handler is provided', () => {
     renderTb(<ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" />);
     expect(screen.queryByTestId('compose-toolbar-push-to-word')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redlineMarksToDocxAnnotations — per-block split (Fix #1, UAT 2026-07-20)
+// A redline whose marked text spans >1 editor paragraph must emit ONE annotation per <w:p>, because the
+// server locates each target within a single paragraph — a concatenated cross-paragraph target never
+// matches (→ 422 "a tracked change could not be located").
+// ---------------------------------------------------------------------------
+describe('redlineMarksToDocxAnnotations — per-block split (Fix #1)', () => {
+  const del = (text: string, ledgerRef = 'b1@t1') => ({
+    type: 'text',
+    text,
+    marks: [{ type: 'deletion', attrs: { ledgerRef } }],
+  });
+  const ins = (text: string, ledgerRef = 'b1@t1') => ({
+    type: 'text',
+    text,
+    marks: [{ type: 'insertion', attrs: { ledgerRef } }],
+  });
+  const para = (...content: unknown[]) => ({ type: 'paragraph', content });
+  const doc = (...content: unknown[]) => ({ type: 'doc', content });
+
+  it('splits a deletion that spans two paragraphs into one annotation per paragraph', () => {
+    const json = doc(para(del('End of paragraph one.')), para(del('Start of paragraph two.')));
+
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    const deletions = out.filter(a => a.kind === DocxTrackChangeKind.Deletion);
+    expect(deletions.map(d => d.targetText)).toEqual(['End of paragraph one.', 'Start of paragraph two.']);
+    // Critically, NO annotation concatenates the two paragraphs' text.
+    expect(out.some(a => a.targetText === 'End of paragraph one.Start of paragraph two.')).toBe(false);
+  });
+
+  it('leaves a single-paragraph replace redline unchanged (insertion first, then deletion)', () => {
+    const json = doc(para(ins('the new clause'), del('the old clause')));
+
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    expect(out).toEqual([
+      {
+        kind: DocxTrackChangeKind.Insertion,
+        targetText: 'the old clause',
+        newText: 'the new clause',
+        author: 'Spaarke AI',
+        date: '2026-07-20T00:00:00Z',
+      },
+      {
+        kind: DocxTrackChangeKind.Deletion,
+        targetText: 'the old clause',
+        author: 'Spaarke AI',
+        date: '2026-07-20T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('skips imported: revisions (they ride the retained-original baseline)', () => {
+    const json = doc(para(del('was-imported', 'imported:rev-1')));
+
+    const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
+
+    expect(out).toEqual([]);
   });
 });
