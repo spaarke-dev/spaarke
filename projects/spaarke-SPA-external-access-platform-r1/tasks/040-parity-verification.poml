@@ -3,7 +3,8 @@
     <title>End-to-end parity verification (SWA + CIAM)</title>
     <phase>3 Cutover &amp; decommission</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-07-20 PARITY GREEN. OWNER live-verified on SWA+CIAM: CIAM sign-in works; data is CORRECTLY SCOPED (authz not over-broad — sees only granted projects); a newly-added external-access grant is immediately accessible in the external site (invite/grant → participation → ADR-009 cache invalidation → data, end-to-end). HEADLESS (agent): SWA root 200 + security headers (Referrer-Policy, CSP frame-ancestors 'self', X-Content-Type-Options nosniff); deep-link /project/:id → 200 (BrowserRouter + navigationFallback); in-app 404; CORS preflight SWA→BFF /api/v1/external/me → 204 + ACAO=SWA origin; live bundle carries the real spaarkeextid.ciamlogin.com authority (0 #{ placeholders); admin route 401, external route 401 unauthenticated. TEST/DESIGN-COVERED: authz-before-stream 403/no-bytes/no-Graph (task 030 ExternalAccessContractTests centerpiece); broker-only no-B2B-guest (CIAM design mints no B2B invite; task 026 removed synthetic SPE membership). No parity gap → task 041 UNBLOCKED. Residual (non-blocking): full SSPR password-reset flow is the deferred live-E2E detail (owner used existing creds); DI-030-01 invalid-issuer/real-oid-logic remain deferred.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Verification pass over already-shipped surface (no new code); gate before decommission</rigor-reason>
     <model-tier>sonnet</model-tier>

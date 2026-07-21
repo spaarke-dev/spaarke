@@ -7,7 +7,9 @@
       1. [RETIRED] Deploy-CorporateWorkspace.ps1  — sprk_corporateworkspace (HTML)
          Retired 2026-05-26 (R4 task 041 / OC-R4-05).
          See docs/architecture/LEGALWORKSPACE-RETIREMENT.md.
-      2. Deploy-ExternalWorkspaceSpa.ps1  — sprk_externalworkspace (HTML + inline JS)
+      2. [RETIRED] Deploy-ExternalWorkspaceSpa.ps1  — sprk_externalworkspace (HTML + inline JS)
+         Retired 2026-07-20 (spaarke-SPA-external-access-platform-r1 task 041).
+         SPA now served from Azure Static Web Apps (.github/workflows/deploy-external-spa.yml).
       3. Deploy-SpeAdminApp.ps1           — sprk_speadmin (HTML)
       4. Deploy-WizardCodePages.ps1       — 12 wizard/code page web resources
       5. Deploy-EventsPage.ps1            — sprk_eventspage.html
@@ -71,12 +73,17 @@ $components = @(
     #     Desc       = 'sprk_corporateworkspace (HTML) — RETIRED'
     #     Args       = @{ DataverseUrl = $DataverseUrl }
     # },
-    @{
-        Name       = 'ExternalWorkspaceSpa'
-        Script     = 'Deploy-ExternalWorkspaceSpa.ps1'
-        Desc       = 'sprk_externalworkspace (HTML + inline JS)'
-        Args       = @{ DataverseUrl = $DataverseUrl }
-    },
+    # RETIRED 2026-07-20 (spaarke-SPA-external-access-platform-r1 task 041) — the external Secure
+    # Project Workspace SPA is now served from Azure Static Web Apps (deploy-external-spa.yml), NOT
+    # as the sprk_externalworkspace Dataverse web resource. Deploy-ExternalWorkspaceSpa.ps1 was
+    # deleted; the sprk_externalworkspace Power Pages site is retired (owner ops). See
+    # docs/architecture/external-access-spa-architecture.md (task 042).
+    # @{
+    #     Name       = 'ExternalWorkspaceSpa'
+    #     Script     = 'Deploy-ExternalWorkspaceSpa.ps1'
+    #     Desc       = 'sprk_externalworkspace (HTML + inline JS) — RETIRED'
+    #     Args       = @{ DataverseUrl = $DataverseUrl }
+    # },
     @{
         Name       = 'SpeAdminApp'
         Script     = 'Deploy-SpeAdminApp.ps1'

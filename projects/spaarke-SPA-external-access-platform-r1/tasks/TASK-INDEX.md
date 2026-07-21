@@ -28,8 +28,8 @@
 | 029 | Core-user "Invite to Secure Workspace" trigger | 2 | FULL | sonnet/high | 025 | ✗ (new command + wiring) | ✅ |
 | 030 | Unit tests for CIAM external-access surface | 2 | FULL (TEST) | sonnet/high | 020,021,022,023,025,026,027 | ✗ (spans files) | ✅ |
 | 031 | Deploy BFF + verify publish size & CVE | 2 | STANDARD | sonnet/high | 030 | ✗ (deploy gate) | ✅ |
-| 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | 🔲 |
-| 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔲 |
+| 040 | End-to-end parity verification (SWA + CIAM) | 3 | STANDARD | sonnet/high | 014,031 | ✗ (verification gate) | ✅ |
+| 041 | Retire Power Pages site + web-resource script | 3 | STANDARD | sonnet/high | 040 | ✗ (irreversible) | 🔄 (repo done; owner site-teardown pending) |
 | 042 | Rewrite external-access architecture + guides | 3 | MINIMAL | sonnet/high | 040 | ✓ Group C | 🔲 |
 | 090 | Project wrap-up | 3 | FULL | sonnet/high | 040,041,042 | ✗ (final gate) | 🔲 |
 

@@ -619,7 +619,7 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 | # | Script Called | Web Resource |
 |---|-------------|--------------|
 | 1 | ~~`Deploy-CorporateWorkspace.ps1`~~ | ~~`sprk_corporateworkspace` (HTML)~~ — **RETIRED 2026-05-26** (R4 task 041 / OC-R4-05; see [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](../docs/architecture/LEGALWORKSPACE-RETIREMENT.md)) |
-| 2 | `Deploy-ExternalWorkspaceSpa.ps1` | `sprk_externalworkspace` (HTML + inline JS) |
+| 2 | ~~`Deploy-ExternalWorkspaceSpa.ps1`~~ | ~~`sprk_externalworkspace` (HTML + inline JS)~~ — **RETIRED 2026-07-20** (spaarke-SPA-external-access-platform-r1 task 041; SPA now served from Azure Static Web Apps via `.github/workflows/deploy-external-spa.yml`) |
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
 | 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
@@ -794,7 +794,7 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 6. Publishes the web resource so changes are live
 
 **Notes:**
-- The Reporting Code Page uses `vite-plugin-singlefile`, making the dist output a single file — no manual JS inlining step needed (contrast with `Deploy-ExternalWorkspaceSpa.ps1`)
+- The Reporting Code Page uses `vite-plugin-singlefile`, making the dist output a single file — no manual JS inlining step needed (contrast with the retired `Deploy-ExternalWorkspaceSpa.ps1`, which inlined JS into a Dataverse web resource)
 - Idempotent: first run creates the web resource; subsequent runs update and republish it
 - Web resource accessible at: `{DataverseUrl}/WebResources/sprk_reporting`
 
