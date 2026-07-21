@@ -9,10 +9,30 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **032 — "What lights up" audit (FR-14 pre) (Phase 3, Wave 10)** — NOT started |
-| **Step** | — (031 ✅ DONE: Layer-A seam extracted, behavior-neutral, both gates clean, 8780-test full suite green) |
-| **Status** | ready-for-032 (opus/high, STANDARD rigor — audit doc reviewed before the 033 flip) |
-| **Next Action** | **Dispatch 032** via `task-execute` on `tasks/032-what-lights-up-audit.poml`. It's the pre-flip audit ("what lights up" when `Notification` becomes routable) reviewed BEFORE 033 flips `DispositionRoutability` + `OutputRouter`. |
+| **Task** | **Phase 3 COMPLETE (030→033 all ✅). Next: 024 — communication-arrived producer (Phase 2, Wave 6) — ⛔ BLOCKED on email-r4 W10 merge** |
+| **Step** | — (033 ✅ DONE: Notification disposition flipped routable + OutputRouter leg via IActionSeam; full suite 8781/0; both gates clean) |
+| **Status** | **project WAIT state** — every remaining task (024, 025, 040–052, 090) depends transitively on **024**, which is BLOCKED until **email-communication-solution-r4 W10** merges (it owns `Services/Communication/**` persist path). No unblocked forward work in this worktree until then. |
+| **Next Action** | **Wait on email-r4 W10 merge.** When merged: `/conflict-check`, then dispatch **024** via `task-execute` on `tasks/024-*.poml` (opus/high, FULL). Also outstanding (user actions, not code): 023 R-5 named-human security sign-off; `sprk_isexternal` backfill (10 users). |
+
+### 033 Quality Gates (Step 9.5) — both CLEAN
+- **code-review**: 0 Critical / 0 Warning / 1 informational (OutputRouter.cs 523 lines >300 — cohesive Email-mirror leg, don't split). ADR-013 facade discipline confirmed; NFR-07 identifiers-only logging.
+- **adr-check**: 0 violations. ADR-043 (through-the-registry Path C), ADR-013 (IActionSeam facade), ADR-040 (store-before-render), ADR-010 (no new interface; 5 ctor params <7), ADR-032, ADR-038 all compliant. §10 Placement Justification: existing-leg realization, no package, 46.06 MB, 0 new HIGH CVE.
+- **Tests**: full BFF suite 8781 passed / 0 failed / 101 skipped. Targeted: 46 disposition/router + 81 dispatch/ActionSeam.
+
+### Files Modified This Session (033)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs` — Notification entry `Routable=false→true`, removed NotRoutableReason (+ audit-cite comment).
+- `src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs` — added `IActionSeam? actionSeam=null` ctor param (last, optional → DI auto-injects Singleton); `case BindingDisposition.Notification` → `CreateNotificationViaSeamAsync` (parses `notification` envelope, calls seam, loud on `!Success`/missing envelope, `Skipped`=no-op); updated 2 doc comments.
+- `tests/integration/seam/Ai/DispositionRoutabilityNotificationSeamTests.cs` — NEW: 3 tests (admit⇔route⇔store happy path; seam-rejects-content→loud-after-store; missing-envelope→loud).
+- `tests/integration/seam/Ai/DispositionRoutabilitySeamTests.cs` — removed Notification from not-routable Theory; added it to `Registry_RoutableSet_IsExactlyTheRealizedLegs`.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/OutputRouterTests.cs` — removed Notification from `RouteAsync_..._ThrowsLoudNotSupported` Theory (now routes).
+- No DI edit needed (single ctor; Singleton IActionSeam auto-resolved). DispositionRoutability/OutputRouter were byte-identical to origin/master (conflict-check pass).
+
+### 032 result (Phase 3, Wave 10 — ✅ DONE 2026-07-21)
+- **Outcome: nothing lights up.** Live `spaarkedev1` `sprk_playbookconsumer` catalog has **0** rows with `sprk_disposition=notification` (targeted query `[]`; full census = 28 Bindings: 12 Informational + 7 null + 4 SurfaceLaunch + 3 Compose + 1 Email + 1 WorkProduct + **0 Notification**). Code/seed scan agrees (only enum def + registry entry + option-set def + test fixtures — no Binding).
+- **Two notification mechanisms distinguished**: Path 1 = `CreateNotificationNodeExecutor` (ActionType 50, playbook-node, writes appnotification TODAY, NOT gated by registry — e.g. daily-update-service playbooks) is **out of scope**; Path 2 = Binding `disposition=notification` → OutputRouter (the flip target) has **zero rows**.
+- **Both escalation triggers cleared** (no risky Binding; no per-Binding-granularity dilemma). No ADR-043 §6.5 tension raised.
+- **Recommendation**: immediate flip SAFE; no Binding remediation. 033 MUST (1) land OutputRouter leg in same change as registry flip, (2) add `Notification` admit⇔route⇔store seam test. Forward-looking guard: the FIRST future notification Binding lights up with no further registry gate → re-run NFR-02/03 content check when authoring it (033 Trigger 1 already halts on any unanticipated routed capability).
+- Deliverable: `notes/what-lights-up-audit.md` (STANDARD rigor; quality gates skipped — docs-only, no code/tests modified).
 
 ### 031 result (Phase 3, Wave 9 — ✅ DONE 2026-07-21)
 - Session-agnostic Layer-A seam extracted behind the 3 node executors: 3 cores (`Services/Ai/Nodes/ActionCore/*`) + ADR-013 facade (`Services/Ai/PublicContracts/{IActionSeam,ActionSeam}.cs`) + DI (`AnalysisServicesModule.AddNodeExecutors`, unconditional Singleton). Executors refactored to delegate; **constructors byte-identical**.

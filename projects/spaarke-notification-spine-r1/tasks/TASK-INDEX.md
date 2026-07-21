@@ -23,8 +23,8 @@
 | 025 | R3 contract-lock note (FR-19) | 2 | 🔲 | 024,021,022 | sonnet/high | MINIMAL | — |
 | 030 | Characterization tests — dispatch (FR-07 pre) | 3 | ✅ | none | sonnet/high | STANDARD | — |
 | 031 | Layer-A action seam behind executors (FR-07) | 3 | ✅ | 030 | opus/xhigh | FULL | — |
-| 032 | "What lights up" audit (FR-14 pre) | 3 | 🔲 | 031 | opus/high | STANDARD | — |
-| 033 | Notification leg flip (FR-14) | 3 | 🔲 | 032 | opus/high | FULL | — |
+| 032 | "What lights up" audit (FR-14 pre) | 3 | ✅ | 031 | opus/high | STANDARD | — |
+| 033 | Notification leg flip (FR-14) | 3 | ✅ | 032 | opus/high | FULL | — |
 | 040 | comms_assessed producer (FR-11) | 4 | 🔲 | 031,024 + email-r4-W10 | opus/high | FULL | — |
 | 041 | Comms policy layer (FR-12) | 4 | 🔲 | 040 | opus/xhigh | FULL | — |
 | 042 | RI actions via seam + mirror (FR-13) | 4 | 🔲 | 040,041,012,020 | opus/high | FULL | — |

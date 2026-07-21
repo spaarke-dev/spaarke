@@ -4,7 +4,7 @@
     <title>Flip DispositionRoutability.Notification to Routable=true THROUGH the registry (ADR-043 Path-C, sequenced after the 032 audit)</title>
     <phase>3 Layer A + Notification flip</phase>
     <gate>blocked-until:032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>ADR-043 shipped-catalog behavior-surface change touching `Services/Ai/DispositionRoutability.cs` and `Services/Ai/OutputRouter.cs`; dispatch-spine change requires FULL protocol + unconditional Step 9.5 gates.</rigor-reason>
     <model-tier>opus</model-tier>
