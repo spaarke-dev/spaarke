@@ -750,6 +750,11 @@ public sealed class CommunicationService
         if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
             communication["sprk_inreplyto"] = request.InReplyToMessageId;
 
+        // Reply regarding inheritance (UAT R4 D12-1 / task 124) — a Message reply/forward inherits the
+        // parent message's regarding the same way email does; copy before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -1640,6 +1645,11 @@ public sealed class CommunicationService
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — see the shared-mailbox
+        // create path; copies the parent's regarding onto this new draft before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -1739,6 +1749,12 @@ public sealed class CommunicationService
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — copy the parent's
+        // regarding onto this new draft BEFORE mapping any explicit association, so an explicitly-supplied
+        // association still wins on its field (CopyRegardingFromSourceAsync skips already-set fields).
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
 
@@ -1806,6 +1822,77 @@ public sealed class CommunicationService
 
         if (primary.EntityUrl is not null)
             communication["sprk_regardingrecordurl"] = TruncateTo(primary.EntityUrl, 200);
+    }
+
+    /// <summary>
+    /// Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124). Copies the
+    /// parent (source) communication's regarding association onto a NEW draft <paramref name="communication"/>:
+    /// reads ALL populated <c>sprk_regarding*</c> typed lookups (<see cref="Engine.RegardingFieldMap.AllRegardingFields"/>)
+    /// plus the denormalized regarding pointer (id/type/name/url) + association count from the source, and writes
+    /// each populated value onto the new record. This is a DIRECT COPY — it never invokes the Association Engine
+    /// and never re-derives (per the task-124 constraint + owner intent). Additive: only populated source fields
+    /// are set; a sibling regarding field is never cleared (mirrors task-042 write semantics). Best-effort /
+    /// non-fatal — an inheritance-read failure MUST NOT fail the send (NFR-02).
+    /// </summary>
+    private async Task CopyRegardingFromSourceAsync(
+        DataverseEntity communication, Guid sourceCommunicationId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var columns = new List<string>
+            {
+                "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
+                "sprk_regardingrecordurl", "sprk_associationcount",
+            };
+            columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
+
+            var source = await _genericEntityService.RetrieveAsync(
+                "sprk_communication", sourceCommunicationId, columns.ToArray(), ct);
+
+            var copied = 0;
+            foreach (var (entityLogicalName, field) in Engine.RegardingFieldMap.All)
+            {
+                // Only copy a populated typed lookup; never overwrite a value already set on the new
+                // record by an explicit association (MapAssociationFields runs AFTER this — explicit wins).
+                if (!communication.Attributes.ContainsKey(field)
+                    && source.GetAttributeValue<EntityReference>(field) is { } er)
+                {
+                    communication[field] = new EntityReference(
+                        string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id);
+                    copied++;
+                }
+            }
+
+            // Denormalized regarding pointer — copy only populated values (additive).
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            var count = source.GetAttributeValue<int?>("sprk_associationcount");
+            if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
+                communication["sprk_associationcount"] = count.Value;
+
+            _logger.LogInformation(
+                "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
+                copied, sourceCommunicationId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Regarding inheritance from source communication {SourceId} failed (non-fatal) | CorrelationId: {CorrelationId}",
+                sourceCommunicationId, correlationId);
+        }
+    }
+
+    /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>
+    /// only when the target does not already carry it (additive; explicit values win).</summary>
+    private static void CopyStringIfPresent(DataverseEntity source, DataverseEntity target, string field)
+    {
+        if (target.Attributes.ContainsKey(field)) return;
+        var val = source.GetAttributeValue<string>(field);
+        if (!string.IsNullOrWhiteSpace(val)) target[field] = val;
     }
 
     /// <summary>

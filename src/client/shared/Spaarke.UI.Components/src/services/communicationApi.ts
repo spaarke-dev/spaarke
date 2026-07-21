@@ -132,6 +132,14 @@ export interface SendCommunicationOptions {
   archiveToSpe?: boolean;
   /** Entity associations to link onto the generated `sprk_communication`. */
   associations?: ICommunicationAssociation[];
+  /**
+   * Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124): the SOURCE
+   * (parent) `sprk_communication` GUID this draft is composed from. When set, the BFF copies ALL
+   * populated `sprk_regarding*` typed lookups (+ denormalized regarding pointer) from that source
+   * onto the new record at create time — a direct copy (true inheritance), never an engine
+   * re-derivation. Only reply/forward set it; omit for `+ New`/draft/view.
+   */
+  inheritRegardingFromCommunicationId?: string;
   /** Send mode. Default `'sharedMailbox'`. */
   sendMode?: CommunicationSendMode;
   /** Caller-provided correlation ID for tracing. Optional. */
@@ -337,6 +345,7 @@ export async function sendCommunication(
     communicationType: toBffCommunicationType(opts.communicationType),
     threadId: opts.threadId,
     inReplyToMessageId: opts.inReplyToMessageId,
+    inheritRegardingFromCommunicationId: opts.inheritRegardingFromCommunicationId,
     fromMailbox: opts.fromMailbox,
     sendMode: toBffSendMode(opts.sendMode),
     archiveToSpe: opts.archiveToSpe ?? false,

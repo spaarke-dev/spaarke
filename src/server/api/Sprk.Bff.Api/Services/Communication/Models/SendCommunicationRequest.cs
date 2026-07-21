@@ -96,6 +96,18 @@ public sealed record SendCommunicationRequest
     public string? InReplyToMessageId { get; init; }
 
     /// <summary>
+    /// Reply / Reply All / Forward regarding inheritance (UAT R4 D12-1 / task 124): the SOURCE
+    /// (parent) <c>sprk_communication</c> id the new draft is composed from. When provided, the
+    /// create path copies ALL populated <c>sprk_regarding*</c> typed lookups (per
+    /// <see cref="Engine.RegardingFieldMap.AllRegardingFields"/>) plus the denormalized regarding
+    /// pointer (id/type/name/url + count) from that source onto the new record — a DIRECT COPY
+    /// (true inheritance), never a re-run of the Association Engine. Additive: only populated source
+    /// fields are set; a sibling regarding field is never cleared. Best-effort / non-fatal — an
+    /// inheritance-read failure never fails the send. Optional; only reply/forward set it.
+    /// </summary>
+    public Guid? InheritRegardingFromCommunicationId { get; init; }
+
+    /// <summary>
     /// R1 "respond into the current thread" target (FR-12, task 062): the target
     /// <c>sprk_communicationthread</c> record id. When provided on a <see cref="Models.CommunicationType.Message"/>
     /// send, the outbound thread-resolution step stamps <c>sprk_communication.sprk_communicationthread</c>
