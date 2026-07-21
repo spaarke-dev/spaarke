@@ -165,6 +165,56 @@ describe('resolveTargetSpans (typographic normalization — round-3 UAT Test #4)
 });
 
 // ---------------------------------------------------------------------------
+// resolveTargetSpans — whitespace-tolerant fallback (Fix #4, UAT 2026-07-20)
+// The model authors target_text against the Document-Intelligence extraction; we match against mammoth's
+// flattened editor text. The two normalize spacing differently, so a byte-verbatim target often differs
+// only in whitespace. A whitespace-COLLAPSED fallback (run only after the precise pass misses) restores
+// the match while keeping real PM positions — WITHOUT loosening an exact match or guessing a paraphrase.
+// ---------------------------------------------------------------------------
+describe('resolveTargetSpans (whitespace-tolerant fallback — Fix #4)', () => {
+  it('matches a target that has EXTRA whitespace vs the (normally-spaced) doc — the common cross-extractor case', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>'); // normal single spacing
+    // The model authored the target against a differently-normalized extraction — a double space here.
+    const r = resolveTargetSpans(editor, 'quick  brown', 'strict');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The span covers the doc's ACTUAL text — real PM positions, not a normalized copy.
+      expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('quick brown');
+    }
+    editor.destroy();
+  });
+
+  it('matches a target whose spacing differs by a run of whitespace mid-phrase', () => {
+    const editor = makeEditor('<p>These systems focus on one asset type</p>');
+    const r = resolveTargetSpans(editor, 'systems   focus', 'strict'); // 3 spaces in the target
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('the fallback still does NOT match across a paragraph boundary', () => {
+    const editor = makeEditor('<p>end of one</p><p>start of two</p>');
+    const r = resolveTargetSpans(editor, 'one start', 'first');
+    expect(r.ok).toBe(false);
+    editor.destroy();
+  });
+
+  it('a genuine paraphrase (a changed word) still returns not_found — do-not-guess preserved (FR-19)', () => {
+    const editor = makeEditor('<p>the quick brown fox jumps</p>');
+    const r = resolveTargetSpans(editor, 'the speedy brown fox', 'strict');
+    expect(r).toMatchObject({ ok: false, kind: 'not_found' });
+    editor.destroy();
+  });
+
+  it('an exact (non-whitespace) match is unchanged — the precise pass wins first', () => {
+    const editor = makeEditor('<p>alpha beta gamma</p>');
+    const r = resolveTargetSpans(editor, 'beta', 'strict');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('beta');
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DEF-11 — whole-document revision: multi-change materialize + Accept-all/Reject-all
 // ---------------------------------------------------------------------------
 function countMarks(editor: Editor, markName: 'insertion' | 'deletion'): number {
@@ -1102,7 +1152,7 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
     return ref;
   }
 
-  it('the cited rationale is the visual HEADLINE; the confidence band renders SECONDARY, after it', async () => {
+  it('the popover shows BOTH the coarse confidence band (compact header) and the full cited rationale', async () => {
     const ref = renderEditorWithText('<p>The quick brown fox.</p>');
     await screen.findByRole('region');
 
@@ -1132,14 +1182,17 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
     const band = await screen.findByTestId('compose-redline-confidence-band');
     expect(popover).toContainElement(rationale);
     expect(popover).toContainElement(band);
+    // The FULL rationale is shown (no truncation / no internal ledger id) — the primary trust cue.
     expect(rationale).toHaveTextContent(/Standard playbook term is 60 days notice/);
     // A coarse qualitative band, never a numeric/percentage score.
     expect(band).toHaveTextContent(/High confidence/i);
     expect(band).not.toHaveTextContent(/%|0\.\d/);
 
-    // Rationale is the HEADLINE — it precedes the confidence band in DOM order.
+    // UAT 2026-07-20 R2 layout: the confidence band is a compact header ABOVE the rationale body (the
+    // §6.2 anti-rubber-stamp safeguards — the low-band "needs review" cue + demoted Accept — are the
+    // binding requirement and are asserted separately below; header order is a presentation choice).
     // eslint-disable-next-line no-bitwise
-    expect(rationale.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(band.compareDocumentPosition(rationale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('a low-confidence redline is never pre-selected or auto-accepted, and carries an explicit "needs review" affordance', async () => {

@@ -269,6 +269,61 @@ function buildCharIndex(editor: Editor): { text: string; positions: number[] } {
 }
 
 /**
+ * Fix #4 (UAT 2026-07-20): derive a WHITESPACE-COLLAPSED view of a {@link buildCharIndex} result — each
+ * run of whitespace becomes a single space mapped to the PM position of the run's FIRST char; the NUL
+ * block sentinel is preserved verbatim (and breaks any run, so no cross-paragraph match). The model
+ * authors `target_text` against the Document-Intelligence extraction while we match against mammoth's
+ * flattened text; the two normalize spacing/tabs/line-breaks differently, so a byte-verbatim target
+ * often differs from the editor text ONLY in whitespace. Every retained char keeps a real PM position,
+ * so the matched span endpoints stay exact even though the collapse is non-1:1.
+ */
+function collapseWhitespaceIndex(raw: { text: string; positions: number[] }): { text: string; positions: number[] } {
+  const chars: string[] = [];
+  const positions: number[] = [];
+  let inRun = false;
+  for (let i = 0; i < raw.text.length; i++) {
+    const c = raw.text[i];
+    if (c === ' ') {
+      // Block sentinel — preserved; it terminates any whitespace run so a needle can't span blocks.
+      chars.push(c);
+      positions.push(raw.positions[i]);
+      inRun = false;
+    } else if (/\s/.test(c)) {
+      if (inRun) continue;
+      chars.push(' ');
+      positions.push(raw.positions[i]);
+      inRun = true;
+    } else {
+      chars.push(c);
+      positions.push(raw.positions[i]);
+      inRun = false;
+    }
+  }
+  return { text: chars.join(''), positions };
+}
+
+/** Find every span of `targetText` in the doc — 1:1-folded (precise) or additionally whitespace-collapsed
+ * (tolerant). Returns real, contiguous PM spans (see {@link buildCharIndex}). */
+function findTargetMatches(editor: Editor, targetText: string, collapseWhitespace: boolean): RedlineSpan[] {
+  const raw = buildCharIndex(editor);
+  const { text, positions } = collapseWhitespace ? collapseWhitespaceIndex(raw) : raw;
+  const needle = collapseWhitespace
+    ? normalizeForMatch(targetText).replace(/\s+/g, ' ').trim()
+    : normalizeForMatch(targetText);
+  if (!needle) return [];
+
+  const matches: RedlineSpan[] = [];
+  let idx = text.indexOf(needle);
+  while (idx !== -1) {
+    const from = positions[idx];
+    const to = positions[idx + needle.length - 1] + 1;
+    matches.push({ from, to });
+    idx = text.indexOf(needle, idx + needle.length);
+  }
+  return matches;
+}
+
+/**
  * Resolve a `target_text` snippet to document span(s) under the adeu `match_mode` contract:
  *  - `strict` — exactly one match required; 0 → not_found, >1 → ambiguous (do NOT guess);
  *  - `first`  — the first match (≥1 required);
@@ -278,18 +333,15 @@ function buildCharIndex(editor: Editor): { text: string; positions: number[] } {
 export function resolveTargetSpans(editor: Editor, targetText: string, matchMode: RedlineMatchMode): ResolveResult {
   if (!targetText) return { ok: false, kind: 'not_found', matchCount: 0 };
 
-  // Fold the target through the SAME 1:1 map buildCharIndex applies to the doc, so a smart-quote /
-  // NBSP / typographic-dash divergence between the stored DOCX and the model's echoed target_text no
-  // longer defeats the match. Length is preserved (1:1), so position mapping below stays exact.
-  const { text, positions } = buildCharIndex(editor);
-  const needle = normalizeForMatch(targetText);
-  const matches: RedlineSpan[] = [];
-  let idx = text.indexOf(needle);
-  while (idx !== -1) {
-    const from = positions[idx];
-    const to = positions[idx + needle.length - 1] + 1;
-    matches.push({ from, to });
-    idx = text.indexOf(needle, idx + needle.length);
+  // Pass 1 — PRECISE: the 1:1 fold (smart-quote / NBSP / typographic-dash), length-preserving.
+  let matches = findTargetMatches(editor, targetText, false);
+  // Pass 2 — TOLERANT FALLBACK (Fix #4): only when the precise pass found NOTHING, retry with whitespace
+  // collapsed so a spacing/tab/line-break divergence between the model's target_text and the
+  // mammoth-flattened editor text no longer defeats an otherwise-exact match. Because it runs only on a
+  // precise-miss, it never loosens an already-unambiguous match. A genuine paraphrase (a changed/dropped
+  // word) still finds nothing → the FR-19 "do not guess" refusal is preserved.
+  if (matches.length === 0) {
+    matches = findTargetMatches(editor, targetText, true);
   }
 
   if (matches.length === 0) return { ok: false, kind: 'not_found', matchCount: 0 };
