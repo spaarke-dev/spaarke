@@ -4,7 +4,7 @@
     <title>SignalR Delivery Service + Authenticated Negotiate Endpoint (Layer C)</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:001,012,013</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF infrastructure service + authenticated endpoint; auth-sensitive; 6+ steps; unblocks four downstream Phase-2 tasks — meets root CLAUDE.md §8 FULL criteria (bff-api tag, auth tag, architecture change).</rigor-reason>
     <model-tier>opus</model-tier>

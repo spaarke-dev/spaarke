@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **Phase 1 COMPLETE** — 010 (ADR-047), 011 (outbox table), 012 (outbox service), 013 (envelope contract) all done + 001 gate |
-| **Step** | — (between phases) |
-| **Status** | phase-1-complete; ready for Phase 2 |
-| **Next Action** | **Wave 4 = 020** (SignalR delivery service + negotiate — Serverless wiring; needs 001✅+012✅+013✅, opus). Then Wave 5 (021‖022‖023 parallel). Review 012 seam-test approach (fake-boundary vs live-tenant) before Phase 2 relies on the outbox query. |
+| **Task** | ✅ **020 COMPLETE** (SignalR delivery + negotiate). Phase 1 done; Phase 2 Wave 4 done. |
+| **Step** | — (between waves) |
+| **Status** | ready for Phase 2 Wave 5 (021‖022‖023 parallel) |
+| **Next Action** | **Wave 5 = 021 (client lib) ‖ 022 (poll fallback) ‖ 023 (fan-out targeting)** — all need 020✅ (022 needs only 012✅; 023 needs 020✅). Then 024 (communication-arrived producer — BLOCKED on email-r4 W10). **Contract note for 024+: ping targets Azure AD oid, but outbox OwnerId is Dataverse systemuserid → producers must resolve systemuserid→oid.** |
 
 ### Files Modified This Session
 - `projects/spaarke-notification-spine-r1/README.md` - Created - project overview + graduation criteria
