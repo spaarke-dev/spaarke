@@ -82,7 +82,7 @@ public class CommunicationThreadReadServiceTests
     {
         var messageId = Guid.NewGuid();
         SetupMessages(MessageRow(messageId, body: "hello", bodyFormat: 1, type: TypeMessage,
-            from: "alice@x.com", inReplyTo: "root-1"));
+            from: "alice@x.com", inReplyTo: "root-1", subject: "Docs for review", to: "bob@x.com; carol@x.com"));
         SetupAttachments(AttachmentRow(Guid.NewGuid(), messageId, docId: Guid.NewGuid(), name: "brief.pdf", type: 1));
         SetupThreadName(null);
 
@@ -97,7 +97,26 @@ public class CommunicationThreadReadServiceTests
         msg.CommunicationType.Should().Be(TypeMessage);
         msg.From.Should().Be("alice@x.com");
         msg.InReplyTo.Should().Be("root-1");
+        // FR-04 email-in-flow enrichment: subject + "; "-split recipient To header, projected from the same
+        // access-filtered row (never fabricated, never BCC).
+        msg.Subject.Should().Be("Docs for review");
+        msg.To.Should().BeEquivalentTo(new[] { "bob@x.com", "carol@x.com" });
         msg.Attachments.Should().ContainSingle().Which.FileName.Should().Be("brief.pdf");
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_MessageWithNoRecipientsOrSubject_ProjectsEmptyToAndNullSubject()
+    {
+        // Message-type rows (chat) carry no sprk_to/sprk_subject — must degrade to empty list + null, never throw.
+        SetupMessages(MessageRow(Guid.NewGuid(), body: "just a chat", type: TypeMessage));
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        var msg = result.Messages.Single();
+        msg.Subject.Should().BeNull();
+        msg.To.Should().BeEmpty();
     }
 
     [Fact]
@@ -360,7 +379,8 @@ public class CommunicationThreadReadServiceTests
     private static Dictionary<string, JsonElement> MessageRow(
         Guid id, string? body = null, int? bodyFormat = null, int? type = null,
         string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
-        int? direction = null, Guid? sentBy = null, string? sentByName = null)
+        int? direction = null, Guid? sentBy = null, string? sentByName = null,
+        string? subject = null, string? to = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -373,6 +393,9 @@ public class CommunicationThreadReadServiceTests
         if (bodyFormat is not null) row["sprk_bodyformat"] = El(bodyFormat.Value);
         if (type is not null) row["sprk_communicationtype"] = El(type.Value);
         if (from is not null) row["sprk_from"] = El(from);
+        if (subject is not null) row["sprk_subject"] = El(subject);
+        // `to` is stored on sprk_to as a "; "-joined header (see CommunicationService); pass it in that form.
+        if (to is not null) row["sprk_to"] = El(to);
         if (inReplyTo is not null) row["sprk_inreplyto"] = El(inReplyTo);
         if (direction is not null) row["sprk_direction"] = El(direction.Value);
         if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());

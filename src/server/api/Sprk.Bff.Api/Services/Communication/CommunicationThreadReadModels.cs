@@ -30,12 +30,16 @@ public sealed record ThreadAttachmentRef(
 /// <param name="Direction"><c>sprk_direction</c> choice: Incoming=100000000, Outgoing=100000001; null when unset.</param>
 /// <param name="SentBy">The sender's Dataverse <c>systemuserid</c> from <c>_sprk_sentby_value</c>; null when unset.</param>
 /// <param name="SentByName">The sender's display name from <c>sprk_sentbyname</c>; null when unset.</param>
+/// <param name="Subject">The communication subject from <c>sprk_subject</c> (R3 task 021 / FR-04); null when unset. Projected metadata on the same access-filtered row (no new query/gate).</param>
+/// <param name="To">The email "To" header recipients from <c>sprk_to</c> (R3 task 021 / FR-04), semicolon-split; empty when unset. The authoritative recipient field of a row the caller is already permitted to read — NOT a fabricated/derived list, and NEVER BCC (BCC is stored separately and is never projected). Projected metadata on the same access-filtered row.</param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
     int? BodyFormat,
     int? CommunicationType,
     string? From,
+    string? Subject,
+    IReadOnlyList<string> To,
     int? Direction,
     Guid? SentBy,
     string? SentByName,

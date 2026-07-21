@@ -51,6 +51,8 @@ public sealed class CommunicationThreadReadService
     private const string BodyFormatField = "sprk_bodyformat";
     private const string TypeField = "sprk_communicationtype";
     private const string FromField = "sprk_from";
+    private const string SubjectField = "sprk_subject";                 // R3 task 021 / FR-04 — email-in-flow block subject
+    private const string ToField = "sprk_to";                           // R3 task 021 / FR-04 — "; "-joined recipient To header
     private const string SentAtField = "sprk_sentat";
     private const string CreatedOnField = "createdon";
     private const string InReplyToField = "sprk_inreplyto";
@@ -123,7 +125,7 @@ public sealed class CommunicationThreadReadService
         // 1) Impersonated message read — Dataverse row-level security applies natively.
         var select = string.Join(',', new[]
         {
-            PkField, BodyField, BodyFormatField, TypeField, FromField,
+            PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
             DirectionField, SentByValue, SentByNameField,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField,
         });
@@ -597,7 +599,7 @@ public sealed class CommunicationThreadReadService
     {
         var select = string.Join(',', new[]
         {
-            PkField, BodyField, BodyFormatField, TypeField, FromField,
+            PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
             DirectionField, SentByValue, SentByNameField,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, ThreadLookupValue,
         });
@@ -632,6 +634,8 @@ public sealed class CommunicationThreadReadService
             BodyFormat: parsed.BodyFormat,
             CommunicationType: parsed.CommunicationType,
             From: parsed.From,
+            Subject: parsed.Subject,
+            To: parsed.To,
             Direction: parsed.Direction,
             SentBy: parsed.SentBy,
             SentByName: parsed.SentByName,
@@ -778,6 +782,8 @@ public sealed class CommunicationThreadReadService
             BodyFormat = TryInt(row, BodyFormatField),
             CommunicationType = TryInt(row, TypeField),
             From = TryString(row, FromField),
+            Subject = TryString(row, SubjectField),
+            To = SplitRecipients(TryString(row, ToField)),
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
             SentByName = TryString(row, SentByNameField),
@@ -796,6 +802,8 @@ public sealed class CommunicationThreadReadService
         public int? BodyFormat { get; init; }
         public int? CommunicationType { get; init; }
         public string? From { get; init; }
+        public string? Subject { get; init; }
+        public IReadOnlyList<string> To { get; init; } = Array.Empty<string>();
         public int? Direction { get; init; }
         public Guid? SentBy { get; init; }
         public string? SentByName { get; init; }
@@ -809,6 +817,20 @@ public sealed class CommunicationThreadReadService
 
     private static int NormalizePageSize(int? top)
         => top is null or <= 0 ? DefaultPageSize : Math.Min(top.Value, MaxPageSize);
+
+    /// <summary>
+    /// Splits the <c>sprk_to</c> recipient field into individual addresses. The send path stores it as
+    /// <c>string.Join("; ", To)</c> (see <c>CommunicationService</c>), so split on ';' and trim; empty/whitespace
+    /// entries are dropped. Returns an empty list for null/blank (never null).
+    /// </summary>
+    private static IReadOnlyList<string> SplitRecipients(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+        return value
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+    }
 
     /// <summary>OData datetimeoffset literal (unquoted, UTC) for a <c>gt</c> comparison on <c>createdon</c>.</summary>
     private static string FormatOData(DateTimeOffset value)

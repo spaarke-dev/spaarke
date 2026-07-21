@@ -81,7 +81,8 @@ public class CommunicationByRegardingReadTests
         var sender = Guid.NewGuid();
         SetupThreads(ThreadRow(threadId, "Matter — Acme"));
         SetupMessages(MessageRow(messageId, threadId, body: "hello", bodyFormat: 1, type: TypeMessage,
-            from: "alice@x.com", inReplyTo: "root-1", direction: 100000001, sentBy: sender, sentByName: "Alice"));
+            from: "alice@x.com", inReplyTo: "root-1", direction: 100000001, sentBy: sender, sentByName: "Alice",
+            subject: "Acme kickoff", to: "bob@x.com; carol@x.com"));
         SetupAttachments(AttachmentRow(Guid.NewGuid(), messageId, docId: Guid.NewGuid(), name: "brief.pdf", type: 1));
 
         var result = await Sut().ReadByRegardingAsync("sprk_matter", RecordId, Caller(), CancellationToken.None);
@@ -100,6 +101,9 @@ public class CommunicationByRegardingReadTests
         msg.CommunicationType.Should().Be(TypeMessage);
         msg.From.Should().Be("alice@x.com");
         msg.InReplyTo.Should().Be("root-1");
+        // FR-04 email-in-flow enrichment ALSO flows through the by-regarding read (guards the second $select).
+        msg.Subject.Should().Be("Acme kickoff");
+        msg.To.Should().BeEquivalentTo(new[] { "bob@x.com", "carol@x.com" });
         msg.Attachments.Should().ContainSingle().Which.FileName.Should().Be("brief.pdf");
         // FR-18 uniform contract: the enriched sender-identity fields also flow through the by-regarding read.
         msg.Direction.Should().Be(100000001);
@@ -259,7 +263,8 @@ public class CommunicationByRegardingReadTests
     private static Dictionary<string, JsonElement> MessageRow(
         Guid id, Guid threadId, string? body = null, int? bodyFormat = null, int? type = null,
         string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
-        int? direction = null, Guid? sentBy = null, string? sentByName = null)
+        int? direction = null, Guid? sentBy = null, string? sentByName = null,
+        string? subject = null, string? to = null)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -273,6 +278,8 @@ public class CommunicationByRegardingReadTests
         if (bodyFormat is not null) row["sprk_bodyformat"] = El(bodyFormat.Value);
         if (type is not null) row["sprk_communicationtype"] = El(type.Value);
         if (from is not null) row["sprk_from"] = El(from);
+        if (subject is not null) row["sprk_subject"] = El(subject);
+        if (to is not null) row["sprk_to"] = El(to);
         if (inReplyTo is not null) row["sprk_inreplyto"] = El(inReplyTo);
         if (direction is not null) row["sprk_direction"] = El(direction.Value);
         if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());

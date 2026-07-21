@@ -34,7 +34,11 @@ function dto(id: string, overrides: Partial<IThreadMessageDto> = {}): IThreadMes
     messageId: id,
     body: `body-${id}`,
     bodyFormat: 100000001, // HTML
-    communicationType: 100000000, // Email
+    // Message-type: this suite characterizes the CHAT-BUBBLE mechanics
+    // (mine/others alignment, status, day dividers, keyboard focus) — those are
+    // bubble concepts. Email-type now renders as `<EmailInFlowBlock />` (task
+    // 021 / FR-04), covered by `ConversationView.emailInFlow.test.tsx`.
+    communicationType: 100000004, // Message
     from: 'shared-mailbox@example.com',
     direction: null,
     sentBy: null,

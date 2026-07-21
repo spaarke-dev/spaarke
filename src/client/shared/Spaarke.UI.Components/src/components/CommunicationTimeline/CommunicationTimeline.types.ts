@@ -76,6 +76,14 @@ export interface TimelineMessage {
   senderSystemUserId?: string | null;
   /** The sender's display name (R3 task 002 / FR-18, from `ThreadMessageDto.SentByName` / `sprk_sentbyname`). */
   senderName?: string | null;
+  /** `sprk_subject` (R3 task 021 / FR-04) — rendered as the email-in-flow block subject; null/undefined when unset. */
+  subject?: string | null;
+  /**
+   * `sprk_to` "To" header recipients (R3 task 021 / FR-04) — the email-in-flow block's recipient line. The
+   * authoritative recipient list of a row the caller may read (never fabricated, never BCC). Empty/undefined for
+   * chat messages (which have no To header).
+   */
+  to?: string[];
   /** `sprk_direction` (R3 task 002 / FR-18): `'incoming'` | `'outgoing'`, or `null` when unset. */
   direction?: 'incoming' | 'outgoing' | null;
   /** Display/sort timestamp — `sentAt ?? createdOn`. */

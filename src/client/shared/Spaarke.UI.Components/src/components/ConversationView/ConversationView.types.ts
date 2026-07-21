@@ -16,6 +16,7 @@
  */
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
+import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
 
 export interface ConversationViewProps {
   // — Auth (injected per shared-lib decoupling rule, ADR-028) —
@@ -42,6 +43,23 @@ export interface ConversationViewProps {
 
   /** Fired when a poll fails (the component also renders an inline error). */
   onError?: (error: Error) => void;
+
+  /**
+   * Fired when the user activates the open-icon on an EMAIL-in-flow block
+   * (task 021, FR-04). Email-type communications render as a compact
+   * subject/from/to block (`<EmailInFlowBlock />`) rather than a chat bubble;
+   * this callback hands the row back so the HOST can open the extended
+   * `<SendEmailDialog />` (task 020: `threadId` / `regarding` / `recordLink`)
+   * in view/detail for that email — reading its now-enriched
+   * subject/from/to/body, or composing with thread + regarding context.
+   *
+   * ConversationView stays context-agnostic (ADR-012): it has
+   * `authenticatedFetch` / `bffBaseUrl` / `threadId` but NOT the
+   * `regarding` / recipient-directory / user context the dialog needs, so it
+   * never mounts the dialog itself. This decoupled seam mirrors task 023's
+   * `onPin`. Omit it and the open-icon is a no-op.
+   */
+  onOpenEmail?: (message: TimelineMessage) => void;
 
   /** Optional className applied to the root layout container. */
   className?: string;

@@ -132,7 +132,12 @@ function dto(id: string, overrides: Partial<IThreadMessageDto> = {}): IThreadMes
   };
 }
 
-const EMAIL_MSG = dto('e1', { body: 'invoice details', communicationType: 100000000 });
+// Email-type renders as `<EmailInFlowBlock />` (task 021 / FR-04) — a compact
+// subject/from/to block (role="group", aria-label "Email: <subject>…"), NOT a
+// chat bubble. `subject` makes the block identifiable; `body` is retained
+// because the word-filter still matches on the underlying message data (the
+// block just doesn't RENDER the body). Chat-type stays a bubble (role="article").
+const EMAIL_MSG = dto('e1', { body: 'invoice details', subject: 'invoice memo', communicationType: 100000000 });
 const CHAT_MSG = dto('m1', { body: 'quick chat', communicationType: 100000004 });
 
 function jsonResponse(body: unknown): Response {
@@ -168,27 +173,32 @@ function renderView(overrides: Partial<ConversationViewProps>, theme = webLightT
 }
 
 describe('ConversationView — in-conversation filters (FR-09)', () => {
+  // The email renders as a compact block (role="group", "Email: invoice memo…");
+  // the chat renders as a bubble (role="article", "quick chat"). The type
+  // toggles filter each independently.
+  const emailBlock = () => screen.queryByRole('group', { name: /^Email: invoice memo/ });
+
   it('both toggles on shows both types; disabling Message hides message-type bubbles', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
-    expect(screen.getByText('invoice details')).toBeInTheDocument();
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    expect(screen.getByRole('article')).toBeInTheDocument();
     expect(screen.getByText('quick chat')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
-    expect(screen.getByText('invoice details')).toBeInTheDocument();
-    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(emailBlock()).toBeInTheDocument();
+    expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
 
-  it('disabling Email hides email-type bubbles', async () => {
+  it('disabling Email hides email-type blocks', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: 'Show email messages' }));
-    await waitFor(() => expect(screen.queryByText('invoice details')).not.toBeInTheDocument());
+    await waitFor(() => expect(emailBlock()).not.toBeInTheDocument());
     expect(screen.getByText('quick chat')).toBeInTheDocument();
   });
 
@@ -196,44 +206,49 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
     await userEvent.click(screen.getByRole('button', { name: 'Show email messages' }));
     await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
 
     expect(await screen.findByText('No messages match the current filters.')).toBeInTheDocument();
     expect(screen.queryByText('No messages yet.')).not.toBeInTheDocument();
     expect(screen.queryAllByRole('article')).toHaveLength(0);
+    expect(emailBlock()).not.toBeInTheDocument();
   });
 
   it('filtering is presentational — toggling a filter does NOT re-fetch, and clearing restores the full set', async () => {
     const { fetchMock, store } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    expect(screen.getByText('quick chat')).toBeInTheDocument();
     const readsAfterLoad = store.reads;
 
     await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
     // No re-fetch: the read count is unchanged by filtering.
     expect(store.reads).toBe(readsAfterLoad);
 
     // Clearing the filter restores the full set from the SAME already-loaded state.
     await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(screen.getByText('quick chat')).toBeInTheDocument());
+    expect(emailBlock()).toBeInTheDocument();
     expect(store.reads).toBe(readsAfterLoad);
   });
 
-  it('the word dropdown narrows to matching bubbles (additive with the type toggles)', async () => {
+  it('the word dropdown narrows to matching items (additive with the type toggles)', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
 
     await userEvent.click(screen.getByRole('combobox', { name: 'Filter by word' }));
+    // 'invoice' is drawn from the email's underlying body ('invoice details'),
+    // which the word filter still matches even though the block doesn't render it.
     await userEvent.click(await screen.findByRole('option', { name: 'invoice' }));
 
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
-    expect(screen.getByText('invoice details')).toBeInTheDocument();
+    expect(emailBlock()).toBeInTheDocument();
   });
 
   it('the filter bar is hidden when the thread is empty (nothing to filter)', async () => {

@@ -14,3 +14,5 @@ export type {
 } from './ConversationView.types';
 export { MessageBubble } from './subcomponents/MessageBubble';
 export type { IMessageBubbleProps } from './subcomponents/MessageBubble';
+export { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
+export type { IEmailInFlowBlockProps } from './subcomponents/EmailInFlowBlock';

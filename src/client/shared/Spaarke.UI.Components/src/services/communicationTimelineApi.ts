@@ -77,6 +77,14 @@ export interface IThreadMessageDto {
   bodyFormat: number | null;
   communicationType: number | null;
   from: string | null;
+  /** `sprk_subject` (R3 task 021 / FR-04) — the email-in-flow block subject; null when unset. */
+  subject: string | null;
+  /**
+   * `sprk_to` "To" header recipients (R3 task 021 / FR-04), server-split from the "; "-joined field. The
+   * authoritative recipient list of a row the caller is already permitted to read (never fabricated, never BCC).
+   * Empty array when unset.
+   */
+  to: string[];
   /** `sprk_direction` choice int: Incoming=100000000, Outgoing=100000001; null when unset. */
   direction: number | null;
   /** Sender's `systemuserid` GUID (`_sprk_sentby_value`), serialized as a string; null when unset. */

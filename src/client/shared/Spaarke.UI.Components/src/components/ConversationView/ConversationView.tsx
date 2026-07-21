@@ -58,6 +58,7 @@ import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTime
 import { sendTimelineMessage } from '../../services/communicationTimelineApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { MessageBubble } from './subcomponents/MessageBubble';
+import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
 import type { ConversationRenderItem, ConversationViewHandle, ConversationViewProps } from './ConversationView.types';
 
 // ---------------------------------------------------------------------------
@@ -438,13 +439,24 @@ function messagePlainBody(message: TimelineMessage): string {
 
 /**
  * Plain-text projection of a message for word-filter MATCHING: folds in the
- * visible body + `sender` + `senderName`, lowercased. (The sender email is
- * included for matching, but deliberately excluded from the dropdown OPTIONS
- * — see `extractWordOptions` — so address fragments like "com" don't pollute
- * the picker.)
+ * visible body + `subject` + `sender` + `to` recipients + `senderName`,
+ * lowercased. Subject + recipients are included (task 021/FR-04) so an email
+ * rendered as a compact subject/from/to block is still findable by its
+ * headline + recipient — otherwise a filter would hide a word the block shows.
+ * (Address strings — `sender`/`to` — are included for MATCHING but deliberately
+ * excluded from the dropdown OPTIONS — see `extractWordOptions` — so fragments
+ * like "com" don't pollute the picker.)
  */
 export function messageSearchText(message: TimelineMessage): string {
-  return [messagePlainBody(message), message.sender ?? '', message.senderName ?? ''].join(' ').toLowerCase();
+  return [
+    messagePlainBody(message),
+    message.subject ?? '',
+    message.sender ?? '',
+    ...(message.to ?? []),
+    message.senderName ?? '',
+  ]
+    .join(' ')
+    .toLowerCase();
 }
 
 /**
@@ -471,9 +483,10 @@ export function messagePassesFilters(message: TimelineMessage, filters: Conversa
 export function extractWordOptions(messages: TimelineMessage[], cap = 40): string[] {
   const seen = new Set<string>();
   for (const m of messages) {
-    // Options come from visible body + display name only — NOT the sender email
-    // address (its domain fragments like "com" would match nearly every row).
-    const optionText = [messagePlainBody(m), m.senderName ?? ''].join(' ').toLowerCase();
+    // Options come from visible body + subject + display name only — NOT the
+    // email addresses (sender/to), whose domain fragments like "com" would
+    // match nearly every row.
+    const optionText = [messagePlainBody(m), m.subject ?? '', m.senderName ?? ''].join(' ').toLowerCase();
     for (const token of optionText.split(/[^a-z0-9]+/i)) {
       if (token.length >= 3) seen.add(token);
     }
@@ -486,7 +499,7 @@ export function extractWordOptions(messages: TimelineMessage[], cap = 40): strin
 // ---------------------------------------------------------------------------
 
 export const ConversationView = React.forwardRef<ConversationViewHandle, ConversationViewProps>((props, ref) => {
-  const { threadId, currentUserSystemUserId, authenticatedFetch, bffBaseUrl, pollIntervalMs, onError, className } =
+  const { threadId, currentUserSystemUserId, authenticatedFetch, bffBaseUrl, pollIntervalMs, onError, onOpenEmail, className } =
     props;
 
   const styles = useStyles();
@@ -756,11 +769,24 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   highlightedId === item.entry.message.id && styles.messageAnchorHighlight
                 )}
               >
-                <MessageBubble
-                  message={item.entry.message}
-                  isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                  status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
-                />
+                {/* Email-type communications render as a compact in-flow block
+                    (subject/from/to + single "Email" indicator + open-icon,
+                    task 021 / FR-04); message-type keep the chat bubble. Only
+                    the child swaps — the anchor wrapper (scrollToMessage) +
+                    filters are untouched. */}
+                {item.entry.message.channelType === 'email' ? (
+                  <EmailInFlowBlock
+                    message={item.entry.message}
+                    isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
+                    onOpen={onOpenEmail}
+                  />
+                ) : (
+                  <MessageBubble
+                    message={item.entry.message}
+                    isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
+                    status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
+                  />
+                )}
               </div>
             )
           )}

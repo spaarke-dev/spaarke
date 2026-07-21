@@ -24,7 +24,11 @@ function dto(id: string, overrides: Partial<IThreadMessageDto> = {}): IThreadMes
     messageId: id,
     body: `body-${id}`,
     bodyFormat: 100000000, // PlainText
-    communicationType: 100000000, // Email
+    // Message-type so the messages render as chat bubbles (role="article").
+    // The scrollToMessage anchor wrapper is child-agnostic (it wraps email
+    // blocks and bubbles identically, task 021 / FR-04) — this suite exercises
+    // the imperative handle, for which the bubble is the simpler fixture.
+    communicationType: 100000004, // Message
     from: 'someone@example.com',
     direction: null,
     sentBy: USER_2,
