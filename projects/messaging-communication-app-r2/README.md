@@ -1,6 +1,6 @@
 # Communication Workspace — R2
 
-> **Status**: ✅ **Code-complete** (2026-07-19) — 20/20 work tasks + 090 wrap-up; BFF build clean, **8654 tests pass / 0 fail**, publish ~46.24 MB, 0 new CVE. **Owner live-deploy gates pending** (Dataverse schema apply + PCF/page/config imports — MCP was offline this session; all authored + unit-tested per R1's build-and-defer-live pattern). See "Owner deploy gates" + "Open findings" below.
+> **Status**: ✅ **COMPLETE** (2026-07-20) — all 21 tasks; **8654 tests pass / 0 fail**, publish ~46.24 MB, 0 new CVE; **merged to master**; BFF **deployed + verified** on `spaarke-bff-dev`. Successor **R3** (`messaging-communication-app-r3`) spun off (spec + design on master; worktree `spaarke-wt-messaging-communication-app-r3`). Open findings + full continuity ledger → [`notes/r2-closeout-and-r3-handoff.md`](notes/r2-closeout-and-r3-handoff.md). R2 UI surfaces superseded by R3 are intentionally **not** deployed; the only owner follow-ups R3 needs are schema task 002/003 live + notification-spine availability.
 > **Created**: 2026-07-18 via `/project-pipeline` · **Code-complete**: 2026-07-19
 > **Branch**: `work/messaging-communication-app-r2` (synced to latest master 2026-07-18)
 > **Portfolio**: [Project #662](https://github.com/spaarke-dev/spaarke/issues/662) · Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Status: **Active** · Start 2026-07-18

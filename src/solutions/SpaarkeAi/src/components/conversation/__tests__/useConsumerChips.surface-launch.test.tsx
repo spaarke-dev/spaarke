@@ -11,7 +11,10 @@
  * hook's branch logic, not the real SSE/network path.
  */
 
-import { renderHook, act } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import { renderHook, act, render, screen, fireEvent } from '@testing-library/react';
+import * as React from 'react';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import type { DispatchConsumerResult, IChatMessage } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
@@ -122,5 +125,77 @@ describe('useConsumerChips surface_launch branch', () => {
     await flush();
 
     expect(launchSurfaceMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('useConsumerChips local-action chips (UAT R4-6 / R4-11)', () => {
+  it('appends "Ask about these files" after a chat-summarize dispatch, alongside server chips', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'informational',
+      consumerType: 'chat-summarize',
+      result: { tldr: 'A summary.' },
+      chips: [{ label: 'Create a matter', bindingId: 'b-create-matter' }],
+    } as unknown as DispatchConsumerResult);
+
+    const { result } = renderHook(() => useConsumerChips(makeDeps()));
+    await act(async () => {
+      result.current.dispatchBinding('b-summarize');
+    });
+    await flush();
+
+    render(<FluentProvider theme={webLightTheme}>{result.current.consumerChipsSlot}</FluentProvider>);
+    // Server chip stays; the local prompt chip is appended (replaces old "Summarize again").
+    expect(screen.getByTestId('consumer-chip-b-create-matter')).toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chip-local:ask-about-files')).toBeInTheDocument();
+  });
+
+  it('prepends Send-as-email + Save-to-document after a draft-correspondence dispatch', async () => {
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'informational',
+      consumerType: 'draft-correspondence',
+      // Shape that isCorrespondenceDraft() accepts (body + subject).
+      result: { body: 'Dear counsel, …', subject: 'Re: Acme' },
+      chips: [{ label: 'Create a matter', bindingId: 'b-create-matter' }],
+    } as unknown as DispatchConsumerResult);
+
+    const { result } = renderHook(() => useConsumerChips(makeDeps()));
+    await act(async () => {
+      result.current.dispatchBinding('b-draft');
+    });
+    await flush();
+
+    render(<FluentProvider theme={webLightTheme}>{result.current.consumerChipsSlot}</FluentProvider>);
+    expect(screen.getByTestId('consumer-chip-local:send-as-email')).toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chip-local:save-to-document')).toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chip-b-create-matter')).toBeInTheDocument();
+  });
+
+  it('routes a local chip to onLocalChipAction WITHOUT re-dispatching', async () => {
+    const onLocalChipAction = jest.fn<void, [string]>();
+    dispatchConsumerMock.mockResolvedValue({
+      streamId: 's',
+      status: 'complete',
+      disposition: 'informational',
+      consumerType: 'chat-summarize',
+      result: { tldr: 'A summary.' },
+      chips: [],
+    } as unknown as DispatchConsumerResult);
+
+    const { result } = renderHook(() => useConsumerChips(makeDeps({ onLocalChipAction, sessionAttachmentCount: 1 })));
+    await act(async () => {
+      result.current.dispatchBinding('b-summarize');
+    });
+    await flush();
+
+    render(<FluentProvider theme={webLightTheme}>{result.current.consumerChipsSlot}</FluentProvider>);
+    fireEvent.click(screen.getByTestId('consumer-chip-local:ask-about-files'));
+
+    expect(onLocalChipAction).toHaveBeenCalledWith('local:ask-about-files');
+    // The initial summarize dispatch fired once; the local chip must NOT trigger a second dispatch.
+    expect(dispatchConsumerMock).toHaveBeenCalledTimes(1);
   });
 });

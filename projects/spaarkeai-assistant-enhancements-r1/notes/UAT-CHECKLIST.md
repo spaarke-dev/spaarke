@@ -41,10 +41,14 @@
 - [ ] Renders a **readable draft** in chat (not raw JSON)
 - [ ] Opens a **pre-filled Compose tab** with the drafted response (Subject / body / suggested recipients / sources)
 - [ ] Chat shows a short **"opened in Compose"** confirmation (not the raw draft)
+- [ ] **(R4-6)** After the draft opens, next-action cards appear: **Send as email · Save to document · Create a matter**
+- [ ] **"Send as email"** opens the Email widget; **"Save to document"** runs the add-to-DMS save (posts "Saved to the DMS."); **"Create a matter"** opens the pre-seeded Create Matter wizard
 
 ## G. Summarize files
 - [ ] **"Working…"** spinner shows during summarization
 - [ ] Summaries return and render readably
+- [ ] **(R4-11)** After a summary, the cards are **Create a matter · Draft a response · Ask about these files** (NO "Summarize again")
+- [ ] **"Ask about these files"** posts a nudge inviting a question; typing a question then answers grounded in the attached files
 
 ## H. Compose / Revise
 - [ ] Natural-language **"revise this document"** still opens the file in Compose + applies a tracked edit
@@ -63,6 +67,12 @@
 ## K. Create a project
 - [ ] Assistant drafts a project, then launches the **Create Project wizard pre-seeded** (parity with create-matter)
 
+## K2. Quick Start wizard context (R4-12)
+- [ ] Attach 1–2 files, open **⋮ → Quick Start** (or the welcome **More…** card)
+- [ ] Click **Create Matter** → the wizard opens with the attached file(s) **pre-attached** on the Add-files step
+- [ ] Click **Create Project** → same (files pre-attached)
+- [ ] With NO files attached, Quick Start wizards still open normally (no error)
+
 ## L. Regression sanity
 - [ ] Daily Briefing / existing widgets still open
 - [ ] New session (⋮/＋) clears the transcript and mints a fresh session
@@ -71,7 +81,10 @@
 ---
 
 ## ⚠️ Known not-yet-done (do not fail — next round)
-- ⚠️ **R4-6** — after Draft-a-response, the **Send as email / Save to document / Create a matter** next-action cards are NOT implemented yet
-- ⚠️ **R4-11** — post-summarize chip set is still **"Summarize again"** (replacement set pending your decision; catalog PATCH, no deploy)
-- ⚠️ **R4-12** — Quick Start wizards do **NOT** yet carry the current conversation context (uploaded files)
 - ⚠️ **R4-7 / R4-9** — the empty "Actions available for…" header + Context-consistency symptoms — re-capture the repro
+- ℹ️ **R4-12 scope note** — Quick Start file context is threaded for **Create Matter + Create Project** (the envelope wizards). Summarize / Assign Work / Find Similar / Send Email cards do not carry the session files (separate mechanism) — call out if you need those too.
+
+## ✅ Shipped 2026-07-20 (R4 round-2 close-out)
+- ✅ **R4-6** post-Draft cards (Send as email / Save to document / Create a matter)
+- ✅ **R4-11** post-summarize cards (Create a matter / Draft a response / Ask about these files)
+- ✅ **R4-12** Quick Start wizard file context (Create Matter / Create Project)
