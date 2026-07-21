@@ -67,7 +67,11 @@
 | 111 | CommunicationAttachments PCF — double-header fix + upload-status icon + configurable title + OOB styling (R3 A) | W11 | pcf, frontend | FR-17 | 101 | 090 | true | FULL | ✅ (`5d999e6a0`) · shared-lib RichFilePreview `showTitle` fix (single title + nav restored); green/red SPE icon; ATTACHMENTS title; v1.2.0 |
 | 112 | CommunicationConnections PCF — spacing, title prop+styling, remove open-icon/matched-because, full-viewport modal, Done→Save footer (R3 B) | W11 | pcf, frontend, dataverse | FR-17 | 105 | 090 | true | FULL | ✅ (`eee9a6f64`) · RELATED RECORDS title; full-modal + Save footer; data contract unchanged; v1.4.0 |
 | 113 | CommunicationActions PCF — 20x20 icons, right-align icon buttons, Create Event/To Do/Link Invoice as modals (R3 C) | W11 | pcf, frontend, communication | FR-12,13 | 103,104 | 090 | true | FULL | ✅ (`f802abee6`) · 20x20 right-aligned icons; create-as-modal via swappable launchCreate seam; v1.2.0 |
-| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105,111-113 | — | **false** | STANDARD | 🔲 (HELD until W9+W10+W11 remediation closes) |
+| 121 | CommunicationConnections PCF — title top/bottom padding, number/name spacing, restyle matched-reason (R4 A) | W12 | pcf, frontend | FR-17 | 112 | 090 | true | FULL | 🔲 |
+| 122 | CommunicationAttachments PCF — title padding, fix green/red upload indicator, .eml opens same preview (R4 B) | W12 | pcf, frontend | FR-17 | 111 | 090 | true | FULL | 🔲 |
+| 123 | EmailComposer — contact suggestion resolves to email address not name (R4 C, W10-103 bug) | W12 | frontend, communication | FR-12 | 103 | 090 | true | FULL | 🔲 |
+| 124 | Reply/Reply-All/Forward — inherit regarding/related records from parent communication (R4 D) | W12-b | communication, bff-api, frontend | FR-12,13 | 104,042 | 090 | true | FULL | 🔲 |
+| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105,111-113,121-124 | — | **false** | STANDARD | 🔲 (HELD until W9-W12 remediation closes) |
 
 ---
 
