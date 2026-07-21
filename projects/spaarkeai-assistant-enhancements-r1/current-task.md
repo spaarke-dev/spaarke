@@ -11,9 +11,12 @@
 |-------|-------|
 | **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`8973a1c1d`**, merged to **origin/master** (`c9a0d5fe7..8973a1c1d`). Working tree **clean**. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed** | dev: `sprk_spaarkeai` code page (2026-07-20) + two live catalog PATCHes (chat-summarize, draft-correspondence). BFF **unchanged** this round. |
-| **Next Action** | Wait for owner's UAT pass against [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) (new sections F/G/K2 + G cards). Only remaining R4 items: **R4-7** (empty "Actions available" header) + **R4-9** (Context inconsistency) — both need the owner to re-capture a repro. |
+| **Git** | branch + `origin/branch` at **`3a74acc40`**, merged to **origin/master** (`9fda08501..3a74acc40`). Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
+| **Deployed** | dev: `sprk_spaarkeai` code page (R5 client batch, 2026-07-20). BFF **unchanged** across R4 round-2 + R5. |
+| **Next Action** | **Shared-lib/code-page chunk** (multi-deploy): **R5-4** SprkChat composer layout · **R5-7** Create Event file leg (add `initialFileRefs` to `CreateEventWizard` + wire main.tsx — envelope already carries files) · **R5-8** Assign Work / Summarize / Find Similar file legs (registry + new session-bytes ingestion seams). Also awaiting owner repro: **R4-7 / R4-9**. Rule: `/worktree-sync` before any BFF deploy (none needed so far). |
+
+### R5 round-1 shipped 2026-07-20 (client-only, `sprk_spaarkeai`)
+R5-1 Revise-as-card · R5-2 spacing · R5-3 remove ? icon · R5-5 history restore+styling · R5-9 Email Compose modal. New seams: `localActionChips.reviseInCompose`, `useConsumerChips.getAppendedLocalChips`/`onCorrespondenceDraft`, `QuickStartModal.onSendEmail`, `ConversationPane` mounts `SendEmailDialog`. 127 tests pass. Full backlog: [`notes/uat-feedback-2026-07-20-R5.md`](notes/uat-feedback-2026-07-20-R5.md).
 
 ### Shipped 2026-07-20 (R4 round-2 close-out — client-only + live catalog, NO BFF deploy)
 - **R4-6** post-Draft cards: Create-a-matter (live `draft-correspondence` chiptransitions) + Send-as-email / Save-to-document (client `localActionChips.ts` `local:*` chips reusing draft-email / add-to-dms bridges).
