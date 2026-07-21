@@ -80,6 +80,14 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     surface: 'sprk_todo',
     title: 'New To Do',
   },
+  // UAT R5-8 (2026-07-20): Quick Start "Assign Work" launches the Create Work Assignment wizard
+  // through the hand-off envelope so the session's attached file(s) ride along (parity with
+  // create-matter/-project/-event). The wizard's Add Files step is pre-seeded via initialFileRefs.
+  'create-work-assignment': {
+    kind: 'wizard',
+    surface: 'sprk_createworkassignmentwizard',
+    title: 'Create Work Assignment',
+  },
 };
 
 /**
