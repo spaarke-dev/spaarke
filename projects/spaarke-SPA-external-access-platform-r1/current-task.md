@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-20 (task 031 BFF DEPLOYED + CIAM config wired = 18 tasks ✅; merged to master @ 80aaafb96; deploy 47.08 MB/no-CVE/healthz-green; Ciam:* App Service settings set → /external/* now 401 [DI-028-01 fully resolved]; next 011→012→014)
+> **Last Updated**: 2026-07-20 (tasks 011 + 012 COMPLETE = 20 tasks ✅; external-spa BrowserRouter+404 + deep-link-through-login done, tsc/vite green; 014 SWA deploy BLOCKED-ON-DECISION — see below; master @ 80aaafb96)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — 18 tasks ✅. All Phase-2 (020-031) + Phase-1 010/013 done; merged to master @ `80aaafb96`; BFF deployed to spaarke-bff-dev. |
-| **Step** | 031 COMPLETE — deployed via Deploy-BffApi.ps1: 47.08 MB compressed (−2.55 vs baseline, ≤60 ✓), no vulnerable pkgs, SHA-256 verified, /healthz 200. CIAM config wired: 7 Ciam:* App Service settings set (Audience=GUID per manifest v2) → /api/v1/external/* now returns 401 unauthenticated (verified stable). DI-028-01 fully resolved. |
-| **Status** | 18 ✅ (001, 002, 003, 004, 010, 013, 020, 021, 022, 023, 024, 025, 026, 027, 028, 029, 030, 031) |
-| **Next Action** | **(A) ✅ DONE — Ciam:* App Service settings wired + verified (401).** **(B) 011 → 012 → 014** — external-spa builds (DI-028-02 fixed): HashRouter→BrowserRouter (011, deps 010 ✅) → deep-link (012) → SWA deploy + parity (014). 011/012 share App.tsx → sequential. Then Phase 3: **040** parity (deps 014,031 ✅) → 041/042 → 090. **OPEN (defer-issues.md)**: DI-028-01 (Ciam App Service config — item A above), DI-030-01 (live-E2E 2 sub-criteria), DI-025-01, DI-029-01 (ribbon/MDA UI). |
+| **Task** | none active — 20 tasks ✅. All Phase-2 (020-031) + Phase-1 010/011/012/013 done; BFF deployed + CIAM config wired; external-spa BrowserRouter+404+deep-link done (tsc/vite green). |
+| **Step** | 011 ✅ (HashRouter→BrowserRouter + in-app 404 + hash-nav cleanup) + 012 ✅ (deep-link-through-login via sessionStorage return-to). 014 (SWA deploy) BLOCKED-ON-DECISION. |
+| **Status** | 20 ✅ (001-004, 010, 011, 012, 013, 020-031) |
+| **Next Action** | **014 (SWA deploy) is BLOCKED pending owner decisions** (escalated): (1) 014's "B2B parity" premise is SUPERSEDED — the SPA already targets CIAM (028); `.env.production` has CIAM `#{...}#` placeholders. (2) `deploy-external-spa.yml` has NO token-substitution/env → `npm run build` would bake literal `#{MSAL_AUTHORITY}#` → broken SPA. Fix: add build `env:` feeding CIAM VITE_* (non-secret; authority `https://spaarkeextid.ciamlogin.com/7052feba-…`, client `bd57e54e-…`, scope `api://4a4d5126-…/SDAP.Access`, BFF `https://spaarke-bff-dev.azurewebsites.net`). (3) Parity verification (login/data-load) needs a browser + CIAM test user (live-E2E spike); header checks doable via curl. (4) Outward-facing SWA deploy needs go-ahead. RECOMMEND: wire the workflow env (verifiable, non-outward-facing), then deploy on owner go + curl-verify headers; full sign-in = live-E2E spike. Then Phase 3: 040 parity → 041/042 → 090. |
 
 ### Completed this session (2026-07-19)
 - **004** — `contact.sprk_externalobjectid` (String/100) created live on `spaarkedev1`, in SpaarkeCore + SpaarkeMaster, published, queryable. Doc: `notes/data-model-sprk_externalobjectid.md`. MetadataId `b28603f2-bd83-f111-8076-7ced8ddc4cc6`.
