@@ -50,6 +50,7 @@ import { CreateFollowOnEventStep } from './CreateFollowOnEventStep';
 import { FollowOnGrid, SendEmailFollowOnStep, followOnStepId } from '../WizardFollowOns';
 import type { FollowOnCardConfig } from '../WizardFollowOns';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
+import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 
@@ -98,6 +99,13 @@ export interface IWorkAssignmentWizardDialogProps {
    * index. When omitted, indexing is skipped (files still upload to SPE).
    */
   tenantId?: string;
+  /**
+   * Assistant hand-off FILE references (UAT R5-8 — the create-flow file leg). When launched from
+   * the Assistant's `create-work-assignment` surface_launch flow, `main.tsx` passes the hand-off
+   * seed's `{ sessionId, fileIds, fileNames }` here; the dialog fetches each file's binary and
+   * pre-seeds the Add Files step. `undefined`/no sessionId → the files step opens empty as before.
+   */
+  initialFileRefs?: HandoffFileRefs;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,8 +123,14 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
   embedded,
   resolveSpeContainerId,
   tenantId,
+  initialFileRefs,
 }) => {
   const shellRef = React.useRef<IWizardShellHandle>(null);
+
+  // -- Assistant hand-off file leg (R5-8) ------------------------------------
+  // Fetch the drafted-from session document(s) and pre-seed the Add Files step (parity with
+  // CreateMatterWizard/CreateEventWizard). Empty for direct opens. See the seed effect below.
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authenticatedFetch, bffBaseUrl);
 
   // -- Form state ------------------------------------------------------------
   const [formState, setFormState] = React.useState<ICreateWorkAssignmentFormState>(EMPTY_WORK_ASSIGNMENT_FORM);
@@ -242,6 +256,15 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
       );
     }
   }, [open]);
+
+  // -- Seed the hand-off file(s) into the Add Files step (R5-8) ---------------
+  // Runs AFTER the reset-on-open cleared uploadedFiles: the async file-leg fetch resolves later, so
+  // this fires when handoffFiles becomes non-empty and pre-attaches them. Guarded on `open`.
+  React.useEffect(() => {
+    if (open && handoffFiles.length > 0) {
+      setUploadedFiles(handoffFiles);
+    }
+  }, [open, handoffFiles]);
 
   // -- Step validity callbacks -----------------------------------------------
   const handleSelectWorkValid = React.useCallback((valid: boolean) => {

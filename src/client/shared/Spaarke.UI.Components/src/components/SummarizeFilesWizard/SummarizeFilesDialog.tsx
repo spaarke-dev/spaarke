@@ -28,6 +28,7 @@ import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
+import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import { searchUsersAsLookup } from '../CreateMatterWizard/matterService';
@@ -95,6 +96,13 @@ export interface ISummarizeFilesDialogProps {
   bffBaseUrl?: string;
   /** When true, hides the built-in dialog chrome (for Dataverse embedded mode). */
   embedded?: boolean;
+  /**
+   * Assistant hand-off FILE references (UAT R5-8 — the create-flow file leg). When launched from
+   * the Assistant "Summarize Files" Quick Start card via the surface-launch envelope, `main.tsx`
+   * passes the hand-off seed's `{ sessionId, fileIds, fileNames }` here; the dialog fetches each
+   * file's binary and pre-seeds the upload step. `undefined`/no sessionId → opens empty as before.
+   */
+  initialFileRefs?: HandoffFileRefs;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +180,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   embedded,
+  initialFileRefs,
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
@@ -181,6 +190,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     uploadedFiles: [],
     validationErrors: [],
   });
+
+  // ── Assistant hand-off file leg (R5-8) ─────────────────────────────────
+  // Fetch the session document(s) and pre-seed the upload step (parity with the create wizards).
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authenticatedFetch ?? fetch, bffBaseUrl ?? '');
 
   // ── Analysis state ────────────────────────────────────────────────────
   const [summarizeStatus, setSummarizeStatus] = React.useState<SummarizeStatus>('idle');
@@ -230,6 +243,15 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       abortControllerRef.current?.abort();
     };
   }, [open]);
+
+  // ── Seed the hand-off file(s) into the upload step (R5-8) ──────────────
+  // Fires after the reset-on-open cleared the file state: the async file-leg fetch resolves later,
+  // so this pre-attaches the session document(s) once they arrive.
+  React.useEffect(() => {
+    if (open && handoffFiles.length > 0) {
+      fileDispatch({ type: 'ADD_FILES', files: handoffFiles });
+    }
+  }, [open, handoffFiles]);
 
   // ── Refs for dynamic step closures (prevents stale closure bug) ───────
   const summarizeResultRef = React.useRef(summarizeResult);
