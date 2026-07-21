@@ -236,6 +236,18 @@ export type EmailComposerAction =
   | { type: 'RESET'; state: EmailComposerState };
 
 // ---------------------------------------------------------------------------
+// Conversation context (R3 task 020, FR-07) — additive, optional
+// ---------------------------------------------------------------------------
+
+/** A lightweight, clickable record reference rendered in the composer (FR-07). */
+export interface IComposerRecordLink {
+  /** Absolute or app-relative URL to the record. */
+  url: string;
+  /** Human label (e.g. "Matter: Smith v. Jones"). */
+  label: string;
+}
+
+// ---------------------------------------------------------------------------
 // Props contract (design §5.4)
 // ---------------------------------------------------------------------------
 
@@ -264,6 +276,24 @@ export interface IEmailComposerProps {
   associations?: ICommunicationAssociation[];
   /** Default `true` — renders `associations[]` as read-only Fluent Tags via `AssociationChips`. */
   showAssociations?: boolean;
+
+  // — Conversation context (R3 task 020, FR-07/FR-19) — all optional/additive —
+  /**
+   * Active conversation thread id. When set, it is carried into the send
+   * payload (`SendCommunicationOptions.threadId`) so the backend pins the sent
+   * email to this thread (FR-19) — via the EXISTING send path, NOT a new send
+   * branch (ADR-045). Undefined = today's behavior (server find-or-create).
+   */
+  threadId?: string;
+  /**
+   * Optional record-link affordance rendered below the linked-record chips
+   * (FR-07) — a lightweight "this email is about <record>" link. Purely
+   * presentational; auto-association + thread pinning are handled by
+   * `associations` (ADR-024 mechanism) + `threadId`, not by this link.
+   * Unsafe-scheme urls (`javascript:`/`data:`/`vbscript:`) degrade to a
+   * non-clickable label.
+   */
+  recordLink?: IComposerRecordLink;
 
   // — Attachment sources —
   /** Default `['wizard','related','local','spe']` when `wizardContext` present, else `['local','related','spe']`. */

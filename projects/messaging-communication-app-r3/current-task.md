@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Phase 2 COMPLETE ✅** (010,011,012,013,014). Next: Phase 3 / Wave 10 = task 020 (**opus** — extend SendEmailDialog/EmailComposer). |
+| **Task** | Phase 2 COMPLETE ✅. **Task 020 (FR-07) COMPLETE ✅ + gated.** Next: **MERGE origin/master** (54 behind, EmailComposer diverged), THEN Phase 3 Wave 11 (023 + 024) / 021 / 022. |
 | **Step** | — |
-| **Status** | 013 + 014 done + gated; **UNCOMMITTED** (this session's work not yet committed/pushed). |
-| **Next Action** | Commit Phase 2 (013+014), then `work on task 020` (FR-07, **opus tier** — session must be on Opus/Fable). ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify client work via scoped `tsc --noEmit` (expect exactly those 2) + `npm test`, NOT whole-package `npm run build`. |
+| **Status** | 013,014,020 committed. **🛑 branch is 54 commits behind origin/master; master has email-r4 EmailComposer changes overlapping task 020's files — merge master before PR + before 021/022.** |
+| **Next Action** | **Merge origin/master into this branch** (resolve `EmailComposer.tsx` vs email-r4 `423e9c7b8` reply/forward-attachments; my task-020 edits are additive), re-run EmailComposer tests, then continue Phase 3. Tasks 021 (email-in-flow) + 022 (forward) also edit EmailComposer — do them AFTER the merge, not before. ⚠️ pre-existing worktree build gap: sibling `@spaarke/auth`/`@spaarke/sdap-client` dist unbuilt (2 unrelated tsc errors) — verify via scoped `tsc --noEmit` + `npm test`, NOT whole-package `npm run build`. |
 
 ### Progress — 11 tasks ✅ (001–006, 010–014). 9 committed+pushed (PR #664); **013 + 014 committed? NO — uncommitted**
 - **Phase 1 (backend spine) COMPLETE + pushed**: 001–006.

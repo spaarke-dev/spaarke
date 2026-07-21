@@ -26,6 +26,7 @@ import { forwardRef, useImperativeHandle } from 'react';
 import {
   Field,
   Input,
+  Link,
   MessageBar,
   MessageBarBody,
   Text,
@@ -57,7 +58,7 @@ import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 // Mapping: engine state → sendCommunication() request
 // ---------------------------------------------------------------------------
 
-function mapStateToSendRequest(state: EmailComposerState): SendCommunicationOptions {
+function mapStateToSendRequest(state: EmailComposerState, threadId?: string): SendCommunicationOptions {
   return {
     to: state.to.map(r => r.email),
     cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
@@ -65,6 +66,11 @@ function mapStateToSendRequest(state: EmailComposerState): SendCommunicationOpti
     subject: state.subject,
     body: state.body,
     bodyFormat: state.bodyFormat === 'HTML' ? 'html' : 'text',
+    // R3 task 020 (FR-07/FR-19): pin the sent email to the active conversation
+    // thread when opened from a conversation. Omitted (undefined) for every
+    // existing caller → server find-or-create, unchanged. Same send path
+    // (ADR-045) — not a new branch.
+    threadId,
     // `attachmentDocumentIds` correctly carries `sprk_document` GUIDs (R4 W0
     // owner decision, 2026-07-14 — NO rename; see communicationApi.ts
     // file-level note). Only items with a resolved `documentId` AND not
@@ -88,6 +94,16 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
+}
+
+/**
+ * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
+ * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
+ * shared send engine — a caller could build the url from record-derived data.
+ * Everything else (http(s), app-relative, mailto) is allowed.
+ */
+function isSafeHref(url: string): boolean {
+  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +245,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      const request = mapStateToSendRequest(stateRef.current);
+      const request = mapStateToSendRequest(stateRef.current, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -245,7 +261,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       throw err;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients]);
+  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
 
   const saveDraft = React.useCallback(async (): Promise<{ communicationId: string }> => {
     if (!props.onSaveDraftRequest) {
@@ -315,6 +331,21 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {showAssociations && state.associations.length > 0 && (
         <div className={styles.section} role="region" aria-label="Linked records">
           <AssociationChips associations={state.associations} />
+        </div>
+      )}
+
+      {/* R3 task 020 (FR-07): optional record-link affordance when opened from a
+          conversation. Presentational only — semantic tokens, no hardcoded color.
+          Unsafe-scheme urls degrade to a non-clickable label (isSafeHref). */}
+      {props.recordLink && (
+        <div className={styles.section} role="region" aria-label="Related record">
+          {isSafeHref(props.recordLink.url) ? (
+            <Link href={props.recordLink.url} target="_blank" rel="noopener noreferrer">
+              {props.recordLink.label}
+            </Link>
+          ) : (
+            <Text>{props.recordLink.label}</Text>
+          )}
         </div>
       )}
 

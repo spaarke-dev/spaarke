@@ -24,7 +24,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 012 | FR-01/10 two-pane shell + thread list | 2 | ✅ | FULL/sonnet/high | 010,003 | Wave 7 (B) |
 | 013 | FR-06 in-conversation compose (existing send path) | 2 | ✅ | FULL/sonnet/high | 011 | serial |
 | 014 | FR-09 in-conversation additive filters | 2 | ✅ | FULL/sonnet/high | 011 | serial |
-| 020 | FR-07 extend `SendEmailDialog`/`EmailComposer` (thread id + record link) | 3 | 🔲 | FULL/**opus**/high | 010 | serial |
+| 020 | FR-07 extend `SendEmailDialog`/`EmailComposer` (thread id + record link) | 3 | ✅ | FULL/**opus**/high | 010 | serial |
 | 021 | FR-04 email-in-flow compact block + open→modal | 3 | 🔲 | FULL/sonnet/high | 011,020 | serial |
 | 022 | FR-08 forward action → email modal (forward mode) | 3 | 🔲 | FULL/sonnet/high | 020 | serial |
 | 023 | FR-05 `MessageQuickView` popover (200-char, open→pin) | 3 | 🔲 | FULL/sonnet/high | 011 | Wave 11 (C) |
