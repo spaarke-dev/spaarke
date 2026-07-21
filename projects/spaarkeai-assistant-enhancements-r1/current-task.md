@@ -9,11 +9,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation (R4 round-2 shipped; awaiting owner's next UAT pass) |
+| **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`47fdfb83f`**, fully merged to master (origin/master since advanced to `80aaafb96` by ANOTHER project — my work is in its history). Working tree **clean**. |
-| **Deployed** | dev: `sprk_spaarkeai` code page **and** `spaarke-bff-dev` (BFF) — both current |
-| **Next Action** | Wait for owner's UAT pass against [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md). Then pick up **R4-11** (post-summarize card set — needs owner's card choice, then a live `sprk_chiptransitions` PATCH, no deploy), **R4-6** (post-Draft Send-email/Save/Create-matter cards — Send/Save actions must exist first), **R4-12** (thread uploaded files into Quick Start wizard handoff — larger). |
+| **Git** | branch + `origin/branch` at **`8973a1c1d`**, merged to **origin/master** (`c9a0d5fe7..8973a1c1d`). Working tree **clean**. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
+| **Deployed** | dev: `sprk_spaarkeai` code page (2026-07-20) + two live catalog PATCHes (chat-summarize, draft-correspondence). BFF **unchanged** this round. |
+| **Next Action** | Wait for owner's UAT pass against [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) (new sections F/G/K2 + G cards). Only remaining R4 items: **R4-7** (empty "Actions available" header) + **R4-9** (Context inconsistency) — both need the owner to re-capture a repro. |
+
+### Shipped 2026-07-20 (R4 round-2 close-out — client-only + live catalog, NO BFF deploy)
+- **R4-6** post-Draft cards: Create-a-matter (live `draft-correspondence` chiptransitions) + Send-as-email / Save-to-document (client `localActionChips.ts` `local:*` chips reusing draft-email / add-to-dms bridges).
+- **R4-11** post-summarize cards: Create-a-matter + Draft-a-response (live `chat-summarize` chiptransitions) + Ask-about-these-files (client prompt-nudge chip). Replaces "Summarize again".
+- **R4-12** Quick Start file context: `QuickStartModal.getFileContext` → `launchSurface` for create-matter + create-project (zero shared-lib change).
+- **R1.5 → notification-spine-r1**: owner decision recorded in both design docs + memory ([[r15-folds-into-notification-spine]]).
+- Mechanism: `local:*` sentinel chips intercepted in `useConsumerChips.handleConsumerChipClick` → `onLocalChipAction` (never a fake dispatch). Catalog cache caveat: `ConsumerRoutingService` may cache bindings — BFF restart clears if UAT shows stale chips.
+- Tests: 23 pass. Deployed + merged (8973a1c1d).
 
 ### Critical Context
 - Everything is committed, pushed, and merged. Two full UAT rounds shipped this session (R3 + R4). The **BFF history endpoint** (R4-8) and **Draft→Compose** are the headline new behaviors to verify.
