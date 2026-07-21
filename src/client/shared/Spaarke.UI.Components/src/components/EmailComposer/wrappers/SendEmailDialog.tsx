@@ -23,6 +23,7 @@ import type {
   EmailComposerBodyFormat,
   IComposerAttachmentSource,
   IComposerRecordLink,
+  ISourceCommunicationRecord,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
@@ -75,6 +76,33 @@ export interface ISendEmailDialogProps {
   regarding?: ISendEmailDialogRegarding;
   /** Optional record-link chip rendered in the composer (FR-07). Forwarded to the engine. */
   recordLink?: IComposerRecordLink;
+
+  // — Source-record prefill (view/reply/forward/draft; R3 task 022, FR-08) — additive/optional —
+  /**
+   * The existing `sprk_communication` record backing `view`/`reply`/`forward`/
+   * `draft` modes. When the host opens the dialog with `mode="forward"` and a
+   * `sourceRecord`, the engine derives the forward prefill (`Fwd:` subject,
+   * quoted body, source attachments) via its EXISTING `deriveForwardState`
+   * (`EmailComposer.reducer.ts`) — NO new forward send path (ADR-045). Reaches
+   * `<EmailComposer/>` unchanged via the `...composerProps` spread below.
+   * Existing callers that pass no `sourceRecord` are unaffected (compose mode).
+   *
+   * ⚠️ In `forward` mode the composer derives `associations` from
+   * `sourceRecord.associations` and does NOT merge the dialog's `regarding`
+   * prop. To keep a forwarded email associated with the active record, the host
+   * MUST include the regarding record as an entry in `sourceRecord.associations`
+   * (dedup on entityType+entityId); the `regarding` prop alone is ignored in
+   * forward mode. (`threadId` DOES survive forward mode — it's a top-level
+   * send() prop.)
+   */
+  sourceRecord?: ISourceCommunicationRecord;
+  /**
+   * The source communication's id (`sprk_communication` GUID), forwarded to the
+   * engine. Optional/additive — the engine also reads it from
+   * `sourceRecord.communicationId` when omitted (`EmailComposer.reducer.ts`
+   * `initialState`).
+   */
+  communicationId?: string;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {

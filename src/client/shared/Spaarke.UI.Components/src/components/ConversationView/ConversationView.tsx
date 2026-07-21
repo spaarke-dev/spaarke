@@ -47,7 +47,7 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, SendRegular } from '@fluentui/react-icons';
+import { ArrowClockwiseRegular, ArrowForwardRegular, SendRegular } from '@fluentui/react-icons';
 import { useThreadPoll } from '../CommunicationTimeline/hooks/useThreadPoll';
 import { buildTimeline, type TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
 import {
@@ -123,6 +123,14 @@ const useStyles = makeStyles({
     outlineWidth: tokens.strokeWidthThick,
     outlineStyle: 'solid',
     outlineColor: 'transparent',
+    // Pointer users: hovering anywhere on the message row reveals its trailing
+    // Forward action (task 022 / FR-08). Keyboard reveal is handled by the
+    // action row's own `:focus-within` (see `messageActions`).
+    ':hover': {
+      '& [data-message-actions]': {
+        opacity: 1,
+      },
+    },
   },
   // Transient open→pin highlight — semantic tokens only (ADR-021), adapts to
   // light/dark via the host FluentProvider. Auto-cleared after ~1.5s.
@@ -133,6 +141,31 @@ const useStyles = makeStyles({
   dividerLabel: {
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightSemibold,
+  },
+  // Per-message action row inside the anchor wrapper (task 022 / FR-08). Holds
+  // the Forward affordance and applies to BOTH the chat bubble and the
+  // email-in-flow block (the child swaps; this row + the anchor do not). Kept
+  // subtle — the action stays out of the way by default and is revealed on
+  // hover/keyboard focus of the message row, but is ALWAYS present in the DOM
+  // and keyboard-reachable (NFR-05). Right-aligned so it sits at the trailing
+  // edge for both mine-right and others-left messages.
+  messageActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    // Unobtrusive by default; the reveal is opacity-only so the button keeps
+    // its layout box + focusability (never `display:none`/`visibility:hidden`,
+    // which would drop it from the tab order and the accessibility tree).
+    opacity: 0,
+    transitionProperty: 'opacity',
+    transitionDuration: tokens.durationFaster,
+    transitionTimingFunction: tokens.curveEasyEase,
+    // Keyboard users: revealing when the button itself gains focus keeps it
+    // fully operable without a pointer.
+    ':focus-within': {
+      opacity: 1,
+    },
   },
   visuallyHidden: {
     position: 'absolute',
@@ -376,6 +409,17 @@ export function isOwnMessage(message: TimelineMessage, currentUserSystemUserId: 
   return !!message.senderSystemUserId && message.senderSystemUserId === currentUserSystemUserId;
 }
 
+/**
+ * Contextual accessible name for a message's Forward affordance (NFR-05). A
+ * bare "Forward message" repeated N times is indistinguishable to a screen
+ * reader, so we fold in the message's subject → sender name → sender address,
+ * degrading to a generic label only when none is present.
+ */
+export function forwardLabel(message: TimelineMessage): string {
+  const context = message.subject?.trim() || message.senderName?.trim() || message.sender?.trim();
+  return context ? `Forward ${context}` : 'Forward message';
+}
+
 function dayKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
@@ -507,6 +551,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     pollIntervalMs,
     onError,
     onOpenEmail,
+    onForwardMessage,
     className,
   } = props;
 
@@ -788,6 +833,32 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                     isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
                     status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
                   />
+                )}
+
+                {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
+                    wrapper so it applies uniformly to BOTH the chat bubble and
+                    the email-in-flow block WITHOUT editing either subcomponent.
+                    It only hands the message back to the host via
+                    `onForwardMessage`; the HOST opens `<SendEmailDialog/>` in
+                    forward mode and owns the draft — ConversationView persists
+                    nothing on forward (FR-08 / ADR-012). Keyboard-reachable
+                    (NFR-05); revealed on hover/focus. Rendered ONLY when a
+                    handler is wired — a keyboard user never reaches a Forward
+                    button that does nothing. The accessible name is
+                    contextualized per message so N Forward buttons are
+                    distinguishable to a screen reader. */}
+                {onForwardMessage && (
+                  <div className={styles.messageActions} data-message-actions>
+                    <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<ArrowForwardRegular />}
+                        aria-label={forwardLabel(item.entry.message)}
+                        onClick={() => onForwardMessage(item.entry.message)}
+                      />
+                    </Tooltip>
+                  </div>
                 )}
               </div>
             )

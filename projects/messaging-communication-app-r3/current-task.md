@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Phase 2 ✅ · 020,023,024 ✅ (pushed) · **Task 021 (FR-04) COMPLETE ✅ + gated** (incl. backend Subject/To read-DTO enrichment). Next: 022 (forward, deps 020), 025 (title link). |
+| **Task** | Phase 2 ✅ · 020,021,023,024 ✅ (pushed) · **Task 022 (FR-08 forward) COMPLETE ✅ + gated**. Phase 3 remaining: **025** (title→record modal link). |
 | **Step** | — |
-| **Status** | 013,014,020,023,024 + 2 merges committed+pushed (PR #664). **021 done + gated, about to commit** (backend + client + frontend). 7 tasks this session. |
-| **Next Action** | Commit 021, then `work on task 022` (FR-08 forward action → EmailComposer forward mode, deps 020). Then 025 (conversation title → record-scoped modal link, deps 011+012). ⚠️ **021 enriched the read DTO**: `ThreadMessageDto`/`IThreadMessageDto`/`TimelineMessage` now carry `subject`+`to` (email-in-flow block + word filter use them); recipients = access-filtered `sprk_to`, never BCC. `mapStateToSendRequest` lives in `EmailComposer.reducer.ts` (post-merge). ⚠️ worktree build gap: verify via scoped `tsc --noEmit` + `npm test`, NOT whole-package build. |
+| **Status** | 013,014,020,021,023,024 + merges committed+pushed (PR #664). **022 done + gated, about to commit** (ConversationView Forward affordance + SendEmailDialog sourceRecord). 8 tasks this session. |
+| **Next Action** | Commit 022, then `work on task 025` (FR-12 conversation title → record-scoped modal link, deps 011+012). After 025, **Phase 3 is complete** → Phase 4 (030 record PCF [opus], 031 widget, 032 code page, 033 Email&Messages tab, 034 deploy). ⚠️ **regarding-in-forward is host-wired** via `sourceRecord.associations` (ISS-005 #672 for the engine-union follow-up). Two Fluent-dialog integration tests hardened w/ `findByRole('dialog',{},{timeout:4000})` (jsdom flake). `mapStateToSendRequest` lives in `EmailComposer.reducer.ts`. ⚠️ worktree build gap: verify via scoped `tsc --noEmit` + `npm test`. |
 
 ### Progress — 11 tasks ✅ (001–006, 010–014). 9 committed+pushed (PR #664); **013 + 014 committed? NO — uncommitted**
 - **Phase 1 (backend spine) COMPLETE + pushed**: 001–006.

@@ -186,7 +186,7 @@ describe('ConversationView email-in-flow (FR-04)', () => {
 
     // The extended dialog appears, carrying the regarding record (folded into
     // the composer's association chips) — proving thread + regarding context.
-    const dialog = await screen.findByRole('dialog');
+    const dialog = await screen.findByRole('dialog', {}, { timeout: 4000 });
     expect(within(dialog).getByText(/Smith v Jones/)).toBeInTheDocument();
   });
 

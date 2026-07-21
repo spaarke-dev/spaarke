@@ -61,6 +61,33 @@ export interface ConversationViewProps {
    */
   onOpenEmail?: (message: TimelineMessage) => void;
 
+  /**
+   * Fired when the user activates the Forward affordance on a message (task
+   * 022, FR-08). Rendered on EVERY message (both the chat `<MessageBubble />`
+   * and the `<EmailInFlowBlock />`), it hands the row back so the HOST can open
+   * the extended `<SendEmailDialog />` in FORWARD mode, seeded from the
+   * now-enriched message: build an `ISourceCommunicationRecord` from
+   * `subject`/`to`/`sender`/`body`/`bodyFormat`/`attachments` (all present on
+   * `TimelineMessage` since task 021) and pass it as `sourceRecord` with
+   * `mode="forward"`. The composer derives the `Fwd:` subject + quoted body +
+   * attachments via its EXISTING `deriveForwardState` (ADR-045) — no new
+   * forward send path.
+   *
+   * ConversationView stays context-agnostic (ADR-012): it never mounts the
+   * dialog and persists NO forward draft — the modal owns all draft state
+   * (FR-08). This decoupled seam mirrors `onOpenEmail` (task 021) and task
+   * 023's `onPin`. Omit it and the Forward affordance is not rendered.
+   *
+   * ⚠️ In `forward` mode the composer derives `associations` from
+   * `sourceRecord.associations` and does NOT merge the dialog's `regarding`
+   * prop. To keep a forwarded email associated with the active record, the host
+   * MUST include the regarding record as an entry in `sourceRecord.associations`
+   * (dedup on entityType+entityId); the `regarding` prop alone is ignored in
+   * forward mode. (`threadId` DOES survive forward mode — it's a top-level
+   * send() prop.)
+   */
+  onForwardMessage?: (message: TimelineMessage) => void;
+
   /** Optional className applied to the root layout container. */
   className?: string;
 }
