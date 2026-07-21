@@ -1,23 +1,26 @@
 # EXTERNAL ACCESS — ADMIN & OPERATIONS SETUP GUIDE
 
-> **Audience**: Power Platform admins and DevOps engineers configuring the external access environment
-> **Last Updated**: 2026-03-19
-> **Applies To**: Power Pages portal, Dataverse, Entra ID, Azure App Service
+> **Audience**: Azure / Power Platform admins and DevOps engineers configuring the external access environment
+> **Last Updated**: 2026-07-20
+> **Applies To**: Azure Static Web Apps, Microsoft Entra External ID (CIAM), Dataverse, Azure App Service (BFF)
 > **Architecture Reference**: [`docs/architecture/external-access-spa-architecture.md`](../architecture/external-access-spa-architecture.md)
 
 ---
 
 ## Overview
 
-This guide covers the one-time and recurring configuration required to run the External Access SPA in Power Pages. It includes:
+This guide covers the one-time and recurring configuration required to run the External Access SPA on **Azure Static Web Apps** with **Microsoft Entra External ID (CIAM)** identity. It includes:
 
-- **Power Pages setup**: table permissions, web roles, site settings
-- **Entra B2B configuration**: app registrations, CORS, CSP
-- **BFF API settings**: JWT validation, CORS, connection strings
-- **Invitation flow**: how external users are invited and onboarded
+- **CIAM tenant + app registrations**: SPA client, BFF API, Graph provisioner
+- **BFF API settings**: the second `Ciam` JWT scheme, CORS, download path
+- **Azure Static Web Apps**: hosting + deploy workflow + runtime config
+- **Onboarding flow**: admin-initiated CIAM provisioning (invite-and-grant), SSPR password set
+- **SPE + Dataverse**: broker-only, app-only access
 - **Monitoring and troubleshooting**
 
 For SPA development, see [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUIDE.md).
+
+> **Retired (historical)**: The external portal formerly ran on **Power Pages** with **Entra B2B guests**. That model — Power Pages site, `sprk_externalworkspace` web resource, table permissions / web roles, B2B invitations, and `Deploy-ExternalWorkspaceSpa.ps1` — is **decommissioned** (ADR-028 Amendment A1). Nothing in this guide is Power Pages configuration; historical mentions are labeled as retired.
 
 ---
 
@@ -25,494 +28,272 @@ For SPA development, see [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUID
 
 | Item | Value |
 |------|-------|
-| Power Pages site URL | `https://sprk-external-workspace.powerappsportals.com` |
+| SWA resource (dev) | `swa-spaarke-external-spa-dev` (resource group `rg-spaarke-dev`) |
+| SPA live host (dev) | `https://green-dune-0c4f1221e.7.azurestaticapps.net` |
+| BFF API (dev) | `https://spaarke-bff-dev.azurewebsites.net` |
 | Dataverse org | `https://spaarkedev1.crm.dynamics.com` |
-| BFF API (dev) | `https://spe-api-dev-67e2xz.azurewebsites.net` |
-| Entra tenant | `a221a95e-6abc-4434-aecc-e48338a1b2f2` (main workforce tenant) |
-| SPA app registration | `spaarke-external-access-SPA` — `f306885a-8251-492c-8d3e-34d7b476ffd0` |
-| BFF app registration | `SDAP-BFF-SPE-API` — `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
-| Web resource name | `sprk_externalworkspace` |
+| CIAM external tenant | `spaarkeextid` (`spaarkeextid.onmicrosoft.com`) — tenant ID `7052feba-bfc4-43e0-b09e-65014b429131` |
+| CIAM authority | `https://spaarkeextid.ciamlogin.com/7052feba-bfc4-43e0-b09e-65014b429131` |
+| SPA public client (CIAM) | `bd57e54e-b339-4500-b55c-e451009fd907` |
+| BFF API app (CIAM) | `4a4d5126-91b0-4865-8e3a-134b7209013e` — App ID URI `api://4a4d5126-…`, scope `SDAP.Access` |
+| CIAM Graph provisioner app | `e63e6eb1-be25-4214-80a8-a6d609034bb9` (`User.ReadWrite.All`, cert credential) |
+| Contact ↔ CIAM link column | `Contact.sprk_externalobjectid` (String/100) — stable CIAM `oid` |
 
 ---
 
-## Section 1: Entra ID App Registrations
+## Section 1: Microsoft Entra External ID (CIAM) Tenant
 
-### 1.1 SPA App Registration (`spaarke-external-access-SPA`)
+External users are **local accounts in a dedicated CIAM external tenant** (`spaarkeextid`), not B2B guests in the workforce tenant.
 
-**Platform configuration** (must be SPA platform, not Web):
+### 1.1 Tenant + User Flow
 
-1. Azure Portal → Entra ID → App registrations → `spaarke-external-access-SPA`
-2. Authentication → Add a platform → Single-page application
-3. Redirect URIs:
-   - `https://sprk-external-workspace.powerappsportals.com`
-   - `http://localhost:3000` (local dev)
-4. Implicit grant settings: **uncheck both** (ID tokens and access tokens) — code flow only
+1. Provision an Entra External ID (CIAM) tenant (`spaarkeextid`).
+2. Configure the sign-in user flow with **`isSignUpAllowed = false`** — R1 is admin-initiated only; there is **no self-service sign-up**.
+3. Enable **SSPR with Email OTP** so a provisioned user can set/reset their password via **"Forgot password"** (the onboarding email drives this).
 
-**API permissions** (delegated):
-- `api://1e40baad-e065-4aea-a8d4-4b7ab273458c/SDAP.Access` — grant admin consent
+### 1.2 SPA App Registration (CIAM tenant)
 
-### 1.2 BFF API App Registration (`SDAP-BFF-SPE-API`)
+- App ID: `bd57e54e-b339-4500-b55c-e451009fd907`
+- Platform: **Single-page application (SPA)** — not Web.
+- Redirect URIs: the SWA origin (`https://green-dune-0c4f1221e.7.azurestaticapps.net`) and `http://localhost:3000` (local dev). MSAL uses `window.location.origin`.
+- Implicit grant: **disabled** (authorization code + PKCE only).
+- API permission (delegated): `api://4a4d5126-91b0-4865-8e3a-134b7209013e/SDAP.Access` — grant admin consent.
 
-1. Azure Portal → Entra ID → App registrations → `SDAP-BFF-SPE-API`
-2. Expose an API:
-   - Application ID URI: `api://1e40baad-e065-4aea-a8d4-4b7ab273458c`
-   - Scope name: `SDAP.Access`
-   - Authorized client applications: `f306885a-8251-492c-8d3e-34d7b476ffd0` (the SPA)
-3. Token configuration → Add optional claims → Access: `preferred_username` — **required** for BFF Contact lookup
+### 1.3 BFF API App Registration (CIAM tenant)
 
-### 1.3 B2B Guest Invite Settings
+- App ID: `4a4d5126-91b0-4865-8e3a-134b7209013e`
+- Expose an API: Application ID URI `api://4a4d5126-91b0-4865-8e3a-134b7209013e`, scope `SDAP.Access`, authorized client = the SPA (`bd57e54e-…`).
+- **Manifest**: set `requestedAccessTokenVersion: 2` so the access-token `aud` is the **client-id GUID** (`4a4d5126-…`). This is exactly what the BFF validates as `Ciam:Audience`.
 
-External users are Azure AD B2B guests. Ensure the tenant allows B2B invitation:
+### 1.4 Graph Provisioner App Registration (CIAM tenant)
 
-1. Azure Portal → Entra ID → External Identities → External collaboration settings
-2. Guest invite settings: **Admins and users in the guest inviter role can invite** (minimum)
-3. Collaboration restrictions: Allow invitations to any domain (or allowlist specific external domains)
-
-When the BFF calls `/api/v1/external-access/invite`, it creates an Azure AD B2B invitation. The guest user receives an email with a redemption link. On first sign-in they accept the B2B invitation and appear as a guest in the Spaarke tenant.
+- App ID: `e63e6eb1-be25-4214-80a8-a6d609034bb9`
+- Microsoft Graph **application** permission: `User.ReadWrite.All` — grant admin consent **in the CIAM tenant** (workforce MI cannot reach this tenant).
+- Credential: a **certificate**, private key stored in Key Vault as `ciam-graph-provisioner-cert` in `spaarke-spekvcert`. The BFF (`CiamGraphClientFactory`) loads it by name at runtime — **never a plaintext secret** (NFR-06).
 
 ---
 
 ## Section 2: BFF API Configuration
 
-### 2.1 Azure App Service Configuration
+The BFF validates CIAM tokens with a **second `Ciam` JWT bearer scheme** that runs alongside the workforce default scheme (`Infrastructure/DI/AuthorizationModule.cs`). The `Ciam` scheme is **additive** — it does not replace the workforce scheme. It is pinned to the `/api/v1/external` route group via the `AuthPolicies.CiamExternal` policy; the internal `/api/v1/external-access` management group stays on the workforce default.
 
-BFF API: `spe-api-dev-67e2xz` in resource group `spe-infrastructure-westus2`
+### 2.1 Azure App Service Configuration (`spaarke-bff-dev`)
 
-**Required app settings** (Azure App Service → Configuration → Application settings):
+Add a `Ciam` config section mirroring `AzureAd`, plus the Graph-provisioner sub-section and the portal URL:
 
-| Setting | Value |
-|---------|-------|
-| `AzureAd__TenantId` | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
-| `AzureAd__ClientId` | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
-| `Cors__AllowedOrigins__0` | `https://sprk-external-workspace.powerappsportals.com` |
-| `Cors__AllowedOrigins__1` | `http://localhost:3000` |
+| Setting | Value / Notes |
+|---------|---------------|
+| `Ciam__Instance` | `https://spaarkeextid.ciamlogin.com` |
+| `Ciam__TenantId` | `7052feba-bfc4-43e0-b09e-65014b429131` |
+| `Ciam__Audience` | `4a4d5126-91b0-4865-8e3a-134b7209013e` (BFF-API client-id GUID; v2 tokens) |
+| `Ciam__Domain` | `spaarkeextid.onmicrosoft.com` (local-account identity issuer) |
+| `Ciam__GraphProvisioner__ClientId` | `e63e6eb1-be25-4214-80a8-a6d609034bb9` |
+| `Ciam__GraphProvisioner__CertificateName` | `ciam-graph-provisioner-cert` (Key Vault) |
+| `ExternalAccess__PortalUrl` | `https://green-dune-0c4f1221e.7.azurestaticapps.net` |
+| `Cors__AllowedOrigins__0` | `https://green-dune-0c4f1221e.7.azurestaticapps.net` |
+| `Cors__AllowedOrigins__1` | `http://localhost:3000` (local dev) |
+
+The BFF constructs the CIAM validation authority as `{Ciam:Instance}/{Ciam:TenantId}/v2.0` and validates issuer, audience, lifetime, and signing key.
 
 ### 2.2 CORS Configuration
 
-The BFF must respond to pre-flight OPTIONS requests from the Power Pages portal domain. Verify in `Sprk.Bff.Api` Program.cs that `AllowedOrigins` includes the portal URL.
+The BFF must answer pre-flight OPTIONS requests from the SWA origin. Verify the SWA origin is in `Cors__AllowedOrigins`.
 
-Testing CORS:
 ```bash
 curl -I -X OPTIONS \
-  https://spe-api-dev-67e2xz.azurewebsites.net/api/v1/external/me \
-  -H "Origin: https://sprk-external-workspace.powerappsportals.com" \
+  https://spaarke-bff-dev.azurewebsites.net/api/v1/external/me \
+  -H "Origin: https://green-dune-0c4f1221e.7.azurestaticapps.net" \
   -H "Access-Control-Request-Method: GET"
 # Expected: HTTP 204 with Access-Control-Allow-Origin header
 ```
 
----
+### 2.3 Broker-Only Downstream (no OBO on the external path)
 
-## Section 3: Power Pages Site Setup (One-Time)
-
-### 3.1 Create or Activate the Site
-
-1. Go to [make.powerpages.microsoft.com](https://make.powerpages.microsoft.com)
-2. Select **SPAARKE DEV 1** environment
-3. If no site exists: create a new blank site
-4. Note the **website record ID** (GUID) — needed for PAC CLI and support
-
-### 3.2 Surface the SPA Web Resource
-
-The SPA is deployed as a Dataverse web resource (`sprk_externalworkspace`). To serve it on the portal:
-
-1. In the Power Pages site, create a page at URL `/workspace`
-2. Set the page type to **Custom** or **Blank** layout
-3. Add a **Liquid** template reference:
-   ```liquid
-   {{ webresource('sprk_externalworkspace') }}
-   ```
-4. Alternatively, set the root page to redirect to the web resource URL directly
-
-This only needs to be done once. Subsequent SPA deployments update the web resource content without any Power Pages portal changes.
+All external-surface SPE + Dataverse access is **app-only / managed identity**. The external user's token authenticates **only** to the BFF and is never exchanged for a downstream Graph/SPE token. No workforce Entra B2B guest is provisioned for any external user. The document-download endpoint streams app-only via `SpeFileStore.DownloadFileAsync` after enforcing authorization (see Section 6).
 
 ---
 
-## Section 4: Power Pages Table Permissions
+## Section 3: Azure Static Web Apps Hosting
 
-Table permissions control which Dataverse records an authenticated portal contact can read or write via the Power Pages Web API (`/_api/`). Even though the current SPA routes data through the BFF instead of `/_api/`, table permissions are still required for:
-- The parent-chain access model used by the BFF's participation lookup
-- Future use of the `/_api/` path for lightweight reads
+The SPA is served as a static site from SWA (`swa-spaarke-external-spa-dev`), replacing the retired Power Pages web resource.
 
-Configure all permissions in the **Portal Management** app (not Power Pages Design Studio — parent scope is only available in Portal Management).
+### 3.1 Runtime Config (`staticwebapp.config.json`)
 
-### 4.1 Web Roles
+Lives at `src/client/external-spa/staticwebapp.config.json` and is staged into `dist/` at deploy time:
 
-Create three web roles (Portal Management → Web Roles):
-
-| Role Name | Key | Anonymous Users | Authenticated Users |
-|-----------|-----|----------------|---------------------|
-| Secure Project Viewer | `secure-project-viewer` | No | No |
-| Secure Project Collaborator | `secure-project-collaborator` | No | No |
-| Secure Project Full Access | `secure-project-full` | No | No |
-
-Set Website to the active Power Pages site. Do NOT mark as Authenticated Users Role — roles are assigned explicitly per contact when access is granted.
-
-### 4.2 Table Permission Chain
-
-The parent-chain provides cascading access: Contact → Participation record → Project → Documents/Events.
-
-#### Level 0 — Participation Records (all roles)
-
-| Field | Value |
-|-------|-------|
-| Entity Name | `External Record Access - Contact` |
-| Entity Logical Name | `sprk_externalrecordaccess` |
-| Scope | **Contact** |
-| Contact Relationship | `sprk_contactid` |
-| Read | ✓ | Write | ✗ | Create | ✗ | Delete | ✗ |
-| Associated Web Roles | Viewer + Collaborator + Full Access |
-
-#### Level 1 — Projects (child of Level 0, all roles)
-
-| Field | Value |
-|-------|-------|
-| Entity Name | `Secure Projects` |
-| Entity Logical Name | `sprk_project` |
-| Scope | **Parent** |
-| Parent Relationship | `sprk_projectid` |
-| Parent Entity Permission | `External Record Access - Contact` |
-| Read | ✓ | Write | ✗ | Create | ✗ | Delete | ✗ |
-| Associated Web Roles | Viewer + Collaborator + Full Access |
-
-#### Level 2 — Documents
-
-| Role | Read | Write | Create | Delete | Scope |
-|------|------|-------|--------|--------|-------|
-| Viewer | ✓ | ✗ | ✗ | ✗ | Parent (sprk_projectid → Secure Projects) |
-| Collaborator | ✓ | ✗ | ✓ | ✗ | Parent |
-| Full Access | ✓ | ✓ | ✓ | ✗ | Parent |
-
-Entity Logical Name: `sprk_document`, Parent Relationship: `sprk_projectid`
-
-#### Level 2 — Events
-
-| Role | Read | Write | Create | Delete | Scope |
-|------|------|-------|--------|--------|-------|
-| Viewer | ✓ | ✗ | ✗ | ✗ | Parent |
-| Collaborator | ✓ | ✓ | ✓ | ✗ | Parent |
-| Full Access | ✓ | ✓ | ✓ | ✗ | Parent |
-
-Entity Logical Name: `sprk_event`, Parent Relationship: `sprk_regardingproject` (use actual relationship name)
-
-#### Global Read — Reference Tables (Authenticated Users role)
-
-For lookup/reference tables shared across all projects:
-
-| Table | Entity Logical Name | Scope | CRUD |
-|-------|---------------------|-------|------|
-| Organizations/Accounts | `account` | Global | Read only |
-| Document Types | `sprk_documenttype` | Global | Read only |
-
----
-
-## Section 5: Power Pages Site Settings
-
-Configure via Portal Management app → Site Settings (or Power Pages Studio → Settings).
-
-### 5.1 Entra B2B Identity Provider
-
-1. Power Pages Studio → Security → Identity providers
-2. Add → Microsoft Entra ID
-3. Configure:
-   - Tenant type: **Workforce** (main tenant, not B2C)
-   - Client ID: `f306885a-8251-492c-8d3e-34d7b476ffd0`
-   - Authority: `https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2`
-4. Claim mappings (map Entra claims to Contact fields):
-   - `preferred_username` → `emailaddress1`
-   - `given_name` → `firstname`
-   - `family_name` → `lastname`
-
-### 5.2 Content Security Policy
-
-Add to site settings (`HTTP/Content-Security-Policy`):
-
-```
-default-src 'self';
-script-src 'self' 'unsafe-inline';
-style-src 'self' 'unsafe-inline';
-connect-src 'self'
-  https://spe-api-dev-67e2xz.azurewebsites.net
-  https://login.microsoftonline.com
-  https://graph.microsoft.com;
-frame-ancestors 'self';
-img-src 'self' data: https:;
-```
-
-### 5.3 Web API Site Settings (if using `/_api/`)
-
-Required only if `/_api/` is used for direct Dataverse reads. Currently the SPA routes all data through the BFF, but these settings may be needed for future development:
-
-```
-Webapi/sprk_project/enabled = true
-Webapi/sprk_project/fields = sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon
-
-Webapi/sprk_document/enabled = true
-Webapi/sprk_document/fields = sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon
-
-Webapi/sprk_event/enabled = true
-Webapi/sprk_event/fields = sprk_eventid,sprk_eventname,sprk_duedate,sprk_eventstatus,sprk_todoflag,_sprk_regardingproject_value,createdon
-
-Webapi/sprk_externalrecordaccess/enabled = true
-Webapi/sprk_externalrecordaccess/fields = sprk_name,_sprk_contact_value,_sprk_project_value,sprk_accesslevel,statecode
-```
-
-**Note:** Use the actual Dataverse logical field names, not the friendly display names. See the [Architecture Reference](../architecture/external-access-spa-architecture.md) for the correct field name mapping.
-
----
-
-## Section 6: Invitation Flow
-
-When a Core User invites an external contact to a Secure Project, the BFF handles the full flow.
-
-### 6.1 What POST `/api/v1/external-access/invite` Does
-
-1. Looks up or creates a Contact record by email in Dataverse
-2. Creates an `sprk_externalrecordaccess` record (the participation)
-3. Calls the Microsoft Graph B2B invitation API to send an invite email
-4. Returns `{ contactId, inviteRedeemUrl, status }` to the caller
-
-### 6.2 What the External User Experiences
-
-1. Receives an invitation email (from Microsoft/Entra) with a "Get Started" link
-2. Clicks the link → Entra B2B redemption flow (accepts permissions, creates guest account)
-3. After redemption, navigates to the portal URL
-4. MSAL triggers login → SSO with their Microsoft 365 account (often zero-click)
-5. SPA loads → `GET /api/v1/external/me` returns their project access
-6. Workspace displays with their assigned project(s)
-
-### 6.3 Re-Inviting or Resending
-
-If a user reports not receiving the invitation:
-1. Check the B2B invitation status in Entra → External Identities → All users
-2. If status is `PendingAcceptance`, use the invitation link from the original invite response
-3. The BFF's invite endpoint is idempotent — calling it again for the same email will resolve the existing contact and create a new invitation
-
-### 6.4 Revoking Access
-
-POST `/api/v1/external-access/revoke`:
-1. Sets the `sprk_externalrecordaccess` record to inactive (`statecode = 1`)
-2. Removes the contact from the SPE container (if `containerId` provided)
-3. Invalidates Redis participation cache for the contact (60s TTL forces immediate eviction)
-
-The user's guest account in Entra is **not** deleted — only participation is revoked. The user will see an empty workspace on next login (no projects listed).
-
----
-
-## Section 7: SPE Container Membership
-
-For projects with SharePoint Embedded file storage, the BFF manages container membership via Microsoft Graph.
-
-### 7.1 Granting Container Access
-
-When access is granted at Collaborate or Full Access level, the BFF calls:
-```
-POST /storage/fileStorage/containers/{containerId}/permissions
+```json
 {
-    "roles": ["writer"],
-    "grantedToV2": { "user": { "userPrincipalName": "alice@contoso.com" } }
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/assets/*",
+      "/*.{css,js,map,ico,png,svg,gif,jpg,jpeg,webp,json,txt,woff,woff2,ttf,eot}"
+    ]
+  },
+  "globalHeaders": {
+    "Referrer-Policy": "no-referrer-or-same-origin",
+    "Content-Security-Policy": "frame-ancestors 'self'",
+    "X-Content-Type-Options": "nosniff"
+  }
 }
 ```
 
-View Only level: `"roles": ["reader"]`
+`navigationFallback` rewrites unmatched routes to `/index.html` so `BrowserRouter` clean-URL deep links (e.g. `/project/{id}`) resolve instead of 404ing. `globalHeaders` sets the framing/referrer/nosniff security headers.
 
-### 7.2 External Sharing Prerequisite
+### 3.2 Deploy Workflow
 
-External user sharing must be enabled on the SPE container application:
-```powershell
-Set-SPOApplication -OverrideTenantSharingCapability $true -OwningApplicationId "{speAppId}"
-```
+`.github/workflows/deploy-external-spa.yml` (currently `workflow_dispatch`):
 
-This is a one-time configuration per SPE application registration.
+1. `npm install --legacy-peer-deps` (per root CLAUDE.md §12 — not `npm ci`).
+2. Build `src/client/external-spa` with the CIAM `VITE_*` build env (see [SPA guide](EXTERNAL-ACCESS-SPA-GUIDE.md#environment-variables)). These `VITE_*` values are non-secret identifiers and override the `.env.production` placeholders at build time.
+3. Copy `staticwebapp.config.json` into `dist/`.
+4. Upload via `Azure/static-web-apps-deploy` with `skip_app_build: true` and the SWA deploy token secret `AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV`.
+
+> **Retired (historical)**: `scripts/Deploy-ExternalWorkspaceSpa.ps1` (base64 web-resource upload) is deleted. Do not use it.
 
 ---
 
-## Section 8: Monitoring and Troubleshooting
+## Section 4: Dataverse Schema
 
-### 8.1 Common Issues
+### 4.1 `Contact.sprk_externalobjectid` (String/100)
+
+The stable link between a CIAM identity and a Dataverse Contact. Populated by the onboarding flow with the CIAM user's `oid`. The `ExternalCallerAuthorizationFilter` resolves the caller Contact by this field; email is only a first-login fallback that then binds the `oid`.
+
+### 4.2 `sprk_externalrecordaccess` (participation grant)
+
+Unchanged authorization model. A grant is one active record with:
+- Grantee = the **Contact** (`sprk_contactid@odata.bind` → `/contacts(...)`) — never a firm/org lookup.
+- `sprk_projectid` → the project, `sprk_accesslevel` (see Section 8), `sprk_granteddate`, and `sprk_grantedby` (audited caller).
+- Optional `sprk_expirydate` and `sprk_accountid` (record-keeping only; not the grantee).
+
+> Power Pages web roles, table permissions, and the `adx_*` / `mspp_*` built-in tables are **retired** — they are no longer part of this platform.
+
+---
+
+## Section 5: Onboarding Flow (admin-initiated)
+
+There is **no self-service sign-up** in R1 (`isSignUpAllowed = false`). A core user onboards an external attorney; the attorney then sets a password via SSPR.
+
+### 5.1 Core-User "Invite to Secure Workspace" — `POST /api/v1/external-access/invite-and-grant`
+
+`InviteAndGrantExternalUserEndpoint` (workforce-authed admin surface) does, in one action:
+
+1. **Onboard (idempotent)** — resolve or create the Dataverse Contact by email; if the Contact already has an `oid` bound, **skip** account creation (status `AlreadyProvisioned`). Otherwise `CiamUserProvisioningService` calls Graph `POST /users` (cross-tenant, via `CiamGraphClientFactory`) to create a **CIAM local account** — an `identities` block with `signInType = emailAddress`, `issuer = spaarkeextid.onmicrosoft.com`, a generated temporary password, `forceChangePasswordNextSignIn = true`, and `passwordPolicies = DisablePasswordExpiration`. The returned `oid` is persisted to `Contact.sprk_externalobjectid`.
+2. **Grant** — create the `sprk_externalrecordaccess` record (grantee = the Contact, audited via `sprk_grantedby`) and invalidate the Redis participation cache so the grant is immediately visible.
+3. **Email** — send the onboarding email (`RegistrationEmailService.SendCiamOnboardingEmailAsync` + `CiamOnboardingTemplate.html`) directing the user to the portal and to set a password via "Forgot password".
+
+The temporary password is **never** returned to the caller or logged — it is delivered only via the SSPR set-password flow.
+
+**Sibling endpoints**: `POST /invite` (onboard only) and `POST /grant` (grant only) share the same reusable cores.
+
+### 5.2 What the External User Experiences
+
+1. Receives the onboarding email.
+2. Opens the portal URL and clicks **"Forgot password"** → sets a password via SSPR (Email OTP).
+3. Signs in against the CIAM authority (authorization code + PKCE).
+4. The SPA loads → `GET /api/v1/external/me` returns their project access.
+5. The workspace displays their assigned project(s).
+
+### 5.3 Idempotency
+
+Re-invoking `invite` or `invite-and-grant` for an already-provisioned Contact (an `oid` is present) creates **no second CIAM account** and re-sends **no** onboarding email (status `AlreadyProvisioned`). `invite-and-grant` still (re)issues the grant, so re-running is a safe way to retry a failed grant.
+
+### 5.4 Revoking Access — `POST /api/v1/external-access/revoke`
+
+1. Deactivates the `sprk_externalrecordaccess` record (`statecode = 1`).
+2. Invalidates the Redis participation cache for the Contact.
+
+The user's **CIAM account is not deleted** — only participation is revoked. On next sign-in they see an empty workspace (no projects listed). No SPE container-membership removal is needed (broker-only — none was written on grant).
+
+---
+
+## Section 6: Document Download (app-only, authz-before-stream)
+
+`GET /api/v1/external/projects/{id}/documents/{documentId}/content` enforces authorization **before** any storage read (NFR-03):
+
+1. **Project access** — the caller must have a participation record for `{id}`, else **403, no bytes, no Graph call**.
+2. **Document → project scoping** — the `documentId` must belong to `{id}` (an app-only Dataverse read that resolves no Graph pointer); a mismatch or missing document is a uniform 403.
+3. **Only then** does the BFF resolve SPE pointers server-side and stream **app-only** via `SpeFileStore.DownloadFileAsync` (never the OBO path).
+
+Graph pointers (`driveId`/`driveItemId`) are never exposed to the browser; the endpoint is keyed on `documentId`. Content returns as `application/octet-stream` (attachment).
+
+External SPE access is entirely BFF-brokered app-only. There is **no per-external-user SPE container membership** and no `Set-SPOApplication` external-sharing prerequisite for external users on this path.
+
+---
+
+## Section 7: Monitoring and Troubleshooting
+
+### 7.1 Common Issues
 
 | Symptom | Likely Cause | Resolution |
 |---------|-------------|------------|
-| SPA loads but shows login loop | MSAL redirect URI mismatch | Check app registration has exact portal URL as SPA redirect URI |
-| 401 on all BFF calls | JWT audience mismatch | Verify `MSAL_BFF_SCOPE` matches `api://1e40baad-...` in app settings |
-| 403 `contact_not_found` | No Dataverse Contact with matching email | Ensure Contact record exists with `emailaddress1` = user's UPN |
-| Empty project list (`/me` returns empty projects) | Access records inactive or missing | Check `sprk_externalrecordaccess` for `statecode = 0` records for the contact |
-| `AttributePermissionIsMissing` | Column not in Web API site setting | Add field to `Webapi/{table}/fields` site setting |
-| User sees data they shouldn't | Table permission scope too broad | Check scope — must be Contact or Parent, not Global |
-| Invitation email not received | B2B invitation in pending state | Check Entra External Identities for invitation status |
-| CORS error in browser console | BFF CORS not configured for portal domain | Add portal URL to BFF `Cors__AllowedOrigins` app setting |
-| SPA blank after deploy | Old cached version | Hard refresh (Ctrl+F5) or clear browser cache |
-| SPE files not accessible | Container membership not provisioned | Re-call `/grant` or check `SpeContainerMembershipService` logs |
+| SPA 404 on deep link `/project/{id}` | SWA `navigationFallback` missing/misconfigured | Ensure `staticwebapp.config.json` rewrites to `/index.html` and was staged into `dist/` |
+| MSAL fails on `*.ciamlogin.com` metadata | CIAM host not in `knownAuthorities` | Confirm the CIAM authority host is declared in `msal-config.ts` `knownAuthorities` |
+| 401 on all `/api/v1/external/*` calls | `Ciam:Audience` mismatch | Must equal the BFF-API **client-id GUID** (`4a4d5126-…`); confirm `requestedAccessTokenVersion: 2` |
+| 403 `contact_not_found` | No Contact resolvable by `oid` (or first-login email) | Confirm onboarding populated `sprk_externalobjectid`; check the Contact exists |
+| Empty project list from `/me` | No active participation records | Check `sprk_externalrecordaccess` for `statecode = 0` records for the Contact |
+| New grant not visible for ~60s | Redis cache not invalidated | Grant invalidates the cache; verify `tid` claim present for cache key |
+| Download returns 403 with no bytes | Authz-before-stream denied (no project access or doc not in project) | Expected for unauthorized callers; verify participation + document→project scoping |
+| CORS error in browser console | SWA origin not in BFF CORS allow-list | Add the SWA origin to `Cors__AllowedOrigins` |
+| Provisioning fails (Graph `POST /users`) | CIAM Graph provisioner cert/permission | Verify `ciam-graph-provisioner-cert` in Key Vault + `User.ReadWrite.All` consented in the CIAM tenant |
 
-### 8.2 Checking BFF Logs
+### 7.2 Checking BFF Logs
 
 ```bash
 # Stream live logs from App Service
-az webapp log tail -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz
+az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev
 
 # Filter external access logs
-az webapp log tail -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz | grep "\[EXT"
+az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev | grep "\[EXT"
 ```
 
 Key log prefixes:
-- `[EXT-AUTH]` — ExternalCallerAuthorizationFilter (contact resolution, participation loading)
-- `[EXT-ME]` — GetExternalUserContext handler
-- `[EXT-DATA]` — ExternalDataService (Dataverse queries)
-- `[EXT-GRANT]` — GrantExternalAccessEndpoint
-- `[EXT-INVITE]` — InviteExternalUserEndpoint
+- `[EXT-AUTH]` — `ExternalCallerAuthorizationFilter` (oid/email Contact resolution, participation loading)
+- `[EXT-DOWNLOAD]` — document content endpoint (authz decisions + stream)
+- `[EXT-GRANT]` — grant endpoint
+- `[EXT-INVITE]` / `[EXT-INVITE-GRANT]` — onboarding + invite-and-grant
+- `[CIAM-PROVISION]` — CIAM user creation
 
-### 8.3 Checking Participation Records
+### 7.3 Checking Participation Records
 
 ```bash
-# Using az CLI with Dataverse
 TOKEN=$(az account get-access-token \
   --resource https://spaarkedev1.crm.dynamics.com \
   --query accessToken -o tsv)
 
-# Get all active access records for a contact
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_externalrecordaccesses?\$filter=_sprk_contact_value eq {contactId} and statecode eq 0&\$select=_sprk_contact_value,_sprk_project_value,sprk_accesslevel,statecode"
+  "https://spaarkedev1.crm.dynamics.com/api/data/v9.2/sprk_externalrecordaccesses?\$filter=_sprk_contactid_value eq {contactId} and statecode eq 0&\$select=_sprk_contactid_value,_sprk_projectid_value,sprk_accesslevel,statecode"
 ```
 
-### 8.4 Audit Trail
+### 7.4 Audit Trail
 
 | What | Where | Maintained By |
 |------|-------|---------------|
-| Who granted access + when | `sprk_externalrecordaccess.sprk_grantedby` + `sprk_granteddate` | BFF API on grant |
-| Who approved file access | `sprk_externalrecordaccess.sprk_approvedby` + `sprk_approveddate` | BFF API on file approval |
-| B2B invitation sent/redeemed | Entra External Identities → All users | Entra (automatic) |
-| BFF authorization decisions | App Service logs `[EXT-AUTH]` | BFF (INFO/WARN) |
+| Who granted access + when | `sprk_externalrecordaccess.sprk_grantedby` + `sprk_granteddate` | BFF on grant |
+| CIAM user provisioning | App Service logs `[CIAM-PROVISION]` + the user's `oid` on `Contact.sprk_externalobjectid` | BFF / Graph |
+| BFF authorization decisions | App Service logs `[EXT-AUTH]` / `[EXT-DOWNLOAD]` | BFF |
 | SPE file access | SPE audit logs via Graph API | SharePoint Embedded |
 
 ---
 
-## Section 9: Access Level → Role Mapping
+## Section 8: Access Levels
 
-When granting access, the BFF assigns the appropriate web role to the contact:
+The BFF grants one of three access levels on `sprk_externalrecordaccess.sprk_accesslevel`. Enforcement is server-side (`ExternalCallerContext.GetEffectiveRights`); client-side flags are UX-only.
 
-| `sprk_accesslevel` value | Access Level | Web Role Assigned |
-|--------------------------|-------------|-------------------|
-| `100000000` | ViewOnly | `secure-project-viewer` |
-| `100000001` | Collaborate | `secure-project-collaborator` |
-| `100000002` | FullAccess | `secure-project-full` |
+| `sprk_accesslevel` | Access Level | Effective rights (server-side) |
+|--------------------|-------------|--------------------------------|
+| `100000000` | ViewOnly | Read |
+| `100000001` | Collaborate | Read + Create + Write |
+| `100000002` | FullAccess | Read + Create + Write + Delete |
 
 **Capability summary:**
 
 | Capability | ViewOnly | Collaborate | FullAccess |
 |------------|----------|-------------|------------|
-| View project and documents | Yes | Yes | Yes |
-| Upload documents | No | Yes | Yes |
-| Download files (SPE) | Yes (Reader) | Yes (Writer) | Yes (Writer) |
-| Create events/tasks | No | Yes | Yes |
-| Update events/tasks | No | Yes | Yes |
-| Run AI summaries | No | Yes | Yes |
-| Invite other participants | No | No | Yes |
-
----
-
-## Section 10: Power Pages Built-In Table Reference
-
-Power Pages provides these tables out of the box. Spaarke uses them directly — no custom equivalents needed.
-
-### `mspp_webrole` — Web Role
-
-Groups table permissions and is assigned to Contacts to gate record access.
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `mspp_webroleid` | PK | Primary key |
-| `mspp_name` | String(100) | Role name (e.g., "Secure Project Participant") |
-| `mspp_key` | String(100) | Non-localized key for code/workflow lookups |
-| `mspp_description` | Memo | Description |
-| `mspp_anonymoususersrole` | Boolean | Applies to unauthenticated visitors |
-| `mspp_authenticatedusersrole` | Boolean | Applies to all signed-in users automatically |
-| `mspp_websiteid` | Lookup → `mspp_website` | Which Power Pages site owns this role |
-
-Contact assignment: N:N relationship `powerpagecomponent_mspp_webrole_contact`.
-
-Default roles auto-created per site: **Anonymous Users** (unauthenticated) and **Authenticated Users** (all signed-in contacts).
-
----
-
-### `mspp_entitypermission` — Table Permission
-
-Defines CRUD access rules for a Dataverse table, scoped by access type.
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `mspp_entitypermissionid` | PK | Primary key |
-| `mspp_entityname` | String(400) | Display name of the rule |
-| `mspp_entitylogicalname` | String(250) | Dataverse table this applies to |
-| `mspp_scope` | Choice | Access type scope (see below) |
-| `mspp_read` / `mspp_write` / `mspp_create` / `mspp_delete` | Boolean | CRUD permissions |
-| `mspp_append` / `mspp_appendto` | Boolean | Append permissions |
-| `mspp_contactrelationship` | String | Relationship name for Contact scope |
-| `mspp_parentrelationship` | String | Relationship name for Parent scope |
-| `mspp_parententitypermission` | Lookup → self | Parent permission (for hierarchy chains) |
-| `mspp_websiteid` | Lookup → `mspp_website` | Site that owns this permission |
-
-**Scope values:**
-
-| Value | Label | Meaning |
-|-------|-------|---------|
-| `756150000` | Global | All records of this table |
-| `756150001` | Contact | Records related to the signed-in Contact |
-| `756150002` | Account | Records related to the Contact's parent Account |
-| `756150003` | Parent | Records related to a parent record the Contact can access |
-| `756150004` | Self | Only the Contact's own record |
-
-N:N to Web Roles via `mspp_entitypermission_webrole`.
-
----
-
-### `adx_invitation` — Invitation
-
-Built-in invitation system for onboarding external users.
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `adx_invitationid` | PK | Primary key |
-| `adx_invitationcode` | String(200) | Single-use redemption code |
-| `adx_type` | Choice | Single (`756150000`) or Group (`756150001`) |
-| `adx_invitecontact` | Lookup → Contact | Invited contact |
-| `adx_invitercontact` | Lookup → Contact | Who sent the invitation |
-| `adx_redeemedcontact` | Lookup → Contact | Contact who redeemed |
-| `adx_assigntoaccount` | Lookup → Account | Assign redeemed contact to this Account |
-| `adx_expirydate` | DateTime | Expiration date |
-| `adx_maximumredemptions` | Integer | Max redemptions (1 for single-use) |
-| `adx_redemptions` | Integer | Current redemption count |
-| `statuscode` | Status | New → Sent → Redeemed → Inactive |
-
-N:N to `mspp_webrole` — web roles are **automatically assigned on redemption**.
-
----
-
-### `adx_externalidentity` — External Identity
-
-Maps a Contact to their federated login identity. Auto-created by Power Pages on first login; can be pre-created to enable immediate access after Entra registration.
-
-| Column | Type | Purpose |
-|--------|------|---------|
-| `adx_externalidentityid` | PK | Primary key |
-| `adx_username` | String(100) | Username from identity provider |
-| `adx_identityprovidername` | String(400) | Provider name (e.g., `"AzureAD"`) |
-| `adx_contactid` | Lookup → Contact | Mapped Contact |
-
-Pre-create via BFF on invite to allow login without separate portal registration flow:
-
-```http
-POST /api/data/v9.2/adx_externalidentities
-{
-    "adx_username": "jane.smith@partner.com",
-    "adx_identityprovidername": "https://login.microsoftonline.com/{tenantId}/v2.0",
-    "adx_contactid@odata.bind": "/contacts({contactId})"
-}
-```
-
----
-
-### `adx_inviteredemption` — Invite Redemption
-
-Activity record tracking each redemption event. Auto-created by the platform — no manual management needed.
+| View project + documents | Yes | Yes | Yes |
+| Download documents (app-only) | Yes | Yes | Yes |
+| Create / update to-dos | No | Yes | Yes |
+| Delete | No | No | Yes |
 
 ---
 
@@ -520,9 +301,8 @@ Activity record tracking each redemption event. Auto-created by the platform —
 
 - **Architecture Reference**: [external-access-spa-architecture.md](../architecture/external-access-spa-architecture.md)
 - **Developer Guide**: [EXTERNAL-ACCESS-SPA-GUIDE.md](EXTERNAL-ACCESS-SPA-GUIDE.md)
+- **Auth architecture (ADR-028 + Amendment A1)**: [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)
 - **UAC Architecture**: [uac-access-control.md](../architecture/uac-access-control.md)
-- **Power Pages table permissions (MS Learn)**: https://learn.microsoft.com/en-us/power-pages/security/table-permissions
-- **Create web roles (MS Learn)**: https://learn.microsoft.com/en-us/power-pages/security/create-web-roles
-- **B2B invitation API (MS Learn)**: https://learn.microsoft.com/en-us/graph/api/invitation-post
-- **Invitation table reference (MS Learn)**: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/adx_invitation
-- **Power Pages security overview**: https://learn.microsoft.com/en-us/power-pages/security/power-pages-security
+- **Entra External ID (CIAM) overview (MS Learn)**: https://learn.microsoft.com/en-us/entra/external-id/customers/overview-customers-ciam
+- **Create a user (Graph `POST /users`)**: https://learn.microsoft.com/en-us/graph/api/user-post-users
+- **Azure Static Web Apps configuration**: https://learn.microsoft.com/en-us/azure/static-web-apps/configuration
