@@ -343,9 +343,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     display: 'flex',
     alignItems: 'center',
-    // Clear separation between record NAME and record NUMBER / type tag (B11-1) —
-    // the prior XS (4px) gap read as cramped in UAT.
-    gap: tokens.spacingHorizontalS,
+    // Clear separation between record NAME and record NUMBER / type tag. W11 (B11-1)
+    // bumped XS→S; UAT R4 A12-3 increases to M (12px) — S still read as cramped.
+    gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
   recNum: {

@@ -84,7 +84,10 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    paddingBlock: tokens.spacingVerticalM,
+    // Asymmetric section padding (UAT R4 A12-1): reduced TOP (spacingVerticalS) so the
+    // title hugs the section boundary; fuller bottom retained for the version footer.
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalL,
   },
   // Card header doubles as the review-modal opener (the stray "open" icon was
@@ -97,17 +100,20 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
-  // Section title — OOB spec (UI-DESIGN-STANDARDS): fontSizeBase300 (14px) +
-  // fontWeightSemibold (600) + colorNeutralForeground1 (#242424) + 20px height +
-  // 4px vertical padding (spacingVerticalXS). Tokens only (ADR-021), theme-correct.
+  // Section title — UI-DESIGN-STANDARDS: fontSizeBase300 (14px) + fontWeightSemibold
+  // (600) + colorNeutralForeground1 (#242424) + 20px height. Refined asymmetric title
+  // padding (UAT R4 A12-1/A12-2, now the Spaarke convention): reduced TOP
+  // (spacingVerticalNone) so the title hugs the section top; increased BOTTOM
+  // (spacingVerticalM) for breathing room before the first row. Tokens only
+  // (ADR-021), theme-correct.
   sectionHeader: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     lineHeight: tokens.lineHeightBase300,
     minHeight: '20px',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalNone,
+    paddingBottom: tokens.spacingVerticalM,
   },
   grow: { flex: 1 },
   primaryRow: {
@@ -131,12 +137,13 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
-  // Why the primary record matched — shown subtly under the name on the collapsed card.
+  // Why the primary record matched — shown under the name on the collapsed card.
+  // UAT R4 A12-4: enlarged to row-text scale (fontSizeBase300) and de-italicized for
+  // legibility (was fontSizeBase100 italic, which read as too small).
   cardReason: {
     flexBasis: '100%',
     color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase100,
-    fontStyle: 'italic',
+    fontSize: tokens.fontSizeBase300,
   },
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
   // Flex column so the DialogBody fills the full surface height (B11-6) — the

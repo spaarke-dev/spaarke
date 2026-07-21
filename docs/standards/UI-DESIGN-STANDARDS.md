@@ -46,6 +46,42 @@ sectionHeader: {
 },
 ```
 
+### Title padding — asymmetric (refined 2026-07-21 by `email-communication-solution-r4` task 121, UAT R4 A12)
+
+A section title reads best **hugging the top of its section boundary** with **clear
+breathing room below it** before the first row. The convention is therefore
+**asymmetric**: little/no padding above the title, a fuller gap below it. Express both
+as Fluent tokens (ADR-021) — never raw px.
+
+| Property | Token | Resolves to (light) | Notes |
+|---|---|---|---|
+| Title padding top | `tokens.spacingVerticalNone` | `0px` | Title hugs the section top boundary |
+| Title padding bottom | `tokens.spacingVerticalM` | `12px` | Breathing room before the first row |
+| Section container top padding | `tokens.spacingVerticalS` | `8px` | Reduced (vs `spacingVerticalM`) so the title sits close to the section top |
+| Section container bottom padding | `tokens.spacingVerticalM` | `12px` | Retained for the footer / trailing content |
+
+**Rationale**: a symmetric title gap (equal above/below) wastes vertical space above
+the title and crowds the first row. The reference implementation applies
+`paddingTop: spacingVerticalNone` + `paddingBottom: spacingVerticalM` on the title
+element, inside a section container whose own `paddingTop` is reduced to
+`spacingVerticalS`.
+
+**Reference implementation**: `src/client/pcf/CommunicationConnections/` —
+`CommunicationConnectionsApp.tsx` (`sectionHeader` = title padding; `card` = section
+container padding).
+
+```ts
+// makeStyles — section header with asymmetric title padding
+sectionHeader: {
+  fontSize: tokens.fontSizeBase300,
+  fontWeight: tokens.fontWeightSemibold,
+  color: tokens.colorNeutralForeground1,
+  lineHeight: tokens.lineHeightBase300,
+  paddingTop: tokens.spacingVerticalNone,   // reduced top — hug the section boundary
+  paddingBottom: tokens.spacingVerticalM,    // increased bottom — space before first row
+},
+```
+
 ---
 
 ## List row
