@@ -161,9 +161,19 @@ describe('ComposeWorkspace — DEF-08 AI-drafted full-document seed', () => {
     expect(screen.queryByTestId('compose-empty-state')).not.toBeInTheDocument();
     expect(editorProps.initialHtml).toBe('<p>Inline drafted letter body.</p>');
 
-    // No compose-outputs fetch on the inline path.
-    const outputCalls = authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/compose-outputs'));
-    expect(outputCalls).toHaveLength(0);
+    // Item 6 (UAT round-4): Part B mounts the inline html DIRECTLY — no ledger fetch RESOLVES the body
+    // (asserted above via editorProps.initialHtml). The mount now also mints a document session id so a
+    // later "Draft alternative" materializes as a redline; that (harmlessly) arms the FR-04 read-only
+    // compose-outputs durability probe. So the only permitted compose-outputs traffic is a GET probe —
+    // never a body-resolving POST or a persistence/create/save call.
+    const nonGetOutputCalls = authenticatedFetchMock.mock.calls.filter(
+      ([u, init]) => String(u).includes('/compose-outputs') && init?.method && init.method !== 'GET'
+    );
+    expect(nonGetOutputCalls).toHaveLength(0);
+    const persistenceCalls = authenticatedFetchMock.mock.calls.filter(([u]) =>
+      ['create-on-save', '/save', '/upload', '/persist'].some(frag => String(u).includes(frag))
+    );
+    expect(persistenceCalls).toHaveLength(0);
   });
 
   it('surfaces an error (not a silent blank tab) when the drafted output is missing from the ledger', async () => {

@@ -38,6 +38,7 @@ import {
   anchoredAnnotationsToDocxAnnotations,
   anchoredAnnotationsToPriorAnchors,
   redlineMarksToDocxAnnotations,
+  selectSaveRedlineAnnotations,
   DocxTrackChangeKind,
 } from './useComposeWordShuttle';
 import { ComposeToolbar } from './ComposeToolbar';
@@ -302,5 +303,39 @@ describe('redlineMarksToDocxAnnotations — per-block split (Fix #1)', () => {
     const out = redlineMarksToDocxAnnotations(json, 'Spaarke AI', '2026-07-20T00:00:00Z');
 
     expect(out).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectSaveRedlineAnnotations — Item 3 (UAT round-4): no 422 on a zero-edit save
+// ---------------------------------------------------------------------------
+describe('selectSaveRedlineAnnotations (item 3 — zero-edit save must not persist unverified suggestions)', () => {
+  const REDLINES = [
+    { kind: DocxTrackChangeKind.Deletion, targetText: 'old', author: 'AI', date: '2026-07-21T00:00:00Z' },
+  ];
+
+  it('returns [] for a CLEAN save even when the doc carries passively-materialized AI redline marks', () => {
+    const getRedlineAnnotations = jest.fn(() => REDLINES);
+    const out = selectSaveRedlineAnnotations({ editorIsDirty: false, hasRedlines: true, getRedlineAnnotations });
+    expect(out).toEqual([]);
+    // The gate short-circuits BEFORE reading annotations — nothing to locate server-side, so no 422.
+    expect(getRedlineAnnotations).not.toHaveBeenCalled();
+  });
+
+  it('persists redline annotations once the user has ENGAGED the document (dirty + has redlines)', () => {
+    const out = selectSaveRedlineAnnotations({
+      editorIsDirty: true,
+      hasRedlines: true,
+      getRedlineAnnotations: () => REDLINES,
+    });
+    expect(out).toEqual(REDLINES);
+  });
+
+  it('returns [] when there are no redlines, regardless of dirty state', () => {
+    const getRedlineAnnotations = jest.fn(() => REDLINES);
+    expect(selectSaveRedlineAnnotations({ editorIsDirty: true, hasRedlines: false, getRedlineAnnotations })).toEqual(
+      []
+    );
+    expect(getRedlineAnnotations).not.toHaveBeenCalled();
   });
 });

@@ -212,6 +212,36 @@ describe('resolveTargetSpans (whitespace-tolerant fallback — Fix #4)', () => {
     if (r.ok) expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('beta');
     editor.destroy();
   });
+
+  // Item 1 (UAT round-4): invisible/zero-width chars leak into flattened editor text and defeat an
+  // otherwise-exact match. The tolerant pass strips them (both sides) so the match survives.
+  it('matches through a ZERO-WIDTH SPACE (U+200B) sitting inside the doc text', () => {
+    const editor = makeEditor('<p>the quick​brown fox</p>'); // zero-width space mid-word-boundary
+    const r = resolveTargetSpans(editor, 'quickbrown', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('matches through a SOFT HYPHEN (U+00AD) in the doc against a target without it', () => {
+    const editor = makeEditor('<p>the co­operation clause</p>'); // soft-hyphenated "cooperation"
+    const r = resolveTargetSpans(editor, 'cooperation', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('a zero-width char in the TARGET is stripped too (both sides normalized)', () => {
+    const editor = makeEditor('<p>indemnification obligations</p>');
+    const r = resolveTargetSpans(editor, 'indemnif​ication', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('a genuine paraphrase is STILL refused even with the invisible-strip (do-not-guess preserved)', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>');
+    const r = resolveTargetSpans(editor, 'the​ nimble brown fox', 'strict');
+    expect(r).toMatchObject({ ok: false, kind: 'not_found' });
+    editor.destroy();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -335,6 +365,46 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
     expect(statuses[1]).toBe('not_found');
     expect(result.current.pending).toHaveLength(1);
     expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    editor.destroy();
+  });
+
+  it('item 1: reports BATCHED failed/total counts when several targets cannot be placed', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    let statuses: string[] = [];
+    act(() => {
+      statuses = result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift' }, // places
+          { target_text: 'absent-one', new_text: 'x' }, // fails
+          { target_text: 'absent-two', new_text: 'y' }, // fails
+        ],
+        BASE
+      );
+    });
+
+    expect(statuses).toEqual(['applied', 'not_found', 'not_found']);
+    // The banner drives off failedCount/totalCount → "2 of 3 couldn't be placed" (calm, batched).
+    expect(result.current.error).toMatchObject({ kind: 'not_found', failedCount: 2, totalCount: 3 });
+    editor.destroy();
+  });
+
+  it('item 1: no batched error when every target places (error stays null)', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift' },
+          { target_text: 'brown', new_text: 'auburn' },
+        ],
+        BASE
+      );
+    });
+
+    expect(result.current.error).toBeNull();
     editor.destroy();
   });
 });
@@ -1125,7 +1195,8 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     });
 
     const banner = await screen.findByTestId('compose-redline-error');
-    expect(banner).toHaveTextContent(/not found/i);
+    // Item 1 (UAT round-4): softened, non-alarming copy — the document is fully usable regardless.
+    expect(banner).toHaveTextContent(/couldn't be placed automatically/i);
     // Nothing was rendered as a pending suggestion.
     expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
   });

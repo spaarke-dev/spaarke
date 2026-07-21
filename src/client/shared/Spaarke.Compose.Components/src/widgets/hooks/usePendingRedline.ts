@@ -132,6 +132,15 @@ export interface PendingRedlineError {
   /** Tier 3 — the target snippet; shown truncated in UI, never logged. */
   targetText: string;
   matchCount: number;
+  /**
+   * Item 1 (UAT round-4): for a whole-document change list (materializeMany), how many edits could
+   * NOT be placed and how many were attempted. Lets the banner surface a CALM batched summary
+   * ("N of M suggestions couldn't be placed automatically") instead of an alarming single-edit
+   * message when a table-heavy / cross-extractor document leaves several exact-but-cross-cell targets
+   * unplaceable. Absent (undefined) for the single-materialize path, which keeps its one-edit copy.
+   */
+  failedCount?: number;
+  totalCount?: number;
 }
 
 export interface UsePendingRedlineResult {
@@ -218,9 +227,25 @@ const MATCH_FOLD: Readonly<Record<string, string>> = {
   '−': '-',
 };
 
+/**
+ * Item 1 (UAT round-4): invisible / zero-width characters that carry NO visible glyph and are NEVER
+ * present in a model-authored `target_text`, but DO leak into mammoth-flattened editor text (and into
+ * some source docs — e.g. copy-pasted patent boilerplate). Stripped in the TOLERANT fallback pass only
+ * (dropping them is non-1:1, so it stays out of the precise 1:1 pass). Zero-width space (U+200B),
+ * zero-width no-break space / BOM (U+FEFF), soft hyphen (U+00AD), word joiner (U+2060), zero-width
+ * non-joiner/joiner (U+200C/U+200D). A single such char on one side otherwise defeats an exact match.
+ */
+const INVISIBLE_STRIP = /[\u200B\u200C\u200D\u2060\uFEFF\u00AD]/g;
+
 /** Fold one character to its match-normal form (1:1). */
 function normalizeChar(ch: string): string {
   return MATCH_FOLD[ch] ?? ch;
+}
+
+/** True for an invisible/zero-width char {@link INVISIBLE_STRIP} drops in the tolerant pass. */
+function isInvisibleStrip(ch: string): boolean {
+  const c = ch.charCodeAt(0);
+  return c === 0x200b || c === 0x200c || c === 0x200d || c === 0x2060 || c === 0xfeff || c === 0x00ad;
 }
 
 /** Fold a string per-code-unit with {@link normalizeChar} — same iteration granularity as buildCharIndex. */
@@ -288,6 +313,13 @@ function collapseWhitespaceIndex(raw: { text: string; positions: number[] }): { 
       chars.push(c);
       positions.push(raw.positions[i]);
       inRun = false;
+    } else if (isInvisibleStrip(c)) {
+      // Item 1 (UAT round-4): drop zero-width / soft-hyphen chars entirely (non-1:1, tolerant-pass
+      // only). They carry no glyph and are absent from model targets, but leak into flattened editor
+      // text — a single one otherwise defeats an exact match. Dropping keeps every RETAINED char's
+      // real PM position, so matched span endpoints stay exact. Does NOT touch `inRun` (an invisible
+      // between two spaces must not un-collapse the surrounding whitespace run).
+      continue;
     } else if (/\s/.test(c)) {
       if (inRun) continue;
       chars.push(' ');
@@ -308,7 +340,9 @@ function findTargetMatches(editor: Editor, targetText: string, collapseWhitespac
   const raw = buildCharIndex(editor);
   const { text, positions } = collapseWhitespace ? collapseWhitespaceIndex(raw) : raw;
   const needle = collapseWhitespace
-    ? normalizeForMatch(targetText).replace(/\s+/g, ' ').trim()
+    ? // Item 1: mirror collapseWhitespaceIndex — strip invisibles, THEN collapse whitespace, so a
+      // target carrying (or missing) a zero-width/soft-hyphen char still matches the collapsed view.
+      normalizeForMatch(targetText).replace(INVISIBLE_STRIP, '').replace(/\s+/g, ' ').trim()
     : normalizeForMatch(targetText);
   if (!needle) return [];
 
@@ -732,7 +766,11 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
 
       const statuses: MaterializeStatus[] = [];
       const newPending: PendingRedline[] = [];
-      let firstError: PendingRedlineError | null = null;
+      // Item 1 (UAT round-4): collect unplaceable target-bearing edits so the banner can surface a calm
+      // batched summary (N of M) rather than a single alarming per-edit message. An array (vs a closure-
+      // assigned `let`) keeps the type narrowable after the forEach.
+      const failures: PendingRedlineError[] = [];
+      let targetedCount = 0;
 
       edits.forEach((payload, i) => {
         // Sub-key per change so per-change on-click accept/reject stays granular (DEF-12), while the
@@ -767,13 +805,12 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
 
         // resolveTargetSpans re-reads the CURRENT doc, so it already accounts for earlier edits'
         // struck (still-present) originals + appended insertions — positions stay valid per edit.
+        targetedCount += 1;
         const matchMode = normalizeMatchMode(payload?.match_mode);
         const resolved = resolveTargetSpans(editor, targetText, matchMode);
         if (!resolved.ok) {
-          // FR-19 "do not guess": skip this one, surface the first unresolved target, keep going.
-          if (!firstError) {
-            firstError = { ledgerRef: subRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount };
-          }
+          // FR-19 "do not guess": skip this one, record the failure, keep going.
+          failures.push({ ledgerRef: subRef, kind: resolved.kind, targetText, matchCount: resolved.matchCount });
           statuses.push(resolved.kind);
           return;
         }
@@ -800,7 +837,10 @@ export function usePendingRedline(editor: Editor | null): UsePendingRedlineResul
         statuses.push('applied');
       });
 
-      setError(firstError);
+      // Item 1: surface the FIRST failure with batched counts so the banner can say "N of M couldn't be
+      // placed" calmly (array access → cleanly narrowable type, unlike a closure-assigned `let`).
+      const firstFailure = failures[0];
+      setError(firstFailure ? { ...firstFailure, failedCount: failures.length, totalCount: targetedCount } : null);
       setPending(prev => {
         const kept = prev.filter(p => !superseded.some(s => s.ledgerRef === p.ledgerRef));
         return [...kept, ...newPending];

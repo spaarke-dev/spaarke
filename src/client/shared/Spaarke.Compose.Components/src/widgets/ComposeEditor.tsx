@@ -1814,11 +1814,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             by usePendingRedline; semantic tokens only (ADR-021 dark-mode).
             =================================================================== */}
         {redline.error ? (
-          <div className={styles.redlineError} role="alert" data-testid="compose-redline-error">
+          <div className={styles.redlineError} role="status" data-testid="compose-redline-error">
             <Text size={200} className={styles.redlineErrorText}>
+              {/* Item 1 (UAT round-4): a table-heavy / cross-extractor document can leave several
+                  exact-but-cross-cell targets unplaceable. Prefer a CALM batched summary (N of M)
+                  over an alarming single-edit "not found" — the document is fully usable regardless.
+                  `ambiguous` keeps its actionable reselect guidance. */}
               {redline.error.kind === 'ambiguous'
-                ? `Couldn't place this suggested edit: its target text appears ${redline.error.matchCount} times in the document. Reselect the exact passage and try again.`
-                : `Couldn't place this suggested edit: its target text was not found in the current document.`}
+                ? `This suggested edit matches ${redline.error.matchCount} places in the document. Select the exact passage and try again.`
+                : (redline.error.failedCount ?? 0) > 1
+                  ? `${redline.error.failedCount} of ${redline.error.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                  : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
             </Text>
             <Button
               size="small"
