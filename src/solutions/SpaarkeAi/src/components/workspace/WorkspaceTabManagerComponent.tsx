@@ -33,7 +33,6 @@ import {
 import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
-  DismissCircle16Regular,
   DismissCircle16Filled,
   WarningRegular,
 } from "@fluentui/react-icons";
@@ -602,30 +601,30 @@ export function WorkspaceTabManagerComponent({
                     </span>
                   )}
 
-                  <Tooltip
-                    content={`Close ${tab.displayName}`}
-                    relationship="label"
-                    positioning="below"
-                  >
-                    <Button
-                      className={mergeClasses(
-                        styles.closeButton,
-                        isSelected && styles.closeButtonSelected,
-                      )}
-                      appearance="subtle"
-                      icon={
-                        isSelected ? (
-                          <DismissCircle16Filled />
-                        ) : (
-                          <DismissCircle16Regular />
-                        )
-                      }
-                      size="small"
-                      aria-label={`Close ${tab.displayName}`}
-                      data-testid={`workspace-tab-close-${tab.id}`}
-                      onClick={(e) => handleCloseClick(e, tab.id)}
-                    />
-                  </Tooltip>
+                  {/* UAT 2026-07-21: the close affordance shows ONLY on the
+                      active tab — inactive tabs render no × (activate first to
+                      close). The glyph is a filled brand circle to match the
+                      blue active-tab label. */}
+                  {isSelected ? (
+                    <Tooltip
+                      content={`Close ${tab.displayName}`}
+                      relationship="label"
+                      positioning="below"
+                    >
+                      <Button
+                        className={mergeClasses(
+                          styles.closeButton,
+                          styles.closeButtonSelected,
+                        )}
+                        appearance="subtle"
+                        icon={<DismissCircle16Filled />}
+                        size="small"
+                        aria-label={`Close ${tab.displayName}`}
+                        data-testid={`workspace-tab-close-${tab.id}`}
+                        onClick={(e) => handleCloseClick(e, tab.id)}
+                      />
+                    </Tooltip>
+                  ) : null}
                 </div>
               </Tab>
             );

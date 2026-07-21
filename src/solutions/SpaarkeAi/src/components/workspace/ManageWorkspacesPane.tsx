@@ -199,11 +199,10 @@ import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilt
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  // UAT 2026-07-20: reduce the side pane width a little (Fluent `size="medium"`
-  // is ~592px). Overriding `width` on the surface wins over the size-derived
-  // default width.
+  // UAT 2026-07-21: standard Power Apps side-pane width (400px). Overriding
+  // `width` on the surface wins over the Fluent size-derived default width.
   drawer: {
-    width: "520px",
+    width: "400px",
   },
   drawerBody: {
     paddingTop: tokens.spacingVerticalS,
@@ -333,7 +332,17 @@ const useStyles = makeStyles({
   defaultBadge: {
     flexShrink: 0,
   },
+  // UAT 2026-07-21: the footer divider line runs the FULL pane width. The
+  // border-top lives on this full-bleed wrapper (no horizontal padding); the
+  // buttons are padded by `footerInner` inside it, so the line reaches both
+  // edges while the buttons stay inset.
   footer: {
+    flexShrink: 0,
+    borderTopStyle: "solid",
+    borderTopWidth: "1px",
+    borderTopColor: tokens.colorNeutralStroke2,
+  },
+  footerInner: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -342,13 +351,9 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderTopStyle: "solid",
-    borderTopWidth: "1px",
-    borderTopColor: tokens.colorNeutralStroke2,
-    flexShrink: 0,
   },
   // Right-aligned button cluster (+ New, Save). Cancel sits at the left edge
-  // via the footer's space-between; this group holds the two right buttons.
+  // via footerInner's space-between; this group holds the two right buttons.
   footerRight: {
     display: "flex",
     alignItems: "center",
@@ -1312,41 +1317,43 @@ export const ManageWorkspacesPane: React.FC<ManageWorkspacesPaneProps> = ({
          * create wizard; Save reconciles the open tabs against the pinned
          * list; Cancel and Save both close the drawer. */}
         <div className={styles.footer}>
-          <Tooltip
-            content="Close without opening pinned workspaces."
-            relationship="description"
-          >
-            <Button
-              appearance="secondary"
-              onClick={handleCancel}
-              data-testid="manage-workspaces-cancel"
-            >
-              Cancel
-            </Button>
-          </Tooltip>
-          <div className={styles.footerRight}>
-            <Tooltip content="Create a new workspace." relationship="description">
-              <Button
-                appearance="secondary"
-                icon={<AddRegular />}
-                onClick={() => void handleNew()}
-                data-testid="manage-workspaces-new"
-              >
-                New
-              </Button>
-            </Tooltip>
+          <div className={styles.footerInner}>
             <Tooltip
-              content="Apply changes and open pinned workspaces."
+              content="Close without opening pinned workspaces."
               relationship="description"
             >
               <Button
-                appearance="primary"
-                onClick={handleSave}
-                data-testid="manage-workspaces-save"
+                appearance="secondary"
+                onClick={handleCancel}
+                data-testid="manage-workspaces-cancel"
               >
-                Save
+                Cancel
               </Button>
             </Tooltip>
+            <div className={styles.footerRight}>
+              <Tooltip content="Create a new workspace." relationship="description">
+                <Button
+                  appearance="secondary"
+                  icon={<AddRegular />}
+                  onClick={() => void handleNew()}
+                  data-testid="manage-workspaces-new"
+                >
+                  New
+                </Button>
+              </Tooltip>
+              <Tooltip
+                content="Apply changes and open pinned workspaces."
+                relationship="description"
+              >
+                <Button
+                  appearance="primary"
+                  onClick={handleSave}
+                  data-testid="manage-workspaces-save"
+                >
+                  Save
+                </Button>
+              </Tooltip>
+            </div>
           </div>
         </div>
       </OverlayDrawer>
