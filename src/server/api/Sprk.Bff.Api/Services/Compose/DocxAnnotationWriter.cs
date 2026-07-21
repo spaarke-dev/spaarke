@@ -164,8 +164,8 @@ public sealed class DocxAnnotationWriter
 
         private void ApplyComment(DocxAnnotation annotation)
         {
-            var (paragraph, matchStart) = LocateTarget(annotation.TargetText!);
-            var matched = IsolateRange(paragraph, matchStart, annotation.TargetText!.Length);
+            var (paragraph, matchStart, matchLength) = LocateTarget(annotation.TargetText!);
+            var matched = IsolateRange(paragraph, matchStart, matchLength);
             var first = matched[0];
             var last = matched[^1];
 
@@ -228,8 +228,8 @@ public sealed class DocxAnnotationWriter
             }
 
             // Anchored insertion: place the tracked insertion immediately AFTER the located anchor.
-            var (paragraph, matchStart) = LocateTarget(annotation.TargetText);
-            var matched = IsolateRange(paragraph, matchStart, annotation.TargetText.Length);
+            var (paragraph, matchStart, matchLength) = LocateTarget(annotation.TargetText);
+            var matched = IsolateRange(paragraph, matchStart, matchLength);
             matched[^1].InsertAfterSelf(ins);
         }
 
@@ -237,8 +237,8 @@ public sealed class DocxAnnotationWriter
 
         private void ApplyDeletion(DocxAnnotation annotation)
         {
-            var (paragraph, matchStart) = LocateTarget(annotation.TargetText!);
-            var matched = IsolateRange(paragraph, matchStart, annotation.TargetText!.Length);
+            var (paragraph, matchStart, matchLength) = LocateTarget(annotation.TargetText!);
+            var matched = IsolateRange(paragraph, matchStart, matchLength);
 
             foreach (var run in matched)
             {
@@ -313,7 +313,7 @@ public sealed class DocxAnnotationWriter
         /// match within the paragraph's run text. Upstream FR-19 validation guarantees an
         /// unambiguous target; this writer resolves the first occurrence deterministically.
         /// </summary>
-        private (Paragraph Paragraph, int MatchStart) LocateTarget(string target)
+        private (Paragraph Paragraph, int MatchStart, int MatchLength) LocateTarget(string target)
         {
             // C1 fix (UAT 2026-07-20): match through the SAME 1:1 typographic fold the client uses
             // (ComposeTextFold / MATCH_FOLD). Word/DOCX text carries curly quotes / NBSP / typographic
@@ -321,7 +321,7 @@ public sealed class DocxAnnotationWriter
             // may fold on paste); an EXACT ordinal search then misses by a single character and surfaces as
             // a 422 "tracked change could not be located". The fold is 1:1 (one char in → one out), so the
             // match offset in the folded text is IDENTICAL to the offset in the original run text — run
-            // isolation (IsolateRange/SplitRunAtOffset) is unaffected, and target.Length is unchanged.
+            // isolation (IsolateRange/SplitRunAtOffset) is unaffected, and the match length equals target.Length.
             var foldedTarget = ComposeTextFold.Fold(target);
             foreach (var paragraph in _body.Descendants<Paragraph>())
             {
@@ -329,13 +329,80 @@ public sealed class DocxAnnotationWriter
                 var index = ComposeTextFold.Fold(text).IndexOf(foldedTarget, StringComparison.Ordinal);
                 if (index >= 0)
                 {
-                    return (paragraph, index);
+                    return (paragraph, index, foldedTarget.Length);
+                }
+            }
+
+            // Durable fix (UAT round-4, items 1/3): a WHITESPACE-COLLAPSED fallback, run only after the
+            // precise 1:1 pass missed — the server twin of the client's Fix #4 whitespace-tolerant pass.
+            // The model authors target_text against the Document-Intelligence extraction while the paragraph
+            // text comes from a different flattening; the two normalize spacing/line-breaks differently, so
+            // a byte-verbatim-but-for-whitespace target defeats the ordinal search and 422s even though it
+            // is genuinely present. Collapse whitespace runs on BOTH sides, match, then MAP the collapsed
+            // offsets back to ORIGINAL run-text offsets so IsolateRange/SplitRunAtOffset stay exact. The
+            // ORIGINAL matched span length (returned as MatchLength) differs from target.Length here — the
+            // callers isolate over MatchLength, not target.Length. A genuine paraphrase still finds nothing
+            // in either pass → the FR-19 "do not guess" refusal is preserved (whitespace, never wording).
+            var collapsedTarget = CollapseWhitespace(foldedTarget, out _).Trim();
+            if (collapsedTarget.Length > 0)
+            {
+                foreach (var paragraph in _body.Descendants<Paragraph>())
+                {
+                    var foldedText = ComposeTextFold.Fold(GetParagraphText(paragraph));
+                    var collapsedText = CollapseWhitespace(foldedText, out var indexMap);
+                    var idx = collapsedText.IndexOf(collapsedTarget, StringComparison.Ordinal);
+                    if (idx >= 0)
+                    {
+                        // Map the collapsed [idx, idx+len) span back to original run-text offsets. The last
+                        // collapsed char is a non-space (collapsedTarget is trimmed), so map[last]+1 is the
+                        // exact original end — no trailing-whitespace-run ambiguity.
+                        var originalStart = indexMap[idx];
+                        var originalEnd = indexMap[idx + collapsedTarget.Length - 1] + 1;
+                        return (paragraph, originalStart, originalEnd - originalStart);
+                    }
                 }
             }
 
             throw new DocxAnnotationException(
                 DocxAnnotationErrorKind.TargetNotFound,
                 $"Annotation target text was not found in the document: \"{Truncate(target)}\".");
+        }
+
+        /// <summary>
+        /// Collapses each run of whitespace to a single space and returns the collapsed string plus an
+        /// index map: <c>indexMap[collapsedIndex]</c> is the ORIGINAL index (into <paramref name="folded"/>)
+        /// of that retained character — for a collapsed space, the FIRST char of the whitespace run. Lets a
+        /// whitespace-collapsed match be mapped back to exact original run-text offsets for run isolation.
+        /// </summary>
+        private static string CollapseWhitespace(string folded, out int[] indexMap)
+        {
+            var sb = new System.Text.StringBuilder(folded.Length);
+            var map = new List<int>(folded.Length);
+            var inRun = false;
+            for (var i = 0; i < folded.Length; i++)
+            {
+                var c = folded[i];
+                if (char.IsWhiteSpace(c))
+                {
+                    if (inRun)
+                    {
+                        continue;
+                    }
+
+                    sb.Append(' ');
+                    map.Add(i);
+                    inRun = true;
+                }
+                else
+                {
+                    sb.Append(c);
+                    map.Add(i);
+                    inRun = false;
+                }
+            }
+
+            indexMap = map.ToArray();
+            return sb.ToString();
         }
 
         /// <summary>
