@@ -4,7 +4,7 @@
     <title>Deploy Phase 4 surfaces — right-pane PCF + standalone code page + sprk_communicationspage + web-resource (Matter pilot)</title>
     <phase>4 Surfaces</phase>
     <gate>Deploy gate — surfaces load in target env; PCF versions bumped</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment/orchestration task (build + pack + import); no new source logic. Prescriptive sequence; verification-focused.</rigor-reason>
     <model-tier>sonnet</model-tier>
