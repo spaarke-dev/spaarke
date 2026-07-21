@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Azure.SignalR.Management;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Notifications.Envelopes;
 
 namespace Sprk.Bff.Api.Services.Notifications;
@@ -73,29 +74,41 @@ public class SignalRDeliveryService
     private readonly Lazy<Task<ServiceHubContext>> _lazyHub;
 
     /// <summary>
+    /// Resolves the recipient's Dataverse <c>systemuserid</c> to the Azure AD <c>oid</c> that
+    /// <see cref="NegotiateAsync"/> registered the connection under (the SignalR user identity). Null on
+    /// the Null-Object path (which overrides <see cref="PingUserAsync"/> to a pure no-op and never uses it).
+    /// </summary>
+    private readonly ISystemUserIdentityResolver? _identityResolver;
+
+    /// <summary>
     /// Production ctor. Builds the Serverless <see cref="ServiceHubContext"/> lazily from
     /// <paramref name="options"/> on first ping/negotiate — never at construction/startup.
     /// </summary>
     public SignalRDeliveryService(
         IOptions<SignalRDeliveryOptions> options,
+        ISystemUserIdentityResolver identityResolver,
         ILoggerFactory loggerFactory)
     {
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identityResolver);
         ArgumentNullException.ThrowIfNull(loggerFactory);
 
         var opts = options.Value;
+        _identityResolver = identityResolver;
         _logger = loggerFactory.CreateLogger<SignalRDeliveryService>();
         _lazyHub = new Lazy<Task<ServiceHubContext>>(() => BuildHubContextAsync(opts));
     }
 
     /// <summary>
-    /// ADR-032 Null-Object / test-double ctor — minimal deps (logger only), per ADR-032
-    /// "keep Null-Object constructors minimal". The lazy hub is unusable and never reached because
-    /// the Null-Object overrides every entrypoint; a test double overrides
-    /// <see cref="GetHubContextAsync"/> to supply a boundary double.
+    /// ADR-032 Null-Object / test-double ctor — minimal deps, per ADR-032 "keep Null-Object constructors
+    /// minimal". The lazy hub is unusable and never reached because the Null-Object overrides every
+    /// entrypoint; a test double overrides <see cref="GetHubContextAsync"/> to supply a boundary double and
+    /// supplies a resolver double so the real <see cref="PingUserAsync"/> logic runs. The Null-Object passes
+    /// <paramref name="identityResolver"/> as <c>null</c> (it does not resolve — its ping is a pure no-op).
     /// </summary>
-    protected SignalRDeliveryService(ILogger<SignalRDeliveryService> logger)
+    protected SignalRDeliveryService(ISystemUserIdentityResolver? identityResolver, ILogger<SignalRDeliveryService> logger)
     {
+        _identityResolver = identityResolver;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _lazyHub = new Lazy<Task<ServiceHubContext>>(() =>
             Task.FromException<ServiceHubContext>(new InvalidOperationException(
@@ -103,27 +116,44 @@ public class SignalRDeliveryService
     }
 
     /// <summary>
-    /// Sends an at-most-once, signal-only ping to <paramref name="userOid"/> (targeting
-    /// <c>Clients.User(oid)</c>) AFTER the caller has durably written outbox row
-    /// <paramref name="outboxRowId"/>. Best-effort: a delivery failure is logged and swallowed
-    /// (the outbox + poll fallback carry the durable truth). Requiring <paramref name="outboxRowId"/>
-    /// makes the write-before-ping ordering structural (spec MUST rule).
+    /// Sends an at-most-once, signal-only ping to the recipient identified by their Dataverse
+    /// <paramref name="recipientSystemUserId"/> (the outbox <c>OwnerId</c>) AFTER the caller has durably
+    /// written outbox row <paramref name="outboxRowId"/>. The <c>systemuserid</c> is resolved to the Azure
+    /// AD <c>oid</c> that the negotiate endpoint registered the connection under (via
+    /// <see cref="ISystemUserIdentityResolver"/>, cached), then dispatched to <c>Clients.User(oid)</c>.
+    /// When the recipient has no AAD mapping the ping is a quiet no-op (the outbox + poll fallback carry the
+    /// durable truth). Best-effort: a delivery failure is logged and swallowed. Requiring
+    /// <paramref name="outboxRowId"/> makes the write-before-ping ordering structural (spec MUST rule).
     /// </summary>
     /// <param name="outboxRowId">The <c>sprk_notificationoutbox</c> row id returned by the producer's prior write. MUST be non-empty.</param>
-    /// <param name="userOid">The target user's Azure AD object id (oid) — the SignalR user identity the negotiate endpoint registered the connection under.</param>
+    /// <param name="recipientSystemUserId">The recipient's Dataverse <c>systemuserid</c> (== the outbox row's <c>OwnerId</c>). Resolved server-side to the target oid.</param>
     /// <param name="kind">The closed notification kind discriminator.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="ArgumentException"><paramref name="outboxRowId"/> is empty (ping-before-write) or <paramref name="userOid"/> is blank.</exception>
-    public virtual async Task PingUserAsync(Guid outboxRowId, string userOid, NotificationKind kind, CancellationToken ct = default)
+    /// <exception cref="ArgumentException"><paramref name="outboxRowId"/> is empty (ping-before-write).</exception>
+    public virtual async Task PingUserAsync(Guid outboxRowId, Guid recipientSystemUserId, NotificationKind kind, CancellationToken ct = default)
     {
         RequireWrittenRow(outboxRowId);
-        RequireOid(userOid);
+
+        // Resolve systemuserid → oid (the SignalR user identity negotiate registered). Producers key by the
+        // durable outbox OwnerId (systemuserid); SignalR connections are keyed by the JWT oid.
+        var oid = await _identityResolver!.ResolveOidAsync(recipientSystemUserId, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(oid))
+        {
+            // No AAD mapping (unmapped/disabled user, or empty recipient) — quiet no-op. The outbox row is
+            // the durable truth and task 022's poll fallback delivers it; a missing live signal is not
+            // caller-visible error state (NFR-04).
+            _logger.LogInformation(
+                "SignalR user-ping skipped: recipient systemuserid {RecipientSystemUserId} has no Azure AD oid mapping " +
+                "(quiet no-op; outbox row {OutboxRowId} + poll fallback carry the durable truth).",
+                recipientSystemUserId, outboxRowId);
+            return;
+        }
 
         var signal = new NotificationSignal(outboxRowId, kind);
         try
         {
             var hub = await GetHubContextAsync(ct).ConfigureAwait(false);
-            await hub.Clients.User(userOid).SendAsync(SignalMethod, signal, ct).ConfigureAwait(false);
+            await hub.Clients.User(oid).SendAsync(SignalMethod, signal, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -240,12 +270,12 @@ public class SignalRDeliveryService
 internal sealed class NullSignalRDeliveryService : SignalRDeliveryService
 {
     public NullSignalRDeliveryService(ILogger<SignalRDeliveryService> logger)
-        : base(logger)
+        : base(null, logger)
     {
     }
 
-    /// <summary>P2 quiet no-op — the outbox + poll fallback carry the durable truth.</summary>
-    public override Task PingUserAsync(Guid outboxRowId, string userOid, NotificationKind kind, CancellationToken ct = default)
+    /// <summary>P2 quiet no-op — the outbox + poll fallback carry the durable truth. Does NOT resolve identity.</summary>
+    public override Task PingUserAsync(Guid outboxRowId, Guid recipientSystemUserId, NotificationKind kind, CancellationToken ct = default)
         => Task.CompletedTask;
 
     /// <summary>P2 quiet no-op — the outbox + poll fallback carry the durable truth.</summary>

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Notifications;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -21,6 +22,15 @@ public static class NotificationsModule
     {
         // Bind options so IOptions<SignalRDeliveryOptions> is available to the real service.
         services.Configure<SignalRDeliveryOptions>(configuration.GetSection(SignalRDeliveryOptions.SectionName));
+
+        // Shared bidirectional systemuserid ⇄ oid resolver (ADR-028 cross-reference; CLAUDE.md §11
+        // consolidation point). Registered UNCONDITIONALLY as a Singleton — it wraps the singleton
+        // IDataverseService + IDistributedCache and is injected into the singleton SignalRDeliveryService
+        // (real impl) and, later, the poll endpoint (task 022). Concrete class behind an interface is
+        // justified: multiple independent consumers need BOTH lookup directions from one cached service.
+        // ADR-010 home: this module owns the delivery leg, whose real SignalRDeliveryService is the first
+        // consumer, so the resolver is registered alongside it.
+        services.AddSingleton<ISystemUserIdentityResolver, SystemUserIdentityResolver>();
 
         // Config-driven kill-switch (ADR-032): read the section point-in-time to decide which impl to
         // register. Absent connection string OR Enabled=false ⇒ Null-Object.

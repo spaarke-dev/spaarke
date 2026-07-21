@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Notifications;
 using Sprk.Bff.Api.Services.Notifications.Envelopes;
 using Xunit;
@@ -67,9 +68,12 @@ public sealed class SignalRDeliverySeamTests
         // so the ping is issued with a genuinely post-write row id (write-before-ping vertical slice).
         var store = new FakeGenericEntityService();
         var outbox = BuildOutbox(store);
-        var userId = Guid.NewGuid();
-        var userOid = Guid.NewGuid().ToString();
+        var userId = Guid.NewGuid();               // the recipient's Dataverse systemuserid (outbox OwnerId)
+        var userOid = Guid.NewGuid().ToString();   // the Azure AD oid the resolver maps it to
         var outboxRowId = await outbox.WriteAsync(userId, NotificationKind.CommunicationArrived, BuildEnvelope());
+
+        // The resolver maps the recipient's systemuserid → the oid SignalR is keyed by (ADR-028).
+        var resolver = ResolverMapping(userId, userOid);
 
         // Doubled ServiceHubContext boundary — captures what the real service dispatches.
         string? targetedUser = null;
@@ -91,10 +95,10 @@ public sealed class SignalRDeliverySeamTests
         var hub = new Mock<IServiceHubContext>();
         hub.Setup(h => h.Clients).Returns(hubClients.Object);
 
-        var sut = new BoundaryDoubleDeliveryService(hub.Object);
+        var sut = new BoundaryDoubleDeliveryService(hub.Object, resolver);
 
-        // Act — ping AFTER the write, passing the post-write outbox row id.
-        await sut.PingUserAsync(outboxRowId, userOid, NotificationKind.CommunicationArrived);
+        // Act — ping AFTER the write, passing the recipient systemuserid (resolved server-side to the oid).
+        await sut.PingUserAsync(outboxRowId, userId, NotificationKind.CommunicationArrived);
 
         // Assert — dispatched at-most-once to Clients.User(oid) with the signal-only payload.
         targetedUser.Should().Be(userOid, "delivery must target the caller's own oid");
@@ -121,9 +125,11 @@ public sealed class SignalRDeliverySeamTests
     {
         // The write-before-ping ordering is STRUCTURAL: a caller cannot ping without a post-write row id.
         var hub = new Mock<IServiceHubContext>(MockBehavior.Strict); // Strict → any dispatch would fail the test.
-        var sut = new BoundaryDoubleDeliveryService(hub.Object);
+        // Strict resolver too — the write-before-ping guard must throw BEFORE any identity resolution.
+        var resolver = new Mock<ISystemUserIdentityResolver>(MockBehavior.Strict).Object;
+        var sut = new BoundaryDoubleDeliveryService(hub.Object, resolver);
 
-        var act = async () => await sut.PingUserAsync(Guid.Empty, Guid.NewGuid().ToString(), NotificationKind.CommunicationArrived);
+        var act = async () => await sut.PingUserAsync(Guid.Empty, Guid.NewGuid(), NotificationKind.CommunicationArrived);
 
         await act.Should().ThrowAsync<ArgumentException>().WithParameterName("outboxRowId");
     }
@@ -147,7 +153,7 @@ public sealed class SignalRDeliverySeamTests
             .Returns(clientProxy.Object);
         var hub = new Mock<IServiceHubContext>();
         hub.Setup(h => h.Clients).Returns(hubClients.Object);
-        var sut = new BoundaryDoubleDeliveryService(hub.Object);
+        var sut = new BoundaryDoubleDeliveryService(hub.Object, Mock.Of<ISystemUserIdentityResolver>());
 
         await sut.PingGroupAsync(outboxRowId, "thread:abc", NotificationKind.CommunicationArrived);
 
@@ -161,7 +167,11 @@ public sealed class SignalRDeliverySeamTests
         // Best-effort at-most-once: a transient SignalR failure must NOT fail the producer's own path.
         var store = new FakeGenericEntityService();
         var outbox = BuildOutbox(store);
-        var outboxRowId = await outbox.WriteAsync(Guid.NewGuid(), NotificationKind.CommunicationArrived, BuildEnvelope());
+        var recipientId = Guid.NewGuid();
+        var outboxRowId = await outbox.WriteAsync(recipientId, NotificationKind.CommunicationArrived, BuildEnvelope());
+
+        // Recipient IS mapped (so dispatch is attempted and the transient failure is what gets swallowed).
+        var resolver = ResolverMapping(recipientId, Guid.NewGuid().ToString());
 
         var clientProxy = new Mock<IClientProxy>();
         clientProxy
@@ -171,9 +181,9 @@ public sealed class SignalRDeliverySeamTests
         hubClients.Setup(c => c.User(It.IsAny<string>())).Returns(clientProxy.Object);
         var hub = new Mock<IServiceHubContext>();
         hub.Setup(h => h.Clients).Returns(hubClients.Object);
-        var sut = new BoundaryDoubleDeliveryService(hub.Object);
+        var sut = new BoundaryDoubleDeliveryService(hub.Object, resolver);
 
-        var act = async () => await sut.PingUserAsync(outboxRowId, Guid.NewGuid().ToString(), NotificationKind.CommunicationArrived);
+        var act = async () => await sut.PingUserAsync(outboxRowId, recipientId, NotificationKind.CommunicationArrived);
 
         await act.Should().NotThrowAsync("a live-signal failure is not caller-visible error state (NFR-04)");
     }
@@ -193,9 +203,35 @@ public sealed class SignalRDeliverySeamTests
 
         SignalRDeliveryService nullService = new NullSignalRDeliveryService(NullLogger<SignalRDeliveryService>.Instance);
 
-        var act = async () => await nullService.PingUserAsync(outboxRowId, Guid.NewGuid().ToString(), NotificationKind.CommunicationArrived);
+        var act = async () => await nullService.PingUserAsync(outboxRowId, Guid.NewGuid(), NotificationKind.CommunicationArrived);
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task PingUserAsync_WhenRecipientHasNoOidMapping_IsQuietNoOpWithoutDispatch()
+    {
+        // A recipient systemuserid with no azureactivedirectoryobjectid mapping (unmapped/disabled user):
+        // the resolver returns null → the ping is a quiet no-op. No dispatch, no throw — the outbox row +
+        // poll fallback (task 022) carry the durable truth.
+        var store = new FakeGenericEntityService();
+        var outbox = BuildOutbox(store);
+        var recipientId = Guid.NewGuid();
+        var outboxRowId = await outbox.WriteAsync(recipientId, NotificationKind.CommunicationArrived, BuildEnvelope());
+
+        var resolver = new Mock<ISystemUserIdentityResolver>();
+        resolver.Setup(r => r.ResolveOidAsync(recipientId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string?)null);
+
+        // Strict hub — ANY access to Clients (let alone a dispatch) would fail the test.
+        var hub = new Mock<IServiceHubContext>(MockBehavior.Strict);
+        var sut = new BoundaryDoubleDeliveryService(hub.Object, resolver.Object);
+
+        var act = async () => await sut.PingUserAsync(outboxRowId, recipientId, NotificationKind.CommunicationArrived);
+
+        await act.Should().NotThrowAsync("an unmapped recipient is a quiet no-op, not caller-visible error state");
+        resolver.Verify(r => r.ResolveOidAsync(recipientId, It.IsAny<CancellationToken>()), Times.Once);
+        hub.Verify(h => h.Clients, Times.Never, "no SignalR dispatch when the recipient has no oid mapping");
     }
 
     [Fact]
@@ -235,9 +271,11 @@ public sealed class SignalRDeliverySeamTests
             ConnectionString = connString,
             HubName = "notifications"
         });
-        var sut = new SignalRDeliveryService(options, NullLoggerFactory.Instance);
-
         var oid = Guid.NewGuid().ToString();
+        var recipientId = Guid.NewGuid();
+        var resolver = ResolverMapping(recipientId, oid);
+        var sut = new SignalRDeliveryService(options, resolver, NullLoggerFactory.Instance);
+
         var info = await sut.NegotiateAsync(oid);
 
         info.Url.Should().NotBeNullOrWhiteSpace();
@@ -246,8 +284,8 @@ public sealed class SignalRDeliverySeamTests
         // A real ping must not throw against a live resource (delivery is at-most-once/best-effort).
         var store = new FakeGenericEntityService();
         var outbox = BuildOutbox(store);
-        var outboxRowId = await outbox.WriteAsync(Guid.NewGuid(), NotificationKind.CommunicationArrived, BuildEnvelope());
-        var ping = async () => await sut.PingUserAsync(outboxRowId, oid, NotificationKind.CommunicationArrived);
+        var outboxRowId = await outbox.WriteAsync(recipientId, NotificationKind.CommunicationArrived, BuildEnvelope());
+        var ping = async () => await sut.PingUserAsync(outboxRowId, recipientId, NotificationKind.CommunicationArrived);
         await ping.Should().NotThrowAsync();
     }
 
@@ -265,12 +303,20 @@ public sealed class SignalRDeliverySeamTests
     {
         private readonly IServiceHubContext _hub;
 
-        public BoundaryDoubleDeliveryService(IServiceHubContext hub)
-            : base(NullLogger<SignalRDeliveryService>.Instance)
+        public BoundaryDoubleDeliveryService(IServiceHubContext hub, ISystemUserIdentityResolver identityResolver)
+            : base(identityResolver, NullLogger<SignalRDeliveryService>.Instance)
             => _hub = hub;
 
         protected override Task<IServiceHubContext> GetHubContextAsync(CancellationToken ct)
             => Task.FromResult(_hub);
+    }
+
+    /// <summary>Builds an <see cref="ISystemUserIdentityResolver"/> double mapping one systemuserid → oid.</summary>
+    private static ISystemUserIdentityResolver ResolverMapping(Guid systemUserId, string? oid)
+    {
+        var mock = new Mock<ISystemUserIdentityResolver>();
+        mock.Setup(r => r.ResolveOidAsync(systemUserId, It.IsAny<CancellationToken>())).ReturnsAsync(oid);
+        return mock.Object;
     }
 
     private sealed class FixedTimeProvider : TimeProvider

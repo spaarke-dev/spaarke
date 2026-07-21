@@ -76,3 +76,26 @@ re-fork its own channel (the forked-consumer failure §11 forbids).
   systemuserid→oid before pinging. Called out for task 024.
 - **CSP (from the spike):** verify `wss://*.service.signalr.net` in the target Power Platform environment CSP
   before relying on live push, else clients silently fall back to poll.
+
+## Producer identity contract (updated — identity-resolution fix, 2026-07-21)
+
+> Supersedes the "Producer identity contract (task 024+)" bullet above: producers no longer resolve
+> systemuserid→oid themselves. The resolution now lives inside the delivery service, behind a shared
+> resolver.
+
+- **Producers ping by the recipient's Dataverse `systemuserid`** (== the outbox row's `OwnerId`), NOT by
+  Azure AD oid. `PingUserAsync(Guid outboxRowId, Guid recipientSystemUserId, NotificationKind, ct)`.
+  Producers already hold the `systemuserid` (they wrote the outbox row keyed by it), so there is nothing
+  extra to resolve at the call site — the identity mismatch is handled centrally.
+- **The delivery service resolves `systemuserid → oid`** via `ISystemUserIdentityResolver.ResolveOidAsync`
+  (`Services/Identity/SystemUserIdentityResolver.cs`), cached bidirectionally in `IDistributedCache`
+  (10-min TTL) over the `systemuser.azureactivedirectoryobjectid` cross-reference (ADR-028). It then
+  dispatches to `Clients.User(oid)` — the identity negotiate registered the connection under.
+- **Unmapped recipient ⇒ quiet no-op.** If the recipient has no AAD oid mapping (unprovisioned/disabled
+  user, or the resolver returns null), `PingUserAsync` logs at info and returns without dispatch — the
+  outbox row is the durable truth and task 022's poll fallback delivers it (NFR-04). No throw; the
+  producer's success path is never affected.
+- **The poll endpoint (task 022) uses the SAME resolver in the OTHER direction**: it resolves the caller's
+  JWT `oid → systemuserid` via `ISystemUserIdentityResolver.ResolveSystemUserIdAsync` to query the outbox
+  by `OwnerId`. One cached resolver serves both legs; negotiate is unchanged (it still registers the JWT
+  `oid` server-side).
