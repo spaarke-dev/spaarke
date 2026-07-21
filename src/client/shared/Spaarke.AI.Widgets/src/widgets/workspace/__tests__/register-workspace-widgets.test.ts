@@ -13,6 +13,16 @@
  *     (the lazy factory resolves to the WorkspaceWidgetWrapper HOC).
  *   - Unknown types still fall back to GenericTextWidget (registry contract
  *     is preserved after the registrations run).
+ *
+ * `communications-list` — upgrade-in-place identity (messaging-communication-app-r3
+ * task 031, FR-14a / NFR-06): a dedicated describe block below asserts the
+ * registered type string and section id are UNCHANGED after the
+ * `CommunicationsWorkspaceWidget` body swap (Pattern D DataGrid →
+ * `ConversationWorkspace`/`ConversationView`), that no second registration was
+ * added, and that the factory resolves to the REAL upgraded widget export
+ * (not the GenericTextWidget fallback and not a re-implementation). Full
+ * render-mount coverage of the upgraded body lives in the widget package's
+ * own test suite (see that describe block's comment for why).
  */
 
 import React from 'react';
@@ -333,5 +343,71 @@ describe('registerWorkspaceWidgets — idempotency', () => {
 
     const resolved = await registry.resolveWorkspaceWidget('BudgetDashboard');
     expect(resolved).not.toBe(MockGenericText);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: `communications-list` upgrade-in-place identity (messaging-communication-app-r3
+// task 031, FR-14a / NFR-06)
+// ---------------------------------------------------------------------------
+//
+// `@spaarke/communication-components` is mapped to SOURCE by this package's
+// jest.config.ts moduleNameMapper (`'^@spaarke/communication-components$'`),
+// so `resolveWorkspaceWidget('communications-list')` below loads the REAL
+// (upgraded) `CommunicationsWorkspaceWidget`, not a mock — these assertions
+// exercise the actual registered factory, the actual widget type/section
+// identity, and the actual upgraded body.
+
+describe('communications-list — upgrade in place (task 031, FR-14a / NFR-06)', () => {
+  beforeEach(() => {
+    loadRegistrations();
+  });
+
+  it('the registered type string is exactly "communications-list" (unchanged)', () => {
+    expect(registry.hasWorkspaceWidget('communications-list')).toBe(true);
+  });
+
+  it('registers communications-list exactly ONCE — no second widget/registry entry was added', () => {
+    const types = registry.getAllWorkspaceWidgetTypes();
+    const communicationsEntries = types.filter(t => t === 'communications-list' || /communication/i.test(t));
+    expect(communicationsEntries).toEqual(['communications-list']);
+  });
+
+  it('metadata (displayName/category) is unchanged by the body-swap upgrade', () => {
+    const meta = registry.getWorkspaceWidgetMetadata('communications-list');
+    expect(meta).toBeDefined();
+    expect(meta!.displayName).toBe('Communications');
+    expect(meta!.category).toBe('data');
+    expect(meta!.allowMultiple).toBe(true);
+  });
+
+  it('resolves to the REAL upgraded CommunicationsWorkspaceWidget, not the GenericTextWidget fallback', async () => {
+    const resolved = await registry.resolveWorkspaceWidget('communications-list');
+    expect(resolved).not.toBeNull();
+    expect(resolved).not.toBeUndefined();
+    expect(resolved).not.toBe(MockGenericText);
+  });
+
+  it('resolves to the identical CommunicationsWorkspaceWidget component the upgraded widget package exports (identity, not a re-implementation)', async () => {
+    // Full DOM-mount of the resolved component is intentionally NOT exercised
+    // here: `@spaarke/communication-components` is mapped to SOURCE for this
+    // package's Jest run, which pulls in its OWN `node_modules` copy of React/
+    // Fluent — mounting it via THIS package's `react-dom` trips React's
+    // single-instance invariant ("Invalid hook call") across the package
+    // boundary. That full-mount coverage already exists, against the
+    // package's OWN React instance, in
+    // `Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.test.ts`
+    // ("mounts the shared ConversationWorkspace two-pane shell"). This test's
+    // job is narrower: prove the registry resolves to the SAME component
+    // export the widget package publishes — not a stand-in, not the
+    // GenericTextWidget fallback, and not a second/forked component.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const widgetModule = require('@spaarke/communication-components');
+    const resolved = await registry.resolveWorkspaceWidget('communications-list');
+
+    expect(resolved).toBe(widgetModule.CommunicationsWorkspaceWidget);
+    expect((resolved as React.ComponentType<unknown> & { displayName?: string }).displayName).toBe(
+      'CommunicationsWorkspaceWidget'
+    );
   });
 });

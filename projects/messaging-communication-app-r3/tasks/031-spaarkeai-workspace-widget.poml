@@ -4,7 +4,7 @@
     <title>SpaarkeAI workspace widget (Surface 2a) — render shared two-pane conversation; keep communications-list / section communications</title>
     <phase>4 Surfaces</phase>
     <gate>code-review + adr-check at Step 9.5; ui-test</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx in a SpaarkeAi hot-path shared lib; upgrade-in-place of a registered workspace widget with fixed type/section strings — regression-sensitive.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -4,7 +4,7 @@
     <title>Standalone conversation code page (Surface 2b) — Vite page rendering the shared two-pane conversation</title>
     <phase>4 Surfaces</phase>
     <gate>code-review + adr-check at Step 9.5; ui-test</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Vite code page (net-new surface + main.tsx entry + auth bootstrap); touches .tsx; standalone auth/theme host integration is regression-sensitive.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -34,7 +34,13 @@
       // `@spaarke/ui-components`'s raw source (and its PCF-framework-dependent
       // surface) into the program — `skipLibCheck` covers the rest.
       "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
-      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"]
+      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
+      // Added task 031 (FR-14a): the widget now imports the free-function
+      // `authenticatedFetch` directly (ADR-028). Same pre-built-declaration
+      // pattern as `@spaarke/ui-components` above — no `node_modules` install
+      // required for type-checking.
+      "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
+      "@spaarke/auth/*": ["../Spaarke.Auth/dist/*"]
     }
   },
   "include": ["src"],

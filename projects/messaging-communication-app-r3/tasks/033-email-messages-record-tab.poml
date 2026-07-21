@@ -4,7 +4,7 @@
     <title>"Email &amp; Messages" record tab (FR-15) — record-filtered DataGrid via form onLoad + sprk_regarding{type} hostFilter</title>
     <phase>4 Surfaces</phase>
     <gate>code-review + adr-check at Step 9.5; ui-test</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches a shared DataGrid web-resource surface + a form onLoad script that scopes access by regarding; incorrect scoping is a correctness/over-disclosure risk; ADR-006 tension (Path C).</rigor-reason>
     <model-tier>sonnet</model-tier>

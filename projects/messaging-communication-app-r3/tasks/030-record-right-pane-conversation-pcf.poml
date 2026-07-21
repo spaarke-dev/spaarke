@@ -4,7 +4,7 @@
     <title>Record right-pane conversation PCF (Surface 1) — preview + counter + quick-view + record-filtered modal</title>
     <phase>4 Surfaces</phase>
     <gate>code-review + adr-check at Step 9.5; ui-test</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New PCF control (net-new surface dir); Path-A-on-OOB-form blast radius; touches .ts/.tsx; opens a record-filtered modal navigating away from the PCF — correctness-sensitive host integration.</rigor-reason>
     <model-tier>opus</model-tier>
