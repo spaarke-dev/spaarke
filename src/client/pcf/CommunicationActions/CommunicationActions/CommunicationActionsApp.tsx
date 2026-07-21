@@ -39,7 +39,13 @@ import {
   Receipt16Regular,
 } from '@fluentui/react-icons';
 import { authenticatedFetch } from '@spaarke/auth';
-import { SendEmailPage, type ISendEmailPageProps, type EmailComposerMode } from '@spaarke/ui-components';
+import {
+  SendEmailPage,
+  type ISendEmailPageProps,
+  type EmailComposerMode,
+  searchUsersAndContacts,
+  createXrmDataService,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { deriveComposerFields, type ComposerMode } from './composerPrefill';
@@ -265,6 +271,18 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     setComposerMode(mode);
   };
 
+  // To/Cc/Bcc directory typeahead. Host-context Xrm.WebApi search over the
+  // systemuser + contact tables (per docs/standards/DATA-ACCESS-DECISION-CRITERIA.md
+  // — single-entity, in-session, no OBO/AI/cross-system → Xrm.WebApi, NOT BFF).
+  // Runs in the user's Dataverse session, so it respects the caller's read
+  // permissions. `createXrmDataService()` is the canonical shared adapter; the
+  // engine's RecipientField owns debounce (300 ms), min-length (≥2), and top-N.
+  const dataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+
   // Launch a "create from this email" form (Event / To Do / Invoice). R4 launches
   // the target create form; full create-and-link is the Notification-Spine project.
   const handleCreate = React.useCallback((kind: CreateKind) => {
@@ -332,6 +350,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       communicationId: composerMode === 'compose' ? undefined : communicationId,
       authenticatedFetch,
       bffBaseUrl,
+      onSearchRecipients: handleSearchRecipients,
       onSent: () => {
         setComposerMode(null);
         setStatus('Sent.');
@@ -340,7 +359,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl]);
+  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients]);
 
   if (authError) {
     return (

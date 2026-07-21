@@ -18,6 +18,7 @@ import { EmailComposer } from '../EmailComposer';
 import type { EmailComposerMode } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
+import type { ILookupItem } from '../../../types/LookupTypes';
 
 export interface ISendEmailPageProps {
   /** REQUIRED — driven by the Code Page URL parameter. */
@@ -29,6 +30,13 @@ export interface ISendEmailPageProps {
   initialSubject?: string;
   initialBody?: string;
   associations?: ICommunicationAssociation[];
+  /**
+   * Recipient directory lookup, forwarded verbatim to the engine's `RecipientField`
+   * (To/Cc/Bcc typeahead). Mirrors `searchUsersAndContacts(dataService, query)`;
+   * hosts pre-bind it to a host-context `Xrm.WebApi` contact/user search. Optional —
+   * when omitted the fields stay free-text-only (autocomplete is additive).
+   */
+  onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;
