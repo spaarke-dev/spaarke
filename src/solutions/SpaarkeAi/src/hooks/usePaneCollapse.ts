@@ -80,11 +80,27 @@ const VALID_PANE_IDS: ReadonlySet<string> = new Set<PaneId>([
   'context',
 ]);
 
+/**
+ * Initial-load default for a user who has NOT yet touched pane collapse state
+ * (no `spaarke:panes:collapsed` key on disk). UAT 2026-07-20: on first load the
+ * shell should open with the Assistant pane at its default width, the Workspace
+ * fully open, and the Context pane closed. Assistant + Workspace are open by
+ * omission; Context is the only pane collapsed by default.
+ *
+ * This is a DEFAULT, not a forced state: once the user toggles any pane the
+ * resulting set is persisted and wins on every subsequent load (the app has
+ * always persisted collapse state — see file header). A user who expands
+ * Context keeps it expanded across reloads.
+ */
+function defaultCollapseSet(): Set<PaneId> {
+  return new Set<PaneId>(['context']);
+}
+
 function readPersistedCollapseSet(): Set<PaneId> {
-  if (typeof window === 'undefined') return new Set();
+  if (typeof window === 'undefined') return defaultCollapseSet();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === null) return new Set();
+    if (raw === null) return defaultCollapseSet();
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return new Set();
     const next = new Set<PaneId>();
