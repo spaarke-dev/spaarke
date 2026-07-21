@@ -119,7 +119,14 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
     throw new Error('docxBridge: mammoth.convertToHtml export not found');
   }
 
-  const result = await convertToHtml({ arrayBuffer: docxBytes });
+  // UAT round-4 ROOT-CAUSE FIX: mammoth's DEFAULT `ignoreEmptyParagraphs: true` silently DROPS empty
+  // paragraphs (semantic-cleanup philosophy). On a real .docx that shifts the editor's paragraph set out
+  // of alignment with the server's document-order `w14:paraId` pre-parse — so the client's position-based
+  // paraId stamping drifts and edited paragraphs get ids that match no paragraph in the retained original
+  // (the recurring "a tracked change could not be located" / "matches no paragraph" save failures).
+  // Empirically, this option recovers 9 dropped paragraphs on the CIPO patent letter (48 vs 39), which is
+  // exactly the count-alignment the paraId mapping needs. Preserving empties keeps the round-trip faithful.
+  const result = await convertToHtml({ arrayBuffer: docxBytes }, { ignoreEmptyParagraphs: false });
 
   return {
     html: result.value,
