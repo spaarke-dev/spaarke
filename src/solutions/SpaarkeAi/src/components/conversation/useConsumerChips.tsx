@@ -53,6 +53,8 @@ import {
   formatEventOutputMarkdown,
   isCorrespondenceDraft,
   buildCorrespondenceComposeHtml,
+  isComposeDraftDocument,
+  buildDraftDocumentComposeSeed,
 } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
 import {
@@ -215,6 +217,12 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // `compose.draft.html` seed (no shared-lib change — the editor already seeds from draft HTML).
           // The transcript gets a short confirmation instead of the raw draft.
           const isCorrespondence = !isSurfaceLaunch && isCorrespondenceDraft(dispatched.result);
+          // R7-4 (UAT 2026-07-21): a `compose-draft-document` result (substantial output — a brief /
+          // memo / analysis) carries editor-ready `body_html`. Route it INTO a Compose tab (verbatim
+          // seed) and show only a short confirmation in the transcript — never dump the full document
+          // into chat. Same `compose.draft.html` seed the correspondence route uses (no shared-lib change).
+          const isDraftDocument =
+            !isSurfaceLaunch && !isCorrespondence && isComposeDraftDocument(dispatched.result);
           if (isCorrespondence) {
             // R5-9: hand the raw draft to the host so a subsequent "Send as email" chip can seed
             // the Email Compose modal (subject / body / suggested recipients).
@@ -231,6 +239,21 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
                 "I've opened a draft response in the Compose tab — review and edit it there."
               )
             );
+          } else if (isDraftDocument) {
+            const { html, title } = buildDraftDocumentComposeSeed(
+              dispatched.result as Record<string, unknown>
+            );
+            dispatch("workspace", {
+              type: "widget_load",
+              widgetType: "compose",
+              widgetData: { compose: { draft: { html, fileName: title } } },
+              displayName: "Compose",
+            } as unknown as WorkspacePaneEvent);
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                `"${title}" has been prepared in the Compose tab — review and edit it there.`
+              )
+            );
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
             enqueueAssistantMessage(
               makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
@@ -245,6 +268,10 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           if (isCorrespondence) {
             // R4-6: after "Draft a response" opens a Compose tab, offer Send-as-email +
             // Save-to-document (client bridges) before the server "Create a matter" chip.
+            nextChips = [...buildPostDraftLocalChips(), ...serverChips];
+          } else if (isDraftDocument) {
+            // R7-4: after a drafted document opens in Compose, offer the same post-draft companions
+            // (Send as email / Save to document) so the user is never left without a next step.
             nextChips = [...buildPostDraftLocalChips(), ...serverChips];
           } else if (dispatched.consumerType === "chat-summarize") {
             // R4-11: after a summary, offer "Ask about these files" alongside the server
