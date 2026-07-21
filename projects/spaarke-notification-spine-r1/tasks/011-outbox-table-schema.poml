@@ -4,7 +4,7 @@
     <title>Create the `sprk_` Kind-Typed Notification Outbox Dataverse Table</title>
     <phase>1 Layer B + Contract + ADR-047</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New Dataverse schema deployment task; not a `.cs`/`.ts` code-implementation task.</rigor-reason>
     <model-tier>sonnet</model-tier>

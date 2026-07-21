@@ -4,7 +4,7 @@
     <title>FR-01 SignalR Footprint Spike — Serverless vs Default Mode Go/No-Go</title>
     <phase>0 Gate-Zero</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Spike producing a go/no-go decision; adds the SignalR SDK experimentally to measure footprint, not to ship production code.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -80,7 +80,9 @@
     <criterion testable="true">Given a >60 MB breach in either mode (negative case), when that breach is measured, then the spike note documents the revised Layer-C placement (hub/negotiate moved out of the BFF) instead of a mode decision, and the escalation trigger fires — no downstream Layer-C task proceeds against a >60 MB BFF placement.</criterion>
     <criterion testable="true">Given the spike concludes, when the BFF csproj is inspected, then it contains only the package reference matching the final decision (none if no-go; exactly one SDK package if go) — no leftover experimental reference from the rejected mode.</criterion>
   </acceptance-criteria>
-  <notes>Spec FR-01. This is the hard blocking gate for the whole project's Phase 2 — do not let schedule pressure shortcut the CVE scan or CSP check. The two researcher memory files are prior art, not a substitute for this task's own measurements against THIS BFF's current dependency graph.</notes>
+  <notes>Spec FR-01. This is the hard blocking gate for the whole project's Phase 2 — do not let schedule pressure shortcut the CVE scan or CSP check. The two researcher memory files are prior art, not a substitute for this task's own measurements against THIS BFF's current dependency graph.
+
+COMPLETION (2026-07-21): ✅ GO / Serverless mode. Measured (this-branch baseline 47.08 MB incl-PDB): Serverless (Microsoft.Azure.SignalR.Management 1.33.1) = 47.38 MB (+0.30 MB), Default (Microsoft.Azure.SignalR 1.33.1) = 47.31 MB (+0.23 MB); both 0 new HIGH CVE; both ~12.6 MB under the 60 MB ceiling → escalation trigger NOT fired, Layer C stays in BFF. Mode = Serverless (send-only topology; Default's hosted-hub capability unused → FR-01 burden-of-proof not met). csproj left with Microsoft.Azure.SignalR.Management 1.33.1 (unwired; task 020 wires + justifies). CSP: no repo blocker; Power Platform env CSP is a runtime action item. Full spike note: notes/spikes/fr-01-signalr-footprint.md. Deviations documented there (cold-start structural proxy; MapHub not wired; csproj-package-left rationale). AWAITING HUMAN GATE REVIEW before Phase 2 dispatch.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>

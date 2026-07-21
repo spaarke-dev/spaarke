@@ -4,16 +4,17 @@
 > **Total tasks**: 22 (incl. mandatory wrap-up) across 6 phases
 > **Status legend**: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ completed · ⛔ blocked
 > **Execution**: every task via `task-execute`. Phase 0 (001) is a HARD go/no-go gate — do NOT start Phase 2 until it resolves.
+> **GATE 001 RESOLVED 2026-07-21**: ✅ **GO / Serverless mode** (`Microsoft.Azure.SignalR.Management` 1.33.1; +0.30 MB, 0 new HIGH CVE; Layer C stays in BFF). Awaiting human review of `notes/spikes/fr-01-signalr-footprint.md` before Phase 2 dispatch. CSP action item: verify Power Platform env `connect-src` at provisioning.
 
 ## Task Registry
 
 | ID | Title | Phase | Status | Deps | Tier/Effort | Rigor | Parallel |
 |----|-------|-------|--------|------|-------------|-------|----------|
-| 001 | SignalR footprint spike (FR-01) | 0 | 🔲 | none | opus/high | STANDARD | none (blocking gate) |
+| 001 | SignalR footprint spike (FR-01) | 0 | ✅ | none | opus/high | STANDARD | none (blocking gate) |
 | 010 | Author ADR-047 (concise + full) | 1 | 🔲 | 001 | opus/high | STANDARD | ❌ main-session (.claude/) |
-| 011 | Outbox table schema (FR-02) | 1 | 🔲 | none | sonnet/high | STANDARD | Group P1 |
+| 011 | Outbox table schema (FR-02) | 1 | ✅ | none | sonnet/high | STANDARD | Group P1 |
 | 012 | Outbox service (FR-02) | 1 | 🔲 | 011 | sonnet/high | FULL | — |
-| 013 | Envelope contract + kind taxonomy (FR-03/10) | 1 | 🔲 | none | sonnet/high | FULL | Group P1 |
+| 013 | Envelope contract + kind taxonomy (FR-03/10) | 1 | ✅ | none | sonnet/high | FULL | Group P1 |
 | 020 | SignalR delivery service + negotiate (FR-04) | 2 | 🔲 | 001,012,013 | opus/high | FULL | — |
 | 021 | Shared client subscriber library (FR-05) | 2 | 🔲 | 020,013 | sonnet/high | FULL | — |
 | 022 | Pending/poll fallback endpoint (FR-06) | 2 | 🔲 | 012 | sonnet/high | FULL | Group Q |
