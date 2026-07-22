@@ -1,7 +1,17 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-22 (context-handoff — all UAT rounds R1–R5 merged to master, NOT deployed)
+> **Last Updated**: 2026-07-22 (deferred-items batch worked — item 2 committed on worktree; items 1 & 3 found already done; NOT merged, NOT deployed)
 > **Recovery**: Read "Quick Recovery" first.
+
+## Deferred-items batch status (2026-07-22, on `work/email-communication-solution-r4` branch — commit `d94781eaa`, NOT pushed/merged/deployed)
+
+- **Item 1 — FR-03 `sprk_servicerequest` as regarding target**: ✅ **ALREADY COMPLETE** (task 003, prior wave). Verified: `CommunicationService.RegardingLookupMap`:1819, `RegardingFieldMap.All`:18, `IncomingAssociationResolver.GetPrimaryNameField`:499 (→`sprk_name`), `docs/data-model/sprk_servicerequest.md`. `TODO_REGARDING_CATALOG` deliberately NOT touched (it's a `sprk_todo` catalog using `sprk_regardingcontact`, not a communication catalog — documented in the doc §4.1). No number-field convention for servicerequest → correctly absent from `GetReferenceNumberField`. **No work needed.**
+- **Item 2 — escape embedded `"` in name-match provenance**: ✅ **DONE + committed `d94781eaa`**. New shared `RungProvenanceFormat.EscapeValue` (server-only quote→apostrophe neutralize) applied to the user-controlled `name`/`number` in BOTH `RecordNameMatchRung` (3.5) and `ContactNameMatchRung` (3.6). Keeps the shipped PCF `provenance.ts` parser (`key="([^"]*)"`, no unescape) uncorrupted by a quote in a record/contact name — **no PCF rebundle needed**. Real display name still on `Target.Name`. +1 regression test; 571 Communication tests green; build 0 errors; code-review + adr-check CLEAN.
+- **Item 3 — `_recordTypeRefCache` → `ConcurrentDictionary`**: ✅ **ALREADY DONE** (task 018; `IncomingAssociationResolver.cs`:346 is already `ConcurrentDictionary` with the race-condition comment). **No work needed.**
+
+**HELD for owner input** (unchanged): (a) FR-21 wizard email-step migration — needs the "standard composer form" decision. (b) #7 split-index test relocate — recommend it rides task-050 KEEP-path reorg.
+
+**Deploy note**: master's undeployed BFF (124+132) + this worktree's `d94781eaa` (item 2) are all BFF — one `/bff-deploy` covers them once merged. PCF imports unchanged (Connections v1.6.1 / Actions v1.3.1 / Attachments v1.3.0). Item 2 needs NO PCF change.
 
 ---
 
