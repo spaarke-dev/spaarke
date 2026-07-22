@@ -7,12 +7,12 @@
 | ID | Title | Type | Origin | GitHub Issue |
 |----|-------|------|--------|--------------|
 | D-032-01 | FR-E5 BU/team enrichment in the User fragment | Deferral | task 032 (owner sign-off 2026-07-15) | ✅ RESOLVED 2026-07-16 (built) |
-| D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | {URL} |
+| D-043-01 | No client-accessible preference source for the SNS chip reorder | Gap | task 043 (FR-G1) | 🟡 PARTIAL 2026-07-21 (learned-usage source LIVE; stated-override seam wired, awaits structured field) |
 | D-042-01 | User-scope MemoryItem seed deferred (no client memory-write endpoint) | Deferral | task 042 (FR-F3) | ✅ RESOLVED 2026-07-16 (built) |
 | D-042-02 | Profile-write authZ depends on `sprk_userprofile` Dataverse row-security config | Security follow-up | task 042 (052 write-side hand-off) | ✅ RESOLVED 2026-07-16 |
 | D-013-01 | Smart pre-seed **resolvedLookups server enrichment** (wire the 010 resolver into dispatch) | Deferral (part 3 of 013) | task 013 (2026-07-16) | ✅ RESOLVED 2026-07-16 (built) |
 | D-013-02 | create-todo OOB pre-fill needs **logical-name draftValues** (title→sprk_name, description→sprk_description, priority_suggestion→sprk_priority) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-16 (built) |
-| D-013-03 | create-task Event-subtype **display name** for the dropdown (only the Task GUID is client-side) | Gap | task 013b (2026-07-16) | {URL} |
+| D-013-03 | create-task Event-subtype **display name** for the dropdown (only the Task GUID is client-side) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-21 (preset carries the fixed "Task" name + mapper binds the pair) |
 | D-013-04 | **completeHandoff(recordId)** not wired into wizard `onFinish` → launches read back as "cancelled" (P5 honest-ack on the launch path) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-16 (built) |
 
 ---
@@ -56,6 +56,7 @@
 - **Why deferred**: the stated profile (`sprk_userprofile`) is read **server-side only** (`StatedProfileReader` → `ContextBinder.userFragment` as LLM prompt text); there is no GET endpoint / session-bootstrap field / SSE frame projecting it to the browser, and there is no structured "chip-ordering preference" field in the User Model yet (only free-text `sprk_assistantpreferences`).
 - **What it needs when picked up** (two parts, both small, no sort-mechanics change): (1) a **structured chip-order preference** in the User Model (a `preferredBindingOrder`-shaped signal, stated via the questionnaire and/or learned via the "shape suggestions over time" capability, spec §5); (2) a **client projection** of it — either a session-bootstrap field or a client-side Dataverse read of `sprk_userprofile` — passed into `useConsumerChips` as `chipDisplayPreference`. The comparator already accepts it verbatim.
 - **Trigger to revisit**: task 042 (My Assistant questionnaire) or the preference-update capability (spec §5) lands, OR a session-bootstrap profile projection is added. Natural pairing with 042.
+- 🟡 **PARTIAL 2026-07-21 (owner-directed, option (c))**: shipped the missing preference SOURCE client-side. New `chipPreference.ts` produces the `ChipDisplayPreference`: **LEARNED usage** (the user's own recent dispatches, tracked in `localStorage` by Binding id, most-used-then-recent first — a real "the Assistant learns what you use" signal, no server projection needed) drives the reorder today, and a **STATED override seam** (`buildChipPreference(statedOrder)` gives a non-empty stated order precedence) is wired but currently fed `null`. `useConsumerChips` gained an `onChipDispatched` callback (records usage) and now receives a live `chipDisplayPreference` from `ConversationPane` (was always `undefined` → the reorder was inert). The sort mechanics (`reorderChipsForDisplay`) are unchanged. **Remaining**: the durable, cross-device STATED override still needs a structured `sprk_userprofile` order field + a client projection (owner schema add + a questionnaire control) — then it layers in with ZERO change to this seam. Tests: `__tests__/chipPreference.test.ts`.
 
 ## D-042-01 — User-scope MemoryItem seed deferred
 

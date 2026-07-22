@@ -9,11 +9,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation — R7 fully shipped + deployed + merged; awaiting owner's next UAT pass. Open: R4-7 / R4-9 (need repro) + R7-5b append (owner decision). |
+| **Mode** | UAT remediation shipped through R7; pivoting to **project close-out** — formal tasks 050/051/054/090 + deferrals D-043-01 / D-013-03. |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` + **origin/master** all at **`5b952439e`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
-| **Deployed (dev)** | `sprk_spaarkeai` (**R7** — rebuilt from merged source, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4/R5/R6/R7** (`compose-draft-document` capability was already Active in the dev catalog — statecode=0). |
-| **Next Action** | Wait for owner's next UAT pass. **Open items: R4-7, R4-9** (need repro), **R7-5b** (append drafted content INTO the open Compose tab — needs a shared-lib Spaarke.Compose.Components append mode; owner chose "append"; NOT in this deploy — see R7 note). Rule: `/worktree-sync` before any BFF deploy (none needed all stream). |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`ae6373957`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **Deployed (dev)** | `sprk_spaarkeai` (**R7**, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4–R7**. |
+| **Closed by owner 2026-07-21** | **R4-7** (empty "Actions available…" header) — CLOSED, won't-fix. **R7-5b** (append into a populated Compose tab) — CLOSED, dropped (blank-tab draft-into-Compose already ships in R7). |
+| **Next Action** | Close-out backlog (owner-directed 2026-07-21): **D-013-03** (event-subtype display name — small) · **D-043-01** (project user preference → client chip reorder; ties to memory/User Model) · **050** (authoring: ambiguity set + "what are my tasks?" list capability — OWNER-REVIEW gate FR-J1) → **051** (eval suite, NFR-06 gate; depends on 050) → **054** (deploy verify + PROD catalog parity) → **090** (wrap-up). **R4-9** still needs a repro. Rule: `/worktree-sync` before any BFF deploy. |
 
 ### Only open items (both need an owner repro; NO code written yet)
 - **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.

@@ -28,6 +28,7 @@ import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-ico
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
+import { MemoryDialog } from "./MemoryDialog";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
@@ -83,6 +84,7 @@ import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToD
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
 import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
+import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
   detectSectionRewriteIntent,
@@ -434,6 +436,20 @@ export function ConversationPane(): React.JSX.Element {
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
   const [quickStartOpen, setQuickStartOpen] = React.useState(false);
+  // UAT 2026-07-21 (#8): "What the Assistant remembers about you" review/delete dialog (host-owned so
+  // it has authenticatedFetch + bffBaseUrl), opened from the ⋮ Assistant Tools "Memory" entry.
+  const [memoryOpen, setMemoryOpen] = React.useState(false);
+  // D-043-01 (option c): drive the Suggested-Next-Steps DISPLAY reorder from the user's preference.
+  // The LEARNED signal (recent dispatch usage, localStorage) is the live source; a durable STATED
+  // override layers in via the `null` seam below once a structured `sprk_userprofile` order becomes
+  // client-projectable (buildChipPreference gives stated precedence when non-empty). `chipUsageTick`
+  // bumps after each dispatch so the preference re-reads usage and the next chip strip re-ranks.
+  const [chipUsageTick, setChipUsageTick] = React.useState(0);
+  const chipDisplayPreference = React.useMemo(
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- chipUsageTick is the intended recompute trigger
+    () => buildChipPreference(/* statedOrder seam */ null),
+    [chipUsageTick]
+  );
   const chips = useConsumerChips({
     bffBaseUrl,
     getAccessToken,
@@ -467,6 +483,13 @@ export function ConversationPane(): React.JSX.Element {
           : null,
       []
     ),
+    // D-043-01: the preference that reorders the suggested-next-step cards (learned usage today).
+    chipDisplayPreference,
+    // D-043-01: record each dispatched Binding as learned usage, then re-read the preference.
+    onChipDispatched: React.useCallback((bindingId: string) => {
+      recordChipUsage(bindingId);
+      setChipUsageTick((t) => t + 1);
+    }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
 
@@ -1677,6 +1700,8 @@ export function ConversationPane(): React.JSX.Element {
               onQuickStart={() => setQuickStartOpen(true)}
               onMyAssistant={myAssistant.openDialog}
               highlightMyAssistant={myAssistant.needsProfile}
+              // #8 (UAT 2026-07-21): the "Memory" entry opens the remembers-about-you review dialog.
+              onMemory={() => setMemoryOpen(true)}
             />
           </>
         }
@@ -1915,6 +1940,15 @@ export function ConversationPane(): React.JSX.Element {
             );
           }
         }}
+      />
+
+      {/* #8 (UAT 2026-07-21): "What the Assistant remembers about you" — review + forget over the
+          shipped GET/DELETE /api/memory/user endpoints. Opened from the ⋮ Assistant Tools "Memory" entry. */}
+      <MemoryDialog
+        open={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={bffBaseUrl}
       />
 
       {/* R5-9 (UAT 2026-07-20): the shared Email Compose modal (SendEmailDialog → EmailComposer).
