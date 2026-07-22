@@ -142,9 +142,65 @@ public sealed class ComposeServiceLoadParaIdTests
         result.ParaIdMap.Select(e => e.ParaId).Should().OnlyHaveUniqueItems();
         result.ParaIdMap[0].ParaId.Should().Be("AAAA0001", "an existing paraId is collected verbatim");
         result.ParaIdMap[0].IsMinted.Should().BeFalse();
-        result.ParaIdMap.Skip(1).Should().OnlyContain(e => e.IsMinted, "the id-less paragraphs are minted");
+        // FR-01 (task 010, ingest): ComposeBaselineParaIdStamper.MintAndPersist now mints + PHYSICALLY
+        // WRITES ids into `content` BEFORE the projection builder runs (see
+        // LoadAsync_ForFormattedDocument_PersistsMintedParaIdsIntoTheReturnedContentBytes for the
+        // durability proof). By the time the single-authority projection builder walks the body, those
+        // paragraphs already carry an id — so its own IsMinted flag reads false for them too (it is
+        // reporting "did *I* just mint this", not "was this paragraph originally id-less"). The
+        // load-bearing invariant this task adds is that every paragraph resolves to a non-empty, unique
+        // id that is PERSISTED in the retained bytes — which the id-uniqueness assertion above already
+        // covers alongside the byte-level proof in the companion test.
+        result.ParaIdMap.Skip(1).Should().OnlyContain(e => !e.IsMinted,
+            "ingest-time persistence (task 010) means the projection builder finds these ids already physically present");
         result.VersionId.Should().Be("v-load-1",
             "the load-time SPE version id is surfaced so a later dirty save can re-fetch this baseline (FR-06)");
+    }
+
+    [Fact]
+    public async Task LoadAsync_ForFormattedDocument_PersistsMintedParaIdsIntoTheReturnedContentBytes()
+    {
+        // FR-01 (task 010, ingest): the whole point of persisting on ingest is that the id lives in the
+        // RETAINED PACKAGE BYTES returned as Content — not only in the ParaIdMap projection — because
+        // Content is what SaveAsync's same-session fast path echoes back as the baseline
+        // (ResolveSaveBaselineAsync). If minting were only in the map, this would fail.
+        var docx = FormattedDocx();
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), DriveId, DocumentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: DocumentSpeId,
+                Name: "contract.docx",
+                ParentId: null,
+                Size: docx.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"etag-v1\"",
+                IsFolder: false,
+                WebUrl: "https://spe/web",
+                DriveId: DriveId));
+        _spe.Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), DriveId, DocumentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(docx));
+
+        var sut = CreateSut();
+
+        var result = await sut.LoadAsync(
+            new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
+            new DefaultHttpContext(),
+            CancellationToken.None);
+
+        using var ms = new MemoryStream(result.Content.ToArray());
+        using var openedDoc = WordprocessingDocument.Open(ms, isEditable: false);
+        var idsInReturnedBytes = openedDoc.MainDocumentPart!.Document!.Body!
+            .Descendants<Paragraph>()
+            .Select(p => p.ParagraphId?.Value)
+            .ToList();
+
+        idsInReturnedBytes.Should().HaveCount(3);
+        idsInReturnedBytes.Should().OnlyContain(id => !string.IsNullOrEmpty(id),
+            "every editable paragraph's paraId must be PHYSICALLY present in the Content bytes Load returns, not only in ParaIdMap");
+        idsInReturnedBytes.Should().OnlyHaveUniqueItems();
+        idsInReturnedBytes.Should().BeEquivalentTo(
+            result.ParaIdMap.Select(e => e.ParaId),
+            "the projection's paraId map stays consistent with what is now physically persisted in the retained bytes");
     }
 
     [Fact]

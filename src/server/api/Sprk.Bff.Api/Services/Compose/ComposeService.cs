@@ -259,6 +259,26 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
+        // FR-01 (task 010, ingest — design §5, I-1/I-3): mint + PERSIST a w14:paraId into the retained
+        // package's DOM for every editable paragraph that lacks one — durable across a load → save →
+        // reload round-trip, not merely carried in the projection map below. Idempotent
+        // (ComposeBaselineParaIdStamper.MintAndPersist): a document whose paragraphs already all carry
+        // ids returns byte-identical (no-op). Running this BEFORE the projection build means the builder
+        // — which reads but never writes existing ids — sees a body with no gaps, so its own ParaIdMap is
+        // automatically consistent with what is now physically in `content`. That same mutated `content`
+        // is what Load returns as Content and what the client echoes back as the same-session Save
+        // fast-path baseline (ResolveSaveBaselineAsync), so the persisted ids survive that round-trip by
+        // construction — same-session durable minting; a Word-regenerated cross-session id collision is
+        // AnnotationReanchorService's fuzzy-fallback boundary, not this step's concern.
+        var ingestParaIdStamp = _baselineParaIdStamper.MintAndPersist(content);
+        if (ingestParaIdStamp.Mutated)
+        {
+            content = ingestParaIdStamp.Bytes;
+            _logger.LogInformation(
+                "Compose load: minted + persisted {MintedCount} w14:paraId(s) into the retained package for drive={DriveId} item={DocumentSpeId}.",
+                ingestParaIdStamp.ParaIdMap.Count(e => e.IsMinted), request.DriveId, request.DocumentSpeId);
+        }
+
         // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
         // projection builder produces BOTH the paraId-tagged editor HTML AND the ordered w14:paraId map from
         // ONE traversal — replacing the client-side mammoth convert + position-based paraId stamping (the

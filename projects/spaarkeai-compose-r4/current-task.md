@@ -10,10 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **Phase 0 COMPLETE** (001–006). Gate 🟢 GREEN — cutover authorized. Next: Phase 1 (010–013) |
+| **Task** | ✅ **Phase 0 + Phase 1 COMPLETE** (001–013). Next: Phase 2 Capture (020–024) |
 | **Step** | — |
-| **Status** | Phase 0 done — Phase 1 startable |
-| **Next Action** | Run Phase 1 Ingest: W1 = 010 (persist paraId, deps 001) ∥ 011 (offset table, deps 001/003) → then 012 (opaque atoms, after 011) → 013 (seam). Autonomous per owner directive. |
+| **Status** | Phase 1 done (521/521 Compose tests green) — Phase 2 startable |
+| **Next Action** | Run Phase 2 (frontend/ProseMirror): W2 = 020 (step→op interceptor, deps 003) ∥ 021 (opaque-atom node, deps 012) → 022 (rebased op log, after 020) → 023 (delete paragraph-diff export, GATED on 006 ✅) → 024 (tests). Autonomous. |
+
+> **Pre-existing tech debt flagged 2026-07-22** (NOT R4): ADR-007 GraphIsolation arch test fails on baseline — Graph* types leak in `Services/Communication/**` + `Api/Office/Errors` + `Infrastructure/Errors` (email/messaging subsystems). Zero Compose involvement. Out of R4 scope; flag to owner.
 
 ### Files Modified This Session (Wave W0a)
 - `.claude/adr/ADR-049-compose-shadow-document.md` (new — task 001) + `.claude/adr/INDEX.md` (entry)

@@ -17,10 +17,10 @@
 | 004 | Round-trip byte-diff harness (NFR-01) | 0 Gate | sonnet / high | FULL | 002 | startable | ✅ |
 | 005 | Applier spike on CIPO + patch-engine A/B | 0 Gate | opus / xhigh | FULL | 002,003 | startable | ✅ |
 | 006 | **Phase 0 GATE — 🟢 GREEN, cutover authorized** | 0 Gate | opus / high | FULL | 003,004,005 | passed | ✅ |
-| 010 | Persist w14:paraId on ingest (FR-01) | 1 Ingest | sonnet / high | FULL | 001 | blocked | 🔲 |
-| 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | blocked | 🔲 |
-| 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | blocked | 🔲 |
-| 013 | Phase-1 ingest/projection seam slice (NFR-06) | 1 Ingest | sonnet / high | FULL | 010,011,012 | blocked | 🔲 |
+| 010 | Persist w14:paraId on ingest (FR-01) | 1 Ingest | sonnet / high | FULL | 001 | done | ✅ |
+| 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | done | ✅ |
+| 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | done | ✅ |
+| 013 | Phase-1 ingest/projection seam slice (NFR-06) | 1 Ingest | sonnet / high | FULL | 010,011,012 | done | ✅ |
 | 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | blocked | 🔲 |
 | 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | blocked | 🔲 |
 | 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | blocked | 🔲 |
