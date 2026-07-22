@@ -1,0 +1,137 @@
+<task id="054" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Concurrency + import seam slices (NFR-06/08)</title>
+    <phase>5 Concurrency + save</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING task adding through-the-wire seam slices under tests/integration/seam (tags include testing + integration-test); TEST-MODIFYING override applies (code-review + adr-check at Step 9.5 unconditionally).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Seam-slice authoring against four fully-specified behaviors from 050-053 using the existing WebApplicationFactory harness; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>050,051,052,053</deps>
+    <tags>bff-api,testing,integration-test</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author the through-the-wire `WebApplicationFactory` seam slices under `tests/integration/seam/Compose/`
+    (create the directory if absent) proving the Phase-5 concurrency + import behaviors end-to-end:
+    (1) a STALE-BASE save RE-ANCHORS without an eTag 500 (task 050) — AUTO applies, REVIEW/ORPHAN surface;
+    (2) CREATE-ON-SAVE then a content write does NOT throw the eTag mismatch (task 051), and a concurrent
+        external edit yields a clean 412/ProblemDetails, not a 500;
+    (3) an SPE HTTP 423 (Office lock) surfaces a user-actionable ProblemDetails, not a 500 (task 052), while
+        a non-lock 5xx still surfaces as a generic ProblemDetails;
+    (4) imported revisions/comments are accept/reject-able and SURVIVE a save (task 053), and an imported
+        revision on an unresolvable paraId surfaces (not dropped).
+
+    These are through-the-wire slices (real request pipeline via `WebApplicationFactory`) per ADR-038 / NFR-06.
+    NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests. Cover the NEGATIVE cases
+    (un-re-anchorable ORPHAN, non-lock 5xx, unresolvable imported anchor) explicitly.
+  </prompt>
+
+  <role>
+    Senior .NET 8 test engineer fluent in `WebApplicationFactory` integration/seam testing of a Minimal API
+    save/load pipeline. Understands the ADR-038 seam DoD: a through-the-wire slice is the definition of done
+    for every save/load/dispatch change, and the banned patterns (mock handler / DI-registration / ctor-null).
+  </role>
+
+  <goal>
+    A green `tests/integration/seam/Compose/` suite proving all four Phase-5 behaviors through the real request
+    pipeline: stale-base save re-anchors (no eTag 500); create-on-save then content write does not throw (and
+    concurrent-edit yields 412); HTTP 423 surfaces a ProblemDetails (non-lock 5xx stays generic); imported
+    revisions/comments are accept/reject-able and survive save (unresolvable anchor surfaces). Negative cases
+    covered.
+  </goal>
+
+  <context>
+    <background>
+      NFR-06 (E2E DoD): "every save/load/dispatch change carries a through-the-wire `WebApplicationFactory`
+      seam slice (`tests/integration/seam/**`); no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null
+      tests (ADR-038)." NFR-08 (concurrency): "stale-base save re-anchors (no eTag 500); 423 lock surfaces
+      cleanly." Success Criterion 4: "Concurrency — stale-base save re-anchors (no eTag 500); 423 surfaces
+      cleanly. Verify: seam tests + UAT." This task is the seam-slice evidence for tasks 050/051/052/053. The
+      `tests/integration/seam/Compose/` directory is created here if the Phase-3 tasks (034) did not already.
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ConcurrencySaveSeamTests.cs — NEW WebApplicationFactory seam slices: stale-base re-anchor (050), create-on-save sequencing (051), HTTP 423 lock (052)</file>
+      <file role="new">tests/integration/seam/Compose/ImportRoundTripSeamTests.cs — NEW WebApplicationFactory seam slice: imported revisions/comments accept/reject-able + survive save (053)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — tasks 050/051/052 save-path behaviors under test</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — task 052 ProblemDetails mapping under test</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — task 053 import round-trip under test</file>
+      <file role="reference">tests/integration/seam/ — existing seam-test conventions/harness to mirror (WebApplicationFactory setup)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (save + concurrency), §10 (Success Criterion 4)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-06, NFR-08, Success Criterion 4</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Version-stamp + re-anchor-on-stale — the stale-base re-anchor behavior under test.</dependency>
+      <dependency task="051" status="pending">eTag sequencing for create-on-save — the no-500 create-on-save behavior under test.</dependency>
+      <dependency task="052" status="pending">HTTP 423 lock protocol — the ProblemDetails mapping under test.</dependency>
+      <dependency task="053" status="pending">Import round-trip mount — the accept/reject-able + survive-save behavior under test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-06 / ADR-038">Slices MUST be through-the-wire via `WebApplicationFactory` (real request pipeline). NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="spec / NFR-08 / Success Criterion 4">The suite MUST prove all four behaviors: stale-base save re-anchors (no eTag 500); create-on-save then content write does not throw; HTTP 423 surfaces a ProblemDetails; imported revisions/comments accept/reject-able + survive save.</constraint>
+    <constraint source="project / negative cases">Cover the NEGATIVE cases explicitly: an un-re-anchorable ORPHAN surfaces (not dropped); a non-lock 5xx surfaces as a generic ProblemDetails (not masked as a lock); a concurrent external edit on create-on-save yields a clean 412; an unresolvable imported anchor surfaces (not dropped).</constraint>
+    <constraint source="project / seam location">Slices live under `tests/integration/seam/Compose/` (the ADR-038 KEEP path for vertical-slice-seam tests). Mirror the existing `tests/integration/seam/` harness conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WebApplicationFactory seam slices for a Compose save/load pipeline; ADR-038 seam DoD + banned patterns; ProblemDetails + 412/423 assertions</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory seam slice" location="tests/integration/seam/">
+        Mirror the existing seam-test harness: drive the real request pipeline via `WebApplicationFactory`, assert the through-the-wire response/behavior — no mocked transport, no DI-registration assertions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (TEST-MODIFYING override — code-review + adr-check unconditionally). Load ADR-038 + TEST-ARCHITECTURE.md + the existing `tests/integration/seam/` harness. Confirm `tests/integration/seam/Compose/` exists (create if absent). Read the 050/051/052/053 behaviors under test.</step>
+    <step order="1" name="Concurrency save slices">Author `ConcurrencySaveSeamTests.cs`: (a) stale-base save re-anchors without an eTag 500 (AUTO applies, REVIEW/ORPHAN surface; un-re-anchorable → ORPHAN surfaces, not dropped); (b) create-on-save then content write does not throw the eTag mismatch, and a concurrent external edit yields a clean 412/ProblemDetails; (c) SPE 423 surfaces a user-actionable ProblemDetails, non-lock 5xx stays generic.</step>
+    <step order="2" name="Import round-trip slice">Author `ImportRoundTripSeamTests.cs`: imported revisions/comments are accept/reject-able and survive a save (paraId-keyed); an imported revision on an unresolvable paraId surfaces (not dropped).</step>
+    <step order="3" name="Verify + index">Run the seam suite (green). Confirm no banned patterns (`Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null). Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No seam coverage exists for stale-base re-anchor / eTag sequencing / 423 / imported-revision survival.</existing>
+    <extension>No — ADR-038 seam DoD requires through-the-wire slices for these save/load changes.</extension>
+    <cost-of-doing-nothing>NFR-06/08 + Success Criterion 4 (concurrency) ship unverified; the eTag-500 regression could recur undetected.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ConcurrencySaveSeamTests.cs</output>
+    <output type="test">tests/integration/seam/Compose/ImportRoundTripSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A through-the-wire seam slice proves a STALE-BASE save re-anchors WITHOUT an eTag 500 (AUTO applies, REVIEW/ORPHAN surface) — GREEN.</criterion>
+    <criterion testable="true">A seam slice proves CREATE-ON-SAVE then a content write does NOT throw the eTag mismatch — GREEN.</criterion>
+    <criterion testable="true">A seam slice proves an SPE HTTP 423 surfaces a user-actionable ProblemDetails, not a 500 — GREEN.</criterion>
+    <criterion testable="true">A seam slice proves imported revisions/comments are accept/reject-able and SURVIVE a save (paraId-keyed) — GREEN.</criterion>
+    <criterion testable="true">NEGATIVE cases covered: an un-re-anchorable ORPHAN surfaces (not dropped); a non-lock 5xx surfaces as a generic ProblemDetails (not masked); a concurrent external edit on create-on-save yields a clean 412; an unresolvable imported anchor surfaces (not dropped).</criterion>
+    <criterion testable="true">All slices are through-the-wire via `WebApplicationFactory`; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests; slices live under `tests/integration/seam/Compose/`; suite is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Seam-slice evidence (NFR-06/08, Success Criterion 4) for tasks 050/051/052/053. Runs after all four land
+    (parallel-safe true — separate test files). If `tests/integration/seam/Compose/` was already created by
+    task 034 (Phase-3 corpus proof), extend it rather than duplicating harness setup.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
