@@ -55,6 +55,11 @@ import { useInjectionQueue } from "./useInjectionQueue";
 import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
 import { useConsumerChips } from "./useConsumerChips";
+// spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
+// a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
+// pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
+import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
+import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
 import { usePlaybookSelection } from "./usePlaybookSelection";
@@ -492,6 +497,46 @@ export function ConversationPane(): React.JSX.Element {
     }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // ── spaarke-notification-spine-r1 task 051 (FR-16): proactive-suggestion cards ──
+  // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
+  // spine via the task-021 `@spaarke/notifications` client, re-grounded through the
+  // BFF, and rendered as a compact card (SuggestionCard) — a SIBLING of the Click-path
+  // chips, independent of a dispatch turn. The card's action re-enters the EXISTING
+  // dispatch (chips.dispatchBinding) — never a second pipeline (ADR-039 / spec Scope).
+  // Held in a ref so the notifications subscription never re-arms on dispatch-state churn.
+  const dispatchBindingRef = React.useRef(chips.dispatchBinding);
+  dispatchBindingRef.current = chips.dispatchBinding;
+  const suggestions = useSuggestionCards({
+    subscribe: React.useCallback(
+      (kind, handler) => getNotificationsClient().registerHandler(kind, handler),
+      []
+    ),
+    // Re-fetch/re-ground: GET /api/notifications/pending (task 022) — oid-scoped +
+    // read-time expiry-filtered SERVER-side. Tolerant of the `{ items }` wrapper or a bare array.
+    fetchPending: React.useCallback(async (): Promise<ReadonlyArray<PendingSuggestionItem>> => {
+      const response = await authenticatedFetch(`${bffBaseUrl}/api/notifications/pending`, {
+        method: "GET",
+      });
+      const data: unknown = await response.json();
+      const items = Array.isArray(data)
+        ? data
+        : data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
+          ? (data as { items: unknown[] }).items
+          : [];
+      return items as ReadonlyArray<PendingSuggestionItem>;
+    }, [authenticatedFetch, bffBaseUrl]),
+    // task 052 re-entry: route the re-validated action through the SHARED dispatch. The
+    // client carries ZERO routing logic (ADR-039) — `actionHint` is handed to the existing
+    // dispatchBinding; task 052 formalizes the actionHint→Binding resolution. An unresolved
+    // Binding surfaces the stable ADR-019 failure line via runBindingDispatch's own catch.
+    onSuggestionAction: React.useCallback((envelope) => {
+      dispatchBindingRef.current(envelope.actionHint, {
+        slots: { regardingRecordId: envelope.regardingRecordId },
+      });
+    }, []),
+    inject: injection.inject,
+  });
 
   // ── spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path surface launch ──
   // The BFF's BindingCapabilityTool emits a `surface_launch` SSE event when the
@@ -1760,6 +1805,11 @@ export function ConversationPane(): React.JSX.Element {
             </MessageBarActions>
           </MessageBar>
         )}
+
+        {/* task 051 (FR-16): proactive suggestions render at the top of the pane — they arrive
+            from the Layer-C spine independent of a dispatch turn, so they are NOT in the
+            transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
+        {suggestions.suggestionSlot}
 
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (

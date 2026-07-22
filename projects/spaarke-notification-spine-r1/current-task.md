@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-22 (context-handoff — tasks 024–050 ✅; task 051 design locked, NOT yet implemented).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (7 ahead of master, synced to master `f8e04ecdc`, all pushed; batching master-merge per owner). **Phases 1–4 COMPLETE** (024/025 on master; 040/041/042 on branch). **Phase 5**: 050 ✅ committed `c7ef339ae`; **051 = NEXT — design fully captured below (§"051 investigation + LOCKED design"), ready to implement in a fresh window**. Then 052 → 090.
+> **Last Updated**: 2026-07-22 (task 051 ✅ COMPLETE — suggestion renderer branch shipped + gates clean).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (synced to master `f8e04ecdc`, batching master-merge per owner). **Phases 1–4 COMPLETE** (024/025 on master; 040/041/042 on branch). **Phase 5**: 050 ✅ `c7ef339ae`; **051 ✅ (this commit)**; **052 = NEXT** (dispatch parity), then 090 wrap-up.
 
 ---
 
@@ -9,10 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **051 — Suggestion renderer branch (FR-16), Phase 5 Wave 16 — NOT STARTED** (deps 050✅ 021✅ met). Prior: 024✅ 025✅ 040✅ 041✅ 042✅ **050✅**. Phase 4 COMPLETE; Phase 5 in progress. |
-| **Step** | Begin task 051 (`tasks/051-suggestion-renderer-branch.poml`). Tier **sonnet/high**. Frontend: `@spaarke/notifications` client kind-router renders the `kind=suggestion` outbox row (ADR-021 Fluent v9 + dark mode); `actionHint` drives the render + the dispatch it re-enters (052). |
-| **Status** | 024/025 on master; **040+041+042+050 committed on branch** (synced to master f8e04ecdc; batching master-merge per owner). Owner-created `sprk_communicationrule` table (Path B, 041). |
-| **Next Action** | **"work on task 051"** (renderer). Then 052 (dispatch parity) → 090 wrap-up. Master-merge of 025/040/041/042/050 batched for later per owner. |
+| **Task** | **052 — Suggestion dispatch parity (FR-17), Phase 5 Wave 17 — NOT STARTED** (deps 051✅ 031✅ met). Prior: 024✅ 025✅ 040✅ 041✅ 042✅ 050✅ **051✅**. Only 052 + 090 remain. |
+| **Step** | Begin task 052 (`tasks/052-*.poml`, opus/high). Implement the `actionHint`→Binding re-entry: the seam is `onSuggestionAction(envelope)` in `ConversationPane.tsx` (currently the interim `chips.dispatchBinding(envelope.actionHint, { slots:{ regardingRecordId } })`). Add the dispatch-parity seam test. 051's re-fetch-before-dispatch + graceful-fail + expiry-filter are already in place. |
+| **Status** | 024/025 on master; **040+041+042+050+051 committed on branch** (synced to master f8e04ecdc; batching master-merge per owner). |
+| **Next Action** | **"work on task 052"** (dispatch parity). Then 090 wrap-up (main-session, incl. /test-diet + ADR-047 full). Master-merge of 025/040/041/042/050/051 batched for later per owner. |
+
+### 051 result (Phase 5, Wave 16 — ✅ DONE 2026-07-22)
+- **`SuggestionCard.tsx`** (NEW, presentational sibling of ConsumerChips — mirrors the `chip` token class, Fluent v9 tokens ONLY, dark-mode-correct) + **`useSuggestionCards.tsx`** (NEW hook): subscribe to `kind=suggestion` on the ONE `@spaarke/notifications` client → re-ground from `GET /api/notifications/pending` (task 022) → **pre-mount expiry filter** (`expiresAt<=now` excluded) → click **re-fetches/re-grounds BEFORE acting** (confirm still-pending) → hand fresh envelope to host `onSuggestionAction`; stale/error → stable ADR-019 line + NO dispatch.
+- **ConversationPane wiring**: new top-of-content slot (NOT the transcript footer — proactive, turn-independent). `onSuggestionAction` routes through the EXISTING `chips.dispatchBinding` (ref-held) → escalation trigger (no 2nd dispatch pipeline) did NOT fire. **actionHint→Binding resolution is 052's job** (interim passes actionHint as bindingId; unresolved → graceful ADR-019 line).
+- **jest**: added `src/__mocks__/notifications.ts` + `jest.config.ts` mapper (`@spaarke/notifications` ships ESM dist jest can't transform + drives live SignalR; mirrors the `@spaarke/auth`/`sdap-client` mock pattern). **No mount-time fetch** (was breaking the fake-timers event-path suite + redundant vs the poll first-tick) — re-ground on signal only.
+- **7 new tests** (renders / expired-absent / click-re-fetches-before-dispatch via jest invocationCallOrder / stale-graceful / dark-mode). Sibling guard: **21 conversation suites / 119 tests all green**; typecheck surface-gate **0 surface-owned**; lint clean. Full-suite: only pre-existing `three-pane-compose-coordination.e2e` fails (9, unrelated task-104 compose hook throw — fails identically on baseline); CreateOnSaveAssociation/MyAssistant pass 25/25 isolated (parallel-load flakiness). Both Step 9.5 gates CLEAN. Notes: `notes/051-suggestion-renderer-notes.md`.
 
 ### 051 investigation + LOCKED design (Phase 5, Wave 16 — IN PROGRESS, not yet implemented)
 **Rigor**: FULL. Tier **sonnet** (session on opus ≥ tier → OK). conflict-check CLEAN (no open PR touches SpaarkeAi conversation). **Files read**: `ConsumerChips.tsx` (visual anchor), `useConsumerChips.tsx` (dispatch+graceful-fail), `notificationsBootstrap.ts` (task-021 client contract).
