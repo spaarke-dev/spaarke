@@ -43,6 +43,11 @@ public sealed class ThreadResolver : IThreadResolver
     // every CREATE path below rather than relying solely on the Dataverse column default.
     private const string NameIsAutoDerivedField = "sprk_nameisautoderived";
 
+    // FR-24 pin/favorite (task 040 schema / task 041 write). Boolean column added live to spaarkedev1 by task 040;
+    // pre-existing rows read back null (DefaultValue does not backfill), normalized to false by the read side
+    // (CommunicationThreadReadService). This write path only ever sets an explicit true/false.
+    private const string PinnedField = "sprk_ispinned";
+
     // FR-17 participant roll-up (task 004). Names a RECORD-LESS thread (no ADR-024 regarding anchor) from the
     // people/addresses in its messages, via the MESSAGE-grain sprk_communicationparticipant junction (R2 tasks
     // 003/050) — REUSE of the existing ADR-024/ADR-048 participant index, NOT a second participant store. Two
@@ -336,6 +341,21 @@ public sealed class ThreadResolver : IThreadResolver
 
         _logger.LogInformation("Renamed thread {ThreadId} (naming-edited marker → Edited): {Name}", threadId, persisted);
         return persisted;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> SetPinnedAsync(Guid threadId, bool pinned, CancellationToken ct = default)
+    {
+        // User-initiated write, NOT best-effort (unlike ReDeriveThreadNameAsync) — a failure must surface to the
+        // endpoint, mirroring RenameThreadAsync's contract.
+        await _entityService.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            new Dictionary<string, object> { [PinnedField] = pinned },
+            ct);
+
+        _logger.LogInformation("Set pinned={Pinned} on thread {ThreadId}", pinned, threadId);
+        return pinned;
     }
 
     /// <summary>

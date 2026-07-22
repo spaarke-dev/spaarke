@@ -4,7 +4,7 @@
     <title>New-communication awareness — emit + consume notification-spine communication-arrived</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>blocked</gate>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF producer/consumer wiring + frontend awareness; tags include bff-api. FULL gates mandatory.</rigor-reason>
     <model-tier>opus</model-tier>

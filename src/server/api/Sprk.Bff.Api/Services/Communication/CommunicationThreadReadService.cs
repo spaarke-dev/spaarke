@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -43,6 +44,7 @@ public sealed class CommunicationThreadReadService
     private const string ThreadPkField = "sprk_communicationthreadid";
     private const string ThreadNameField = "sprk_name";
     private const string ThreadTypeField = "sprk_threadtype"; // Record-Anchored=100000000, Direct 1:1=100000001
+    private const string PinnedField = "sprk_ispinned"; // R3 task 040/041 / FR-24 — null on pre-existing rows, normalized to false below
 
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
@@ -58,6 +60,7 @@ public sealed class CommunicationThreadReadService
     private const string InReplyToField = "sprk_inreplyto";
     private const string InternalOnlyField = "sprk_isinternalonly";
     private const string PrivilegeField = "sprk_privilegeclassification";
+    private const string IsPrivateField = "sprk_isprivate";             // R3 task 043 / FR-21 — message-level privacy marker (display metadata; NEVER gates a read)
     // Sender-identity enrichment (R3 task 002 / FR-18) — projected metadata over the already-visible row.
     private const string DirectionField = "sprk_direction";            // choice: Incoming=100000000, Outgoing=100000001
     private const string SentByValue = "_sprk_sentby_value";           // systemuser lookup value
@@ -91,17 +94,20 @@ public sealed class CommunicationThreadReadService
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICommunicationAccessFilter _accessFilter;
     private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _identityResolver;
     private readonly ILogger<CommunicationThreadReadService> _logger;
 
     public CommunicationThreadReadService(
         IImpersonatedCommunicationQuery query,
         ICommunicationAccessFilter accessFilter,
         ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver,
         ILogger<CommunicationThreadReadService> logger)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
         _accessFilter = accessFilter ?? throw new ArgumentNullException(nameof(accessFilter));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -126,8 +132,14 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            DirectionField, SentByValue, SentByNameField,
-            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField,
+            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) is intentionally NOT selected.
+            // The column is in a broken metadata state in the target env (IsValidODataAttribute=false —
+            // a partial/failed creation that cannot be published or deleted), so $select on it 400s and
+            // surfaces as a 500 on every thread that has messages. Nothing writes the column either, so
+            // SentByName is null regardless. Re-add here once the column is re-provisioned AND a writer
+            // populates it. Direction + SentBy (systemuserid) still drive the Teams-style bubble alignment.
+            DirectionField, SentByValue,
+            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
         if (since is { } s)
@@ -137,8 +149,13 @@ public sealed class CommunicationThreadReadService
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows.
+        // #675 / ISS-006: the internal-vs-external bit is the AUTHORITATIVE per-caller value (systemuser.sprk_isexternal
+        // via the shared resolver), NOT a hardcoded `true`. Hardcoding internal made CommunicationAccessFilter treat
+        // every caller as internal, so an external-licensed systemuser could read internal-only (D-05) messages
+        // (over-disclosure). IsExternalAsync fails closed (external) on an unresolvable id.
         var parsed = rows.Select(ParseMessageRow).ToList();
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
         var byId = parsed.ToDictionary(p => p.MessageId);
@@ -186,7 +203,10 @@ public sealed class CommunicationThreadReadService
         var odata = $"$select={select}&$filter={filter}&$top={MaxUnreadScan}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) — an unread scan must
+        // NOT count internal-only messages for an external-licensed caller (mirrors the thread-read filter above).
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var entities = rows.Select(r => ParseMessageRow(r).Entity).ToList();
         var filtered = _accessFilter.FilterMessages(context, entities);
         var unread = filtered.VisibleMessages.Count;
@@ -228,14 +248,18 @@ public sealed class CommunicationThreadReadService
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
 
         // 1) Impersonated thread query by the typed regarding lookup (entity-set-agnostic; task 002 lookups).
-        var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField });
+        // PinnedField added (task 041 / FR-24) so the record-mode thread list can mark/sort pinned threads too.
+        var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField });
         var threadOData =
             $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId}" +
             $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
         var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
 
         var threads = threadRows
-            .Select(r => (Id: TryGuid(r, ThreadPkField) ?? Guid.Empty, Name: TryString(r, ThreadNameField)))
+            .Select(r => (
+                Id: TryGuid(r, ThreadPkField) ?? Guid.Empty,
+                Name: TryString(r, ThreadNameField),
+                IsPinned: TryBool(r, PinnedField) ?? false))
             .Where(t => t.Id != Guid.Empty)
             .ToList();
 
@@ -260,7 +284,8 @@ public sealed class CommunicationThreadReadService
             .Select(t =>
             {
                 var msgs = byThread.TryGetValue(t.Id, out var list) ? list : Array.Empty<ThreadMessageDto>();
-                return new ThreadReadResult(ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count);
+                return new ThreadReadResult(
+                    ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count, IsPinned: t.IsPinned);
             })
             .ToList();
 
@@ -332,7 +357,8 @@ public sealed class CommunicationThreadReadService
                 $"({CreatedOnField} lt {v} or ({CreatedOnField} eq {v} and {ThreadPkField} lt {c.ThreadId}))");
         }
 
-        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField });
+        // PinnedField added (task 041 / FR-24) so the all-mode thread list can mark/sort pinned threads.
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField });
         var filterPart = clauses.Count > 0 ? $"&$filter={string.Join(" and ", clauses)}" : string.Empty;
         // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
         // to detect whether a further page exists without a second COUNT query.
@@ -346,7 +372,10 @@ public sealed class CommunicationThreadReadService
                 ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
                 Name: TryString(r, ThreadNameField),
                 ThreadType: TryInt(r, ThreadTypeField),
-                CreatedOn: TryDateTimeOffset(r, CreatedOnField)))
+                CreatedOn: TryDateTimeOffset(r, CreatedOnField),
+                // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
+                // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
+                IsPinned: TryBool(r, PinnedField) ?? false))
             .Where(t => t.ThreadId != Guid.Empty)
             .ToList();
 
@@ -600,14 +629,22 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            DirectionField, SentByValue, SentByNameField,
-            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, ThreadLookupValue,
+            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) intentionally NOT selected —
+            // broken column in the target env (IsValidODataAttribute=false) that 400s $select → 500 on the
+            // by-regarding + filtered-query read paths. See the matching note in ReadThreadAsync. Nothing
+            // writes the column, so SentByName is null regardless. Re-add once re-provisioned + written.
+            DirectionField, SentByValue,
+            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
+        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) on the SHARED read
+        // pipeline that both the by-regarding read (010) and the filtered query (011) compose onto — so an
+        // external-licensed caller cannot read internal-only (D-05) messages via ANY read path, not just thread-read.
         var parsed = rows.Select(ParseMessageRow).ToList();
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
         var byId = parsed.ToDictionary(p => p.MessageId);
@@ -643,6 +680,12 @@ public sealed class CommunicationThreadReadService
             CreatedOn: parsed.CreatedOn,
             InReplyTo: parsed.InReplyTo,
             Privilege: (int)decision.Privilege,
+            // FR-21 markers ride the SAME impersonated + access-filtered row as every other field: a row the caller
+            // may not see is absent from this projection entirely (no over-disclosure). IsInternalOnly is only ever
+            // true here for a permitted (internal) caller (the filter drops it for external callers); IsPrivate is
+            // display-only metadata that never gated the read.
+            IsInternalOnly: parsed.IsInternalOnly,
+            IsPrivate: parsed.IsPrivate,
             Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
                 ? atts
                 : Array.Empty<ThreadAttachmentRef>());
@@ -766,6 +809,7 @@ public sealed class CommunicationThreadReadService
     {
         var messageId = TryGuid(row, PkField) ?? Guid.Empty;
         var isInternalOnly = TryBool(row, InternalOnlyField);
+        var isPrivate = TryBool(row, IsPrivateField);
         var privilege = TryInt(row, PrivilegeField);
 
         var entity = new Entity("sprk_communication", messageId);
@@ -777,6 +821,11 @@ public sealed class CommunicationThreadReadService
         return new ParsedMessage
         {
             MessageId = messageId,
+            // FR-21 marker projection. Default false when the column is unset on a VISIBLE row — a display default,
+            // not an access decision (the internal-only ACCESS gate is the access filter's fail-closed job, not this
+            // label). IsPrivate never gates; impersonation enforces private-thread visibility.
+            IsInternalOnly = isInternalOnly ?? false,
+            IsPrivate = isPrivate ?? false,
             ThreadId = TryGuid(row, ThreadLookupValue) ?? Guid.Empty,
             Body = TryString(row, BodyField),
             BodyFormat = TryInt(row, BodyFormatField),
@@ -798,6 +847,8 @@ public sealed class CommunicationThreadReadService
     {
         public required Guid MessageId { get; init; }
         public Guid ThreadId { get; init; }
+        public bool IsInternalOnly { get; init; }
+        public bool IsPrivate { get; init; }
         public string? Body { get; init; }
         public int? BodyFormat { get; init; }
         public int? CommunicationType { get; init; }

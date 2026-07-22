@@ -18,6 +18,8 @@ function msg(id: string, isoSentAt: string, body = `body-${id}`): IThreadMessage
     createdOn: isoSentAt,
     inReplyTo: null,
     privilege: 0,
+    isInternalOnly: false,
+    isPrivate: false,
     attachments: [],
   };
 }

@@ -55,6 +55,7 @@ import {
   getThreadUnreadCount,
   listThreads,
   listThreadsByRegarding,
+  setThreadPinned,
   type IThreadListApiClientOptions,
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
@@ -190,28 +191,10 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   const recordId = regarding?.id;
   const regardingKey = entityType && recordId ? `${entityType}:${recordId}` : undefined;
 
-  // — Word filter (search term) —
-  const [searchTerm, setSearchTerm] = React.useState('');
-  const [debouncedSearch, setDebouncedSearch] = React.useState('');
-  const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  React.useEffect(() => {
-    // Record mode filters client-side over an already-loaded, already-access-
-    // filtered set (see module header) — no server round trip needed, so no
-    // debounce delay either. All-mode passes `search` server-side (FR-16) —
-    // debounce to avoid firing a request per keystroke.
-    if (regardingKey) {
-      setDebouncedSearch(searchTerm);
-      return;
-    }
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => setDebouncedSearch(searchTerm), 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchTerm, regardingKey]);
-
   // — Thread list load (regarding-scoped vs. all-mode) —
+  // The thread-list text filter was removed in the Teams-style redesign (task
+  // 062 / §B4 — "not needed"), so the list always loads the full access-
+  // filtered set for the current scope (no `search` param, no client narrowing).
   const [allRows, setAllRows] = React.useState<IThreadListItemDto[]>([]);
   const [listStatus, setListStatus] = React.useState<ThreadListStatus>('loading');
   const [errorMessage, setErrorMessage] = React.useState<string | undefined>(undefined);
@@ -226,7 +209,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         const result =
           entityType && recordId
             ? await listThreadsByRegarding(entityType, recordId, client)
-            : await listThreads({ search: debouncedSearch || undefined, top: pageSize }, client);
+            : await listThreads({ top: pageSize }, client);
         if (cancelled) return;
         setAllRows(result.threads);
         setListStatus('ready');
@@ -243,17 +226,11 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityType, recordId, debouncedSearch, pageSize, client]);
+  }, [entityType, recordId, pageSize, client]);
 
-  // Record mode: narrow the already-loaded, already-access-filtered set
-  // client-side (NOT a visibility filter — see module header). All mode: the
-  // server already applied `search`, so pass rows through unchanged.
-  const visibleRows = React.useMemo(() => {
-    if (!regardingKey) return allRows;
-    const needle = searchTerm.trim().toLowerCase();
-    if (!needle) return allRows;
-    return allRows.filter(r => (r.name ?? '').toLowerCase().includes(needle));
-  }, [allRows, regardingKey, searchTerm]);
+  // No thread-list text filter anymore (task 062 / §B4) — the visible set is
+  // exactly the loaded, access-filtered set for the current scope.
+  const visibleRows = allRows;
 
   // — Per-thread unread signal (see communicationThreadListApi.ts "getThreadUnreadCount" note) —
   const [unreadCounts, setUnreadCounts] = React.useState<Record<string, number>>({});
@@ -331,15 +308,38 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     setUnreadCounts(prev => ({ ...prev, [threadId]: 0 }));
   }, []);
 
-  const threadListRows: IThreadListRow[] = React.useMemo(
-    () =>
-      visibleRows.map(r => ({
-        threadId: r.threadId,
-        name: r.name,
-        unreadCount: unreadCounts[r.threadId],
-      })),
-    [visibleRows, unreadCounts]
+  // — Pin/unpin (task 041, FR-24): optimistic local update + rollback on failure —
+  const handleTogglePin = React.useCallback(
+    (threadId: string, nextPinned: boolean) => {
+      const previous = allRows.find(r => r.threadId === threadId)?.isPinned ?? false;
+
+      // Optimistic: flip the row immediately so the pin toggle + the sort below react without waiting on the
+      // network round trip.
+      setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, isPinned: nextPinned } : r)));
+
+      setThreadPinned(threadId, nextPinned, client).catch(err => {
+        // Rollback — restore the pre-toggle value on ANY failure (network, 403 "cannot see thread", etc.). The
+        // list's own error state is unaffected (this is a row-scoped write failure, not a list-load failure); the
+        // failure still flows through the same onError seam the list-load path uses so a host can surface it.
+        setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, isPinned: previous } : r)));
+        if (err instanceof Error) onError?.(err);
+      });
+    },
+    [allRows, client, onError]
   );
+
+  const threadListRows: IThreadListRow[] = React.useMemo(() => {
+    const mapped = visibleRows.map(r => ({
+      threadId: r.threadId,
+      name: r.name,
+      unreadCount: unreadCounts[r.threadId],
+      isPinned: r.isPinned,
+    }));
+    // Pinned threads float to the top (FR-24). Array.prototype.sort is spec-guaranteed stable (ES2019+), so within
+    // the pinned/unpinned groups the existing order — server createdon-desc (all-mode) or server order
+    // (record-mode) — and the word filter's already-narrowed set are both preserved untouched.
+    return [...mapped].sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
+  }, [visibleRows, unreadCounts]);
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
@@ -360,9 +360,8 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         selectedThreadId={selectedThreadId}
         onSelectThread={handleSelectThread}
         onMarkThreadRead={handleMarkThreadRead}
-        searchTerm={searchTerm}
-        onSearchTermChange={setSearchTerm}
         onCreateThread={onCreateThread}
+        onTogglePin={handleTogglePin}
       />
       <div className={styles.rightPane}>{rightPane}</div>
     </div>

@@ -57,15 +57,25 @@ const useStyles = makeStyles({
     padding: 0,
     display: 'flex',
     flexDirection: 'column',
+    // Anchor point for the absolutely-positioned close button (§B1).
+    position: 'relative',
   },
   body: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 },
   title: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     paddingInline: tokens.spacingHorizontalL,
+    // Leave room so the "Messages" title never runs under the corner close button.
+    paddingInlineEnd: tokens.spacingHorizontalXXL,
     paddingBlock: tokens.spacingVerticalM,
     margin: 0,
+  },
+  // §B1 (UAT): the close "x" pinned to the modal's upper-right corner —
+  // independent of the title row's own layout/padding, so it reads
+  // unambiguously as "the corner", not just "the right end of a padded row".
+  closeButton: {
+    position: 'absolute',
+    top: tokens.spacingVerticalM,
+    right: tokens.spacingHorizontalM,
+    zIndex: 1,
   },
   content: { flex: 1, minHeight: 0, padding: 0, display: 'flex', flexDirection: 'column' },
   workspaceHost: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' },
@@ -120,20 +130,18 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={(_ev, data) => (!data.open ? onClose() : undefined)} modalType="modal">
       <DialogSurface className={s.surface}>
+        {/* §B1 (UAT): moved out of DialogTitle's inline action slot so it pins to the
+            surface's literal upper-right corner regardless of title row padding. */}
+        <Button
+          appearance="subtle"
+          className={s.closeButton}
+          aria-label="Close conversations"
+          icon={<DismissRegular />}
+          onClick={onClose}
+        />
         <DialogBody className={s.body}>
-          <DialogTitle
-            className={s.title}
-            action={
-              <Button
-                appearance="subtle"
-                aria-label="Close conversations"
-                icon={<DismissRegular />}
-                onClick={onClose}
-              />
-            }
-          >
-            Conversations
-          </DialogTitle>
+          {/* §B2 (UAT): modal title = "Messages". */}
+          <DialogTitle className={s.title}>Messages</DialogTitle>
           <DialogContent className={s.content}>
             <div className={s.workspaceHost}>
               <ConversationWorkspaceR16

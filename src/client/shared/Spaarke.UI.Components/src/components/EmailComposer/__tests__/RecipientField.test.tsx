@@ -211,7 +211,14 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     // contact — selecting it commits that email.
     const onSearch = jest
       .fn()
-      .mockResolvedValue([{ id: 'contact-9', name: 'Ralph Schroeder (ralph@example.com)', email: 'ralph@example.com', entityType: 'contact' }]);
+      .mockResolvedValue([
+        {
+          id: 'contact-9',
+          name: 'Ralph Schroeder (ralph@example.com)',
+          email: 'ralph@example.com',
+          entityType: 'contact',
+        },
+      ]);
     const onChangeSpy = jest.fn();
     renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
     const input = getInput();
@@ -221,7 +228,9 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     expect(onSearch).toHaveBeenCalledWith('ralph@ex');
     fireEvent.click(option);
     await waitFor(() =>
-      expect(onChangeSpy).toHaveBeenCalledWith([expect.objectContaining({ email: 'ralph@example.com', resolved: true })])
+      expect(onChangeSpy).toHaveBeenCalledWith([
+        expect.objectContaining({ email: 'ralph@example.com', resolved: true }),
+      ])
     );
   });
 

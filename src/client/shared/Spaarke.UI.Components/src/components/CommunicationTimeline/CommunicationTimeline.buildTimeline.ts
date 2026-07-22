@@ -62,6 +62,11 @@ export function mapThreadMessageDtoToTimelineMessage(dto: IThreadMessageDto): Ti
     bodyFormat: dto.bodyFormat === BODY_FORMAT_PLAIN_TEXT ? 'text' : 'html',
     inReplyTo: dto.inReplyTo,
     privilege: dto.privilege,
+    // R3 task 043 (FR-21) — privilege/privacy markers, additive pass-through (no derivation here, mirrors every
+    // other field). These ride the SAME access-filtered row the BFF returned; the client renders exactly what the
+    // server permitted — no client-side access inference.
+    isInternalOnly: dto.isInternalOnly ?? false,
+    isPrivate: dto.isPrivate ?? false,
     attachments: dto.attachments.map(a => ({
       id: a.communicationAttachmentId,
       documentId: a.documentId ?? undefined,

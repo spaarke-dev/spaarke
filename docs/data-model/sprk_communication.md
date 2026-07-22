@@ -1,15 +1,27 @@
 # sprk_communication Entity Fields
 
-> **Last Reviewed**: 2026-07-20
-> **Reviewed By**: messaging-communication-app-r3 task 006 (doc-drift fix — adds `sprk_communicationtype` option `100000004: Message` + the R1 messaging columns omitted from this doc; code-wins per root CLAUDE.md §2)
+> **Last Reviewed**: 2026-07-21
+> **Reviewed By**: messaging-communication-app-r3 task 040 (adds `sprk_communicationthread.sprk_ispinned` — thread pin/favorite backing field, FR-24)
 > **Status**: Current
-> **Solution**: Spaarke (Dataverse)
+> **Solution**: Spaarke (Dataverse) — `sprk_ispinned` shipped in the `SpaarkeCore` unmanaged solution
+
+> **2026-07-21 (R3 task 040)**: Added `sprk_communicationthread.sprk_ispinned` (Boolean/Two Options, default `false`) — additive pin/favorite flag for FR-24. See the new **Communication Thread — Pin Field** section below. This doc does not yet catalog the rest of the `sprk_communicationthread` entity's columns (out of scope for task 040 — flagged, not invented; the entity itself predates R3).
 
 > **2026-07-20 (R3 task 006)**: Added `100000004: Message` to `sprk_communicationtype` (matches shipped `CommunicationType.cs` enum). Added the R1 messaging columns that were verified in code and/or the as-built schema but missing from this doc: `sprk_acsmessageid`, `sprk_acsthreadid`, `sprk_communicationthread` (message → thread lookup), `sprk_isinternalonly`, `sprk_privilegeclassification`, and `sprk_isprivate` (present in the as-built schema per `projects/messaging-communication-app-r1/notes/messaging-schema-spec.md`, but not yet consumed by any BFF code path as of this correction — flagged, not invented).
 
 > **2026-07-14 (R4 task 001/002)**: Added `sprk_inreplyto`, `sprk_associationprovenance`, `sprk_regardingservicerequest`; widened `sprk_internetmessageid` (100→1000); documented previously-omitted `sprk_associationstatus` (+ new `Suggested`/`Ambiguous` values) and `sprk_receiveddate`. Legacy `sprk_associationstatus` value `Unresolved (100000002)` is retained and treated by the R4 engine as equivalent to `Pending Review`.
 
 > **Architecture**: How these columns are populated — the 6-rung Association Engine over the normalized envelope, the confidence→status ladder (`sprk_associationstatus`), the auto-file kill-switch, and the provenance JSON shape (`sprk_associationprovenance`) — is documented in [`communication-intelligence-architecture.md`](../architecture/communication-intelligence-architecture.md) (canonical) and [ADR-045](../../.claude/adr/ADR-045-communication-architecture.md).
+
+## Communication Thread — Pin Field (R3 task 040, FR-24)
+
+`sprk_communicationthread` (entity display name "Communication Thread", predates R3) is not yet fully cataloged in this doc. Task 040 added a single additive field to back thread pin/favorite state; documented here rather than invented as part of a full-entity rewrite.
+
+| Entity Display Name  | Entity Logical Name      | Logical Name  | Schema Name   | Display Name | Attribute Type | Description | Custom Attribute | Type   | Additional data |
+| --------------------- | -------------------------- | ---------------- | ----------------- | ------------- | ---------------- | ------------ | ----------------- | ------ | ---------------- |
+| Communication Thread | sprk_communicationthread | sprk_ispinned | sprk_IsPinned | Pinned | Two options | R3 FR-24: thread pin/favorite state. `true` = user has pinned this thread. Written by BFF/client (task 041) — no plugin. Pre-existing thread rows return `null` via Web API (not backfilled to `false`; no data migration performed) — task 041 and any other consumer MUST treat `null` as falsy/unpinned, not just strict `=== false`. | True | Simple | True: Yes<br><br>False: No<br><br>Default Value: False (applies to new records only) |
+
+---
 
 | Entity Display Name   | Entity Logical Name       | Logical Name                     | Schema Name                      | Display Name                  | Attribute Type   | Description                                                     | Custom Attribute | Type   | Additional data                                                                                                                                                                                     |
 | --------------------- | ------------------------- | -------------------------------- | -------------------------------- | ----------------------------- | ---------------- | --------------------------------------------------------------- | ---------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

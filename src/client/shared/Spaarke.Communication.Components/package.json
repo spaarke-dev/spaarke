@@ -22,11 +22,13 @@
   "peerDependencies": {
     "@fluentui/react-components": "^9.0.0",
     "@fluentui/react-icons": "^2.0.0",
+    "@microsoft/signalr": "^8.0.0",
     "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
     "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
   },
   "dependencies": {
     "@spaarke/auth": "file:../Spaarke.Auth",
+    "@spaarke/notifications": "file:../Spaarke.Notifications",
     "@spaarke/ui-components": "file:../Spaarke.UI.Components"
   },
   "devDependencies": {

@@ -563,9 +563,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const primaryFiled = React.useMemo<Connection | null>(() => {
     if (filedConnections.length === 0) return null;
     const eff =
-      primaryField && filedConnections.some(c => c.field === primaryField)
-        ? primaryField
-        : filedConnections[0].field;
+      primaryField && filedConnections.some(c => c.field === primaryField) ? primaryField : filedConnections[0].field;
     return filedConnections.find(c => c.field === eff) ?? null;
   }, [filedConnections, primaryField]);
 
@@ -575,11 +573,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // number (correct for outbound). Both fall back to the denorm fields when nothing
   // is filed yet.
   const cardName = primaryFiled
-    ? resolveDisplayName(primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName
+    ? (resolveDisplayName(primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName)
     : primaryDenorm.name;
-  const cardNumber = primaryFiled
-    ? primaryFiled.recordNumber ?? primaryDenorm.number
-    : primaryDenorm.number;
+  const cardNumber = primaryFiled ? (primaryFiled.recordNumber ?? primaryDenorm.number) : primaryDenorm.number;
 
   // Override-reason dialog state.
   const [overrideConn, setOverrideConn] = React.useState<Connection | null>(null);
@@ -837,9 +833,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
           { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
         );
         if (result && typeof result.catch === 'function') {
-          result.catch((err: unknown) =>
-            console.warn('[CommunicationConnections] navigateTo rejected:', err)
-          );
+          result.catch((err: unknown) => console.warn('[CommunicationConnections] navigateTo rejected:', err));
         }
       } catch (err) {
         console.warn('[CommunicationConnections] navigateTo threw:', err);

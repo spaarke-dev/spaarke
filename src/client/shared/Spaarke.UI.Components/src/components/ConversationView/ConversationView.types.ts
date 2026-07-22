@@ -16,7 +16,7 @@
  */
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
-import type { TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
+import type { TimelineAttachment, TimelineMessage } from '../CommunicationTimeline/CommunicationTimeline.types';
 
 /**
  * The Dataverse record a thread is associated with ("regarding"), used by the
@@ -131,6 +131,29 @@ export interface ConversationViewProps {
    * send() prop.)
    */
   onForwardMessage?: (message: TimelineMessage) => void;
+
+  /**
+   * Fired when the user activates an attachment on a message (task 042 /
+   * FR-20). Rendered on BOTH the chat `<MessageBubble />` and the
+   * `<EmailInFlowBlock />` for any attachment that resolved to a governed
+   * `sprk_document` (has a `documentId`). Hands the attachment + its message
+   * back so the HOST can open it via the EXISTING SPE document-viewer path —
+   * the shared `<RichFilePreviewDialog />` fed by `/api/documents/{id}/preview-url`
+   * + `/open-links` (the same wiring `CommunicationAttachmentsApp` uses) — NOT
+   * a new inline previewer (FR-20 constraint).
+   *
+   * ConversationView stays context-agnostic (ADR-012): it holds no `Xrm` /
+   * BFF-preview surface, so it never mounts the viewer itself. This decoupled
+   * seam mirrors `onOpenEmail` / `onForwardMessage`. Omit it and attachments
+   * render as non-interactive chips.
+   *
+   * Access-filtering (NFR-01): the affordance is gated on a `documentId` that
+   * only exists on attachments the impersonated, access-filtered thread read
+   * returned for a message this caller may read; the BFF preview/open-links
+   * endpoints re-enforce document-level access under OBO — a user without
+   * access can neither see nor retrieve the attachment (no over-disclosure).
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 
   /** Optional className applied to the root layout container. */
   className?: string;

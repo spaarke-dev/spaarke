@@ -4,7 +4,7 @@
     <title>Thread pin field — additive Dataverse schema on sprk_communicationthread</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Additive Dataverse schema only (one new boolean/two-option field); no application code, no ADR-sensitive surface. Deterministic Web-API + solution work.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -732,6 +732,53 @@ public class ThreadResolverTests
             Times.Never);
     }
 
+    // FR-24 pin field name (task 040 schema) — a local literal (not a production-internal reference), mirroring
+    // the NameIsAutoDerivedField convention above.
+    private const string PinnedField = "sprk_ispinned";
+
+    [Fact]
+    public async Task SetPinnedAsync_WithTrue_SetsIsPinnedTrueInOneUpdate()
+    {
+        // FR-24 pin: sprk_ispinned=true written in ONE UpdateAsync (mirrors RenameThreadAsync's atomic-write shape).
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.SetPinnedAsync(threadId, true, CancellationToken.None);
+
+        persisted.Should().BeTrue();
+        written.Should().NotBeNull();
+        ((bool)written![PinnedField]).Should().BeTrue();
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SetPinnedAsync_WithFalse_SetsIsPinnedFalse()
+    {
+        // Unpin: sprk_ispinned=false written explicitly (never relies on the Dataverse column default).
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.SetPinnedAsync(threadId, false, CancellationToken.None);
+
+        persisted.Should().BeFalse();
+        written.Should().NotBeNull();
+        ((bool)written![PinnedField]).Should().BeFalse();
+    }
+
     [Fact]
     public async Task RenameThenReDerive_OnEditedThread_IsNoOp_NamePreserved()
     {

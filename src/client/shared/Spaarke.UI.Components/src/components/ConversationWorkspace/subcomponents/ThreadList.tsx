@@ -2,19 +2,29 @@
  * ThreadList.tsx
  *
  * The left-pane thread list of `<ConversationWorkspace />` (task 012, FR-01/10).
- * Rows show ONLY the thread's name + an unread indicator (NO preview text, per
- * FR-10) — a word-filter box narrows the displayed rows and a create-thread
- * (＋) button invokes the host-supplied `onCreateThread` callback (the
- * NewThreadModal itself is task 024 — this component only wires the callback).
+ * Rows show the thread's name + an unread indicator (NO preview text, per
+ * FR-10) + a pin toggle (task 041, FR-24). A create-thread (＋) icon button
+ * invokes the host-supplied `onCreateThread` callback (the NewThreadModal
+ * itself is task 024 — this component only wires the callback). Pin only — no
+ * archive/mute/tag control (spec FR-24).
+ *
+ * Teams-style side pane (R3 task 062 / UAT §B4-6): NO "Filter threads" text
+ * input (removed — not needed), the create control is an icon-only ＋ (not
+ * "＋ New"), and the pane carries a subtle contrast fill
+ * (`colorNeutralBackground2`) that sets it apart from the message pane
+ * (`colorNeutralBackground1`) — semantic tokens only, so the contrast adapts in
+ * dark mode.
  *
  * ARIA: `role="list"` / `role="listitem"` (NFR-05) with roving-tabIndex
  * keyboard navigation (ArrowUp/ArrowDown moves selection + focus, Enter/Space
- * selects). Fluent v9 semantic tokens only (ADR-021) — dark mode passes
- * through the host `FluentProvider`.
+ * selects). The pin toggle is a native `<Button>` (independently Tab-reachable,
+ * Enter/Space-activatable) with `aria-pressed` reflecting state. Fluent v9
+ * semantic tokens only (ADR-021) — dark mode passes through the host
+ * `FluentProvider`.
  */
 import * as React from 'react';
-import { Button, Input, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { AddRegular } from '@fluentui/react-icons';
+import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { AddRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 import { UnreadIndicator } from '../../CommunicationTimeline/subcomponents/UnreadIndicator';
 
 export interface IThreadListRow {
@@ -23,6 +33,13 @@ export interface IThreadListRow {
   name: string | null;
   /** Server-computed readable-message signal for this thread (see `communicationThreadListApi.ts` header note). Undefined while not yet loaded. */
   unreadCount?: number;
+  /**
+   * `sprk_ispinned` (task 040/041, FR-24). Host already normalizes the field's Dataverse-`null` reading (on a
+   * pre-existing thread row) to `false` before this row is built — see `ConversationWorkspace`'s `threadListRows`
+   * memo — so this component only ever renders a definite pinned/unpinned state. Undefined while not yet loaded
+   * (treated the same as unpinned).
+   */
+  isPinned?: boolean;
 }
 
 export type ThreadListStatus = 'loading' | 'ready' | 'error';
@@ -34,9 +51,14 @@ export interface IThreadListProps {
   selectedThreadId?: string;
   onSelectThread: (threadId: string) => void;
   onMarkThreadRead?: (threadId: string) => void;
-  searchTerm: string;
-  onSearchTermChange: (value: string) => void;
   onCreateThread?: () => void;
+  /**
+   * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
+   * inverse of the row's current `isPinned`). The host owns optimistic UI + rollback (see `ConversationWorkspace`);
+   * this component only renders whatever `isPinned` it is given and reports the user's intent. Omit to hide the
+   * pin toggle entirely (e.g. a read-only host).
+   */
+  onTogglePin?: (threadId: string, nextPinned: boolean) => void;
   className?: string;
 }
 
@@ -50,22 +72,23 @@ const useStyles = makeStyles({
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
+    // Subtle contrast fill vs. the message pane (`colorNeutralBackground1`) so
+    // the thread/side pane reads as distinct (task 062 / §B6). Semantic token —
+    // adapts in dark mode.
+    backgroundColor: tokens.colorNeutralBackground2,
   },
   toolbar: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
+    // Icon-only ＋ sits at the trailing edge (task 062 / §B5) — Teams-style.
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingHorizontalM,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-  },
-  searchInput: {
-    flexGrow: 1,
-    minWidth: 0,
   },
   list: {
     flex: '1 1 auto',
@@ -96,7 +119,15 @@ const useStyles = makeStyles({
   rowFocused: {
     boxShadow: `inset 0 0 0 2px ${tokens.colorStrokeFocus2}`,
   },
+  rowHeader: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+  },
   rowName: {
+    flex: '1 1 auto',
+    minWidth: 0,
     fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground1,
     overflow: 'hidden',
@@ -105,6 +136,14 @@ const useStyles = makeStyles({
   },
   rowNameSelected: {
     fontWeight: tokens.fontWeightSemibold,
+  },
+  pinButton: {
+    flexShrink: 0,
+    minWidth: 'auto',
+    padding: 0,
+  },
+  pinButtonActive: {
+    color: tokens.colorBrandForeground1,
   },
   centeredState: {
     display: 'flex',
@@ -129,9 +168,8 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   selectedThreadId,
   onSelectThread,
   onMarkThreadRead,
-  searchTerm,
-  onSearchTermChange,
   onCreateThread,
+  onTogglePin,
   className,
 }) => {
   const styles = useStyles();
@@ -178,23 +216,18 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
-        <Input
-          className={styles.searchInput}
-          contentBefore={undefined}
-          value={searchTerm}
-          placeholder="Filter threads"
-          aria-label="Filter threads by name"
-          onChange={(_e, data) => onSearchTermChange(data.value)}
-        />
-        <Button
-          appearance="primary"
-          icon={<AddRegular />}
-          aria-label="New thread"
-          onClick={() => onCreateThread?.()}
-          disabled={!onCreateThread}
-        >
-          New
-        </Button>
+        {/* Icon-only ＋ create control (task 062 / §B5) — the accessible name
+            stays "New thread" so keyboard + screen-reader users still identify
+            it despite the label being visually icon-only (NFR-05). */}
+        <Tooltip content="New thread" relationship="label">
+          <Button
+            appearance="primary"
+            icon={<AddRegular />}
+            aria-label="New thread"
+            onClick={() => onCreateThread?.()}
+            disabled={!onCreateThread}
+          />
+        </Tooltip>
       </div>
 
       {status === 'loading' && (
@@ -211,7 +244,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
 
       {status === 'ready' && rows.length === 0 && (
         <div className={styles.centeredState}>
-          <Text>{searchTerm ? 'No threads match your filter.' : 'No threads yet.'}</Text>
+          <Text>No threads yet.</Text>
         </div>
       )}
 
@@ -221,6 +254,10 @@ export const ThreadList: React.FC<IThreadListProps> = ({
             const isSelected = row.threadId === selectedThreadId;
             const isFocused = row.threadId === focusedThreadId;
             const displayName = row.name && row.name.trim().length > 0 ? row.name : '(Untitled thread)';
+            // Defensive falsy coercion (task 040 caveat: a pre-existing thread's sprk_ispinned reads back null,
+            // not false — the host normalizes it before building rows, but this component never assumes a strict
+            // boolean on the wire).
+            const isPinned = !!row.isPinned;
             return (
               <div
                 key={row.threadId}
@@ -239,9 +276,27 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                 onClick={() => onSelectThread(row.threadId)}
                 onFocus={() => setFocusedThreadId(row.threadId)}
               >
-                <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
-                  {displayName}
-                </Text>
+                <div className={styles.rowHeader}>
+                  <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
+                    {displayName}
+                  </Text>
+                  {onTogglePin && (
+                    <Button
+                      appearance="transparent"
+                      size="small"
+                      className={mergeClasses(styles.pinButton, isPinned ? styles.pinButtonActive : undefined)}
+                      icon={isPinned ? <PinFilled /> : <PinRegular />}
+                      aria-label={isPinned ? `Unpin ${displayName}` : `Pin ${displayName}`}
+                      aria-pressed={isPinned}
+                      onClick={e => {
+                        // Prevent the click from bubbling to the row's onClick (which would also select the
+                        // thread) — the pin toggle is an independent affordance.
+                        e.stopPropagation();
+                        onTogglePin(row.threadId, !isPinned);
+                      }}
+                    />
+                  )}
+                </div>
                 {typeof row.unreadCount === 'number' && row.unreadCount > 0 && (
                   <UnreadIndicator
                     unreadCount={row.unreadCount}

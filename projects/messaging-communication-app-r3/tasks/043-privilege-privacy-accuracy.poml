@@ -4,7 +4,7 @@
     <title>Privilege / privacy accuracy — surface markers; recipient display = actual permitted recipients</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>after:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Correctness-critical (NFR-01): privilege/privacy accuracy; touches shared read DTO + BFF + UI display. FULL gates mandatory.</rigor-reason>
     <model-tier>opus</model-tier>
