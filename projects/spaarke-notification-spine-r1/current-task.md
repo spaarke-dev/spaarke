@@ -9,10 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **025 — R3 contract-lock note (FR-19), Phase 2 Wave 7 — NOT STARTED** (deps 024✅ 021✅ 022✅ all met). Prior: 024 ✅ DONE. |
-| **Step** | Begin Step 1 of task 025 (`tasks/025-r3-contract-lock-note.poml`). MINIMAL rigor (doc deliverable — formalizes the communication-arrived contract so messaging-r3 task 045 becomes verify-only). |
-| **Status** | 024 shipped: `CommunicationArrivedProducer` emitting at 5 orchestration points (email/msg × in/out), non-fatal, outbox-before-ping. 8853/0 suite; both gates CLEAN; 46.09 MB; 0 new CVE. |
-| **Next Action** | Push/sync task 024 (commit made), then **"work on task 025"**. Or continue the critical path (040 needs 031✅+024✅+email-r4-W10✅ → now unblocked). |
+| **Task** | **040 — comms_assessed producer (FR-11), Phase 4 Wave 12 — NOT STARTED** (deps 031✅ 024✅ email-r4-W10✅ all met → UNBLOCKED). Prior: 024 ✅, 025 ✅ DONE. Phase 2 + Phase 3 COMPLETE. |
+| **Step** | Begin Step 1 of task 040 (`tasks/040-comms-assessed-producer.poml`). FULL rigor (opus/high — assessment-gated producer; touches Services/Communication). |
+| **Status** | 024+025 shipped & on master (`1a5bc7d15`). SpaarkeAi fresh-master build fixed (Notifications added to Build-AllClientComponents.ps1; verified end-to-end). messaging-r3 task 045 unblocked (contract-lock note delivered to their worktree). |
+| **Next Action** | **"work on task 040"** (comms_assessed — the enrichment-gated sibling of 024; do NOT conflate with 024). Then 041 → 042 → Phase 5 (050-052) → 090. |
+
+### 025 result (Phase 2, Wave 7 — ✅ DONE 2026-07-21)
+- Delivered `notification-spine-contract-lock.md` to messaging-r3's worktree notes dir (`C:/code_files/spaarke-wt-messaging-communication-app-r3/.../notes/`) + mirrored to `notes/handoffs/`. Cites the ACTUAL shipped shapes (013 envelope, 020 negotiate, 021 `@spaarke/notifications` client, 022 `/pending`, 024's 5 call sites). MINIMAL rigor (docs-only; no gates).
+- **Escalation trigger FIRED + handled in-note (§6)**: R3's alignment note listed the envelope as **8 fields**; shipped is **9** (adds required `regardingRecordId`). Additive/non-breaking (all 8 assumed fields match) — flagged explicitly per the trigger, not silently reconciled. R3 action: add `regardingRecordId: string` to their type mirror.
+- Confirmed for R3: trigger=persistence all channels; spine-emits/R3-consumes (MUST NOT wire own producer); envelope not on live wire (poll for detail); degrade = 503→poll fallback, no signal loss.
+- ⚠️ R3-worktree copy is DELIVERED ON DISK but NOT committed to R3's branch (cross-project boundary — their team's call to commit).
 
 ### 024 result (Phase 2, Wave 6 — ✅ DONE 2026-07-21)
 - **Single spine-owned `communication-arrived` producer** (`Services/Communication/CommunicationArrivedProducer.cs`): re-read comm+thread → task-023 fan-out → task-013 envelope → per-recipient task-012 outbox (BEFORE) → task-020 ping. Internally non-fatal (NFR-05). Concrete Singleton.

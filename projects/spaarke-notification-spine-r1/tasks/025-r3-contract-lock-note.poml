@@ -4,7 +4,7 @@
     <title>R3-P1 Contract-Lock Note — Deliver communication-arrived Contract to messaging-r3</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:024,021,022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation deliverable — a written contract note summarizing already-shipped contracts (013/020/021/022/024); no code changes.</rigor-reason>
     <model-tier>sonnet</model-tier>
