@@ -1,0 +1,151 @@
+<task id="012" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Opaque atoms for SDT/fields/complex objects in the projection (FR-02, server half)</title>
+    <phase>1 Backend ingest</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF `.cs` (tags include bff-api); introduces a new projection node type on the ingest path affecting byte-preservation of non-renderable constructs — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded projection extension: render named OOXML constructs as placeholder blocks that carry paraId and are never opened. Clear rule (opaque = never touched = byte-preserved); no cross-cutting offset math.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1b</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies `ComposeDocxProjectionBuilder.cs` — shared with task 011; sequence AFTER 011.</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Extend `ComposeDocxProjectionBuilder` so the projection renders non-renderable OOXML constructs —
+    SDT / content controls (`w:sdt`), fields (`w:fldSimple`, `w:fldChar`/`w:instrText` field runs), and
+    complex / floating objects (drawings, embedded objects) — as OPAQUE ATOM BLOCKS: non-editable
+    placeholder nodes that CARRY THEIR paraId and PRESERVE DOCUMENT ORDER, but are never opened or
+    reinterpreted. Because an opaque atom is never opened, the underlying construct survives save
+    BYTE-FOR-BYTE (the Patch Engine never touches subtrees no operation targets — invariant I-4). Be
+    literal: identify the construct types, emit a placeholder node in the projection that holds the
+    construct's paraId and its position in document order, and mark it non-editable so the client cannot
+    generate an intra-atom offset operation against it. This is the server/projection half of FR-02; the
+    client schema half (the atom node in TipTap) is task 021.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the OOXML constructs that a browser editor cannot faithfully render
+    or safely re-derive — `w:sdt` (structured document tags / content controls), Word fields
+    (`w:fldSimple`, `w:fldChar` begin/separate/end + `w:instrText`), and drawing/embedded objects — and in
+    the existing `ComposeDocxProjectionBuilder` walk. Understands that the correct treatment is
+    "represent as an opaque placeholder, never open" so the retained bytes are preserved by construction
+    (design §5.0 opaque atoms; I-4).
+  </role>
+
+  <goal>
+    The projection renders SDT/content-controls, fields, and complex/floating objects as opaque,
+    non-editable atom placeholder nodes that carry their paraId and preserve document order; corpus docs
+    containing such constructs (e.g. `01 - Test Matter Create Fields Only.docx`) load without editor
+    error, and those constructs are byte-identical after a no-op save because the atoms are never opened.
+  </goal>
+
+  <context>
+    <background>
+      Design §5.0 names opaque atoms as one of the bridge's three hard pieces: "non-renderable constructs
+      — fields, SDT/content controls, complex floats — shown as non-editable placeholders holding their
+      paraId so order + patchability survive." Design §5 "Ingest": "Non-renderable constructs (SDT/content
+      controls, fields, complex/floating objects) become **opaque atom blocks** — visible, non-inline-
+      editable, carrying their paraId so document order + patchability survive." Spec FR-02 acceptance:
+      "corpus docs containing fields/SDTs load without editor error; the constructs survive save
+      byte-for-byte (they are never opened)." The §11 gate marks the opaque-atom node as genuinely NEW
+      (no existing overlap) — hence the `&lt;justification&gt;` block. This task is the server/projection
+      half; the client TipTap atom node is task 021. The corpus doc `01 - Test Matter Create Fields Only.docx`
+      is the fields/SDT exemplar.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — detect SDT/fields/complex objects and emit opaque atom placeholder nodes (paraId-carrying, non-editable, document-order preserving)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs — task 011 extended this record with the addressing table; atoms coexist with it in document order</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — document-order paraId walk to keep atom ordering consistent</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5.0 (opaque atoms), §5 (Ingest), §3 (I-4)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-02, NFR-01</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/sample-docs/01 - Test Matter Create Fields Only.docx — fields/SDT corpus exemplar</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Offset-addressing table — task 011 extended `ComposeDocxProjectionBuilder` + `ComposeDocxProjection`; this task edits the same builder AFTER it (shared files).</dependency>
+    </dependencies>
+  </context>
+
+  <justification>
+    <existing>None — there is no existing projection node type for non-renderable OOXML constructs (SDT / fields / complex floats).</existing>
+    <extension>No — this is genuinely a NEW node type (an opaque atom block). It cannot be an extension of an existing renderable-run projection because the whole point is that the construct is NOT opened/reinterpreted.</extension>
+    <cost-of-doing-nothing>Without opaque atoms, fields and content controls either break the editor on load (unrenderable) or are dropped/mangled on save (re-derived lossily) — corpus docs containing fields/SDTs fail to load or lose those constructs.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="spec / FR-02">Non-renderable constructs (SDT/content controls, fields, complex/floating objects) MUST render as non-editable placeholder atom nodes that carry their paraId and preserve document order. Scope: the projection/server half — emit the atom node; the client schema node is task 021.</constraint>
+    <constraint source="spec / FR-02 + NFR-01 / I-4">The constructs MUST survive save byte-for-byte because they are NEVER opened. Scope: an atom is opaque — the projection does not reinterpret its inner OOXML, and no operation may target inside it, so the Patch Engine leaves its subtree byte-identical.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green. Scope: no `IOpenAiClient`/executor/routing type.</constraint>
+    <constraint source="ADR-007">byte[]-in/byte[]-out; no `Microsoft.Graph` type in `Services/Compose/`. Scope: atoms built from package bytes only.</constraint>
+    <constraint source="project / §10 Placement Justification">Extends the projection builder in `Services/Compose/` (new node type inside an existing service; no new service/DI). State the Placement Justification + the `&lt;justification&gt;` in the PR; cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the BFF PR (overlaps r1/r2/r3 + ai-architecture-redesign-r2). Sequence AFTER task 011 (shared `ComposeDocxProjectionBuilder.cs`).</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire proof is task 013's seam slice; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project / §10 publish-size">Report publish size absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new runtime package; verify no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Opaque-atom projection for SDT/fields/complex objects; OOXML non-renderable constructs (w:sdt, w:fldChar/w:instrText, drawings); byte-preservation by never-opening; projection contract; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Custom w:p→HTML projection (extend with atoms)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        The projection walk that maps runs to HTML is where SDT/field/complex-object nodes are detected and emitted as opaque placeholder blocks instead of being opened — carrying paraId, keeping document order, marked non-editable.
+      </pattern>
+      <pattern name="Never-open = byte-preserved (I-4)" location="projects/spaarkeai-compose-r4/design.md">
+        Because an atom's inner OOXML is never opened or re-derived, the Patch Engine leaves its subtree untouched, so the construct is byte-identical after save by construction.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Load knowledge files + `.claude/constraints/bff-extensions.md`. State the Placement Justification + the `&lt;justification&gt;` (existing/extension/cost). Confirm task 011 is merged (shared file); run `/conflict-check`. Sequence AFTER 011.</step>
+    <step order="1" name="Enumerate atom construct types">Identify in the projection walk the constructs to treat as opaque: `w:sdt` (content controls), fields (`w:fldSimple` and `w:fldChar` begin/separate/end + `w:instrText` field runs), and complex/floating objects (drawings, embedded objects). Use the corpus exemplar `01 - Test Matter Create Fields Only.docx` to ground the set.</step>
+    <step order="2" name="Emit opaque atom nodes">In `ComposeDocxProjectionBuilder`, emit a non-editable placeholder atom node for each such construct, carrying its paraId and its position in document order; do NOT open/reinterpret the inner OOXML. Ensure atoms interleave correctly with normal paragraphs and with the task 011 addressing table.</step>
+    <step order="3" name="Guarantee non-editability">Mark the atom so no intra-atom offset operation can be generated against it (the client half enforces the schema; the projection signals it). Confirm the atom's inner subtree is never surfaced as editable text.</step>
+    <step order="4" name="Byte-preservation check">On the corpus exemplar, verify: the doc loads without editor error, and a no-op save leaves the SDT/field/object subtrees byte-identical (atoms never opened).</step>
+    <step order="5" name="Build + facade + size/CVE">Build BFF; run `Services/Compose` unit tests; run Tier-1 NetArchTest. Publish; report size absolute + delta vs ~49.63 MB; `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="6" name="Close out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a construct blurs the atom boundary — e.g. an SDT that WRAPS editable paragraphs (a block-level content control containing real editable `w:p`), where treating the whole thing as opaque would make legitimate content non-editable — STOP and surface the boundary case: decide (with the owner) whether the atom is the SDT shell only (inner paragraphs stay editable) or the whole block. Do not silently pick a treatment that either loses editability or risks dropping the construct. Escalate per root §6.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (emits opaque atom placeholder nodes for SDT/fields/complex objects)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan; Placement Justification; `&lt;justification&gt;`; NetArch facade result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Corpus docs containing fields/SDTs (the `01 - Test Matter Create Fields Only.docx` doc) load WITHOUT editor error; SDT/content-controls, fields, and complex/floating objects render as non-editable placeholder atom nodes.</criterion>
+    <criterion testable="true">Each atom node carries its paraId and preserves document order (atoms interleave correctly with normal paragraphs and the addressing table).</criterion>
+    <criterion testable="true">Those constructs are byte-identical after a no-op save (the atoms are never opened / reinterpreted).</criterion>
+    <criterion testable="true">Negative: no intra-atom editing operation can be generated against an atom (it is marked non-editable in the projection).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in `Services/Compose/`.</criterion>
+    <criterion testable="true">BFF builds green; publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Server/projection half of FR-02; the client TipTap atom node is task 021. Shared-file task with 011
+    (both touch `ComposeDocxProjectionBuilder.cs`) — sequence AFTER 011; `parallel-safe:false`.
+    Through-the-wire byte-preservation proof lives in task 013.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

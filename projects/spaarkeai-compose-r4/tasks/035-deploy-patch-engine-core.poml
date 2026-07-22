@@ -1,0 +1,124 @@
+<task id="035" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Deploy patch-engine core to dev + publish-size/CVE/NetArch report</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF deploy step with publish-size/CVE/NetArch gates and a `/conflict-check` on a contended service; tags include `deploy`. FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy + reporting against the `bff-deploy` skill; prescriptive sequence, no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy step — mutates the dev environment; must be sequential after the cutover (032) + corpus proof (034).</parallel-reason>
+    <deps>032,034</deps>
+    <tags>bff-api,deploy</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the BFF with the unified Patch Engine to the dev environment (invoke the `bff-deploy` skill).
+    Report the publish size ABSOLUTE + DELTA vs the ~49.63 MB baseline (incl. PDBs), against the ≤60 MB
+    ceiling. Run `dotnet list package --vulnerable --include-transitive` and confirm NO new HIGH-severity
+    CVE. Confirm the Tier-1 NetArchTest is green. Run `/conflict-check` BEFORE opening the PR —
+    `Services/Compose/` overlaps sibling projects (r1/r2/r3 + ai-architecture-redesign-r2). This is a
+    deploy/reporting task (no new production surface). Apply the root §10 size-escalation thresholds:
+    ≥+5 MB single-task delta → explicit justification; ≥55 MB cumulative → architecture review;
+    ≥60 MB → HARD STOP.
+  </prompt>
+
+  <role>
+    Release engineer for the Spaarke BFF: fluent in the `bff-deploy` skill, `dotnet publish` size
+    measurement (incl. the PDB convention), transitive CVE scanning, and the NetArchTest facade gate.
+  </role>
+
+  <goal>
+    The BFF with the unified Patch Engine (030 core + 031 structural + 032 cutover) deployed to dev, with
+    a publish-size report (absolute + delta vs ~49.63 MB, ≤60 MB), a clean transitive CVE scan (no new
+    HIGH), a green Tier-1 NetArchTest, and a `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      Spec NFR-04 (publish size ≤60 MB; zero new runtime package for the docx core; verify Docxodus size
+      delta if adopted), NFR-05 (facade discipline — Tier-1 NetArchTest). Root §10 BFF hygiene: measure
+      publish size on every BFF-touching task, report absolute + delta vs ~49.63 MB baseline (incl. PDBs);
+      size-escalation thresholds. Plan Phase 3 task 035: "deploy patch-engine core to dev (behind existing
+      surface; hard-replace not yet public)." Tasks 032 (cutover) + 034 (corpus proof) must be complete
+      before this deploy.
+    </background>
+    <relevant-files>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — tasks 030/031/032 — the deployed engine</file>
+      <file role="dependency-output">tests/integration/seam/Compose/ — task 034 corpus proof — the pre-deploy evidence</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md — BFF Publish-Size Per-Task Verification Rule (NFR-01) + escalation thresholds</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-04, NFR-05</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Retire legacy writers — the unified write path must be in place before deploy.</dependency>
+      <dependency task="034" status="pending">Patch-engine seam slices + corpus proof — the pre-deploy acceptance evidence must be green.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-04 / CLAUDE.md §10">Report publish size ABSOLUTE + DELTA vs ~49.63 MB baseline (incl. PDBs), ≤60 MB ceiling. If Docxodus was adopted (task 005 A/B), verify its size delta. Zero new runtime package expected for the docx core.</constraint>
+    <constraint source="CLAUDE.md §10 / azure-deployment.md">Apply escalation thresholds: ≥+5 MB single-task delta → explicit justification; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.</constraint>
+    <constraint source="spec / NFR-05">Tier-1 NetArchTest MUST be green (facade discipline — `Services/Compose/` pure).</constraint>
+    <constraint source="project / §10">Run `/conflict-check` BEFORE the PR — `Services/Compose/` overlaps `spaarkeai-compose-r1/r2/r3` + `spaarke-ai-architecture-redesign-r2`. Verify no new HIGH CVE via `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="project / coordination">Resolve the cross-project notifications build break on tip-of-master before any SpaarkeAi deploy from tip (design §11 / project CLAUDE.md).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deploy (bff-deploy skill); publish-size measurement + PDB convention; transitive CVE scan; NetArchTest gate; conflict-check on contended services</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size per-task verification" location=".claude/constraints/azure-deployment.md">
+        `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; report absolute + delta vs the ~49.63 MB baseline (state the PDB convention); apply the escalation thresholds.
+      </pattern>
+      <pattern name="conflict-check before BFF PR" location=".claude/skills/conflict-check/SKILL.md">
+        `Services/Compose/` overlaps four sibling projects — run `/conflict-check` before opening the PR to detect file contention.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Confirm tasks 032 (cutover) + 034 (corpus proof) are complete and green. Load `bff-extensions.md` + `azure-deployment.md`.</step>
+    <step order="1" name="Publish + size report">Run `dotnet publish -c Release`; measure compressed output; report absolute size + delta vs ~49.63 MB (incl. PDBs), against the ≤60 MB ceiling. Apply the escalation thresholds (≥+5 MB → justify; ≥55 MB → arch review; ≥60 MB → HARD STOP).</step>
+    <step order="2" name="CVE + NetArch gates">Run `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE). Run the Tier-1 NetArchTest (facade discipline green).</step>
+    <step order="3" name="conflict-check + deploy">Run `/conflict-check` before the PR. Invoke the `bff-deploy` skill to deploy the BFF to dev (behind the existing surface; the hard-replace is not yet public).</step>
+    <step order="4" name="Index + deviations">Update TASK-INDEX.md: set this task's status to ✅. Record the size/CVE/NetArch report + `/conflict-check` result in the PR and document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">BFF (Sprk.Bff.Api) with the unified Patch Engine deployed to the dev environment</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB (≤60 MB); transitive CVE scan (no new HIGH); Tier-1 NetArchTest result; `/conflict-check` result — in the PR description</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The BFF deploy to dev succeeds via the `bff-deploy` skill.</criterion>
+    <criterion testable="true">Publish size is reported absolute + delta vs the ~49.63 MB baseline (incl. PDBs) and is ≤60 MB.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">The Tier-1 NetArchTest is green.</criterion>
+    <criterion testable="true">`/conflict-check` was run before the PR; overlaps with sibling `Services/Compose/` projects were checked.</criterion>
+    <criterion testable="true">NEGATIVE/GATE: if the single-task size delta is ≥+5 MB it is explicitly justified; ≥55 MB cumulative triggers architecture review; ≥60 MB is a HARD STOP (deploy not published).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Publish size crosses a root §10 threshold (≥+5 MB single-task delta without a clear cause, ≥55 MB cumulative, or ≥60 MB), OR a new HIGH CVE appears, OR `/conflict-check` surfaces an unresolved file contention with a sibling project. STOP and escalate per root §6 / §10 before deploying.</trigger>
+  </escalation>
+
+  <notes>
+    No `&lt;justification&gt;` — deploy/reporting task, not new surface. `mode="prescriptive"` — deploy sequence is irreversible-ish (mutates dev) and gate-ordered. This deploys the engine behind the existing surface; the public hard-replace + full R4 deploy is Phase 6 (tasks 060–062).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

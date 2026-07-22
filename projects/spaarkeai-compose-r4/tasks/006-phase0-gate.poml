@@ -1,0 +1,140 @@
+<task id="006" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Phase 0 GATE — schema + harness + applier spike green ⇒ authorize cutover (HARD go/no-go)</title>
+    <phase>0 Gate</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The hard-replace safety-net gate (NFR-08): a go/no-go judgment that authorizes irreversible old-path deletion (tasks 023, 032, 060). A wrong GREEN removes the safety net. Highest-consequence gate in the project.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>A go/no-go judgment gate weighing three evidence streams whose outcome authorizes irreversible deletion; demands the strongest judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate judgment — a main-session sequential decision that reads the outputs of 003/004/005; not parallelizable.</parallel-reason>
+    <deps>003,004,005</deps>
+    <tags>gate,review</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THE PHASE 0 HARD GO/NO-GO GATE. Record a go/no-go decision in `notes/phase0-gate-decision.md` that
+    verifies three evidence streams are GREEN before authorizing the hard-replace cutover:
+    (a) the OPERATION SCHEMA (task 003) is implemented on both ends and round-trips;
+    (b) the BYTE-DIFF HARNESS (task 004) is green on the corpus (untouched parts byte-identical; document.xml
+        structurally faithful) — any recorded finding assessed;
+    (c) the APPLIER SPIKE (task 005) landed at least one interior edit at the correct paraId+offset on the
+        CIPO doc AND produced the A/B engine recommendation for FR-04/FR-11.
+
+    ONLY a GREEN gate authorizes the cutover / deletion tasks (023 client paragraph-diff delete, 032 retire
+    both writers, 060 hard-replace completion). This is the hard-replace safety net (spec NFR-08) — a silent
+    bypass is a §6 escalation. If ANY of (a)(b)(c) is not green, the gate is RED: BLOCK the downstream cutover
+    tasks and escalate per CLAUDE.md §6. No `&lt;justification&gt;` (this is a decision record, not new code surface).
+  </prompt>
+
+  <role>
+    Gate reviewer with the authority to read the Phase-0 evidence (schema round-trip, corpus harness results,
+    applier-spike decision) and render a go/no-go that either authorizes or blocks the irreversible cutover
+    half of R4. Understands NFR-08 (the gate IS the safety net for a hard-replace with no A/B parallel-run) and
+    the §6 escalation obligation on a RED gate.
+  </role>
+
+  <goal>
+    A recorded go/no-go decision at `notes/phase0-gate-decision.md` that explicitly checks (a) schema
+    implemented + round-trips, (b) byte-diff harness green on the corpus, (c) applier spike landed an interior
+    CIPO edit + A/B recommendation made — and states GREEN (authorize cutover tasks 023/032/060) or RED (block
+    them + escalate). The decision cites the concrete evidence artifacts from tasks 003/004/005.
+  </goal>
+
+  <context>
+    <background>
+      R4 is a hard-replace cutover with no A/B parallel-run; NFR-08 makes this Phase-0 proof gate a HARD
+      prerequisite to any old-path removal, and the corpus harness is the acceptance evidence run before AND
+      after cutover. The project CLAUDE.md is explicit: "No old-path deletion (tasks 023, 032, 060) may proceed
+      until task 006 is green … Silent bypass is a §6 escalation." Success Criterion 8 (spec §Success Criteria)
+      is exactly this gate: "operation schema + applier spike on CIPO + corpus harness green PRIOR to any
+      old-path deletion." This gate reads the outputs of tasks 003 (schema + round-trip test), 004
+      (`tests/integration/seam/Compose/` harness results + any finding), and 005
+      (`notes/patch-engine-ab-decision.md` + the interior-edit evidence).
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-compose-r4/notes/phase0-gate-decision.md — the recorded go/no-go decision with the (a)(b)(c) checklist + evidence citations + GREEN/RED verdict</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs + client compose-operations.ts — task 003 schema (verify implemented + round-trip test green)</file>
+      <file role="dependency-output">tests/integration/seam/Compose/ — task 004 harness (verify green on corpus; assess any recorded finding)</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/patch-engine-ab-decision.md — task 005 A/B decision + interior-edit-on-CIPO evidence</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §6 (Phase 0 gate), §7 NFR-08</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md Success Criterion 8, NFR-08, FR-12</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Operation schema — must be implemented on both ends and round-trip (evidence stream a).</dependency>
+      <dependency task="004" status="pending">Byte-diff harness — must be green on the corpus (evidence stream b).</dependency>
+      <dependency task="005" status="pending">Applier spike + A/B — must have landed an interior CIPO edit + made the FR-04/FR-11 recommendation (evidence stream c).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-08 / Success Criterion 8">The gate MUST verify all three evidence streams (a schema round-trips, b harness green on corpus, c spike landed interior CIPO edit + A/B made) BEFORE a GREEN verdict. Scope: GREEN is the ONLY state that authorizes cutover tasks 023/032/060.</constraint>
+    <constraint source="project / CLAUDE.md §6">If ANY of (a)(b)(c) is not green, the gate is RED: BLOCK tasks 023/032/060 and escalate per §6. Scope: a silent bypass (proceeding to deletion without a GREEN gate) is itself a §6 violation.</constraint>
+    <constraint source="project">The decision MUST cite the concrete evidence artifacts (the round-trip test, the harness results + any finding, the A/B decision doc + interior-edit evidence). Scope: no hand-waving; the verdict is evidence-backed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Phase-0 hard-replace safety-net gate; NFR-08 gate-before-deletion ordering; §6 escalation on RED</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r4/spec.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>projects/spaarkeai-compose-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Evidence-backed go/no-go record" location="projects/spaarkeai-compose-r4/spec.md Success Criterion 8">
+        The gate is a checklist verdict: each of (a)(b)(c) is a checkbox with a cited evidence artifact; the overall verdict (GREEN/RED) follows deterministically from the three checks.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL). Load spec Success Criterion 8 + NFR-08 and confirm tasks 003/004/005 are complete (their outputs available).</step>
+    <step order="1" name="Verify stream (a) — schema">Confirm the task-003 operation schema is implemented on both ends and its round-trip test is green. Cite the test + files.</step>
+    <step order="2" name="Verify stream (b) — harness">Confirm the task-004 byte-diff harness is green on the corpus (untouched parts byte-identical; document.xml structurally faithful). Assess any recorded finding for gate impact (e.g., strict-splice requirement).</step>
+    <step order="3" name="Verify stream (c) — spike">Confirm the task-005 applier spike landed at least one interior edit at the correct paraId+offset on the CIPO doc AND produced the FR-04/FR-11 A/B recommendation. Cite `notes/patch-engine-ab-decision.md`.</step>
+    <step order="4" name="Render verdict">Write `notes/phase0-gate-decision.md` with the (a)(b)(c) checklist + evidence citations + a GREEN or RED verdict. GREEN authorizes cutover tasks 023/032/060; RED blocks them and triggers §6 escalation.</step>
+    <step order="5" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 006 status to ✅ (the gate task is done regardless of GREEN/RED — the DECISION is the deliverable). If RED, record the block + escalation in `projects/spaarkeai-compose-r4/notes/` and ensure 023/032/060 remain blocked.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any of (a)(b)(c) is not green — the gate is RED. BLOCK cutover tasks 023/032/060 and escalate per CLAUDE.md §6 (🔔 Human Input Required) with the failing stream and the evidence. Do NOT proceed to deletion on a RED or ambiguous gate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No prior gate record exists for this cutover.</existing>
+    <extension>N/A — produces a go/no-go decision note, not a code component.</extension>
+    <cost-of-doing-nothing>Without a recorded green gate, the hard-replace deletions (023/032/060) proceed with no safety-net evidence (spec NFR-08).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r4/notes/phase0-gate-decision.md — the (a)(b)(c) checklist + evidence citations + GREEN/RED verdict authorizing or blocking cutover</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`notes/phase0-gate-decision.md` exists and records the go/no-go verdict with the (a)(b)(c) checklist.</criterion>
+    <criterion testable="true">Stream (a): the decision confirms the task-003 operation schema is implemented on both ends and round-trips (with a cited test).</criterion>
+    <criterion testable="true">Stream (b): the decision confirms the task-004 byte-diff harness is green on the corpus and assesses any recorded finding.</criterion>
+    <criterion testable="true">Stream (c): the decision confirms the task-005 spike landed an interior CIPO edit at the correct paraId+offset AND made the FR-04/FR-11 A/B recommendation (cited).</criterion>
+    <criterion testable="true">The verdict is GREEN only if all three streams are green; a RED verdict BLOCKS tasks 023/032/060 and records a §6 escalation.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 006 as ✅ and, if RED, the block on 023/032/060 is recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is Success Criterion 8 and the load-bearing NFR-08 safety net. It authorizes the irreversible half of
+    R4. GREEN is the ONLY state that unblocks tasks 023, 032, 060. Treat a RED gate as a legitimate,
+    expected outcome to escalate — not a failure to force green.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

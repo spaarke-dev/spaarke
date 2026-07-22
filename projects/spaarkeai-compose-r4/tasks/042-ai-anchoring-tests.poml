@@ -1,0 +1,142 @@
+<task id="042" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>AI anchoring tests — concurrent-edit ProseMirror test (Success Criterion 3)</title>
+    <phase>4 AI anchoring</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying + frontend/e2e-test task under ADR-021 dark-mode obligation; TEST-MODIFYING override applies (code-review + adr-check at Step 9.5 unconditionally); tags include frontend + testing + e2e-test.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against a fully-specified pair of behaviors (rebased-selection + refused-bad-anchor) from 040/041; no architectural judgment — disciplined ProseMirror test construction.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>040,041</deps>
+    <tags>frontend,testing,e2e-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author the automated ProseMirror test that proves Success Criterion 3 (AI drift-proof). Two behaviors,
+    both under real editor state:
+    (1) GENERATION WITH CONCURRENT EDITS lands at the REBASED selection — drop the generate-window bookmark
+        (task 040), simulate concurrent user edits during the request window, let the AI return paraId-anchored
+        operations, and assert the operations land at the rebased selection (bookmark resolved to its current
+        position), NOT the stale original offset.
+    (2) A BAD/OUT-OF-RANGE anchor is REFUSED — feed a returned operation with an unknown paraId / out-of-range
+        offset and assert it is surfaced (as a review comment), NOT placed (task 041 validation gate).
+
+    Tests live under `src/client/shared/Spaarke.Compose.Components/src/`. Exercise real ProseMirror/TipTap
+    editor state — NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests (ADR-038). This is
+    the automated evidence for Success Criterion 3 (the other evidence is CIPO operator UAT in Phase 6).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript test engineer fluent in TipTap 3 / ProseMirror test harnessing (constructing a
+    real editor state, dispatching transactions to simulate concurrent edits, asserting resolved positions and
+    marks). Understands the two behaviors under proof are the rebased-selection landing and the refused-bad-anchor.
+  </role>
+
+  <goal>
+    A green automated ProseMirror test suite that proves: generation with concurrent user edits lands at the
+    rebased selection; and a bad/out-of-range anchor is refused (surfaced, not placed). `npm run build:prod`
+    for the shared lib is green.
+  </goal>
+
+  <context>
+    <background>
+      Success Criterion 3 (spec + design §10): "AI drift-proof — generation with concurrent edits lands at the
+      rebased selection; bad anchors refused. Verify: automated ProseMirror test + UAT on CIPO." This task is
+      the automated ProseMirror test half. It exercises the capture (040 bookmark + resolve-on-return) and apply
+      (041 validate + refuse) paths end-to-end in the editor without hitting the network — the AI return is
+      simulated as paraId-anchored operations (and, for the negative case, a bad anchor).
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/aiAnchoring.test.ts — NEW ProseMirror test: rebased-selection landing + refused-bad-anchor</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts — task 040/041 bookmark + validate-before-apply gate under test</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — the schema carrying `data-paraid`; build the test editor state with paraIds</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/ — existing Vitest/ProseMirror test setup to mirror</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §10 (Success Criterion 3)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md Success Criterion 3, FR-07</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Generate-window bookmark + resolve-on-return (the capture path under test).</dependency>
+      <dependency task="041" status="pending">Validate-before-apply gate + fuzzy-as-comment fallback (the refuse-bad-anchor path under test).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / Success Criterion 3">The test MUST prove BOTH: generation with concurrent edits lands at the rebased selection; AND a bad/out-of-range anchor is refused (surfaced, not placed).</constraint>
+    <constraint source="ADR-038 / NFR-06">Tests exercise REAL ProseMirror/TipTap editor state (construct editor, dispatch transactions to simulate concurrent edits). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. The AI return is simulated as paraId-anchored operations — no live network.</constraint>
+    <constraint source="ADR-021 / project">Include an ADR-021 dark-mode render assertion on any surfaced review-comment UI produced in the refuse-bad-anchor case.</constraint>
+    <constraint source="NFR-03 / project">Test harness uses the MIT ProseMirror/TipTap base only — no `@tiptap-pro/*`, no AGPL, no EigenPal dependency.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror/TipTap test harnessing; simulating concurrent edits via transactions; asserting resolved positions + surfaced comments; Vitest</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Real-editor-state test" location="src/client/shared/Spaarke.Compose.Components/src/">
+        Mirror the existing Vitest/ProseMirror setup: build a real editor with paraId'd paragraphs, dispatch transactions to simulate concurrent edits, and assert resolved positions/marks — no mocked transport.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (TEST-MODIFYING override — code-review + adr-check unconditionally). Load ADR-038 + the existing test setup + the 040/041 hooks under test.</step>
+    <step order="1" name="Rebased-selection test">Construct a real editor with paraId'd paragraphs; select a phrase; drop the generate-window bookmark (040); dispatch transactions simulating concurrent user edits during the request window; feed a simulated AI return of paraId-anchored operations; assert the operations land at the REBASED selection (resolved bookmark position), not the stale original offset.</step>
+    <step order="2" name="Refused-bad-anchor test">Feed a simulated AI return with an unknown paraId / out-of-range offset; assert the op is REFUSED and surfaced as a review comment (041 gate), and the document text at that location is unchanged.</step>
+    <step order="3" name="Dark-mode assertion">Assert the surfaced review-comment UI renders under the Fluent v9 dark theme (ADR-021).</step>
+    <step order="4" name="Verify + index">Run the tests (green) and `npm run build:prod` (green). Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No automated test exists for AI generation landing at the rebased selection under concurrent edits.</existing>
+    <extension>No — this is the test for the new AI-anchoring surface (040/041).</extension>
+    <cost-of-doing-nothing>Success Criterion 3 (AI drift-proof) has no regression guard; the generate-window drift defect could silently return.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/aiAnchoring.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A ProseMirror test proves generation with CONCURRENT user edits lands at the REBASED selection (bookmark resolved to current position), not the stale original offset — GREEN.</criterion>
+    <criterion testable="true">A ProseMirror test proves a bad/out-of-range anchor is REFUSED and surfaced (not placed); the document text at that location is unchanged — GREEN.</criterion>
+    <criterion testable="true">NEGATIVE case covered: the refused-anchor test asserts NO silent placement occurred at any location.</criterion>
+    <criterion testable="true">Tests exercise real ProseMirror/TipTap editor state (no `Mock&lt;HttpMessageHandler&gt;` / DI / ctor-null; no live network); no `@tiptap-pro/*` / AGPL / EigenPal dependency.</criterion>
+    <criterion testable="true">Surfaced review-comment UI renders correctly in Fluent v9 dark mode (ADR-021); shared-lib `npm run build:prod` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Generation with concurrent edits lands at rebased selection">
+      <steps>Real editor; select phrase; drop bookmark; dispatch concurrent-edit transactions; feed paraId-anchored AI operations.</steps>
+      <expected>Operations land at the rebased selection; assertion on resolved position passes.</expected>
+    </ui-test>
+    <ui-test name="Bad anchor is refused, not placed">
+      <steps>Feed an operation with an unknown paraId / out-of-range offset.</steps>
+      <expected>Op is surfaced as a review comment; no text mutation at that location; no silent placement anywhere.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the surfaced review-comment UI under the Fluent v9 dark theme provider.</steps>
+      <expected>UI uses theme tokens and is legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <notes>
+    Automated evidence for Success Criterion 3; the complementary evidence is CIPO operator UAT (task 062).
+    No BFF surface changes here (client tests only), so no seam slice required for this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
