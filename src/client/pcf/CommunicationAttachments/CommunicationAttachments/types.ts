@@ -33,6 +33,14 @@ export interface IAttachmentItem {
   documentId: string | null;
   /** Formatted value of the document lookup, when present. */
   documentName: string | null;
+  /**
+   * Whether the attachment's `sprk_document` has an uploaded SPE file — drives
+   * the per-row upload-status indicator (A11-2/A11-3). Derived from the
+   * document's `sprk_hasfile` / `sprk_graphitemid` fields (see
+   * `isDocumentUploaded`), enriched via a second `context.webAPI` read (NOT a
+   * BFF call). Optional; treated as `false` (not uploaded) when absent.
+   */
+  uploaded?: boolean;
 }
 
 /**
@@ -45,4 +53,17 @@ export interface IAttachmentRecord {
   sprk_attachmenttype?: number | null;
   _sprk_document_value?: string | null;
   '_sprk_document_value@OData.Community.Display.V1.FormattedValue'?: string | null;
+}
+
+/**
+ * Raw shape returned by `context.webAPI.retrieveMultipleRecords` for
+ * `sprk_document`, narrowed to the SPE upload-status signals the attachment
+ * list reads. `sprk_graphitemid` present === the file is stored in SPE (the
+ * BFF's own check in `CommunicationService`); `sprk_hasfile` is the Dataverse
+ * flag. Only the fields we `$select` are typed.
+ */
+export interface IDocumentRecord {
+  sprk_documentid?: string;
+  sprk_hasfile?: boolean | null;
+  sprk_graphitemid?: string | null;
 }

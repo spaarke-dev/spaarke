@@ -305,7 +305,6 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
   },
-  optWhy: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
   optConf: { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', textAlign: 'right' },
   confLbl: {
     fontSize: tokens.fontSizeBase100,
@@ -344,7 +343,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
+    // Clear separation between record NAME and record NUMBER / type tag. W11 (B11-1)
+    // bumped XS→S; UAT R4 A12-3 increases to M (12px) — S still read as cramped.
+    gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
   recNum: {
@@ -471,7 +472,6 @@ function DecisionBlock({
                   {g.recordNumber ? <span className={s.recNum}> · {g.recordNumber}</span> : null}
                   {g.candidates.length > 1 ? <span className={s.typeTag}> · {g.candidates.length} records</span> : null}
                 </Text>
-                {g.matchReason ? <Text className={s.optWhy}>{g.matchReason}</Text> : null}
               </div>
               <div className={s.optConf}>
                 <Text className={confClass(s, g.confidence)} weight="semibold">
@@ -530,11 +530,6 @@ function FiledRow({
 }): JSX.Element {
   const s = useStyles();
   const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
-  const why = conn.matchReason
-    ? conn.confidence
-      ? `${conn.matchReason} · ${confText(conn.confidence)}`
-      : conn.matchReason
-    : undefined;
 
   return (
     <div className={mergeClasses(s.row, !first && s.rowBorder)}>
@@ -547,7 +542,6 @@ function FiledRow({
           {conn.recordNumber ? <span className={s.recNum}>· {conn.recordNumber}</span> : null}
           <span className={s.typeTag}>{entityLabel(conn.entity)}</span>
         </Text>
-        {why ? <Text className={s.recWhy}>{why}</Text> : null}
       </div>
       {isPrimary ? (
         <Badge appearance="tint" color="warning" icon={<Star16Filled />}>
@@ -628,7 +622,6 @@ function SuggestedRow({
           {conn.recordNumber ? <span className={s.recNum}>· {conn.recordNumber}</span> : null}
           <span className={s.typeTag}>{entityLabel(conn.entity)}</span>
         </Text>
-        {conn.matchReason ? <Text className={s.recWhy}>{conn.matchReason}</Text> : null}
       </div>
       <span />
       <div className={s.rowActs}>
@@ -688,7 +681,6 @@ function AiSuggestionRow({
             AI
           </Badge>
         </Text>
-        <Text className={s.recWhy}>{suggestion.reason}</Text>
       </div>
       <span />
       <div className={s.rowActs}>

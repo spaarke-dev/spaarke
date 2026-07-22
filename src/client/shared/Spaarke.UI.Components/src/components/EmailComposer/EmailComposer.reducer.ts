@@ -295,6 +295,15 @@ export function mapStateToSendRequest(state: EmailComposerState, threadId?: stri
     associations: state.associations,
     sendMode: state.sendMode,
     fromMailbox: state.fromMailbox,
+    // Reply / Reply All / Forward inherit the parent communication's regarding associations
+    // (UAT R4 D12-1 / task 124). The new draft is composed from a source communication whose id is
+    // `state.communicationId`; the BFF copies that source's populated sprk_regarding* lookups onto the
+    // new record at create time (true inheritance — a direct copy, NOT an engine re-derivation). Only
+    // reply/forward set it (Reply All maps to the 'reply' mode); compose/draft/view do not inherit.
+    inheritRegardingFromCommunicationId:
+      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId
+        ? state.communicationId
+        : undefined,
   };
 }
 

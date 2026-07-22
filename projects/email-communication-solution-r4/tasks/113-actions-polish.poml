@@ -1,0 +1,64 @@
+<task id="113" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationActions PCF — 20x20 tool icons, right-align icon-only buttons, Create Event/To Do/Link Invoice open as modals (UAT R3 C)</title>
+    <phase>Wave 11 — UAT round 3 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>103,104</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a shipped PCF toolbar + record-launch behavior (navigate → modal); PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12, FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 3 (`notes/UAT-ROUND3-FEEDBACK.md` section C) refinements to the `CommunicationActions` PCF
+    (`src/client/pcf/CommunicationActions/`). Three items:
+
+    C11-1 — increase the tool icon size to 20×20 to match OOB command-bar icons.
+    C11-2 — for the ICON-ONLY buttons (the separator line, save-to-SharePoint, create event, etc.) make them
+      RIGHT-ALIGNED in the toolbar (labelled buttons stay as they are; the icon-only cluster aligns right).
+    C11-3 — Create Event / Create To Do / Link Invoice currently NAVIGATE to a new page/tab. They must open as
+      MODALS instead. OWNER DECISION: FIRST check whether a CUSTOM Fluent v9 create dialog already exists for these
+      flows (search the shared lib + solutions for existing Create*Wizard dialogs / modal launchers). IF a custom
+      dialog exists, use it. IF NOT, open via OOB `Xrm.Navigation.navigateTo(target, { target: 2, position: 1, ... })`
+      (in-app centered dialog) — but route ALL THREE launches through a SINGLE launch seam/helper (e.g.
+      `launchCreate(kind, ctx)`) so the OOB call can later be swapped for a custom Fluent dialog WITHOUT touching the
+      button call sites. Preserve whatever record/context prefill the current navigation passes.
+  </prompt>
+
+  <goal>
+    Toolbar icons are 20×20 (OOB parity); icon-only buttons are right-aligned; Create Event / Create To Do / Link
+    Invoice open in a modal (existing custom dialog if present, else OOB `navigateTo target:2`) routed through one
+    swappable launch seam. Existing send/attachment behavior (tasks 103/104) unchanged.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tool icons render at 20×20 (verified in the manifest/styles + harness); matches OOB command-bar icon sizing.</criterion>
+    <criterion testable="true">Icon-only buttons (separator, save-to-SharePoint, create-*, etc.) are right-aligned in the toolbar; any labelled buttons keep their placement.</criterion>
+    <criterion testable="true">Create Event / Create To Do / Link Invoice open as a MODAL (not a new page/tab). The task report states whether an existing custom dialog was found+used OR OOB `navigateTo target:2` was used; either way all three route through ONE launch seam/helper so the launch mechanism is swappable without editing call sites.</criterion>
+    <criterion testable="true">The record/context prefill previously passed to the navigation is preserved through the new modal launch (same entity/target + seeded values).</criterion>
+    <criterion testable="true">The W10 contact-autocomplete (103) and reply/forward-attachment (104) behavior is unaffected; existing EmailComposer wiring untouched.</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest updated/green (launch-seam dispatch + right-align/20px if testable); version bump all 5 locations (1.1.3 → 1.2.0); solution ZIP repacked + validated (type-66, apostrophe-free). NOTE: this control's `Solution/pack.ps1` writes `bin/` relative to CWD — run it from the `Solution/` dir (or harden to `$PSScriptRoot`) so the ZIP lands in `Solution/bin/`.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>MODAL-DECISION-CRITERIA.md: opening a record/create form → OOB `Xrm.Navigation.navigateTo` `{target:2}` is the sanctioned default; a custom Fluent dialog is acceptable if one already exists. Do NOT iframe-embed.</constraint>
+    <constraint>Route all three create launches through ONE seam so OOB↔custom is swappable later (owner requirement).</constraint>
+    <constraint>Do NOT regress tasks 103/104 (contact autocomplete, reply/forward attachments). ADR-021 Fluent v9 tokens; ADR-028 auth.</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free; type-66 solution; follow /pcf-deploy. Prefer staying within `src/client/pcf/CommunicationActions/**`; if a change must touch @spaarke/ui-components, STOP and report (avoids cross-batch races with W11 tasks 111/112 — though those are different controls, keep shared-lib untouched).</constraint>
+  </constraints>
+
+  <notes>
+    Read the CommunicationActions toolbar component + the current Create Event/To Do/Link Invoice handlers first to
+    see how they navigate today (Xrm.Navigation.navigateTo pageType? openForm? a custom-page target?). The launch
+    seam should wrap exactly that. Check `src/client/shared` + `src/solutions` for existing Create*Wizard modal
+    launchers before defaulting to OOB. Leave changes UNCOMMITTED; do NOT touch TASK-INDEX/current-task/project
+    CLAUDE.md. Deploy remainder (import) = owner.
+  </notes>
+</task>

@@ -1,0 +1,71 @@
+<task id="111" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationAttachments PCF — double-header fix, upload-status icon, configurable title, OOB title styling (UAT R3 A)</title>
+    <phase>Wave 11 — UAT round 3 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>101</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies a shipped PCF (.tsx) incl. a preview-mount bug + new data-driven indicator; PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 3 (`notes/UAT-ROUND3-FEEDBACK.md` section A) refinements to the `CommunicationAttachments` PCF
+    (`src/client/pcf/CommunicationAttachments/`). Five items:
+
+    A11-1 (BUG) — the preview modal shows a DOUBLE header (the file title renders twice; see feedback). Root-cause it:
+    compare EXACTLY how `SemanticSearchControl` mounts `RichFilePreviewDialog` (does it pass a title/header prop AND
+    also render its own header?) vs how CommunicationAttachments mounts it. Make CommunicationAttachments mount the
+    dialog the SAME way SemanticSearchControl does so only ONE title header renders. Do not fork the dialog.
+
+    A11-2 + A11-3 — replace the LEFT per-row file-type glyph with an UPLOAD-STATUS icon: a SharePoint icon in green
+    when the attachment's document has an uploaded SPE file, red when it does not. Determine "uploaded" from the
+    attachment/document data already available to the control (inspect the `sprk_communicationattachment` /
+    `sprk_document` fields the control already reads — e.g. a has-file / drive-item-id / graph-item-id field; do NOT
+    add a new BFF call). KEEP the right-side type pill (PDF / Email / DOCX) as-is.
+
+    A11-4 — make the section title a PCF PROPERTY (bound or input property in the manifest), defaulting to
+    "ATTACHMENTS". The host reads the property and renders it as the title.
+
+    A11-5 — render that title in ALL CAPS using the Spaarke OOB title spec from
+    `docs/standards/UI-DESIGN-STANDARDS.md`: `tokens.fontSizeBase300` (14px) + `tokens.fontWeightSemibold` (600) +
+    `tokens.colorNeutralForeground1` (#242424), 20px height, 4px top/bottom padding (`tokens.spacingVerticalXS`).
+    Tokens only (ADR-021) — theme-correct light + dark.
+  </prompt>
+
+  <goal>
+    The attachment preview shows a single title header (mounted like SemanticSearchControl); each row shows a
+    green/red SharePoint upload-status icon in the left slot (type pill kept on the right); the section title is a
+    configurable PCF property defaulting to "ATTACHMENTS", rendered ALL CAPS in the OOB title token spec.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">The preview modal renders the file title ONCE (double-header gone); the mount matches SemanticSearchControl's RichFilePreviewDialog usage (documented in a code comment or the task notes with the specific prop/wrapper difference that caused the duplication).</criterion>
+    <criterion testable="true">Each attachment row's LEFT icon is a SharePoint glyph: green when the row's document has an uploaded SPE file, red when not — derived from existing attachment/document fields (no new BFF endpoint). The right-side type pill (PDF/Email/DOCX) is unchanged.</criterion>
+    <criterion testable="true">A manifest property controls the section title, default "ATTACHMENTS"; changing the property changes the rendered title. (State whether bound or input and why.)</criterion>
+    <criterion testable="true">The title renders ALL CAPS via `fontSizeBase300` + `fontWeightSemibold` + `colorNeutralForeground1` + 20px height + 4px vertical padding tokens (no hardcoded hex/px); legible in dark theme.</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest updated/green (add a test for the upload-status mapping + title-prop default); version bump all 5 locations (1.1.0 → 1.2.0); solution ZIP repacked + validated (type-66, manifest generic + apostrophe-free per R2 XSD fix).</criterion>
+    <criterion testable="true">§11: reuse RichFilePreviewDialog (no new modal), no new BFF surface; upload status read from existing data.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>ADR-021 Fluent v9 tokens only; ADR-022 platform libs / virtual control; ADR-028 auth unchanged.</constraint>
+    <constraint>Do NOT fork or copy RichFilePreviewDialog — fix the mount to match SemanticSearchControl.</constraint>
+    <constraint>Do NOT add a BFF call for upload status — use fields the control already loads. If genuinely unavailable, STOP and report rather than adding a new endpoint.</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free; follow /pcf-deploy (build:prod, copy out→Solution, pack.ps1). Stay within `src/client/pcf/CommunicationAttachments/**` — do NOT modify @spaarke/ui-components shared lib (if you believe you must, STOP and report).</constraint>
+  </constraints>
+
+  <notes>
+    Nav/preview exemplar: `src/client/pcf/SemanticSearchControl` (how it mounts RichFilePreviewDialog — the
+    reference for A11-1). Title spec home: `docs/standards/UI-DESIGN-STANDARDS.md` (task 101). Deploy remainder
+    (import) = owner. Leave changes UNCOMMITTED and do NOT touch TASK-INDEX/current-task/project CLAUDE.md — the
+    main session commits.
+  </notes>
+</task>
