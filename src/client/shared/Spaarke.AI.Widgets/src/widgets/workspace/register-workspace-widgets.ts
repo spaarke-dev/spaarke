@@ -623,9 +623,12 @@ const ENTITY_VIEW_CONFIG_IDS = {
   invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
   workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
   communications: 'e1826c4c-9575-f111-ab0e-7ced8ddc4a05',
-  // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks (Assistant)" — an INLINE
-  // config (sprk_event Task-subtype + statecode=0 + ownerid eq-userid). Opened by the `list-tasks`
-  // capability when the user asks "what are my tasks?".
+  // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks (Assistant)" — opened by the
+  // `list-tasks` capability when the user asks "what are my tasks?". Sources the "My Tasks Open"
+  // saved query (12a510e4; Deadline+Task+Reminder, eventstatus=Open, NO owner filter) and scopes it
+  // to the caller via the DataGrid `behavior.membershipFilter` feature — "records I'm on" (owner +
+  // every assigned-person role), broader than `ownerid eq-userid`. Membership is resolved by the
+  // DataverseEntityViewWidget from the AI session's authenticatedFetch.
   myTasks: 'ac05e4f1-8d85-f111-8075-7c1e5268570d',
 } as const;
 
@@ -730,10 +733,11 @@ registerWorkspaceWidget(
   tableWidgetVisibility
 );
 
-// spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks" — the user's open, assigned
-// Event-Task records. Opened by the `list-tasks` capability's client surface-launch branch
-// (ConversationPane.handleSurfaceLaunch). Reuses the shared DataverseEntityViewWidget with the
-// inline "My Tasks (Assistant)" config (ownerid eq-userid resolves "assigned to me" server-side).
+// spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks" — the user's open task-type
+// Event records they are a member of. Opened by the `list-tasks` capability's client surface-launch
+// branch (ConversationPane.handleSurfaceLaunch). Reuses the shared DataverseEntityViewWidget with the
+// "My Tasks (Assistant)" config, which sources the "My Tasks Open" saved query and applies the
+// DataGrid `behavior.membershipFilter` overlay ("records I'm on", broader than ownerid eq-userid).
 registerWorkspaceWidget(
   'my-tasks-list',
   {

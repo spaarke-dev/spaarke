@@ -311,3 +311,40 @@ export function overlayHostFilters(
     return fetchXml;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// overlayMembershipFilter — membership-scoped IN(ids) (task 050 feature)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Overlay a membership-scoped filter onto a FetchXML string, scoping the grid to
+ * the caller's membership record ids (resolved by the shared membership service).
+ *
+ * Thin wrapper over {@link overlayHostFilters} — the membership scope is just one
+ * more condition in the same top-level `<filter type='and'>`:
+ * - `ids` non-empty → `IN(attribute, ids)` (reuses the `in` operator path).
+ * - `ids` empty (`[]`) → an IMPOSSIBLE-MATCH condition (`operator='null'` on the
+ *   primary-id attribute, which is never null) so a user who is a member of
+ *   NOTHING sees an EMPTY grid — never everyone's records. This is the critical
+ *   difference from `overlayHostFilters`, whose `in` path DROPS an empty-value
+ *   condition (leaving the base query unfiltered).
+ *
+ * Callers pass `null` (fail-soft / feature inactive) upstream and simply skip this
+ * helper — `null` must NOT reach here (there is no "unfiltered" membership state
+ * distinct from "not applied").
+ *
+ * @param fetchXml  The composed FetchXML (after parent-context + host overlays).
+ * @param attribute The id attribute to IN-match (typically the entity `primaryIdAttribute`).
+ * @param ids       The resolved membership record ids (`[]` → impossible match).
+ * @returns The fetchXml with the membership condition injected, or the input
+ *   unchanged if `fetchXml`/`attribute` is falsy or on parse error.
+ */
+export function overlayMembershipFilter(fetchXml: string, attribute: string, ids: ReadonlyArray<string>): string {
+  if (!fetchXml || !attribute) return fetchXml;
+  if (ids.length === 0) {
+    // Impossible match: the primary-id attribute is never null, so `null` returns
+    // zero rows. Reuses overlayHostFilters' valueless-operator path.
+    return overlayHostFilters(fetchXml, [{ attribute, operator: 'null' }]);
+  }
+  return overlayHostFilters(fetchXml, [{ attribute, operator: 'in', value: ids as string[] }]);
+}
