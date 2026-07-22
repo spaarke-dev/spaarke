@@ -1,0 +1,133 @@
+<task id="061" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Corpus proof re-run + publish-size + CVE + NetArch (NFR-01/04/05)</title>
+    <phase>6 Hardening + cutover</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Verifies the byte-preservation + facade acceptance evidence for a mission-critical hard-replace; bff-api + testing + docx tags; gates the flagship deploy. Failure is a release blocker, so FULL rigor with quality gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified verification task — re-run an existing harness (task 004), read three well-defined tool outputs (publish size, CVE scan, NetArchTest), and report against fixed thresholds. No architectural judgment; literal execution suits sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>060</deps>
+    <tags>bff-api,testing,docx</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Re-run the acceptance-evidence suite AFTER the hard-replace cutover (task 060) and confirm it is all
+    green. Four checks, all reported with numbers:
+    (1) CORPUS BYTE-DIFF — re-run the round-trip byte-diff harness (task 004) against the full fidelity
+    corpus AFTER cutover: load → no-op save of every corpus doc → untouched OOXML subtrees MUST be
+    byte-identical (this is the before/after acceptance evidence per NFR-08; run before was task 034). Any
+    corpus doc that regresses byte-identity is a RELEASE BLOCKER.
+    (2) PUBLISH SIZE — `dotnet publish -c Release`; report compressed size ABSOLUTE + DELTA vs the ~49.63 MB
+    baseline (incl. PDBs; state the PDB convention). Ceiling ≤60 MB.
+    (3) CVE — `dotnet list package --vulnerable --include-transitive`; NO new HIGH-severity CVE.
+    (4) NetArch — run the Tier-1 `NetArchTest` facade suite; MUST be green (`Services/Compose/` injects no AI
+    internals; no `Microsoft.Graph` type above `SpeFileStore`).
+    This is a VERIFICATION task — no new surface, no `&lt;justification&gt;`. Report every number in the task notes
+    and the PR description.
+  </prompt>
+
+  <role>
+    Senior BFF engineer running the post-cutover acceptance-evidence pass. Fluent in the byte-diff harness,
+    BFF publish-size hygiene (root §10), CVE triage, and the ADR-013/ADR-007 Tier-1 NetArchTest facade rules.
+    Understands that the corpus harness is the acceptance evidence run BEFORE and AFTER cutover (NFR-08).
+  </role>
+
+  <goal>
+    Post-cutover acceptance evidence is all green and reported with numbers: the corpus byte-diff harness
+    passes (untouched subtrees byte-identical across every corpus doc, matching the pre-cutover run from
+    task 034); BFF publish size is reported absolute + delta vs ~49.63 MB baseline and is ≤60 MB; no new
+    HIGH CVE; Tier-1 NetArchTest facade suite green.
+  </goal>
+
+  <context>
+    <background>
+      Design §6 (Phase 6: "corpus proof — byte-diff untouched parts; publish-size") and §7 (NFR-01/04/05).
+      Spec NFR-01 (byte preservation, byte-diff harness), NFR-04 (publish ≤60 MB), NFR-05 (facade discipline —
+      Tier-1 NetArchTest), NFR-08 (the corpus harness is the acceptance evidence run before AND after
+      cutover), and Success Criteria 1 (byte-preserving) + 7 (hard-replace complete: publish ≤60 MB, ADR +
+      tests green). Task 004 built the byte-diff harness; task 034 ran the pre-cutover corpus proof; task 060
+      completed the hard-replace. This task re-runs the harness post-cutover and confirms the four hygiene
+      gates, producing the release-decision evidence that task 062 (deploy) and 063 (flagship gate) consume.
+    </background>
+    <relevant-files>
+      <file role="dependency-output">tests/integration/seam/Compose/ — the round-trip byte-diff harness (task 004) re-run here against the corpus</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/ — the pre-cutover corpus-proof result (task 034) to diff the post-cutover run against</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — the post-060 state (one engine; legacy paths gone) under test</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/ — the Tier-1 NetArchTest facade suite (ADR-013/ADR-007)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §6, §7 (NFR-01/04/05)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-01, NFR-04, NFR-05, NFR-08, Success Criteria 1/7</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="blocked">Hard-replace cutover completion — this task verifies the post-cutover state (one engine, mammoth gone) is byte-preserving and hygienic.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-01">Scope: re-run the byte-diff harness across the FULL corpus post-cutover. Untouched OOXML subtrees MUST be byte-identical (package parts never opened verbatim; `document.xml` structurally faithful). Any regression vs the pre-cutover run is a release blocker.</constraint>
+    <constraint source="spec / NFR-04 / §10 BFF hygiene">Report BFF publish size absolute + delta vs ~49.63 MB baseline (incl. PDBs; state the PDB convention). HARD ceiling ≤60 MB. ≥+5 MB single-task delta requires explicit justification; ≥60 MB is a HARD STOP.</constraint>
+    <constraint source="spec / NFR-05 / ADR-013 / ADR-007">Tier-1 NetArchTest facade suite MUST be green: `Services/Compose/` injects no `IOpenAiClient`/executor/routing type; no `Microsoft.Graph` type above `SpeFileStore`.</constraint>
+    <constraint source="project / §10 BFF hygiene">Run `dotnet list package --vulnerable --include-transitive`; NO new HIGH-severity CVE. State the Placement Justification in the PR (verification only; no new surface).</constraint>
+    <constraint source="ADR-038 / NFR-06">The harness is a through-the-wire seam slice; MUST NOT introduce `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Post-cutover corpus byte-diff proof; BFF publish-size + CVE hygiene; Tier-1 NetArchTest facade verification</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Before/after corpus byte-diff" location="tests/integration/seam/Compose/">
+        NFR-08: the corpus harness is the acceptance evidence run before (034) AND after (this task) cutover.
+        Diff the two runs — byte-identity on untouched subtrees must hold post-cutover exactly as pre-cutover.
+      </pattern>
+      <pattern name="Publish-size per-task verification" location=".claude/constraints/bff-extensions.md">
+        Measure compressed publish output; report absolute + delta vs ~49.63 MB baseline (incl. PDBs);
+        ≤60 MB ceiling; escalate ≥+5 MB single-task delta.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (reason: bff-api/testing/docx verification gating the flagship deploy). Load knowledge files + `bff-extensions.md`. Confirm task 060 is DONE (post-cutover state). State the Placement Justification for the PR.</step>
+    <step order="1" name="Corpus byte-diff re-run">Re-run the round-trip byte-diff harness (task 004) against the full fidelity corpus. Confirm every doc's untouched OOXML subtrees are byte-identical. Diff against the pre-cutover run (task 034). Any regression = release blocker → escalate.</step>
+    <step order="2" name="Publish-size report">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output; report absolute + delta vs ~49.63 MB baseline (incl. PDBs; state the convention). Ceiling ≤60 MB; ≥60 MB = HARD STOP → escalate.</step>
+    <step order="3" name="CVE scan">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH-severity CVE.</step>
+    <step order="4" name="NetArch">Run the Tier-1 NetArchTest facade suite; confirm green (`Services/Compose/` no AI internals; no `Microsoft.Graph` above `SpeFileStore`).</step>
+    <step order="5" name="Report + finalize">Record all four results (corpus byte-diff, publish size + delta, CVE, NetArch) in `projects/spaarkeai-compose-r4/notes/` and the PR description. Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="report">Post-cutover corpus byte-diff result (byte-identity on untouched subtrees across the corpus; diff vs the pre-cutover run)</output>
+    <output type="report">BFF publish-size absolute + delta vs ~49.63 MB baseline (≤60 MB); CVE scan result</output>
+    <output type="report">Tier-1 NetArchTest facade-suite result (green)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The corpus byte-diff harness passes post-cutover: untouched OOXML subtrees are byte-identical across every corpus doc, matching the pre-cutover run (task 034).</criterion>
+    <criterion testable="true">BFF publish size is reported absolute + delta vs ~49.63 MB baseline (incl. PDBs) and is ≤60 MB.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">The Tier-1 NetArchTest facade suite is green (no AI internals in `Services/Compose/`; no `Microsoft.Graph` above `SpeFileStore`).</criterion>
+    <criterion testable="true">Negative: any corpus doc regressing byte-identity, or publish size ≥60 MB, is treated as a release blocker and escalated — the task does NOT report green in that case.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Publish size ≥60 MB compressed is a HARD STOP — escalate per root §6/§10 rather than reporting green. Any corpus doc regressing byte-identity vs the pre-cutover run is a release blocker — escalate; do not proceed to deploy (062).</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

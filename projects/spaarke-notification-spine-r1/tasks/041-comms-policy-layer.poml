@@ -4,7 +4,7 @@
     <title>Comms Policy Layer — Tenant/Matter Rule Config + Confidence Gate</title>
     <phase>4 Comms-RI Proving Producer + Policy</phase>
     <gate>blocked-until:040</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code implementation of a new BFF policy/gate service; tags include bff-api/ai; carries a binding architecture decision (rule-store: Binding rows vs a new thin table) that must be resolved WITH grep evidence before any schema work — a judgment boundary per root CLAUDE.md §8.5, not a mechanical extension.</rigor-reason>
     <model-tier>opus</model-tier>

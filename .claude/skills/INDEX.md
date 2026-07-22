@@ -48,6 +48,7 @@
 | [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [power-page-deploy](power-page-deploy/SKILL.md) | Build and deploy Vite/React SPA to Dataverse as a Power Pages web resource | No | `/power-page-deploy`, "deploy power pages", "deploy spa", "deploy external workspace" |
 | [master-deploy](master-deploy/SKILL.md) | **End-to-end unified-master deploy** — all 19 web resources + BFF API from one master HEAD. Encodes today's lessons (build-script fallbacks, Reporting workaround, BFF restore bug). Use after multiple PRs merge. | No | `/master-deploy`, "master deploy", "deploy from master", "deploy everything from master", "unified deploy" |
+| [use-case-to-design](use-case-to-design/SKILL.md) | Define an AI use case via a 6-lens method (use case → surface/UX → required capabilities → have-vs-gap → configuration → acceptance) → emit design.md. Upstream feeder to design-to-spec. | No | `/use-case-to-design`, "define use case", "use case to design", "new AI use case" |
 | [design-to-spec](design-to-spec/SKILL.md) | Transform human design documents into AI-optimized spec.md | No | `/design-to-spec`, "design to spec" |
 | [pull-from-github](pull-from-github/SKILL.md) | Pull latest changes from GitHub | No | `/pull-from-github`, "pull from github" |
 | [push-to-github](push-to-github/SKILL.md) | Commit changes and push to GitHub | No | `/push-to-github`, "push to github" |
@@ -102,6 +103,7 @@
 - **spaarke-conventions** - Naming, patterns, file organization
 
 ### 🚀 Project Lifecycle
+- **use-case-to-design** - Component: Use-case-vertical front door — 6-lens method → design.md (Tier 0, feeds design-to-spec)
 - **design-to-spec** - Component: Transform human design docs into AI-optimized spec.md (Tier 1)
 - **project-pipeline** - **⭐ RECOMMENDED**: Full orchestrator - spec.md → ready tasks + branch (Tier 2)
 - **project-continue** - Orchestrator: Resume project after PR merge or new session (Tier 2)

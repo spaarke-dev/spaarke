@@ -188,6 +188,43 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     expect(recipients[0].email).not.toBe('Ralph');
   });
 
+  it('prevents the input blur on suggestion mousedown so the selection is not lost (UAT: "select only takes the draft")', async () => {
+    // Real-browser bug: clicking a suggestion fires mousedown → the <Input> blurs
+    // → handleBlur commits the half-typed draft ("ralp") AND hides the list, so the
+    // click never reaches handleSelectResult. The fix is preventDefault on the
+    // option's mousedown (keeps focus). Assert the option prevents default.
+    const onSearch = jest
+      .fn()
+      .mockResolvedValue([{ id: 'contact-9', name: 'Ralph', email: 'ralph@example.com', entityType: 'contact' }]);
+    renderWithProviders(<Harness onSearch={onSearch} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'ralp' } });
+    const option = await screen.findByRole('option', { name: /Ralph/ }, { timeout: 2000 });
+    const prevented = !fireEvent.mouseDown(option); // fireEvent returns false when defaultPrevented
+    expect(prevented).toBe(true);
+  });
+
+  it('surfaces a directory match found by EMAIL fragment (search matches name OR email)', async () => {
+    // The host query matches fullname OR email; typing an address must still find
+    // the contact. Here the search is asked for an email fragment and returns the
+    // contact — selecting it commits that email.
+    const onSearch = jest
+      .fn()
+      .mockResolvedValue([{ id: 'contact-9', name: 'Ralph Schroeder (ralph@example.com)', email: 'ralph@example.com', entityType: 'contact' }]);
+    const onChangeSpy = jest.fn();
+    renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'ralph@ex' } });
+    const option = await screen.findByRole('option', { name: /Ralph Schroeder/ }, { timeout: 2000 });
+    expect(onSearch).toHaveBeenCalledWith('ralph@ex');
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(onChangeSpy).toHaveBeenCalledWith([expect.objectContaining({ email: 'ralph@example.com', resolved: true })])
+    );
+  });
+
   it('renders a no-email contact as non-selectable and does not commit an invalid recipient', async () => {
     // A contact with no emailaddress1 → name is the bare "Ralph", email absent.
     const onSearch = jest.fn().mockResolvedValue([{ id: 'contact-noemail', name: 'Ralph', entityType: 'contact' }]);

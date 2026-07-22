@@ -139,6 +139,13 @@ DataGridConfiguration { _version: '1.0', source, … }
   │       from its own filter UI; each condition becomes a <condition> in the
   │       top-level <filter type='and'>. Supports eq/neq/in/between/null/etc.
   │
+  ├──▶ Overlay membership filter (if behavior.membershipFilter present AND a
+  │     membershipResolver prop is supplied)  ── async, gated
+  │     overlayMembershipFilter(fetchXml, idAttribute, resolvedIds)
+  │     ─ resolves the caller's record ids via GET /api/users/me/memberships/{entity}
+  │       then injects IN(idAttribute, ids). Empty ids → impossible-match (empty grid).
+  │       See §6.6 below.
+  │
   ├──▶ Augment with chip filters (if user has applied any column filters)
   │     augmentFetchXmlWithChips(fetchXml, chipState, descriptors)
   │
@@ -189,6 +196,54 @@ When to choose host filters vs. configjson chips:
 | **Configjson `filterChips`** | The filter UI belongs to the grid itself (per-column chevron menus + the chip strip on top). User-driven, framework-rendered. |
 | **`behavior.parentContextFilter`** | A single declarative parent scope (e.g. drill-through from Matter → KPIs). Stored in the configuration record, not the host. |
 | **`hostFilters` prop** | The filter UI lives outside the grid (e.g. the Calendar widget's filter row + the calendar strip). Host-owned, prop-driven. |
+| **`behavior.membershipFilter`** | "Records the caller is on" (owner + assigned-person roles), broader than `ownerid eq-userid`. Declarative in the config record; resolved at query time via the shared membership service. See §6.6. |
+
+---
+
+## 6.6. Membership filter — `behavior.membershipFilter` (added 2026-07-22 by spaarkeai-assistant-enhancements-r1 task 050)
+
+**Problem.** "My records" in Spaarke ≠ ownership. A user is "on" a record through any of several contact/owner lookups (`ownerid`, `sprk_assignedto`, `sprk_assignedattorney1/2`, …), resolved via `systemuser → sprk_primarycontact`. A stored savedquery cannot express this — `eq-userid` only matches systemuser fields, and Dataverse forbids the caller's dynamic contactid as a literal in a saved view. So membership must be resolved **at query time** and overlaid as an `IN(ids)` condition.
+
+**Config** (`sprk_configjson`):
+
+```json
+"behavior": { "membershipFilter": { "roles": ["owner", "assignedTo"] } }
+// or shorthand for all roles + entity primary id:
+"behavior": { "membershipFilter": true }
+```
+
+| Field | Type | Purpose |
+|---|---|---|
+| `membershipFilter.attribute` | `string?` | Id attribute to `IN`-match. Defaults to the entity `primaryIdAttribute` (e.g. `sprk_eventid`). |
+| `membershipFilter.roles` | `string[]?` | Restrict to specific membership roles (`?roles=`). Omit for all roles the caller is on. |
+| `membershipFilter.identityTypes` | `string[]?` | Restrict identity tables (`?identityTypes=`, e.g. `systemuser`, `contact`, `team`). Omit for all. |
+
+**Resolver contract.** The shared lib is context-agnostic (ADR-012), so the host injects the BFF call as a prop:
+
+```tsx
+import { createMembershipResolver } from '@spaarke/ui-components';
+const membershipResolver = createMembershipResolver(
+  (path, init) => authenticatedFetch(buildBffApiUrl(bffBaseUrl, path), init)
+);
+<DataGrid configId="…" membershipResolver={membershipResolver} />
+```
+
+- Backed by `GET /api/users/me/memberships/{entityType}` (Spaarke Auth v2 OBO, ADR-028; the shared membership service ORs across config-discovered identity fields).
+- `DataverseEntityViewWidget` wires this automatically from the AI session context when mounted inside an `AiSessionProvider` (SpaarkeAi / Code Pages).
+
+**Behavioral guarantees.**
+
+- **No resolver → graceful degrade.** If `membershipFilter` is set but no `membershipResolver` is supplied (e.g. a pure MDA form-subgrid with no BFF token), no overlay is applied and the base savedquery runs. No crash.
+- **Gated resolution.** While a resolver-backed resolution is in flight, the grid holds its query (composes to empty FetchXML) rather than flashing every record before the scope applies.
+- **Fail-soft.** Any transport / non-2xx / parse error resolves to `null` → the grid runs its base query (never blocks the render).
+- **Member of nothing → empty grid.** An empty id list injects an impossible-match condition (`operator='null'` on the id attribute), so the user sees an empty result — never everyone's records.
+- **Composition order** is `base → parentContext → hostFilters → membership → chips`. All layers combine (`and` semantics); membership is memoized on the resolved id set.
+
+**Reference deployment** — the "My Tasks" grid (`sprk_gridconfiguration` "My Tasks (Assistant)"): sources the "My Tasks Open" saved query (Deadline+Task+Reminder, eventstatus=Open, **no owner filter**) and applies `membershipFilter: true`, so the Assistant's `list-tasks` capability opens "the open task-type events I'm on."
+
+**Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 5-min/user). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
+
+**Implementation:** `MembershipFilter` (`types/DataGridConfiguration.ts`) · `createMembershipResolver` (`services/membership.ts`) · `overlayMembershipFilter` (`components/DataGrid/fetchXmlOverlay.ts`) · the gated resolve effect in `DataGrid.tsx` · widget plumbing in `DataverseEntityViewWidget.tsx`.
 
 ---
 

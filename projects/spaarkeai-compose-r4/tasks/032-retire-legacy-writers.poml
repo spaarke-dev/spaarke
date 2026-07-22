@@ -1,0 +1,145 @@
+<task id="032" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Retire both legacy writers; route all writing through the Patch Engine (FR-06)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Hard-replace cutover with high blast radius — deletes the shared write path, changes the save contract, tags include `deletion`. FULL + TEST-MODIFYING per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Hard-replace cutover, high blast radius — removing the shared write path and inverting the save contract is an irreversible, judgment-heavy change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deletes the shared write path + changes the save contract; must be sequential and gated.</parallel-reason>
+    <deps>030,031,006</deps>
+    <tags>bff-api,docx,deletion</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THE WRITE-PATH CUTOVER (FR-06). Route ALL save/annotation writing through `ComposeShadowPatchEngine`,
+    then DELETE the two legacy writers: `DocxAnnotationWriter` (whole class, including its `LocateTarget`
+    text-search at :316-369 and the `DocxAnnotation.TargetText` text-anchor contract at :611-654) AND
+    `ComposeParagraphRedlineSynthesizer`. Update `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs`
+    to the operation-log save contract — replacing the text-anchored `DocxAnnotation` payload and the
+    `{paraId,text}` `ComposeEditedParagraph` payload with the versioned operation log (task 003). A grep
+    MUST show NO remaining call sites of `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, or
+    `DocxAnnotation.TargetText`. This is GATED on task 006 (Phase 0 gate) being green (FR-12 / NFR-08) —
+    it is an irreversible hard-replace with no parallel-run A/B, so execute the steps IN ORDER. BEFORE
+    deleting, CONFIRM the EDGE-1…4 wisdom was already migrated into the Patch Engine by task 030. If any
+    behavior only the old writers had is not covered by the Patch Engine, STOP and escalate (Path-B) —
+    do NOT delete-and-hope.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer executing an irreversible save-path cutover: comfortable removing a shared,
+    load-bearing write path, inverting an endpoint contract, and proving via grep + seam tests that no
+    caller is orphaned. Understands this supersedes the R3 paragraph-diff project decision (Path B).
+  </role>
+
+  <goal>
+    One byte-author remains: all save/annotation writing routes through `ComposeShadowPatchEngine`; both
+    legacy writers and the `DocxAnnotation.TargetText` text-anchor contract are deleted with no remaining
+    call sites; `ComposeEndpoints.cs` accepts the operation-log save contract; the Tier-1 NetArchTest and
+    the updated seam slice are green; and a save submitting a stale/legacy payload shape returns a
+    ProblemDetails, not a 500.
+  </goal>
+
+  <context>
+    <background>
+      Design §2 (the two-path problem — the core defect being removed), §5 (Patch backend), D5 (one
+      byte-author), §9 ADR Tension row 1 (R3 paragraph-diff project decision → Path B amendment). Spec
+      FR-06, FR-12 (hard-replace gated by Phase 0 proof), NFR-08 (hard-replace safety). As-built
+      inventory kill list: `DocxAnnotationWriter.LocateTarget` (:316-369), `DocxAnnotationWriter` (whole
+      class), `ComposeParagraphRedlineSynthesizer`, `DocxAnnotation.TargetText` (:611-654). Bug A (r3)
+      already filtered AI redlines off the text-search path onto the paragraph-diff path; R4 eliminates
+      BOTH and unifies into the operational engine. This cutover is the moment the two-path drift and the
+      422 class are permanently removed.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — save/annotation contract: replace text-anchored `DocxAnnotation` + `{paraId,text}` `ComposeEditedParagraph` payloads with the versioned operation-log contract (task 003); route writing through `ComposeShadowPatchEngine`</file>
+      <file role="delete">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — whole class incl. `LocateTarget` (:316-369) text-search + `DocxAnnotation.TargetText` (:611-654); delete AFTER confirming EDGE-1…4 migrated (task 030)</file>
+      <file role="delete">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeParagraphRedlineSynthesizer.cs — the paragraph-diff writer; delete</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — tasks 030 (core) + 031 (structural) — the single write path all save/annotation writing now routes through</file>
+      <file role="modify">tests/integration/seam/Compose/ — update the save/load seam slice to the operation-log contract (aligns with task 034)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §2, §5, §9 (Path B), D5</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-06, FR-12, NFR-08</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`ComposeShadowPatchEngine` core + EDGE-1…4 migration — the replacement write path (migration MUST be confirmed before deletion).</dependency>
+      <dependency task="031" status="pending">Structural operations in the engine — so the engine covers the full write surface before the old writers are removed.</dependency>
+      <dependency task="006" status="pending">Phase 0 GATE — HARD prerequisite; no old-path deletion may proceed until 006 is green (FR-12 / NFR-08).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-06">ALL save/annotation writing MUST route through the single Patch Engine; `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, and `DocxAnnotation.TargetText` MUST be deleted with NO remaining call sites (grep-verified). Their EDGE-1…4 wisdom MUST already be migrated (task 030) before deletion.</constraint>
+    <constraint source="spec / FR-12 / NFR-08 / project Phase-0 gate">This deletion is GATED on task 006 being green. It is a hard-replace with no parallel-run A/B — the Phase 0 proof is the safety net. MUST NOT delete before the gate is green.</constraint>
+    <constraint source="project / ADR Tension Path B">This supersedes the R3 project decision "dirty save = paragraph-diff synthesizer onto retained original" → step-level operational deltas. Cite the R3 paragraph-diff Path-B supersession in the PR description (design §9 row 1).</constraint>
+    <constraint source="ADR-007 / ADR-013 / NFR-05">The new save path stays behind `SpeFileStore` (no `Microsoft.Graph` in `Services/Compose/`) and injects no AI internals (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-038 / NFR-06">Update the through-the-wire seam slice for the changed save contract; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Endpoints that map unconditionally MUST have unconditional service registration (root §10 bullet 6).</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification in the PR (save orchestration stays in `Services/Compose/`; consolidates onto one write path) and cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the PR. Report publish size delta vs ~49.63 MB (≤60 MB) + no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Hard-replace write-path cutover; endpoint save-contract inversion (operation-log); grep-audit of removed call sites; R3 paragraph-diff Path-B supersession; BFF hygiene + seam DoD</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Grep-audit deletion" location="projects/spaarkeai-compose-r4/notes/as-built-inventory.md kill list">
+        After routing writing through the engine, grep for `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, `DocxAnnotation.TargetText`, and `collectEditedParagraphs` server-side wiring — zero call sites is the deletion's acceptance evidence.
+      </pattern>
+      <pattern name="Operation-log save contract" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Replace the text-anchored `DocxAnnotation` + `{paraId,text}` `ComposeEditedParagraph` payloads with the versioned operation log (task 003) as the single save/annotation contract.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Gate + context + rigor declaration">Output the FULL rigor-level declaration. CONFIRM task 006 (Phase 0 gate) is GREEN — this deletion is gated and MUST NOT proceed otherwise. CONFIRM tasks 030 + 031 are complete and the EDGE-1…4 wisdom is present in `ComposeShadowPatchEngine` (grep the engine for the migrated behaviors). Load knowledge files + `bff-extensions.md`; state the Placement Justification + the R3 Path-B supersession note for the PR.</step>
+    <step order="1" name="Route writing through the engine + invert the contract">Update `ComposeEndpoints.cs` so all save/annotation writing calls `ComposeShadowPatchEngine` and accepts the operation-log contract (task 003), replacing the `DocxAnnotation` + `ComposeEditedParagraph` payloads. A save submitting a stale/legacy payload shape returns a ProblemDetails (validation), not a 500.</step>
+    <step order="2" name="Coverage check BEFORE deletion">Enumerate every behavior the old writers had (redline synthesis, comment/annotation placement, EDGE-1…4 ordering); confirm each is covered by the Patch Engine. If ANY legacy-only behavior is not covered, STOP and escalate (Path-B) — do not delete.</step>
+    <step order="3" name="Delete the legacy writers">Delete `DocxAnnotationWriter.cs` (whole class incl. `LocateTarget` + `DocxAnnotation.TargetText`) and `ComposeParagraphRedlineSynthesizer.cs`. Remove their DI registrations and any residual server-side wiring. Grep to confirm zero remaining call sites of both classes + `DocxAnnotation.TargetText`.</step>
+    <step order="4" name="Update seam + build">Update the `tests/integration/seam/Compose/` save/load slice to the operation-log contract (aligns with task 034). Build the BFF; run the Tier-1 NetArchTest facade check; run the Compose suite (no regression on retained behavior).</step>
+    <step order="5" name="Size/CVE + index + deviations">Publish; report absolute size + delta vs ~49.63 MB (≤60 MB — expect a reduction from the deletions); `dotnet list package --vulnerable --include-transitive`. Run `/conflict-check`. Update TASK-INDEX.md: set this task's status to ✅. Document any deviation (and the Path-B supersession) in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (operation-log save contract; writing routed through the Patch Engine)</output>
+    <output type="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs + ComposeParagraphRedlineSynthesizer.cs (removed; DocxAnnotation.TargetText removed)</output>
+    <output type="test">tests/integration/seam/Compose/ (save/load seam slice updated to the operation-log contract)</output>
+    <output type="report">Grep evidence (zero call sites); publish-size delta vs ~49.63 MB; CVE scan; Placement Justification + R3 Path-B supersession note; /conflict-check result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`grep` shows NO remaining call sites of `DocxAnnotationWriter`, `ComposeParagraphRedlineSynthesizer`, or `DocxAnnotation.TargetText`; both classes are removed from the repo.</criterion>
+    <criterion testable="true">`ComposeEndpoints.cs` accepts the operation-log save contract (task 003); all save/annotation writing routes through `ComposeShadowPatchEngine`.</criterion>
+    <criterion testable="true">The EDGE-1…4 wisdom was confirmed present in the Patch Engine BEFORE deletion (coverage check passed at step 2).</criterion>
+    <criterion testable="true">The Tier-1 NetArchTest is green; the `tests/integration/seam/Compose/` slice is updated and green.</criterion>
+    <criterion testable="true">NEGATIVE: a save with a stale/legacy payload shape returns a ProblemDetails (validation), NOT a 500.</criterion>
+    <criterion testable="true">Task 006 (Phase 0 gate) was green before any deletion (commit/PR ordering evidence); the PR cites the R3 paragraph-diff Path-B supersession.</criterion>
+    <criterion testable="true">Publish size reported delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The step-2 coverage check finds ANY behavior only the old writers had that the Patch Engine does not cover (e.g. a comment-placement or revision-ordering edge case not represented in the operation model). STOP and escalate as a §6.5 Path-B decision — do NOT delete-and-hope or defer the gap as tech debt.</trigger>
+  </escalation>
+
+  <notes>
+    No `&lt;justification&gt;` — this is a deletion/consolidation, not new surface. `mode="prescriptive"`: the cutover is irreversible and gated, so the sequence binds (route + coverage-check BEFORE delete). Residual client-side `mammoth` + `collectEditedParagraphs` removal is task 023/060, not here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

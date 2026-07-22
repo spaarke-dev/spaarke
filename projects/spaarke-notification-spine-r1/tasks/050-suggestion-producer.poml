@@ -4,7 +4,7 @@
     <title>Daily-Briefing kind=suggestion producer — grounded + gated BEFORE outbox write</title>
     <phase>5 Suggestion consumer</phase>
     <gate>blocked-until:012,013,042</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Producer correctness on a hard invariant (grounded+gated-before-write); touches shared Services/Ai/Narrators + writes to the outbox; BFF-touching + dispatch-spine-adjacent per root CLAUDE.md §8</rigor-reason>
     <model-tier>opus</model-tier>

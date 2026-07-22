@@ -72,9 +72,11 @@ This is a **DataGrid framework feature**, broader than 050. After it lands:
 - Add a section to `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` (the `membershipFilter` config, the resolver-prop contract, the authenticatedFetch boundary) — mirror how `parentContextFilter` is documented.
 - Consider a tiny standalone project/spec if the framework owners want it tracked separately; this doc is the seed.
 
-## 7. Open decisions (owner)
-1. **Roles for "My Tasks"**: all membership roles (owner + every assigned-contact role — broadest "anything I'm on") vs a subset (e.g. `owner` + `assignedTo*` only, excluding matter-team membership). The endpoint's `byRole`/`roles` param makes either precise. *Default proposed: all roles* (a task list should surface anything the user is responsible for), refine if too broad.
-2. **Columns/eventtype**: reuse the "My Tasks Open" saved query (Deadline+Task+Reminder, eventstatus=Open) vs Task-only. *Default proposed: reuse the curated view as-is* (owner pointed to it), membership overlay handles the "my" part.
+## 7. Open decisions (owner) — RESOLVED 2026-07-22 (built with recommended defaults)
+1. **Roles for "My Tasks"**: **RESOLVED → all roles** (`membershipFilter: true`). Built with the recommended default: the config passes no `roles`, so the grid surfaces any open task-event the user is on (owner + every assigned-person role). Note: on `sprk_event` the membership service only considers fields targeting IDENTITY tables (systemuser/contact/team), so `sprk_regardingmatter` is NOT a membership field — "all roles" here = "tasks I'm personally on", not "every task on every matter I touch". **One-line reversal** if too broad: set `behavior.membershipFilter` to `{ "roles": ["owner", "assignedTo"] }` on grid config `ac05e4f1` (live data, no deploy).
+2. **Columns/eventtype**: **RESOLVED → reuse the "My Tasks Open" saved query** (`12a510e4`, Deadline+Task+Reminder, eventstatus=Open, verified no owner filter). Config `source` switched from inline to `{type:'savedquery', savedQueryId:'12a510e4-…'}`; the membership overlay supplies the "my" scope.
+
+> **Build status (2026-07-22)**: Feature SHIPPED to dev. `behavior.membershipFilter` + `createMembershipResolver` + `overlayMembershipFilter` + DataGrid gated resolve stage + `DataverseEntityViewWidget` plumbing landed in `@spaarke/ui-components` / `@spaarke/ai-widgets`; 15 unit tests pass; ui-components builds clean; SpaarkeAi rebuilt + deployed (`sprk_spaarkeai` 5206a442, 4.83 MB). Grid config `ac05e4f1` updated (live). Graduated into `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` §6.6. No BFF change (endpoint pre-existed). **Owner UAT pending.**
 
 ## 8. Reference — live 050 artifacts (dev)
 - Grid config: `sprk_gridconfiguration` "My Tasks (Assistant)" = `ac05e4f1-8d85-f111-8075-7c1e5268570d` (currently inline; to switch to savedquery + membershipFilter).

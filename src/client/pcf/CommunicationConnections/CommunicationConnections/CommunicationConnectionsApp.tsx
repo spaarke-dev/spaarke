@@ -24,6 +24,7 @@ import {
   makeStyles,
   tokens,
   Text,
+  Link,
   MessageBar,
   MessageBarBody,
   Dialog,
@@ -34,9 +35,11 @@ import {
   DialogActions,
   Textarea,
   Button,
-  Badge,
+  Toolbar,
+  ToolbarButton,
+  Tooltip,
 } from '@fluentui/react-components';
-import { Dismiss24Regular } from '@fluentui/react-icons';
+import { ArrowClockwiseRegular, Dismiss24Regular, Search20Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
@@ -49,7 +52,7 @@ import {
   parseProvenance,
   deriveConnections,
   mergeFiledConnections,
-  deriveAiSuggestedTypes,
+  groupConnectionsByAction,
   connectionTarget,
   COMMUNICATION_REGARDING_FIELDS,
   type Connection,
@@ -78,34 +81,68 @@ const useStyles = makeStyles({
   versionText: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
   dialogHint: { color: tokens.colorNeutralForeground3, paddingBottom: tokens.spacingVerticalS },
 
-  // Collapsed on-form card (mirrors the RegardingResolver "RELATED RECORD" look:
-  // primary number + name, with an expand affordance into the review modal).
+  // ── Collapsed on-form card — RegardingResolver "RELATED RECORD" parity (task 131 / UAT R5) ──
+  //
+  // This card is styled to be visually + behaviorally indistinguishable from the
+  // RegardingResolver PCF card that sits next to it on the sprk_communication form.
+  // Row 1 = OOB-styled uppercase title (non-clickable) + refresh + lookup; Row 2 =
+  // 1fr:2fr Regarding Number (Link) / Regarding Name (Text) grid with OOB field labels.
+  //
+  // Path-A OOB-parity exception to ADR-021 (documented, owner-approved): the `title`,
+  // `fieldLabel`, and `recordName` styles use hardcoded Segoe/px/#hex literals COPIED
+  // VERBATIM from RegardingResolverApp so both cards match the Dataverse OOB
+  // section-header + field-label spec exactly (Segoe UI 14px/600/#242424 title;
+  // 12px/400/#616161 labels). Semantic tokens are the visual target elsewhere; here
+  // OOB parity is. Mirrors the RegardingResolver styles-block exception note.
   card: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    // Asymmetric section padding (UAT R4 A12-1): reduced TOP (spacingVerticalS) so the
-    // title hugs the section boundary; fuller bottom retained for the version footer.
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalM,
-    paddingInline: tokens.spacingHorizontalL,
+    // RegardingResolver parity: paddingTop 0 so the OOB-styled title aligns with the
+    // adjacent OOB section headers; right/bottom/left preserved at spacingHorizontalS.
+    paddingTop: 0,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
   },
-  // Card header doubles as the review-modal opener (the stray "open" icon was
-  // removed per B11-4); clicking anywhere on the header row opens the modal.
-  cardHeadRow: {
+  row1: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    cursor: 'pointer',
-    borderRadius: tokens.borderRadiusMedium,
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+    justifyContent: 'space-between',
+    minHeight: '32px',
   },
-  // Section title — UI-DESIGN-STANDARDS: fontSizeBase300 (14px) + fontWeightSemibold
-  // (600) + colorNeutralForeground1 (#242424) + 20px height. Refined asymmetric title
-  // padding (UAT R4 A12-1/A12-2, now the Spaarke convention): reduced TOP
-  // (spacingVerticalNone) so the title hugs the section top; increased BOTTOM
-  // (spacingVerticalM) for breathing room before the first row. Tokens only
-  // (ADR-021), theme-correct.
+  // Row-1 title — Dataverse OOB section-header parity (copied verbatim from
+  // RegardingResolverApp `title`: Segoe UI 14px / weight 600 / #242424 / padding
+  // '2px 0px 4px' / uppercase / letterSpacing 0). Documented Path-A exception to
+  // ADR-021. This row is NOT clickable (task 131 reverts the W11 B11-4 header-opens-modal).
+  title: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 600,
+    color: '#242424',
+    padding: '2px 0px 4px',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  // Row-1 actions area — refresh (left) + lookup (right).
+  row1Actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  refreshToolbar: {
+    paddingLeft: 0,
+    paddingRight: 0,
+    minHeight: 'auto',
+  },
+  // Flip the lookup magnifier horizontally so it matches the OOB Dataverse lookup
+  // icon direction (RegardingResolver applies the same scaleX(-1) to its picker svg).
+  lookupIcon: {
+    transform: 'scaleX(-1)',
+  },
+  // Modal DialogTitle still uses the token-based section-header (ADR-021). The card
+  // title above uses the OOB-parity `title` style; this stays for the modal only.
   sectionHeader: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
@@ -115,35 +152,52 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalNone,
     paddingBottom: tokens.spacingVerticalM,
   },
-  grow: { flex: 1 },
-  primaryRow: {
+  // Row-2 — 1fr:2fr grid (RegardingResolver parity). Number cell left (1/3),
+  // Name cell right (2/3). Empty cells hide entirely (no em-dash).
+  row2: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 2fr',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    minHeight: '24px',
+    alignItems: 'start',
+  },
+  numberCell: {
     display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'baseline',
-    gap: tokens.spacingHorizontalM,
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
     minWidth: 0,
   },
-  primaryNumber: {
-    color: tokens.colorBrandForegroundLink,
-    fontWeight: tokens.fontWeightSemibold,
-    whiteSpace: 'nowrap',
-    fontSize: tokens.fontSizeBase300,
+  nameCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
   },
-  primaryName: {
+  // Row-2 field label — OOB-parity (12px / 400 / #616161 / Segoe), copied verbatim
+  // from RegardingResolverApp `fieldLabel`. Documented Path-A exception to ADR-021.
+  fieldLabel: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: '#616161',
+    lineHeight: '16px',
+  },
+  recordNumber: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
+  },
+  // Row-2 record-name value — plain text (NOT a Link). Segoe UI 14px / 400 / #242424,
+  // ellipsis on overflow. Copied verbatim from RegardingResolverApp `recordName`.
+  recordName: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 400,
+    color: '#242424',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
-  // Why the primary record matched — shown under the name on the collapsed card.
-  // UAT R4 A12-4: enlarged to row-text scale (fontSizeBase300) and de-italicized for
-  // legibility (was fontSizeBase100 italic, which read as too small).
-  cardReason: {
-    flexBasis: '100%',
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
   },
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
   // Flex column so the DialogBody fills the full surface height (B11-6) — the
@@ -243,6 +297,70 @@ async function refreshForm(): Promise<void> {
   } catch (err) {
     console.warn('[CommunicationConnections] form refresh failed:', err);
   }
+}
+
+/**
+ * Row-1 refresh-button handler — RegardingResolver `handleRefreshInternal` parity
+ * (task 131). Saves the form (commits any dirty buffered attributes) then refreshes
+ * from the server (`data.refresh(true)`, parity with the OOB Refresh ribbon command).
+ * Falls back to `window.location.reload()` when no MDA refresh API is available
+ * (test harness / canvas app). Defensive throughout — never throws to the host form.
+ */
+async function handleRefreshInternal(): Promise<void> {
+  const xrm = getXrm();
+  try {
+    const data = xrm?.Page?.data;
+    const save = data?.entity?.save;
+    if (typeof save === 'function') {
+      const saveResult = save.call(data.entity);
+      if (saveResult && typeof saveResult.then === 'function') await saveResult;
+    }
+    const refresh = data?.refresh;
+    if (typeof refresh === 'function') {
+      const refreshResult = refresh.call(data, true);
+      if (refreshResult && typeof refreshResult.then === 'function') await refreshResult;
+      return;
+    }
+    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+      window.location.reload();
+    }
+  } catch (err) {
+    console.warn('[CommunicationConnections] Refresh failed:', err);
+  }
+}
+
+/**
+ * Resolve the entity + id the Row-2 record-number Link should open (the primary
+ * regarding record). Primary source is the denormalized `sprk_regardingrecordurl`
+ * (parse `etn` + `id`, mirroring RegardingResolver's buildRecordUrl round-trip);
+ * fallback matches a filed association by the primary record name. Returns null
+ * when no target can be resolved. Never throws.
+ */
+function resolvePrimaryOpenTarget(
+  url: string | null,
+  filed: IFiledAssociation[],
+  primaryName: string | null
+): { entityName: string; entityId: string } | null {
+  if (typeof url === 'string' && url.length > 0) {
+    try {
+      const parsed = new URL(url);
+      const etn = parsed.searchParams.get('etn');
+      const id = parsed.searchParams.get('id');
+      if (etn && id) {
+        const cleanId = id.replace(/[{}]/g, '');
+        if (cleanId.length > 0) return { entityName: etn, entityId: cleanId };
+      }
+    } catch {
+      /* malformed URL — fall through to the filed-association fallback */
+    }
+  }
+  if (primaryName) {
+    const hit = filed.find(f => f.recordName === primaryName);
+    if (hit?.entityType && hit?.recordId) {
+      return { entityName: hit.entityType, entityId: cleanGuid(hit.recordId) };
+    }
+  }
+  return null;
 }
 
 export interface ICommunicationConnectionsAppProps {
@@ -348,16 +466,23 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   );
 
   // ── Collapsed card + authoritative filed list ──────────────────────────────
-  // The collapsed card shows the denormalized PRIMARY (number + name — the same
-  // fields RegardingResolver surfaces). The modal lists EVERY filed association by
-  // reading each populated typed `sprk_regarding*` lookup — so records added via
-  // "Link another" (never in the engine's provenance) still appear. Re-read on a
+  // The collapsed card shows the PRIMARY FILED association (number + name — see the
+  // `primaryFiled` derivation below; task 132 / UAT R5). The denormalized primary
+  // (number/name/url) is still read here as the fallback source when nothing is
+  // filed yet (outbound draft). The modal lists EVERY filed association by reading
+  // each populated typed `sprk_regarding*` lookup — so records added via "Link
+  // another" (never in the engine's provenance) still appear. Re-read on a
   // `reloadKey` bump after each successful write.
   const [modalOpen, setModalOpen] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
-  const [primaryDenorm, setPrimaryDenorm] = React.useState<{ number: string | null; name: string | null }>({
+  const [primaryDenorm, setPrimaryDenorm] = React.useState<{
+    number: string | null;
+    name: string | null;
+    url: string | null;
+  }>({
     number: null,
     name: null,
+    url: null,
   });
   const [filedAssociations, setFiledAssociations] = React.useState<IFiledAssociation[]>([]);
 
@@ -374,6 +499,10 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         setPrimaryDenorm({
           number: (rec['sprk_regardingrecordnumber'] as string) ?? null,
           name: (rec['sprk_regardingrecordname'] as string) ?? null,
+          // Captured for the Row-2 number Link open-target (task 131). Written by the
+          // same synchronous outbound enrichment as number/name — the denorm fields are
+          // the reliable source (provenance is a no-op for outbound).
+          url: (rec['sprk_regardingrecordurl'] as string) ?? null,
         });
         // Use the COMMUNICATION regarding field names (sprk_regardingperson for Contact, …),
         // not the sprk_todo TODO_REGARDING_CATALOG names.
@@ -411,6 +540,46 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const [primaryField, setPrimaryField] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // ── Card source of truth: the PRIMARY FILED ASSOCIATION (task 132 / UAT R5) ──
+  // The on-form card sources its Regarding Number + Name from the primary FILED
+  // association — the SAME reliable path the modal's "Filed" section uses (the
+  // matter's real name + provenance-derived number) — NOT the denormalized
+  // sprk_regardingrecord* fields, which the INBOUND association path writes
+  // backwards (the record NUMBER lands in the NAME field, number field null).
+  // Merge the engine's suggested slots with the record's actually-filed typed
+  // lookups, group, and take the ★ primary (the explicitly designated primaryField
+  // when confirmed, else the first filed slot in SLOT_META priority order — the
+  // exact `effectivePrimary` rule ConnectionsEditor uses). Falls back to the denorm
+  // fields when nothing is filed yet, so an outbound draft still shows its regarding.
+  const filedConnections = React.useMemo<Connection[]>(() => {
+    const merged = mergeFiledConnections(
+      provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
+      filedAssociations
+    );
+    return groupConnectionsByAction(merged, [], confirmedFields, new Set<string>()).filed;
+  }, [provenance, status, filedAssociations, confirmedFields]);
+
+  const primaryFiled = React.useMemo<Connection | null>(() => {
+    if (filedConnections.length === 0) return null;
+    const eff =
+      primaryField && filedConnections.some(c => c.field === primaryField)
+        ? primaryField
+        : filedConnections[0].field;
+    return filedConnections.find(c => c.field === eff) ?? null;
+  }, [filedConnections, primaryField]);
+
+  // Card Name: the filed association's real record name (resolved friendly name when
+  // available, else the lookup's formatted value). Card Number: the filed
+  // association's provenance-derived reference number, falling back to the denorm
+  // number (correct for outbound). Both fall back to the denorm fields when nothing
+  // is filed yet.
+  const cardName = primaryFiled
+    ? resolveDisplayName(primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName
+    : primaryDenorm.name;
+  const cardNumber = primaryFiled
+    ? primaryFiled.recordNumber ?? primaryDenorm.number
+    : primaryDenorm.number;
 
   // Override-reason dialog state.
   const [overrideConn, setOverrideConn] = React.useState<Connection | null>(null);
@@ -634,23 +803,53 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     })();
   }, [overrideConn, overrideReason, provenanceRaw, writeCtx]);
 
-  const connectionsForCount = mergeFiledConnections(
-    provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
-    filedAssociations
+  // Row-1 refresh button — stable callback wrapping the module-level helper.
+  const handleRefreshClick = React.useCallback(() => {
+    void handleRefreshInternal();
+  }, []);
+
+  // Row-2 record-number Link — opens the primary regarding record in a Dataverse
+  // modal (Xrm.Navigation.navigateTo, target: 2), mirroring RegardingResolver's
+  // number-hyperlink. Opening a related record is a VIEW action — safe even when
+  // the number/name come straight from the denormalized fields. Defensive: unresolved
+  // target or missing Xrm → warn + no-op; never throws to the host form.
+  const handleRecordNumberClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      // Prefer the primary FILED association's entity + id (the reliable target that
+      // matches the Number/Name now shown on the card); fall back to the denorm URL
+      // round-trip only when nothing is filed yet.
+      const target = primaryFiled
+        ? { entityName: primaryFiled.entity, entityId: cleanGuid(primaryFiled.targetId) }
+        : resolvePrimaryOpenTarget(primaryDenorm.url, filedAssociations, primaryDenorm.name);
+      if (!target) {
+        console.warn('[CommunicationConnections] Cannot open regarding record — no target resolved.');
+        return;
+      }
+      const xrm = getXrm();
+      if (typeof xrm?.Navigation?.navigateTo !== 'function') {
+        console.warn('[CommunicationConnections] Xrm.Navigation.navigateTo unavailable; cannot open record.');
+        return;
+      }
+      try {
+        const result = xrm.Navigation.navigateTo(
+          { pageType: 'entityrecord', entityName: target.entityName, entityId: target.entityId },
+          { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+        );
+        if (result && typeof result.catch === 'function') {
+          result.catch((err: unknown) =>
+            console.warn('[CommunicationConnections] navigateTo rejected:', err)
+          );
+        }
+      } catch (err) {
+        console.warn('[CommunicationConnections] navigateTo threw:', err);
+      }
+    },
+    [primaryFiled, primaryDenorm.url, primaryDenorm.name, filedAssociations]
   );
-  // AI-suggested types (e.g. a "new Matter") are review items too — count them so the card
-  // flags there's something to act on even when a contact already auto-filed.
-  const aiSuggestionCount = provenance
-    ? deriveAiSuggestedTypes(provenance, new Set(connectionsForCount.map(c => c.entity))).length
-    : 0;
-  const toReviewCount =
-    connectionsForCount.filter(c => c.status !== 'confirmed' && !confirmedFields.has(c.field)).length +
-    aiSuggestionCount;
-  // The primary connection (matches the denormalized primary shown on the card) — used to surface the
-  // match reason + record number on the collapsed card so the reviewer sees WHY without opening the modal.
-  const primaryConn =
-    connectionsForCount.find(c => c.targetName === primaryDenorm.name && c.matchReason) ??
-    connectionsForCount.find(c => c.status === 'confirmed' && c.matchReason);
+
+  const hasNumber = typeof cardNumber === 'string' && cardNumber.trim().length > 0;
+  const hasName = typeof cardName === 'string' && cardName.trim().length > 0;
 
   return (
     <div className={s.root}>
@@ -662,45 +861,68 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         </div>
       )}
 
-      {/* Collapsed on-form card — primary number + name; the header row opens the review modal. */}
-      <div className={s.card}>
-        <div
-          className={s.cardHeadRow}
-          role="button"
-          tabIndex={0}
-          aria-label="Review connections"
-          onClick={() => setModalOpen(true)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setModalOpen(true);
-            }
-          }}
-        >
-          <Text className={s.sectionHeader}>{title}</Text>
-          <div className={s.grow} />
-          {toReviewCount > 0 && (
-            <Badge appearance="tint" color="warning">
-              {toReviewCount} to review
-            </Badge>
+      {/* Collapsed on-form card — RegardingResolver "RELATED RECORD" parity (task 131).
+          Row 1: OOB-styled uppercase title (NOT clickable) + refresh + lookup icons.
+          Row 2: 1fr:2fr Regarding Number (Link) / Regarding Name (Text) grid with
+          OOB field labels; empty cells hide. The lookup icon is the ONLY modal opener. */}
+      <div className={s.card} data-testid="cc-card">
+        <div className={s.row1} data-testid="cc-row-1">
+          <Text className={s.title} data-testid="cc-title">
+            {title}
+          </Text>
+          {!readOnly && (
+            <div className={s.row1Actions}>
+              <Toolbar className={s.refreshToolbar} size="small" aria-label="Connection actions">
+                <Tooltip content="Refresh form" relationship="label" withArrow>
+                  <ToolbarButton
+                    icon={<ArrowClockwiseRegular />}
+                    aria-label="Refresh form"
+                    data-testid="cc-refresh"
+                    onClick={handleRefreshClick}
+                  />
+                </Tooltip>
+                <Tooltip content="Review connections" relationship="label" withArrow>
+                  <ToolbarButton
+                    icon={<Search20Regular className={s.lookupIcon} />}
+                    aria-label="Review connections"
+                    data-testid="cc-lookup"
+                    onClick={() => setModalOpen(true)}
+                  />
+                </Tooltip>
+              </Toolbar>
+            </div>
           )}
         </div>
-        {primaryDenorm.name ? (
-          <div className={s.primaryRow}>
-            {(primaryDenorm.number || primaryConn?.recordNumber) && (
-              <Text className={s.primaryNumber}>{primaryDenorm.number || primaryConn?.recordNumber}</Text>
-            )}
-            <Text className={s.primaryName}>{primaryDenorm.name}</Text>
-            {primaryConn?.matchReason && <Text className={s.cardReason}>{primaryConn.matchReason}</Text>}
+
+        <div className={s.row2} data-testid="cc-row-2">
+          {hasNumber && (
+            <div className={s.numberCell} data-testid="cc-number-cell">
+              <Text className={s.fieldLabel}>Regarding Number</Text>
+              <Link
+                className={s.recordNumber}
+                role="link"
+                data-testid="cc-record-number"
+                onClick={handleRecordNumberClick}
+              >
+                {cardNumber}
+              </Link>
+            </div>
+          )}
+          {hasName && (
+            <div className={s.nameCell} data-testid="cc-name-cell">
+              <Text className={s.fieldLabel}>Regarding Name</Text>
+              <Text className={s.recordName} data-testid="cc-record-name">
+                {cardName}
+              </Text>
+            </div>
+          )}
+        </div>
+
+        {showVersionFooter && (
+          <div className={s.footer} data-testid="cc-footer">
+            <Text className={s.versionText}>v{version}</Text>
           </div>
-        ) : (
-          <Text className={s.emptyText}>
-            {toReviewCount > 0
-              ? `${toReviewCount} suggestion${toReviewCount === 1 ? '' : 's'} to review`
-              : 'No connection filed yet'}
-          </Text>
         )}
-        {showVersionFooter && <Text className={s.versionText}>v{version}</Text>}
       </div>
 
       {/* Review / reconcile modal — the full connections surface. */}

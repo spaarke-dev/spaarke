@@ -199,6 +199,46 @@ public static class CommunicationModule
         // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
         services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
 
+        // communication_assessed producer seam (spaarke-notification-spine-r1 task 040 / FR-11). Enrichment
+        // step 5 (RunAssessmentEmissionAsync) publishes the assessed signal through
+        // ICommunicationAssessedProducer instead of only logging. Registered UNCONDITIONALLY (ADR-032) with
+        // the interim log-only safe default (LoggingCommunicationAssessedProducer) — no outbox write, no
+        // IEventRulesService.FireAsync (both out of scope for FR-11). Task 041 replaces this registration with
+        // the real comms-policy-gate consumer behind the SAME seam; task 042 (downstream of that gate) writes
+        // the kind=communication-assessed outbox row. Placement Justification (root §10/§11): the seam lives in
+        // Services/Communication/ beside its sole emit point (the enrichment step), consumes nothing AI-internal
+        // (ADR-013 clean), and is a genuine seam (≥2 implementations: this default + task 041's policy consumer).
+        // NOTE (task 041): the log-only default below is REPLACED by RuleGatedAssessedConsumer (next block);
+        // LoggingCommunicationAssessedProducer stays defined as the ADR-032 safe default / test double.
+
+        // Comms policy gate (spaarke-notification-spine-r1 task 041 / FR-12). Owner chose a dedicated
+        // sprk_communicationrule Dataverse table (Path B — notes/041-rule-store-decision.md).
+        // CommunicationRuleGate reads that table and evaluates tenant/matter match + a confidence threshold
+        // (per-rule sprk_confidencethreshold, falling back to CommsPolicyOptions.DefaultConfidenceThreshold),
+        // flags privilege (ADR-015 — flagged, NEVER decided), and returns authorize/deny. RuleGatedAssessedConsumer
+        // is the REAL consumer behind task 040's ICommunicationAssessedProducer seam — it REPLACES the interim
+        // LoggingCommunicationAssessedProducer; the enrichment step-5 emit point is unchanged. No outbox write, no
+        // IEventRulesService.FireAsync (RI action execution is task 042, downstream of authorize). Concrete
+        // singletons (ADR-010); all deps (IGenericEntityService, IOptions) are singletons.
+        services.Configure<CommsPolicyOptions>(configuration.GetSection(CommsPolicyOptions.SectionName));
+        services.AddSingleton<CommunicationRuleGate>();
+
+        // Comms-RI action orchestrator (spaarke-notification-spine-r1 task 042 / FR-13). Executes the RI action
+        // path when CommunicationRuleGate AUTHORIZES: converges the Layer-A action seam (task 031 IActionSeam,
+        // ADR-013 — creates a follow-up task, never a direct write), the Layer-B outbox (task 012, kind=
+        // communication-assessed row BEFORE the ping), the Layer-C SignalR ping (task 020, best-effort), and the
+        // ONE platform appnotification writer (NotificationService.CreateNotificationAsync — the Daily-Briefing
+        // mirror). RuleGatedAssessedConsumer (registered next) delegates to it ONLY inside its authorize branch, so
+        // a deny produces no side effect. Placement Justification (root §10/§11): sits in Services/Communication/
+        // beside the gate + arrived producer, depends "up" into the Notifications spine + the ADR-013 IActionSeam
+        // facade (never AI-internal types); ZERO new access logic, ZERO new Dataverse write path (the seam +
+        // NotificationService are the only writers). Concrete singleton (ADR-010) — all deps are singletons:
+        // IActionSeam + NotificationService (AnalysisServicesModule), OutboxService + SignalRDeliveryService
+        // (NotificationsModule), IGenericEntityService. MUST be registered BEFORE RuleGatedAssessedConsumer, which
+        // now takes it as a ctor dependency.
+        services.AddSingleton<CommunicationRiActionService>();
+        services.AddSingleton<ICommunicationAssessedProducer, RuleGatedAssessedConsumer>();
+
         // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread
         // analog of the enrichment orchestrator above: find-or-create a sprk_communicationthread and stamp
         // the sprk_communicationthread lookup, invoked from BOTH the inbound capture path (email:
