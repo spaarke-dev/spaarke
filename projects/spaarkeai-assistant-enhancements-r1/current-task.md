@@ -11,10 +11,11 @@
 |-------|-------|
 | **Mode** | UAT remediation shipped through R7; pivoting to **project close-out** — formal tasks 050/051/054/090 + deferrals D-043-01 / D-013-03. |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` + **origin/master** all at **`ae6373957`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
-| **Deployed (dev)** | `sprk_spaarkeai` (**R7**, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4–R7**. |
-| **Closed by owner 2026-07-21** | **R4-7** (empty "Actions available…" header) — CLOSED, won't-fix. **R7-5b** (append into a populated Compose tab) — CLOSED, dropped (blank-tab draft-into-Compose already ships in R7). |
-| **Next Action** | Close-out backlog (owner-directed 2026-07-21): **D-013-03** (event-subtype display name — small) · **D-043-01** (project user preference → client chip reorder; ties to memory/User Model) · **050** (authoring: ambiguity set + "what are my tasks?" list capability — OWNER-REVIEW gate FR-J1) → **051** (eval suite, NFR-06 gate; depends on 050) → **054** (deploy verify + PROD catalog parity) → **090** (wrap-up). **R4-9** still needs a repro. Rule: `/worktree-sync` before any BFF deploy. |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`63ae17cf4`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **Deployed (dev)** | `sprk_spaarkeai` (4862 KB — R7 + #8 Memory tool + D-043-01 chip reorder + D-013-03 preset); `sprk_createeventwizard` (1022 KB — D-013-03 mapper); CommunicationActions PCF v1.1.4 (R6). **BFF still unchanged across R4–R7 + this close-out batch** (all client-only). |
+| **Closed by owner 2026-07-21** | **R4-7** (won't-fix) · **R7-5b** (dropped) · **R4-9** (moved to a separate project). |
+| **Close-out done (2026-07-22)** | **D-013-03** ✅ (event-subtype "Task" label) · **#8 Memory tool** ✅ (⋮→Memory review/forget over `/api/memory/user`) · **D-043-01 v1** ✅ (learned-usage chip reorder + stated-override seam). All deployed + merged (`63ae17cf4`). |
+| **Next Action** | **050** — author the "what are my tasks?" list capability (**Event-type Task** = `sprk_event`, per owner) + ambiguity set + chips; author capability directly in dev catalog; **OWNER-REVIEW gate (FR-J1)** — present content for Ralph's approval before ✅. Then **051** (eval suite, NFR-06; depends on 050) → **054** (deploy verify, DEV ONLY) → **090** (wrap-up). D-043-01 stated-override needs a structured `sprk_userprofile` field (owner schema add) to go durable. Rule: `/worktree-sync` before any BFF deploy. |
 
 ### Only open items (both need an owner repro; NO code written yet)
 - **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.
