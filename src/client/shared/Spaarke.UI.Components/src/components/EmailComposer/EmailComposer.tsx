@@ -26,6 +26,7 @@ import { forwardRef, useImperativeHandle } from 'react';
 import {
   Field,
   Input,
+  Link,
   MessageBar,
   MessageBarBody,
   Text,
@@ -35,9 +36,8 @@ import {
 } from '@fluentui/react-components';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
-import type { SendCommunicationOptions } from '../../services/communicationApi';
 
-import { emailComposerReducer, initialState, validateState } from './EmailComposer.reducer';
+import { emailComposerReducer, initialState, validateState, mapStateToSendRequest } from './EmailComposer.reducer';
 import type {
   EmailComposerState,
   IEmailComposerHandle,
@@ -54,32 +54,12 @@ import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 
 // ---------------------------------------------------------------------------
-// Mapping: engine state → sendCommunication() request
+// Attachment source defaults
 // ---------------------------------------------------------------------------
 
-function mapStateToSendRequest(state: EmailComposerState): SendCommunicationOptions {
-  return {
-    to: state.to.map(r => r.email),
-    cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
-    bcc: state.bcc.length > 0 ? state.bcc.map(r => r.email) : undefined,
-    subject: state.subject,
-    body: state.body,
-    bodyFormat: state.bodyFormat === 'HTML' ? 'html' : 'text',
-    // `attachmentDocumentIds` correctly carries `sprk_document` GUIDs (R4 W0
-    // owner decision, 2026-07-14 — NO rename; see communicationApi.ts
-    // file-level note). Only items with a resolved `documentId` AND not
-    // forward-deselected are sent; locally-picked files without a resolved
-    // Document yet are excluded (see AttachmentList.tsx doc comment).
-    attachmentDocumentIds: state.attachments
-      .filter(a => a.selected !== false && a.documentId)
-      .map(a => a.documentId as string),
-    archiveToSpe: state.archiveToSpe,
-    associations: state.associations,
-    sendMode: state.sendMode,
-    fromMailbox: state.fromMailbox,
-  };
-}
-
+// NOTE: `mapStateToSendRequest` now lives in `EmailComposer.reducer.ts` (moved
+// there by email-r4 task 104); it is imported above. R3 task 020's `threadId`
+// argument was re-applied to that reducer copy during the origin/master merge.
 function defaultAttachmentSources(
   attachmentSources: IComposerAttachmentSource[] | undefined,
   wizardContext: IEmailComposerProps['wizardContext']
@@ -88,6 +68,16 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
+}
+
+/**
+ * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
+ * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
+ * shared send engine — a caller could build the url from record-derived data.
+ * Everything else (http(s), app-relative, mailto) is allowed.
+ */
+function isSafeHref(url: string): boolean {
+  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,10 +132,11 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalXXL,
   },
 
-  // `dialog` — compact, bounded width; body editor sized for shorter messages.
+  // `dialog` — bounded width; R6-4 (UAT 2026-07-21): widened 600 → 760 to match the standard
+  // Spaarke email surface (the 960px page composer) more closely without going full-page.
   dialog: {
     width: '100%',
-    maxWidth: '600px',
+    maxWidth: '760px',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
@@ -229,7 +220,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      const request = mapStateToSendRequest(stateRef.current);
+      const request = mapStateToSendRequest(stateRef.current, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -245,7 +236,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       throw err;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients]);
+  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
 
   const saveDraft = React.useCallback(async (): Promise<{ communicationId: string }> => {
     if (!props.onSaveDraftRequest) {
@@ -318,6 +309,21 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         </div>
       )}
 
+      {/* R3 task 020 (FR-07): optional record-link affordance when opened from a
+          conversation. Presentational only — semantic tokens, no hardcoded color.
+          Unsafe-scheme urls degrade to a non-clickable label (isSafeHref). */}
+      {props.recordLink && (
+        <div className={styles.section} role="region" aria-label="Related record">
+          {isSafeHref(props.recordLink.url) ? (
+            <Link href={props.recordLink.url} target="_blank" rel="noopener noreferrer">
+              {props.recordLink.label}
+            </Link>
+          ) : (
+            <Text>{props.recordLink.label}</Text>
+          )}
+        </div>
+      )}
+
       {/* Live region — announces validation errors to assistive tech (NFR-03). */}
       <div aria-live="polite" className={styles.liveRegion}>
         {!state.validation.ok &&
@@ -381,7 +387,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         readOnly={state.readOnly}
         required={!props.allowEmptyBody}
         errorMessage={fieldErrors.body}
-        minHeight={props.mount === 'dialog' ? 140 : 220}
+        minHeight={props.mount === 'dialog' ? 200 : 220}
       />
 
       <div className={styles.section} role="region" aria-label="Attachments">
@@ -392,6 +398,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onAdd={item => dispatch({ type: 'ADD_ATTACHMENT', item })}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
+          onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
           readOnly={state.readOnly}
           errorMessage={fieldErrors.attachments}
         />

@@ -184,6 +184,13 @@ function mintDocumentSessionId(): string {
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+// Item 7 (UAT round-4): the single generic starter scaffold "Open template" mounts today. A neutral
+// title + body the user overwrites — the seam for a future template picker (each future template is
+// just another HTML string / fetched body routed through the same born-in-editor mount). Intentionally
+// plain (no firm branding, no letterhead) so it is a safe default for any document type.
+const COMPOSE_BLANK_TEMPLATE_HTML =
+  '<h1>Document title</h1><p>Start writing here. Replace this text with your content.</p>';
+
 // ---------------------------------------------------------------------------
 // FR-02 (task 011) — `sprk_document` field constants for the Search lookup
 // ---------------------------------------------------------------------------
@@ -667,6 +674,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap?: ParaIdMapEntry[];
           importedRevisions?: ImportedRevision[];
           importedComments?: ImportedComment[];
+          // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server
+          // DOCX→editor projection. Optional so an older BFF (no projection) falls back to mammoth.
+          projection?: {
+            status?: 'success' | 'partial' | 'failed';
+            canEdit?: boolean;
+            html?: string;
+            warnings?: { code: string; count: number }[];
+            schemaVersion?: string;
+          };
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -690,6 +706,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
         const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
         const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
+        // Phase-1 mammoth removal: normalize the server projection defensively. An older BFF (no
+        // projection field) → null → the editor falls back to the client mammoth convert.
+        const p = payload.projection;
+        const hydratedProjection = p
+          ? {
+              status: p.status ?? 'failed',
+              canEdit: p.canEdit ?? false,
+              html: p.html ?? '',
+              warnings: Array.isArray(p.warnings) ? p.warnings : [],
+              schemaVersion: p.schemaVersion ?? 'compose-html-v1',
+            }
+          : null;
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -702,6 +730,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap: hydratedParaIdMap,
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
+          projection: hydratedProjection,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -802,14 +831,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   const handlePushToWord = React.useCallback(async (): Promise<void> => {
     if (!state.documentRef?.speDriveItemId || !effectiveDriveId || !state.etag) return;
-    if (composeDocxAnnotations.length === 0) return;
+    // C3 fix (UAT 2026-07-20): Push-to-Word carried ONLY session comments/anchored annotations — it never
+    // read the pending AI redline marks, so redlines never pushed (comments did). Prepend them (same shape,
+    // mirrors triggerSave's `saveAnnotations` ordering) so a push writes w:ins/w:del too.
+    const redlineAnnotations = editorRef.current?.getRedlineAnnotations?.() ?? [];
+    const pushableAnnotations = [...redlineAnnotations, ...composeDocxAnnotations];
+    if (pushableAnnotations.length === 0) return;
     try {
       await pushAnnotations({
         documentSpeId: state.documentRef.speDriveItemId,
         driveId: effectiveDriveId,
         tenantId,
         ifMatch: state.etag,
-        annotations: composeDocxAnnotations,
+        annotations: pushableAnnotations,
       });
     } catch {
       // The hook surfaces a user-safe error; a push failure must not crash the editing session.
@@ -985,18 +1019,41 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
-      // Pending AI redlines (task 023) → native-markup annotations the SERVER composes onto the authored
-      // baseline (replaces the old client reject-baseline reconstruction). Combined with the session's
-      // COMMENT annotations. `?.()` guards an older editor build without the handle (defensive).
-      const hasRedlines = editorRef.current.hasPendingRedlines?.() ?? false;
+      // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
+      // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
+      // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
+      // of an uploaded doc whose ids are all client-minted, otherwise fails with "w14:paraId matches no
+      // paragraph in the retained original"). Read-only (no dirty-flag side effect); empty for a
+      // born-in-editor doc (no snapshot). The server only applies it when an editedParagraphs delta is
+      // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
+      const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
+
+      // Save-robustness fix (UAT round-4): pending AI/user REDLINES are NO LONGER sent as text-searched
+      // annotations. `DocxAnnotationWriter.LocateTarget` re-locates each target in the raw OOXML by text,
+      // which 422s whenever the target spans a `<w:tab/>`/`<w:br/>` (tab-laid-out list items) or drifts —
+      // the recurring "a tracked change could not be located" error. Redlines now persist through the
+      // POSITION-based path instead: `collectEditedParagraphs` emits each changed paragraph's ACCEPT-STATE
+      // text (pending redline applied) keyed by paraId, and the server synthesizer diffs it against the
+      // retained original to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only COMMENTS still
+      // ride the annotation path (no position-based comment synthesis exists; a comment anchors a user
+      // SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search remains for Push-to-Word.
+      const redlineAnnotations: DocxAnnotationInput[] = [];
       const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
-      const redlineAnnotations =
-        hasRedlines && typeof editorRef.current.getRedlineAnnotations === 'function'
-          ? editorRef.current.getRedlineAnnotations()
+      // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
+      // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
+      // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an
+      // older editor build without the handle.
+      const commentThreadAnnotations =
+        typeof editorRef.current.getCommentThreadAnnotations === 'function'
+          ? editorRef.current.getCommentThreadAnnotations()
           : [];
       // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
       // so concat order only affects the ins/del sequence the bridge already ordered correctly.
-      const saveAnnotations: DocxAnnotationInput[] = [...redlineAnnotations, ...commentAnnotations];
+      const saveAnnotations: DocxAnnotationInput[] = [
+        ...redlineAnnotations,
+        ...commentAnnotations,
+        ...commentThreadAnnotations,
+      ];
 
       // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
       // iterate (not spread) to avoid a call-stack overflow on large documents.
@@ -1031,6 +1088,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           sessionId: state.sessionId,
           displayName: state.documentRef.fileName ?? null,
           annotations: saveAnnotations,
+          // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
+          paraIdMap,
           ...(bornInEditorRender
             ? { contentModel: editorRef.current.buildContentModel() }
             : { content: encodeRetained(state.docxBytes!) }),
@@ -1052,6 +1111,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
           // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
           editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
+          // C2: the baseline paraId map so the server can stamp minted ids before synthesizing the delta.
+          paraIdMap,
         };
       }
 
@@ -1597,6 +1658,35 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   // -------------------------------------------------------------------------
+  // Item 7 (UAT round-4) — Blank page / Open template born-in-editor mounts
+  // -------------------------------------------------------------------------
+  // Both mount a born-in-editor working draft via `mountDraftHtml` (create-on-save on first Save, the
+  // same lifecycle as an inline AI draft). Each mints a document session id (item 6) so a subsequent
+  // "Draft alternative" / AI edit routes into a real session and materializes as a redline. "Open
+  // template" mounts a single generic starter scaffold today; the handler is the seam for a future
+  // template picker (the empty-state CTA already exists).
+  const mountBornInEditor = React.useCallback((html: string, fileName: string): void => {
+    setSearchResolvedDriveId(null);
+    dispatch({
+      kind: 'mountDraftHtml',
+      html,
+      fileName,
+      containerId: containerIdRef.current,
+      sessionId: mintDocumentSessionId(),
+    });
+    // A freshly-created born-in-editor doc is unsaved by definition — enable Save (create-on-save).
+    setIsDirty(true);
+  }, []);
+
+  const handleBlankRequested = React.useCallback((): void => {
+    mountBornInEditor('<p></p>', 'Untitled document.docx');
+  }, [mountBornInEditor]);
+
+  const handleTemplateRequested = React.useCallback((): void => {
+    mountBornInEditor(COMPOSE_BLANK_TEMPLATE_HTML, 'Untitled document.docx');
+  }, [mountBornInEditor]);
+
+  // -------------------------------------------------------------------------
   // R3 — "Visible to assistant" toggle → active-document register/withdraw
   // -------------------------------------------------------------------------
   // The toggle lives on the WORKSPACE tab strip (WorkspacePane.handleToggleVisibility), but the
@@ -1884,11 +1974,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // Part B: inline html — mount directly, no fetch.
     if (typeof initialDraftRef.html === 'string' && initialDraftRef.html.length > 0) {
       setSearchResolvedDriveId(null);
+      // Item 6 (UAT round-4): mint a document session id so a later "Draft alternative" (or any
+      // AI-edit) on this born-in-editor doc routes into a real session and materializes as a redline
+      // instead of misrouting to informational prose. Mirrors the Browse path (mountTransient).
+      const draftDocumentSessionId = mintDocumentSessionId();
       dispatch({
         kind: 'mountDraftHtml',
         html: initialDraftRef.html,
         fileName: initialDraftRef.fileName,
         containerId: containerIdRef.current,
+        sessionId: draftDocumentSessionId,
       });
       setIsDirty(true);
       return;
@@ -2044,6 +2139,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
   const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
+  // C3 fix (UAT 2026-07-20): Open-in-Word FLUSHES a save first so Word opens the CURRENT bytes —
+  // including pending AI redlines as native w:ins/w:del. Redlines (and settled edits) only reach SPE via
+  // a save; Open-in-Word used to open the last-PERSISTED bytes, so a redline the user had on screen never
+  // showed in Word (only comments, which a prior push/save had already landed). Gated on unsaved work OR
+  // pending redlines (a clean doc opens immediately). The document id is stable across the flush because
+  // Word-open is only enabled once the doc is already persisted (hasWordDocument), so a create-on-save id
+  // change cannot strand this handler. With C1/C2 fixed, that redline-inclusive save now succeeds.
+  const openInWordFlushed = async (mode: 'web' | 'desktop'): Promise<void> => {
+    if (wordActionsDisabled) return;
+    const hasRedlines = editorRef.current?.hasPendingRedlines?.() ?? false;
+    if (isDirty || hasRedlines) {
+      await triggerSaveRef.current();
+    }
+    if (mode === 'web') {
+      await openInWeb(toolbarDocumentId);
+    } else {
+      await openInDesktop(toolbarDocumentId);
+    }
+  };
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -2101,7 +2216,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               </MessageBar>
             </div>
           ) : null}
-          <ComposeEmptyState onBrowseRequested={handleBrowseRequested} onSearchRequested={handleSearchRequested} />
+          <ComposeEmptyState
+            onBlankRequested={handleBlankRequested}
+            onTemplateRequested={handleTemplateRequested}
+            onBrowseRequested={handleBrowseRequested}
+            onSearchRequested={handleSearchRequested}
+          />
         </>
       ) : null}
 
@@ -2170,6 +2290,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               paraIdMap={state.paraIdMap}
               importedRevisions={state.importedRevisions}
               importedComments={state.importedComments}
+              // Phase-1 mammoth removal: the server DOCX→editor projection (stored-document Load only).
+              // When present the editor mounts projection.html directly; null → mammoth fallback.
+              projection={state.projection}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}
@@ -2178,10 +2301,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
               onOpenInWord={() => {
-                if (!wordActionsDisabled) void openInWeb(toolbarDocumentId);
+                void openInWordFlushed('web');
               }}
               onOpenInWordDesktop={() => {
-                if (!wordActionsDisabled) void openInDesktop(toolbarDocumentId);
+                void openInWordFlushed('desktop');
               }}
               // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
               // draft has no SPE drive-item to write native annotations into yet).

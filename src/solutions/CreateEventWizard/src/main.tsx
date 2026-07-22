@@ -13,6 +13,15 @@ function App() {
   // directly (no hand-off) — the wizard opens empty as before.
   const initialFormValues = React.useMemo(() => mapEventHandoffSeed(b.handoffSeed), [b.handoffSeed]);
 
+  // UAT R5-7 (the create-flow file leg for events): pass the hand-off's session file references
+  // so the wizard fetches the drafted-from document(s) and attaches them to the new event.
+  // `undefined` when there's no session file to carry (direct open, or a draft with no source file).
+  const initialFileRefs = React.useMemo(() => {
+    const seed = b.handoffSeed;
+    if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
+    return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
+  }, [b.handoffSeed]);
+
   if (!b.isAuthReady) {
     return (
       <FluentProvider theme={b.theme} style={{ height: "100%" }}>
@@ -40,6 +49,7 @@ function App() {
         initialAssociation={b.initialAssociation}
         lockAssociation={b.lockAssociation}
         initialFormValues={initialFormValues}
+        initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );

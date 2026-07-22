@@ -344,6 +344,33 @@ describe('ComposeFormatToolbar — Save button', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 6b. Track Changes toggle (item 4, UAT round-4)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Track Changes toggle (item 4)', () => {
+  it('is not rendered when no onToggleTrackChanges handler is wired', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-track-changes')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onToggleTrackChanges when clicked', async () => {
+    const user = userEvent.setup();
+    const onToggleTrackChanges = jest.fn();
+    renderFormatToolbar({}, { props: { onToggleTrackChanges, trackChangesEnabled: false } });
+
+    const toggle = screen.getByTestId('compose-format-track-changes');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await user.click(toggle);
+    expect(onToggleTrackChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects the ON state via aria-pressed', () => {
+    renderFormatToolbar({}, { props: { onToggleTrackChanges: jest.fn(), trackChangesEnabled: true } });
+    expect(screen.getByTestId('compose-format-track-changes')).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 7. Sticky pin + disabled-all + dark mode
 // ---------------------------------------------------------------------------
 

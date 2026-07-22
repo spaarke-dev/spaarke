@@ -35,9 +35,8 @@ import {
   Textarea,
   Button,
   Badge,
-  Tooltip,
 } from '@fluentui/react-components';
-import { Open16Regular, Dismiss24Regular } from '@fluentui/react-icons';
+import { Dismiss24Regular } from '@fluentui/react-icons';
 import {
   TODO_REGARDING_CATALOG,
   cleanGuid,
@@ -56,10 +55,12 @@ import {
   type Connection,
 } from './provenance';
 import { ConnectionsEditor } from './ConnectionsEditor';
+import { resolveTitle } from './title';
 import {
   applyRegardingSelection,
   advanceAssociationStatus,
   persistOverrideReason,
+  unlinkRegarding,
   type IResolverWriteContext,
   type IRegardingSelection,
 } from './handlers/ConnectionsWriteHandler';
@@ -83,19 +84,45 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    paddingBlock: tokens.spacingVerticalM,
+    // Asymmetric section padding (UAT R4 A12-1): reduced TOP (spacingVerticalS) so the
+    // title hugs the section boundary; fuller bottom retained for the version footer.
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalL,
   },
-  cardHeadRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  kicker: {
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    fontSize: tokens.fontSizeBase200,
+  // Card header doubles as the review-modal opener (the stray "open" icon was
+  // removed per B11-4); clicking anywhere on the header row opens the modal.
+  cardHeadRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    cursor: 'pointer',
+    borderRadius: tokens.borderRadiusMedium,
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  // Section title — UI-DESIGN-STANDARDS: fontSizeBase300 (14px) + fontWeightSemibold
+  // (600) + colorNeutralForeground1 (#242424) + 20px height. Refined asymmetric title
+  // padding (UAT R4 A12-1/A12-2, now the Spaarke convention): reduced TOP
+  // (spacingVerticalNone) so the title hugs the section top; increased BOTTOM
+  // (spacingVerticalM) for breathing room before the first row. Tokens only
+  // (ADR-021), theme-correct.
+  sectionHeader: {
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
+    minHeight: '20px',
+    paddingTop: tokens.spacingVerticalNone,
+    paddingBottom: tokens.spacingVerticalM,
   },
   grow: { flex: 1 },
-  primaryRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: tokens.spacingHorizontalM, minWidth: 0 },
+  primaryRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    gap: tokens.spacingHorizontalM,
+    minWidth: 0,
+  },
   primaryNumber: {
     color: tokens.colorBrandForegroundLink,
     fontWeight: tokens.fontWeightSemibold,
@@ -110,18 +137,39 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
   emptyText: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase300 },
-  // Why the primary record matched — shown subtly under the name on the collapsed card.
+  // Why the primary record matched — shown under the name on the collapsed card.
+  // UAT R4 A12-4: enlarged to row-text scale (fontSizeBase300) and de-italicized for
+  // legibility (was fontSizeBase100 italic, which read as too small).
   cardReason: {
     flexBasis: '100%',
     color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase100,
-    fontStyle: 'italic',
+    fontSize: tokens.fontSizeBase300,
   },
   // Wizard-standard modal footprint (~80vw × 80vh) so the review grid has room.
-  modalSurface: { width: '80vw', maxWidth: '1200px', height: '80vh', maxHeight: '80vh' },
-  modalBody: { height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  // Close sits lower-left (Spaarke modal convention); the X in the title bar is the top-right close.
-  modalActions: { justifyContent: 'flex-start' },
+  // Flex column so the DialogBody fills the full surface height (B11-6) — the
+  // content region grows and the footer pins to the bottom (no empty gap below).
+  modalSurface: {
+    width: '80vw',
+    maxWidth: '1200px',
+    height: '80vh',
+    maxHeight: '80vh',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  // DialogBody stretches to fill the surface; it keeps its own auto/1fr/auto grid
+  // (title / content / actions) so the content row grows and actions pin bottom.
+  modalBody: { flexGrow: 1, minHeight: 0 },
+  // Content row fills the 1fr track; inner ConnectionsEditor rail owns the scroll
+  // (overflow hidden here avoids a double scrollbar).
+  modalContent: { minHeight: 0, overflowY: 'hidden', display: 'flex', flexDirection: 'column' },
+  // Pinned bottom footer bar holding the Save action (B11-8), right-aligned.
+  modalFooter: {
+    justifyContent: 'flex-end',
+    borderTopWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    paddingTop: tokens.spacingVerticalM,
+  },
 });
 
 // Fallback primary-name field per entity, used ONLY when the `sprk_recordtype_ref`
@@ -217,6 +265,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
 
   const showVersionFooterRaw = context.parameters.showVersionFooter?.raw;
   const showVersionFooter = showVersionFooterRaw !== false;
+
+  // Configurable section/modal title (default "RELATED RECORDS"), B11-2.
+  const title = resolveTitle(context.parameters.titleText?.raw);
 
   const provenance = React.useMemo(() => parseProvenance(provenanceRaw), [provenanceRaw]);
 
@@ -535,6 +586,38 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     setOverrideReason('');
   }, []);
 
+  // Unlink ONE filed association (null exactly that entity's typed regarding lookup —
+  // additive-safe, siblings untouched; NOT a clear-and-set). Drops it from the
+  // confirmed set + clears the primary designation if it was primary.
+  const handleUnlink = React.useCallback(
+    (conn: Connection): void => {
+      void (async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          const res = await unlinkRegarding(writeCtx, conn.entity);
+          if (!res.success) {
+            setError(res.error ?? 'Could not unlink this connection.');
+            return;
+          }
+          setConfirmedFields(prev => {
+            const nextSet = new Set(prev);
+            nextSet.delete(conn.field);
+            return nextSet;
+          });
+          setPrimaryField(prev => (prev === conn.field ? null : prev));
+          await refreshForm();
+          setReloadKey(k => k + 1);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : 'Unexpected error while unlinking.');
+        } finally {
+          setBusy(false);
+        }
+      })();
+    },
+    [writeCtx]
+  );
+
   const submitOverride = React.useCallback((): void => {
     const conn = overrideConn;
     if (!conn) return;
@@ -579,25 +662,28 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         </div>
       )}
 
-      {/* Collapsed on-form card — primary number + name, expand into the review modal. */}
+      {/* Collapsed on-form card — primary number + name; the header row opens the review modal. */}
       <div className={s.card}>
-        <div className={s.cardHeadRow}>
-          <Text className={s.kicker}>Related Record</Text>
+        <div
+          className={s.cardHeadRow}
+          role="button"
+          tabIndex={0}
+          aria-label="Review connections"
+          onClick={() => setModalOpen(true)}
+          onKeyDown={e => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setModalOpen(true);
+            }
+          }}
+        >
+          <Text className={s.sectionHeader}>{title}</Text>
           <div className={s.grow} />
           {toReviewCount > 0 && (
             <Badge appearance="tint" color="warning">
               {toReviewCount} to review
             </Badge>
           )}
-          <Tooltip content="Review connections" relationship="label">
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<Open16Regular />}
-              aria-label="Review connections"
-              onClick={() => setModalOpen(true)}
-            />
-          </Tooltip>
         </div>
         {primaryDenorm.name ? (
           <div className={s.primaryRow}>
@@ -620,8 +706,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
       {/* Review / reconcile modal — the full connections surface. */}
       <Dialog open={modalOpen} onOpenChange={(_, d) => setModalOpen(d.open)}>
         <DialogSurface className={s.modalSurface}>
-          <DialogBody>
+          <DialogBody className={s.modalBody}>
             <DialogTitle
+              className={s.sectionHeader}
               action={
                 <Button
                   appearance="subtle"
@@ -631,9 +718,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 />
               }
             >
-              Connections
+              {title}
             </DialogTitle>
-            <DialogContent className={s.modalBody}>
+            <DialogContent className={s.modalContent}>
               <ConnectionsEditor
                 record={record}
                 provenance={provenance}
@@ -648,13 +735,14 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 onAcceptAll={handleAcceptAll}
                 onChange={handleChange}
                 onSetPrimary={handleSetPrimary}
+                onUnlink={handleUnlink}
                 onLinkAnother={handleLinkAnother}
                 onCreateType={handleCreateType}
               />
             </DialogContent>
-            <DialogActions className={s.modalActions}>
-              <Button appearance="secondary" onClick={() => setModalOpen(false)}>
-                Close
+            <DialogActions className={s.modalFooter}>
+              <Button appearance="primary" onClick={() => setModalOpen(false)}>
+                Save
               </Button>
             </DialogActions>
           </DialogBody>

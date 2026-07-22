@@ -22,7 +22,11 @@ import StarterKit from '@tiptap/starter-kit';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeCommentThread } from './ComposeCommentThread';
-import { composeCommentThreadsToDocxAnnotations, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
+import {
+  composeCommentThreadsToDocxAnnotations,
+  composeSessionCommentThreadsToDocxAnnotations,
+  type ComposeCommentThreadModel,
+} from './ComposeCommentThread.types';
 import { DocxTrackChangeKind } from './useComposeWordShuttle';
 
 function makeEditor(content = '<p>Hello world. Second sentence.</p>'): Editor {
@@ -264,6 +268,48 @@ describe('composeCommentThreadsToDocxAnnotations (persistence shape → native w
 });
 
 // ---------------------------------------------------------------------------
+// 2b. composeSessionCommentThreadsToDocxAnnotations — item 5b: exclude imported threads
+// ---------------------------------------------------------------------------
+describe('composeSessionCommentThreadsToDocxAnnotations (item 5b — persist only session-authored comments)', () => {
+  const imported: ComposeCommentThreadModel = {
+    id: 'imported-1',
+    author: 'Prior Reviewer',
+    timestamp: '2026-01-01T00:00:00.000Z',
+    text: 'From the original document',
+    anchorText: 'clause A',
+    resolved: false,
+    replies: [],
+  };
+  const authored: ComposeCommentThreadModel = {
+    id: 'thread-new-1',
+    author: 'You',
+    timestamp: '2026-07-21T00:00:00.000Z',
+    text: 'A new comment this session',
+    anchorText: 'clause B',
+    resolved: false,
+    replies: [],
+  };
+
+  it('EXCLUDES imported threads (they ride the retained original — re-emitting would duplicate)', () => {
+    const importedIds = new Set(['imported-1']);
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([imported, authored], importedIds);
+    // Only the session-authored comment is persisted as a new w:comment.
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toMatchObject({ commentText: 'A new comment this session', targetText: 'clause B' });
+  });
+
+  it('with no imported ids, every thread persists (a born-in-editor doc has no imported comments)', () => {
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([authored], new Set());
+    expect(annotations).toHaveLength(1);
+  });
+
+  it('a doc whose only comments are imported persists nothing new on save', () => {
+    const annotations = composeSessionCommentThreadsToDocxAnnotations([imported], new Set(['imported-1']));
+    expect(annotations).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. ComposeCommentThread panel — Fluent v9 UI
 // ---------------------------------------------------------------------------
 
@@ -275,11 +321,13 @@ function renderPanel(
     onClose?: () => void;
     pendingRange?: { from: number; to: number; preview: string } | null;
     onThreadCreated?: (id: string) => void;
+    onThreadsChanged?: (threads: readonly ComposeCommentThreadModel[]) => void;
     initialThreads?: ComposeCommentThreadModel[];
   } = {}
 ) {
   const onClose = opts.onClose ?? jest.fn();
   const onThreadCreated = opts.onThreadCreated ?? jest.fn();
+  const onThreadsChanged = opts.onThreadsChanged ?? jest.fn();
   const result = render(
     <FluentProvider theme={opts.theme ?? webLightTheme}>
       <ComposeCommentThread
@@ -289,11 +337,12 @@ function renderPanel(
         author="Alex Author"
         pendingRange={opts.pendingRange}
         onThreadCreated={onThreadCreated}
+        onThreadsChanged={onThreadsChanged}
         initialThreads={opts.initialThreads}
       />
     </FluentProvider>
   );
-  return { ...result, onClose, onThreadCreated };
+  return { ...result, onClose, onThreadCreated, onThreadsChanged };
 }
 
 describe('ComposeCommentThread panel', () => {
@@ -327,6 +376,26 @@ describe('ComposeCommentThread panel', () => {
 
     expect(onThreadCreated).toHaveBeenCalledTimes(1);
     expect(commentAnchorIds(editor)).toHaveLength(1);
+    editor.destroy();
+  });
+
+  it('item 5b: reports the live thread list up via onThreadsChanged so the host can persist comments', async () => {
+    const user = userEvent.setup();
+    const editor = makeEditor();
+    const { onThreadsChanged } = renderPanel(editor, {
+      pendingRange: { from: 1, to: 6, preview: 'Hello' },
+      onThreadsChanged: jest.fn(),
+    });
+
+    await user.type(screen.getByTestId('compose-comment-new-input'), 'Persist me.');
+    await user.click(screen.getByTestId('compose-comment-new-post'));
+
+    // The host receives the created thread (→ save maps it to a native w:comment).
+    const lastCall = (onThreadsChanged as jest.Mock).mock.calls.at(-1);
+    expect(lastCall).toBeTruthy();
+    const reported = lastCall![0] as ComposeCommentThreadModel[];
+    expect(reported).toHaveLength(1);
+    expect(reported[0]).toMatchObject({ text: 'Persist me.', anchorText: 'Hello' });
     editor.destroy();
   });
 

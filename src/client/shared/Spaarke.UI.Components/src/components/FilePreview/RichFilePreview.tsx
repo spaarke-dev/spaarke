@@ -133,6 +133,14 @@ export interface IRichFilePreviewProps {
    * actions, or a tailored array to override per-mount.
    */
   disabledActions?: DocumentRowAction[];
+  /**
+   * Whether the renderer draws its own title text. Defaults to `true`. Set to
+   * `false` when a wrapper already supplies the document title (e.g.
+   * `RichFilePreviewDialog` in navigation mode, where `RecordNavigationModalShell`
+   * owns the title chrome) — this avoids a duplicate ("double header") title.
+   * The title-bar row (3-dot `DocumentRowMenu` + any actions) still renders.
+   */
+  showTitle?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +193,10 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
+    // Keep the actions cluster right-aligned even when the title text is
+    // hidden (`showTitle={false}`), since the title normally consumes the
+    // leading flex space.
+    marginInlineStart: 'auto',
   },
   // Prev/Next nav cluster relocated from footer (DialogActions) to
   // the title bar's right side, just before the 3-dot DocumentRowMenu.
@@ -393,6 +405,7 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
   currentIndex,
   onNavigate,
   disabledActions: disabledActionsOverride,
+  showTitle = true,
 }) => {
   const styles = useStyles();
 
@@ -675,11 +688,15 @@ export const RichFilePreview: React.FC<IRichFilePreviewProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Title bar — document name + optional Prev/Next + 3-dot DocumentRowMenu. */}
+      {/* Title bar — document name + optional Prev/Next + 3-dot DocumentRowMenu.
+          `showTitle` is false when a wrapper (e.g. the nav-mode dialog shell)
+          already renders the title, preventing a duplicate "double header". */}
       <div className={styles.titleBar}>
-        <Text as="h2" className={styles.titleText} size={400}>
-          {documentName || 'Document Preview'}
-        </Text>
+        {showTitle && (
+          <Text as="h2" className={styles.titleText} size={400}>
+            {documentName || 'Document Preview'}
+          </Text>
+        )}
         <div
           className={styles.titleActions}
           aria-label={isInWorkspace ? 'Document actions (in workspace)' : 'Document actions'}

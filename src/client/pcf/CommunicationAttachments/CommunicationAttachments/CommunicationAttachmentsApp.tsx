@@ -12,8 +12,9 @@
  *      and render name + type, filtering out inline-image attachments.
  *   4. On row click, open the shared `RichFilePreviewDialog` for that
  *      attachment's `sprk_document`, resolving the preview URL via the BFF.
- *      A `.eml`/`message-rfc822` document routes to download/open instead
- *      (owner decision #4 — Graph cannot inline-preview an email message).
+ *      ALL attachments — including `.eml`/`message-rfc822` — open the same
+ *      in-modal preview (UAT R4 B12-4 reverses the earlier decision #4:
+ *      SharePoint/Graph previews email messages via the same embed URL).
  *
  * No new preview modal + no new BFF endpoint (root §11) — the rich modal is the
  * shared `RichFilePreviewDialog` and the URLs come from the existing
@@ -40,7 +41,6 @@ import { IAttachmentItem } from './types';
 import {
   CommunicationAttachmentsService,
   IAttachmentsWebApi,
-  isEmailMessageAttachment,
   fileTypeLabel,
 } from './services/CommunicationAttachmentsService';
 import { AttachmentApiService } from './services/AttachmentApiService';
@@ -50,19 +50,43 @@ import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/enviro
 
 const useStyles = makeStyles({
   root: { height: '100%', width: '100%', display: 'flex', flexDirection: 'column' },
+  // Asymmetric title padding (UAT R4 B12-1/B12-2): LESS space above the title
+  // (title sits close to the section top) + MORE space below it (breathing room
+  // before the first attachment line). Mirrors the small-top / larger-bottom
+  // convention task 121 applies in UI-DESIGN-STANDARDS.md. Token names ONLY
+  // (ADR-021). Top: spacingVerticalXS (4px, down from spacingVerticalS/8px);
+  // bottom: spacingVerticalM (12px, up from 8px).
   header: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    paddingBlock: tokens.spacingVerticalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalM,
     paddingInline: tokens.spacingHorizontalL,
   },
-  kicker: {
-    color: tokens.colorNeutralForeground3,
-    textTransform: 'uppercase',
-    letterSpacing: '0.04em',
-    fontSize: tokens.fontSizeBase200,
+  // Spaarke section-header standard (docs/standards/UI-DESIGN-STANDARDS.md):
+  // 14px (fontSizeBase300) · semibold (fontWeightSemibold) · neutral foreground 1
+  // (colorNeutralForeground1 — #242424 in light, theme-correct in dark) · 20px
+  // height · 4px top/bottom padding (spacingVerticalXS). Token names ONLY
+  // (ADR-021) — no hardcoded hex/px.
+  //
+  // ALL-CAPS via `textTransform` per owner UAT R3 A11-5 (an explicit,
+  // documented deviation from the standard's "do NOT uppercase" note — the
+  // owner asked for caps on this control specifically). Uppercasing is a
+  // display transform, so the underlying property value is preserved.
+  // B12-1/B12-2: the asymmetric top/bottom spacing lives on the `header`
+  // wrapper (above); the title element itself carries no vertical padding so
+  // the wrapper owns the small-top / larger-bottom rhythm without stacking.
+  sectionHeader: {
+    display: 'block',
+    fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
+    minHeight: '20px',
+    paddingTop: tokens.spacingVerticalNone,
+    paddingBottom: tokens.spacingVerticalNone,
+    textTransform: 'uppercase',
   },
   grow: { flex: 1 },
   empty: { padding: tokens.spacingHorizontalL, color: tokens.colorNeutralForeground3 },
@@ -119,7 +143,10 @@ function resolveCommunicationId(context: ComponentFramework.Context<IInputs>): s
  * applies inside `getApiBaseUrl` — both config paths now produce a host-only base.
  */
 function normalizeBffBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+  return raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
 }
 
 /** Open a URL in a new tab, preferring the desktop protocol URL when present. */
@@ -143,13 +170,16 @@ export interface ICommunicationAttachmentsAppProps {
   version: string;
 }
 
-export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppProps> = ({
-  context,
-  version,
-}) => {
+export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppProps> = ({ context, version }) => {
   const s = useStyles();
 
   const showVersionFooter = context.parameters.showVersionFooter?.raw !== false;
+  // Section title (A11-4) — an INPUT manifest property (not bound): the label is
+  // a control-configuration concern, identical for every communication record,
+  // so it belongs on the control instance, not on a per-record column. Defaults
+  // to "ATTACHMENTS" when the maker leaves it blank. Rendered ALL CAPS (A11-5)
+  // via the `sectionHeader` style's textTransform.
+  const sectionTitle = (context.parameters.sectionTitle?.raw ?? '').trim() || 'ATTACHMENTS';
   const communicationId = React.useMemo(() => resolveCommunicationId(context), [context]);
 
   // ── Auth bootstrap (ADR-028 async-init-in-component; INV-7) ───────────────
@@ -247,21 +277,46 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   // ── Preview modal ─────────────────────────────────────────────────────────
   const [previewItem, setPreviewItem] = React.useState<IAttachmentItem | null>(null);
 
+  // A11-1 (double-header fix): the double header was a SHARED-LIB issue — in
+  // navigation mode `RichFilePreviewDialog` wraps the renderer in
+  // `RecordNavigationModalShell` (smart-todo-r4 task 011), and BOTH the shell
+  // and the renderer drew the document title (two identical `<h2>`s). Fixed in
+  // `@spaarke/ui-components` by having the dialog pass `showTitle={false}` to
+  // the renderer in shell mode (shell owns the single title). With that fix we
+  // KEEP the prev/next "N of M" browse (the A1 nicety) AND a single title.
+  //
+  // `navItems` = the modal-previewable attachments. Every row with a resolvable
+  // `sprk_document` participates in the prev/next browse — INCLUDING `.eml`/`.msg`
+  // (UAT R4 B12-4 REVERSES the earlier decision #4: SharePoint/Graph previews
+  // `message/rfc822` via the same `/preview-url` embed as any other file, so email
+  // messages open the same in-modal `RichFilePreviewDialog`). Rows without a
+  // documentId can't preview and are excluded to keep every index resolvable.
+  const navItems = React.useMemo(
+    () => items.filter(i => !!i.documentId),
+    [items]
+  );
+  const previewIndex = React.useMemo(
+    () => (previewItem ? navItems.findIndex(i => i.documentId === previewItem.documentId) : -1),
+    [navItems, previewItem]
+  );
+  const handlePreviewNavigate = React.useCallback(
+    (nextIndex: number): void => {
+      if (nextIndex < 0 || nextIndex >= navItems.length) return;
+      setPreviewItem(navItems[nextIndex]);
+    },
+    [navItems]
+  );
+
   const handleRowActivate = React.useCallback(
     (item: IAttachmentItem): void => {
       if (!item.documentId) return;
-      // `.eml`/`.msg` documents cannot render in Graph inline preview (owner
-      // decision #4) — route to download/open instead of the modal.
-      if (isEmailMessageAttachment(item)) {
-        void (async () => {
-          const links = await apiService.getOpenLinks(item.documentId as string);
-          openExternal(links?.desktopUrl ?? null, links?.webUrl ?? null);
-        })();
-        return;
-      }
+      // Every attachment with a resolvable document — including `.eml`/`.msg` —
+      // opens the shared in-modal `RichFilePreviewDialog` (UAT R4 B12-4). The
+      // modal still exposes open-in-desktop/web affordances for anything the
+      // embed viewer can't render, so there is no forced external-open path.
       setPreviewItem(item);
     },
-    [apiService]
+    []
   );
 
   const openDocumentRecord = React.useCallback((documentId: string): void => {
@@ -311,7 +366,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   return (
     <div className={s.root}>
       <div className={s.header}>
-        <Text className={s.kicker}>Attachments</Text>
+        <Text className={s.sectionHeader}>{sectionTitle}</Text>
         <div className={s.grow} />
         {items.length > 0 && (
           <Badge appearance="tint" color="informative">
@@ -347,6 +402,9 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
           documentId={previewItem.documentId}
           documentType={fileTypeLabel(previewItem.name)}
           onClose={() => setPreviewItem(null)}
+          navigationTotal={navItems.length}
+          currentIndex={previewIndex}
+          onNavigate={handlePreviewNavigate}
           fetchPreviewUrl={() => apiService.getPreviewUrl(previewItem.documentId as string)}
           onOpenFile={mode => {
             void (async () => {

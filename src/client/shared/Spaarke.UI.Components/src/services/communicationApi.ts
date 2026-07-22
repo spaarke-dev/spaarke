@@ -108,11 +108,16 @@ export interface SendCommunicationOptions {
    */
   communicationType?: CommunicationChannelType;
   /**
-   * R1 "respond into the current thread" target (task 062, FR-12): the target
-   * `sprk_communicationthread` record id. Only meaningful when
-   * `communicationType` is `'message'` — stamps the sent message's thread
-   * lookup directly onto this thread (Dataverse grouping only; NOT ACS-thread
-   * session reuse, which is R2). Ignored for `'email'` sends.
+   * "Respond/compose into the current thread" target: the target
+   * `sprk_communicationthread` record id (a **bare Dataverse record GUID** — the
+   * BFF binds it to `Guid?`, so braces/composite keys are rejected at
+   * deserialization with a 400). Honored on BOTH branches:
+   *   - `'message'` (task 062, FR-12): stamps the sent message's thread lookup
+   *     directly (Dataverse grouping only; NOT ACS-thread session reuse — R2).
+   *   - `'email'` (R3 task 005/020, **FR-19**): pins the sent email to this
+   *     thread, bypassing the server find-or-create — the same send path
+   *     (`AssignExplicitThreadAsync`), NOT a new branch (ADR-045).
+   * Omit for the default find-or-create behavior.
    */
   threadId?: string;
   /**
@@ -132,6 +137,14 @@ export interface SendCommunicationOptions {
   archiveToSpe?: boolean;
   /** Entity associations to link onto the generated `sprk_communication`. */
   associations?: ICommunicationAssociation[];
+  /**
+   * Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124): the SOURCE
+   * (parent) `sprk_communication` GUID this draft is composed from. When set, the BFF copies ALL
+   * populated `sprk_regarding*` typed lookups (+ denormalized regarding pointer) from that source
+   * onto the new record at create time — a direct copy (true inheritance), never an engine
+   * re-derivation. Only reply/forward set it; omit for `+ New`/draft/view.
+   */
+  inheritRegardingFromCommunicationId?: string;
   /** Send mode. Default `'sharedMailbox'`. */
   sendMode?: CommunicationSendMode;
   /** Caller-provided correlation ID for tracing. Optional. */
@@ -337,6 +350,7 @@ export async function sendCommunication(
     communicationType: toBffCommunicationType(opts.communicationType),
     threadId: opts.threadId,
     inReplyToMessageId: opts.inReplyToMessageId,
+    inheritRegardingFromCommunicationId: opts.inheritRegardingFromCommunicationId,
     fromMailbox: opts.fromMailbox,
     sendMode: toBffSendMode(opts.sendMode),
     archiveToSpe: opts.archiveToSpe ?? false,

@@ -17,6 +17,7 @@ import { createRoot } from "react-dom/client";
 import { FluentProvider, Spinner } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
 import { resolveRuntimeConfig, initAuth, getAuthProvider, authenticatedFetch } from "@spaarke/auth";
+import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
 import { FindSimilarApp } from "./App";
 
 const container = document.getElementById("root");
@@ -63,6 +64,14 @@ async function bootstrap(): Promise<void> {
     console.warn("[FindSimilar] Could not resolve tenantId:", err);
   }
 
+  // R5-8: read the hand-off envelope (when launched from the Assistant "Find Similar" Quick Start
+  // card) so the session's first attached file pre-selects. `undefined` on a direct open.
+  const seed = computeHandoffSeed(readHandoffFromUrl());
+  const initialFileRefs =
+    seed && seed.sessionId && seed.fileIds.length > 0
+      ? { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames }
+      : undefined;
+
   // 4. Render
   root.render(
     <FluentProvider theme={currentTheme} style={{ height: "100%" }}>
@@ -70,6 +79,7 @@ async function bootstrap(): Promise<void> {
         apiBaseUrl={runtimeConfig.bffBaseUrl}
         tenantId={tenantId}
         authenticatedFetch={authenticatedFetch}
+        initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );

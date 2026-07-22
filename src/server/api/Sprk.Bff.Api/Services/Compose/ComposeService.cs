@@ -145,6 +145,18 @@ public class ComposeService : IComposeService
     // behind the SpeFileStore facade. Optional + defaults to a fresh instance (stateless, thread-safe) so
     // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
     private readonly DocxAnnotationReader _annotationReader;
+    // C2 fix (UAT 2026-07-20): stamps the client's minted paraIds physically onto the resolved baseline's
+    // id-less paragraphs BEFORE the synthesizer resolves — completing the "apply physically" step
+    // ParaIdPreParser mints but never wrote into the bytes. Pure/stateless; optional + defaults to a
+    // fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeBaselineParaIdStamper _baselineParaIdStamper;
+    // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+    // server-side DOCX→editor projection. On Load it emits paraId-tagged HTML AND the ordered paraId map
+    // from ONE traversal (the client no longer runs mammoth or position-stamps ids) — eliminating the
+    // two-engine drift that produced the recurring save-abort bug class. The map it returns is the load
+    // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
+    // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeDocxProjectionBuilder _projectionBuilder;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -161,7 +173,9 @@ public class ComposeService : IComposeService
         ParaIdPreParser? paraIdPreParser = null,
         ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
         ComposeDocumentRenderer? documentRenderer = null,
-        DocxAnnotationReader? annotationReader = null)
+        DocxAnnotationReader? annotationReader = null,
+        ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
+        ComposeDocxProjectionBuilder? projectionBuilder = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -177,6 +191,8 @@ public class ComposeService : IComposeService
         // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
         // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
         _annotationReader = annotationReader ?? new DocxAnnotationReader();
+        _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
+        _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
@@ -243,22 +259,30 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
-        // FR-08 (E2, task 010): pre-parse the load-time bytes for the ordered w14:paraId map alongside
-        // the (client-side) mammoth convert, which discards paraId. Single Open XML pass (NFR-08).
-        // Best-effort — a malformed/unreadable source must NOT fail Load (which historically did no
-        // server-side parse of the content); the client degrades to fuzzy-only anchoring (task 012)
-        // when the map is empty.
-        IReadOnlyList<ParaIdMapEntry> paraIdMap;
-        try
+        // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+        // projection builder produces BOTH the paraId-tagged editor HTML AND the ordered w14:paraId map from
+        // ONE traversal — replacing the client-side mammoth convert + position-based paraId stamping (the
+        // two-engine drift that caused the "matches no paragraph in the retained original" save failures).
+        // The builder's map is the load path's single paraId authority; it is produced in
+        // Descendants<Paragraph>() order (reader-aligned) so the imported-revision/comment ParagraphHint
+        // resolution below keeps working. Fail-closed + best-effort: an unreadable source yields
+        // Status=Failed/empty map (NEVER throws) and Load still returns the source bytes (§3.3). The builder
+        // supersedes the ParaIdPreParser single-pass on the Load path (one paragraph-enumeration authority).
+        var projection = _projectionBuilder.Build(content, cancellationToken);
+        IReadOnlyList<ParaIdMapEntry> paraIdMap = projection.ParaIdMap;
+        if (projection.Status == ComposeProjectionStatus.Failed)
         {
-            paraIdMap = _paraIdPreParser.Parse(content).Entries;
+            _logger.LogWarning(
+                "Compose load: DOCX projection failed for drive={DriveId} item={DocumentSpeId} (code={Code}); client will fail closed (read-only / Open in Word)",
+                request.DriveId, request.DocumentSpeId, projection.Warnings.FirstOrDefault()?.Code);
         }
-        catch (Exception ex)
+        else if (projection.Warnings.Count > 0)
         {
-            _logger.LogWarning(ex,
-                "Compose load: paraId pre-parse failed for drive={DriveId} item={DocumentSpeId}; returning empty map",
-                request.DriveId, request.DocumentSpeId);
-            paraIdMap = Array.Empty<ParaIdMapEntry>();
+            // Counts-only (privacy — no document content). Surfaces fidelity gaps to engineering (F-03).
+            _logger.LogInformation(
+                "Compose load: DOCX projection partial for drive={DriveId} item={DocumentSpeId}; warnings={Warnings}",
+                request.DriveId, request.DocumentSpeId,
+                string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
         }
 
         // FR-24/FR-25 (task 050 + task 051, import round-trip): run the EXISTING DocxAnnotationReader ONCE
@@ -394,6 +418,7 @@ public class ComposeService : IComposeService
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
             ActionHistory = actionHistory,
             ParaIdMap = paraIdMap,
+            Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
         };
@@ -514,13 +539,44 @@ public class ComposeService : IComposeService
         byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
+        // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's
+        // id-less paragraphs BEFORE the synthesizer/annotation writer resolve against it. This completes
+        // the "apply minted ids physically" step ParaIdPreParser mints but never wrote into the source
+        // bytes (its own remark) — without it, editing/accepting a redline on an originally-id-less
+        // paragraph (or any paragraph of an uploaded doc, whose ids are all client-minted) fails with
+        // "w14:paraId matches no paragraph in the retained original". Text-verified + fill-gaps-only +
+        // count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
+        // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
+        // Gated on an EditedParagraphs delta being present: the stamp only matters for the synthesizer's
+        // paraId resolution, and running it on a clean/annotation-only save would needlessly rewrite the
+        // bytes and break the FR-06a byte-identical clean-save invariant (ComposeServiceUploadFidelityTests).
+        // Skipped on the born-in-editor path (ContentModel present → the renderer already mints ids into
+        // the bytes it authors; the client sends no map there).
+        if (request.ContentModel is null
+            && request.EditedParagraphs is { Count: > 0 }
+            && request.ParaIdMap is { Count: > 0 })
+        {
+            contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
+        }
+
         if (request.EditedParagraphs is { Count: > 0 })
         {
             _logger.LogInformation(
                 "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
                 request.EditedParagraphs.Count, request.SessionId);
             contentToPersist = _redlineSynthesizer.SynthesizeRedline(
-                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt);
+                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt,
+                out var unresolvedParaIds);
+            // UAT round-4 graceful degradation: the save SUCCEEDS with the paragraphs that resolved; any
+            // that did not (a mammoth-dropped/structural paragraph shifted the client's paraId mapping) are
+            // logged here, non-silently, instead of aborting the whole save. Not an error-level event — the
+            // document persisted; these paragraphs simply were not redlined onto the retained original.
+            if (unresolvedParaIds.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Compose save: {UnresolvedCount} of {EditCount} edited paragraph(s) had a w14:paraId that matched no paragraph in the retained original and were NOT redlined (session={SessionId}): {UnresolvedParaIds}. The save still persisted the resolved paragraphs.",
+                    unresolvedParaIds.Count, request.EditedParagraphs.Count, request.SessionId, string.Join(", ", unresolvedParaIds));
+            }
         }
 
         if (request.Annotations is { Count: > 0 })

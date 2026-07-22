@@ -1447,6 +1447,13 @@ export interface ISprkChatInputProps {
    * `triggerSlashMode()` via the imperative handle.
    */
   hideSlashButton?: boolean;
+  /**
+   * UAT 2026-07-21: content rendered at the LEFT of the composer's bottom
+   * toolbar tray. SprkChat passes its Attach (paperclip) button here so the
+   * paperclip sits in the tray (left) opposite the Send button (right).
+   * When omitted, the tray-left is empty and Send stays right-aligned.
+   */
+  toolbarLeadingSlot?: import('react').ReactNode;
 }
 
 /**

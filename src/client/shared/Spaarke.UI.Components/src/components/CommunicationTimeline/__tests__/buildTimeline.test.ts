@@ -140,6 +140,9 @@ describe('mapThreadMessageDtoToTimelineMessage', () => {
       bodyFormat: 100000001, // HTML
       communicationType: 100000000, // Email
       from: 'alice@example.com',
+      direction: null,
+      sentBy: null,
+      sentByName: null,
       sentAt: '2026-07-01T10:00:00Z',
       createdOn: '2026-07-01T09:59:00Z',
       inReplyTo: null,
@@ -212,6 +215,33 @@ describe('mapThreadMessageDtoToTimelineMessage', () => {
       { id: 'att-2', documentId: undefined, fileName: undefined, attachmentType: undefined },
     ]);
   });
+
+  // R3 task 011 (FR-18/FR-02) — sender-identity enrichment pass-through. ConversationView's
+  // mine/others bubble alignment keys on `senderSystemUserId`, so this mapping must be exact.
+  it('passes sentBy/sentByName through unchanged as senderSystemUserId/senderName', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({ sentBy: '11111111-1111-1111-1111-111111111111', sentByName: 'Alice Example' })
+    );
+    expect(result.senderSystemUserId).toBe('11111111-1111-1111-1111-111111111111');
+    expect(result.senderName).toBe('Alice Example');
+  });
+
+  it('maps Direction.Incoming (100000000) to "incoming"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: 100000000 }));
+    expect(result.direction).toBe('incoming');
+  });
+
+  it('maps Direction.Outgoing (100000001) to "outgoing"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: 100000001 }));
+    expect(result.direction).toBe('outgoing');
+  });
+
+  it('defaults null/unset direction, sentBy, sentByName to null', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: null, sentBy: null, sentByName: null }));
+    expect(result.direction).toBeNull();
+    expect(result.senderSystemUserId).toBeNull();
+    expect(result.senderName).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -243,9 +273,7 @@ describe('mapRegardingReadResultToGroups', () => {
     };
   }
 
-  function regardingDto(
-    threads: IRegardingReadResultDto['threads']
-  ): IRegardingReadResultDto {
+  function regardingDto(threads: IRegardingReadResultDto['threads']): IRegardingReadResultDto {
     return {
       entityType: 'sprk_matter',
       recordId: 'record-1',
@@ -260,9 +288,7 @@ describe('mapRegardingReadResultToGroups', () => {
   });
 
   it('maps each thread to a group carrying its name and message count', () => {
-    const result = mapRegardingReadResultToGroups(
-      regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])])
-    );
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])]));
 
     expect(result).toHaveLength(1);
     expect(result[0].threadId).toBe('t1');

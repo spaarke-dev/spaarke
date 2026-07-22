@@ -66,6 +66,15 @@ import { FluentProvider, webLightTheme } from "@fluentui/react-components";
 import { DefaultButton } from "@fluentui/react";  // v8 - DON'T USE
 ```
 
+### UI Design Standards (section header + list row)
+
+When building a **section header** or a **list/row** surface, follow the canonical
+Fluent-token spec in [`docs/standards/UI-DESIGN-STANDARDS.md`](../../../docs/standards/UI-DESIGN-STANDARDS.md):
+section header = `fontSizeBase300` (14px) + `fontWeightSemibold` (600) +
+`colorNeutralForeground1`; list row = 20px min-height + 4px top/bottom padding
+(`spacingVerticalXS`). Token names ONLY (ADR-021) — never hardcode the hex/px so
+both light and dark themes resolve. Reference impl: `CommunicationAttachments/`.
+
 ## Component Patterns
 
 ### PCF Entry Point (index.ts)

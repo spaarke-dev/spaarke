@@ -67,6 +67,11 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingHorizontalS,
   },
+  hint: {
+    color: tokens.colorNeutralForeground3,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingVerticalXXS,
+  },
 });
 
 export interface ComposeStylesPaneProps {
@@ -107,26 +112,41 @@ export function ComposeStylesPane(props: ComposeStylesPaneProps): React.JSX.Elem
       </div>
       {doc.styles.length === 0 ? (
         <Text size={200} className={styles.empty} data-testid="compose-styles-pane-empty">
-          This document has no styled paragraphs yet.
+          {/* U2 (UAT 2026-07-20): explain what this pane is FOR when it's empty (the prior one-liner
+              read as "nothing here"). */}
+          No paragraph styles to apply yet. When this document uses named styles — like “Heading 1”, “Heading 2”, or a
+          firm’s custom style — they appear here so you can apply one to the paragraph your cursor is in.
         </Text>
       ) : (
-        <div className={styles.list} role="listbox" aria-label="Existing document styles">
-          {doc.styles.map(style => (
-            <Tooltip key={style.styleId} content={`Apply “${style.displayName}”`} relationship="description" withArrow>
-              <Button
-                appearance={doc.activeStyleId === style.styleId ? 'primary' : 'secondary'}
-                size="small"
-                aria-pressed={doc.activeStyleId === style.styleId}
-                role="option"
-                aria-selected={doc.activeStyleId === style.styleId}
-                onClick={() => doc.applyStyle(style.styleId)}
-                data-testid={`compose-styles-pane-apply-${style.styleId}`}
+        <>
+          {/* Item 5a (UAT round-4): the common case is a thin list (often just "Body Text"), which
+              read as a pointless one-button panel. An always-visible hint states the pane's purpose. */}
+          <Text size={200} className={styles.hint} data-testid="compose-styles-pane-hint">
+            Click a style to apply it to the paragraph your cursor is in.
+          </Text>
+          <div className={styles.list} role="listbox" aria-label="Existing document styles">
+            {doc.styles.map(style => (
+              <Tooltip
+                key={style.styleId}
+                content={`Apply “${style.displayName}”`}
+                relationship="description"
+                withArrow
               >
-                {style.displayName}
-              </Button>
-            </Tooltip>
-          ))}
-        </div>
+                <Button
+                  appearance={doc.activeStyleId === style.styleId ? 'primary' : 'secondary'}
+                  size="small"
+                  aria-pressed={doc.activeStyleId === style.styleId}
+                  role="option"
+                  aria-selected={doc.activeStyleId === style.styleId}
+                  onClick={() => doc.applyStyle(style.styleId)}
+                  data-testid={`compose-styles-pane-apply-${style.styleId}`}
+                >
+                  {style.displayName}
+                </Button>
+              </Tooltip>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

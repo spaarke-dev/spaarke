@@ -248,6 +248,47 @@ export interface ParaIdMapEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Phase-1 mammoth removal — server DOCX→editor projection (design
+// notes/design-server-side-docx-html-conversion.md)
+// ---------------------------------------------------------------------------
+//
+// Client mirror of `Sprk.Bff.Api.Services.Compose.ComposeDocxProjection` (via the wire
+// `LoadComposeDocumentResponse.projection`). The server's single-walk `ComposeDocxProjectionBuilder`
+// assigns each paragraph's `w14:paraId` and emits its editor block from the SAME paragraph instance, so
+// the editor mounts `html` DIRECTLY (the paraId extension parses `data-paraid`) instead of running the
+// client mammoth convert + position-based `stampParaIds` — eliminating the two-engine drift that caused
+// the recurring save-abort bug class.
+//
+// Privacy: `html` carries document content (Tier 3) — in-memory to the editor render only, never logged.
+
+/** Server DOCX→editor projection status — `success` (fully projected), `partial` (fidelity warnings), `failed` (could not project). */
+export type ComposeProjectionStatus = 'success' | 'partial' | 'failed';
+
+/**
+ * The server DOCX→editor projection. When present the editor mounts {@link html} directly; when
+ * {@link canEdit} is false (or {@link status} is `failed`) the editor fails closed to a read-only /
+ * "Open in Word" state rather than mounting a blank editable doc over a non-empty baseline.
+ */
+export interface ComposeServerProjection {
+  /** `success` | `partial` | `failed`. */
+  status: ComposeProjectionStatus;
+  /** False ⇒ mount read-only / "Open in Word" (fail-closed), never a blank editable doc. */
+  canEdit: boolean;
+  /** paraId-tagged TipTap HTML (`data-paraid` per block). Tier 3 — never logged. Empty when `status === 'failed'`. */
+  html: string;
+  /** Machine-readable fidelity warnings — codes + counts only (no document content). */
+  warnings: readonly ComposeProjectionWarning[];
+  /** Projection contract version (Phase 1: `compose-html-v1`). */
+  schemaVersion: string;
+}
+
+/** A single projection fidelity warning — a stable `code` and its occurrence `count` (Tier 1 safe). */
+export interface ComposeProjectionWarning {
+  code: string;
+  count: number;
+}
+
+// ---------------------------------------------------------------------------
 // R3 FR-24 — import round-trip: existing Word revisions projected on Load (design §7)
 // ---------------------------------------------------------------------------
 //
@@ -363,6 +404,22 @@ export interface ComposeEditedParagraph {
   /** The paragraph's `w14:paraId` (8-hex; must exist in the retained original). */
   paraId: string;
   /** The paragraph's new reject-state settled text. Tier 3 (document content). */
+  text: string;
+}
+
+/**
+ * C2 fix (UAT 2026-07-20): one entry of the ordered load-time paraId map the save sends so the server
+ * can stamp MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
+ * synthesizer resolves (mirror of the server `Sprk.Bff.Api.Services.Compose.ComposeBaselineParaId`).
+ * Built from the LOAD-TIME snapshot (document order), so `text` is the BASELINE (reject-state) text —
+ * the server's verification key that prevents stamping an id onto the wrong paragraph. Tier 3.
+ */
+export interface ComposeBaselineParaId {
+  /** Zero-based document-order position of this paragraph. */
+  index: number;
+  /** The editor's `w14:paraId` for this paragraph (8-hex). */
+  paraId: string;
+  /** The paragraph's LOAD-TIME reject-state text (verification key). Tier 3 (document content). */
   text: string;
 }
 

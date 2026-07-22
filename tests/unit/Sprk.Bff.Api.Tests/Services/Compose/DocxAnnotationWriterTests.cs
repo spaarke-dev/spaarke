@@ -408,6 +408,93 @@ public class DocxAnnotationWriterTests
         AssertNoValidationErrors(doc);
     }
 
+    // -- C1 fix (UAT 2026-07-20): typographic-fold anchoring ------------------------------------
+
+    [Fact]
+    public void Annotate_TargetTextDiffersFromBaselineByTypography_StillAnchors_NoTargetNotFound()
+    {
+        // The baseline OOXML carries a curly apostrophe + an em dash; the model echoed the clause back with
+        // straightened ASCII (straight apostrophe + hyphen-minus — the common case). Before the fix,
+        // LocateTarget's EXACT ordinal search missed by one character and threw TargetNotFound → HTTP 422
+        // "a tracked change could not be located". The fold makes both sides match.
+        var source = CreateDocx("Any reference to the Examiner’s Report—a formal notice herein.");
+        var annotations = new[]
+        {
+            new DocxAnnotation
+            {
+                Kind = TrackChangeKind.Comment,
+                TargetText = "Examiner's Report-a formal notice herein", // straight ' , hyphen-minus, plain space
+                CommentText = "Anchored despite the typographic drift.",
+                Author = "Spaarke AI",
+                Date = When,
+            },
+        };
+
+        var act = () => _sut.Annotate(source, annotations);
+
+        act.Should().NotThrow<DocxAnnotationException>(
+            "the writer must fold curly quotes / dashes / NBSP the same way the client does before matching");
+        var result = _sut.Annotate(source, annotations);
+        using var doc = WordprocessingDocument.Open(new MemoryStream(result), false);
+        doc.MainDocumentPart!.Document!.Body!.Descendants<CommentRangeStart>().Should().ContainSingle(
+            "the comment anchored to the folded target span");
+    }
+
+    // -- Durable fix (UAT round-4, items 1/3): whitespace-collapsed fallback anchoring --------------
+
+    [Fact]
+    public void Annotate_TargetTextDiffersFromParagraphByWhitespaceOnly_StillAnchors_NoTargetNotFound()
+    {
+        // The paragraph carries DOUBLE spaces (a common cross-extractor divergence: the model authored
+        // its target against one flattening, the OOXML runs came from another). Before the fallback,
+        // LocateTarget's precise ordinal pass missed on the extra whitespace and threw TargetNotFound →
+        // HTTP 422. The whitespace-collapsed fallback matches, then maps back to the ORIGINAL run-text
+        // offsets so the isolated span is the real (double-spaced) text — not a target-length slice.
+        var source = CreateDocx("The Supplier  shall  indemnify the Customer.");
+        var annotations = new[]
+        {
+            new DocxAnnotation
+            {
+                Kind = TrackChangeKind.Deletion,
+                TargetText = "Supplier shall indemnify", // single spaces — differs only by whitespace
+                Author = "Spaarke AI",
+                Date = When,
+            },
+        };
+
+        var result = _sut.Annotate(source, annotations);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(result), false);
+        var del = doc.MainDocumentPart!.Document!.Body!.Descendants<DeletedRun>().Single();
+        // The isolated span is the ORIGINAL, double-spaced text — proving MatchLength (not target.Length)
+        // drove IsolateRange. A one-length-off isolation would strike the wrong characters.
+        del.Descendants<DeletedText>().Single().Text.Should().Be("Supplier  shall  indemnify");
+        AssertNoValidationErrors(doc);
+    }
+
+    [Fact]
+    public void Annotate_TargetIsAGenuineParaphrase_StillThrowsTargetNotFound_DoNotGuess()
+    {
+        // The fallback tolerates WHITESPACE, never WORDING. A reworded target (a changed word) must still
+        // find nothing in either pass → TargetNotFound (FR-19 "do not guess"), not a wrong-span anchor.
+        var source = CreateDocx("The Supplier shall indemnify the Customer.");
+        var annotations = new[]
+        {
+            new DocxAnnotation
+            {
+                Kind = TrackChangeKind.Deletion,
+                TargetText = "Supplier must reimburse", // paraphrase — not present verbatim
+                Author = "Spaarke AI",
+                Date = When,
+            },
+        };
+
+        var act = () => _sut.Annotate(source, annotations);
+
+        act.Should().Throw<DocxAnnotationException>()
+            .Which.Kind.Should().Be(DocxAnnotationErrorKind.TargetNotFound);
+    }
+
     // -- Helpers ---------------------------------------------------------------------------------
 
     private static byte[] CreateDocx(params string[] paragraphs)

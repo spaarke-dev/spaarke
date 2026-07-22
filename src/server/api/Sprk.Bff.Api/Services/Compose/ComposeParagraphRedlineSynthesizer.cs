@@ -80,7 +80,27 @@ public sealed class ComposeParagraphRedlineSynthesizer
         IReadOnlyList<ComposeEditedParagraph> editedParagraphs,
         string author,
         DateTimeOffset revisionTimestamp)
+        => SynthesizeRedline(retainedOriginal, editedParagraphs, author, revisionTimestamp, out _);
+
+    /// <summary>
+    /// As <see cref="SynthesizeRedline(ReadOnlyMemory{byte}, IReadOnlyList{ComposeEditedParagraph}, string, DateTimeOffset)"/>,
+    /// but GRACEFULLY DEGRADES on unmatched paraIds instead of aborting the whole save. A real document
+    /// round-tripped through mammoth (which drops empty/structural paragraphs and reflows tables/tabs) can
+    /// leave a handful of editor paragraphs whose client-mapped <c>w14:paraId</c> no longer matches the
+    /// retained original. Rather than fail the entire save (UAT round-4: "…matches no paragraph in the
+    /// retained original … synthesis aborted"), this applies the redline to EVERY paragraph that DID
+    /// resolve and returns the unresolved ids via <paramref name="unresolvedParaIds"/> so the caller can
+    /// surface a precise, non-silent warning. Hard errors (unreadable docx, missing body, empty/duplicate
+    /// edited paraId) still throw — those are contract violations, not partial-mapping.
+    /// </summary>
+    public byte[] SynthesizeRedline(
+        ReadOnlyMemory<byte> retainedOriginal,
+        IReadOnlyList<ComposeEditedParagraph> editedParagraphs,
+        string author,
+        DateTimeOffset revisionTimestamp,
+        out IReadOnlyList<string> unresolvedParaIds)
     {
+        unresolvedParaIds = Array.Empty<string>();
         if (retainedOriginal.IsEmpty)
         {
             throw new ArgumentException("retainedOriginal is required and must be non-empty.", nameof(retainedOriginal));
@@ -127,17 +147,15 @@ public sealed class ComposeParagraphRedlineSynthesizer
             var body = doc.MainDocumentPart?.Document?.Body
                 ?? throw new ComposeRedlineException("The retained-original document has no body to synthesize onto.");
 
-            // Task 012 FR-12 splice key: resolve ALL edited ids BEFORE any mutation (fail-fast — a single
-            // unmatched id fails the whole synthesis so no partial/wrong write can land).
+            // Task 012 FR-12 splice key: resolve edited ids. UAT round-4 GRACEFUL DEGRADATION — a real doc
+            // round-tripped through mammoth can drop empty/structural paragraphs and shift the client's
+            // order-based paraId mapping, leaving a few edited ids that match no original paragraph. Rather
+            // than abort the ENTIRE save (which blocked users), apply the redline to every id that DID
+            // resolve and RETURN the unresolved ids so the caller surfaces a precise, non-silent warning.
+            // Resolving before mutation still guarantees no PARTIAL-then-fail write for a matched id.
             var index = ComposeParaIdSpliceMap.BuildParagraphIndex(body);
             var resolution = ComposeParaIdSpliceMap.Resolve(index, byParaId.Keys);
-            if (!resolution.IsFullyMatched)
-            {
-                throw new ComposeRedlineException(
-                    "One or more edited paragraphs have a w14:paraId that matches no paragraph in the retained original: " +
-                    string.Join(", ", resolution.Unmatched) +
-                    ". The synthesis was aborted — no paragraph was modified.");
-            }
+            unresolvedParaIds = resolution.Unmatched;
 
             // EDGE-3: seed revision ids past any existing w:ins/w:del id so newly-emitted ids are unique.
             var nextId = SeedRevisionId(body);

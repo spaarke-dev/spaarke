@@ -55,6 +55,8 @@ export {
   deriveDraftState,
   deriveViewState,
   mapStateToDraftUpdate,
+  mapStateToSendRequest,
+  buildBodyWithAttachmentLinks,
   ATTACHMENT_MAX_COUNT,
   ATTACHMENT_MAX_TOTAL_BYTES,
   ATTACHMENT_WARN_TOTAL_BYTES,

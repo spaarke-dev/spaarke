@@ -1,0 +1,69 @@
+<task id="122" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationAttachments PCF — title padding, fix green/red upload indicator, .eml opens same in-modal preview (UAT R4 B)</title>
+    <phase>Wave 12 — UAT round 4 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>111</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Fixes a shipped-feature bug (upload indicator) + changes preview routing (.eml); PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W12</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 4 (`notes/UAT-ROUND4-FEEDBACK.md` section B) on the `CommunicationAttachments` PCF
+    (`src/client/pcf/CommunicationAttachments/`). Four items:
+
+    B12-1 — reduce the padding ABOVE the section title (title closer to the top of the section boundary).
+    B12-2 — increase the padding BELOW the title (more space before the first attachment line). Mirror the same
+      asymmetric title-padding convention task 121 applies to Connections + records in UI-DESIGN-STANDARDS.md (read
+      that doc; if 121 hasn't updated it yet in your run, apply the same small-top/larger-bottom padding).
+    B12-3 — BUG (W11 A11-2 follow-up): the per-row upload icon is NOT rendering distinct green/red — the screenshot
+      shows every row the same dark cloud. Root-cause it: the W11 `enrichUploadStatus` reads `sprk_document`
+      (`sprk_graphitemid` / `sprk_hasfile`) via an extra `context.webAPI` call. Verify (a) that read actually returns
+      those fields (correct logical names, correct filter, not silently failing → all `undefined` → all one state),
+      and (b) the icon color is driven by the boolean via Fluent color tokens (`colorPaletteGreenForeground1` /
+      `colorPaletteRedForeground1`). Fix so uploaded rows are GREEN and not-uploaded rows are RED, visibly distinct.
+      Add a test proving the green/red mapping off the boolean.
+    B12-4 — the `.eml` attachment currently shows an external "open in SharePoint" icon and opens externally (the
+      `isEmailMessageAttachment` special-case routes it to download instead of the modal). Owner wants it to open the
+      SAME in-modal `RichFilePreviewDialog` preview as other attachments. FIRST verify whether
+      `GET /api/documents/{id}/preview-url` returns a renderable URL for a `.eml` document (SPE/Graph may preview
+      `message/rfc822`). IF it renders, remove the `.eml`/`.msg` download special-case so those rows open the modal
+      preview (and appear in the prev/next nav set). IF it genuinely cannot render, STOP and report (do not silently
+      leave the external-open behavior — surface the finding).
+  </prompt>
+
+  <goal>
+    Title sits close to the section top with breathing room below; every attachment row shows a clearly green
+    (uploaded) or red (not-uploaded) SPE icon; and `.eml` attachments open the same in-modal preview as other files
+    (or the reason they cannot is reported).
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Title top padding reduced + bottom padding increased (Fluent tokens), matching the UI-DESIGN-STANDARDS asymmetric convention.</criterion>
+    <criterion testable="true">Per-row upload icon renders GREEN when the document has an uploaded SPE file and RED when not — distinct colors via Fluent tokens; the underlying upload-status read is verified to return the field (not all-undefined). A test asserts the green/red mapping off the uploaded boolean.</criterion>
+    <criterion testable="true">`.eml` rows open the in-modal `RichFilePreviewDialog` (same as other attachments) and participate in prev/next nav — OR, if the preview URL cannot render `.eml`, the task report states that finding with evidence and leaves a documented fallback.</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest green (upload-status green/red + .eml routing); version bump all 5 locations (1.2.0 → 1.3.0); ZIP repacked + validated (type-66, apostrophe-free).</criterion>
+    <criterion testable="true">§11: still reuses RichFilePreviewDialog (no new modal), upload status from existing webAPI data (no new BFF surface).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>ADR-021 Fluent v9 tokens (green/red via `colorPaletteGreenForeground1`/`colorPaletteRedForeground1`); ADR-022; ADR-028 auth.</constraint>
+    <constraint>Prefer staying within `src/client/pcf/CommunicationAttachments/**`. Do NOT modify `@spaarke/ui-components` (the W11 `showTitle` double-header fix is already in the shared lib — `.eml` should preview through the existing `RichFilePreviewDialog` unchanged). If a shared-lib change seems needed, STOP and report (avoids racing the parallel W12 shared-lib task).</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free; type-66 solution; follow /pcf-deploy. Run pack.ps1 from the `Solution/` dir if it is CWD-relative.</constraint>
+  </constraints>
+
+  <notes>
+    W11 task 111 added `enrichUploadStatus` in `services/CommunicationAttachmentsService.ts` + the icon in
+    `AttachmentList.tsx`; `isEmailMessageAttachment` + the download route are in `CommunicationAttachmentsApp.tsx`
+    (`handleRowActivate`). The upload icon uses Cloud✓/Cloud✗ (no SharePoint brand glyph in Fluent). Leave changes
+    UNCOMMITTED; do NOT touch TASK-INDEX/current-task/project CLAUDE.md. Deploy remainder (import) = owner.
+  </notes>
+</task>

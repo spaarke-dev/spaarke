@@ -19,7 +19,12 @@ export const authenticatedFetch = jest.fn(async (url: string): Promise<Response>
   const isOpenLinks = url.includes('/open-links');
   const body = isOpenLinks
     ? { desktopUrl: 'ms-word:ofe|u|https://spe/file.docx', webUrl: 'https://spe/file', mimeType: 'x', fileName: 'file' }
-    : { previewUrl: 'https://preview/embed', documentInfo: { name: 'file', mimeType: 'x' }, checkoutStatus: null, correlationId: 'c1' };
+    : {
+        previewUrl: 'https://preview/embed',
+        documentInfo: { name: 'file', mimeType: 'x' },
+        checkoutStatus: null,
+        correlationId: 'c1',
+      };
   return {
     ok: true,
     status: 200,

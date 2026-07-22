@@ -20,6 +20,10 @@ import type {
   IValidationResult,
   ValidationErrorCode,
 } from './EmailComposer.types';
+// Type-only import (keeps this module pure — no I/O): the send-request shape the
+// engine maps state onto. `mapStateToSendRequest` lives here (not in the .tsx) so
+// task 104's "selection → request payload" contract is unit-testable in isolation.
+import type { SendCommunicationOptions } from '../../services/communicationApi';
 
 // ---------------------------------------------------------------------------
 // Attachment caps (project constraint — matches BFF enforcement + the
@@ -59,6 +63,25 @@ function wizardAttachments(props: IEmailComposerProps): IAttachmentItem[] {
 }
 
 /**
+ * Normalize the host-supplied `initialAttachments` (task 104) — the source
+ * communication's attachments offered for inclusion on reply/replyAll/forward.
+ * Applies the per-mode attach-file default when `selected` is left `undefined`:
+ * forward → included (`true`), reply/replyAll → offered-but-off (`false`). The
+ * body-link toggle always starts off. Hosts may still pass an explicit `selected`
+ * to override the default.
+ */
+function initialAttachmentsFor(props: IEmailComposerProps): IAttachmentItem[] {
+  const list = props.initialAttachments ?? [];
+  if (list.length === 0) return [];
+  const includeByDefault = props.mode === 'forward';
+  return list.map(a => ({
+    ...a,
+    selected: a.selected ?? includeByDefault,
+    linkSelected: a.linkSelected ?? false,
+  }));
+}
+
+/**
  * Builds the engine's initial state from props. `compose` seeds from
  * `initial*` props (+ wizard-uploaded attachments); `view`/`reply`/`forward`/
  * `draft` derive from `props.sourceRecord` via the pure derive* helpers below.
@@ -74,7 +97,7 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     subject: props.initialSubject ?? '',
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',
-    attachments: wizardAttachments(props),
+    attachments: [...wizardAttachments(props), ...initialAttachmentsFor(props)],
     sendMode: props.sendMode ?? 'sharedMailbox',
     fromMailbox: props.fromMailbox,
     archiveToSpe: props.archiveToSpe ?? true,
@@ -154,7 +177,9 @@ export function deriveReplyState(source: ISourceCommunicationRecord): Partial<Em
     subject: dedupSubjectPrefix(source.subject, 'Re:'),
     body: '',
     bodyFormat: source.bodyFormat,
-    attachments: [],
+    // Reply OFFERS the source attachments but defaults them OFF (task 104, D1/D2) —
+    // the user opts in per item (attach-file and/or body-link) via AttachmentList.
+    attachments: (source.attachments ?? []).map(a => ({ ...a, selected: false, linkSelected: false })),
     associations: source.associations ?? [],
     readOnly: false,
   };
@@ -168,7 +193,8 @@ export function deriveForwardState(source: ISourceCommunicationRecord): Partial<
     subject: dedupSubjectPrefix(source.subject, 'Fwd:'),
     body: wrapForwardedBody(source),
     bodyFormat: source.bodyFormat,
-    attachments: (source.attachments ?? []).map(a => ({ ...a, selected: true })),
+    // Forward DEFAULTS to including the source attachments as files (task 104).
+    attachments: (source.attachments ?? []).map(a => ({ ...a, selected: true, linkSelected: a.linkSelected ?? false })),
     associations: source.associations ?? [],
     readOnly: false,
   };
@@ -205,6 +231,79 @@ export function mapStateToDraftUpdate(state: EmailComposerState): Record<string,
     sprk_body: state.body,
     sprk_bodyformat: state.bodyFormat,
     sprk_communicationtype: 'Email',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Attachment inclusion → send payload (task 104, D1/D2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Append a "Linked documents" block to `body` for every attachment the user
+ * toggled ON for the body-link path (`linkSelected === true`) that has a
+ * resolvable `linkUrl`. Best-effort: an item toggled on but missing `linkUrl`
+ * is silently skipped (never a hard send failure — task 104 constraint). Pure —
+ * returns a new body string; the caller decides where the result goes.
+ */
+export function buildBodyWithAttachmentLinks(
+  body: string,
+  bodyFormat: EmailComposerBodyFormat,
+  attachments: readonly IAttachmentItem[]
+): string {
+  const linked = attachments.filter(a => a.linkSelected === true && !!a.linkUrl);
+  if (linked.length === 0) return body;
+
+  if (bodyFormat === 'HTML') {
+    const items = linked
+      .map(a => `<li><a href="${escapeHtml(a.linkUrl as string)}">${escapeHtml(a.fileName)}</a></li>`)
+      .join('');
+    return `${body}<p>Linked documents:</p><ul>${items}</ul>`;
+  }
+  const lines = linked.map(a => `- ${a.fileName}: ${a.linkUrl}`).join('\n');
+  return `${body}\n\nLinked documents:\n${lines}`;
+}
+
+/**
+ * Map engine state onto the `sendCommunication()` request (task 104 moved this
+ * here from EmailComposer.tsx so the payload contract is unit-testable):
+ *   - attach-file path → `attachmentDocumentIds` carries the `sprk_document`
+ *     GUID of every attachment that is BOTH kept (`selected !== false`) AND
+ *     resolved (`documentId`). Locally-picked files without a Document yet, and
+ *     reply/forward items the user deselected, are excluded.
+ *   - body-link path → `buildBodyWithAttachmentLinks` appends chosen links.
+ *
+ * Reuses the existing `SendCommunicationRequest.AttachmentDocumentIds` field —
+ * NO new send-contract attachment field is introduced (task 104 / §11).
+ */
+export function mapStateToSendRequest(state: EmailComposerState, threadId?: string): SendCommunicationOptions {
+  return {
+    to: state.to.map(r => r.email),
+    cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
+    bcc: state.bcc.length > 0 ? state.bcc.map(r => r.email) : undefined,
+    subject: state.subject,
+    body: buildBodyWithAttachmentLinks(state.body, state.bodyFormat, state.attachments),
+    bodyFormat: state.bodyFormat === 'HTML' ? 'html' : 'text',
+    // R3 task 020 (FR-07/FR-19): pin the sent email to the active conversation
+    // thread when opened from a conversation. Omitted (undefined) for every
+    // existing caller → server find-or-create, unchanged. Same send path
+    // (ADR-045) — not a new branch.
+    threadId,
+    attachmentDocumentIds: state.attachments
+      .filter(a => a.selected !== false && a.documentId)
+      .map(a => a.documentId as string),
+    archiveToSpe: state.archiveToSpe,
+    associations: state.associations,
+    sendMode: state.sendMode,
+    fromMailbox: state.fromMailbox,
+    // Reply / Reply All / Forward inherit the parent communication's regarding associations
+    // (UAT R4 D12-1 / task 124). The new draft is composed from a source communication whose id is
+    // `state.communicationId`; the BFF copies that source's populated sprk_regarding* lookups onto the
+    // new record at create time (true inheritance — a direct copy, NOT an engine re-derivation). Only
+    // reply/forward set it (Reply All maps to the 'reply' mode); compose/draft/view do not inherit.
+    inheritRegardingFromCommunicationId:
+      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId
+        ? state.communicationId
+        : undefined,
   };
 }
 
@@ -315,6 +414,13 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
       return {
         ...state,
         attachments: state.attachments.map(a => (a.id === action.id ? { ...a, selected: a.selected === false } : a)),
+        isDirty: true,
+      };
+
+    case 'TOGGLE_ATTACHMENT_LINK':
+      return {
+        ...state,
+        attachments: state.attachments.map(a => (a.id === action.id ? { ...a, linkSelected: !a.linkSelected } : a)),
         isDirty: true,
       };
 

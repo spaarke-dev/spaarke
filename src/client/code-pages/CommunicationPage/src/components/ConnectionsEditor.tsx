@@ -14,17 +14,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  mergeClasses,
-  Text,
-  Button,
-  Badge,
-  Divider,
-  Checkbox,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button, Badge, Divider, Tooltip } from '@fluentui/react-components';
 import {
   Briefcase20Regular,
   Building20Regular,
@@ -32,10 +22,8 @@ import {
   Receipt20Regular,
   CalendarLtr20Regular,
   DocumentText20Regular,
-  Add20Regular,
   Sparkle16Regular,
   CheckmarkCircle20Filled,
-  Warning20Regular,
   ArrowSwap16Regular,
   Link20Regular,
   ChevronDown16Regular,
@@ -49,7 +37,6 @@ import {
   confidenceBand,
   deriveConnections,
   deriveCreateActions,
-  rationaleSentence,
   topCandidate,
 } from './provenance';
 
@@ -132,7 +119,7 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingLeft: '108px',
-    paddingBlock: 2,
+    paddingBlock: tokens.spacingVerticalXXS,
   },
 
   summaryBar: {

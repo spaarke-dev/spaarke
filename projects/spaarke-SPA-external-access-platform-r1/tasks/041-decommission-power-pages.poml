@@ -3,7 +3,8 @@
     <title>Retire Power Pages site + web-resource deploy script</title>
     <phase>3 Cutover &amp; decommission</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
+    <status-note>2026-07-20 REPO HALF COMPLETE (owner site-teardown pending). Gate satisfied: task 040 parity GREEN (owner live-verified scoping + new-grant propagation). Reversible repo retirement done: DELETED scripts/Deploy-ExternalWorkspaceSpa.ps1 (git rm); commented out the ExternalWorkspaceSpa component in scripts/Deploy-AllWebResources.ps1 + its comment-help entry with a RETIRED note (matching the CorporateWorkspace R4-041 precedent); struck through the two scripts/README.md rows. Verified: NO active/dangling reference to the script in scripts/.github/config (only intentional RETIRED comments); Deploy-AllWebResources.ps1 still parses (PSParser OK). REMAINING (owner ops — IRREVERSIBLE, cannot be done headlessly): retire the sprk_externalworkspace Power Pages SITE in the Power Platform maker/admin portal (take out of service / delete). Until then both hosts technically coexist; the SPA already serves from SWA. Doc rewrites (external-access-spa-architecture.md + guides) = task 042. Marking in-progress until owner confirms the site is retired, then → completed.</status-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Irreversible retirement — prescriptive; gated on parity</rigor-reason>
     <model-tier>sonnet</model-tier>

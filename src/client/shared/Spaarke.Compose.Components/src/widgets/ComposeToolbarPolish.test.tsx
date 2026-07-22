@@ -258,7 +258,7 @@ describe('FR-21 (DEF-15) — dismissing the simplification banner persists for t
     renderBannerStack({ importWarnings: DIFFERENT_WARNINGS });
 
     expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByText('Document opened with 1 simplification(s)')).toBeInTheDocument();
+    expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
   });
 
   it('sessionStorage carries a dismissal sentinel keyed to the warnings content after ×', async () => {

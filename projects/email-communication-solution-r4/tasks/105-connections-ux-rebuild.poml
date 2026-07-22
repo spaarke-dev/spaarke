@@ -1,0 +1,72 @@
+<task id="105" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationConnections PCF — UX rebuild: group by action, plain-language statuses, explicit per-row controls (UAT R2 C1)</title>
+    <phase>Wave 10 — UAT round 2 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>042,043</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Reworks a shipped PCF's UX + interaction model (.tsx); PCF build+pack+deploy. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 2 C1 (`notes/UAT-ROUND2-FEEDBACK.md`): the CommunicationConnections modal is confusing — "I'm still
+    not clear on how I'm supposed to resolve, or what the statuses mean." The MATCHING is correct (verified: subject
+    matter+project, body matter → Ambiguous, sender contact filed); the problem is the UI/interaction.
+
+    OWNER-APPROVED redesign (mockup: https://claude.ai/code/artifact/3c1eaf58-8b56-4417-9819-0a1aed1dace7 —
+    rendered from the real "CMRCL-848992 Smith v Smith" email). Rebuild the modal to GROUP BY ACTION NEEDED, not by
+    record type:
+      1. "Needs your decision" — Ambiguous conflicts as selectable options + a "Set as primary" action.
+      2. "Filed automatically" — high-confidence auto-links, marked done, with the ★ primary clearly shown +
+         change/unlink.
+      3. "Suggested" — soft matches (AI, name matches, and the new B1 contacts) each with explicit Confirm ✓ /
+         Dismiss ✕.
+    Replace the opaque "Ambiguous / Primary / Filed / Suggested" chips with plain-language actions + a status
+    LEGEND. Each row states exactly what to do (pick-a-matter radio, Set as primary, Confirm, Dismiss).
+
+    Rebuild the presentation/interaction of the existing `CommunicationConnections` PCF
+    (`src/client/pcf/CommunicationConnections/`) — it reads `sprk_associationprovenance` (candidates + statuses)
+    and `sprk_associationstatus`, and writes the additive typed-lookup regarding fields (per the task-042 engine
+    map). Keep the data contract; change the UX + the resolve interactions to match the approved mockup.
+  </prompt>
+
+  <goal>
+    The Connections modal groups matches by action (Needs decision / Filed / Suggested), uses plain-language
+    verbs + a legend instead of opaque status chips, and gives each row one explicit control — so a reviewer knows
+    exactly how to resolve conflicts and confirm/dismiss suggestions. Data contract (provenance in, regarding
+    writes out) unchanged.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Matches render in three action-grouped sections: "Needs your decision" (conflicts), "Filed automatically" (auto-linked), "Suggested" (confirm/dismiss) — driven off the provenance candidates + statuses.</criterion>
+    <criterion testable="true">A conflict (Ambiguous field) renders as selectable options with a "Set as primary" action that writes the chosen target to the regarding field (using the existing additive typed-lookup write path from task 042).</criterion>
+    <criterion testable="true">Suggested rows (AI create-suggestions, name matches, B1 contacts) each have explicit Confirm (link/create) and Dismiss controls; Filed rows show the ★ primary + change/unlink.</criterion>
+    <criterion testable="true">A plain-language status legend is present; opaque bare-chip statuses are replaced by action verbs (per the mockup).</criterion>
+    <criterion testable="true">The provenance-read + regarding-write DATA CONTRACT is unchanged (only presentation/interaction reworked); existing 042 write semantics (additive, never clear-and-set) preserved.</criterion>
+    <criterion testable="true">Fluent v9 tokens only, theme-correct light + dark (ADR-021); matches the Spaarke system style (reuse the 101 design-standards header/row spec where applicable).</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest for the grouping + resolve/confirm/dismiss interactions; version bump all 5 locations (→ 1.1.0); solution ZIP repacked + validated (type-66; manifest generic + apostrophe-free).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Do NOT change the association DATA model or the engine — this is a client UX rebuild over the existing `sprk_associationprovenance` / `sprk_associationstatus` contract.</constraint>
+    <constraint>Preserve task-042 write semantics: multi-association = additive typed-lookup writes mirroring the engine's RegardingFieldMap; never clear-and-set.</constraint>
+    <constraint>ADR-028 auth (`@spaarke/auth`, authReady gate, no PublicClientApplication); ADR-021 Fluent v9 tokens; ADR-022 virtual control + platform libs.</constraint>
+    <constraint>Manifest description-keys generic + apostrophe-free (R2 XSD fix); solution = type-66 only; follow /pcf-deploy.</constraint>
+  </constraints>
+
+  <notes>
+    Mockup is the source of truth for layout/labels/interaction: https://claude.ai/code/artifact/3c1eaf58-8b56-4417-9819-0a1aed1dace7
+    Read the existing `CommunicationConnections` components (ConnectionsEditor + provenance parsing) first — reuse
+    the provenance model + write path; only the presentation layer changes. Depends on B1 (102) for the contact
+    suggestions to appear in the "Suggested" section, but the UX rebuild can proceed independently (contacts just
+    populate when 102 ships). Deploy remainder (import) = owner.
+  </notes>
+</task>

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FormXml patch — "Email & Messages" tab on the Matter main form
+  ================================================================
+
+  messaging-communication-app-r3 task 033 (FR-15) deliverable. Adds:
+    1. A new <library> registration for `sprk_/scripts/communications_grid_onload.js`
+       on the Matter main form's events collection.
+    2. A new <Handler> binding wiring the library's `Spaarke.CommunicationsGrid.onLoad`
+       function to the form's OnLoad event (in addition to existing handlers —
+       Spaarke.MatterInsight.onLoad, Spaarke.MatterInsightCard.onLoad,
+       Spaarke.MatterKpi.onLoad — all UNCHANGED).
+    3. A new tab "Email & Messages" containing a single "Web Resource" control
+       (classid {9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}) pointing at the
+       `sprk_communicationspage.html` web resource (the SAME Code Page used by
+       the global/launcher All-Communications entry — R2 task 040; NO second
+       grid page, no second `sprk_gridconfiguration` default — NFR-06).
+
+  Companion artefacts (already shipped by this task):
+    - Web resource: sprk_/scripts/communications_grid_onload.js
+       (compiled output of communicationsGridOnLoad.ts, this folder)
+    - Web resource: sprk_communicationspage.html
+       (existing R2 Code Page — src/solutions/sprk_communicationspage/,
+        completed by this task to read the `data=` envelope and forward it as
+        `additionalHostFilters`)
+
+  This file is a PATCH (not a full FormXml replacement) — mirrors the
+  established convention in this folder (see `insightCardMount.FormXml.patch.xml`).
+  Task 034 (deploy) merges these fragments into the exported Matter form XML
+  via the Dataverse form editor or `dataverse-deploy` solution packaging.
+
+  Rollout scope (spec FR-15): Matter is the PILOT. The tab/control/library
+  shape below is identical for the other 10 regarding-family entities
+  (sprk_project, sprk_invoice, sprk_servicerequest, sprk_workassignment,
+  sprk_event, sprk_budget, sprk_analysis, sprk_organization, account, contact)
+  — only the target FORM changes; `communicationsGridOnLoad.js` is entity-
+  agnostic and needs no per-entity code change (see its header comment).
+  Wiring the remaining 10 forms is out of this task's scope (Matter pilot
+  first, per spec) and is tracked as follow-on rollout, not a defer/issue
+  (the mechanism is proven here; the remaining wiring is repetition of this
+  same patch shape against 10 more forms).
+
+  Control / library identifiers
+  ------------------------------
+  Tab name:       "tab_email_messages"     (NEW per this patch)
+  Section name:   "section_email_messages" (NEW per this patch)
+  Control name:   "WebResource_CommunicationsGrid" (NEW — MUST match
+                  `communicationsGridOnLoad.ts`'s `ns._controlName`)
+  Library name:   "sprk_/scripts/communications_grid_onload.js" (NEW)
+
+  Final solution packaging (Task 034) MUST verify these names against the
+  actual exported FormXml — the platform sometimes suffixes generated names
+  (e.g. `tab_5`, `section_3`).
+-->
+
+<!-- ============================================================ -->
+<!-- 1. Library registration (Matter form events.libraries)       -->
+<!-- ============================================================ -->
+<libraries-patch>
+  <!--
+    Append this <library> entry to <events><libraries> in the Matter main
+    form's customizations.xml. Existing entries (matter_insight_onload.js,
+    matter_insight_card_mount.js, matter_kpi_onload.js, etc.) are preserved.
+  -->
+  <library name="sprk_/scripts/communications_grid_onload.js" libraryUniqueId="{REPLACE-WITH-NEW-GUID}" />
+</libraries-patch>
+
+<!-- ============================================================ -->
+<!-- 2. OnLoad handler binding (Matter form events.event[OnLoad]) -->
+<!-- ============================================================ -->
+<handlers-patch>
+  <!--
+    Append this <Handler> entry to the <event name="OnLoad"> <Handlers>
+    collection. Preserves all existing handlers.
+  -->
+  <Handler
+    functionName="Spaarke.CommunicationsGrid.onLoad"
+    libraryName="sprk_/scripts/communications_grid_onload.js"
+    handlerUniqueId="{REPLACE-WITH-NEW-GUID}"
+    enabled="true"
+    parameters=""
+    passExecutionContext="true" />
+</handlers-patch>
+
+<!-- ============================================================ -->
+<!-- 3. "Email & Messages" tab + Web Resource control              -->
+<!-- ============================================================ -->
+<tab name="tab_email_messages" id="{REPLACE-WITH-NEW-GUID}" IsUserDefined="1" locklevel="0" showlabel="true" expanded="true">
+  <labels>
+    <label description="Email &amp; Messages" languagecode="1033" />
+  </labels>
+  <columns>
+    <column width="100%">
+      <sections>
+        <section name="section_email_messages" showlabel="false" showbar="false" locklevel="0" id="{REPLACE-WITH-NEW-GUID}" IsUserDefined="1" columns="1">
+          <labels>
+            <label description="Email &amp; Messages" languagecode="1033" />
+          </labels>
+          <rows>
+            <row>
+              <!--
+                width/height are starter values matching the grid's typical
+                full-tab usage (mirrors the Report Card tab's subgrid sizing
+                convention in this same folder tree). Task 034 UAT may tune.
+              -->
+              <cell id="{REPLACE-WITH-NEW-GUID}" showlabel="false" rowspan="12" colspan="1" auto="false">
+                <labels>
+                  <label description="Email &amp; Messages" languagecode="1033" />
+                </labels>
+                <control
+                  id="WebResource_CommunicationsGrid"
+                  classid="{9FDF5F91-88B1-47F4-AD53-C11EFC01A01D}"
+                  indicationOfSubgrid="false">
+                  <parameters>
+                    <Url>$webresource:sprk_communicationspage.html</Url>
+                    <!--
+                      PassParameters=false — this tab does NOT rely on the
+                      platform's automatic typecode+id `data` parameter. The
+                      form onLoad script (`communicationsGridOnLoad.js`)
+                      pushes its OWN `data` envelope (`regardingAttribute` +
+                      `regardingValue`) via `setData()` at runtime — see that
+                      script's header for why (dynamic per-entity regarding
+                      field name vs. a fixed typecode+id shape).
+                    -->
+                    <PassParameters>false</PassParameters>
+                    <Security>false</Security>
+                    <Scrolling>auto</Scrolling>
+                    <Border>false</Border>
+                  </parameters>
+                </control>
+              </cell>
+            </row>
+          </rows>
+        </section>
+      </sections>
+    </column>
+  </columns>
+</tab>
+
+<!--
+  ============================================================
+  4. Solution packaging (Task 034 scope)
+  ============================================================
+
+  Task 034 packages this patch + the compiled
+  `communicationsGridOnLoad.js` web resource into the Matter form's solution
+  component and imports to dev/UAT/prod via the `dataverse-deploy` skill.
+  `sprk_communicationspage.html` itself is already an existing solution
+  component (R2) — this patch only adds a NEW placement (the form tab), not a
+  new web resource for the page.
+-->

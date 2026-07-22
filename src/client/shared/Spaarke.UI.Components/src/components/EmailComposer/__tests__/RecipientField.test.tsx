@@ -156,6 +156,56 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     );
   });
 
+  it('resolves the recipient to the first-class item.email, not the display name (task 123 / UAT R4 C12-1)', async () => {
+    // The display name is a bare name with NO "(email)" segment — the ONLY
+    // source of the email is the first-class `email` field. Previously the
+    // selection fell back to using the name ("ralph") as the recipient value,
+    // which failed validation ("Invalid email address: ralph").
+    const onSearch = jest
+      .fn()
+      .mockResolvedValue([{ id: 'contact-9', name: 'Ralph', email: 'ralph@example.com', entityType: 'contact' }]);
+    const onChangeSpy = jest.fn();
+    renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'ralph' } });
+    const option = await screen.findByRole('option', { name: /Ralph/ }, { timeout: 2000 });
+    fireEvent.click(option);
+
+    await waitFor(() =>
+      expect(onChangeSpy).toHaveBeenCalledWith([
+        expect.objectContaining({
+          email: 'ralph@example.com',
+          resolved: true,
+          sourceId: 'contact-9',
+          entityType: 'contact',
+        }),
+      ])
+    );
+    // The committed recipient value is the EMAIL, never the display name.
+    const [[recipients]] = onChangeSpy.mock.calls;
+    expect(recipients[0].email).toBe('ralph@example.com');
+    expect(recipients[0].email).not.toBe('Ralph');
+  });
+
+  it('renders a no-email contact as non-selectable and does not commit an invalid recipient', async () => {
+    // A contact with no emailaddress1 → name is the bare "Ralph", email absent.
+    const onSearch = jest.fn().mockResolvedValue([{ id: 'contact-noemail', name: 'Ralph', entityType: 'contact' }]);
+    const onChangeSpy = jest.fn();
+    renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
+    const input = getInput();
+
+    fireEvent.change(input, { target: { value: 'ralph' } });
+    const option = await screen.findByRole('option', { name: /Ralph/ }, { timeout: 2000 });
+    expect(option).toHaveAttribute('aria-disabled', 'true');
+
+    fireEvent.click(option);
+
+    // Give any (unexpected) state update a chance to flush.
+    await new Promise(r => setTimeout(r, 50));
+    expect(onChangeSpy).not.toHaveBeenCalled();
+  });
+
   it('does not search for a draft shorter than two characters', async () => {
     const onSearch = jest.fn().mockResolvedValue([]);
     renderWithProviders(<Harness onSearch={onSearch} />);

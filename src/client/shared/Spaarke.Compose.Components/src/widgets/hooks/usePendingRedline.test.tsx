@@ -165,6 +165,86 @@ describe('resolveTargetSpans (typographic normalization — round-3 UAT Test #4)
 });
 
 // ---------------------------------------------------------------------------
+// resolveTargetSpans — whitespace-tolerant fallback (Fix #4, UAT 2026-07-20)
+// The model authors target_text against the Document-Intelligence extraction; we match against mammoth's
+// flattened editor text. The two normalize spacing differently, so a byte-verbatim target often differs
+// only in whitespace. A whitespace-COLLAPSED fallback (run only after the precise pass misses) restores
+// the match while keeping real PM positions — WITHOUT loosening an exact match or guessing a paraphrase.
+// ---------------------------------------------------------------------------
+describe('resolveTargetSpans (whitespace-tolerant fallback — Fix #4)', () => {
+  it('matches a target that has EXTRA whitespace vs the (normally-spaced) doc — the common cross-extractor case', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>'); // normal single spacing
+    // The model authored the target against a differently-normalized extraction — a double space here.
+    const r = resolveTargetSpans(editor, 'quick  brown', 'strict');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // The span covers the doc's ACTUAL text — real PM positions, not a normalized copy.
+      expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('quick brown');
+    }
+    editor.destroy();
+  });
+
+  it('matches a target whose spacing differs by a run of whitespace mid-phrase', () => {
+    const editor = makeEditor('<p>These systems focus on one asset type</p>');
+    const r = resolveTargetSpans(editor, 'systems   focus', 'strict'); // 3 spaces in the target
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('the fallback still does NOT match across a paragraph boundary', () => {
+    const editor = makeEditor('<p>end of one</p><p>start of two</p>');
+    const r = resolveTargetSpans(editor, 'one start', 'first');
+    expect(r.ok).toBe(false);
+    editor.destroy();
+  });
+
+  it('a genuine paraphrase (a changed word) still returns not_found — do-not-guess preserved (FR-19)', () => {
+    const editor = makeEditor('<p>the quick brown fox jumps</p>');
+    const r = resolveTargetSpans(editor, 'the speedy brown fox', 'strict');
+    expect(r).toMatchObject({ ok: false, kind: 'not_found' });
+    editor.destroy();
+  });
+
+  it('an exact (non-whitespace) match is unchanged — the precise pass wins first', () => {
+    const editor = makeEditor('<p>alpha beta gamma</p>');
+    const r = resolveTargetSpans(editor, 'beta', 'strict');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(editor.state.doc.textBetween(r.spans[0].from, r.spans[0].to)).toBe('beta');
+    editor.destroy();
+  });
+
+  // Item 1 (UAT round-4): invisible/zero-width chars leak into flattened editor text and defeat an
+  // otherwise-exact match. The tolerant pass strips them (both sides) so the match survives.
+  it('matches through a ZERO-WIDTH SPACE (U+200B) sitting inside the doc text', () => {
+    const editor = makeEditor('<p>the quick​brown fox</p>'); // zero-width space mid-word-boundary
+    const r = resolveTargetSpans(editor, 'quickbrown', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('matches through a SOFT HYPHEN (U+00AD) in the doc against a target without it', () => {
+    const editor = makeEditor('<p>the co­operation clause</p>'); // soft-hyphenated "cooperation"
+    const r = resolveTargetSpans(editor, 'cooperation', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('a zero-width char in the TARGET is stripped too (both sides normalized)', () => {
+    const editor = makeEditor('<p>indemnification obligations</p>');
+    const r = resolveTargetSpans(editor, 'indemnif​ication', 'strict');
+    expect(r.ok).toBe(true);
+    editor.destroy();
+  });
+
+  it('a genuine paraphrase is STILL refused even with the invisible-strip (do-not-guess preserved)', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>');
+    const r = resolveTargetSpans(editor, 'the​ nimble brown fox', 'strict');
+    expect(r).toMatchObject({ ok: false, kind: 'not_found' });
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // DEF-11 — whole-document revision: multi-change materialize + Accept-all/Reject-all
 // ---------------------------------------------------------------------------
 function countMarks(editor: Editor, markName: 'insertion' | 'deletion'): number {
@@ -285,6 +365,46 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
     expect(statuses[1]).toBe('not_found');
     expect(result.current.pending).toHaveLength(1);
     expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    editor.destroy();
+  });
+
+  it('item 1: reports BATCHED failed/total counts when several targets cannot be placed', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    let statuses: string[] = [];
+    act(() => {
+      statuses = result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift' }, // places
+          { target_text: 'absent-one', new_text: 'x' }, // fails
+          { target_text: 'absent-two', new_text: 'y' }, // fails
+        ],
+        BASE
+      );
+    });
+
+    expect(statuses).toEqual(['applied', 'not_found', 'not_found']);
+    // The banner drives off failedCount/totalCount → "2 of 3 couldn't be placed" (calm, batched).
+    expect(result.current.error).toMatchObject({ kind: 'not_found', failedCount: 2, totalCount: 3 });
+    editor.destroy();
+  });
+
+  it('item 1: no batched error when every target places (error stays null)', () => {
+    const editor = makeEditor('<p>The quick brown fox.</p>');
+    const { result } = renderHook(() => usePendingRedline(editor));
+
+    act(() => {
+      result.current.materializeMany(
+        [
+          { target_text: 'quick', new_text: 'swift' },
+          { target_text: 'brown', new_text: 'auburn' },
+        ],
+        BASE
+      );
+    });
+
+    expect(result.current.error).toBeNull();
     editor.destroy();
   });
 });
@@ -1075,7 +1195,8 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     });
 
     const banner = await screen.findByTestId('compose-redline-error');
-    expect(banner).toHaveTextContent(/not found/i);
+    // Item 1 (UAT round-4): softened, non-alarming copy — the document is fully usable regardless.
+    expect(banner).toHaveTextContent(/couldn't be placed automatically/i);
     // Nothing was rendered as a pending suggestion.
     expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
   });
@@ -1102,7 +1223,7 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
     return ref;
   }
 
-  it('the cited rationale is the visual HEADLINE; the confidence band renders SECONDARY, after it', async () => {
+  it('the popover shows BOTH the coarse confidence band (compact header) and the full cited rationale', async () => {
     const ref = renderEditorWithText('<p>The quick brown fox.</p>');
     await screen.findByRole('region');
 
@@ -1132,14 +1253,17 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
     const band = await screen.findByTestId('compose-redline-confidence-band');
     expect(popover).toContainElement(rationale);
     expect(popover).toContainElement(band);
+    // The FULL rationale is shown (no truncation / no internal ledger id) — the primary trust cue.
     expect(rationale).toHaveTextContent(/Standard playbook term is 60 days notice/);
     // A coarse qualitative band, never a numeric/percentage score.
     expect(band).toHaveTextContent(/High confidence/i);
     expect(band).not.toHaveTextContent(/%|0\.\d/);
 
-    // Rationale is the HEADLINE — it precedes the confidence band in DOM order.
+    // UAT 2026-07-20 R2 layout: the confidence band is a compact header ABOVE the rationale body (the
+    // §6.2 anti-rubber-stamp safeguards — the low-band "needs review" cue + demoted Accept — are the
+    // binding requirement and are asserted separately below; header order is a presentation choice).
     // eslint-disable-next-line no-bitwise
-    expect(rationale.compareDocumentPosition(band) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(band.compareDocumentPosition(rationale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('a low-confidence redline is never pre-selected or auto-accepted, and carries an explicit "needs review" affordance', async () => {

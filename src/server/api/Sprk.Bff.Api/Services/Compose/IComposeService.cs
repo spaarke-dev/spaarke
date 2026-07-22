@@ -393,6 +393,21 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
 
     /// <summary>
+    /// Phase-1 mammoth removal (design <c>notes/design-server-side-docx-html-conversion.md</c>): the
+    /// server-side DOCX→editor projection — paraId-tagged HTML + status + fidelity warnings, produced by the
+    /// single-walk <see cref="ComposeDocxProjectionBuilder"/>. The client mounts <c>Projection.Html</c> via
+    /// <c>setContent</c> (the paraId extension parses <c>data-paraid</c>) instead of running mammoth +
+    /// position-stamping ids. Fail-closed: the client keys off <see cref="ComposeDocxProjection.Status"/> /
+    /// <see cref="ComposeDocxProjection.CanEdit"/>, NOT <c>Html.Length</c>. Defaulted so existing constructions
+    /// remain valid; <see cref="ComposeService.LoadAsync"/> always populates it. Tier-3 HTML — never logged.
+    /// </summary>
+    public ComposeDocxProjection Projection { get; init; } = new()
+    {
+        Status = ComposeProjectionStatus.Failed,
+        CanEdit = false,
+    };
+
+    /// <summary>
     /// FR-24 (task 050, import round-trip): the existing native Word tracked changes (<c>w:ins</c>/
     /// <c>w:del</c>, any authorship) recovered from the load-time <c>.docx</c> by the EXISTING
     /// <see cref="DocxAnnotationReader"/> (reused verbatim), run server-side ALONGSIDE the mammoth
@@ -582,6 +597,19 @@ public sealed record SaveComposeDocumentRequest
     /// shape the push-annotations path uses (reuse, not a parallel contract).
     /// </summary>
     public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
+
+    /// <summary>
+    /// C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
+    /// paragraph in document order carrying its <c>w14:paraId</c> + reject-state text. When present,
+    /// <see cref="SaveAsync"/> runs <see cref="ComposeBaselineParaIdStamper"/> to stamp any MINTED ids
+    /// (assigned on Load by <see cref="ParaIdPreParser"/> but never written into the source bytes, or
+    /// client-minted on an uploaded doc) physically onto the resolved baseline's id-LESS paragraphs
+    /// BEFORE the E1 synthesizer/E2 anchoring resolve against it — so an edit/accept on such a paragraph
+    /// no longer fails with "w14:paraId matches no paragraph in the retained original". Text-verified +
+    /// fill-gaps-only + count-gated (never a wrong write). Null/empty on an older client → the stamper is
+    /// skipped and behavior is unchanged.
+    /// </summary>
+    public IReadOnlyList<ComposeBaselineParaId>? ParaIdMap { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
