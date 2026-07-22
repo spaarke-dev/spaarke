@@ -59,10 +59,24 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import {
+  makeStyles,
+  shorthands,
+  tokens,
+  Button,
+  CounterBadge,
+  Toast,
+  ToastTitle,
+  ToastBody,
+  Toaster,
+  useId,
+  useToastController,
+} from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
 import { ConversationWorkspace, ConversationView, getCurrentUserId } from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
+import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
+import { createNotificationsClient } from './createNotificationsClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — `makeStyles` at module scope (ADR-021: Fluent v9 semantic tokens
@@ -82,6 +96,32 @@ const useStyles = makeStyles({
     minHeight: 0,
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // FR-22 awareness bar — a slim, flex-shrink:0 strip above the conversation shell that shows the
+  // unread-arrival badge. Only rendered when there are unseen arrivals, so the zero state is visually
+  // identical to before (NFR-06 upgrade-in-place). Fluent v9 semantic tokens only (ADR-021).
+  awarenessBar: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    columnGap: tokens.spacingHorizontalS,
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
+    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  awarenessLabel: {
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  // Body wrapper so the two-pane conversation shell fills the space beneath the (optional) awareness bar.
+  body: {
+    display: 'flex',
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflow: 'hidden',
   },
 });
 
@@ -109,6 +149,32 @@ export interface CommunicationsWorkspaceWidgetProps {
 export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidgetProps> = () => {
   const styles = useStyles();
 
+  // ── FR-22 new-communication awareness (task 045) — AWARENESS ONLY (NFR-03) ──
+  // Consume the notification-spine `communication-arrived` kind → unread badge + toast. Content is
+  // NOT fetched from the signal; the two-pane shell below keeps loading messages via its own ~5s
+  // `ConversationView` poll (unchanged). The toaster surfaces each arrival; the badge counts unseen ones.
+  const toasterId = useId('communications-awareness-toaster');
+  const { dispatchToast } = useToastController(toasterId);
+
+  const handleArrival = React.useCallback(
+    (_event: ArrivalEvent) => {
+      // Signal-only: we raise an awareness toast; we do NOT read `_event.envelope` for content (NFR-03).
+      dispatchToast(
+        <Toast>
+          <ToastTitle>New communication</ToastTitle>
+          <ToastBody>A new message arrived. It will appear in your conversations shortly.</ToastBody>
+        </Toast>,
+        { intent: 'info' }
+      );
+    },
+    [dispatchToast]
+  );
+
+  const { unreadCount, reset } = useCommunicationArrivals({
+    createClient: createNotificationsClient,
+    onArrival: handleArrival,
+  });
+
   // Current-user identity (FR-02/FR-18 mine/others bubble alignment) — the
   // established Xrm-host-context mechanism (root CLAUDE.md §11: no second
   // identity mechanism). Falls back to '' when no Xrm host context is
@@ -134,15 +200,39 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
 
   return (
     <div className={styles.root}>
-      {/* Record-less / workspace mode: no `regarding` prop — the all-mode
-          thread list (FR-16) includes every thread the caller may see,
-          including record-less Direct threads. `bffBaseUrl` is intentionally
-          omitted: the free-function `authenticatedFetch` (imported above)
-          already resolves relative URLs against the host's configured BFF
-          base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
-          `resolveUrl` — the same behavior every other production
-          `authenticatedFetch`-importing surface in this codebase relies on). */}
-      <ConversationWorkspace authenticatedFetch={authenticatedFetch} renderConversation={renderConversation} />
+      {/* FR-22 awareness bar (unread badge) — only shown when there are unseen arrivals, so the zero
+          state is unchanged from before (NFR-06). Clicking "Mark as seen" clears the counter. */}
+      {unreadCount > 0 && (
+        <div className={styles.awarenessBar} role="status" aria-live="polite">
+          <CounterBadge
+            count={unreadCount}
+            appearance="filled"
+            color="informative"
+            aria-label={`${unreadCount} new communication${unreadCount === 1 ? '' : 's'}`}
+          />
+          <span className={styles.awarenessLabel}>
+            {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
+          </span>
+          <Button size="small" appearance="subtle" onClick={reset}>
+            Mark as seen
+          </Button>
+        </div>
+      )}
+
+      {/* Awareness toaster — raises an info toast per consumed `communication-arrived` (signal-only). */}
+      <Toaster toasterId={toasterId} position="top-end" />
+
+      <div className={styles.body}>
+        {/* Record-less / workspace mode: no `regarding` prop — the all-mode
+            thread list (FR-16) includes every thread the caller may see,
+            including record-less Direct threads. `bffBaseUrl` is intentionally
+            omitted: the free-function `authenticatedFetch` (imported above)
+            already resolves relative URLs against the host's configured BFF
+            base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
+            `resolveUrl` — the same behavior every other production
+            `authenticatedFetch`-importing surface in this codebase relies on). */}
+        <ConversationWorkspace authenticatedFetch={authenticatedFetch} renderConversation={renderConversation} />
+      </div>
     </div>
   );
 };

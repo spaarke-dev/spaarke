@@ -81,11 +81,11 @@ describe('CommunicationsWorkspaceWidget — upgrade in place (FR-14a, NFR-06)', 
   it('mounts the shared ConversationWorkspace two-pane shell (thread list + conversation pane)', async () => {
     renderWidget();
 
-    // ThreadList's toolbar ("New thread" / filter input) is the shared
-    // component's own chrome — its presence confirms ConversationWorkspace
-    // mounted, not a re-implemented list.
+    // ThreadList's "New thread" create control is the shared component's own
+    // chrome — its presence confirms ConversationWorkspace mounted, not a
+    // re-implemented list. (The thread text-filter input was removed in the
+    // task-062 Teams-style redesign — no longer asserted here.)
     await waitFor(() => expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument());
-    expect(screen.getByPlaceholderText('Filter threads')).toBeInTheDocument();
   });
 
   it('renders record-less / all mode — calls the FR-16 all-mode endpoint, never by-regarding', async () => {

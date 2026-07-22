@@ -297,6 +297,24 @@ public static class CommunicationModule
         services.TryAddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
         services.AddSingleton<CommunicationFanOutTargetingService>();
 
+        // FR-22 new-communication awareness producer (messaging-communication-app-r3 task 045). The
+        // "producer (task 024)" the fan-out service's XML doc anticipates: it COMPOSES the three existing
+        // spine primitives — CommunicationFanOutTargetingService (recipients) + OutboxService (durable write,
+        // registered in AnalysisServicesModule B1) + SignalRDeliveryService (best-effort ping, registered in
+        // NotificationsModule) — to emit NotificationKind.CommunicationArrived so eligible recipients get an
+        // unread-badge + toast AWARENESS signal. Placement Justification (root §10 / §11): its inputs are ALL
+        // Communication-flavored (the fan-out service + the sprk_communication/thread reads), so ADR-010's
+        // feature-module home is HERE alongside the fan-out service, not NotificationsModule. Adds ZERO new
+        // access/outbox/delivery mechanism (§11 — reuse, no parallel notification channel). Awareness-only
+        // (NFR-03): the envelope carries IDs + display metadata + BadgeDelta only, never a message body — the
+        // spine is not the content channel; clients keep polling ~5s for content. Best-effort / non-fatal
+        // (NFR-02): NotifyArrivalAsync never throws, so it can never fail the capture path that persisted the
+        // record. Registered UNCONDITIONALLY (ADR-010 / ADR-032 — its deps resolve unconditionally: OutboxService
+        // is unconditional, SignalRDeliveryService is the ADR-032 real-or-Null-Object under one concrete type).
+        // Singleton — all deps are singletons; consumed by the inbound capture paths
+        // (IncomingCommunicationProcessor + MessagingIngestor) as an optional best-effort step.
+        services.AddSingleton<CommunicationArrivalNotifier>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).

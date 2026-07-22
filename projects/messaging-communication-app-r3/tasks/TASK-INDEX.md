@@ -40,7 +40,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 042 | FR-20 attachments open/preview/download + attach-on-compose (SPE) | 5 | ✅ | FULL/**opus**/high | 011,020 | serial |
 | 043 | FR-21 privilege/privacy accuracy (permitted recipients) | 5 | ✅ | FULL/**opus**/**xhigh** | 002,011 | serial |
 | 044 | FR-23 configure Dataverse Search for `sprk_communication` | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |
-| 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ⛔ | FULL/**opus**/high | 003 (+spine) | serial (blocked) |
+| 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ✅ | FULL/**opus**/high | 003 (+spine) | serial (blocked) |
 | 046 | FR-25 per-user read-state (best-effort) | 5 | ⏸ | FULL/opus/high | 003 | serial (deferred) |
 | 050 | Deploy full solution + UAT across 11 entities | 6 | 🔲 | STANDARD/sonnet/high | 034,041,042,043,044,045 | serial (prescriptive) |
 | 060 | UAT: send 401 "Denied by resource provider" investigation/fix ([#676](https://github.com/spaarke-dev/spaarke/issues/676)) | 7 | ✅ | FULL/**opus**/**xhigh** | none | Wave 25 (F) |

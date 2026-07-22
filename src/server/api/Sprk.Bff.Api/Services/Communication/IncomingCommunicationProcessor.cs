@@ -44,6 +44,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivalNotifier? _arrivalNotifier;
     private readonly CommunicationOptions _options;
     private readonly ITextExtractor _textExtractor;
     private readonly AttachmentMatchOptions _attachmentMatchOptions;
@@ -78,7 +79,8 @@ public sealed class IncomingCommunicationProcessor
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivalNotifier? arrivalNotifier = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -95,6 +97,7 @@ public sealed class IncomingCommunicationProcessor
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _participantIndexer = participantIndexer;
+        _arrivalNotifier = arrivalNotifier;
         _options = options.Value;
         _textExtractor = textExtractor;
         _attachmentMatchOptions = attachmentMatchOptions.Value;
@@ -337,6 +340,17 @@ public sealed class IncomingCommunicationProcessor
                     Cc = envelope.Cc,
                 },
                 ct);
+        }
+
+        // ── Step 4.8: New-communication awareness (task 045 / FR-22) — AWARENESS-ONLY, non-fatal (NFR-02/03) ──
+        // Emit the notification-spine communication-arrived kind so eligible recipients get an unread-badge +
+        // toast. Runs AFTER thread resolution (4.6) + participant indexing (4.7) so the fan-out has the thread
+        // grouping key + the junction candidate set. NotifyArrivalAsync never throws (best-effort), and it
+        // carries IDs + display metadata ONLY — never message content (the spine is not the content channel;
+        // clients keep polling ~5s for content, NFR-03).
+        if (_arrivalNotifier is not null)
+        {
+            await _arrivalNotifier.NotifyArrivalAsync(communicationId, ct);
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────

@@ -43,6 +43,7 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
     private readonly IThreadResolver? _threadResolver;
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivalNotifier? _arrivalNotifier;
     private readonly ILogger<MessagingIngestor> _logger;
 
     /// <param name="threadResolver">
@@ -71,13 +72,15 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
         ILogger<MessagingIngestor> logger,
         IThreadResolver? threadResolver = null,
         IDirectThreadAccessService? directThreadAccess = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivalNotifier? arrivalNotifier = null)
     {
         _genericEntityService = genericEntityService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
+        _arrivalNotifier = arrivalNotifier;
         _logger = logger;
     }
 
@@ -149,6 +152,17 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
                     Cc = request.Message.Cc,
                 },
                 cancellationToken);
+        }
+
+        // ── New-communication awareness (task 045 / FR-22) — AWARENESS-ONLY, non-fatal (NFR-02/03) ──
+        // Emit the notification-spine communication-arrived kind so eligible recipients get an unread-badge +
+        // toast. Runs AFTER thread resolution + participant indexing so the fan-out has the thread grouping key
+        // + the junction candidate set. Same producer the email inbound path uses (channel-symmetric, ADR-045).
+        // NotifyArrivalAsync never throws (best-effort) and carries IDs + display metadata ONLY — never message
+        // content (the spine is not the content channel; clients keep polling ~5s for content, NFR-03).
+        if (_arrivalNotifier is not null)
+        {
+            await _arrivalNotifier.NotifyArrivalAsync(communicationId, cancellationToken);
         }
 
         // ── Shared enrichment/association — BEST-EFFORT, NON-FATAL (NFR-02) ──

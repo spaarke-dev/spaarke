@@ -55,6 +55,10 @@ module.exports = {
     '^d3-force$': '<rootDir>/src/__mocks__/d3-force.ts',
     '^marked$': '<rootDir>/src/__mocks__/marked.ts',
     '^@spaarke/sdap-client$': '<rootDir>/src/__mocks__/sdap-client.ts',
+    // task 045 (FR-22): the real @spaarke/notifications pulls @microsoft/signalr (a peer dep not
+    // installed here), so map it to a no-op stub for widget-mount tests. Arrival-driving tests inject
+    // their own fake client into useCommunicationArrivals instead of relying on this stub.
+    '^@spaarke/notifications$': '<rootDir>/src/__mocks__/notifications.ts',
     // Dedupe React so a component mounted from @spaarke/ui-components SOURCE
     // shares this package's React instance (avoids "Invalid hook call").
     '^react$': '<rootDir>/node_modules/react',
