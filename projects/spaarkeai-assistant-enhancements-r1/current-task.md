@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r1
 
-> **Last Updated**: 2026-07-21 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. This is a **UAT-driven remediation** stream (not formal POML task execution) — the Assistant repositioning features are shipped; we're iterating on UAT feedback (now through R6).
+> **Last Updated**: 2026-07-22 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. UAT remediation shipped through **R7**; now in **project close-out**. Immediate next: the owner-approved **membership-filter DataGrid feature** (design doc referenced below), then **051 → 054 → 090**.
 
 ---
 
@@ -11,7 +11,7 @@
 |-------|-------|
 | **Mode** | UAT remediation shipped through R7; pivoting to **project close-out** — formal tasks 050/051/054/090 + deferrals D-043-01 / D-013-03. |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` + **origin/master** all at **`f06a21b59`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`422a5b6f4`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
 | **050 dispatch fix (2026-07-22)** | UAT: "what are my tasks?" errored "No session files available" — a prompted Action with no file/operand hits `ResolveFileOperandAsync` (hard-fails on 0 files). Fix: list-tasks input schema now declares **`documentText`** (a ContextBinder OperandVocabulary field) so `HasStructuredOperand`=true → structured path relaxes the no-file stop; content ignored (grid queries tasks client-side). Live Action `57651aad` sprk_inputschema+systemprompt updated + seed mirrors + BFF **restarted** (healthz 200). **AWAITING owner re-test.** Note: `compose-draft-document` likely has the SAME latent no-file issue (its `request` also isn't an operand-vocab field) — verify if a fileless "write a brief" fails; same fix applies. |
 | **Deployed (dev)** | `sprk_spaarkeai` (4825 KB — R7 + #8 Memory + D-043-01 chip reorder + **050 My Tasks**); `sprk_createeventwizard` (D-013-03); CommunicationActions PCF v1.1.4 (R6). **BFF unchanged across R4–R7 + close-out** (050 = catalog DATA + client only). Dev BFF **restarted 2026-07-22** to clear the capability cache (healthz 200) so `list-tasks` is discoverable. |
 | **Closed by owner** | **R4-7** (won't-fix) · **R7-5b** (dropped) · **R4-9** (separate project). |
