@@ -143,6 +143,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // PATCH /api/communications/threads/{threadId}/pin — pin/unpin a thread (task 041 / FR-24). Pin only — no
+        // archive/mute/tag equivalent. Same authorization shape as rename: the caller is resolved server-side and
+        // authorized AGAINST the thread by an impersonated visibility check (403 if the caller cannot see it —
+        // ADR-028 / NFR-01). Sets sprk_ispinned (task 040 schema) in one write via IThreadResolver.SetPinnedAsync.
+        // Distinct route: PATCH verb + literal /pin segment, no collision with the rename POST or any GET route.
+        group.MapPatch("/threads/{threadId:guid}/pin", SetThreadPinnedAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("SetThreadPinned")
+            .WithDescription("Pin/unpin a communication thread (FR-24): sets sprk_ispinned. Caller resolved server-side; 403 if the caller cannot see the thread. No Dataverse plugin — this BFF write is the only pin-state write path.")
+            .Produces<SetThreadPinnedResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
         // messages for the record-level regarding-mode Timeline (R2 task 010 / FR-01, Surface 1). Entity-set-agnostic
         // across all 11 ADR-024 regarding families (matter, contact, …). Impersonated (Dataverse row-level security)
@@ -594,6 +607,37 @@ public static class CommunicationEndpoints
 
         var persisted = await threadResolver.RenameThreadAsync(threadId, name, ct);
         return TypedResults.Ok(new RenameThreadResponse { ThreadId = threadId, Name = persisted });
+    }
+
+    /// <summary>
+    /// Pin/unpin a communication thread (task 041 / FR-24). Authorizes the server-resolved caller AGAINST the
+    /// thread via the SAME impersonated visibility check as rename (403 if the caller cannot see the thread — never
+    /// pin/unpin an inaccessible thread), then sets <c>sprk_ispinned</c> via
+    /// <see cref="IThreadResolver.SetPinnedAsync"/>. Returns the persisted pinned state. NO Dataverse plugin — this
+    /// BFF write is the only pin-state write path.
+    /// </summary>
+    private static async Task<IResult> SetThreadPinnedAsync(
+        Guid threadId,
+        SetThreadPinnedRequest request,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // Authorize the caller against the thread (impersonated visibility). ResolveCallerOrThrowAsync inside
+        // throws a 403 for an unresolved caller (fail closed); zero visible rows → the caller cannot see it → 403.
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_PIN_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        var persisted = await threadResolver.SetPinnedAsync(threadId, request.Pinned, ct);
+        return TypedResults.Ok(new SetThreadPinnedResponse { ThreadId = threadId, IsPinned = persisted });
     }
 
     /// <summary>

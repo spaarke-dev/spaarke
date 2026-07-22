@@ -36,7 +36,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 033 | FR-15 "Email & Messages" DataGrid record tab + `sprk_communicationspage` | 4 | ✅ | FULL/sonnet/high | none | Wave 15 (D) |
 | 034 | Deploy Phase 4 surfaces (Matter pilot) | 4 | ✅ | STANDARD/sonnet/high | 030,031,032,033 | serial (prescriptive) |
 | 040 | FR-24 `sprk_communicationthread` pin field schema | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |
-| 041 | FR-24 thread pin UI + persistence | 5 | 🔲 | FULL/sonnet/high | 040,012 | serial |
+| 041 | FR-24 thread pin UI + persistence | 5 | ✅ | FULL/sonnet/high | 040,012 | serial |
 | 042 | FR-20 attachments open/preview/download + attach-on-compose (SPE) | 5 | ✅ | FULL/**opus**/high | 011,020 | serial |
 | 043 | FR-21 privilege/privacy accuracy (permitted recipients) | 5 | ✅ | FULL/**opus**/**xhigh** | 002,011 | serial |
 | 044 | FR-23 configure Dataverse Search for `sprk_communication` | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |

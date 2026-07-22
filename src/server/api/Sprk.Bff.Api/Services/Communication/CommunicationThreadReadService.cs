@@ -43,6 +43,7 @@ public sealed class CommunicationThreadReadService
     private const string ThreadPkField = "sprk_communicationthreadid";
     private const string ThreadNameField = "sprk_name";
     private const string ThreadTypeField = "sprk_threadtype"; // Record-Anchored=100000000, Direct 1:1=100000001
+    private const string PinnedField = "sprk_ispinned"; // R3 task 040/041 / FR-24 — null on pre-existing rows, normalized to false below
 
     // sprk_communication columns (as-built, notes/messaging-schema-spec.md).
     private const string ThreadLookupValue = "_sprk_communicationthread_value"; // message → thread lookup
@@ -229,14 +230,18 @@ public sealed class CommunicationThreadReadService
         var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
 
         // 1) Impersonated thread query by the typed regarding lookup (entity-set-agnostic; task 002 lookups).
-        var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField });
+        // PinnedField added (task 041 / FR-24) so the record-mode thread list can mark/sort pinned threads too.
+        var threadSelect = string.Join(',', new[] { ThreadPkField, ThreadNameField, PinnedField });
         var threadOData =
             $"$select={threadSelect}&$filter=_{regardingField}_value eq {recordId}" +
             $"&$orderby={CreatedOnField} asc&$top={MaxThreads}";
         var threadRows = await _query.QueryAsync(ThreadSet, threadOData, callerSystemUserId, ct);
 
         var threads = threadRows
-            .Select(r => (Id: TryGuid(r, ThreadPkField) ?? Guid.Empty, Name: TryString(r, ThreadNameField)))
+            .Select(r => (
+                Id: TryGuid(r, ThreadPkField) ?? Guid.Empty,
+                Name: TryString(r, ThreadNameField),
+                IsPinned: TryBool(r, PinnedField) ?? false))
             .Where(t => t.Id != Guid.Empty)
             .ToList();
 
@@ -261,7 +266,8 @@ public sealed class CommunicationThreadReadService
             .Select(t =>
             {
                 var msgs = byThread.TryGetValue(t.Id, out var list) ? list : Array.Empty<ThreadMessageDto>();
-                return new ThreadReadResult(ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count);
+                return new ThreadReadResult(
+                    ThreadId: t.Id, Name: t.Name, Messages: msgs, Count: msgs.Count, IsPinned: t.IsPinned);
             })
             .ToList();
 
@@ -333,7 +339,8 @@ public sealed class CommunicationThreadReadService
                 $"({CreatedOnField} lt {v} or ({CreatedOnField} eq {v} and {ThreadPkField} lt {c.ThreadId}))");
         }
 
-        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField });
+        // PinnedField added (task 041 / FR-24) so the all-mode thread list can mark/sort pinned threads.
+        var select = string.Join(',', new[] { ThreadPkField, ThreadNameField, ThreadTypeField, CreatedOnField, PinnedField });
         var filterPart = clauses.Count > 0 ? $"&$filter={string.Join(" and ", clauses)}" : string.Empty;
         // Deterministic total order on the composite key so paging is stable + non-overlapping; over-fetch one row
         // to detect whether a further page exists without a second COUNT query.
@@ -347,7 +354,10 @@ public sealed class CommunicationThreadReadService
                 ThreadId: TryGuid(r, ThreadPkField) ?? Guid.Empty,
                 Name: TryString(r, ThreadNameField),
                 ThreadType: TryInt(r, ThreadTypeField),
-                CreatedOn: TryDateTimeOffset(r, CreatedOnField)))
+                CreatedOn: TryDateTimeOffset(r, CreatedOnField),
+                // Pre-existing rows read sprk_ispinned back as null (task 040 DefaultValue does not backfill) —
+                // TryBool returns null for that case, so the ?? false normalizes it to unpinned (task 041 caveat).
+                IsPinned: TryBool(r, PinnedField) ?? false))
             .Where(t => t.ThreadId != Guid.Empty)
             .ToList();
 

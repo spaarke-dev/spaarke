@@ -55,6 +55,7 @@ import {
   getThreadUnreadCount,
   listThreads,
   listThreadsByRegarding,
+  setThreadPinned,
   type IThreadListApiClientOptions,
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
@@ -331,15 +332,38 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     setUnreadCounts(prev => ({ ...prev, [threadId]: 0 }));
   }, []);
 
-  const threadListRows: IThreadListRow[] = React.useMemo(
-    () =>
-      visibleRows.map(r => ({
-        threadId: r.threadId,
-        name: r.name,
-        unreadCount: unreadCounts[r.threadId],
-      })),
-    [visibleRows, unreadCounts]
+  // — Pin/unpin (task 041, FR-24): optimistic local update + rollback on failure —
+  const handleTogglePin = React.useCallback(
+    (threadId: string, nextPinned: boolean) => {
+      const previous = allRows.find(r => r.threadId === threadId)?.isPinned ?? false;
+
+      // Optimistic: flip the row immediately so the pin toggle + the sort below react without waiting on the
+      // network round trip.
+      setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, isPinned: nextPinned } : r)));
+
+      setThreadPinned(threadId, nextPinned, client).catch(err => {
+        // Rollback — restore the pre-toggle value on ANY failure (network, 403 "cannot see thread", etc.). The
+        // list's own error state is unaffected (this is a row-scoped write failure, not a list-load failure); the
+        // failure still flows through the same onError seam the list-load path uses so a host can surface it.
+        setAllRows(prev => prev.map(r => (r.threadId === threadId ? { ...r, isPinned: previous } : r)));
+        if (err instanceof Error) onError?.(err);
+      });
+    },
+    [allRows, client, onError]
   );
+
+  const threadListRows: IThreadListRow[] = React.useMemo(() => {
+    const mapped = visibleRows.map(r => ({
+      threadId: r.threadId,
+      name: r.name,
+      unreadCount: unreadCounts[r.threadId],
+      isPinned: r.isPinned,
+    }));
+    // Pinned threads float to the top (FR-24). Array.prototype.sort is spec-guaranteed stable (ES2019+), so within
+    // the pinned/unpinned groups the existing order — server createdon-desc (all-mode) or server order
+    // (record-mode) — and the word filter's already-narrowed set are both preserved untouched.
+    return [...mapped].sort((a, b) => Number(!!b.isPinned) - Number(!!a.isPinned));
+  }, [visibleRows, unreadCounts]);
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
@@ -363,6 +387,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         searchTerm={searchTerm}
         onSearchTermChange={setSearchTerm}
         onCreateThread={onCreateThread}
+        onTogglePin={handleTogglePin}
       />
       <div className={styles.rightPane}>{rightPane}</div>
     </div>

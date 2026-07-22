@@ -4,7 +4,7 @@
     <title>Thread pin/favorite UI + persistence to the pin field</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>after:040</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared React thread-list component (.tsx) with persistence to Dataverse; FULL per CLAUDE.md §8 (modifying .tsx, shared surface).</rigor-reason>
     <model-tier>sonnet</model-tier>
