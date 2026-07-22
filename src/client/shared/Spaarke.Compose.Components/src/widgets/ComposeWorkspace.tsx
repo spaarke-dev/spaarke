@@ -674,6 +674,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap?: ParaIdMapEntry[];
           importedRevisions?: ImportedRevision[];
           importedComments?: ImportedComment[];
+          // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server
+          // DOCX→editor projection. Optional so an older BFF (no projection) falls back to mammoth.
+          projection?: {
+            status?: 'success' | 'partial' | 'failed';
+            canEdit?: boolean;
+            html?: string;
+            warnings?: { code: string; count: number }[];
+            schemaVersion?: string;
+          };
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -697,6 +706,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
         const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
         const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
+        // Phase-1 mammoth removal: normalize the server projection defensively. An older BFF (no
+        // projection field) → null → the editor falls back to the client mammoth convert.
+        const p = payload.projection;
+        const hydratedProjection = p
+          ? {
+              status: p.status ?? 'failed',
+              canEdit: p.canEdit ?? false,
+              html: p.html ?? '',
+              warnings: Array.isArray(p.warnings) ? p.warnings : [],
+              schemaVersion: p.schemaVersion ?? 'compose-html-v1',
+            }
+          : null;
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -709,6 +730,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap: hydratedParaIdMap,
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
+          projection: hydratedProjection,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -2268,6 +2290,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               paraIdMap={state.paraIdMap}
               importedRevisions={state.importedRevisions}
               importedComments={state.importedComments}
+              // Phase-1 mammoth removal: the server DOCX→editor projection (stored-document Load only).
+              // When present the editor mounts projection.html directly; null → mammoth fallback.
+              projection={state.projection}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}

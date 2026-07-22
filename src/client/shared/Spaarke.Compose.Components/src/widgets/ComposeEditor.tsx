@@ -125,6 +125,7 @@ import { applyImportedRevisions } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
   ParaIdMapEntry,
+  ComposeServerProjection,
   ComposeEditedParagraph,
   ComposeBaselineParaId,
   ComposeContentModel,
@@ -421,6 +422,18 @@ export interface ComposeEditorProps {
    * Privacy: `commentText`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
    */
   importedComments?: readonly ImportedComment[];
+
+  /**
+   * Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — the server-side
+   * DOCX→editor projection from a STORED-DOCUMENT Load. When present the editor mounts `projection.html`
+   * DIRECTLY (the paraId extension parses `data-paraid`) instead of running the client mammoth convert +
+   * position-based `stampParaIds` — eliminating the two-engine drift. Fail-closed: `canEdit === false`
+   * (or `status === 'failed'`) ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank
+   * editable doc over a non-empty baseline. Null/absent for a transient (Browse / assistant-upload /
+   * AI-draft) mount or an older BFF — those fall back to the mammoth convert.
+   * Privacy: `html` is Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  projection?: ComposeServerProjection | null;
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -1172,6 +1185,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       paraIdMap,
       importedRevisions,
       importedComments,
+      projection,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -1491,6 +1505,45 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // triggerSave keys the byte-branch off `editorRef.current.isDirty()` (= dirtyRef), NOT
       // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
       const isTransientMount = !documentRef?.speDriveItemId;
+
+      // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): when the host
+      // supplies a SERVER PROJECTION (a stored-document Load), mount its paraId-tagged HTML DIRECTLY — the
+      // paraId extension parses `data-paraid` on setContent, so there is NO client mammoth convert and NO
+      // position-based `stampParaIds` (the two-engine drift that caused the save-abort bug class). The
+      // imported-revision/comment overlays + the snapshot run EXACTLY as the mammoth path below, now keyed
+      // by the exact server paraIds. A transient/browse mount (no projection) still uses the mammoth
+      // fallback below (its create-on-save persists the original bytes, so paraId alignment is moot there).
+      if (projection) {
+        // Fail-closed (design §4 / GPT §11): a failed or non-editable projection MUST NOT mount a blank
+        // editable doc over a non-empty retained baseline — render the reference-only "Open in Word" state.
+        if (!projection.canEdit || projection.status === 'failed') {
+          editor.commands.setContent('<p></p>');
+          dirtyRef.current = false;
+          setReferenceOnly({ fileName: documentRef?.fileName });
+          onDirtyChange?.(false);
+          return;
+        }
+        editor.commands.setContent(projection.html);
+        // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot mirror the mammoth
+        // path below (applied AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers).
+        applyImportedRevisions(editor, importedRevisions);
+        applyImportedCommentAnchors(editor, importedComments);
+        paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
+        onDirtyChange?.(isTransientMount);
+        // Surface Partial fidelity gaps via the existing banner (codes only — no document content, ADR-015).
+        if (projection.status === 'partial' && projection.warnings.length > 0) {
+          onImportWarnings?.([
+            {
+              type: 'warning',
+              message:
+                'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+            },
+          ]);
+        }
+        return;
+      }
+
       let cancelled = false;
       setIsImporting(true);
       docxToTipTapHtml(docxBytes)
