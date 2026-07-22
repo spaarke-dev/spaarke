@@ -132,7 +132,13 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            DirectionField, SentByValue, SentByNameField,
+            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) is intentionally NOT selected.
+            // The column is in a broken metadata state in the target env (IsValidODataAttribute=false —
+            // a partial/failed creation that cannot be published or deleted), so $select on it 400s and
+            // surfaces as a 500 on every thread that has messages. Nothing writes the column either, so
+            // SentByName is null regardless. Re-add here once the column is re-provisioned AND a writer
+            // populates it. Direction + SentBy (systemuserid) still drive the Teams-style bubble alignment.
+            DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
@@ -623,7 +629,11 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            DirectionField, SentByValue, SentByNameField,
+            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) intentionally NOT selected —
+            // broken column in the target env (IsValidODataAttribute=false) that 400s $select → 500 on the
+            // by-regarding + filtered-query read paths. See the matching note in ReadThreadAsync. Nothing
+            // writes the column, so SentByName is null regardless. Re-add once re-provisioned + written.
+            DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
