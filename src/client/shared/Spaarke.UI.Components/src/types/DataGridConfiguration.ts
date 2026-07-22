@@ -341,6 +341,60 @@ export interface ParentContextFilter {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Membership filter overlay (spaarkeai-assistant-enhancements-r1 task 050 feature)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Declares that the grid should be scoped to the CALLER's *membership* on the
+ * target entity — i.e. every record the current user is "on" through any of the
+ * entity's contact/owner lookup fields (`ownerid`, `sprk_assignedto`,
+ * `sprk_assignedattorney1`, …), not just records they own.
+ *
+ * Why this exists: `ownerid eq-userid` (the OOB "assigned to me" primitive) only
+ * matches the single owner field. In Spaarke, "my records" is a broader concept
+ * resolved by the shared membership service (`GET /api/users/me/memberships/{entityType}`),
+ * which ORs across N config-discovered identity fields and follows the
+ * `systemuser → sprk_primarycontact` hop. A stored savedquery CANNOT express this
+ * (Dataverse forbids the caller's dynamic contactid as a literal in a saved view),
+ * so it must be resolved at query time and overlaid as an `IN(ids)` condition.
+ *
+ * Runtime contract: when set AND the host supplies a `membershipResolver`
+ * (built from `authenticatedFetch` — SpaarkeAi + Code Pages), the framework
+ * resolves the caller's record ids and injects
+ * `<condition attribute='{attribute}' operator='in'>…ids…</condition>` before
+ * fetching. When the user is a member of NOTHING, an impossible-match condition
+ * is injected so the grid shows an EMPTY result (never everyone's records).
+ * When NO resolver is present (e.g. a pure MDA form-subgrid with no BFF token),
+ * the feature degrades gracefully — no overlay, the base savedquery runs.
+ *
+ * **Example** — the "My Tasks" grid:
+ * ```json
+ * "behavior": { "membershipFilter": { "roles": ["owner", "assignedTo"] } }
+ * ```
+ *
+ * @see overlayMembershipFilter — the FetchXML helper in `components/DataGrid/fetchXmlOverlay.ts`
+ * @see createMembershipResolver — the client resolver factory in `services/membership.ts`
+ */
+export interface MembershipFilter {
+  /**
+   * Primary-id attribute to `IN`-match against the resolved membership ids.
+   * Defaults to the entity's `primaryIdAttribute` (e.g. `sprk_eventid`) when omitted.
+   */
+  attribute?: string;
+  /**
+   * Restrict to specific membership roles (forwarded as `?roles=`). Role names
+   * follow the server's camelCase strategy (e.g. `owner`, `assignedAttorney`).
+   * Omit for all roles the caller is on (broadest "anything I'm responsible for").
+   */
+  roles?: string[];
+  /**
+   * Restrict the identity tables considered (forwarded as `?identityTypes=`,
+   * e.g. `systemuser`, `contact`, `team`). Omit for all configured identity types.
+   */
+  identityTypes?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Behavior — grid-level interaction knobs
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -369,6 +423,16 @@ export interface BehaviorConfig {
    * See {@link ParentContextFilter} for details + rationale.
    */
   parentContextFilter?: ParentContextFilter;
+  /**
+   * Membership-scoped filter overlay. When set AND the host supplies a
+   * `membershipResolver` to `<DataGrid />`, the framework resolves the caller's
+   * membership record ids (via the shared membership service) and overlays an
+   * `IN(ids)` condition — scoping the grid to "records I'm on", broader than
+   * `ownerid eq-userid`. Degrades to the base query when no resolver is present.
+   * `true` is shorthand for `{}` (all roles, entity primary id).
+   * See {@link MembershipFilter} for details + rationale.
+   */
+  membershipFilter?: MembershipFilter | true;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

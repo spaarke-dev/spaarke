@@ -1,0 +1,131 @@
+<task id="051" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>eTag sequencing for create-on-save (no eTag-mismatch 500) (FR-08)</title>
+    <phase>5 Concurrency + save</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF implementation on the ComposeService save/create path modifying .cs; root-cause fix of a deployed eTag 500; irreversible ordered save sequence; tags include bff-api + spe.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Root-cause of the deployed eTag 500 is well-understood (stale precondition after the create-on-save follow-up write advances the item eTag); the fix is a defined, ordered sequencing change on an existing path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same `ComposeService` save path as 050 — shared file, ordered save sequence.</parallel-reason>
+    <deps>050</deps>
+    <tags>bff-api,spe</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Fix the deployed create-on-save eTag mismatch (FR-08). When a document is CREATED on save and then the
+    content write follows, the create advances the item eTag — so a follow-up content write that uses the
+    PRE-create precondition throws `InvalidOperationException` ("resource changed since caller last read" —
+    an eTag-mismatch 500). SEQUENCE create-on-save so the content write uses the POST-CREATE eTag: create
+    first, capture the fresh eTag returned by the create, then perform the content write with
+    `If-Match: &lt;post-create eTag&gt;`. A genuinely concurrent EXTERNAL edit between create and content-write
+    must still yield a clean 412 / ProblemDetails, NOT a 500.
+
+    Modify the `ComposeService` save/create path. SPE writes stay behind `SpeFileStore` (ADR-007) — no
+    `Microsoft.Graph` type in `Services/Compose/`. This is an ORDERED save sequence — execute the steps in
+    order (`mode="prescriptive"`). Builds on the version-stamped save from 050. Every save-path change carries
+    a through-the-wire seam slice (ADR-038; the seam slice is task 054).
+  </prompt>
+
+  <role>
+    Senior .NET 8 engineer on `ComposeService` + the SPE facade. Understands the SharePoint Embedded
+    create-then-write eTag lifecycle: a create returns a fresh eTag that MUST seed the subsequent conditional
+    content write, and that a stale precondition is the deployed R3 UAT failure surface.
+  </role>
+
+  <goal>
+    A create-on-save sequence where the content write uses the POST-create eTag via `If-Match`, so
+    create-on-save followed by a content write does NOT throw the eTag-mismatch `InvalidOperationException`;
+    and a genuinely concurrent external edit still yields a clean 412 / ProblemDetails, not a 500. SPE writes
+    stay behind `SpeFileStore`.
+  </goal>
+
+  <context>
+    <background>
+      As-built inventory (known failure surfaces from R3 UAT): "eTag mismatch after create-on-save
+      (`InvalidOperationException` — resource changed since caller last read) — precondition goes stale when
+      the create-on-save follow-up write advances the item eTag. → fixed by eTag sequencing (Phase 5)." Spec
+      FR-08 acceptance: "create-on-save then content write does not throw the eTag mismatch." This task
+      sequences the create → capture-fresh-eTag → conditional content write on the same save path 050
+      version-stamps. The genuine-concurrency case (an external edit lands between create and content write)
+      must still surface cleanly (412/ProblemDetails), not masked or swallowed.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — the save/create path: sequence create-on-save so the content write uses the post-create eTag via If-Match; do not reuse the pre-create precondition</file>
+      <file role="dependency">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — create + conditional content write stay behind this facade (ADR-007); the create must return the fresh eTag for the follow-up write</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — task 050 version-stamped save (the path this sequencing extends)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (save + concurrency — "sequence create-on-save → fresh eTag → conditional content write")</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-08</file>
+      <file role="reference">projects/spaarkeai-compose-r4/notes/as-built-inventory.md (known failure surfaces — eTag mismatch after create-on-save)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Version-stamped save path — the create-on-save sequencing extends it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-08">Create-on-save MUST be sequenced so the content write uses the POST-create eTag (via `If-Match`); create-on-save then content write MUST NOT throw the eTag-mismatch `InvalidOperationException` (500). The content write MUST NOT reuse the pre-create precondition.</constraint>
+    <constraint source="spec / FR-08 negative">A genuinely concurrent EXTERNAL edit between create and content write MUST still yield a clean 412 / ProblemDetails — MUST NOT be masked into a success and MUST NOT surface as a 500.</constraint>
+    <constraint source="ADR-007 / NFR-05">The create + conditional content write stay behind `SpeFileStore` — no `Microsoft.Graph` type in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire seam slice required for this save-path change (authored as the task 054 seam slice). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="CLAUDE.md §10 / project">State the Placement Justification (save/create orchestration stays in `Services/Compose/`; reuses `SpeFileStore` seams). Verify BFF publish size ≤60 MB compressed, report absolute + delta vs ~49.63 MB (incl. PDBs). No new HIGH CVE. Run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE create-then-write eTag lifecycle; If-Match conditional write; 412 vs 500 surfacing; SPE facade; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Create → fresh eTag → conditional content write" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        Create returns a fresh eTag; the follow-up content write must seed `If-Match` from THAT eTag, not the pre-create precondition — the sequencing that removes the deployed 500.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (bff-api + spe; xhigh; sonnet). Load the knowledge files + bff-extensions.md + design §5 + the as-built-inventory eTag-mismatch note. Read the `ComposeService` create-on-save path + `SpeFileStore` create/write. State the Placement Justification. Run `/conflict-check`.</step>
+    <step order="1" name="Reproduce the deployed 500">Confirm the failure path: create-on-save followed by a content write reusing the pre-create precondition throws the eTag-mismatch `InvalidOperationException`. Trace it to the stale precondition.</step>
+    <step order="2" name="Sequence create → capture fresh eTag">Sequence the save so the create runs first and the FRESH eTag it returns is captured (surfaced from `SpeFileStore`) for the follow-up write.</step>
+    <step order="3" name="Conditional content write with post-create eTag">Perform the content write with `If-Match: &lt;post-create eTag&gt;`. Ensure a genuine concurrent external edit yields a clean 412 / ProblemDetails (not a 500, not a masked success).</step>
+    <step order="4" name="Verify + size/CVE report">`dotnet build`; run existing `Services/Compose` unit tests + Tier-1 NetArchTest. Publish; report absolute size + delta vs ~49.63 MB; `dotnet list package --vulnerable`. (The through-the-wire proof is task 054.)</step>
+    <step order="5" name="Index + deviations">Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (create-on-save sequenced; content write uses post-create eTag)</output>
+    <output type="report">Placement Justification; publish-size absolute + delta vs ~49.63 MB; CVE scan; `/conflict-check` result for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Create-on-save followed by a content write does NOT throw the eTag-mismatch `InvalidOperationException`; the content write uses the FRESH post-create eTag via `If-Match`.</criterion>
+    <criterion testable="true">The content write no longer reuses the pre-create precondition (the deployed root cause is removed).</criterion>
+    <criterion testable="true">NEGATIVE: a genuinely concurrent external edit between create and content write yields a clean 412 / ProblemDetails — not a 500, not a masked success.</criterion>
+    <criterion testable="true">The create + conditional content write stay behind `SpeFileStore` (no `Microsoft.Graph` in `Services/Compose/`, ADR-007); `Services/Compose/` injects no AI internals (Tier-1 NetArchTest green, ADR-013).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; `dotnet build` + existing Compose tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The through-the-wire proof (create-on-save then content write does not throw) is authored as the task 054
+    seam slice under `tests/integration/seam/Compose/`. Same save path as 050/052 — sequential (parallel-safe
+    false). Run `/conflict-check` before the BFF PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

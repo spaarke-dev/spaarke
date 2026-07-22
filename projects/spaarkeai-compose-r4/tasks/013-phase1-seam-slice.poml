@@ -1,0 +1,150 @@
+<task id="013" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Phase-1 ingest/projection through-the-wire seam slice (NFR-06)</title>
+    <phase>1 Backend ingest</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `tests/**` and has tags including `testing` / `integration-test` — the TEST-MODIFYING override row (root §8) forces code-review + adr-check at Step 9.5 UNCONDITIONALLY; also a BFF-path (bff-api) seam.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Authoring a WebApplicationFactory seam slice over already-built ingest behavior (010/011/012) against a fixed ADR-038 KEEP-category pattern; bounded, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010,011,012</deps>
+    <tags>bff-api,testing,integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author a `WebApplicationFactory` seam slice under `tests/integration/seam/Compose/` that proves the
+    Phase-1 ingest/projection behaviors THROUGH THE WIRE (real endpoint → real services → real bytes), not
+    via unit mocks. It MUST prove three things across ≥2 corpus docs: (1) paraIds are PERSISTED on ingest
+    (task 010) — a load → save → reload shows the same durable `w14:paraId`s in the retained bytes;
+    (2) the intra-paragraph offset-addressing table round-trips offsets → run splits deterministically
+    (task 011); and (3) opaque atoms survive a no-op save byte-for-byte (task 012). This is the
+    vertical-slice-seam category that is the DoD for every save/load/dispatch change (ADR-038 §7). Follow
+    ADR-038 strictly: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests — this
+    is a through-the-wire slice, not a unit harness. Be literal about coverage: three behaviors × ≥2
+    corpus docs, plus the negative case (a malformed / absent-paragraph doc still ingests with a minted id
+    and does not crash).
+  </prompt>
+
+  <role>
+    Senior .NET 8 test engineer fluent in `WebApplicationFactory` integration seam slices, the Compose
+    endpoints (`Api/ComposeEndpoints.cs`), and the ADR-038 testing pyramid (integration-heavy; the
+    `tests/integration/seam/**` vertical-slice-seam KEEP category). Understands that a seam slice exercises
+    the real DI-wired pipeline end to end and that mock/DI-registration/ctor-null tests are banned.
+  </role>
+
+  <goal>
+    A green `WebApplicationFactory` seam slice in `tests/integration/seam/Compose/` that proves, through
+    the wire and across ≥2 corpus docs, all three Phase-1 ingest behaviors — persisted paraIds, the
+    offset-addressing table's deterministic offset→run round-trip, and byte-preserved opaque atoms — plus
+    the malformed/absent-paragraph negative case that still ingests with a minted id (no crash).
+  </goal>
+
+  <context>
+    <background>
+      Spec NFR-06 / design §5: "every save/load/dispatch change carries a through-the-wire
+      `WebApplicationFactory` seam slice (`tests/integration/seam/**`); no `Mock&lt;HttpMessageHandler&gt;`, no
+      DI-registration/ctor-null tests." The Phase-1 tasks — 010 (persist paraId on ingest), 011
+      (offset-addressing table), 012 (opaque atoms) — are the behaviors this slice proves. ADR-038 §7 added
+      the `tests/integration/seam/**` vertical-slice-seam category as the DoD for dispatch-spine / save-load
+      changes. The seam directory `tests/integration/seam/Compose/` does not yet exist — create it. Corpus
+      docs live at `projects/spaarkeai-compose-r4/notes/sample-docs/` (`01 - Test Matter Create Fields
+      Only.docx` is the fields/SDT exemplar for the atom proof; `Engagement Letter.docx` and the CIPO
+      claims doc give paragraph/offset coverage).
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ — NEW seam-slice directory (create it) + the Phase-1 ingest/projection seam test(s)</file>
+      <file role="canonical-reference">tests/integration/seam/ — existing seam slices to mirror for the `WebApplicationFactory` wiring shape (host bootstrap, real endpoint call, no `Mock&lt;HttpMessageHandler&gt;`)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — the load/ingest endpoint(s) the slice calls through the wire</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs — task 010 persisted-paraId behavior under test</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — task 011 addressing table + task 012 opaque atoms under test</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/notes/sample-docs/ — corpus fixtures (`01 - Test Matter Create Fields Only.docx`, `Engagement Letter.docx`, CIPO claims doc)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (Ingest), §7 (NFR-06)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-06, FR-01, FR-02</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Persist paraId on ingest — the persisted-id behavior this slice proves.</dependency>
+      <dependency task="011" status="pending">Offset-addressing table — the offset→run round-trip this slice proves.</dependency>
+      <dependency task="012" status="pending">Opaque atoms — the byte-preserved-atom behavior this slice proves.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-06 / ADR-038">The proof MUST be a through-the-wire `WebApplicationFactory` seam slice under `tests/integration/seam/**`. Scope: real endpoint → real DI-wired services → real bytes; unit-green ≠ done.</constraint>
+    <constraint source="ADR-038 §7">NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests. Scope: this is the vertical-slice-seam KEEP category, not a unit harness — the slice exercises the actual pipeline.</constraint>
+    <constraint source="spec / FR-01,FR-02">The slice proves all three Phase-1 behaviors: persisted paraIds (load→save→reload), deterministic offset→run round-trip, byte-preserved opaque atoms. Scope: across ≥2 corpus docs.</constraint>
+    <constraint source="ADR-013 / NFR-05">The slice runs against the real `Services/Compose/` with no AI internals introduced; Tier-1 NetArchTest stays green. Scope: test wiring adds no AI-internal dependency.</constraint>
+    <constraint source="project / §10 Placement Justification + hygiene">Tests live in `tests/integration/seam/Compose/`. Report BFF publish size absolute + delta vs ~49.63 MB baseline, ≤60 MB (test project does not ship, but confirm no BFF-runtime change); verify no new HIGH CVE. Run `/conflict-check` before the BFF PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WebApplicationFactory through-the-wire seam slices; ADR-038 vertical-slice-seam KEEP category; banned mock/DI/ctor tests; Compose ingest/projection endpoints; corpus fixtures</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="WebApplicationFactory seam slice" location="tests/integration/seam/">
+        Mirror an existing `tests/integration/seam/**` slice: boot the real host, call the real endpoint over the wire, assert on real response/bytes — no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration assertions.
+      </pattern>
+      <pattern name="Corpus-fixture round-trip" location="projects/spaarkeai-compose-r4/notes/sample-docs/">
+        Drive the slice with real corpus docs (fields/SDT exemplar + a paragraph/offset-rich doc) so the three ingest behaviors and the negative malformed-doc case are exercised on realistic bytes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (note the TEST-MODIFYING override forces FULL gates unconditionally). Load ADR-038 + TEST-ARCHITECTURE + `.claude/constraints/bff-extensions.md`. Confirm tasks 010/011/012 are merged. Run `/conflict-check`.</step>
+    <step order="1" name="Create the seam directory + mirror an existing slice">Create `tests/integration/seam/Compose/`. Read an existing `tests/integration/seam/**` slice and mirror its `WebApplicationFactory` bootstrap (real host, real endpoint call, no mocks).</step>
+    <step order="2" name="Prove persisted paraIds">Add a slice that loads a corpus doc through the ingest endpoint, saves, reloads, and asserts the same durable `w14:paraId`s are present in the retained bytes (task 010).</step>
+    <step order="3" name="Prove offset→run round-trip">Assert the projection's intra-paragraph offset-addressing table maps sample editor-offsets to deterministic `(runIndex, run-local-offset)` run splits (task 011).</step>
+    <step order="4" name="Prove opaque-atom byte-preservation">On the fields/SDT exemplar (`01 - Test Matter Create Fields Only.docx`), assert it loads without error and the SDT/field/object subtrees are byte-identical after a no-op save (task 012).</step>
+    <step order="5" name="Negative case">Add a malformed / absent-paragraph doc case: assert it still ingests with a minted id and does NOT crash (no unhandled exception; a ProblemDetails or successful minted-id ingest, per the ingest contract).</step>
+    <step order="6" name="Run + build + size/CVE">Run the seam slice (green across ≥2 corpus docs + the negative case). Build BFF; confirm no BFF-runtime change; report publish size delta vs ~49.63 MB; `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="7" name="Close out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a Phase-1 behavior cannot be proven through the wire without reaching for a banned test shape (e.g. the only way to observe the offset table is to mock an internal collaborator), STOP: that signals a seam/observability gap in 010/011/012, not a licence to add a `Mock&lt;HttpMessageHandler&gt;` / DI-registration test. Surface the gap (feed it back to the relevant ingest task) rather than violating ADR-038. Escalate per root §6.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No through-the-wire seam coverage exists for the new ingest behaviors (paraId persistence, addressing table, opaque atoms).</existing>
+    <extension>No — a unit test can't prove the through-the-wire projection contract; ADR-038 seam DoD requires a vertical slice.</extension>
+    <cost-of-doing-nothing>NFR-06 (seam DoD for every load change) has no verifier and ingest regressions ship silently.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ — new `WebApplicationFactory` seam slice(s) proving persisted paraIds, offset→run round-trip, and byte-preserved opaque atoms across ≥2 corpus docs + the negative case</output>
+    <output type="report">Seam-slice run result; publish-size delta vs ~49.63 MB; CVE scan; confirmation of no banned test shapes</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `WebApplicationFactory` seam slice under `tests/integration/seam/Compose/` is green for all three Phase-1 ingest behaviors — persisted paraIds (load→save→reload), deterministic offset→run round-trip, byte-preserved opaque atoms — across ≥2 corpus docs.</criterion>
+    <criterion testable="true">Negative: a doc with a malformed / absent paragraph still ingests with a minted id and does not crash (no unhandled exception).</criterion>
+    <criterion testable="true">The slice uses NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, and NO ctor-null tests (ADR-038 §7 compliant vertical-slice-seam).</criterion>
+    <criterion testable="true">The slice runs against the real DI-wired `Services/Compose/` pipeline through the real Compose endpoint (through-the-wire, not unit-mocked).</criterion>
+    <criterion testable="true">BFF builds green; no BFF-runtime change (test project only); publish-size delta reported vs ~49.63 MB baseline; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    No `&lt;justification&gt;` block — this is test coverage for the Phase-1 ingest surface (category =
+    `tests/integration/seam/**` vertical-slice-seam per ADR-038 §7), not new product surface. Depends on
+    010/011/012 all landing first. `test-diet` (project wrap-up) will classify this as MAINTAIN (seam slice
+    = KEEP category).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -71,7 +71,9 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safe}') and isdisabled eq false` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and isdisabled` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(internalemailaddress,'${safe}')) and isdisabled eq false` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 
@@ -104,7 +106,9 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safe}') and statecode eq 0` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and statecode` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(emailaddress1,'${safe}')) and statecode eq 0` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 

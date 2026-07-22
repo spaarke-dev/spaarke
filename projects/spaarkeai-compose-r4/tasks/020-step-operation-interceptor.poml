@@ -1,0 +1,171 @@
+<task id="020" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>ProseMirror step→operation interceptor (FR-03) — the core client bridge</title>
+    <phase>2 Frontend capture</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client bridge core: modifies/creates `.ts` in the editor write path (tags include frontend); this is the load-bearing capture piece the whole operational save model depends on. FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The core client bridge piece — maps transaction steps to ID-anchored operations; a subtle position/offset mistake corrupts every downstream patch. High-blast-radius, needs the strongest model.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>frontend,fluent-ui,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Build the client half of the R4 bridge (design §5, "Capture (frontend)"): intercept ProseMirror
+    transaction steps and map EACH step to an operation anchored `(paraId, runIndex, run-local-offset)`
+    per the task-003 operation schema. This is a NEW ProseMirror plugin/extension under
+    `src/client/shared/Spaarke.Compose.Components/src/` — it does NOT diff the document and does NOT emit
+    `{paraId,text}` payloads. Borrow the `prosemirror-transform` primitives (`Step`, `StepMap`, `Mapping`)
+    per `notes/bridge-prior-art.md` §1; reuse the existing `widgets/paraIdExtension.ts` to read a node's
+    `w14:paraId` attribute — do NOT re-mint ids here. Resolve, for a given editor position, the enclosing
+    paraId node, the index of the run it falls in, and the run-local offset (the fine anchor D2 mandates).
+    An edit expressed against an opaque atom node (task 021's non-editable node) MUST be refused, not
+    captured. Explicitly: MIT ProseMirror base APIs only — NO `@tiptap-pro/*`, no AGPL (NFR-03). All this
+    task adds is capture; it neither fetches nor saves (that is the save-path tasks' job).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript editor engineer fluent in ProseMirror internals (transactions, `Step`/`StepMap`,
+    `ResolvedPos`, node/mark schema) and the TipTap extension model. Understands invariant I-6 (the client is
+    a view + controller that EMITS operations, never authors bytes) and D2 (anchor by
+    `(paraId, runIndex, run-local-offset)`, never absolute editor positions).
+  </role>
+
+  <goal>
+    A ProseMirror plugin/extension that, on every editor transaction, produces zero or more operations —
+    each a valid task-003 op anchored `(paraId, runIndex, run-local-offset)`. A typed edit at an interior
+    location inside a paragraph emits an operation whose anchor resolves back to exactly that
+    `(paraId, runIndex, offset)`; the legacy `{paraId,text}` payload shape is never produced; an edit that
+    ProseMirror routes into an opaque atom is refused (atoms are non-editable). Rebasing across a continuing
+    session is task 022's job — this task produces correctly-anchored per-transaction operations.
+  </goal>
+
+  <context>
+    <background>
+      Design §5.0 (the bridge is the real work; its hard pieces are opaque atoms, offset→run mapping, and
+      structural ops) and §5 "Capture (frontend)" (intercept transaction steps → operations
+      `{paraId, offset|range}`; DELETE the `getHTML`/paragraph-diff export). The op schema this maps onto is
+      task 003 (FR-11) — the shared spine both ends compile against. The durable coarse anchor is the node's
+      `w14:paraId` (already carried by `widgets/paraIdExtension.ts`); the fine anchor is
+      `(runIndex, run-local-offset)` because a bare char-offset drifts when an earlier same-paragraph edit
+      lands first (the CRDT/Peritext lesson, `notes/bridge-prior-art.md` §4). This task REPLACES the retired
+      `collectEditedParagraphs` paragraph-diff capture (`utils/docxBridge.ts:330-395`) — but does NOT delete
+      it here (that is task 023, gated on the Phase 0 gate 006). Capture only; no save wiring.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts — NEW ProseMirror plugin/TipTap extension: transaction steps → task-003 operations anchored `(paraId, runIndex, run-local-offset)`</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts — reuse to read the enclosing node's `w14:paraId` attr; do NOT re-mint ids here</file>
+      <file role="dependency-output">projects/spaarkeai-compose-r4/tasks/003-operation-schema.poml output — the versioned operation contract (op types + `{paraId, runIndex, offset|range}` anchor) this maps onto</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — register the interceptor extension in the editor schema/plugin list (wire-in only; no save-path change here)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts:330-395 — the retired `collectEditedParagraphs` this supersedes (read for the behaviors to cover; do NOT delete — task 023)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5, §5.0 (the bridge; offset→run mapping)</file>
+      <file role="design">projects/spaarkeai-compose-r4/notes/bridge-prior-art.md §1 (ProseMirror Step/StepMap/Mapping), §4 (anchor drift)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-03, FR-11, NFR-02, NFR-03</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Operation schema (FR-11) — the shared op types + `{paraId, runIndex, offset|range}` anchor this interceptor emits. MUST exist before mapping.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-03">Editor edits MUST be captured as operations anchored `(paraId, runIndex, run-local-offset)` from ProseMirror transaction steps. MUST NOT emit any `{paraId,text}` payload and MUST NOT re-diff paragraph text. Scope: the capture plugin only.</constraint>
+    <constraint source="project / I-3, I-6, I-7">Anchor by `w14:paraId` + run-index + run-local-offset ONLY; never a text-search, never an absolute editor position as the durable anchor. The client is a view+controller that emits operations; it authors no bytes. Scope: this interceptor and its emitted ops.</constraint>
+    <constraint source="project / D2">The fine anchor MUST be `(runIndex, run-local-offset)`, re-derivable on apply — NOT a bare `(paraId, char-offset)` — to survive an earlier same-paragraph edit. Scope: the anchor resolver in this module.</constraint>
+    <constraint source="spec / FR-02">An edit expressed against an opaque atom node (task 021) MUST be refused, not captured (atoms are non-editable and never opened). Scope: the interceptor's per-step guard.</constraint>
+    <constraint source="spec / NFR-03">MIT ProseMirror base + `@tiptap/extension-*` only. MUST NOT add `@tiptap-pro/*`, AGPL, or any commercial/per-seat package, and MUST NOT take a runtime dependency on EigenPal. Scope: this task's imports/package.json.</constraint>
+    <constraint source="ADR-028">Any client fetch introduced uses `@spaarke/auth` (`useAuth`/`authenticatedFetch`). NOTE: this task adds NO fetch — capture only; flagged so no ad-hoc token handling is introduced.</constraint>
+    <constraint source="ADR-038 / NFR-06">Capture behavior is covered by Vitest unit tests colocated in the shared lib (authored fully in task 024); this task's own tests exercise the anchor-resolution + atom-refusal behavior. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: tests colocated under `src/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProseMirror transaction/step interception; offset→run anchor resolution; TipTap extension registration; paraId identity; client licensing discipline</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+      <file>projects/spaarkeai-compose-r4/design.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="paraId node attr read" location="src/client/shared/Spaarke.Compose.Components/src/widgets/paraIdExtension.ts">
+        The extension that carries `w14:paraId` as a hidden node attr on `paragraph`/`heading` (PARAID_NODE_TYPES). Read the enclosing node's paraId from a ResolvedPos via this attr — reuse, do not re-mint.
+      </pattern>
+      <pattern name="Step/StepMap/Mapping" location="notes/bridge-prior-art.md §1">
+        `prosemirror-transform` provides invertible atomic `Step`s and `Mapping.map(pos,bias)` — iterate a transaction's steps and resolve each changed range to `(paraId, runIndex, offset)`. In-session only; durable identity is the paraId.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>The retired `collectEditedParagraphs` (`utils/docxBridge.ts:330-395`) is the only current capture path and it is paragraph-diff, `{paraId,text}`-coarse — verified by grep against `Spaarke.Compose.Components/src/`. No existing module intercepts ProseMirror steps or resolves run-local offsets.</existing>
+    <extension>`collectEditedParagraphs` cannot be extended into step-level capture without discarding its entire paragraph-diff algorithm — it re-diffs whole paragraph text and has no notion of runs, offsets, or structural ops. Replacing (not extending) it is the correct move; extending would keep a second text-coarse path alive (the exact defect R4 removes).</extension>
+    <cost-of-doing-nothing>Without step-level capture there are no structural edits and every delta re-diffs runs, so the FR-03 acceptance "interior typed edit → operation with correct `(paraId,runIndex,offset)`" is unachievable and the Patch Engine has no ID-anchored operations to apply — the drift class returns.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (root §8). Load the knowledge files + `notes/bridge-prior-art.md` + the task-003 operation-schema output. Confirm task 003 is complete (the op contract exists to map onto). Note this is a capture-only client task (no fetch, no save wiring, no deletion).</step>
+    <step order="1" name="Anchor resolver">Implement, in `stepOperationInterceptor.ts`, a resolver: given a ProseMirror position/ResolvedPos, return `(paraId, runIndex, run-local-offset)` — paraId from the enclosing PARAID_NODE_TYPES node via `paraIdExtension`, runIndex + run-local-offset by walking the node's inline runs (mark-boundary runs) accumulating length until the offset lands. Re-derivable, per D2.</step>
+    <step order="2" name="Step→operation mapping">Iterate each transaction's `Step`s; map each to a task-003 operation (insertText / deleteRange / replaceRange / setMark/clearMark / structural where the step expresses one), anchored via the step-1 resolver. Emit no `{paraId,text}` payloads.</step>
+    <step order="3" name="Opaque-atom guard">Add the guard: a step whose target resolves into an opaque atom node (task 021) is refused (no operation emitted; the atom stays non-editable). Checkpoint (context-handoff) after this third step per root §5.</step>
+    <step order="4" name="Register in editor">Register the interceptor extension in `ComposeEditor.tsx`'s plugin/extension list (wire-in only). Do NOT touch the save path or delete the legacy export (task 023).</step>
+    <step order="5" name="Local tests + build">Add colocated Vitest tests for the anchor-resolution + atom-refusal behaviors (task 024 authors the full suite). Run `npm run build:prod` (NOT `npm run build`) for the shared lib; confirm green and no `@tiptap-pro/*` in the dependency tree.</step>
+    <step order="6" name="Close-out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test name="Interior typed edit emits correct anchor">
+      <steps>Mount ComposeEditor on a projected doc; place the caret mid-word inside a formatted paragraph (a run boundary present) and type a character.</steps>
+      <expected>One operation is emitted whose anchor resolves to the enclosing paragraph's `paraId`, the correct `runIndex`, and the exact run-local `offset`; no `{paraId,text}` payload appears.</expected>
+    </ui-test>
+    <ui-test name="Edit inside an opaque atom is refused">
+      <steps>With a doc containing an opaque atom node (field/SDT placeholder), attempt to type inside the atom.</steps>
+      <expected>No operation is emitted and the atom content is unchanged (non-editable); the caret cannot author into the atom.</expected>
+    </ui-test>
+    <ui-test name="Multi-run paragraph offset maps to the right run">
+      <steps>In a paragraph split into bold + normal runs, type at the boundary between them.</steps>
+      <expected>The emitted operation's `runIndex`/`run-local-offset` identifies the correct run and in-run position (not an absolute doc position).</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render ComposeEditor with the interceptor registered under the Fluent v9 dark theme provider and perform an edit.</steps>
+      <expected>The editor surface and any atom placeholders use theme tokens and are legible in dark mode; capture behavior is identical to light mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If ProseMirror expresses an edit (a `Step`) that the task-003 operation schema cannot represent — e.g. a step shape with no corresponding op type — STOP and surface it (root §6 / §6.5) as a schema gap; do NOT silently drop the step or invent an out-of-contract op.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts (new ProseMirror step→operation interceptor)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (interceptor registered)</output>
+    <output type="test">Colocated Vitest tests for anchor resolution + atom refusal (extended in task 024)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An interior typed edit emits an operation whose anchor resolves to the correct `(paraId, runIndex, run-local-offset)`.</criterion>
+    <criterion testable="true">No `{paraId,text}` payload and no paragraph-diff capture is produced by the new interceptor.</criterion>
+    <criterion testable="true">An edit routed into an opaque atom node is refused — no operation emitted, atom unchanged (negative case).</criterion>
+    <criterion testable="true">In a multi-run paragraph, the emitted `runIndex`/`run-local-offset` identifies the correct run and in-run position (not an absolute editor position).</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` / AGPL / EigenPal runtime dependency is introduced; `npm run build:prod` for the shared lib is green (NFR-03).</criterion>
+    <criterion testable="true">The dark-mode render (ADR-021) is legible with theme tokens; capture behavior is theme-independent.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Capture only — no fetch (so no `@spaarke/auth` call here), no save wiring, no deletion. The legacy
+    `collectEditedParagraphs` is removed in task 023 (gated on the Phase 0 gate 006), not here. Rebasing the
+    op log across a continuing session is task 022. Client task (no BFF surface) — no publish-size / CVE gate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

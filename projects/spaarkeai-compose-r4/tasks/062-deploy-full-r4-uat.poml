@@ -1,0 +1,153 @@
+<task id="062" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Deploy full R4 + operator UAT on the CIPO doc</title>
+    <phase>6 Hardening + cutover</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live deploy of a mission-critical hard-replace + operator UAT that gates the flagship gate; bff-api/frontend/deploy/e2e-test tags. A deploy step at FULL rigor with quality gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy + UAT sequence with well-defined skills (`bff-deploy`, `code-page-deploy`) and a closed UAT script on a single known doc. Literal execution of a defined runbook suits sonnet; the judgment gate is task 063.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy step — mutates shared dev/UAT environments (BFF App Service + the SpaarkeAi Compose surface); must run alone.</parallel-reason>
+    <deps>060,061</deps>
+    <tags>bff-api,frontend,deploy,e2e-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the full R4 build and run operator UAT on the CIPO corpus doc. Prescriptive sequence:
+    (1) BEFORE the SpaarkeAi deploy, RESOLVE the cross-project notifications build break on tip-of-master
+    (`spaarke-notification-spine-r1` `@spaarke/notifications` unwired dep) — a SpaarkeAi deploy from tip
+    fails until this is resolved.
+    (2) Deploy the API: invoke the `bff-deploy` skill for `Sprk.Bff.Api`.
+    (3) Deploy the SpaarkeAi Compose surface: invoke the `code-page-deploy` skill.
+    (4) Operator UAT on the CIPO corpus doc — the known 422 + empty-paragraph offender:
+        edit an INTERIOR location; generate an AI redline WITH concurrent user edits and accept it; add a
+        comment. Save. The returned `.docx` MUST open in Word-for-web with accept/reject tracked-change
+        redlines AND threaded comments.
+    (5) Concurrency UAT: force a STALE-BASE save and confirm it re-anchors (no eTag 500); force an Office
+        lock and confirm HTTP 423 surfaces as a user-actionable state, NOT an error page.
+    Run `/conflict-check` before the PR. `&lt;ui-tests&gt;` are required (deploy + e2e), including an ADR-021
+    dark-mode check on the Compose surface. This is a DEPLOY task — no new surface, no `&lt;justification&gt;`.
+    Any UAT failure on the CIPO doc BLOCKS the flagship gate (063) — escalate, do not paper over.
+  </prompt>
+
+  <role>
+    Senior release engineer + operator: deploys `Sprk.Bff.Api` (App Service) and the SpaarkeAi Compose code
+    page (Dataverse web resource), then drives the end-to-end UAT flow in Word-for-web. Fluent in the
+    `bff-deploy` / `code-page-deploy` skills, the cross-project notifications build-break resolution, and the
+    R4 concurrency protocol (stale-base re-anchor, HTTP 423 lock handling).
+  </role>
+
+  <goal>
+    Full R4 deployed to the target environment (BFF + SpaarkeAi Compose surface) with the notifications
+    build break resolved first; the CIPO-doc UAT flow succeeds end-to-end — an interior edit + an AI redline
+    generated WITH concurrent edits + a comment all land, and the saved `.docx` opens in Word-for-web with
+    real accept/reject redlines + threaded comments; a stale-base save re-anchors (no eTag 500) and an Office
+    lock (423) surfaces cleanly as a user-actionable state. Dark-mode check on the Compose surface passes.
+  </goal>
+
+  <context>
+    <background>
+      Design §6 (Phase 6: "deploy + operator UAT") and F5/F6 (AI drift-proof generate window; reliable save
+      under concurrency + Office locks). Spec Success Criteria 3 (AI drift-proof — CIPO UAT), 4 (concurrency —
+      stale-base re-anchor + 423 clean), 6 (Word-native output — opens in Word-for-web with accept/reject
+      redlines + threaded comments), and NFR-07. The CIPO patent letter is the canonical worst-offender
+      (known interior-location 422 + empty-paragraph drift, `as-built-inventory.md` §Reference). The
+      cross-project notifications build break (`spaarke-notification-spine-r1` `@spaarke/notifications`
+      unwired dep) MUST be resolved before any SpaarkeAi deploy from tip-of-master (design §11 dependency;
+      spec External Dependencies). Tasks 060 (cutover) + 061 (corpus proof + hygiene) must be green first.
+    </background>
+    <relevant-files>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/ — the API deployed via `bff-deploy`</file>
+      <file role="dependency-output">src/solutions/SpaarkeAi/ — the SpaarkeAi Compose surface deployed via `code-page-deploy`</file>
+      <file role="dependency-output">src/client/shared/Spaarke.Compose.Components/ — the Compose widget hosted in SpaarkeAi (dark-mode check target)</file>
+      <file role="dependency-output">@spaarke/notifications (spaarke-notification-spine-r1) — the unwired dep whose build break must be resolved before the SpaarkeAi deploy</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/notes/as-built-inventory.md §Reference — the CIPO doc known failure surfaces (interior-location 422, empty-paragraph drift, eTag-mismatch-after-create)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §6, F5, F6, §11 (notifications dependency)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md Success Criteria 3/4/6, NFR-07, External Dependencies</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="blocked">Hard-replace cutover completion — the code being deployed.</dependency>
+      <dependency task="061" status="blocked">Corpus proof + size + CVE + NetArch — must be green before deploy (publish ≤60 MB, byte-preserving, facade green).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / External Dependencies">MUST resolve the notifications build break (`spaarke-notification-spine-r1` `@spaarke/notifications` unwired dep) on tip-of-master BEFORE the SpaarkeAi deploy. A SpaarkeAi deploy from tip fails until this is resolved.</constraint>
+    <constraint source="spec / Success Criterion 6 / NFR-07">The saved `.docx` from the UAT flow MUST open in Word-for-web with real accept/reject tracked-change redlines AND threaded comments. Scope: verified on the CIPO doc.</constraint>
+    <constraint source="spec / Success Criterion 4 / FR-08">A stale-base save MUST re-anchor (no eTag 500); an Office lock MUST surface as HTTP 423 → a user-actionable ProblemDetails state, NOT a 500 or error page. Verify both in UAT.</constraint>
+    <constraint source="ADR-021 / project">The Compose surface MUST render correctly in dark mode (ADR-021 dark-mode check as part of the `&lt;ui-tests&gt;`).</constraint>
+    <constraint source="ADR-028">Client save/generate fetches in the deployed surface use `@spaarke/auth` (`useAuth`/`authenticatedFetch`); no ad-hoc token handling.</constraint>
+    <constraint source="project / §10 BFF hygiene + conflict-check">State the Placement Justification in the PR; run `/conflict-check` before the PR (`Services/Compose/` overlaps sibling projects). Confirm the 061 publish-size/CVE/NetArch state carries into the deploy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Full R4 deploy (bff-deploy + code-page-deploy); cross-project notifications build-break resolution; CIPO operator UAT; concurrency (stale-base re-anchor, 423 lock) verification; ADR-021 dark-mode check</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Notifications-first deploy order" location="projects/spaarkeai-compose-r4/design.md §11">
+        Resolve the `@spaarke/notifications` unwired-dep build break on tip BEFORE the SpaarkeAi deploy —
+        the SpaarkeAi surface won't build from tip otherwise.
+      </pattern>
+      <pattern name="CIPO worst-offender UAT" location="projects/spaarkeai-compose-r4/notes/as-built-inventory.md">
+        The CIPO doc is the canonical acceptance target (interior-location 422 + empty-paragraph drift).
+        UAT it: interior edit + concurrent-edit AI redline + comment → Word-for-web accept/reject + threads.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <ui-tests>
+    <scenario>Deploy the SpaarkeAi Compose surface, open the CIPO doc, edit an interior location, generate an AI redline while continuing to type (concurrent edits), accept it, add a comment, save — confirm the interior edit + redline + comment all land at their anchors.</scenario>
+    <scenario>Open the saved `.docx` in Word-for-web — confirm accept/reject tracked-change redlines AND threaded comments are present and actionable.</scenario>
+    <scenario>Force a stale-base save (edit against a moved base) — confirm it re-anchors without an eTag 500.</scenario>
+    <scenario>Force an Office co-authoring lock — confirm HTTP 423 surfaces as a user-actionable state, NOT an error page or 500.</scenario>
+    <scenario>ADR-021 dark-mode check — the Compose surface (editor, toolbar, redline/comment UI) renders correctly in dark mode with no contrast or invisible-element regressions.</scenario>
+  </ui-tests>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration + gate check">Output the FULL rigor-level declaration (reason: deploy + e2e-test + bff-api/frontend). Load knowledge files. Confirm tasks 060 + 061 are green. State the Placement Justification for the PR.</step>
+    <step order="1" name="Resolve notifications build break">Resolve the `spaarke-notification-spine-r1` `@spaarke/notifications` unwired-dep build break on tip-of-master. Confirm the SpaarkeAi surface builds from tip BEFORE deploying it.</step>
+    <step order="2" name="Deploy the API">Invoke the `bff-deploy` skill to deploy `Sprk.Bff.Api`. Confirm the deploy succeeds and health checks pass.</step>
+    <step order="3" name="Deploy the SpaarkeAi Compose surface">Invoke the `code-page-deploy` skill to deploy the SpaarkeAi Compose surface. Confirm the deploy succeeds.</step>
+    <step order="4" name="CIPO operator UAT">On the CIPO doc: edit an interior location; generate an AI redline WITH concurrent user edits and accept it; add a comment; save. Open the saved `.docx` in Word-for-web and confirm accept/reject redlines + threaded comments.</step>
+    <step order="5" name="Concurrency UAT">Force a stale-base save (confirm re-anchor, no eTag 500); force an Office lock (confirm HTTP 423 → user-actionable state, not an error page).</step>
+    <step order="6" name="Dark-mode + conflict-check + finalize">Run the ADR-021 dark-mode check on the Compose surface. Run `/conflict-check` before the PR. Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set this task's status to ✅. Document any UAT deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to the target environment (via bff-deploy)</output>
+    <output type="deploy">SpaarkeAi Compose surface deployed (via code-page-deploy)</output>
+    <output type="report">CIPO UAT result — interior edit + concurrent-edit AI redline + comment → Word-for-web accept/reject redlines + threaded comments; stale-base re-anchor + 423 verified; dark-mode check</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The notifications build break is resolved on tip-of-master and the SpaarkeAi surface builds from tip BEFORE the SpaarkeAi deploy.</criterion>
+    <criterion testable="true">The API (bff-deploy) and the SpaarkeAi Compose surface (code-page-deploy) both deploy successfully.</criterion>
+    <criterion testable="true">The CIPO UAT flow (interior edit + AI redline generated with concurrent edits + accepted + comment) saves and opens in Word-for-web with accept/reject tracked-change redlines AND threaded comments.</criterion>
+    <criterion testable="true">A stale-base save re-anchors without an eTag 500; an Office lock surfaces as HTTP 423 → a user-actionable state.</criterion>
+    <criterion testable="true">Negative: a locked doc shows the user-actionable lock state, NOT a 500 or error page.</criterion>
+    <criterion testable="true">The Compose surface renders correctly in dark mode (ADR-021 check); `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Any UAT failure on the CIPO doc (interior edit, concurrent-edit AI redline, comment, Word-for-web open, stale-base re-anchor, or 423 handling) BLOCKS the flagship gate (063) — escalate per root §6; do not paper over a UAT failure or proceed to the gate. If the notifications build break cannot be resolved, the SpaarkeAi deploy is blocked — escalate.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

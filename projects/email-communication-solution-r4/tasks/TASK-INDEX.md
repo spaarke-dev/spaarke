@@ -71,7 +71,8 @@
 | 122 | CommunicationAttachments PCF — title padding, fix green/red upload indicator, .eml opens same preview (R4 B) | W12 | pcf, frontend | FR-17 | 111 | 090 | true | FULL | ✅ (`c49a12bd4`) · green/red icon (griffel mergeClasses bug); .eml opens modal+nav; v1.3.0 |
 | 123 | EmailComposer — contact suggestion resolves to email address not name (R4 C, W10-103 bug) | W12 | frontend, communication | FR-12 | 103 | 090 | true | FULL | ✅ (`3c40ce076`) · ILookupItem.email first-class; no-email non-selectable; shipped via Actions rebundle `339eb27f6` |
 | 124 | Reply/Reply-All/Forward — inherit regarding/related records from parent communication (R4 D) | W12-b | communication, bff-api, frontend | FR-12,13 | 104,042 | 090 | true | FULL | ✅ (`260f01336`) · server-side copy via RegardingFieldMap.All (additive, explicit-wins); BFF; client via Actions rebundle `339eb27f6` |
-| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105,111-113,121-124 | — | **false** | STANDARD | 🔲 (HELD until W9-W12 remediation closes) |
+| 131 | CommunicationConnections PCF — on-form card parity with RegardingResolver (number/name grid, refresh+lookup icons, non-clickable title, reduced padding) (R5) | W13 | pcf, frontend | FR-17 | 121 | 090 | true | FULL | ✅ (`04e0e3741`) · v1.6.0; card matches RegardingResolver; lookup opens modal; title non-clickable |
+| 090 | Project wrap-up (README Complete, lessons-learned, `/test-diet`, archive) | Wrap | wrapup | — | (all)+091,092,093,101-105,111-113,121-124,131 | — | **false** | STANDARD | 🔲 (HELD until W9-W13 remediation closes) |
 
 ---
 

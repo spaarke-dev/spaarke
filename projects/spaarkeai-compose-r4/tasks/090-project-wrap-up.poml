@@ -1,0 +1,149 @@
+<task id="090" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Project wrap-up — README → Complete, lessons-learned, /test-diet, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Close-out documentation + project-close skills (no .cs/.ts implementation change); the terminal task after the flagship gate. STANDARD rigor per the wrap-up decision tree.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out sequence with well-defined skills (`/test-diet`, `/repo-cleanup`) and file updates against a fixed checklist. Literal execution of the wrap-up runbook suits sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches README + runs project-close skills (`/test-diet`, `/repo-cleanup`) in the main session; terminal, cannot be parallelized.</parallel-reason>
+    <deps>063</deps>
+    <tags>wrapup,docs</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Close out the R4 project per the task-execute wrap-up protocol (root CLAUDE.md §7 project-close gate).
+    This is the mandatory `090-wrapup` task — task-execute Step 11 invokes `/test-diet` BEFORE marking the
+    project complete. Prescriptive close-out sequence:
+    (1) Update `projects/spaarkeai-compose-r4/README.md` status → Complete.
+    (2) Write `notes/lessons-learned.md` (R4-specific: the shadow-document rip-and-replace, the
+        `(paraId, runIndex, run-local-offset)` anchor model, the one-Patch-Engine consolidation, the
+        Phase-0-gate-before-cutover discipline, and the hard-replace-with-no-A/B safety net).
+    (3) Run `/test-diet` — the project-close test-diet gate (root §7): reconcile every test added/modified
+        during R4 against the ADR-038 build-vs-maintain classifier (MAINTAIN stays at KEEP path, SCAFFOLDING
+        is `git rm`, AMBIGUOUS → reviewer judgment). It is READ-ONLY — it emits `git rm`/`git mv` commands
+        for the reviewer; do NOT auto-execute. Save the report to `notes/test-diet-report.md`.
+    (4) Update the project's row in `projects/INDEX.md`.
+    (5) Run `/repo-cleanup` (ephemeral-file hygiene).
+    (6) Archive artifacts; set TASK-INDEX to all ✅; reset `current-task.md` to none.
+    This is a wrap-up task — no new surface, no `&lt;justification&gt;`. The wrap-up PR MUST cite the /test-diet
+    report. This task is TERMINAL — blocked until the flagship gate (063) is all-green.
+  </prompt>
+
+  <role>
+    Senior engineer / release manager performing project close-out, fluent in the Spaarke wrap-up protocol
+    (README status, lessons-learned, `/test-diet`, `/repo-cleanup`, archive), the root CLAUDE.md §7
+    task-completion + project-close test-diet rules, and the §6.5 ADR conflict-resolution protocol.
+  </role>
+
+  <goal>
+    A closed R4 project: `README.md` status = Complete; `notes/lessons-learned.md` recorded;
+    `/test-diet` run with the report emitted to `notes/test-diet-report.md` (MAINTAIN/SCAFFOLDING/AMBIGUOUS
+    classifications + reviewer `git rm`/`git mv` commands, NOT auto-executed); the project's row in
+    `projects/INDEX.md` updated; `/repo-cleanup` run; TASK-INDEX fully ✅; `current-task.md` reset to none.
+    The wrap-up PR description cites the /test-diet report.
+  </goal>
+
+  <context>
+    <background>
+      Per root CLAUDE.md §7 project-close test-diet gate: when the just-completed task is a `090-wrapup-*`
+      task (the project is closing), task-execute Step 11 invokes `/test-diet` BEFORE marking the project
+      complete. `/test-diet` is read-only — it emits `git rm`/`git mv` for the reviewer, it does not
+      auto-execute (ADR-038 build-vs-maintain classifier). This wrap-up also carries the standard Spaarke
+      close-out (README status, lessons-learned, `/repo-cleanup`, INDEX.md row, archive). It is TERMINAL — it
+      cannot run until the flagship gate (063) is all-green. R4-specific lessons to capture: the
+      shadow-document rip-and-replace; the `(paraId, runIndex, run-local-offset)` anchor model (D2); the
+      one-unified-Patch-Engine consolidation (D5, I-5); the Phase-0-gate-before-cutover discipline (NFR-08);
+      and the hard-replace-with-no-parallel-run-A/B safety-net approach.
+    </background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-compose-r4/README.md — set project status to Complete; update graduation-criteria checkboxes</file>
+      <file role="new">projects/spaarkeai-compose-r4/notes/lessons-learned.md — R4 lessons (shadow-document rip-and-replace; anchor model; one-Patch-Engine; Phase-0-gate discipline; hard-replace-no-A/B)</file>
+      <file role="new">projects/spaarkeai-compose-r4/notes/test-diet-report.md — /test-diet output (MAINTAIN/SCAFFOLDING/AMBIGUOUS + reviewer git rm/git mv commands)</file>
+      <file role="modify">projects/INDEX.md — update this project's active-project registry row (status Complete)</file>
+      <file role="modify">projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md — set all tasks ✅</file>
+      <file role="modify">projects/spaarkeai-compose-r4/current-task.md — reset to none per §7</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md §Success Criteria (graduation checkboxes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="063" status="blocked">Flagship gate G — must be all-green before close-out. This wrap-up is terminal and blocked until the gate passes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Project-close protocol: README status Complete + lessons-learned + `/test-diet` (BEFORE marking complete) + `/repo-cleanup` + INDEX.md row + archive. All required. Skipping the /test-diet gate is a HARD WARNING; the wrap-up PR MUST cite the report.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies R4 tests via the build-vs-maintain classifier; MAINTAIN-class stay at KEEP paths, SCAFFOLDING-class are `git rm`, AMBIGUOUS require reviewer judgment. `/test-diet` is READ-ONLY — it emits `git rm`/`git mv` for the reviewer; do NOT auto-execute.</constraint>
+    <constraint source="CLAUDE.md §6.5">Any ADR tension carried by R4 (e.g. the R3 paragraph-diff Path-B amendment from task 001) is cited in the close-out, not silently dropped.</constraint>
+    <constraint source="project / scope">Wrap-up only — no code implementation change, no new surface. Do NOT auto-execute the /test-diet git commands.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Spaarke project close-out protocol; ADR-038 /test-diet gate; /repo-cleanup; INDEX.md registry update; §6.5 ADR conflict resolution</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="090-wrapup /test-diet gate" location=".claude/skills/task-execute/SKILL.md">
+        Step 11: on a `090-wrapup` task, invoke `/test-diet` BEFORE marking the project complete; the wrap-up
+        PR cites `notes/test-diet-report.md`. The skill is read-only (emits git rm/git mv for the reviewer).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration + gate check">Output the STANDARD rigor-level declaration (reason: close-out docs; no implementation change). VERIFY the flagship gate (063) is all-green — if not, remain blocked and escalate; the project cannot close on a partial gate.</step>
+    <step order="1" name="README → Complete">Set `projects/spaarkeai-compose-r4/README.md` status to Complete; update the graduation-criteria checkboxes.</step>
+    <step order="2" name="Lessons-learned">Author `notes/lessons-learned.md` (shadow-document rip-and-replace; `(paraId, runIndex, run-local-offset)` anchor model; one-Patch-Engine consolidation; Phase-0-gate-before-cutover discipline; hard-replace-no-A/B safety net).</step>
+    <step order="3" name="/test-diet gate">Run `/test-diet` to reconcile R4 tests against the ADR-038 build-vs-maintain classifier; save the report to `notes/test-diet-report.md`; do NOT auto-execute its git rm/git mv commands (reviewer applies).</step>
+    <step order="4" name="INDEX.md + repo-cleanup">Update this project's row in `projects/INDEX.md` (status Complete). Run `/repo-cleanup` to validate structure compliance and remove ephemeral files.</step>
+    <step order="5" name="Archive + finalize">Archive artifacts; set `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md` to all ✅; reset `current-task.md` to none per §7. Prepare the wrap-up PR description citing the /test-diet report. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>No lessons-learned / test-diet report exists for R4.</existing>
+    <extension>N/A — produces close-out docs + runs project-close skills, not a code component.</extension>
+    <cost-of-doing-nothing>The mandatory §7 project-close test-diet gate is skipped and R4 wisdom is lost.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r4/README.md (status Complete)</output>
+    <output type="report">projects/spaarkeai-compose-r4/notes/lessons-learned.md</output>
+    <output type="report">projects/spaarkeai-compose-r4/notes/test-diet-report.md</output>
+    <output type="docs">projects/INDEX.md (this project's row updated to Complete)</output>
+    <output type="docs">projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md (all ✅); current-task.md reset to none</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`README.md` status is set to Complete with graduation-criteria checkboxes updated.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` and `notes/test-diet-report.md` both exist; the test-diet report carries MAINTAIN/SCAFFOLDING/AMBIGUOUS classifications and reviewer `git rm`/`git mv` commands (NOT auto-executed).</criterion>
+    <criterion testable="true">This project's row in `projects/INDEX.md` is updated; `/repo-cleanup` has run; TASK-INDEX is fully ✅; `current-task.md` is reset to none.</criterion>
+    <criterion testable="true">The wrap-up PR description cites the /test-diet report.</criterion>
+    <criterion testable="true">Negative: if the flagship gate (063) is not all-green, close-out does NOT proceed — the task remains blocked and escalates.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>This wrap-up is TERMINAL and depends on the flagship gate (063). It cannot start until 063 is all-green. Remain `blocked` and escalate rather than closing partially. Skipping the /test-diet gate is a HARD WARNING — the wrap-up PR MUST cite the report or document the skip rationale.</trigger>
+  </escalation>
+
+  <notes>
+    This is the mandatory `090-wrapup` task: per root CLAUDE.md §7, task-execute Step 11 invokes `/test-diet`
+    BEFORE marking the project complete. The skill is read-only (emits `git rm`/`git mv` for the reviewer,
+    not auto-executed); the wrap-up PR description must cite `notes/test-diet-report.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

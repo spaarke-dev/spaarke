@@ -1,0 +1,147 @@
+<task id="004" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Round-trip byte-diff harness — load → no-op save → byte-diff untouched subtrees (NFR-01)</title>
+    <phase>0 Gate</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Through-the-wire seam-slice harness (`tests/integration/seam/**`) that is the NFR-01 acceptance verifier + the hard-replace safety net; a test-modifying task under ADR-038 — FULL unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A well-specified harness against a defined byte-identity assertion and a fixed corpus; mechanical OOXML-package traversal, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Separate code (harness under tests/integration/seam/Compose/) from task 005 (throwaway spike); both run in wave W0b.</parallel-reason>
+    <deps>002</deps>
+    <tags>testing,docx,integration-test</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Build the round-trip byte-diff harness that is the acceptance verifier for NFR-01 and the safety net for
+    the hard-replace cutover. For EVERY document in the fidelity corpus (`tests/fixtures/compose-corpus/`,
+    task 002), the harness MUST: load the doc, perform a NO-OP save through the projection + patch path, and
+    then assert that (a) every OOXML package part that was never opened is BYTE-IDENTICAL to the original, and
+    (b) the edited `document.xml` is STRUCTURALLY faithful (SDK re-serialize equivalence) — with a clearly
+    marked hook/switch for the stricter XML-splice byte-identity option (spec Unresolved Question: "True
+    byte-identity within document.xml").
+
+    Author it as a through-the-wire seam slice under a NEW directory `tests/integration/seam/Compose/`
+    (create it). It consumes the task-002 corpus fixtures. Follow ADR-038: this is a seam DoD test — NO
+    `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests; drive the real save/load
+    path via `WebApplicationFactory`. A corpus doc that CANNOT round-trip byte-identically even on its
+    untouched parts is a Phase-0 FINDING — record it, do not silently let the assertion pass.
+  </prompt>
+
+  <role>
+    Integration-test engineer fluent in OOXML package structure (WordprocessingDocument, package parts,
+    `document.xml` vs styles/numbering/headers/footers/theme), byte-level diffing, and Spaarke's seam-slice
+    DoD (`tests/integration/seam/**` via `WebApplicationFactory`, ADR-038). Understands this harness is the
+    empirical evidence the Phase-0 gate (task 006) and the cutover (task 060) depend on.
+  </role>
+
+  <goal>
+    A through-the-wire harness under `tests/integration/seam/Compose/` that, for every corpus doc, loads →
+    no-op-saves → asserts untouched package parts are byte-identical and the edited `document.xml` is
+    structurally faithful, with a hook for the strict XML-splice byte-identity option. It consumes the
+    task-002 corpus, obeys ADR-038 (no banned mock/DI/ctor patterns), and surfaces any doc that fails
+    byte-identity on untouched parts as an explicit recorded finding rather than a silent pass.
+  </goal>
+
+  <context>
+    <background>
+      R4 is a hard-replace cutover with no A/B parallel-run; NFR-08 makes the Phase-0 proof gate (task 006) a
+      HARD prerequisite to old-path deletion, and NFR-01 (byte preservation) is verified by THIS harness —
+      run before AND after cutover (task 061 re-runs it). NFR-01 defines the bar: package parts never opened
+      are verbatim; `document.xml` is structurally faithful, "with XML-splice hardening available if strict
+      byte-identity within it is required." Whether strict byte-identity within `document.xml` is required is
+      a spec Unresolved Question decided from corpus results — so the harness carries a switchable hook for it.
+      The corpus fixtures are delivered by task 002. Seam-slice DoD is ADR-038 (design §9 Path-C row 4).
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ — NEW directory; the byte-diff round-trip harness (WebApplicationFactory-driven) + a byte-comparison helper for OOXML package parts, with a strict-splice toggle</file>
+      <file role="dependency-output">tests/fixtures/compose-corpus/ — the corpus fixtures produced by task 002 (the harness iterates these)</file>
+      <file role="canonical-reference">tests/integration/seam/** — existing Spaarke seam slices as the WebApplicationFactory + ADR-038 shape to mirror</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the projection path the no-op save loads through</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (ingest/patch), §7 NFR-01</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md NFR-01, NFR-06, NFR-08, Unresolved Questions (true byte-identity within document.xml)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Fidelity corpus LFS fixtures under `tests/fixtures/compose-corpus/` — the documents the harness iterates.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / NFR-01">For every corpus doc, a load → no-op save MUST leave untouched OOXML package parts BYTE-IDENTICAL and `document.xml` structurally faithful. Scope: the harness asserts both, with a switchable hook for strict XML-splice byte-identity within `document.xml`.</constraint>
+    <constraint source="ADR-038 / NFR-06">This is a seam-slice DoD test driven through `WebApplicationFactory`. MUST NOT use `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, or ctor-null tests. Scope: the real load/save path is exercised end-to-end.</constraint>
+    <constraint source="project / NFR-08">The harness is the hard-replace safety net — it runs BEFORE and AFTER cutover (task 061 re-runs it). A corpus doc that fails byte-identity on untouched parts MUST surface as a recorded finding, not a silent pass. Scope: assertion failures are explicit + logged to notes.</constraint>
+    <constraint source="project / §10">This is a BFF-touching test task: run `/conflict-check` before the PR; report BFF publish size delta if any production `Services/Compose/` code changes (harness-only is expected to be size-neutral). Scope: `Services/Compose/` overlaps sibling projects.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML package byte-diffing; WebApplicationFactory seam slices; ADR-038 banned test patterns; NFR-01 byte-preservation bar</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seam slice via WebApplicationFactory" location="tests/integration/seam/">
+        Drive the real endpoint/service graph through WebApplicationFactory; no HttpMessageHandler mock, no DI-registration assertion. Mirror an existing seam slice for the harness skeleton.
+      </pattern>
+      <pattern name="Untouched-part byte-identity" location="projects/spaarkeai-compose-r4/design.md §5.0">
+        Package parts never opened (styles, numbering, headers/footers, theme, embedded objects) are copied verbatim → assert byte-equality on those parts; assert structural faithfulness on the edited document.xml with a strict-splice toggle.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL). Load ADR-038, NFR-01/06/08, and confirm the task-002 corpus fixtures are present. State the Placement Justification + run `/conflict-check`.</step>
+    <step order="1" name="Create the seam directory + skeleton">Create `tests/integration/seam/Compose/`. Stand up a WebApplicationFactory-driven test skeleton mirroring an existing seam slice (no banned mock/DI/ctor patterns).</step>
+    <step order="2" name="Byte-comparison helper">Implement an OOXML package-part comparison helper: for each part, byte-compare original vs round-tripped; classify parts as "never opened → byte-identical expected" vs "edited document.xml → structurally faithful". Add a strict-splice toggle for byte-identity within document.xml.</step>
+    <step order="3" name="No-op save round-trip">For each corpus doc: load, perform a no-op save through the projection + patch path, capture the output bytes, and run the comparison. Assert untouched parts byte-identical + document.xml structurally faithful.</step>
+    <step order="4" name="Findings capture">Wire any byte-identity failure on untouched parts to an explicit, logged finding (not a silent pass); write findings to `projects/spaarkeai-compose-r4/notes/`. This feeds the Phase-0 gate (task 006) and the Unresolved-Question decision on strict document.xml byte-identity.</step>
+    <step order="5" name="Build + run">Build + run the seam suite; confirm green (or documented findings). Report publish-size delta if any production code changed (expected size-neutral).</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r4/tasks/TASK-INDEX.md`: set task 004 status to ✅. Record the harness findings + any strict-splice decision input in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A corpus doc cannot round-trip byte-identically even on its UNTOUCHED package parts — this is a Phase-0 finding that may move the NFR-01 acceptance bar (strict XML-splice may be required). Record it and surface it to the Phase-0 gate; do NOT weaken the assertion to force a pass.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No round-trip byte-diff harness exists for Compose; `tests/integration/seam/Compose/` does not yet exist (verified via Glob).</existing>
+    <extension>Cannot extend an existing seam slice — none exercises OOXML package-part byte-identity. This is the dedicated NFR-01 verifier.</extension>
+    <cost-of-doing-nothing>Without this harness, NFR-01 (byte preservation) has no verifier and the hard-replace cutover has no safety net — the Phase-0 gate (task 006) cannot produce evidence.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ — the byte-diff round-trip harness + package-part comparison helper (with strict-splice toggle)</output>
+    <output type="report">Per-corpus-doc round-trip results + any byte-identity finding, recorded in projects/spaarkeai-compose-r4/notes/</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The harness lives under `tests/integration/seam/Compose/` and is driven through `WebApplicationFactory` (a real load/save path).</criterion>
+    <criterion testable="true">For every corpus doc, a load → no-op save asserts untouched OOXML package parts are byte-identical and the edited `document.xml` is structurally faithful.</criterion>
+    <criterion testable="true">A switchable hook exists for the strict XML-splice byte-identity option within `document.xml`.</criterion>
+    <criterion testable="true">NEGATIVE: the suite uses NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration test, NO ctor-null test (ADR-038).</criterion>
+    <criterion testable="true">A corpus doc failing byte-identity on untouched parts produces an explicit recorded finding (not a silent pass).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 004 as ✅ and the harness findings are recorded in projects/spaarkeai-compose-r4/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on task 002's corpus. The harness re-runs post-cutover in task 061 — keep it parameterized over the
+    corpus directory so owner-supplied worst-offenders (arriving in Phase 0) are picked up automatically. Its
+    results are direct input to the Phase-0 gate (task 006, criterion b) and to the spec Unresolved Question on
+    strict document.xml byte-identity.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
