@@ -51,6 +51,8 @@ import { AssociationStatus, type ICommunicationRecord } from './types';
 import {
   parseProvenance,
   deriveConnections,
+  mergeFiledConnections,
+  groupConnectionsByAction,
   connectionTarget,
   COMMUNICATION_REGARDING_FIELDS,
   type Connection,
@@ -464,10 +466,12 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   );
 
   // ── Collapsed card + authoritative filed list ──────────────────────────────
-  // The collapsed card shows the denormalized PRIMARY (number + name — the same
-  // fields RegardingResolver surfaces). The modal lists EVERY filed association by
-  // reading each populated typed `sprk_regarding*` lookup — so records added via
-  // "Link another" (never in the engine's provenance) still appear. Re-read on a
+  // The collapsed card shows the PRIMARY FILED association (number + name — see the
+  // `primaryFiled` derivation below; task 132 / UAT R5). The denormalized primary
+  // (number/name/url) is still read here as the fallback source when nothing is
+  // filed yet (outbound draft). The modal lists EVERY filed association by reading
+  // each populated typed `sprk_regarding*` lookup — so records added via "Link
+  // another" (never in the engine's provenance) still appear. Re-read on a
   // `reloadKey` bump after each successful write.
   const [modalOpen, setModalOpen] = React.useState(false);
   const [reloadKey, setReloadKey] = React.useState(0);
@@ -536,6 +540,46 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const [primaryField, setPrimaryField] = React.useState<string | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // ── Card source of truth: the PRIMARY FILED ASSOCIATION (task 132 / UAT R5) ──
+  // The on-form card sources its Regarding Number + Name from the primary FILED
+  // association — the SAME reliable path the modal's "Filed" section uses (the
+  // matter's real name + provenance-derived number) — NOT the denormalized
+  // sprk_regardingrecord* fields, which the INBOUND association path writes
+  // backwards (the record NUMBER lands in the NAME field, number field null).
+  // Merge the engine's suggested slots with the record's actually-filed typed
+  // lookups, group, and take the ★ primary (the explicitly designated primaryField
+  // when confirmed, else the first filed slot in SLOT_META priority order — the
+  // exact `effectivePrimary` rule ConnectionsEditor uses). Falls back to the denorm
+  // fields when nothing is filed yet, so an outbound draft still shows its regarding.
+  const filedConnections = React.useMemo<Connection[]>(() => {
+    const merged = mergeFiledConnections(
+      provenance ? deriveConnections(provenance, status === AssociationStatus.Resolved) : [],
+      filedAssociations
+    );
+    return groupConnectionsByAction(merged, [], confirmedFields, new Set<string>()).filed;
+  }, [provenance, status, filedAssociations, confirmedFields]);
+
+  const primaryFiled = React.useMemo<Connection | null>(() => {
+    if (filedConnections.length === 0) return null;
+    const eff =
+      primaryField && filedConnections.some(c => c.field === primaryField)
+        ? primaryField
+        : filedConnections[0].field;
+    return filedConnections.find(c => c.field === eff) ?? null;
+  }, [filedConnections, primaryField]);
+
+  // Card Name: the filed association's real record name (resolved friendly name when
+  // available, else the lookup's formatted value). Card Number: the filed
+  // association's provenance-derived reference number, falling back to the denorm
+  // number (correct for outbound). Both fall back to the denorm fields when nothing
+  // is filed yet.
+  const cardName = primaryFiled
+    ? resolveDisplayName(primaryFiled.entity, primaryFiled.targetId) ?? primaryFiled.targetName
+    : primaryDenorm.name;
+  const cardNumber = primaryFiled
+    ? primaryFiled.recordNumber ?? primaryDenorm.number
+    : primaryDenorm.number;
 
   // Override-reason dialog state.
   const [overrideConn, setOverrideConn] = React.useState<Connection | null>(null);
@@ -772,7 +816,12 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   const handleRecordNumberClick = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
-      const target = resolvePrimaryOpenTarget(primaryDenorm.url, filedAssociations, primaryDenorm.name);
+      // Prefer the primary FILED association's entity + id (the reliable target that
+      // matches the Number/Name now shown on the card); fall back to the denorm URL
+      // round-trip only when nothing is filed yet.
+      const target = primaryFiled
+        ? { entityName: primaryFiled.entity, entityId: cleanGuid(primaryFiled.targetId) }
+        : resolvePrimaryOpenTarget(primaryDenorm.url, filedAssociations, primaryDenorm.name);
       if (!target) {
         console.warn('[CommunicationConnections] Cannot open regarding record — no target resolved.');
         return;
@@ -796,11 +845,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         console.warn('[CommunicationConnections] navigateTo threw:', err);
       }
     },
-    [primaryDenorm.url, primaryDenorm.name, filedAssociations]
+    [primaryFiled, primaryDenorm.url, primaryDenorm.name, filedAssociations]
   );
 
-  const hasNumber = typeof primaryDenorm.number === 'string' && primaryDenorm.number.trim().length > 0;
-  const hasName = typeof primaryDenorm.name === 'string' && primaryDenorm.name.trim().length > 0;
+  const hasNumber = typeof cardNumber === 'string' && cardNumber.trim().length > 0;
+  const hasName = typeof cardName === 'string' && cardName.trim().length > 0;
 
   return (
     <div className={s.root}>
@@ -855,7 +904,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
                 data-testid="cc-record-number"
                 onClick={handleRecordNumberClick}
               >
-                {primaryDenorm.number}
+                {cardNumber}
               </Link>
             </div>
           )}
@@ -863,7 +912,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
             <div className={s.nameCell} data-testid="cc-name-cell">
               <Text className={s.fieldLabel}>Regarding Name</Text>
               <Text className={s.recordName} data-testid="cc-record-name">
-                {primaryDenorm.name}
+                {cardName}
               </Text>
             </div>
           )}

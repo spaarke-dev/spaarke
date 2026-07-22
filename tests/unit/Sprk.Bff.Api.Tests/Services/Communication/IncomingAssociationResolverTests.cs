@@ -414,8 +414,93 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // Denormalized regarding fields (task 132 / UAT R5): name = name, number = number
+    // =========================================================================
+
+    [Fact]
+    public async Task ResolveAsync_MatterMatch_WritesDenormalizedNameAndNumber_FromTheMatterRecord()
+    {
+        // Regression (task 132 / UAT R5): the inbound path previously copied EntityReference.Name into
+        // sprk_regardingrecordname and never set sprk_regardingrecordnumber. When a rung matched by NUMBER
+        // it attached the record NUMBER as that Name, so inbound emails showed "Regarding Name: LITG-119896"
+        // with the number field null. The resolver must now retrieve the matter's ACTUAL name + number and
+        // denormalize them separately (mirroring the outbound MapAssociationFields contract).
+        var matterId = Guid.NewGuid();
+
+        // Reproduce the bug's input exactly: a matter regarding write whose EntityReference.Name carries the
+        // record NUMBER (as a number-match rung would set it).
+        var bugRung = new StubMatterRung(matterId, entityReferenceName: "LITG-119896");
+
+        // The matter record itself: real name in sprk_mattername, real number in sprk_matternumber.
+        var matterRecord = new DataverseEntity("sprk_matter", matterId);
+        matterRecord["sprk_mattername"] = "Monte Rosa Biotechnology v Spaarke Inc";
+        matterRecord["sprk_matternumber"] = "LITG-119896";
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matterRecord);
+
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var resolver = new IncomingAssociationResolver(
+            new IAssociationRung[] { bugRung },
+            _dataverseServiceMock.Object,
+            _dataverseServiceMock.Object,
+            AssociationTestSupport.Mapper(),
+            Mock.Of<ILogger<IncomingAssociationResolver>>());
+
+        var envelope = CreateEnvelope("LITG-119896 filing", "clerk@court.gov");
+
+        // Act
+        await resolver.ResolveAsync(TestCommunicationId, envelope, new AssociationContext(), CancellationToken.None);
+
+        // Assert: NAME field carries the matter NAME; NUMBER field carries the matter NUMBER.
+        _dataverseServiceMock.Verify(d => d.UpdateAsync(
+            "sprk_communication",
+            TestCommunicationId,
+            It.Is<Dictionary<string, object>>(fields =>
+                (string)fields["sprk_regardingrecordname"] == "Monte Rosa Biotechnology v Spaarke Inc" &&
+                fields.ContainsKey("sprk_regardingrecordnumber") &&
+                (string)fields["sprk_regardingrecordnumber"] == "LITG-119896"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // =========================================================================
     // Test Helpers
     // =========================================================================
+
+    /// <summary>
+    /// Minimal deterministic rung that emits a single high-confidence matter regarding write. Exists to
+    /// drive the resolver's denormalization write path with a controlled EntityReference.Name (reproducing
+    /// the number-in-Name shape the bug depended on). Not a mock of the class-under-test — a rung is the
+    /// engine's first-class, DI-injected extension point.
+    /// </summary>
+    private sealed class StubMatterRung : IAssociationRung
+    {
+        private readonly Guid _matterId;
+        private readonly string _entityReferenceName;
+        public StubMatterRung(Guid matterId, string entityReferenceName)
+        {
+            _matterId = matterId;
+            _entityReferenceName = entityReferenceName;
+        }
+        public RungKind Kind => RungKind.ExplicitReference;
+        public int Order => 0;
+        public Task<IReadOnlyList<RungMatch>> EvaluateAsync(
+            NormalizedMessage message, AssociationContext context, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<RungMatch>>(new[]
+            {
+                new RungMatch
+                {
+                    RegardingFieldName = "sprk_regardingmatter",
+                    Target = new EntityReference("sprk_matter", _matterId) { Name = _entityReferenceName },
+                    Confidence = 1.0,
+                    Provenance = "explicit:caller-supplied:sprk_matter",
+                    Rung = RungKind.ExplicitReference,
+                },
+            });
+    }
 
     private static NormalizedMessage CreateEnvelope(string subject, string fromEmail, string? inReplyTo = null)
         => new()

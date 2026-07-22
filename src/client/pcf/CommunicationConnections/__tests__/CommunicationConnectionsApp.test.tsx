@@ -56,6 +56,8 @@ function buildContext(overrides?: {
   provenance?: string | null;
   showVersionFooter?: boolean | null;
   titleText?: string | null;
+  /** Populated typed regarding lookups (a "filed" association) added to the host communication record. */
+  filed?: { field: string; entityLogicalName: string; id: string; formattedName: string }[];
 }): { context: AnyContext; retrieveRecord: jest.Mock } {
   const denorm = overrides?.denorm ?? {
     number: 'MTR-2025-0001',
@@ -70,6 +72,12 @@ function buildContext(overrides?: {
     sprk_regardingrecordname: denorm.name ?? undefined,
     sprk_regardingrecordurl: denorm.url ?? undefined,
   };
+  // Add any filed typed lookups (bound-value + OData formatted-value pair) the App reads to build
+  // the authoritative filed-association list.
+  for (const f of overrides?.filed ?? []) {
+    denormRecord[`_${f.field}_value`] = f.id;
+    denormRecord[`_${f.field}_value@OData.Community.Display.V1.FormattedValue`] = f.formattedName;
+  }
   const retrieveRecord = jest.fn((entity: string, _id: string, opts?: string) => {
     if (entity === 'sprk_communication' && opts === undefined) return Promise.resolve(denormRecord);
     return Promise.resolve({});
@@ -94,7 +102,7 @@ function buildContext(overrides?: {
 function renderApp(context: AnyContext, readOnly = false): void {
   render(
     <FluentProvider theme={webLightTheme}>
-      <CommunicationConnectionsApp context={context} readOnly={readOnly} version="1.6.0" />
+      <CommunicationConnectionsApp context={context} readOnly={readOnly} version="1.6.1" />
     </FluentProvider>
   );
 }
@@ -209,6 +217,124 @@ describe('CommunicationConnectionsApp — RegardingResolver card parity (task 13
   it('renders the version footer', async () => {
     const { context } = buildContext();
     renderApp(context);
-    expect(await screen.findByTestId('cc-footer')).toHaveTextContent('v1.6.0');
+    expect(await screen.findByTestId('cc-footer')).toHaveTextContent('v1.6.1');
+  });
+
+  // ── FIX A (task 132 / UAT R5): card sources Number + Name from the primary FILED
+  // association, NOT the denorm fields (which the inbound path writes backwards). ──
+  it('sources Row 2 Number + Name from the primary filed association when the denorm fields are backwards (inbound)', async () => {
+    const MATTER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    // Inbound-style bad denorm: the record NUMBER sits in the NAME field, number field null.
+    const denorm = { number: null, name: 'LITG-119896', url: null };
+    // A filed matter lookup whose formatted value is the REAL matter name.
+    const filed = [
+      {
+        field: 'sprk_regardingmatter',
+        entityLogicalName: 'sprk_matter',
+        id: MATTER_ID,
+        formattedName: 'Monte Rosa Biotechnology v Spaarke Inc',
+      },
+    ];
+    // Provenance carries the matter candidate with a RecordNameMatch contributor supplying the NUMBER.
+    const provenance = JSON.stringify({
+      version: 1,
+      direction: 'incoming',
+      decision: { status: 'Suggested', autoFiled: false },
+      rungsFired: ['RecordNameMatch'],
+      candidates: [
+        {
+          field: 'sprk_regardingmatter',
+          targetEntity: 'sprk_matter',
+          targetId: MATTER_ID,
+          reinforcedConfidence: 0.95,
+          deterministicConfidence: 0.95,
+          written: false,
+          conflict: false,
+          contributors: [
+            {
+              rung: 'RecordNameMatch',
+              confidence: 0.95,
+              provenance:
+                'record-name-match:sprk_matter:where=subject:matched=number:' +
+                'name="Monte Rosa Biotechnology v Spaarke Inc":number="LITG-119896":reason="reference number in subject"',
+            },
+          ],
+        },
+      ],
+      signals: [],
+    });
+
+    const { context } = buildContext({ denorm, filed, provenance });
+    renderApp(context);
+
+    // Name cell = the filed association's real record name (NOT the denorm "LITG-119896").
+    await waitFor(() =>
+      expect(screen.getByTestId('cc-record-name')).toHaveTextContent('Monte Rosa Biotechnology v Spaarke Inc')
+    );
+    // Number cell = the provenance-derived reference number (the number that was mislabeled into the name).
+    expect(screen.getByTestId('cc-record-number')).toHaveTextContent('LITG-119896');
+    // The name field's mislabeled number must NOT appear as the record name.
+    expect(screen.getByTestId('cc-record-name')).not.toHaveTextContent('LITG-119896');
+  });
+
+  it('number Link opens the filed matter record (filed association entity + id) via navigateTo', async () => {
+    const MATTER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    (global as { Xrm?: unknown }).Xrm = {
+      Navigation: { navigateTo },
+      Page: { data: { entity: { getId: () => HOST_ID } } },
+    };
+
+    const denorm = { number: null, name: 'LITG-119896', url: null };
+    const filed = [
+      {
+        field: 'sprk_regardingmatter',
+        entityLogicalName: 'sprk_matter',
+        id: MATTER_ID,
+        formattedName: 'Monte Rosa Biotechnology v Spaarke Inc',
+      },
+    ];
+    const provenance = JSON.stringify({
+      version: 1,
+      direction: 'incoming',
+      decision: { status: 'Suggested', autoFiled: false },
+      rungsFired: ['RecordNameMatch'],
+      candidates: [
+        {
+          field: 'sprk_regardingmatter',
+          targetEntity: 'sprk_matter',
+          targetId: MATTER_ID,
+          reinforcedConfidence: 0.95,
+          deterministicConfidence: 0.95,
+          written: false,
+          conflict: false,
+          contributors: [
+            {
+              rung: 'RecordNameMatch',
+              confidence: 0.95,
+              provenance:
+                'record-name-match:sprk_matter:where=subject:matched=number:' +
+                'name="Monte Rosa Biotechnology v Spaarke Inc":number="LITG-119896":reason="x"',
+            },
+          ],
+        },
+      ],
+      signals: [],
+    });
+
+    const { context } = buildContext({ denorm, filed, provenance });
+    renderApp(context);
+
+    const numberLink = await screen.findByTestId('cc-record-number');
+    fireEvent.click(numberLink);
+
+    await waitFor(() => expect(navigateTo).toHaveBeenCalled());
+    const [pageInput, navOptions] = navigateTo.mock.calls[0];
+    expect(pageInput).toMatchObject({
+      pageType: 'entityrecord',
+      entityName: 'sprk_matter',
+      entityId: MATTER_ID,
+    });
+    expect(navOptions).toMatchObject({ target: 2 });
   });
 });
