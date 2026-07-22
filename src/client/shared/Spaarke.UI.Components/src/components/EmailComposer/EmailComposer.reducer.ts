@@ -301,9 +301,7 @@ export function mapStateToSendRequest(state: EmailComposerState, threadId?: stri
     // new record at create time (true inheritance — a direct copy, NOT an engine re-derivation). Only
     // reply/forward set it (Reply All maps to the 'reply' mode); compose/draft/view do not inherit.
     inheritRegardingFromCommunicationId:
-      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId
-        ? state.communicationId
-        : undefined,
+      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId ? state.communicationId : undefined,
   };
 }
 
