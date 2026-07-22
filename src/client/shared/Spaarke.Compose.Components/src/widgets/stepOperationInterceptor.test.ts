@@ -502,6 +502,112 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
   });
 });
 
+// ---------------------------------------------------------------------------
+// Structural step → operation synthesis (task 031, FR-05) — the four paragraph ops
+// ---------------------------------------------------------------------------
+//
+// These exercise task 031's CLIENT half (the amendment closing task 023's coverage gap): a
+// block-boundary ProseMirror step must EMIT the correct structural op into the op-log instead of
+// being silently deferred. The must-verify closed-set case is whole-paragraph delete/merge; split +
+// insert are covered for completeness.
+
+/** N one-line paragraphs, ids `ids[i]`, each with text `texts[i]`. */
+function paras(ids: string[], texts: string[]): PMNode {
+  const blocks = ids.map((id, i) => schema.nodes.paragraph.create({ paraId: id }, texts[i] ? [schema.text(texts[i])] : []));
+  return schema.nodes.doc.create(null, blocks);
+}
+
+describe('classifyStructuralStep — whole-paragraph delete / merge (task 031, closes task-023 gap)', () => {
+  it('a backspace-merge of paragraph 2 into paragraph 1 emits mergeParagraph{paraId:P2, targetParaId:P1}', () => {
+    // [p1 "Hello", p2 "World"]. p1 content 1..6; p1 node-end 7; p2 content-start 8. Deleting the boundary
+    // [6, 8) joins p2 into p1 — a structural ReplaceStep.
+    const doc = paras(['AAAA1111', 'BBBB2222'], ['Hello', 'World']);
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr.delete(1 + 5, 1 + 5 + 1 + 1); // end of p1 content → start of p2 content
+
+    const appended = log.recordTransaction(tr);
+
+    expect(appended).toHaveLength(1);
+    expect(appended[0]).toEqual({ type: 'mergeParagraph', paraId: 'BBBB2222', targetParaId: 'AAAA1111' });
+    // It is in the serialized log — no longer silently lost.
+    const snapshot = log.serialize(tr.doc);
+    expect(snapshot.orderedOps.map((o) => o.operation.type)).toContain('mergeParagraph');
+  });
+
+  it('deleting an entire paragraph NODE emits deleteParagraph{paraId} (the retired empty-text sentinel semantic)', () => {
+    // [p1, p2, p3]. Remove p2 entirely by deleting [p2NodeStart, p3NodeStart).
+    const doc = paras(['AAAA1111', 'BBBB2222', 'CCCC3333'], ['one', 'two', 'three']);
+    const a = 3; // "one".length
+    const b = 3; // "two".length
+    const p2Start = a + 2; // p1 node = [0, a+2)
+    const p3Start = a + 2 + b + 2;
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr.delete(p2Start, p3Start);
+
+    const appended = log.recordTransaction(tr);
+
+    expect(appended).toEqual([{ type: 'deleteParagraph', paraId: 'BBBB2222' }]);
+    // Neighbours survive; only the middle paragraph's op is captured.
+    expect(tr.doc.childCount).toBe(2);
+  });
+
+  it('a whole-paragraph delete is NEVER silently dropped (regression on notes/task-023-coverage-gap.md)', () => {
+    // The precise gap: before task 031 a structural step produced "no operation, no flag". Assert a structural
+    // op now reaches the log for the vanished-paragraph case, and it is NOT routed to the deferral seam.
+    const structuralSeen: string[] = [];
+    const doc = paras(['AAAA1111', 'BBBB2222', 'CCCC3333'], ['keep', 'gone', 'tail']);
+    const log = new RebasedOperationLog({ onStructuralStep: (_s, r) => structuralSeen.push(r) });
+    const state = EditorState.create({ doc });
+    const p2Start = 'keep'.length + 2; // 6
+    const p3Start = p2Start + 'gone'.length + 2; // 12
+    const tr = state.tr.delete(p2Start, p3Start);
+
+    const appended = log.recordTransaction(tr);
+
+    expect(appended.length).toBeGreaterThan(0);
+    expect(appended[0].type).toBe('deleteParagraph');
+    expect(structuralSeen).toHaveLength(0); // it was CAPTURED, not deferred
+  });
+});
+
+describe('classifyStructuralStep — split / insert (task 031)', () => {
+  it('pressing Enter mid-paragraph emits splitParagraph with the run-local split point + a minted newParaId', () => {
+    const doc = paras(['AAAA1111'], ['HelloWorld']);
+    const state = EditorState.create({ doc });
+    const tr = state.tr.split(1 + 5); // split "HelloWorld" after "Hello"
+    const cls = classifyStep(tr.steps[0], doc, {});
+
+    const ops = expectOps(cls);
+    expect(ops).toHaveLength(1);
+    const op = ops[0];
+    expect(op.type).toBe('splitParagraph');
+    if (op.type === 'splitParagraph') {
+      expect(op.paraId).toBe('AAAA1111');
+      expect(op.at).toEqual({ runIndex: 0, offset: 5 });
+      expect(op.newParaId).toMatch(/^[0-9A-F]{8}$/);
+    }
+  });
+
+  it('inserting a new empty paragraph node emits insertParagraph{position} with a minted newParaId', () => {
+    const doc = paras(['AAAA1111', 'BBBB2222'], ['first', 'second']);
+    const state = EditorState.create({ doc });
+    const empty = schema.nodes.paragraph.create({ paraId: null });
+    const insertPos = 'first'.length + 2; // just after p1's node
+    const tr = state.tr.insert(insertPos, empty);
+    const cls = classifyStep(tr.steps[0], doc, {});
+
+    const ops = expectOps(cls);
+    expect(ops[0].type).toBe('insertParagraph');
+    if (ops[0].type === 'insertParagraph') {
+      expect(ops[0].paraId).toBe('AAAA1111');
+      expect(ops[0].position).toBe('After');
+      expect(ops[0].newParaId).toMatch(/^[0-9A-F]{8}$/);
+    }
+  });
+});
+
 describe('RebasedOperationLog — ambiguous same-position ordering is surfaced, not silently guessed (task 022, escalation)', () => {
   it('calls onAmbiguousOrder when two different ops resolve to the identical position at serialize time', () => {
     const doc0 = onePara(PARA_ID, 'Hello World');

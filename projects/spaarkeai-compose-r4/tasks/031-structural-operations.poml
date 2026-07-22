@@ -3,7 +3,7 @@
     <title>Structural operations — split/merge/insert/delete paragraph, sequenced last (FR-05)</title>
     <phase>3 Patch Engine</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends the byte-author `.cs` on the BFF hot path; paragraph-mark deletion via `w:pPr/w:rPr/w:del` is the hardest OOXML edge. FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -24,8 +24,32 @@
     <tags>bff-api,docx</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+    <completion-note>
+      SERVER (ComposeShadowPatchEngine.cs): the four structural ops implemented + SEQUENCED LAST (two-pass
+      applier — text/mark ops first, structural collected + applied after, so text-op run-local anchors are
+      unaffected; proven by Apply_StructuralOpsSequencedLast_TextAnchorUnaffected). Tracked representation is a
+      paragraph-MARK revision in w:pPr/w:rPr (MarkParagraphMark): split = inserted mark on the leading para +
+      trailing runs moved to a new w14:paraId (cloned pPr); merge = w:del on the TARGET (predecessor) para-mark
+      glyph — bridge-prior-art #6, the hardest edge; insert = new empty para w/ inserted mark; delete = strike
+      runs (w:del/w:delText) + deleted para-mark (the retired {paraId,text:''} sentinel semantic — closes task
+      023 server-side). Unrepresentable edges REFUSED via new ComposePatchErrorKind.StructuralOperationRefused
+      (merge across a table/section boundary, colliding newParaId, split of a field-bearing para) — handled, not
+      corrupted. setBlockAttr remains at its own StructuralOpNotYetImplemented seam (outside the four-op scope).
+      CLIENT (stepOperationInterceptor.ts): classifyStructuralStep diffs paraId-bearing blocks before/after a
+      block-boundary ReplaceStep/ReplaceAroundStep to EMIT mergeParagraph/deleteParagraph/splitParagraph/
+      insertParagraph into the RebasedOperationLog (buildAnchor + deriveOperation extended for the four types);
+      whole-paragraph delete/merge is now CAPTURED, not silently deferred — closes the task-023 coverage gap
+      client-side. Verify: server dotnet build clean; 547 Compose tests green (7 new structural + ordering +
+      table-refusal); client typecheck clean on the two touched files (pre-existing unrelated @spaarke/ai-widgets
+      module errors remain); 31 stepOperationInterceptor jest tests green (4 new structural). Publish 49.90 MB
+      compressed incl PDBs (+0.27 vs ~49.63 baseline, ≤60). No NEW package / no NEW HIGH CVE (the
+      System.Security.Cryptography.Xml HIGH is pre-existing transitive). ADR-007/010/013 clean; Tier-1
+      NetArchTest ADR-013 green (the 3 ArchTest failures — ADR-007 Graph isolation, ADR-010 concrete/Options —
+      are pre-existing whole-assembly scans, not introduced here). Do NOT commit; TASK-INDEX/current-task
+      untouched per orchestrator instruction. Task 023 may now proceed (its dep on 031 is satisfied).
+    </completion-note>
   </metadata>
 
   <prompt>

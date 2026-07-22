@@ -26,8 +26,8 @@
 | 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | done | ✅ |
 | 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,006,**031** | ⏸ deferred→031 | 🔲 |
 | 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | done | ✅ |
-| 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | blocked | 🔲 |
-| 031 | Structural operations — split/merge/insert/delete (FR-05) | 3 Patch Engine | opus / xhigh | FULL | 030 | blocked | 🔲 |
+| 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | done | ✅ |
+| 031 | Structural operations — split/merge/insert/delete (FR-05) + client wiring | 3 Patch Engine | opus / xhigh | FULL | 030 | done | ✅ |
 | 032 | Retire both legacy writers (FR-06) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | blocked | 🔲 |
 | 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030 | blocked | 🔲 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | blocked | 🔲 |

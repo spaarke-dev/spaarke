@@ -21,16 +21,19 @@
  * TipTap already bundles (same import family the sibling QaHighlightExtension uses:
  * `@tiptap/pm/state`, `@tiptap/pm/view`). NO `@tiptap-pro/*`, no AGPL, no new package.
  *
- * SCOPE BOUNDARY vs task 031 (structural operations): task 020 owns the interceptor
- * framework + the run-local anchor resolver + the INLINE op set (insertText /
- * deleteRange / replaceRange / setMark / clearMark) + the `setBlockAttr` alignment
- * case + the opaque-atom refusal guard. Paragraph-level STRUCTURAL synthesis
- * (splitParagraph / mergeParagraph / insertParagraph / deleteParagraph, list
- * wrap/unwrap, and non-alignment block attrs) is task 031 — such steps are routed to
- * the `onStructuralStep` seam (recognized, NEVER silently dropped, NEVER mis-mapped to
- * a wrong op). A step whose SHAPE the op schema genuinely cannot carry (e.g. a
- * formatting mark outside the closed `ComposeMarkType` set) is surfaced via
- * `onUnrepresentableStep` (the POML `<escalation>` seam — root §6/§6.5), never dropped.
+ * SCOPE (task 020 framework + task 031 structural synthesis): task 020 built the
+ * interceptor framework + the run-local anchor resolver + the INLINE op set (insertText /
+ * deleteRange / replaceRange / setMark / clearMark) + the `setBlockAttr` alignment case +
+ * the opaque-atom refusal guard. Task 031 adds paragraph-level STRUCTURAL synthesis
+ * (`classifyStructuralStep`): a block-boundary ReplaceStep/ReplaceAroundStep is diffed
+ * before-vs-after to EMIT `splitParagraph` / `mergeParagraph` / `insertParagraph` /
+ * `deleteParagraph` — so a whole-paragraph delete/merge is CAPTURED into the rebased op-log
+ * (closes the task-023 coverage gap; see `notes/task-023-coverage-gap.md`). A structural
+ * shape the four ops cannot cleanly carry (a forward-merge, a multi-paragraph rewrite, a
+ * list wrap/unwrap with no block-count change) is still routed to the `onStructuralStep`
+ * seam (recognized, NEVER silently dropped, NEVER mis-mapped). A step whose SHAPE the op
+ * schema genuinely cannot carry (e.g. a formatting mark outside the closed `ComposeMarkType`
+ * set) is surfaced via `onUnrepresentableStep` (the POML `<escalation>` seam — root §6/§6.5).
  *
  * @see projects/spaarkeai-compose-r4/notes/bridge-prior-art.md §1 (Step/StepMap/Mapping), §4 (anchor drift)
  * @see src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts (task 003 op contract)
@@ -292,6 +295,137 @@ function sliceText(fragment: Fragment): string {
 }
 
 // ---------------------------------------------------------------------------
+// Structural step → operation synthesis (task 031 — the four paragraph ops)
+// ---------------------------------------------------------------------------
+
+/** A paraId-addressable block in a doc snapshot: its node, durable paraId (or null if unminted), and text. */
+interface StructuralBlock {
+  node: PMNode;
+  paraId: string | null;
+  text: string;
+}
+
+/** Ordered list of paraId-bearing textblock paragraphs, each with its paraId (or null) + text content. */
+function structuralBlocks(doc: PMNode): StructuralBlock[] {
+  const out: StructuralBlock[] = [];
+  doc.descendants((node) => {
+    if ((PARAID_NODE_TYPES as readonly string[]).includes(node.type.name) && node.isTextblock) {
+      const pid = (node.attrs as { paraId?: unknown } | undefined)?.paraId;
+      out.push({
+        node,
+        paraId: typeof pid === 'string' && pid.length > 0 ? pid : null,
+        text: node.textContent,
+      });
+      return false; // a textblock's inline children are not themselves blocks
+    }
+    return true;
+  });
+  return out;
+}
+
+/** Mint a fresh 8-hex `w14:paraId` (ST_LongHexNumber) for the NEW paragraph a split/insert op creates. */
+function mintParaId(): string {
+  let s = '';
+  for (let i = 0; i < 8; i++) s += Math.floor(Math.random() * 16).toString(16);
+  return s.toUpperCase();
+}
+
+/**
+ * Synthesize the task-003 STRUCTURAL operation a block-boundary ProseMirror step performs, by diffing the
+ * paraId-bearing blocks BEFORE vs AFTER the step (the durable-id equivalent of the retired
+ * `collectEditedParagraphs` load-vs-current diff — see `notes/task-023-coverage-gap.md`):
+ *
+ *   - one paraId removed, its content absorbed by its predecessor  → `mergeParagraph`
+ *   - one paraId removed, content NOT absorbed forward             → `deleteParagraph` (closes task 023's gap)
+ *   - one block gained, a source's tail became the new block       → `splitParagraph`
+ *   - one empty block gained, all existing blocks unchanged        → `insertParagraph`
+ *
+ * A shape the four ops cannot cleanly carry (a genuine forward-merge, a multi-paragraph rewrite, a list
+ * wrap/unwrap with no block-count change) is DEFERRED — recognized via `onStructuralStep`, never mis-mapped to a
+ * wrong op. This is the same never-mis-map discipline the inline classifier applies at its refusal seams.
+ */
+function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): StepClassification {
+  const applied = step.apply(docBefore);
+  if (applied.failed || !applied.doc) {
+    return { kind: 'defer-structural', step, reason };
+  }
+
+  const before = structuralBlocks(docBefore);
+  const after = structuralBlocks(applied.doc);
+  const afterById = new Map<string, StructuralBlock>();
+  for (const b of after) if (b.paraId) afterById.set(b.paraId, b);
+  const removed = before.filter((b) => b.paraId !== null && !afterById.has(b.paraId));
+
+  // ---- one paragraph removed → merge (backward) or whole-paragraph delete ----
+  if (removed.length === 1 && after.length === before.length - 1) {
+    const gone = removed[0];
+    const goneIdx = before.indexOf(gone);
+    const predecessor = before[goneIdx - 1];
+    if (predecessor?.paraId) {
+      const predAfter = afterById.get(predecessor.paraId);
+      if (predAfter && predAfter.text === predecessor.text + gone.text) {
+        return {
+          kind: 'ops',
+          ops: [{ type: 'mergeParagraph', paraId: gone.paraId as string, targetParaId: predecessor.paraId }],
+        };
+      }
+    }
+    // Not a backward-merge. Classify as a whole-paragraph DELETE only when `gone`'s content was NOT absorbed
+    // forward into its successor (a forward-merge is not expressible as "append onto predecessor" — defer it
+    // rather than mis-strike content as a delete).
+    const successor = before[goneIdx + 1];
+    const succAfter = successor?.paraId ? afterById.get(successor.paraId) : undefined;
+    const absorbedForward = !!succAfter && succAfter.text === gone.text + (successor?.text ?? '');
+    if (!absorbedForward) {
+      return { kind: 'ops', ops: [{ type: 'deleteParagraph', paraId: gone.paraId as string }] };
+    }
+    return { kind: 'defer-structural', step, reason };
+  }
+
+  // ---- one paragraph gained → split (a source's tail) or insert (a brand-new block) ----
+  if (removed.length === 0 && after.length === before.length + 1) {
+    // SPLIT: everything before the split index is unchanged, so before[i] aligns positionally with after[i].
+    // At the split index the source's prefix stays in after[i] (same paraId) and the moved tail is after[i+1].
+    // (Positional, NOT by-id: ProseMirror's `split` copies the source paraId onto the new block, so an id map
+    //  would collide — the new block's own id is irrelevant, the server assigns `newParaId`.)
+    for (let i = 0; i < before.length; i++) {
+      const s = before[i];
+      const prefix = after[i];
+      if (!s.paraId || !prefix || prefix.paraId !== s.paraId) continue;
+      if (prefix.text.length < s.text.length && s.text.startsWith(prefix.text)) {
+        const suffix = s.text.slice(prefix.text.length);
+        const moved = after[i + 1];
+        if (moved && moved.text === suffix) {
+          return {
+            kind: 'ops',
+            ops: [{ type: 'splitParagraph', paraId: s.paraId, at: runLocalPoint(s.node, prefix.text.length), newParaId: mintParaId() }],
+          };
+        }
+      }
+    }
+
+    const existingUnchanged = before.every((b) => !b.paraId || afterById.get(b.paraId)?.text === b.text);
+    if (existingUnchanged) {
+      const newIdx = after.findIndex((b) => b.paraId === null);
+      if (newIdx >= 0) {
+        const refBefore = after[newIdx - 1];
+        const refAfter = after[newIdx + 1];
+        if (refBefore?.paraId) {
+          return { kind: 'ops', ops: [{ type: 'insertParagraph', paraId: refBefore.paraId, newParaId: mintParaId(), position: 'After' }] };
+        }
+        if (refAfter?.paraId) {
+          return { kind: 'ops', ops: [{ type: 'insertParagraph', paraId: refAfter.paraId, newParaId: mintParaId(), position: 'Before' }] };
+        }
+      }
+    }
+    return { kind: 'defer-structural', step, reason };
+  }
+
+  // Multi-paragraph rewrite / list wrap-unwrap without a block-count change — recognized, not mis-mapped.
+  return { kind: 'defer-structural', step, reason };
+}
+
+// ---------------------------------------------------------------------------
 // Step → operation classification
 // ---------------------------------------------------------------------------
 
@@ -376,8 +510,9 @@ export function classifyStep(
       return { kind: 'ops', ops: [] };
     }
 
-    // Cross-paragraph or block-boundary ReplaceStep (split/merge/para insert/delete) → task 031.
-    return { kind: 'defer-structural', step, reason: 'replace-step-structural' };
+    // Cross-paragraph or block-boundary ReplaceStep (split/merge/para insert/delete) → synthesize the
+    // structural op (task 031). Whole-paragraph delete/merge is captured here (closes task 023's gap).
+    return classifyStructuralStep(step, docBefore, 'replace-step-structural');
   }
 
   // --- AddMarkStep → setMark -------------------------------------------------------
@@ -409,9 +544,9 @@ export function classifyStep(
     return { kind: 'defer-structural', step, reason: `attr-step:${step.attr}` };
   }
 
-  // --- ReplaceAroundStep (list wrap/unwrap, blockquote) → structural (task 031) ----
+  // --- ReplaceAroundStep (list wrap/unwrap, blockquote, para split/merge) → structural (task 031) ----
   if (step instanceof ReplaceAroundStep) {
-    return { kind: 'defer-structural', step, reason: 'replace-around-step' };
+    return classifyStructuralStep(step, docBefore, 'replace-around-step');
   }
 
   // --- Any other core step (AddNodeMark / RemoveNodeMark / DocAttr / unknown) ------
@@ -683,6 +818,21 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     assoc,
   });
 
+  if (
+    op.type === 'splitParagraph' ||
+    op.type === 'mergeParagraph' ||
+    op.type === 'insertParagraph' ||
+    op.type === 'deleteParagraph'
+  ) {
+    // A structural op is paragraph-scoped (no run offset) — anchor it at the step's block-boundary position so
+    // the rebasing pass still flags it if a later edit deletes that position (never-silently-drop). Its durable
+    // payload paraIds (paraId / targetParaId / newParaId) are Word-native and carried as-captured.
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) {
+      return { kind: 'block', point: toFinal(step.from, -1) };
+    }
+    return null;
+  }
+
   if (step instanceof ReplaceStep) {
     if (op.type === 'insertText') {
       // The insertion point sticks to content BEFORE it (assoc -1) — a caret-position anchor that
@@ -737,9 +887,15 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       if (!isParaIdBlock(node)) return null;
       return { ...op, paraId: (node.attrs as { paraId: string }).paraId };
     }
+    case 'splitParagraph':
+    case 'mergeParagraph':
+    case 'insertParagraph':
+    case 'deleteParagraph':
+      // Structural ops carry durable `w14:paraId`s in their payload (paraId / targetParaId / newParaId),
+      // captured from the pre-step doc — Word-native ids, NOT re-derivable from a live document position. Return
+      // the op as-captured; the rebasing `deletedContentFlag` still guards it (never-silently-drop).
+      return op;
     default:
-      // Structural op types (splitParagraph/mergeParagraph/insertParagraph/deleteParagraph) are
-      // not emitted by classifyStep yet (task 031's surface) — defensive, unreachable today.
       return null;
   }
 }
