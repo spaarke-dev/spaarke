@@ -505,6 +505,22 @@ export function ConversationPane(): React.JSX.Element {
       if (!payload.consumerType) {
         return;
       }
+
+      // task 050 (2026-07-22): the `list-tasks` capability opens a WORKSPACE GRID TAB, not a wizard/
+      // OOB-form hand-off. `launchSurface` only implements wizard / oob-form transports; a grid tab is
+      // a Class-2a in-app event-bus open. Route it to the shared DataverseEntityViewWidget ("My Tasks",
+      // ownerid eq-userid → assigned to me, statecode=0 → open) via the SAME `widget_load` bus the
+      // compose/draft branches use. The capability drafted nothing — ignore any payload.
+      if (payload.consumerType === "list-tasks") {
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "my-tasks-list",
+          widgetData: {},
+          displayName: "My Tasks",
+        } as WorkspacePaneEvent);
+        return;
+      }
+
       const draft =
         payload.payload && typeof payload.payload === "object" ? payload.payload : {};
       // Lift the server-enriched `resolvedLookups` out of draftValues so the
@@ -545,7 +561,7 @@ export function ConversationPane(): React.JSX.Element {
         bffBaseUrl,
       });
     },
-    [bffBaseUrl, getSessionId]
+    [bffBaseUrl, getSessionId, dispatch]
   );
 
   // UAT R4-12: the session's attached-file context for Quick Start wizards. Unlike the chip/text

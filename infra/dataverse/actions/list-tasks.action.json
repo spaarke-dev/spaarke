@@ -1,0 +1,25 @@
+{
+  "$comment": "spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22) — list-tasks Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row. This is the mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=list-tasks). The Binding that routes to it is in sprk_playbookconsumer-rows.json and DECLARES the core `surface_launch` disposition (BindingDisposition.SurfaceLaunch = 100000007) — the agent selects list-tasks by its tooldescription, dispatch emits a surface_launch SSE with consumerType=list-tasks, and the SpaarkeAi client opens the 'My Tasks' workspace grid tab (ConversationPane.handleSurfaceLaunch). Live rows on spaarkedev1: action 57651aad-8e85-f111-8075-7c1e5268570d, binding 5b1870b9-8e85-f111-8075-7c1e5268570d. Owner hygiene: actionCode carries NO version suffix (list-tasks).",
+  "$comment-purpose": "This Action DRAFTS NOTHING and CREATES NOTHING. It exists so the agent has a grounded, tool-described capability to select when the user asks to SEE their tasks; the dispatch's only load-bearing effect is the surface_launch that opens the grid. The LLM emits a one-line acknowledgement only — the grid tab shows the real records (sprk_event, Task subtype, statecode=0, ownerid eq-userid, queried client-side by the DataGrid framework). allowstools=false structurally prevents any write/tool call.",
+  "actionCode": "list-tasks",
+  "name": "List Tasks",
+  "description": "Open the user's task list (their open, assigned Event-Tasks) in a workspace grid tab. Drafts nothing and creates nothing; the tab shows the live records.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer). No new executor (ADR-039 reuse).",
+  "temperature": 0.1,
+  "$comment-temperature": "Low — the output is a fixed one-line acknowledgement; no creative latitude is wanted.",
+  "systemPrompt": "ROLE: The user asked to SEE or list THEIR tasks. This capability OPENS the user's task list (their open, assigned Event-Tasks) in a workspace tab — you do NOT fetch, count, or enumerate the tasks yourself, and you have NO task data. Emit a JSON object matching the output schema EXACTLY (additionalProperties is false): set `acknowledgement` to a brief one-line confirmation that their tasks are opening (for example 'Opening your open tasks.'). Do NOT fabricate task names, counts, due dates, or any task details — you do not have them; the tab shows the real list.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["acknowledgement"],
+    "properties": {
+      "acknowledgement": {
+        "type": "string",
+        "description": "A brief one-line confirmation that the user's task list is opening. Never contains fabricated task details.",
+        "maxLength": 200
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for list-tasks (spaarkeai-assistant-enhancements-r1 task 050). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). The user's utterance is the only input; the tasks themselves are queried client-side by the DataGrid framework (ownerid eq-userid), never a maker-provided or LLM-authored value. Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "list-tasks",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["request"],
+    "properties": {
+      "request": {
+        "type": "string",
+        "description": "The user's request to see their tasks, in their own words (e.g. 'what are my tasks', 'show my open tasks'). The agent loop supplies this from the user's message.",
+        "maxLength": 2000
+      }
+    }
+  }
+}
