@@ -4,13 +4,7 @@ import { KindRouter, type NotificationHandler } from './kindRouter';
 import { startPollFallback, type PollFallbackHandle } from './pollFallback';
 import type { NotificationKind } from './types';
 
-export type NotificationsConnectionState =
-  | 'idle'
-  | 'connecting'
-  | 'connected'
-  | 'reconnecting'
-  | 'polling'
-  | 'stopped';
+export type NotificationsConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'polling' | 'stopped';
 
 export interface NotificationsClientOptions {
   /** Base poll interval used once the client falls back to polling. Default 30s (see `pollFallback.ts`). */
@@ -81,7 +75,7 @@ export class NotificationsClient {
     this.setState('connecting');
 
     try {
-      const connection = await connectSignalR((signal) => {
+      const connection = await connectSignalR(signal => {
         this.router.dispatch({
           outboxRowId: signal.outboxRowId,
           kind: signal.kind,
@@ -142,8 +136,8 @@ export class NotificationsClient {
     this.pollHandle = startPollFallback({
       intervalMs: this.options.pollIntervalMs,
       maxBackoffMs: this.options.pollMaxBackoffMs,
-      onEvent: (event) => this.router.dispatch(event),
-      onError: (err) => {
+      onEvent: event => this.router.dispatch(event),
+      onError: err => {
         // eslint-disable-next-line no-console
         console.warn('[@spaarke/notifications] Poll-fallback tick failed (non-fatal; will retry with backoff):', err);
       },

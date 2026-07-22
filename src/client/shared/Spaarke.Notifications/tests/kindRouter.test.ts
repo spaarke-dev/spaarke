@@ -1,7 +1,10 @@
 import { KindRouter } from '../src/kindRouter';
 import type { NotificationEvent } from '../src/types';
 
-function makeEvent(kind: string, overrides: Partial<NotificationEvent> = {}): { outboxRowId: string; kind: string; envelope?: unknown; source: 'live' | 'poll' } {
+function makeEvent(
+  kind: string,
+  overrides: Partial<NotificationEvent> = {}
+): { outboxRowId: string; kind: string; envelope?: unknown; source: 'live' | 'poll' } {
   return {
     outboxRowId: overrides.outboxRowId ?? 'row-1',
     kind,
