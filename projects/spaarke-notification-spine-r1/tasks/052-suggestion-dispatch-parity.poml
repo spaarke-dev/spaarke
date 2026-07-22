@@ -4,7 +4,13 @@
     <title>Proactive suggestion dispatch re-enters the shipped SurfaceLaunch/dispatch path — parity proof</title>
     <phase>5 Suggestion consumer</phase>
     <gate>blocked-until:051,031</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- REFRAMED 2026-07-22 (§6.5 owner decision): the dispatch-parity premise was blocked by a real gap
+         (SuggestionEnvelope carries no bindingId; daily-briefing "review" nudges map to no capability binding).
+         Owner directed: acting on a suggestion OPENS the regarding record in a modal (navigation, not dispatch).
+         Delivered as such — see notes/052-suggestion-action-open-record-notes.md. Acceptance criteria below are
+         SUPERSEDED by the modal-open contract in that note. -->
+
     <rigor>FULL</rigor>
     <rigor-reason>Dispatch-spine parity proof; BFF-touching + integration-test tags per root CLAUDE.md §8</rigor-reason>
     <model-tier>opus</model-tier>

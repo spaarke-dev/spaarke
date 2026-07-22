@@ -498,15 +498,17 @@ export function ConversationPane(): React.JSX.Element {
   });
   acceptChipsRef.current = chips.acceptChips;
 
-  // ── spaarke-notification-spine-r1 task 051 (FR-16): proactive-suggestion cards ──
+  // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
   // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
   // spine via the task-021 `@spaarke/notifications` client, re-grounded through the
   // BFF, and rendered as a compact card (SuggestionCard) — a SIBLING of the Click-path
-  // chips, independent of a dispatch turn. The card's action re-enters the EXISTING
-  // dispatch (chips.dispatchBinding) — never a second pipeline (ADR-039 / spec Scope).
-  // Held in a ref so the notifications subscription never re-arms on dispatch-state churn.
-  const dispatchBindingRef = React.useRef(chips.dispatchBinding);
-  dispatchBindingRef.current = chips.dispatchBinding;
+  // chips, independent of a dispatch turn. ACTING on it OPENS the regarding record in a
+  // MODAL (owner decision, task 052 / FR-17) — the modal-standard Layout 1
+  // (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" }, { target: 2, 85% })`), so the
+  // Assistant is NOT navigated away. This is navigation, NOT a capability dispatch — it uses
+  // the existing `INavigationService` surface, so no second dispatch pipeline is introduced.
+  // ONE shared Xrm navigation service — also drives the saved-preview record open below.
+  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
   const suggestions = useSuggestionCards({
     subscribe: React.useCallback(
       (kind, handler) => getNotificationsClient().registerHandler(kind, handler),
@@ -526,15 +528,19 @@ export function ConversationPane(): React.JSX.Element {
           : [];
       return items as ReadonlyArray<PendingSuggestionItem>;
     }, [authenticatedFetch, bffBaseUrl]),
-    // task 052 re-entry: route the re-validated action through the SHARED dispatch. The
-    // client carries ZERO routing logic (ADR-039) — `actionHint` is handed to the existing
-    // dispatchBinding; task 052 formalizes the actionHint→Binding resolution. An unresolved
-    // Binding surfaces the stable ADR-019 failure line via runBindingDispatch's own catch.
-    onSuggestionAction: React.useCallback((envelope) => {
-      dispatchBindingRef.current(envelope.actionHint, {
-        slots: { regardingRecordId: envelope.regardingRecordId },
-      });
-    }, []),
+    // task 052 (FR-17): acting on a suggestion OPENS the regarding record in a modal
+    // (owner decision) — the shared INavigationService's Layout-1 `openRecordModal`
+    // (`navigateTo` entityrecord, `target: 2`, 85%). Navigation, not a capability dispatch,
+    // so no second dispatch pipeline. `openRecordModal` is optional on the interface; the
+    // Xrm adapter always provides it, and a re-fetch already confirmed the row is live.
+    onSuggestionAction: React.useCallback(
+      (envelope) =>
+        previewNavigationService.openRecordModal?.(
+          envelope.regardingRecordType,
+          envelope.regardingRecordId
+        ) ?? Promise.resolve(),
+      []
+    ),
     inject: injection.inject,
   });
 
@@ -762,8 +768,8 @@ export function ConversationPane(): React.JSX.Element {
   const [savedPreview, setSavedPreview] = React.useState<{ documentId: string; fileName?: string } | null>(null);
   const [previewOpen, setPreviewOpen] = React.useState(false);
 
-  // FIX #7a — Xrm navigation service for the preview modal's "Open record" action (host-context; no BFF route).
-  const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
+  // FIX #7a — the preview modal's "Open record" action reuses the ONE `previewNavigationService`
+  // hoisted above (also drives the task-052 suggestion-card modal open).
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {

@@ -47,6 +47,8 @@ export interface SuggestionEnvelopeLite {
   readonly suggestionId: string;
   readonly source: string;
   readonly regardingRecordId: string;
+  /** Dataverse logical name of the regarding record — pairs with regardingRecordId to open the record (task 052). */
+  readonly regardingRecordType: string;
   readonly title: string;
   readonly snippet?: string;
   readonly actionHint: string;
@@ -143,7 +145,13 @@ function isSuggestionEnvelope(envelope: unknown): envelope is SuggestionEnvelope
     typeof e.suggestionId === "string" &&
     typeof e.title === "string" &&
     typeof e.actionHint === "string" &&
-    typeof e.expiresAt === "string"
+    typeof e.expiresAt === "string" &&
+    // A suggestion is only actionable if it can be OPENED — both the record type
+    // and id must be present (task 052). An envelope missing either does not render.
+    typeof e.regardingRecordId === "string" &&
+    e.regardingRecordId.length > 0 &&
+    typeof e.regardingRecordType === "string" &&
+    e.regardingRecordType.length > 0
   );
 }
 

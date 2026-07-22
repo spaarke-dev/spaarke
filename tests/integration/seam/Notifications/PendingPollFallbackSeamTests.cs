@@ -65,6 +65,7 @@ public sealed class PendingPollFallbackSeamTests
         SuggestionId = Guid.NewGuid(),
         Source = "daily-briefing",
         RegardingRecordId = regardingId.ToString(),
+        RegardingRecordType = "sprk_matter",
         Title = "Review upcoming deadline",
         ActionHint = "review",
         ExpiresAt = DateTimeOffset.Parse("2026-08-01T00:00:00Z")

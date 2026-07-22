@@ -85,6 +85,8 @@ export interface SuggestionEnvelope {
   source: string;
   /** ADR-024 regarding record id. */
   regardingRecordId: string;
+  /** Dataverse logical name of the regarding record (e.g. `"sprk_matter"`) — pairs with `regardingRecordId` so acting on the suggestion can open the record. */
+  regardingRecordType: string;
   /** Short display title. */
   title: string;
   /** OPTIONAL short excerpt — access-checked by the producer before inclusion. */

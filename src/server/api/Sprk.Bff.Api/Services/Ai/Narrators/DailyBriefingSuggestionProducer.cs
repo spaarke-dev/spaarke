@@ -199,6 +199,9 @@ public sealed class DailyBriefingSuggestionProducer
             SuggestionId = Guid.NewGuid(),
             Source = SuggestionSource,
             RegardingRecordId = recordId.ToString(),
+            // Grounding gate (IsGrounded) already guaranteed a non-empty EntityType — carry it so acting
+            // on the suggestion can OPEN the regarding record in a modal (task 052 / FR-17).
+            RegardingRecordType = item.EntityType,
             Title = $"Review {item.Name}",
             Snippet = null, // NFR-02/03: content is never placed on the spine.
             ActionHint = ReviewActionHint,

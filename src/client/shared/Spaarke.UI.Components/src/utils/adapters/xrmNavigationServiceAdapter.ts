@@ -109,6 +109,25 @@ export function createXrmNavigationService(): INavigationService {
       await navigation.openForm({ entityName, entityId });
     },
 
+    // Modal-decision standard Layout 1: open the record as a centred dialog
+    // (`target: 2`) at the fixed 85% × 85% size, so the host surface (e.g. the
+    // SpaarkeAi Assistant pane) is NOT navigated away. See
+    // docs/standards/MODAL-DECISION-CRITERIA.md.
+    async openRecordModal(entityName: string, entityId: string): Promise<void> {
+      const navigation = getNavigation();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nav = navigation as any;
+      await nav.navigateTo(
+        { pageType: 'entityrecord', entityName, entityId },
+        {
+          target: 2,
+          position: 1,
+          width: { value: 85, unit: '%' },
+          height: { value: 85, unit: '%' },
+        }
+      );
+    },
+
     async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
       const _navigation = getNavigation();
 

@@ -98,6 +98,7 @@ public sealed class DailyBriefingSuggestionProducerSeamTests
         envelope.SuggestionId.Should().NotBe(Guid.Empty);
         envelope.Source.Should().Be("daily-briefing");
         envelope.RegardingRecordId.Should().Be(recordId.ToString());
+        envelope.RegardingRecordType.Should().Be("sprk_matter", "acting on the suggestion opens the regarding record (task 052)");
         envelope.Title.Should().Be("Review Acme v. Beta");
         envelope.ActionHint.Should().Be("review", "actionHint drives the renderer, never a pre-authorized token");
         envelope.ExpiresAt.Should().BeAfter(DateTimeOffset.UtcNow, "expiresAt is populated per the task-013 contract");

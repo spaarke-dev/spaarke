@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-22 (task 051 ✅ COMPLETE — suggestion renderer branch shipped + gates clean).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (synced to master `f8e04ecdc`, batching master-merge per owner). **Phases 1–4 COMPLETE** (024/025 on master; 040/041/042 on branch). **Phase 5**: 050 ✅ `c7ef339ae`; **051 ✅ (this commit)**; **052 = NEXT** (dispatch parity), then 090 wrap-up.
+> **Last Updated**: 2026-07-22 (task 052 ✅ COMPLETE — suggestion action = open record modal; ALL Phase 5 done).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (synced to master `f8e04ecdc`, batching master-merge per owner). **Phases 1–5 COMPLETE**. **Only 090 (wrap-up, main-session) remains.**
 
 ---
 
@@ -9,10 +9,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **052 — Suggestion dispatch parity (FR-17), Phase 5 Wave 17 — NOT STARTED** (deps 051✅ 031✅ met). Prior: 024✅ 025✅ 040✅ 041✅ 042✅ 050✅ **051✅**. Only 052 + 090 remain. |
-| **Step** | Begin task 052 (`tasks/052-*.poml`, opus/high). Implement the `actionHint`→Binding re-entry: the seam is `onSuggestionAction(envelope)` in `ConversationPane.tsx` (currently the interim `chips.dispatchBinding(envelope.actionHint, { slots:{ regardingRecordId } })`). Add the dispatch-parity seam test. 051's re-fetch-before-dispatch + graceful-fail + expiry-filter are already in place. |
-| **Status** | 024/025 on master; **040+041+042+050+051 committed on branch** (synced to master f8e04ecdc; batching master-merge per owner). |
-| **Next Action** | **"work on task 052"** (dispatch parity). Then 090 wrap-up (main-session, incl. /test-diet + ADR-047 full). Master-merge of 025/040/041/042/050/051 batched for later per owner. |
+| **Task** | **090 — Project wrap-up, Phase 6 — NOT STARTED** (deps ALL✅). Prior: 024✅ 025✅ 040✅ 041✅ 042✅ 050✅ 051✅ **052✅**. Phase 5 COMPLETE. |
+| **Step** | Begin task 090 (`tasks/090-*.poml`, opus/high, **main-session** — .claude/ + ADR-047 full). Includes `/test-diet` (Step 11 gate) + ADR-047 full version + doc-drift + cleanup. |
+| **Status** | 024/025 on master; **040+041+042+050+051+052 committed on branch** (synced to master f8e04ecdc; batching master-merge per owner). |
+| **Next Action** | **"work on task 090"** (wrap-up, main-session). Then master-merge the batched Phase-3/4/5 commits (025/040/041/042/050/051/052 + checkpoints) per owner. |
+
+### 052 result (Phase 5, Wave 17 — ✅ DONE 2026-07-22) — REFRAMED by owner decision
+- **Owner decision (§6.5)**: the POML's "dispatch-parity proof" premise was BLOCKED (SuggestionEnvelope carries no bindingId; daily-briefing "review" nudges map to no capability binding; interim 051 dispatchBinding wiring would 400). Escalated → **owner directed: acting on a suggestion OPENS the regarding record in a MODAL (navigation, not dispatch)**. This clears the escalation trigger (navigation ≠ second dispatch pipeline) and supersedes the POML criteria.
+- **BFF**: `SuggestionEnvelope` (013) gains required **`RegardingRecordType`** (9 fields now); 050 producer sets it from `item.EntityType`. `/pending` carries the envelope unchanged → field reaches client free. Envelope reflection test 8→9, 050 seam + PendingPollFallback fixtures updated. Build 0-err; 44+148 BFF tests green; **46.10 MB (≤60, zero delta)**; 0 new CVE. No messaging-r3 impact (R3 mirrors CommunicationEnvelope, not Suggestion).
+- **Shared lib**: `@spaarke/notifications` mirror gains `regardingRecordType`; **`INavigationService.openRecordModal(entityName,entityId)`** added (OPTIONAL, non-breaking) → Layout-1 modal (`navigateTo` entityrecord, `target:2`, 85%×85%) in the xrm adapter (+bff adapter+mock). New `xrmNavigationServiceAdapter.test.ts` (2/2) locks the modal shape (openForm NOT used).
+- **SpaarkeAi**: `useSuggestionCards` type-guard now requires type+id (shown ⇒ actionable); `ConversationPane.onSuggestionAction` → `previewNavigationService.openRecordModal(regardingRecordType, regardingRecordId)` (replaced interim dispatchBinding; hoisted+deduped the nav service). `SuggestionCard.test.tsx` 8/8 (+ no-record-type→no-render); **354 conversation tests green**; typecheck 0 surface-owned.
+- Both Step 9.5 gates CLEAN. Notes: `notes/052-suggestion-action-open-record-notes.md`.
+- **For 090**: cite the 052 reframe in the wrap-up PR; `/test-diet` keeps the adapter+hook+envelope tests as regression anchors.
 
 ### 051 result (Phase 5, Wave 16 — ✅ DONE 2026-07-22)
 - **`SuggestionCard.tsx`** (NEW, presentational sibling of ConsumerChips — mirrors the `chip` token class, Fluent v9 tokens ONLY, dark-mode-correct) + **`useSuggestionCards.tsx`** (NEW hook): subscribe to `kind=suggestion` on the ONE `@spaarke/notifications` client → re-ground from `GET /api/notifications/pending` (task 022) → **pre-mount expiry filter** (`expiresAt<=now` excluded) → click **re-fetches/re-grounds BEFORE acting** (confirm still-pending) → hand fresh envelope to host `onSuggestionAction`; stale/error → stable ADR-019 line + NO dispatch.

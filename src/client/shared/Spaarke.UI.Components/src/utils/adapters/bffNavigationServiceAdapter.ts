@@ -131,6 +131,20 @@ export function createBffNavigationService(
       }
     },
 
+    // No Xrm modal in a Power Pages SPA context; the closest equivalent is the
+    // SPA router navigation openRecord uses (a full OOB form dialog does not
+    // exist here). Delegates so INavigationService stays uniform.
+    async openRecordModal(entityName: string, entityId: string): Promise<void> {
+      const path = `/records/${encodeURIComponent(entityName)}/${encodeURIComponent(entityId)}`;
+      if (navigate) {
+        navigate(path);
+        return;
+      }
+      if (typeof window !== 'undefined') {
+        window.open(path, '_blank');
+      }
+    },
+
     async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
       // Delegate to the provided dialog renderer
       if (dialogRenderer) {

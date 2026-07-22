@@ -30,7 +30,7 @@ public sealed class EnvelopeSerializationTests
 
     private static readonly string[] SuggestionEnvelopeFields =
     {
-        "Kind", "SuggestionId", "Source", "RegardingRecordId", "Title",
+        "Kind", "SuggestionId", "Source", "RegardingRecordId", "RegardingRecordType", "Title",
         "Snippet", "ActionHint", "ExpiresAt",
     };
 
@@ -63,6 +63,7 @@ public sealed class EnvelopeSerializationTests
         SuggestionId = Guid.Parse("44444444-4444-4444-4444-444444444444"),
         Source = "daily-briefing",
         RegardingRecordId = "55555555-5555-5555-5555-555555555555",
+        RegardingRecordType = "sprk_matter",
         Title = "New matter suggested",
         Snippet = snippet,
         ActionHint = "create-matter",
@@ -146,7 +147,7 @@ public sealed class EnvelopeSerializationTests
 
         foreach (var expectedField in new[]
                  {
-                     "kind", "suggestionId", "source", "regardingRecordId", "title",
+                     "kind", "suggestionId", "source", "regardingRecordId", "regardingRecordType", "title",
                      "snippet", "actionHint", "expiresAt",
                  })
         {

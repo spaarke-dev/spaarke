@@ -37,6 +37,7 @@ function envelope(overrides: Partial<SuggestionEnvelopeLite> = {}): SuggestionEn
     suggestionId: 'sugg-1',
     source: 'daily-briefing',
     regardingRecordId: 'rec-1',
+    regardingRecordType: 'sprk_matter',
     title: 'Review Acme v. Beta',
     actionHint: 'review',
     expiresAt: FUTURE,
@@ -158,7 +159,7 @@ describe('useSuggestionCards (lifecycle)', () => {
     expect(screen.queryByTestId('suggestion-cards')).not.toBeInTheDocument();
   });
 
-  it('re-fetches/re-grounds via the BFF BEFORE dispatching the action (call-order)', async () => {
+  it('re-fetches/re-grounds via the BFF BEFORE acting on the suggestion (call-order)', async () => {
     const { subscribe, fire } = captureSubscribe();
     const fetchPending = jest.fn(async () => [pendingItem(envelope())]); // still-present on both calls
     const onSuggestionAction = jest.fn();
@@ -170,13 +171,31 @@ describe('useSuggestionCards (lifecycle)', () => {
     fireEvent.click(card);
 
     await waitFor(() => expect(onSuggestionAction).toHaveBeenCalledTimes(1));
-    // The click-time re-fetch (the last fetchPending call) must precede the dispatch.
+    // The click-time re-fetch (the last fetchPending call) must precede the action.
     const fetchOrders = fetchPending.mock.invocationCallOrder;
     const lastFetchOrder = fetchOrders[fetchOrders.length - 1];
-    const dispatchOrder = onSuggestionAction.mock.invocationCallOrder[0];
-    expect(lastFetchOrder).toBeLessThan(dispatchOrder);
-    // The fresh envelope (not a stale token) is handed to the host.
-    expect(onSuggestionAction).toHaveBeenCalledWith(expect.objectContaining({ actionHint: 'review' }));
+    const actionOrder = onSuggestionAction.mock.invocationCallOrder[0];
+    expect(lastFetchOrder).toBeLessThan(actionOrder);
+    // The fresh envelope is handed to the host with BOTH the record type + id — the
+    // inputs the host needs to open the regarding record in a modal (task 052).
+    expect(onSuggestionAction).toHaveBeenCalledWith(
+      expect.objectContaining({ regardingRecordType: 'sprk_matter', regardingRecordId: 'rec-1' })
+    );
+  });
+
+  it('does NOT render a suggestion missing its record type (not openable)', async () => {
+    const { subscribe, fire } = captureSubscribe();
+    // No regardingRecordType → cannot open a record → must not render (owner rule: shown ⇒ actionable).
+    const noType = { ...envelope(), regardingRecordType: '' } as SuggestionEnvelopeLite;
+    const deps = baseDeps({
+      subscribe,
+      fetchPending: jest.fn(async () => [pendingItem(noType)]),
+    });
+    renderWithTheme(<Harness deps={deps} />);
+
+    fire();
+    await waitFor(() => expect(deps.fetchPending).toHaveBeenCalled());
+    expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument();
   });
 
   it('fails gracefully when the re-fetch shows the suggestion is stale/revoked (no dispatch, stable line)', async () => {

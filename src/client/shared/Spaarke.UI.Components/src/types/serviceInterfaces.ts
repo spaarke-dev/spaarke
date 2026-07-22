@@ -327,6 +327,23 @@ export interface INavigationService {
   openRecord(entityName: string, entityId: string): Promise<void>;
 
   /**
+   * Opens a Dataverse entity record as a MODAL dialog (the record stays in an
+   * overlay — the host page is NOT navigated away). This is the modal-decision
+   * standard's Layout 1 (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" },
+   * { target: 2, width/height 85% })`), distinct from {@link openRecord} which
+   * uses `openForm` and replaces the current page. Use this when opening a record
+   * from a Fluent v9 surface (e.g. the SpaarkeAi Assistant) that must not lose its
+   * own state to a full-page navigation.
+   *
+   * Optional so existing {@link INavigationService} implementers/test doubles need
+   * no change; callers use `nav.openRecordModal?.(...)`.
+   *
+   * @param entityName - Logical name of the entity (e.g., "sprk_matter")
+   * @param entityId - GUID of the record to open
+   */
+  openRecordModal?(entityName: string, entityId: string): Promise<void>;
+
+  /**
    * Opens a dialog backed by a webresource (Code Page).
    *
    * @param webresourceName - Name of the webresource (e.g., "sprk_uploadwizard")
