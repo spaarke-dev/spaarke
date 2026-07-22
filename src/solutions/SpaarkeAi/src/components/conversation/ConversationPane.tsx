@@ -25,7 +25,7 @@ import {
   MessageBarActions,
 } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
@@ -557,17 +557,22 @@ export function ConversationPane(): React.JSX.Element {
         return;
       }
 
-      // task 050 (2026-07-22): the `list-tasks` capability opens a WORKSPACE GRID TAB, not a wizard/
-      // OOB-form hand-off. `launchSurface` only implements wizard / oob-form transports; a grid tab is
-      // a Class-2a in-app event-bus open. Route it to the shared DataverseEntityViewWidget ("My Tasks",
-      // ownerid eq-userid → assigned to me, statecode=0 → open) via the SAME `widget_load` bus the
-      // compose/draft branches use. The capability drafted nothing — ignore any payload.
-      if (payload.consumerType === "list-tasks") {
+      // Registry-driven surface routing (no per-consumerType literals). The client
+      // launch registry (surfaceLaunchRegistry.ts) is the single source of truth for
+      // "which surface does this capability open"; we branch purely on the resolved
+      // entry's `kind`:
+      //  - workspace-tab / layout → open via the PaneEventBus `widget_load` channel
+      //    (Class-2a in-app tabs: grids/widgets, e.g. list-tasks → "My Tasks" grid).
+      //    Any future grid/widget surface is ONE registry entry — no code branch here.
+      //  - wizard / oob-form → fall through to the sessionStorage hand-off (launchSurface).
+      // The capability that opens a workspace tab drafts nothing — ignore any payload.
+      const surfaceEntry = resolveSurfaceLaunch(payload.consumerType);
+      if (surfaceEntry && (surfaceEntry.kind === "workspace-tab" || surfaceEntry.kind === "layout")) {
         dispatch("workspace", {
           type: "widget_load",
-          widgetType: "my-tasks-list",
-          widgetData: {},
-          displayName: "My Tasks",
+          widgetType: surfaceEntry.surface,
+          widgetData: surfaceEntry.widgetData ?? {},
+          displayName: surfaceEntry.title,
         } as WorkspacePaneEvent);
         return;
       }
