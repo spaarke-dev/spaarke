@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Retire DocxAnnotationWriter — migrate or retire the FR-24 push-annotations surface (I-7 completeness)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes the last text-search byte-author + touches a deployed BFF endpoint + client surface. High blast radius; FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Removes/rewrites a deployed FR-24 surface (push-annotations) and the last I-7-violating text-search path; product + architectural judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeService/ComposeEndpoints (shared save/annotation surface) + client Word-shuttle; sequential.</parallel-reason>
+    <deps>032</deps>
+    <tags>bff-api,docx,frontend,deletion</tags>
+    <estimated-effort>2-4 days (depends on Path B vs C)</estimated-effort>
+    <origin>Created 2026-07-22 by orchestrator (task-032 Path-A re-scope). See notes/task-032-pushannotations-scope.md.</origin>
+
+    <owner-decision-required>
+      🔔 PRODUCT DECISION (root §6.5 / §11) — the owner MUST choose before this task executes:
+      DocxAnnotationWriter also byte-authors the DEPLOYED FR-24 "push-annotations / push-to-Word" surface
+      (server `ComposeService.PushAnnotationsAsync` + endpoint `POST /api/compose/document/{id}/push-annotations`
+      + push-preview endpoint (9b, FR-28); client `useComposePushAnnotations` in `useComposeWordShuttle.ts`,
+      exported from `index.ts`). It is TEXT-ANCHORED (`DocxAnnotation.TargetText`) — cannot route through the
+      `(paraId,runIndex,offset)` engine without whole-doc text-search (forbidden by I-7). Choose:
+      • Path B — RETIRE push-annotations entirely (remove endpoints 9/9b + PushAnnotationsAsync + client hook +
+        Word-shuttle push leg + tests), then delete DocxAnnotationWriter cleanly. Removes a deployed capability.
+      • Path C — MIGRATE push-annotations to the op-log contract (accepted-annotation UI carries op anchors;
+        server routes through the engine). Preserves the capability; larger client-UX rewrite; may be multi-task.
+      Until chosen, this task stays blocked and DocxAnnotationWriter remains (interim 2-byte-author state,
+      documented §6.5 Path-A exception).
+    </owner-decision-required>
+  </metadata>
+
+  <prompt>
+    Close out the last text-search byte-author. After the SAVE path moved onto ComposeShadowPatchEngine (task
+    032), `DocxAnnotationWriter` (+ `DocxAnnotation.TargetText` + `LocateTarget` whole-doc text-search — the 422
+    root cause + the I-7 violation) survives ONLY because it byte-authors the deployed FR-24 push-annotations
+    surface. This task retires that last text-search path per the owner-chosen Path B (retire push-annotations)
+    or Path C (migrate push-annotations to the op-log contract), then deletes `DocxAnnotationWriter` and
+    `DocxAnnotation.TargetText` with zero remaining call sites. This is what makes I-5 (one byte-author) and I-7
+    (no text-search anywhere) actually true, and is a prerequisite for Success Criterion 7 + task 060.
+  </prompt>
+  <role>SPAARKE platform developer — .NET 8 (ComposeService/ComposeEndpoints) + React/TS (Word-shuttle client). Understands the FR-24 push-annotations flow + the R4 op-log contract. Follow ADRs strictly.</role>
+  <goal>DocxAnnotationWriter + DocxAnnotation.TargetText removed (zero call sites); push-annotations either retired (Path B) or migrated to the op-log contract routed through the engine (Path C); no text-search remains anywhere in the compose write path (I-7 fully satisfied); publish size reduced; tests + NetArch green.</goal>
+
+  <context>
+    <background>
+      task-032 Path-A re-scope discovery: notes/task-032-pushannotations-scope.md documents the full code-verified
+      call-site map (server PushAnnotationsAsync:1515, endpoint ComposeEndpoints.cs:154, client
+      useComposeWordShuttle.ts:353, index.ts:105 export, tests). ADR-049 (I-5 one byte-author, I-7 no text-search)
+      is the target end-state. Spec Success Criterion 7 ("both legacy writers removed; mammoth gone") is not fully
+      met until this lands.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — PushAnnotationsAsync + PreviewPushAnnotationsAsync (retire per B, or route through engine per C)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — endpoints (9) /push-annotations + (9b) push-preview</file>
+      <file role="delete">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — the last text-search byte-author (delete after B/C)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeWordShuttle.ts — useComposePushAnnotations (retire per B, or emit op anchors per C)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/index.ts — remove/adjust the push-annotations export</file>
+      <file role="reference">projects/spaarkeai-compose-r4/notes/task-032-pushannotations-scope.md — the full analysis + call-site map</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">SAVE path already routed through the engine + op-log contract; DocxAnnotationWriter no longer on the save path (only push-annotations remains).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / §6.5">Do NOT proceed until the owner selects Path B (retire) or Path C (migrate) — see &lt;owner-decision-required&gt;. Retiring a deployed feature (Path B) is a breaking change requiring explicit sign-off (root §6).</constraint>
+    <constraint source="ADR-049 / I-7">On completion, ZERO text-search remains in the compose write path; `DocxAnnotation.TargetText` + `LocateTarget` are gone. Scope: the compose write/annotation path.</constraint>
+    <constraint source="ADR-007">SPE writes stay behind SpeFileStore; byte[] in/out. Scope: push-annotations persistence.</constraint>
+    <constraint source="ADR-013 / NFR-05">No AI internals in Services/Compose/; Tier-1 NetArchTest green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Seam slice updated for the changed/removed push-annotations surface; no Mock&lt;HttpMessageHandler&gt;/DI/ctor tests.</constraint>
+    <constraint source="project / §10">State Placement Justification + report publish-size reduction (expect a drop from the DocxAnnotationWriter deletion). Run /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>FR-24 push-annotations retirement/migration; last text-search byte-author removal; one-byte-author completion</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/task-032-pushannotations-scope.md</file>
+    </files>
+    <patterns>
+      <pattern name="Op-log save path (Path C reference)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">If Path C, route push-annotations through the same engine.Apply the save path uses (task 032); the client must emit op-anchored input.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor + owner-path confirmation">Output the FULL rigor declaration. CONFIRM the owner has selected Path B or Path C (escalate per §6.5 if not). Load knowledge + the scope-discovery note.</step>
+    <step order="1" name="Execute chosen path">Path B: retire endpoints 9/9b + PushAnnotationsAsync/PreviewPushAnnotationsAsync + client push leg + tests. Path C: migrate push-annotations to op-anchored input routed through the engine.</step>
+    <step order="2" name="Delete the last text-search author">Delete DocxAnnotationWriter.cs (incl. LocateTarget) + DocxAnnotation.TargetText; remove DI + all call sites. Grep to confirm ZERO remaining references + no text-search in the write path (I-7).</step>
+    <step order="3" name="Verify + size + index">Build BFF + client; run Compose suite + seam slices; Tier-1 NetArch green; publish size (expect reduction) + CVE; /conflict-check. Update TASK-INDEX.md: set 036 ✅. Record deviations + the resolution of the §6.5 Path-A interim exception in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The owner has NOT selected Path B or Path C — STOP and escalate per §6.5; do not choose unilaterally (Path B removes a deployed feature).</trigger>
+    <trigger>Path C: the accepted-annotation UI cannot carry `(paraId,runIndex,offset)` anchors without a larger client-model change than one task allows — surface for re-decomposition.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">DocxAnnotationWriter.cs deleted; push-annotations retired (B) or migrated (C); DocxAnnotation.TargetText removed</output>
+    <output type="report">Publish-size reduction; I-7 zero-text-search grep proof; Placement Justification; §6.5 Path-A interim-exception closure</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Owner selected Path B or Path C before execution (recorded).</criterion>
+    <criterion testable="true">DocxAnnotationWriter.cs + DocxAnnotation.TargetText removed; grep shows zero call sites; no text-search remains in the compose write path (I-7).</criterion>
+    <criterion testable="true">Path B: push-annotations endpoints/hook removed + tests updated. Path C: push-annotations routes through the engine with op anchors; no server-side text-search.</criterion>
+    <criterion testable="true">BFF + client build green; Compose suite + seam slices green; Tier-1 NetArchTest green; publish size reduced, ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Success Criterion 7 (one byte-author) is now satisfiable; the §6.5 Path-A interim two-byte-author exception is closed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created by the task-032 Path-A re-scope (2026-07-22). Blocks Success Criterion 7 + task 060 (hard-replace
+    completion). Sequence before 060. The B-vs-C choice is the deferred owner product decision surfaced at the
+    Phase-3 boundary. Full call-site map + rationale: notes/task-032-pushannotations-scope.md.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

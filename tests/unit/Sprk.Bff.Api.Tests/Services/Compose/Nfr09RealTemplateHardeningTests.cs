@@ -3,9 +3,9 @@
 // Agreement + Mutual NDA — CC BY 4.0 public standards; see Fixtures/Compose/RealTemplates/README.md)
 // rather than synthetic spike fixtures.
 //
-// GATE VERDICT: ✅ PASS (under Option C). The E1 engine is now ComposeParagraphRedlineSynthesizer
-// (design §4.2, Option C) — it synthesizes the tracked-change redline directly from the paraId-keyed
-// edits, touching only the changed paragraphs. On the real templates it PRESERVES every w14:paraId and
+// GATE VERDICT: ✅ PASS. The E1 byte-author is now the ComposeShadowPatchEngine (task 030/032) — it
+// applies a task-003 ID-anchored operation log directly onto the retained bytes, touching only the
+// anchored paragraphs. On the real templates it PRESERVES every w14:paraId and
 // every table (top-level + nested).
 //
 // History: the original plan ran Docxodus WmlComparer (tasks 001/020/021). This same harness proved on
@@ -24,6 +24,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -36,7 +37,7 @@ public sealed class Nfr09RealTemplateHardeningTests
     private const string Pt14Ns = "http://powertools.codeplex.com/2011";
     private static readonly DateTimeOffset Stamp = new(2026, 7, 17, 12, 0, 0, TimeSpan.Zero);
 
-    private readonly ComposeParagraphRedlineSynthesizer _sut = new();
+    private readonly ComposeShadowPatchEngine _sut = new();
 
     [Theory]
     [InlineData(Csa)]
@@ -50,23 +51,35 @@ public sealed class Nfr09RealTemplateHardeningTests
 
         var targets = EditableParagraphs(original, minLen: 25).Take(3).ToList();
         targets.Should().HaveCountGreaterThanOrEqualTo(3);
-        var edits = targets.Select(t => new ComposeEditedParagraph(t.ParaId, t.Text + " (as amended)")).ToList();
+        // One insertText per edited paragraph, anchored at (paraId, runIndex 0, offset 0) — the engine
+        // lands a native w:ins at that anchor, leaving every untouched paragraph byte-identical.
+        var log = new ComposeOperationLog
+        {
+            Operations = targets
+                .Select(t => (ComposeOperation)new InsertTextOperation
+                {
+                    ParaId = t.ParaId,
+                    At = new ComposeRunPoint(0, 0),
+                    Text = "(as amended) ",
+                })
+                .ToArray(),
+        };
 
-        var redline = _sut.SynthesizeRedline(original, edits, Author, Stamp);
+        var redline = _sut.Apply(original, log, author: Author, timestamp: Stamp);
 
-        // === THE FIDELITY BAR WmlComparer FAILED — now PASSES under Option C ===
-        BodyParaIds(redline).Should().BeEquivalentTo(origIds, "Option C preserves EVERY w14:paraId (only run content is rewritten; the w:p attribute survives)");
+        // === THE FIDELITY BAR WmlComparer FAILED — now PASSES under the shadow patch engine ===
+        BodyParaIds(redline).Should().BeEquivalentTo(origIds, "the engine preserves EVERY w14:paraId (only run content is mutated; the w:p attribute survives)");
         Pt14UnidCount(redline).Should().Be(0, "no PowerTools involved — no pt14:Unid introduced");
         StructuralParts(redline).Should().BeEquivalentTo(before, "styles, numbering, footnotes, headers, footers, and every table (incl. nested) are preserved");
 
         // === correct, minimal, authored revisions ===
         var rev = ReadRevisions(redline);
-        (rev.Ins + rev.Del).Should().BeGreaterThan(0, "the 3 edits synthesize tracked revisions");
+        (rev.Ins + rev.Del).Should().BeGreaterThan(0, "the 3 edits emit tracked revisions");
         (rev.Ins + rev.Del).Should().BeLessThan(50, "minimal — only the 3 edited paragraphs carry revisions, not a whole-doc rewrite");
         rev.Authors.Should().OnlyContain(a => a == Author);
 
         // === untouched paragraphs pass through byte-identical ===
-        var editedIds = edits.Select(e => e.ParaId.ToUpperInvariant()).ToHashSet();
+        var editedIds = targets.Select(t => t.ParaId.ToUpperInvariant()).ToHashSet();
         var untouched = origIds.First(id => !editedIds.Contains(id));
         ParagraphText(redline, untouched).Should().Be(ParagraphText(original, untouched), "untouched paragraphs are unchanged");
         ParagraphHasRevisions(redline, untouched).Should().BeFalse("untouched paragraphs carry no markup");
@@ -77,11 +90,26 @@ public sealed class Nfr09RealTemplateHardeningTests
     {
         var original = LoadTemplate(Csa);
         var target = EditableParagraphs(original, minLen: 60).First();
-        var words = target.Text.Split(' ');
 
-        // keep word0, INSERT after it, DELETE word1, keep the rest → forces equal + insert + delete.
-        var newText = words[0] + " (as amended)" + string.Join(" ", words.Skip(2));
-        var redline = _sut.SynthesizeRedline(original, new[] { new ComposeEditedParagraph(target.ParaId, newText) }, Author, Stamp);
+        // A replaceRange over the paragraph's first character emits BOTH a native w:ins (the replacement
+        // text) and a native w:del (the struck original char) — forcing an insertion AND a deletion in
+        // one op, the exact ins+del shape this fidelity assertion requires.
+        var redline = _sut.Apply(
+            original,
+            new ComposeOperationLog
+            {
+                Operations = new ComposeOperation[]
+                {
+                    new ReplaceRangeOperation
+                    {
+                        ParaId = target.ParaId,
+                        Range = new ComposeRunRange(new ComposeRunPoint(0, 0), new ComposeRunPoint(0, 1)),
+                        Text = " (as amended) ",
+                    },
+                },
+            },
+            author: Author,
+            timestamp: Stamp);
 
         var rev = ReadRevisions(redline);
         rev.Ins.Should().BeGreaterThan(0);

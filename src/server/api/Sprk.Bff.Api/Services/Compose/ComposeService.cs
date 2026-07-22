@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -124,13 +125,15 @@ public class ComposeService : IComposeService
     // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
     // Stateless + thread-safe — a default construction is functionally identical to the DI singleton.
     private readonly ParaIdPreParser _paraIdPreParser;
-    // FR-01/FR-03/FR-07 (task 022, E1 — Option C, design §4.2): the retained-original REDLINE SYNTHESIZER.
-    // On a dirty save it rewrites ONLY the client's edited paragraphs (paraId-keyed) in the resolved
-    // baseline as native w:ins/w:del, preserving every untouched paragraph + all structure — the "delta
-    // onto the retained original" that replaces the R2 whole-document reconstruction. Optional + defaults
-    // to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
+    // FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff synthesizer, Path B /
+    // ADR-049): the SINGLE unified byte-author. On a dirty save it applies the client's ordered, rebased
+    // task-003 operation log (+ any (paraId,range)-anchored comments) surgically onto the resolved baseline as
+    // native w:ins/w:del/w:comment — ID-anchored, ZERO write-path text-search (I-7), preserving every untouched
+    // paragraph + all structure. REPLACES both ComposeParagraphRedlineSynthesizer (retired here) and the
+    // save-path use of DocxAnnotationWriter (kept only for the push-annotations surface; task 036). Optional +
+    // defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
     // resolves the registered singleton (ComposeModule) in every host.
-    private readonly ComposeParagraphRedlineSynthesizer _redlineSynthesizer;
+    private readonly ComposeShadowPatchEngine _patchEngine;
     // FR-01a (task 026, E1 born-in-editor): the from-scratch high-fidelity OOXML AUTHORING engine. On a
     // born-in-editor save (request.ContentModel present — an AI-drafted/blank/browse-local doc with no
     // retained original), it renders the .docx server-side (real styles + style-linked multi-level numbering
@@ -171,7 +174,7 @@ public class ComposeService : IComposeService
         IHostApplicationLifetime? appLifetime = null,
         IComposeMemoryCapture? memoryCapture = null,
         ParaIdPreParser? paraIdPreParser = null,
-        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
+        ComposeShadowPatchEngine? patchEngine = null,
         ComposeDocumentRenderer? documentRenderer = null,
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
@@ -186,7 +189,7 @@ public class ComposeService : IComposeService
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
-        _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
+        _patchEngine = patchEngine ?? new ComposeShadowPatchEngine();
         _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
         // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
         // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
@@ -538,20 +541,18 @@ public class ComposeService : IComposeService
         //            after a page refresh (client bytes gone) still lands the delta on the correct version.
         //      A create-on-save (no DocumentSpeId) always supplies Content as the document bytes.
         //
-        //   2. Synthesize the USER's paragraph text-edits (request.EditedParagraphs, paraId-keyed) as a
-        //      word-level w:ins/w:del delta ONTO the baseline via ComposeParagraphRedlineSynthesizer —
-        //      rewriting ONLY the edited paragraphs, preserving every untouched paragraph + all structure
-        //      by construction (Option C; replaces the retired R2 whole-document reconstruction). An empty
-        //      edit list is a structural round-trip (no revisions) → a clean Save stays byte-identical.
+        //   2. Apply the client's ordered, rebased task-003 OPERATION LOG (request.OperationLog) + any
+        //      (paraId,range)-anchored comments (request.Comments) surgically ONTO the baseline via the SINGLE
+        //      ComposeShadowPatchEngine (FR-06 cutover, task 032) — emitting native w:ins/w:del/w:comment,
+        //      ID-anchored, ZERO write-path text-search (I-7), preserving every untouched paragraph + all
+        //      structure by construction. This REPLACES both retired writers (ComposeParagraphRedlineSynthesizer
+        //      paragraph-diff + the save-path use of DocxAnnotationWriter). An empty log + no comments is a clean
+        //      Save → the baseline stays byte-identical.
         //
-        //   3. Apply AI redlines/comments (request.Annotations) as NATIVE OOXML (w:ins/w:del/w:comment)
-        //      via the SAME DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — UNCHANGED
-        //      (UAT-R7 #2/#3/#4; task 023 verifies the AI-redline-onto-Option-C-baseline composition).
-        //
-        // All three transforms are pure/in-memory BEFORE any SPE write, so a bad edit (unmatched paraId →
-        // ComposeRedlineException) or bad annotation batch (DocxAnnotationException) throws before the
-        // write — no partial SPE version can land. A no-edit, no-annotation Save persists the baseline
-        // byte-identical (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
+        // The transform is pure/in-memory BEFORE any SPE write, so a refusal (unresolved paraId/anchor,
+        // unsupported schema version, opaque-atom/structural refusal → ComposePatchException) throws before the
+        // write — no partial or wrong SPE version can land. A no-op Save persists the baseline byte-identical
+        // (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
@@ -559,52 +560,40 @@ public class ComposeService : IComposeService
         byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
-        // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's
-        // id-less paragraphs BEFORE the synthesizer/annotation writer resolve against it. This completes
-        // the "apply minted ids physically" step ParaIdPreParser mints but never wrote into the source
-        // bytes (its own remark) — without it, editing/accepting a redline on an originally-id-less
-        // paragraph (or any paragraph of an uploaded doc, whose ids are all client-minted) fails with
-        // "w14:paraId matches no paragraph in the retained original". Text-verified + fill-gaps-only +
-        // count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
-        // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
-        // Gated on an EditedParagraphs delta being present: the stamp only matters for the synthesizer's
-        // paraId resolution, and running it on a clean/annotation-only save would needlessly rewrite the
-        // bytes and break the FR-06a byte-identical clean-save invariant (ComposeServiceUploadFidelityTests).
-        // Skipped on the born-in-editor path (ContentModel present → the renderer already mints ids into
-        // the bytes it authors; the client sends no map there).
-        if (request.ContentModel is null
-            && request.EditedParagraphs is { Count: > 0 }
-            && request.ParaIdMap is { Count: > 0 })
+        // FR-06 (task 032, the write-path cutover): apply the client's ordered, rebased task-003 operation log
+        // (+ any (paraId,range)-anchored comments) surgically onto the resolved baseline via the SINGLE
+        // ComposeShadowPatchEngine. This REPLACES the retired ComposeParagraphRedlineSynthesizer (paragraph-diff)
+        // AND the save-path use of DocxAnnotationWriter (kept only for push-annotations; task 036). Skipped on
+        // the born-in-editor path (ContentModel present → the renderer authored the whole doc, minting ids into
+        // its own bytes; there is no baseline to patch and the client sends no op-log there).
+        var hasOperations = request.OperationLog is { Operations.Count: > 0 };
+        var hasComments = request.Comments is { Count: > 0 };
+        if (request.ContentModel is null && (hasOperations || hasComments))
         {
-            contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
-        }
-
-        if (request.EditedParagraphs is { Count: > 0 })
-        {
-            _logger.LogInformation(
-                "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
-                request.EditedParagraphs.Count, request.SessionId);
-            contentToPersist = _redlineSynthesizer.SynthesizeRedline(
-                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt,
-                out var unresolvedParaIds);
-            // UAT round-4 graceful degradation: the save SUCCEEDS with the paragraphs that resolved; any
-            // that did not (a mammoth-dropped/structural paragraph shifted the client's paraId mapping) are
-            // logged here, non-silently, instead of aborting the whole save. Not an error-level event — the
-            // document persisted; these paragraphs simply were not redlined onto the retained original.
-            if (unresolvedParaIds.Count > 0)
+            // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's id-less
+            // paragraphs BEFORE the engine resolves each op's (paraId, runIndex, run-local-offset) anchor against
+            // it. Without it, an edit on an originally-id-less paragraph (or any paragraph of an uploaded doc,
+            // whose ids are all client-minted) would refuse with ParagraphNotFound. Text-verified + fill-gaps-only
+            // + count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
+            // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
+            if (request.ParaIdMap is { Count: > 0 })
             {
-                _logger.LogWarning(
-                    "Compose save: {UnresolvedCount} of {EditCount} edited paragraph(s) had a w14:paraId that matched no paragraph in the retained original and were NOT redlined (session={SessionId}): {UnresolvedParaIds}. The save still persisted the resolved paragraphs.",
-                    unresolvedParaIds.Count, request.EditedParagraphs.Count, request.SessionId, string.Join(", ", unresolvedParaIds));
+                contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
             }
-        }
 
-        if (request.Annotations is { Count: > 0 })
-        {
             _logger.LogInformation(
-                "Compose save: applying {AnnotationCount} redline/comment annotation(s) to the baseline before persist (session={SessionId}).",
-                request.Annotations.Count, request.SessionId);
-            contentToPersist = _annotationWriter.Annotate(contentToPersist, request.Annotations);
+                "Compose save: applying operation log ({OpCount} op(s)) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (session={SessionId}).",
+                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, request.SessionId);
+
+            // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
+            // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
+            // ProblemDetails by the endpoint — so no partial or wrong SPE version can land.
+            contentToPersist = _patchEngine.Apply(
+                contentToPersist,
+                request.OperationLog ?? new ComposeOperationLog(),
+                request.Comments,
+                ResolveRevisionAuthor(httpContext),
+                observedAt);
         }
 
         _logger.LogInformation(

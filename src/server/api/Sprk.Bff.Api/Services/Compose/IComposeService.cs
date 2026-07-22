@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -542,16 +543,31 @@ public sealed record SaveComposeDocumentRequest
     public string? BaselineVersionId { get; init; }
 
     /// <summary>
-    /// E1 (FR-01/FR-02, task 022, Option C — design §4.2): the editor paragraphs the user CHANGED, each
-    /// keyed by its <c>w14:paraId</c> (E2 splice key) with its new settled text. When non-empty,
-    /// <see cref="SaveAsync"/> drives <see cref="ComposeParagraphRedlineSynthesizer"/> to rewrite exactly
-    /// these paragraphs in the resolved baseline as native <c>w:ins</c>/<c>w:del</c> tracked changes (a
-    /// word-level diff old→new), preserving every untouched paragraph + all structure by construction —
-    /// the "delta onto the retained original" that replaces the R2 whole-document reconstruction. Null/empty
-    /// on a clean Save or a create-on-save (nothing to splice; the baseline persists as-is). An unmatched
-    /// paraId is a handled synthesis error (<c>ComposeRedlineException</c>), never a silent wrong write.
+    /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /
+    /// ADR-049): the ordered, rebased task-003 OPERATION LOG the client captured this dirty session
+    /// (<c>(paraId, runIndex, run-local-offset)</c>-anchored insertText/deleteRange/replaceRange/setMark/
+    /// clearMark + the four structural paragraph ops). When non-empty, <see cref="SaveAsync"/> applies it via
+    /// the single <see cref="ComposeShadowPatchEngine"/> onto the resolved baseline (the "base version" =
+    /// <see cref="Content"/> or the <see cref="BaselineVersionId"/> re-fetch) — surgical, ID-anchored, ZERO
+    /// write-path text-search (I-7), preserving every untouched paragraph + all structure by construction.
+    /// This REPLACES the retired <c>ComposeEditedParagraph</c> paragraph-diff payload + its
+    /// <c>ComposeParagraphRedlineSynthesizer</c>. Null/empty on a clean Save or a create-on-save (nothing to
+    /// apply; the baseline persists byte-identical). An op whose <c>w14:paraId</c>/anchor does not resolve is a
+    /// handled <see cref="ComposePatchException"/> (mapped to ProblemDetails), never a silent wrong write.
     /// </summary>
-    public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
+    public ComposeOperationLog? OperationLog { get; init; }
+
+    /// <summary>
+    /// R4 FR-06 (task 032): durable, <c>(paraId, range)</c>-anchored comments to emit as native
+    /// <c>w:comment</c> via the <see cref="ComposeShadowPatchEngine"/> (its EDGE-1 comment-before-track-change
+    /// ordering) — the text-search-free (I-7) replacement for the save-path <see cref="DocxAnnotation"/>
+    /// comment payload the retired <see cref="DocxAnnotationWriter"/> path baked in. Applied together with
+    /// <see cref="OperationLog"/> in one engine pass. Null/empty → no comments baked on save (session comments
+    /// still persist as mutable UI state via <c>SaveComposeAnnotationsAsync</c> and bake to native OOXML via the
+    /// push-annotations path, both unchanged). The text-anchored push-annotations surface is retired/migrated by
+    /// task 036 (§6.5 Path-A boundary).
+    /// </summary>
+    public IReadOnlyList<ComposeAnchoredComment>? Comments { get; init; }
 
     /// <summary>
     /// E1 born-in-editor (FR-01a, task 026): the paraId-keyed editor CONTENT MODEL — the authoring source for
@@ -582,21 +598,6 @@ public sealed record SaveComposeDocumentRequest
     /// <summary>Optional display name used only on first-Save promotion (Path B initial
     /// row creation) and as the created drive-item's file name.</summary>
     public string? DisplayName { get; init; }
-
-    /// <summary>
-    /// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4): accepted-as-pending
-    /// track-change insertions/deletions + comments to materialize as NATIVE Word markup
-    /// (<c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>) via <see cref="DocxAnnotationWriter"/> BEFORE
-    /// persisting. The client sends (a) <see cref="Content"/> as a clean BASELINE <c>.docx</c> — the
-    /// document with pending redlines reduced to their committed (reject-state) text and accepted
-    /// edits already baked in — and (b) this list; <see cref="IComposeService.SaveAsync"/> re-applies
-    /// them on top so the saved <c>.docx</c> carries real tracked changes + comments instead of the
-    /// flattened plain text the client <c>tipTapToDocxBytes</c> writer (which has no track-change
-    /// branch) would otherwise produce. Null/empty → the baseline is persisted byte-identical (a plain
-    /// no-redline Save is unchanged; FR-06a byte fidelity preserved). Same <see cref="DocxAnnotation"/>
-    /// shape the push-annotations path uses (reuse, not a parallel contract).
-    /// </summary>
-    public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
 
     /// <summary>
     /// C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor

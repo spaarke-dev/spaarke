@@ -3,7 +3,19 @@
     <title>Retire both legacy writers; route all writing through the Patch Engine (FR-06)</title>
     <phase>3 Patch Engine</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <amendment date="2026-07-22" by="orchestrator (Path A — push-annotations scope discovery)">
+      RE-SCOPED to the SAVE path only. The coverage check found `DocxAnnotationWriter` also byte-authors the
+      deployed FR-24 push-annotations surface (text-anchored; can't route through the engine without I-7-forbidden
+      text-search) — out of this task's scope. Per §6.5 Path A: (1) route SaveAsync/endpoint through
+      `ComposeShadowPatchEngine` + wire the client `triggerSave` op-log send; (2) retire
+      `ComposeParagraphRedlineSynthesizer` FULLY; (3) move the SAVE path off `DocxAnnotationWriter` (save-path
+      comments/annotations now via the engine's Apply*), but DO NOT delete the `DocxAnnotationWriter` class or
+      `DocxAnnotation.TargetText` — push-annotations still needs them. DocxAnnotationWriter deletion + the
+      push-annotations retire/migrate (owner Path B vs C) is **new task 036** (blocks Success Criterion 7 / 060).
+      Interim two-byte-author coexistence is a documented §6.5 Path-A exception. Analysis:
+      notes/task-032-pushannotations-scope.md.
+    </amendment>
     <rigor>FULL</rigor>
     <rigor-reason>Hard-replace cutover with high blast radius — deletes the shared write path, changes the save contract, tags include `deletion`. FULL + TEST-MODIFYING per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -137,6 +149,14 @@
 
   <notes>
     No `&lt;justification&gt;` — this is a deletion/consolidation, not new surface. `mode="prescriptive"`: the cutover is irreversible and gated, so the sequence binds (route + coverage-check BEFORE delete). Residual client-side `mammoth` + `collectEditedParagraphs` removal is task 023/060, not here.
+
+    ── 2026-07-22 execution attempt → BLOCKED at Step-2 coverage check (see `projects/spaarkeai-compose-r4/BLOCKED.md`) ──
+    Preconditions ALL GREEN: 006 Phase-0 gate 🟢; 030+031 ✅; EDGE-1…4 confirmed migrated into `ComposeShadowPatchEngine` (grep-verified). The SAVE-path writers' behaviors ARE covered by the engine.
+    BLOCKER (out of the POML's modeled scope): `DocxAnnotationWriter` is ALSO the byte-author of the DEPLOYED FR-24 push-annotations surface — `ComposeService.PushAnnotationsAsync:1515` (endpoint (9) `/push-annotations`, mapped unconditionally) + live client hook `useComposePushAnnotations` (`useComposeWordShuttle.ts`, exported from `index.ts`) + tests. That path is TEXT-ANCHORED (`DocxAnnotation.TargetText`) and cannot be routed through the engine's `(paraId,runIndex,offset)` op-contract server-side without whole-doc text-search (forbidden, I-7). The acceptance criterion "`DocxAnnotationWriter` removed, zero call sites" therefore cannot be met without retiring or client-rewriting push-annotations — neither of which scope A/B/D authorizes. The as-built inventory framed `DocxAnnotationWriter` only as "one of two save paths" and omitted its FR-24 role; the POML inherited that gap.
+    NO code changed / NO class deleted / cutover NOT begun (prescriptive gate honored). Resolution options in BLOCKED.md: (A) re-scope — land SAVE-path cutover, defer `DocxAnnotationWriter` deletion to a push-annotations-retirement task [recommended]; (B) expand 032 to retire push-annotations (product sign-off); (C) migrate push-annotations to the op-log contract (client-UX rewrite). Awaiting orchestrator/owner §6.5 + §11 decision.
+
+    ── 2026-07-22 COMPLETED (Path A, re-scoped) — full report: `projects/spaarkeai-compose-r4/notes/task-032-completion.md` ──
+    SAVE-path hard-replace landed: (A) `ComposeService.SaveAsync` + `ComposeEndpoints` accept the task-003 op-log contract and apply via `ComposeShadowPatchEngine.Apply(...)`; a stale `editedParagraphs` payload → 400 ProblemDetails; an engine refusal → typed ProblemDetails (never 500). (B) client `ComposeEditor` wires a production `RebasedOperationLog` (classifier callbacks supplied; resets on load + serialize) + exposes `serializeOperationLog()`; `ComposeWorkspace.triggerSave` sends the ordered rebased op-log + base version and no longer calls `collectEditedParagraphs`. (C) `ComposeParagraphRedlineSynthesizer` deleted + DI removed; grep-verified zero call sites. (D) push-annotations surface (`DocxAnnotationWriter`/`DocxAnnotation.TargetText`/endpoints 9/9b/`useComposePushAnnotations`) untouched + compiling → task 036. Save-path COMMENT baking deferred to 036 (client comments are text-anchored, I-7): server supports op-anchored `Comments` (engine `ApplyComment`); session comments still persist via FR-29 + push (no regression) — documented §6.5 Path-A exception. VERIFY: BFF build 0 errors; `dotnet test --filter Compose` 524 pass / 0 fail; Tier-1 `ADR013_ComposeFacade` PASS (the ADR-007 NetArch failure is pre-existing — Communication/Office/Infrastructure types, none in Services/Compose); publish 47.48 MB compressed (↓ vs ~49.63 baseline, under the 60 ceiling); no new HIGH CVE (0 packages added); `/conflict-check` clean. Coverage check passed (no SAVE-path gap). Do-not-commit honored.
   </notes>
 
   <execution>

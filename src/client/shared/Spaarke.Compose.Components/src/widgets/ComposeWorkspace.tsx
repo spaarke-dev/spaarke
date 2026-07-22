@@ -137,6 +137,10 @@ import type {
   ImportedRevision,
   ImportedComment,
 } from '../types/compose-contracts';
+// R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
+// `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
+// against, so both ends agree on the contract shape.
+import { COMPOSE_OPERATION_SCHEMA_VERSION } from '../types/compose-operations';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
@@ -1020,6 +1024,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
+      // R4 FR-06 (task 032, the write-path cutover): a dirty save of a LOADED doc now sends the ordered, rebased
+      // task-003 OPERATION LOG (ID-anchored (paraId, runIndex, run-local-offset) ops) the server applies via
+      // ComposeShadowPatchEngine — REPLACING the retired `collectEditedParagraphs()` paragraph-diff delta. Read
+      // ONCE here (serializing resets the log + the editor dirty flag, mirroring the old collect call). Ops whose
+      // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
+      // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
+      // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
+      const opLogSnapshot =
+        !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
+      const operationLog = opLogSnapshot
+        ? {
+            schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
+            operations: opLogSnapshot.orderedOps
+              .filter(entry => !entry.deletedContentFlag)
+              .map(entry => entry.operation),
+          }
+        : undefined;
+
       // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
       // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
       // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
@@ -1119,13 +1141,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
           annotations: saveAnnotations,
-          // The load-time version id lets the server re-fetch the baseline even without the client bytes.
+          // The load-time version id = the op-log's BASE VERSION; lets the server re-fetch the baseline even
+          // without the client bytes.
           baselineVersionId: state.versionId ?? undefined,
           // Same-session fast-path: still holding the retained original → send it (byte-identical).
           content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
-          // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
-          editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
-          // C2: the baseline paraId map so the server can stamp minted ids before synthesizing the delta.
+          // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch Engine
+          // onto the resolved baseline (undefined on a clean save → the baseline persists byte-identical).
+          operationLog,
+          // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors.
           paraIdMap,
         };
       }

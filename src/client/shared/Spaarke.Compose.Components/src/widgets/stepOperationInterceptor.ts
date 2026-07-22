@@ -944,6 +944,19 @@ export class RebasedOperationLog {
   }
 
   /**
+   * Clear the accumulated log (spaarkeai-compose-r4 task 032). Called (1) after a fresh document loads
+   * into the editor — the load `setContent`/import transactions are NOT user edits, so any ops they
+   * produced must be dropped so the log stays aligned to the load-time reject-state baseline — and (2)
+   * after a save serializes + persists the log, so the next dirty session starts empty and already-applied
+   * ops are never re-sent onto the new baseline (double-apply). `baseVersion` is preserved (it is carried
+   * from the one load per dirty session; the save path re-sends it as `baselineVersionId`).
+   */
+  reset(): void {
+    this.entries = [];
+    this.seqCounter = 0;
+  }
+
+  /**
    * Process ONE doc-changing transaction: rebase every already-logged entry through its
    * `Mapping`, then classify + append the transaction's own operations. Returns the operations
    * newly appended by THIS transaction (empty for a transaction that only rebases, e.g. deferred

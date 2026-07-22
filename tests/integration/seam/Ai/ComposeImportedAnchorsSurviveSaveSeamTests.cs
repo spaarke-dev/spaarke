@@ -5,12 +5,12 @@
 // (task 050/051's DocxAnnotationReader projection) live INSIDE the loaded `.docx` as native
 // `w:ins`/`w:del`/`w:comment` OOXML. On an E1 dirty save (task 022), the persisted baseline is the
 // RETAINED ORIGINAL bytes (the client's `content` — the same bytes Load returned, which still carry
-// the imported marks) plus a paraId-keyed delta for ONLY the edited paragraph(s)
-// (`ComposeParagraphRedlineSynthesizer`, Option C). Untouched paragraphs — including ones carrying
-// imported marks — pass through the synthesizer BYTE-IDENTICAL (task 024 proved this for the
-// fidelity core generally; this test proves it specifically for imported marks). Because task 022's
-// synthesizer opens the SAME OPC package in place (`WordprocessingDocument.Open(buffer,
-// isEditable: true)`) and only rewrites the matched paragraphs' XML, the separate
+// the imported marks) plus a task-003 operation log applied for ONLY the edited paragraph(s) via the
+// `ComposeShadowPatchEngine` (task 030/032). Untouched paragraphs — including ones carrying
+// imported marks — are left BYTE-IDENTICAL (task 024 proved this for the
+// fidelity core generally; this test proves it specifically for imported marks). Because the engine
+// opens the SAME OPC package in place (`WordprocessingDocument.Open(buffer,
+// isEditable: true)`) and only mutates the anchored paragraphs' XML, the separate
 // `WordprocessingCommentsPart` (comments.xml) that a `w:comment` element's `CommentRangeStart`/
 // `CommentRangeEnd`/`CommentReference` markers point into is never touched either — so an imported
 // COMMENT survives even though its comment body lives in a different OPC part than the paragraph
@@ -46,7 +46,7 @@
 // DI-registration test; NO ctor-null test. Mocks live ONLY at the ISpeFileOperations /
 // IGenericEntityService / IPostUploadIndexingEnqueuer module boundaries (the SAME fixture as task
 // 024) — the HTTP boundary, the real ComposeEndpoints route mapping, and the real
-// ComposeService/ComposeParagraphRedlineSynthesizer/DocxAnnotationReader/DocxAnnotationWriter/
+// ComposeService/ComposeShadowPatchEngine/DocxAnnotationReader/DocxAnnotationWriter/
 // ParaIdPreParser are all production types.
 
 using System.Net;
@@ -183,21 +183,32 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
 
-        const string amendedPara2Text = "This clause shall survive independent review by counsel and outside experts.";
-
         var saveResponse = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
         {
             sessionId,
             tenantId = tenant,
             driveId,
-            // The real wire contract task 027's client sends for a loaded-doc dirty save: the
+            // The real wire contract task 032's client sends for a loaded-doc dirty save: the
             // same-session fast-path retained-original `content` (STILL carrying the imported marks —
-            // this is the client's pristine mount payload, never a reconstruction) + the paraId-keyed
-            // `editedParagraphs` delta for the ONE paragraph the user actually changed.
+            // this is the client's pristine mount payload, never a reconstruction) + the task-003
+            // `operationLog` the ComposeShadowPatchEngine applies onto it. Here: a single insertText on
+            // the ONE paragraph (para2) the user actually changed — the engine lands a native w:ins at
+            // that paraId + run-local offset, leaving every other paragraph (incl. the imported-mark
+            // ones) byte-identical.
             content = original,
-            editedParagraphs = new[]
+            operationLog = new
             {
-                new { paraId = para2Id, newText = amendedPara2Text },
+                schemaVersion = "compose-ops-v1",
+                operations = new object[]
+                {
+                    new
+                    {
+                        type = "insertText",
+                        paraId = para2Id,
+                        at = new { runIndex = 0, offset = 0 },
+                        text = " and outside experts",
+                    },
+                },
             },
         });
 
@@ -242,7 +253,7 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
             originalComments.Should().NotBeNull();
             persistedComments.Should().NotBeNull("the comments.xml part must survive a dirty save that never touches the commented paragraph");
             ReadPartBytes(persistedComments!).Should().Equal(ReadPartBytes(originalComments!),
-                "comments.xml is never opened by the redline synthesizer (it only opens MainDocumentPart.Document) — byte-identical");
+                "comments.xml is never opened by the patch engine on a save with no anchored comments (it only opens MainDocumentPart.Document) — byte-identical");
         }
 
         // ── Phase 3: RELOAD (through the real GET route again) — the through-the-wire round trip
@@ -326,7 +337,7 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
     /// server-minted). A minted id (produced by <see cref="ParaIdPreParser"/> for a source paragraph
     /// that has none) lives ONLY in the reported <c>ParaIdMap</c>, never physically in the bytes
     /// (design note on <see cref="ParaIdPreParser"/>: "the map, not the bytes, carries minted ids") —
-    /// so a save's <c>editedParagraphs</c> key MUST resolve against a paraId the retained-original
+    /// so a save's operation-log <c>paraId</c> anchor MUST resolve against a paraId the retained-original
     /// bytes ACTUALLY carry, exactly like a genuinely Word-authored document (the 024 fidelity seam's
     /// real CSA fixture). Explicit ids here mirror that Word-authored shape deterministically.</summary>
     private static readonly string[] FixtureParaIds = { "00000001", "00000002", "00000003" };

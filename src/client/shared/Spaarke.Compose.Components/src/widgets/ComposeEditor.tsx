@@ -121,12 +121,20 @@ import {
   buildBaselineParaIdMap,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
-// R4 FR-03 (task 020) — the step→operation interceptor: a headless, read-only
-// ProseMirror plugin that captures transaction steps as task-003 operations
-// anchored `(paraId, runIndex, run-local-offset)`. Registered ADDITIVELY (bare —
-// no handler here); the save/rebase path (task 022+) supplies `onOperations`.
-// Capture only — no fetch, no save wiring, no doc mutation.
-import { COMPOSE_R4_STEP_INTERCEPTOR } from './stepOperationInterceptor';
+// R4 FR-03/FR-06 (task 020/022/032) — the step→operation interceptor + its rebased
+// operation log. A headless, read-only ProseMirror plugin captures transaction steps
+// as task-003 operations anchored `(paraId, runIndex, run-local-offset)`; the
+// RebasedOperationLog keeps them ordered + rebased across the dirty session. Task 032
+// (the write-path cutover) wires the log PRODUCTION here (supplying the classifier
+// callbacks) and exposes `serializeOperationLog()` on the handle so `triggerSave` sends
+// the op-log the server applies via ComposeShadowPatchEngine. Capture only — no fetch,
+// no doc mutation.
+import {
+  RebasedOperationLog,
+  createRebasedOperationLogPlugin,
+  type ComposeOperationLogSnapshot,
+} from './stepOperationInterceptor';
+import { Extension } from '@tiptap/core';
 import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
 import { applyImportedRevisions } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
@@ -541,6 +549,18 @@ export interface ComposeEditorHandle {
    * NEVER authors `.docx` bytes — this replaced the removed `serialize()`.
    */
   collectEditedParagraphs(): ComposeEditedParagraph[];
+
+  /**
+   * R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 OPERATION LOG snapshot
+   * ({@link ComposeOperationLogSnapshot}) captured this dirty session — the ID-anchored
+   * (`paraId, runIndex, run-local-offset`) op stream the host sends on a dirty save of a LOADED doc, which
+   * the server applies via `ComposeShadowPatchEngine`. REPLACES {@link collectEditedParagraphs} on the save
+   * path (that method survives for task-023 cleanup only). Serializing RESETS the log (mirrors
+   * `collectEditedParagraphs` resetting dirty), so a subsequent save starts empty and already-applied ops are
+   * never re-sent onto the new baseline. Ops flagged `deletedContentFlag` (their anchor landed in later-deleted
+   * content) are surfaced in the snapshot; the host excludes them from what it applies (never-silently-drop).
+   */
+  serializeOperationLog(): ComposeOperationLogSnapshot;
 
   /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
@@ -1254,6 +1274,46 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // against it to find the dirty paragraphs the server deltas onto the retained original.
     const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
+    // R4 FR-06 (task 032, the write-path cutover): the per-dirty-session ordered, rebased task-003 OPERATION
+    // LOG (task 022). Instantiated ONCE (lazy) and driven by the rebased-op-log ProseMirror plugin below; the
+    // classifier callbacks surface refused/deferred/unrepresentable steps (never silently dropped, per the
+    // interceptor's discipline). `serializeOperationLog()` on the handle reads it at save time; the load effect
+    // + serialize both `reset()` it (a fresh document / a completed save must not carry stale ops).
+    const opLogRef = React.useRef<RebasedOperationLog | null>(null);
+    if (opLogRef.current === null) {
+      opLogRef.current = new RebasedOperationLog({
+        onStructuralStep: (_step, reason) => {
+          // A block-boundary step the four structural ops cannot cleanly carry (forward-merge, multi-paragraph
+          // rewrite, list wrap/unwrap). Recognized, not mis-mapped — surfaced for diagnosis (never dropped).
+          // eslint-disable-next-line no-console
+          console.debug('[ComposeEditor] op-log: deferred structural step', reason);
+        },
+        onUnrepresentableStep: (_step, reason) => {
+          // A step whose shape the closed op set genuinely cannot represent (e.g. a mark outside the closed
+          // ComposeMarkType set) — the escalation seam (root §6/§6.5). Surfaced, never silently dropped.
+          // eslint-disable-next-line no-console
+          console.warn('[ComposeEditor] op-log: unrepresentable step (surfaced, not applied)', reason);
+        },
+        onRefusedAtomEdit: () => {
+          // An edit whose range entered an opaque atom (field/content-control) — refused by contract (FR-02).
+          // eslint-disable-next-line no-console
+          console.debug('[ComposeEditor] op-log: refused opaque-atom edit');
+        },
+      });
+    }
+    // A headless TipTap extension that registers the rebased-op-log ProseMirror plugin (drives
+    // `recordTransaction` per doc-changing transaction). Built ONCE (the log instance is stable in the ref).
+    const opLogExtension = React.useMemo(
+      () =>
+        Extension.create({
+          name: 'composeRebasedOpLog',
+          addProseMirrorPlugins() {
+            return [createRebasedOperationLogPlugin(opLogRef.current!)];
+          },
+        }),
+      []
+    );
+
     // Item 4 (UAT round-4): live Track Changes decoration overlay. The extension is configured ONCE
     // (stable options) — `getBaseline` reads the load-time snapshot ref live, so the redline tracks
     // edits without re-registering the plugin. Enabled state is driven via a transaction meta (below),
@@ -1415,7 +1475,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
         ...COMPOSE_R4_OPAQUE_ATOMS,
-        ...COMPOSE_R4_STEP_INTERCEPTOR, // R4 FR-03 (task 020) — read-only step→operation capture (additive)
+        opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
+                        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
+                        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
@@ -1512,6 +1574,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // Born-in-editor seed: capture a snapshot so an edit-then-save can still diff (though a born-in-
           // editor save normally sends the full content model, not edited-paragraph deltas).
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+          opLogRef.current?.reset(); // R4 FR-06 (task 032): the seed is not a user edit — start the log empty.
           dirtyRef.current = false;
           onDirtyChange?.(true);
           return;
@@ -1519,6 +1582,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
         paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        opLogRef.current?.reset();
         dirtyRef.current = false;
         onDirtyChange?.(false);
         return;
@@ -1560,6 +1624,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // editable doc over a non-empty retained baseline — render the reference-only "Open in Word" state.
         if (!projection.canEdit || projection.status === 'failed') {
           editor.commands.setContent('<p></p>');
+          opLogRef.current?.reset(); // R4 FR-06 (task 032): no user edits on a reference-only mount.
           dirtyRef.current = false;
           setReferenceOnly({ fileName: documentRef?.fileName });
           onDirtyChange?.(false);
@@ -1571,6 +1636,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         applyImportedRevisions(editor, importedRevisions);
         applyImportedCommentAnchors(editor, importedComments);
         paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced — the load is NOT a
+        // user edit; the op-log must start empty, aligned to this load-time reject-state baseline.
+        opLogRef.current?.reset();
         dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
         onDirtyChange?.(isTransientMount);
         // Surface Partial fidelity gaps via the existing banner (codes only — no document content, ADR-015).
@@ -1615,6 +1683,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
           // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+          // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced (the load is not a
+          // user edit) so the op-log starts empty, aligned to this load-time reject-state baseline.
+          opLogRef.current?.reset();
           dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
           onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
@@ -1764,6 +1835,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           dirtyRef.current = false;
           onDirtyChange?.(false);
           return edited;
+        },
+        // R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 operation-log snapshot
+        // the host sends on a dirty save of a LOADED doc (the server applies it via ComposeShadowPatchEngine).
+        // RESETS the log after serializing (mirrors collectEditedParagraphs resetting dirty) so a subsequent
+        // save starts empty — already-applied ops are never re-sent onto the new baseline.
+        serializeOperationLog: () => {
+          if (!editor) {
+            throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
+          }
+          const snapshot = opLogRef.current!.serialize(editor.state.doc);
+          opLogRef.current!.reset();
+          dirtyRef.current = false;
+          onDirtyChange?.(false);
+          return snapshot;
         },
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
