@@ -35,11 +35,11 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 032 | FR-14b standalone Vite conversation code page | 4 | ✅ | FULL/sonnet/high | 012 | Wave 15 (D) |
 | 033 | FR-15 "Email & Messages" DataGrid record tab + `sprk_communicationspage` | 4 | ✅ | FULL/sonnet/high | none | Wave 15 (D) |
 | 034 | Deploy Phase 4 surfaces (Matter pilot) | 4 | ✅ | STANDARD/sonnet/high | 030,031,032,033 | serial (prescriptive) |
-| 040 | FR-24 `sprk_communicationthread` pin field schema | 5 | 🔲 | STANDARD/sonnet/high | none | Wave 17 (E) |
+| 040 | FR-24 `sprk_communicationthread` pin field schema | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |
 | 041 | FR-24 thread pin UI + persistence | 5 | 🔲 | FULL/sonnet/high | 040,012 | serial |
 | 042 | FR-20 attachments open/preview/download + attach-on-compose (SPE) | 5 | 🔲 | FULL/**opus**/high | 011,020 | serial |
-| 043 | FR-21 privilege/privacy accuracy (permitted recipients) | 5 | 🔲 | FULL/**opus**/**xhigh** | 002,011 | serial |
-| 044 | FR-23 configure Dataverse Search for `sprk_communication` | 5 | 🔲 | STANDARD/sonnet/high | none | Wave 17 (E) |
+| 043 | FR-21 privilege/privacy accuracy (permitted recipients) | 5 | ✅ | FULL/**opus**/**xhigh** | 002,011 | serial |
+| 044 | FR-23 configure Dataverse Search for `sprk_communication` | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |
 | 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ⛔ | FULL/**opus**/high | 003 (+spine) | serial (blocked) |
 | 046 | FR-25 per-user read-state (best-effort) | 5 | ⏸ | FULL/opus/high | 003 | serial (deferred) |
 | 050 | Deploy full solution + UAT across 11 entities | 6 | 🔲 | STANDARD/sonnet/high | 034,041,042,043,044,045 | serial (prescriptive) |

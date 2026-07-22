@@ -58,6 +58,7 @@ public sealed class CommunicationThreadReadService
     private const string InReplyToField = "sprk_inreplyto";
     private const string InternalOnlyField = "sprk_isinternalonly";
     private const string PrivilegeField = "sprk_privilegeclassification";
+    private const string IsPrivateField = "sprk_isprivate";             // R3 task 043 / FR-21 — message-level privacy marker (display metadata; NEVER gates a read)
     // Sender-identity enrichment (R3 task 002 / FR-18) — projected metadata over the already-visible row.
     private const string DirectionField = "sprk_direction";            // choice: Incoming=100000000, Outgoing=100000001
     private const string SentByValue = "_sprk_sentby_value";           // systemuser lookup value
@@ -127,7 +128,7 @@ public sealed class CommunicationThreadReadService
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
             DirectionField, SentByValue, SentByNameField,
-            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField,
+            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
         var filter = new StringBuilder($"{ThreadLookupValue} eq {threadId}");
         if (since is { } s)
@@ -601,7 +602,7 @@ public sealed class CommunicationThreadReadService
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
             DirectionField, SentByValue, SentByNameField,
-            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, ThreadLookupValue,
+            SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
         var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
@@ -643,6 +644,12 @@ public sealed class CommunicationThreadReadService
             CreatedOn: parsed.CreatedOn,
             InReplyTo: parsed.InReplyTo,
             Privilege: (int)decision.Privilege,
+            // FR-21 markers ride the SAME impersonated + access-filtered row as every other field: a row the caller
+            // may not see is absent from this projection entirely (no over-disclosure). IsInternalOnly is only ever
+            // true here for a permitted (internal) caller (the filter drops it for external callers); IsPrivate is
+            // display-only metadata that never gated the read.
+            IsInternalOnly: parsed.IsInternalOnly,
+            IsPrivate: parsed.IsPrivate,
             Attachments: attachmentsByMessage.TryGetValue(parsed.MessageId, out var atts)
                 ? atts
                 : Array.Empty<ThreadAttachmentRef>());
@@ -766,6 +773,7 @@ public sealed class CommunicationThreadReadService
     {
         var messageId = TryGuid(row, PkField) ?? Guid.Empty;
         var isInternalOnly = TryBool(row, InternalOnlyField);
+        var isPrivate = TryBool(row, IsPrivateField);
         var privilege = TryInt(row, PrivilegeField);
 
         var entity = new Entity("sprk_communication", messageId);
@@ -777,6 +785,11 @@ public sealed class CommunicationThreadReadService
         return new ParsedMessage
         {
             MessageId = messageId,
+            // FR-21 marker projection. Default false when the column is unset on a VISIBLE row — a display default,
+            // not an access decision (the internal-only ACCESS gate is the access filter's fail-closed job, not this
+            // label). IsPrivate never gates; impersonation enforces private-thread visibility.
+            IsInternalOnly = isInternalOnly ?? false,
+            IsPrivate = isPrivate ?? false,
             ThreadId = TryGuid(row, ThreadLookupValue) ?? Guid.Empty,
             Body = TryString(row, BodyField),
             BodyFormat = TryInt(row, BodyFormatField),
@@ -798,6 +811,8 @@ public sealed class CommunicationThreadReadService
     {
         public required Guid MessageId { get; init; }
         public Guid ThreadId { get; init; }
+        public bool IsInternalOnly { get; init; }
+        public bool IsPrivate { get; init; }
         public string? Body { get; init; }
         public int? BodyFormat { get; init; }
         public int? CommunicationType { get; init; }

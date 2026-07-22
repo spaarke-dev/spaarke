@@ -26,6 +26,7 @@ import * as React from 'react';
 import { Button, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { OpenRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
+import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
 import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 
 export interface IEmailInFlowBlockProps {
@@ -143,6 +144,11 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
         <div className={styles.headerRow}>
           {/* The SINGLE "Email" indicator — one per block, never per-recipient (FR-04). */}
           <ChannelBadge channelType="email" />
+          <PrivacyMarkers
+            privilege={message.privilege}
+            isInternalOnly={message.isInternalOnly}
+            isPrivate={message.isPrivate}
+          />
           <span className={styles.headerSpacer} />
           <Tooltip content="Open email" relationship="label">
             <Button

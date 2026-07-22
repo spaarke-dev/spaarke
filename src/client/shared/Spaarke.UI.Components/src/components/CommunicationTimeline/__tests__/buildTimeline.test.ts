@@ -226,6 +226,28 @@ describe('mapThreadMessageDtoToTimelineMessage', () => {
     expect(result.senderName).toBe('Alice Example');
   });
 
+  // R3 task 043 (FR-21) — privilege/privacy markers, additive pass-through. These ride the access-filtered row the
+  // BFF returned; the mapping is a straight copy (no client-side access inference).
+  it('passes isInternalOnly/isPrivate through unchanged', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({ isInternalOnly: true, isPrivate: true, privilege: 100000002 })
+    );
+    expect(result.isInternalOnly).toBe(true);
+    expect(result.isPrivate).toBe(true);
+    expect(result.privilege).toBe(100000002);
+  });
+
+  it('defaults isInternalOnly/isPrivate to false when the wire fields are absent', () => {
+    // A row predating task 043 carries no marker fields — the mapping must default them to false, never undefined,
+    // so downstream marker rendering is deterministic (and never guesses "restricted").
+    const bare = dto();
+    delete (bare as { isInternalOnly?: boolean }).isInternalOnly;
+    delete (bare as { isPrivate?: boolean }).isPrivate;
+    const result = mapThreadMessageDtoToTimelineMessage(bare);
+    expect(result.isInternalOnly).toBe(false);
+    expect(result.isPrivate).toBe(false);
+  });
+
   it('maps Direction.Incoming (100000000) to "incoming"', () => {
     const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: 100000000 }));
     expect(result.direction).toBe('incoming');

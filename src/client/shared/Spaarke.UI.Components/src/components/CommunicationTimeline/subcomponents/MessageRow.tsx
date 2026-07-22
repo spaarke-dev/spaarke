@@ -22,6 +22,7 @@ import { Badge, Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/reac
 import { ChatRegular, DocumentRegular, MailRegular } from '@fluentui/react-icons';
 import DOMPurify from 'dompurify';
 import { ChannelBadge } from './ChannelBadge';
+import { PrivacyMarkers } from './PrivacyMarkers';
 import type { TimelineMessage } from '../CommunicationTimeline.types';
 
 export interface IMessageRowProps {
@@ -107,6 +108,11 @@ export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuote
     >
       <div className={styles.headerRow}>
         <ChannelBadge channelType={message.channelType} />
+        <PrivacyMarkers
+          privilege={message.privilege}
+          isInternalOnly={message.isInternalOnly}
+          isPrivate={message.isPrivate}
+        />
         <Text className={styles.sender}>{message.sender ?? 'Unknown sender'}</Text>
         {timestampLabel && (
           <Text size={200} className={styles.timestamp}>

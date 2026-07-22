@@ -22,6 +22,7 @@ import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-c
 import DOMPurify from 'dompurify';
 import { CheckmarkCircleRegular, DocumentRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
+import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
 import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 import type { MessageBubbleStatus } from '../ConversationView.types';
 
@@ -165,6 +166,11 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
       >
         <div className={styles.metaRow}>
           <ChannelBadge channelType={message.channelType} />
+          <PrivacyMarkers
+            privilege={message.privilege}
+            isInternalOnly={message.isInternalOnly}
+            isPrivate={message.isPrivate}
+          />
         </div>
 
         {message.body ? (

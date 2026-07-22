@@ -32,6 +32,21 @@ public sealed record ThreadAttachmentRef(
 /// <param name="SentByName">The sender's display name from <c>sprk_sentbyname</c>; null when unset.</param>
 /// <param name="Subject">The communication subject from <c>sprk_subject</c> (R3 task 021 / FR-04); null when unset. Projected metadata on the same access-filtered row (no new query/gate).</param>
 /// <param name="To">The email "To" header recipients from <c>sprk_to</c> (R3 task 021 / FR-04), semicolon-split; empty when unset. The authoritative recipient field of a row the caller is already permitted to read — NOT a fabricated/derived list, and NEVER BCC (BCC is stored separately and is never projected). Projected metadata on the same access-filtered row.</param>
+/// <param name="Privilege"><c>sprk_privilegeclassification</c> (FR-21): None=100000000 / PotentiallyPrivileged=100000001 / Privileged=100000002. Composed from the access-filter decision — it NEVER gated this read (ADR-015 / owner 2026-07-16); a display/review label only.</param>
+/// <param name="IsInternalOnly">
+/// <c>sprk_isinternalonly</c> (FR-21) — the D-05 internal-only marker. <b>Never over-discloses:</b> the shared
+/// <c>CommunicationAccessFilter</c> DROPS an internal-only row for a non-internal caller (Rule 1), so this flag is
+/// <c>true</c> here ONLY on a row the (permitted, internal) caller already sees. It rides the same access-filtered
+/// row as every other field — a row excluded upstream contributes nothing (no over-disclosure, NFR-01). Defaults to
+/// <c>false</c> when the column is unset on a visible row (display default; the access gate, not this label, is the
+/// fail-closed path).
+/// </param>
+/// <param name="IsPrivate">
+/// <c>sprk_isprivate</c> (FR-21) — the message-level privacy marker. Pure DISPLAY metadata: it NEVER gates a read.
+/// Private-thread visibility is enforced by Dataverse impersonation (base ownership/scoping per the access-model
+/// decision 2026-07-16), NOT by this flag — so surfacing it on a row the caller is already permitted to read cannot
+/// imply access anyone lacks. Defaults to <c>false</c> when unset.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -47,6 +62,8 @@ public sealed record ThreadMessageDto(
     DateTimeOffset? CreatedOn,
     string? InReplyTo,
     int Privilege,
+    bool IsInternalOnly,
+    bool IsPrivate,
     IReadOnlyList<ThreadAttachmentRef> Attachments);
 
 /// <summary>
