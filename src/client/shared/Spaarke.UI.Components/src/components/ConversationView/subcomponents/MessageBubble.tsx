@@ -18,12 +18,13 @@
  * same as `CommunicationTimeline/subcomponents/MessageRow.tsx`.
  */
 import * as React from 'react';
-import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import DOMPurify from 'dompurify';
-import { CheckmarkCircleRegular, DocumentRegular, ErrorCircleRegular } from '@fluentui/react-icons';
+import { CheckmarkCircleRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
 import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
-import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
+import { MessageAttachments } from '../../CommunicationTimeline/subcomponents/MessageAttachments';
+import type { TimelineAttachment, TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 import type { MessageBubbleStatus } from '../ConversationView.types';
 
 export interface IMessageBubbleProps {
@@ -32,6 +33,12 @@ export interface IMessageBubbleProps {
   isOwn: boolean;
   /** Only rendered when `isOwn`. Omit to render no status (e.g. status unknown). */
   status?: MessageBubbleStatus;
+  /**
+   * Open/preview/download an attachment via the existing SPE document-viewer
+   * path (task 042 / FR-20). Threaded from `ConversationView`; the host mounts
+   * `<RichFilePreviewDialog />`. Omit it and attachments render as passive chips.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 }
 
 const useStyles = makeStyles({
@@ -140,7 +147,7 @@ function statusLabel(status: MessageBubbleStatus): string {
   }
 }
 
-export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, status }) => {
+export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, status, onOpenAttachment }) => {
   const styles = useStyles();
 
   const sanitizedHtml = React.useMemo(() => {
@@ -184,13 +191,12 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
         )}
 
         {message.attachments.length > 0 && (
-          <div className={styles.attachmentsRow}>
-            {message.attachments.map(a => (
-              <Badge key={a.id} appearance="outline" icon={<DocumentRegular />} size="small">
-                {a.fileName ?? 'Attachment'}
-              </Badge>
-            ))}
-          </div>
+          <MessageAttachments
+            className={styles.attachmentsRow}
+            attachments={message.attachments}
+            message={message}
+            onOpenAttachment={onOpenAttachment}
+          />
         )}
 
         <div className={styles.footerRow}>

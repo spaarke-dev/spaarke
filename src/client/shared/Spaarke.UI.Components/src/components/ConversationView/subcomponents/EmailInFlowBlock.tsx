@@ -27,7 +27,8 @@ import { Button, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluent
 import { OpenRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
 import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
-import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
+import { MessageAttachments } from '../../CommunicationTimeline/subcomponents/MessageAttachments';
+import type { TimelineAttachment, TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 
 export interface IEmailInFlowBlockProps {
   /** The email-type `sprk_communication` row to render as a compact block. */
@@ -40,6 +41,13 @@ export interface IEmailInFlowBlockProps {
    * in view/detail for this email — this component never mounts the dialog.
    */
   onOpen?: (message: TimelineMessage) => void;
+  /**
+   * Open/preview/download an email attachment via the existing SPE
+   * document-viewer path (task 042 / FR-20). Threaded from `ConversationView`;
+   * the host mounts `<RichFilePreviewDialog />`. Omit it and attachments render
+   * as passive chips.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 }
 
 const SUBJECT_FALLBACK = '(no subject)';
@@ -120,6 +128,12 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     minWidth: 0,
   },
+  attachmentsRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXXS,
+  },
 });
 
 /** Treats null/undefined/blank as "missing" so a whitespace-only server value still shows the fallback. */
@@ -128,7 +142,7 @@ function withFallback(value: string | null | undefined, fallback: string): strin
   return trimmed ? trimmed : fallback;
 }
 
-export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, isOwn, onOpen }) => {
+export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, isOwn, onOpen, onOpenAttachment }) => {
   const styles = useStyles();
 
   const subject = withFallback(message.subject, SUBJECT_FALLBACK);
@@ -180,6 +194,15 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
             {to}
           </Text>
         </div>
+
+        {message.attachments.length > 0 && (
+          <MessageAttachments
+            className={styles.attachmentsRow}
+            attachments={message.attachments}
+            message={message}
+            onOpenAttachment={onOpenAttachment}
+          />
+        )}
       </div>
     </div>
   );

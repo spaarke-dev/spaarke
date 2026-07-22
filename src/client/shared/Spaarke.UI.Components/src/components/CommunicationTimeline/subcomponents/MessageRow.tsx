@@ -18,12 +18,13 @@
  * bodies render as React text content (auto-escaped, no sanitization needed).
  */
 import * as React from 'react';
-import { Badge, Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import { ChatRegular, DocumentRegular, MailRegular } from '@fluentui/react-icons';
+import { Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
+import { ChatRegular, MailRegular } from '@fluentui/react-icons';
 import DOMPurify from 'dompurify';
 import { ChannelBadge } from './ChannelBadge';
 import { PrivacyMarkers } from './PrivacyMarkers';
-import type { TimelineMessage } from '../CommunicationTimeline.types';
+import { MessageAttachments } from './MessageAttachments';
+import type { TimelineAttachment, TimelineMessage } from '../CommunicationTimeline.types';
 
 export interface IMessageRowProps {
   message: TimelineMessage;
@@ -33,6 +34,13 @@ export interface IMessageRowProps {
   onQuoteIntoMessage?: (message: TimelineMessage) => void;
   /** "Quote into email" action (task 063) — omit to hide the affordance. */
   onQuoteIntoEmail?: (message: TimelineMessage) => void;
+  /**
+   * Open/preview/download an attachment via the existing SPE document-viewer
+   * path (task 042 / FR-20). Threaded from `CommunicationTimeline`; the host
+   * mounts `<RichFilePreviewDialog />`. Omit it and attachments render as
+   * passive chips.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 }
 
 const MAX_INDENT_DEPTH = 6;
@@ -88,7 +96,13 @@ const useStyles = makeStyles({
   },
 });
 
-export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuoteIntoMessage, onQuoteIntoEmail }) => {
+export const MessageRow: React.FC<IMessageRowProps> = ({
+  message,
+  depth,
+  onQuoteIntoMessage,
+  onQuoteIntoEmail,
+  onOpenAttachment,
+}) => {
   const styles = useStyles();
   const cappedDepth = Math.min(Math.max(depth, 0), MAX_INDENT_DEPTH);
 
@@ -156,13 +170,12 @@ export const MessageRow: React.FC<IMessageRowProps> = ({ message, depth, onQuote
       ) : null}
 
       {message.attachments.length > 0 && (
-        <div className={styles.attachmentsRow}>
-          {message.attachments.map(a => (
-            <Badge key={a.id} appearance="outline" icon={<DocumentRegular />} size="small">
-              {a.fileName ?? 'Attachment'}
-            </Badge>
-          ))}
-        </div>
+        <MessageAttachments
+          className={styles.attachmentsRow}
+          attachments={message.attachments}
+          message={message}
+          onOpenAttachment={onOpenAttachment}
+        />
       )}
     </div>
   );

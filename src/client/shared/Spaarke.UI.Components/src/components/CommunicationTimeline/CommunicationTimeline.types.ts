@@ -214,6 +214,19 @@ export interface CommunicationTimelineBaseProps {
   /** Fired when a poll or send fails (the component also renders an inline error). */
   onError?: (error: Error) => void;
 
+  /**
+   * Open/preview/download an attachment on a message via the existing SPE
+   * document-viewer path (task 042 / FR-20). Rendered on any message
+   * (`MessageRow`) whose attachment resolved to a governed `sprk_document`.
+   * Hands the attachment + message back so the HOST mounts the shared
+   * `<RichFilePreviewDialog />` (fed by `/api/documents/{id}/preview-url` +
+   * `/open-links`) — NOT a new inline previewer (FR-20). Context-agnostic
+   * (ADR-012): this component never mounts the viewer. Omit it and attachments
+   * render as non-interactive chips. Access-filtering per NFR-01 — see
+   * `MessageAttachments` header.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
+
   /** Optional className applied to the root layout container. */
   className?: string;
 }

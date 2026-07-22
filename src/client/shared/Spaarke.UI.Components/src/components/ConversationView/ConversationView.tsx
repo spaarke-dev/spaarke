@@ -582,6 +582,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     onError,
     onOpenEmail,
     onForwardMessage,
+    onOpenAttachment,
     className,
   } = props;
 
@@ -890,12 +891,14 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                     message={item.entry.message}
                     isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
                     onOpen={onOpenEmail}
+                    onOpenAttachment={onOpenAttachment}
                   />
                 ) : (
                   <MessageBubble
                     message={item.entry.message}
                     isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
                     status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
+                    onOpenAttachment={onOpenAttachment}
                   />
                 )}
 

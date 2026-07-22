@@ -173,6 +173,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
     archiveToSpe,
     onSendComplete,
     onError,
+    onOpenAttachment,
     className,
   } = props;
 
@@ -377,6 +378,7 @@ const ThreadModeCommunicationTimeline: React.FC<CommunicationTimelineThreadModeP
             depth={entry.depth}
             onQuoteIntoMessage={handleQuoteIntoMessage}
             onQuoteIntoEmail={onQuoteIntoEmail ? handleQuoteIntoEmail : undefined}
+            onOpenAttachment={onOpenAttachment}
           />
         ))}
         {timeline.length === 0 && state.status === 'ready' && (
