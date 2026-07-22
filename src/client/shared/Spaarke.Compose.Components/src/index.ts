@@ -248,6 +248,31 @@ export type {
   ComposeOperationLog,
 } from './types/compose-operations';
 
+// -------------------------------------------------------------------------
+// R4 FR-03 — the ProseMirror step→operation interceptor (task 020)
+//
+// The CLIENT half of the bridge: a read-only ProseMirror plugin (headless TipTap
+// extension) that captures transaction STEPS as task-003 operations anchored
+// `(paraId, runIndex, run-local-offset)` (D1/D2, I-6). Registered additively in
+// ComposeEditor; the save/rebase path (task 022+) supplies `onOperations`.
+// -------------------------------------------------------------------------
+export {
+  StepOperationInterceptor,
+  COMPOSE_R4_STEP_INTERCEPTOR,
+  stepOperationInterceptorPluginKey,
+  STEP_INTERCEPTOR_IGNORE_META,
+  resolveRunAnchor,
+  runsOfBlock,
+  runLocalPoint,
+  classifyStep,
+} from './widgets/stepOperationInterceptor';
+export type {
+  StepOperationInterceptorOptions,
+  StepClassification,
+  ComposeAnchor,
+  OperationEmitContext,
+} from './widgets/stepOperationInterceptor';
+
 // R3 FR-24 import round-trip (task 050) — render recovered Word revisions as first-class,
 // accept/reject-able insertion/deletion marks anchored by paraId (design §7). Exported for the
 // ComposeEditor mount + direct tests; most consumers pass `importedRevisions` to <ComposeEditor>.

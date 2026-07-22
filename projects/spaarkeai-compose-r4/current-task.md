@@ -10,10 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **Phase 0 + Phase 1 COMPLETE** (001–013). Next: Phase 2 Capture (020–024) |
+| **Task** | ✅ **Phases 0–2 COMPLETE** (020/021/022/024 done; **023 deferred→031**). Next: Phase 3 Patch Engine (030–035) |
 | **Step** | — |
-| **Status** | Phase 1 done (521/521 Compose tests green) — Phase 2 startable |
-| **Next Action** | Run Phase 2 (frontend/ProseMirror): W2 = 020 (step→op interceptor, deps 003) ∥ 021 (opaque-atom node, deps 012) → 022 (rebased op log, after 020) → 023 (delete paragraph-diff export, GATED on 006 ✅) → 024 (tests). Autonomous. |
+| **Status** | Phase 2 done (48/48 client tests green) — Phase 3 startable |
+| **Next Action** | Run Phase 3: 030 (ComposeShadowPatchEngine core, build on the 005 spike's SpikeOpenXmlApplier) → 031 (structural ops — server + **client onStructuralStep wiring** per re-sequence) → 032 (retire writers, gated) · 033 born-in-editor · 034 seam+corpus · 035 deploy. Then 023 runs after 031. Autonomous. |
+
+> **023 re-sequenced (Path A, 2026-07-22)**: its coverage check found `collectEditedParagraphs` handles whole-paragraph delete/merge (`{paraId,text:''}` sentinel — a real UAT-corruption guard) with no equivalent in the 020/022 interceptor (structural steps deferred). 023 now deps on **031**; 031's scope extended to wire the client `onStructuralStep`→structural-op emission. No regression window. Analysis: `notes/task-023-coverage-gap.md`.
 
 > **Pre-existing tech debt flagged 2026-07-22** (NOT R4): ADR-007 GraphIsolation arch test fails on baseline — Graph* types leak in `Services/Communication/**` + `Api/Office/Errors` + `Infrastructure/Errors` (email/messaging subsystems). Zero Compose involvement. Out of R4 scope; flag to owner.
 

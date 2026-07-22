@@ -3,7 +3,7 @@
     <title>ProseMirror step→operation interceptor (FR-03) — the core client bridge</title>
     <phase>2 Frontend capture</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Client bridge core: modifies/creates `.ts` in the editor write path (tags include frontend); this is the load-bearing capture piece the whole operational save model depends on. FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -15,8 +15,8 @@
     <tags>frontend,fluent-ui,docx</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -163,6 +163,34 @@
     Capture only — no fetch (so no `@spaarke/auth` call here), no save wiring, no deletion. The legacy
     `collectEditedParagraphs` is removed in task 023 (gated on the Phase 0 gate 006), not here. Rebasing the
     op log across a continuing session is task 022. Client task (no BFF surface) — no publish-size / CVE gate.
+
+    COMPLETION (2026-07-22):
+    - New: `src/widgets/stepOperationInterceptor.ts` — read-only ProseMirror plugin (headless TipTap extension
+      `StepOperationInterceptor` + `createStepInterceptorPlugin` factory). Exports `resolveRunAnchor`,
+      `runsOfBlock`, `runLocalPoint`, `classifyStep`. Uses MIT `@tiptap/pm/{state,model,transform}` only (no
+      new package, no `@tiptap-pro/*`). Anchors ops `(paraId, runIndex, run-local-offset)` per D2; never
+      emits `{paraId,text}`.
+    - New: `src/widgets/stepOperationInterceptor.test.ts` — 18 colocated jest tests (all green): interior-edit
+      anchor, multi-run boundary, mark mapping, deleteRange/replaceRange, setBlockAttr(Alignment),
+      atom-refusal (schema-driven guard), unrepresentable-mark escalation, live plugin capture, no-mutation.
+    - Wired additively into `ComposeEditor.tsx` (`...COMPOSE_R4_STEP_INTERCEPTOR`, bare/no-handler — wire-in
+      only) and barrel `src/index.ts`. Did NOT touch task 021's opaque-atom node file or its schema line.
+    - Quality gates: code-review + adr-check PASS (0 critical, 0 violations).
+
+    DEVIATIONS (directional-mode, per root §8.5 / POML `<steps mode="directional">`):
+    1. Test runner is JEST (`npm test`), not Vitest — the package harness is jest (`jest.config.js`,
+       `compose-operations.test.ts` precedent). Ran via jest; ADR-038 colocation + banned-test rules honored.
+    2. Build verified via `npm run typecheck` (`tsc --noEmit`) rather than `npm run build:prod` — this shared
+       lib has NO `build:prod` script (`build` = `tsc`); parent instruction confirmed `npm run build`.
+       typecheck used to avoid a `dist/` write-lock collision with the concurrent task-021 build. My files
+       type-clean; remaining `tsc` errors are pre-existing (unbuilt `@spaarke/*` sibling `dist/` in this
+       worktree — environmental, not introduced by task 020).
+    3. Structural ops (split/merge/insertParagraph/deleteParagraph, list wrap, non-alignment block attrs) are
+       recognized and routed to the `onStructuralStep` seam for task 031 (structural-operations) — never
+       silently dropped, never mis-mapped. This is the correct 020/031 boundary.
+    4. ADR-021 dark-mode ui-test: the interceptor is a headless capture plugin (no DOM, no color) →
+       theme-independent by construction; asserted at the capture layer. The visible dark-mode chrome check
+       belongs to task 021's atom placeholder NodeView.
   </notes>
 
   <execution>

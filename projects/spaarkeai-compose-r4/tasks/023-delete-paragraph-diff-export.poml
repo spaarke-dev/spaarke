@@ -4,6 +4,17 @@
     <phase>2 Frontend capture</phase>
     <gate>blocked</gate>
     <status>not-started</status>
+    <amendment date="2026-07-22" by="orchestrator (Phase-2 coverage-gate finding, Path A)">
+      RE-SEQUENCED. The Phase-2 attempt hit this task's own Step-1 coverage check: `collectEditedParagraphs`
+      captures whole-paragraph delete/merge via the `{paraId,text:''}` sentinel (docxBridge.ts:360-368 — the
+      UAT-round-4 "vanished paragraph" corruption guard), but the task-020/022 step interceptor DEFERS all
+      structural steps to `onStructuralStep` (unwired) → deleting the old path now would silently regress
+      structural delete/merge until structural capture exists. Per BLOCKED analysis Path A (matches design §Q3
+      "structural ops in core, sequenced last within the applier"), deps now include **031**. When this task
+      runs (after 031 wires client structural-op emission), FIRST confirm whole-paragraph delete/merge is
+      captured as a `deleteParagraph`/`mergeParagraph` operation, THEN delete `collectEditedParagraphs`.
+      Analysis: `notes/task-023-coverage-gap.md`.
+    </amendment>
     <rigor>FULL</rigor>
     <rigor-reason>Irreversible deletion in the save path (tags include deletion, frontend); a wrong deletion loses coverage the step interceptor may not yet supply. FULL per root §8; gated on the Phase 0 gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -12,7 +23,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Removes shared `docxBridge.ts` export paths other client tasks reference; must run sequentially after capture (020/022) proves coverage.</parallel-reason>
-    <deps>022,006</deps>
+    <deps>022,006,031</deps>
     <tags>frontend,docx,deletion</tags>
     <estimated-effort>1 day</estimated-effort>
     <assigned>unassigned</assigned>
@@ -150,6 +161,20 @@
     gated because it is an irreversible save-path deletion with no A/B safety net (NFR-08). Do NOT delete
     `buildContentModel` — that is task 033's reconciliation. Client task (no BFF surface) — no publish-size /
     CVE gate.
+
+    **BLOCKED 2026-07-22** at Step 1 (coverage check) — the 006 Phase-0 gate is confirmed GREEN, but
+    `collectEditedParagraphs`'s whole-paragraph delete/merge sentinel (`docxBridge.ts:360-368`, emits
+    `{paraId,text:''}` so the server synthesizer strikes a vanished paragraph — the UAT-round-4
+    "vanished paragraph" corruption fix) has NO equivalent in the task-020/022 step interceptor today:
+    `classifyStep` explicitly defers every structural step (split/merge/insert/delete paragraph) to
+    task 031 (`🔲 not-started`, `blocked` in TASK-INDEX, deps on 030 which is also not-started), and
+    `onStructuralStep` has zero wired handlers in production (`ComposeEditor.tsx`/`ComposeWorkspace.tsx`
+    register the interceptor bare). Deleting `collectEditedParagraphs` now would silently and
+    permanently drop this case (no flag, no signal — not even the "captured but deferred" seam is wired).
+    Full analysis + 3 resolution options (A: re-sequence dep on 031 [recommended]; B: documented interim
+    exception per root §6.5; C: pull forward minimal structural capture) in
+    `projects/spaarkeai-compose-r4/BLOCKED.md`. No code was changed under this task — `docxBridge.ts`,
+    `ComposeWorkspace.tsx`, `ComposeEditor.tsx`, `index.ts` are untouched.
   </notes>
 
   <execution>

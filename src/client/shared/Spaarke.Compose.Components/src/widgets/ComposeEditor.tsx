@@ -121,6 +121,13 @@ import {
   buildBaselineParaIdMap,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
+// R4 FR-03 (task 020) — the step→operation interceptor: a headless, read-only
+// ProseMirror plugin that captures transaction steps as task-003 operations
+// anchored `(paraId, runIndex, run-local-offset)`. Registered ADDITIVELY (bare —
+// no handler here); the save/rebase path (task 022+) supplies `onOperations`.
+// Capture only — no fetch, no save wiring, no doc mutation.
+import { COMPOSE_R4_STEP_INTERCEPTOR } from './stepOperationInterceptor';
+import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
 import { applyImportedRevisions } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
@@ -256,6 +263,10 @@ const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
 // Registered additively below alongside the LOCKED Spike #1 list (never mutated).
+
+// R4 FR-02 opaque-atom node types (task 021) — factored into `./opaqueAtomNode` as pure headless
+// schema pieces (see that module's header). Registered additively below (never mutates the locked
+// list). Renders the task-012 server projection's non-editable SDT/field/object placeholders.
 
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
@@ -777,6 +788,35 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorPaletteYellowBackground2,
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
+    },
+    // R4 FR-02 opaque-atom placeholders (task 021) — non-editable SDT/field/object placeholders
+    // (`composeBlockAtom` / `composeInlineAtom`, opaqueAtomNode.ts). Semantic tokens only (ADR-021:
+    // no hardcoded hex; theme-adaptive in both light and dark). `userSelect: 'none'` is layout/
+    // interaction only (not a color rule) — the placeholder is inspectable/selectable as a whole
+    // ProseMirror node, but its label text is not itself a text-editing target.
+    '& .compose-atom': {
+      color: tokens.colorNeutralForeground2,
+      backgroundColor: tokens.colorNeutralBackground3,
+      border: `1px dashed ${tokens.colorNeutralStroke1}`,
+      borderRadius: tokens.borderRadiusSmall,
+      fontStyle: 'italic',
+      userSelect: 'none',
+      cursor: 'default',
+    },
+    '& .compose-atom-block': {
+      display: 'block',
+      padding: tokens.spacingVerticalXS,
+      margin: `${tokens.spacingVerticalXS} 0`,
+      textAlign: 'center',
+    },
+    '& .compose-atom-inline': {
+      display: 'inline-block',
+      padding: `0 ${tokens.spacingHorizontalXXS}`,
+    },
+    '& .ProseMirror-selectednode.compose-atom': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
     },
     // FR-35 Doc Q&A ephemeral highlight (task 072) — a ProseMirror view
     // decoration, NOT a doc Mark (never serializes to DOCX). Semantic tokens
@@ -1374,6 +1414,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
+        ...COMPOSE_R4_OPAQUE_ATOMS,
+        ...COMPOSE_R4_STEP_INTERCEPTOR, // R4 FR-03 (task 020) — read-only step→operation capture (additive)
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',

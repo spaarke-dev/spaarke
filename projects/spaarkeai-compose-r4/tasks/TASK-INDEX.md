@@ -21,11 +21,11 @@
 | 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | done | ✅ |
 | 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | done | ✅ |
 | 013 | Phase-1 ingest/projection seam slice (NFR-06) | 1 Ingest | sonnet / high | FULL | 010,011,012 | done | ✅ |
-| 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | blocked | 🔲 |
-| 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | blocked | 🔲 |
-| 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | blocked | 🔲 |
-| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,**006** | blocked | 🔲 |
-| 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | blocked | 🔲 |
+| 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | done | ✅ |
+| 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | done | ✅ |
+| 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | done | ✅ |
+| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,006,**031** | ⏸ deferred→031 | 🔲 |
+| 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | done | ✅ |
 | 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | blocked | 🔲 |
 | 031 | Structural operations — split/merge/insert/delete (FR-05) | 3 Patch Engine | opus / xhigh | FULL | 030 | blocked | 🔲 |
 | 032 | Retire both legacy writers (FR-06) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | blocked | 🔲 |
