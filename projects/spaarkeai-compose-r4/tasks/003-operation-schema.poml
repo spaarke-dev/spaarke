@@ -3,7 +3,7 @@
     <title>The shared versioned operation schema — the spine both ends compile against (FR-11)</title>
     <phase>0 Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The load-bearing shared contract implemented identically by client and server; modifies/creates `.cs` + `.ts`; high blast radius — every capture, patch, and AI-anchoring task compiles against it.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -16,9 +16,41 @@
     <tags>bff-api,contract,docx,frontend</tags>
     <estimated-effort>2-3 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
+
+  <completion-notes date="2026-07-22">
+    DELIVERED (additive-only — legacy writers/contracts untouched, retired in later tasks 023/032):
+    - SERVER: src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs — the closed
+      set of ten op records (insertText/deleteRange/replaceRange/setMark/clearMark/splitParagraph/
+      mergeParagraph/insertParagraph/deleteParagraph/setBlockAttr) as a System.Text.Json polymorphic
+      union (`[JsonPolymorphic type]` + `[JsonDerivedType(…, "insertText")]`), anchored by
+      ComposeRunPoint{runIndex,offset} / ComposeRunRange{start,end}; envelope ComposeOperationLog
+      {schemaVersion, operations}; ComposeOperationSchema.Version = "compose-ops-v1". Pure records; no
+      AI internals, no Graph types.
+    - CLIENT: src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts — the mirror
+      discriminated union + COMPOSE_OPERATION_TYPES + isComposeOperation/isComposeOperationLog guards.
+      EXTENDS (re-exported from) src/types/compose-contracts.ts + the package barrel src/index.ts — no fork.
+    - TESTS: tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeOperationSchemaTests.cs (4 pass) +
+      src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.test.ts (9 pass) —
+      round-trip client→server→client byte-stable + wire-discriminator + validation coverage.
+
+    KEY OP-SHAPE DECISION (escalation NOT fired): structural ops (split/merge/insert) reference a second
+    paragraph via newParaId/targetParaId carried in the Slate `properties` slot — these are durable
+    w14:paraIds (NOT run-ids, NOT absolute positions), so the {paraId,runIndex,offset|range} anchor
+    remains sufficient and D2/I-3-compliant. Full rationale + the anchor↔op table:
+    projects/spaarkeai-compose-r4/notes/task-003-operation-schema-decisions.md.
+
+    VERIFICATION: BFF build green (0 err); server 4/4 + client 9/9 tests pass; Tier-1 NetArchTest
+    ADR013_ComposeFacadeTests green; publish 46.11 MB compressed incl PDBs (≤60 ceiling; ~neutral vs
+    ~49.63 baseline; zero new runtime package); no NEW HIGH CVE (no .csproj change — pre-existing
+    System.Security.Cryptography.Xml 8.0.3 HIGH is baseline debt). conflict-check = soft warn (sibling
+    compose worktrees share the BFF hot-path; no file overlap — new additive surface). code-review +
+    adr-check (Step 9.5): PASS, 0 Critical / 0 blocking Warning. Placement Justification: contract stays
+    in Services/Compose/ (pure byte-author input for the future ComposeShadowPatchEngine; ADR-013/007
+    compliant; zero NuGet) per .claude/constraints/bff-extensions.md §10.
+  </completion-notes>
 
   <prompt>
     Define the versioned operation contract that is the spine of R4 — the single schema both the client

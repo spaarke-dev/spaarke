@@ -1265,3 +1265,40 @@ export const logFlowEvent: StubReceiver = (flowName, event) => {
     documentRef: event.documentRef,
   });
 };
+
+// ---------------------------------------------------------------------------
+// R4 FR-11 — the shared, versioned OPERATION SCHEMA (spaarkeai-compose-r4 task 003)
+// ---------------------------------------------------------------------------
+//
+// The op-schema spine both the client (ProseMirror step interceptor, task 020) and
+// the server (ComposeShadowPatchEngine, task 030) implement identically. Authored in
+// the sibling module `./compose-operations.ts` and RE-EXPORTED here (project §11:
+// EXTEND the contracts module, do NOT fork/duplicate it) so `compose-contracts.ts`
+// remains the single client contract surface. Server mirror:
+// `Sprk.Bff.Api.Services.Compose.Operations.ComposeOperation`.
+export {
+  COMPOSE_OPERATION_SCHEMA_VERSION,
+  COMPOSE_OPERATION_TYPES,
+  isComposeOperation,
+  isComposeOperationLog,
+} from './compose-operations';
+export type {
+  ComposeOperationType,
+  ComposeRunPoint,
+  ComposeRunRange,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeParagraphPosition,
+  InsertTextOperation,
+  DeleteRangeOperation,
+  ReplaceRangeOperation,
+  SetMarkOperation,
+  ClearMarkOperation,
+  SplitParagraphOperation,
+  MergeParagraphOperation,
+  InsertParagraphOperation,
+  DeleteParagraphOperation,
+  SetBlockAttrOperation,
+  ComposeOperation,
+  ComposeOperationLog,
+} from './compose-operations';

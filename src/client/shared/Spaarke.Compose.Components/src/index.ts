@@ -213,6 +213,41 @@ export type {
   ImportedComment,
 } from './types/compose-contracts';
 
+// -------------------------------------------------------------------------
+// R4 FR-11 — the shared, versioned operation schema (task 003)
+//
+// The op-schema spine both client (ProseMirror step interceptor, task 020) and
+// server (ComposeShadowPatchEngine, task 030) implement identically. Mirrors
+// `Sprk.Bff.Api.Services.Compose.Operations.ComposeOperation`. Round-trips
+// client → server → client without loss.
+// -------------------------------------------------------------------------
+export {
+  COMPOSE_OPERATION_SCHEMA_VERSION,
+  COMPOSE_OPERATION_TYPES,
+  isComposeOperation,
+  isComposeOperationLog,
+} from './types/compose-operations';
+export type {
+  ComposeOperationType,
+  ComposeRunPoint,
+  ComposeRunRange,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeParagraphPosition,
+  InsertTextOperation,
+  DeleteRangeOperation,
+  ReplaceRangeOperation,
+  SetMarkOperation,
+  ClearMarkOperation,
+  SplitParagraphOperation,
+  MergeParagraphOperation,
+  InsertParagraphOperation,
+  DeleteParagraphOperation,
+  SetBlockAttrOperation,
+  ComposeOperation,
+  ComposeOperationLog,
+} from './types/compose-operations';
+
 // R3 FR-24 import round-trip (task 050) — render recovered Word revisions as first-class,
 // accept/reject-able insertion/deletion marks anchored by paraId (design §7). Exported for the
 // ComposeEditor mount + direct tests; most consumers pass `importedRevisions` to <ComposeEditor>.

@@ -10,16 +10,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, no task started yet |
+| **Task** | Wave W0a ✅ complete (001, 002, 003). Next: Wave W0b (004, 005) |
 | **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Say "continue" or "work on task 001" → invoke `task-execute` with `tasks/001-shadow-document-adr.poml` |
+| **Status** | wave-complete — W0b startable |
+| **Next Action** | Say "continue" → run Wave W0b: 004 (byte-diff harness, deps 002) + 005 (applier spike + A/B, deps 002,003), both `parallel-safe:true` → parallel subagents. Then 006 (Phase 0 GATE). |
 
-### Files Modified This Session
-- Project artifacts created by `/project-pipeline` (README, plan, CLAUDE.md, current-task, tasks/, TASK-INDEX)
+### Files Modified This Session (Wave W0a)
+- `.claude/adr/ADR-049-compose-shadow-document.md` (new — task 001) + `.claude/adr/INDEX.md` (entry)
+- `tests/fixtures/compose-corpus/` — 3 LFS sample docs + `corpus-manifest.md` (task 002)
+- `src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs` (new — task 003)
+- `src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts` (new) + `compose-contracts.ts`/`index.ts` (re-export) + tests (task 003)
+- `notes/task-002-corpus-deviations.md`, `notes/task-003-operation-schema-decisions.md`
 
 ### Critical Context
-R4 is a MISSION-CRITICAL hard-replace of the Compose save layer with a Shadow Document Architecture. **Phase 0 (tasks 001–006) is a proof gate** that MUST be green before any old-path deletion (023/032/060). Start at task 001.
+R4 is a MISSION-CRITICAL hard-replace of the Compose save layer with a Shadow Document Architecture. **Phase 0 (tasks 001–006) is a proof gate** that MUST be green before any old-path deletion (023/032/060). Wave W0a done: ADR-049 codified (invariants I-1…I-7, D1–D5, Path-B amendment of R3 paragraph-diff); operation schema built (10 ops, client+server, round-trips green, publish 46.11 MB); corpus staged as LFS. **⚠️ Corpus deviation finding (task 002): the 3 sample docs carry FEWER worst-offender features than the WBS assumed (CIPO doc is track-changes-clean as saved; only its footer page-number SDT is real SDT coverage). Owner worst-offenders needed in Phase 0 to fully exercise NFR-01 — see `notes/task-002-corpus-deviations.md`. This affects the 004 harness + 005 spike + 006 gate evidence bar.**
 
 ---
 
