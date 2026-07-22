@@ -1,0 +1,86 @@
+<task id="131" project="email-communication-solution-r4">
+  <metadata>
+    <title>CommunicationConnections PCF — on-form card visual + affordance parity with RegardingResolver (UAT R5)</title>
+    <phase>Wave 13 — UAT round 5</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>121</dependencies>
+    <blocks>—</blocks>
+    <tags>pcf, frontend, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Reworks a shipped PCF's on-form card layout + affordances to match a reference control; PCF build+pack. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W13</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Owner UAT R5: the CommunicationConnections PCF on-form card ("RELATED RECORDS") should look + behave EXACTLY like
+    the RegardingResolver PCF card ("RELATED RECORD") shown next to it on the sprk_communication form, so the two are
+    visually consistent. Match the RegardingResolver design precisely.
+
+    REFERENCE (read it fully first): `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx` —
+    replicate its Row 1 (title + refresh + lookup) and Row 2 (Regarding Number / Regarding Name grid) design in the
+    CommunicationConnections on-form COLLAPSED CARD (`src/client/pcf/CommunicationConnections/`, the card rendered by
+    `CommunicationConnectionsApp.tsx`, NOT the modal). Specifics to copy:
+
+    1. LAYOUT — Row 2 is a two-column CSS grid `1fr 2fr`: LEFT cell "Regarding Number" (small gray OOB field label
+       12px/400/#616161 above) + the record NUMBER as a Fluent v9 `<Link>` (semibold) that opens the record; RIGHT
+       cell "Regarding Name" (same label style) + the record NAME as plain `<Text>` (Segoe 14px/400/#242424, ellipsis
+       on overflow). Empty cells hide entirely (no em-dash). The CommunicationConnections card ALREADY reads the
+       denormalized primary regarding number + name (its `primaryDenorm`/filed-association state) — use those as the
+       Number/Name source so the card reflects the sent email's regarding immediately (outbound enrichment writes the
+       regarding fields synchronously; the association engine is a no-op for outbound, so DO NOT depend on provenance
+       for the card's number/name).
+    2. TITLE (Row 1) — OOB section-header parity: Segoe UI 14px, weight 600, color #242424, padding '2px 0px 4px',
+       uppercase, letterSpacing 0 (copy RegardingResolver's `title` style verbatim — it's a documented Path-A OOB-parity
+       exception to ADR-021). The title row MUST NOT be clickable (revert the W11 "card header opens modal" behavior).
+    3. REFRESH ICON (Row 1 right) — a ToolbarButton with `ArrowClockwiseRegular`; on click, save the form + refresh
+       (`Xrm.Page.data.entity.save()` then `data.refresh(true)`), defensive/never-throw, with a window.location.reload
+       fallback — copy RegardingResolver's `handleRefreshInternal`. Hidden in read-only.
+    4. LOOKUP ICON (Row 1 right, RIGHT of refresh) — opens the EXISTING CommunicationConnections resolution modal
+       (the Needs-decision / Filed / Suggested group-by-action UI already built in W10/W11). Use a search/lookup icon
+       matching RegardingResolver's (the OOB-flipped magnifier look — you may reuse `Search20Regular` or the
+       scaleX(-1) transform to match). This icon is now the ONLY way to open the modal (title is not clickable).
+       Hidden in read-only.
+    5. TOP PADDING — root container `paddingTop: 0` (right/bottom/left = spacingHorizontalS), matching RegardingResolver
+       so the title aligns with adjacent OOB section headers.
+
+    Keep the number-hyperlink open behavior defensive (open the record via Xrm.Navigation modal/`navigateTo`, or reuse
+    the control's existing record-open path). Keep the version footer. The modal + its data contract (provenance read +
+    task-042 additive write) are UNCHANGED — only the card presentation + the open-trigger (lookup icon vs title) change.
+  </prompt>
+
+  <goal>
+    The CommunicationConnections on-form card is visually + behaviorally indistinguishable from the RegardingResolver
+    card: two-column Regarding Number (hyperlink) / Regarding Name grid with OOB labels, OOB-styled uppercase title
+    (non-clickable), a refresh icon and a lookup icon (the lookup opens the existing resolution modal), and reduced
+    top padding. The rich modal + data contract are unchanged.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Card Row 2 renders a `1fr 2fr` grid: "Regarding Number" label + number Link (opens the record) | "Regarding Name" label + name text (ellipsis). Labels use the OOB field-label style (12px/400/#616161). Empty cells hide.</criterion>
+    <criterion testable="true">Card number/name come from the denormalized primary regarding (the control's existing primaryDenorm / filed-association read), so a sent email's regarding shows after a form refresh without depending on provenance.</criterion>
+    <criterion testable="true">Title uses the OOB section-header spec (Segoe 14px/600/#242424/'2px 0px 4px'/uppercase) and is NOT clickable (no modal-open on the title/header row).</criterion>
+    <criterion testable="true">A refresh ToolbarButton (ArrowClockwise) saves + refreshes the form (defensive, never throws; reload fallback); a lookup icon (right of refresh) opens the existing Connections resolution modal. Both hidden in read-only.</criterion>
+    <criterion testable="true">Root container paddingTop is 0 (title aligns with OOB section headers); right/bottom/left preserved.</criterion>
+    <criterion testable="true">The resolution modal + provenance-read + task-042 additive write contract are UNCHANGED.</criterion>
+    <criterion testable="true">`npm run build:prod` clean; jest updated/green (title-not-clickable, lookup-opens-modal, refresh wired, number/name render); version bump all 5 locations (1.5.0 → 1.6.0); ZIP repacked + validated (type-66, apostrophe-free; pack.ps1 stays $PSScriptRoot-hardened).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Match RegardingResolver's card design; its hardcoded OOB style literals (Segoe/14px/600/#242424, 12px/#616161 labels) are an owner-approved documented Path-A exception to ADR-021 for OOB parity — carry the same exception note in the CommunicationConnections styles.</constraint>
+    <constraint>Presentation/interaction only — do NOT change the provenance read, the task-042 additive write path, or the modal's internals. The title is NOT clickable; the lookup icon opens the modal.</constraint>
+    <constraint>ADR-022 platform libs; ADR-028 auth (`context.webAPI`). Manifest description-keys generic + apostrophe-free; type-66 solution; follow /pcf-deploy. Stay within `src/client/pcf/CommunicationConnections/**` (read-only ref to RegardingResolver). Do NOT modify `@spaarke/ui-components`.</constraint>
+  </constraints>
+
+  <notes>
+    RegardingResolver reference: `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx`
+    (styles block ~L279-408: container/row1/title/row1Actions/refreshToolbar/row2/fieldLabel/recordNumber/recordName;
+    handleRefreshInternal ~L538; Row 2 grid + labels in the render). The CommunicationConnections card currently makes
+    its header row the modal opener (W11 B11-4) — remove that; the lookup icon replaces it. Leave changes UNCOMMITTED;
+    do NOT touch TASK-INDEX/current-task/project CLAUDE.md. Deploy remainder (import) = owner.
+  </notes>
+</task>
