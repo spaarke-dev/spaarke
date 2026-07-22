@@ -4,7 +4,7 @@
     <title>communication-arrived Producer — Emit at Persistence for All Channels</title>
     <phase>2 Layer C + communication-arrived</phase>
     <gate>blocked-until:012,013,020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches the shared Services/Communication persist path (email-r4 + messaging-r3 merge-order coordination); adds tests/integration/seam/** tests — meets root CLAUDE.md §8 FULL criteria + test-modifying override row.</rigor-reason>
     <model-tier>opus</model-tier>

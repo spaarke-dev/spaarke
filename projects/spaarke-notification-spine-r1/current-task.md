@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-21 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` @ `e5f3e2174` — **pushed + MERGED TO MASTER** (0 behind / 0 ahead / 0 unpushed). Phases 1-3 (tasks 001-033) are live on master. Task 024 investigation done; implementation pending (fresh context recommended).
+> **Last Updated**: 2026-07-21 (task 024 COMPLETE).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1`. Phases 1-3 (001-033) live on master; **task 024 (communication-arrived producer) DONE + committed** (pending push/sync). Next: **025** (R3 contract-lock note, FR-19 — now unblocked).
 
 ---
 
@@ -9,10 +9,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **024 — communication-arrived producer (Phase 2, Wave 6) — IN PROGRESS: investigation done, implementation pending** |
-| **Step** | Step 0-2 done (rigor FULL/opus; conflict-check clean; **persist-site sweep complete**). Next: Step 3 (implement producer) → 4 (wire 5 sites) → 5 (seam test). |
-| **Status** | **UNBLOCKED** — email-r4 W10/11/12 merged to master; our branch synced (0 behind master @ e5f3e2174). messaging-r3 #664 touches 0 persist files → no overlap. Escalation trigger CLEARED. |
-| **Next Action** | Implement `CommunicationArrivedProducer` then wire at the **5 enumerated persist sites** (below). Recommended: fresh context — this is a hot-path multi-file task and this session is very deep. |
+| **Task** | **025 — R3 contract-lock note (FR-19), Phase 2 Wave 7 — NOT STARTED** (deps 024✅ 021✅ 022✅ all met). Prior: 024 ✅ DONE. |
+| **Step** | Begin Step 1 of task 025 (`tasks/025-r3-contract-lock-note.poml`). MINIMAL rigor (doc deliverable — formalizes the communication-arrived contract so messaging-r3 task 045 becomes verify-only). |
+| **Status** | 024 shipped: `CommunicationArrivedProducer` emitting at 5 orchestration points (email/msg × in/out), non-fatal, outbox-before-ping. 8853/0 suite; both gates CLEAN; 46.09 MB; 0 new CVE. |
+| **Next Action** | Push/sync task 024 (commit made), then **"work on task 025"**. Or continue the critical path (040 needs 031✅+024✅+email-r4-W10✅ → now unblocked). |
+
+### 024 result (Phase 2, Wave 6 — ✅ DONE 2026-07-21)
+- **Single spine-owned `communication-arrived` producer** (`Services/Communication/CommunicationArrivedProducer.cs`): re-read comm+thread → task-023 fan-out → task-013 envelope → per-recipient task-012 outbox (BEFORE) → task-020 ping. Internally non-fatal (NFR-05). Concrete Singleton.
+- **DEVIATION (documented, POML step 2/7)**: emit at **5 orchestration points AFTER participant-index** (email `ProcessAsync` 4.8; msg `IngestAsync`; `Send{Message,,AsUser}Async` after `WriteParticipantIndexAsync`) — NOT the raw CreateAsync sites the checkpoint enumerated (junction empty + thread/regarding unstamped at raw-create → fan-out would be zero). Full rationale: `notes/024-communication-arrived-producer-notes.md`.
+- Injected as optional trailing ctor param into 3 singletons (IncomingCommunicationProcessor, MessagingIngestor, CommunicationService) — existing tests compile ZERO-edit.
+- Seam test (5 green, `tests/integration/seam/Communication/`): email/msg × in/out each yield outbox(kind=communication-arrived)+ping, outbox-before-ping ordering, non-fatal on failure.
+- **senderDisplay** = privacy-safe channel label (NFR-02/03: no address; no display-name column exists); **snippet** = null (conservative). Both documented as intentional.
+- Gates: code-review CLEAN (3 Suggestions); adr-check CLEAN. ArchTest 3 reds VERIFIED pre-existing (stash-confirmed). Escalation trigger did NOT fire (email-r4 W10 merged); conflict-check clean (#664 touches 0 persist files).
 
 ### 024 investigation (DONE — the de-risking part)
 - **5 `sprk_communication` row-create persist sites (merged HEAD, authoritative)**:

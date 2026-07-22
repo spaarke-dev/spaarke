@@ -297,6 +297,22 @@ public static class CommunicationModule
         services.TryAddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
         services.AddSingleton<CommunicationFanOutTargetingService>();
 
+        // The single, spine-owned communication-arrived producer (spaarke-notification-spine-r1 task 024 /
+        // FR-09 / NFR-05). Emits the Layer-C refresh signal at PERSISTENCE for every sprk_communication write —
+        // inbound capture (email + messaging) + outbound send (email + messaging), identically — so messaging-r3
+        // task 045 consumes ONE spine event instead of wiring its own producer (Owner Clarification). Injected as
+        // an OPTIONAL trailing ctor param into the three persist orchestrators (IncomingCommunicationProcessor,
+        // MessagingIngestor, CommunicationService), each of which calls it AFTER its participant-index step (the
+        // point at which the fan-out junction, thread lookup, and regarding are populated — NOT the raw CreateAsync;
+        // see the producer's remarks + notes/024). Placement Justification (root §10 / §11): sits in
+        // Services/Communication/ beside its fan-out dependency (task 023) and depends "up" into the Notifications
+        // spine infra (OutboxService + SignalRDeliveryService) — the correct direction; ZERO new access logic, ZERO
+        // AI dependency (ADR-013 clean). Registered UNCONDITIONALLY (ADR-010 / ADR-032 — non-fatal producer consumed
+        // best-effort by all three call sites; no feature gate). Singleton — all deps (IGenericEntityService,
+        // CommunicationFanOutTargetingService, OutboxService, SignalRDeliveryService) are singletons, matching the
+        // three singleton orchestrators it is injected into (no captive-scope anti-pattern).
+        services.AddSingleton<CommunicationArrivedProducer>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).
