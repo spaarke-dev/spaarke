@@ -30,9 +30,26 @@ describe('mapEventHandoffSeed', () => {
     });
   });
 
-  it('does NOT map the create-task registry preset event-type GUID (part-3 gap: no display name)', () => {
-    // `sprk_eventtype_ref` in draftValues is the raw subtype GUID injected by the
-    // registry preset — NOT a ResolvedLookup — so it is intentionally skipped.
+  it('maps the create-task preset event-type GUID + companion name (D-013-03)', () => {
+    // The registry preset injects the raw subtype GUID plus a companion display name so the
+    // event-type lookup renders "Task" instead of a blank label.
+    const result = mapEventHandoffSeed(
+      seed({
+        draftValues: {
+          event_name: 'Named',
+          sprk_eventtype_ref: '124f5fc9-98ff-f011-8406-7c1e525abd8b',
+          sprk_eventtype_ref_name: 'Task',
+        },
+      })
+    );
+    expect(result).toEqual({
+      eventName: 'Named',
+      eventTypeId: '124f5fc9-98ff-f011-8406-7c1e525abd8b',
+      eventTypeName: 'Task',
+    });
+  });
+
+  it('still skips a bare event-type GUID with NO companion name (never a blank label)', () => {
     const result = mapEventHandoffSeed(
       seed({ draftValues: { event_name: 'Named', sprk_eventtype_ref: '124f5fc9-98ff-f011-8406-7c1e525abd8b' } })
     );

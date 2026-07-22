@@ -44,6 +44,7 @@ public sealed class IncomingCommunicationProcessor
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ITextExtractor _textExtractor;
     private readonly AttachmentMatchOptions _attachmentMatchOptions;
@@ -78,7 +79,8 @@ public sealed class IncomingCommunicationProcessor
         IConfiguration configuration,
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
@@ -95,6 +97,7 @@ public sealed class IncomingCommunicationProcessor
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _textExtractor = textExtractor;
         _attachmentMatchOptions = attachmentMatchOptions.Value;
@@ -337,6 +340,16 @@ public sealed class IncomingCommunicationProcessor
                     Cc = envelope.Cc,
                 },
                 ct);
+        }
+
+        // ── Step 4.8: communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal ──
+        // Emit the Layer-C refresh signal AFTER association (4.5) + thread (4.6) + participant index (4.7): the
+        // fan-out reads the participant junction just written, and the envelope needs the thread/regarding just
+        // stamped — so this is the correct emit point, NOT the raw CreateCommunicationRecordAsync. The producer is
+        // internally non-fatal (never throws), so capture never fails on a producer error (NFR-05).
+        if (_arrivedProducer is not null)
+        {
+            await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, ct);
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────

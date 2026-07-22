@@ -1,0 +1,260 @@
+using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Notifications;
+using Sprk.Bff.Api.Services.Notifications.Envelopes;
+
+namespace Sprk.Bff.Api.Services.Communication;
+
+/// <summary>
+/// The single, spine-owned <c>communication-arrived</c> producer (spec FR-09 / NFR-05 / NFR-08). Emits the
+/// Layer-C "a new communication persisted; surfaces should refresh" signal for EVERY <c>sprk_communication</c>
+/// write — inbound capture (email + messaging) and outbound send (email + messaging) — identically.
+/// messaging-r3's task 045 consumes THIS event; it MUST NOT wire its own producer (spec Owner Clarification —
+/// the spine emits, R3 consumes only).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Emit point = post-association, NOT the raw <c>CreateAsync</c> (task-024 deviation, POML step 2/7).</b>
+/// The naive "wire at each <c>_genericEntityService.CreateAsync(communication)</c> site" is WRONG: at the raw
+/// create the <c>sprk_communicationthread</c> lookup + regarding are not yet stamped (resolvers run afterward)
+/// and — decisively — the <c>sprk_communicationparticipant</c> junction that
+/// <see cref="CommunicationFanOutTargetingService"/> reads is still EMPTY, so fan-out would return zero and the
+/// signal would silently reach no one. Each of the five persist orchestrators therefore calls this producer
+/// AFTER its participant-index step (email: <c>IncomingCommunicationProcessor</c> step 4.7; messaging:
+/// <c>MessagingIngestor</c>; outbound: <c>CommunicationService.Send{Message,,AsUser}Async</c> after
+/// <c>WriteParticipantIndexAsync</c>). See <c>notes/024-communication-arrived-producer-notes.md</c>.
+/// </para>
+/// <para>
+/// <b>Order of operations per recipient:</b> compute the fan-out (task 023) → build the task-013 envelope →
+/// for each recipient write the durable task-012 outbox row FIRST, THEN best-effort ping (task 020). The
+/// outbox-BEFORE-ping ordering is structural — <see cref="SignalRDeliveryService.PingUserAsync"/> requires the
+/// <c>outboxRowId</c> that only exists after the write (ADR-041/043 store-before-render, root CLAUDE.md
+/// "outbox BEFORE ping").
+/// </para>
+/// <para>
+/// <b>Non-fatal + spine-is-dumb-transport.</b> The whole emit is wrapped so an exception (re-read, fan-out,
+/// outbox write, or ping) is logged and swallowed — it NEVER propagates to or fails the persist call that
+/// triggered it (NFR-05), mirroring <see cref="CommunicationParticipantIndexer"/>'s never-throw contract. The
+/// envelope carries IDENTIFIERS + minimal display metadata only — no body, no address, no privileged content
+/// (NFR-02/NFR-03); clients re-fetch details through the access-checked BFF poll endpoint (task 022).
+/// </para>
+/// <para>
+/// <b>Placement Justification (root §10 / §11).</b> New component — nothing else emits <c>communication-arrived</c>
+/// at persistence. It cannot extend <see cref="CommunicationEnrichmentService"/> (that path is assessment-gated and
+/// single-call; <c>communication-arrived</c> MUST fire at persistence with NO assessment prerequisite and fans out
+/// per-recipient — that is task 040's separate <c>communication_assessed</c> concern). Cost-of-doing-nothing:
+/// messaging-r3 task 045 has no spine event to consume and would wire a forbidden second producer. It lives in
+/// <c>Services/Communication/</c> beside its fan-out dependency (task 023) and depends "up" into the Notifications
+/// spine infra (outbox + delivery) — the correct direction. ZERO new access logic and ZERO AI dependency
+/// (ADR-013 clean). Concrete singleton (ADR-010) — all deps are singletons; injected into the three singleton
+/// persist orchestrators.
+/// </para>
+/// </remarks>
+public sealed class CommunicationArrivedProducer
+{
+    private const string CommunicationEntity = "sprk_communication";
+    private const string ThreadEntity = "sprk_communicationthread";
+
+    private const string ThreadLookupField = "sprk_communicationthread";
+    private const string CommunicationTypeField = "sprk_communicationtype";
+    private const string DirectionField = "sprk_direction";
+    private const string IsInternalOnlyField = "sprk_isinternalonly";
+    private const string CreatedOnField = "createdon";
+    private const string RegardingIdField = "sprk_regardingrecordid";
+    private const string RegardingTypeField = "sprk_regardingrecordtype";
+    private const string ThreadPrivacyStateField = "sprk_privacystate";
+
+    /// <summary>
+    /// Columns re-read off the persisted <c>sprk_communication</c> row — exactly what the task-013 envelope +
+    /// the task-023 fan-out CONTRACT need (fan-out reads <c>sprk_isinternalonly</c> + <c>createdon</c> off the
+    /// message entity; a missing projection fail-closes to under-fan, never over-fan).
+    /// </summary>
+    private static readonly string[] CommunicationColumns =
+    {
+        ThreadLookupField, CommunicationTypeField, DirectionField,
+        IsInternalOnlyField, CreatedOnField,
+        RegardingIdField, RegardingTypeField,
+    };
+
+    private static readonly string[] ThreadColumns = { ThreadPrivacyStateField };
+
+    private readonly IGenericEntityService _entityService;
+    private readonly CommunicationFanOutTargetingService _targeting;
+    private readonly OutboxService _outbox;
+    private readonly SignalRDeliveryService _delivery;
+    private readonly ILogger<CommunicationArrivedProducer> _logger;
+
+    public CommunicationArrivedProducer(
+        IGenericEntityService entityService,
+        CommunicationFanOutTargetingService targeting,
+        OutboxService outbox,
+        SignalRDeliveryService delivery,
+        ILogger<CommunicationArrivedProducer> logger)
+    {
+        _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
+        _targeting = targeting ?? throw new ArgumentNullException(nameof(targeting));
+        _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
+        _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Emits <c>communication-arrived</c> for the just-persisted <paramref name="communicationId"/>. Fully
+    /// non-fatal (NFR-05): never throws — every failure mode is logged and swallowed so the triggering persist
+    /// call always completes.
+    /// </summary>
+    /// <param name="communicationId">The <c>sprk_communication</c> id whose persist just succeeded (post-association).</param>
+    /// <param name="ct">Cancellation token from the persist path.</param>
+    public async Task EmitCommunicationArrivedAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        try
+        {
+            if (communicationId == Guid.Empty)
+            {
+                return;
+            }
+
+            // 1) Re-read the persisted communication with exactly the projection the envelope + fan-out need.
+            //    Centralizing the projection here (not at each of the five heterogeneous persist sites) is why
+            //    the producer takes only an id — one spine-owned emit, one contract.
+            Entity message;
+            try
+            {
+                message = await _entityService.RetrieveAsync(CommunicationEntity, communicationId, CommunicationColumns, ct);
+                message.Id = communicationId; // defensive: fan-out requires a non-empty message.Id.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[communication-arrived] could not re-read communication {CommunicationId}; nothing emitted (non-fatal).",
+                    communicationId);
+                return;
+            }
+
+            // 2) A thread lookup is required — the envelope's threadId is required, and a null thread routes
+            //    fan-out through the private-thread deny-all gate (empty) anyway. No thread yet ⇒ skip (the poll
+            //    fallback + the next event refresh the surface); do NOT fabricate a thread id.
+            var threadRef = message.GetAttributeValue<EntityReference>(ThreadLookupField);
+            if (threadRef is null || threadRef.Id == Guid.Empty)
+            {
+                _logger.LogInformation(
+                    "[communication-arrived] communication {CommunicationId} has no thread yet; skipping emit (envelope requires threadId; fan-out would be empty).",
+                    communicationId);
+                return;
+            }
+
+            // 2b) Thread privacy posture for fan-out (sprk_privacystate). A read failure ⇒ null thread ⇒ fan-out
+            //     treats it as private/unknown (fail closed), never over-fans.
+            Entity? thread = null;
+            try
+            {
+                thread = await _entityService.RetrieveAsync(ThreadEntity, threadRef.Id, ThreadColumns, ct);
+                thread.Id = threadRef.Id;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[communication-arrived] could not read thread {ThreadId} for communication {CommunicationId}; treating as private (fail closed).",
+                    threadRef.Id, communicationId);
+                thread = null;
+            }
+
+            // 3) Fan-out recipients (task 023) — fail-closed; composes the existing access primitives, no new logic.
+            var recipients = await _targeting.GetEligibleRecipientsAsync(message, thread, ct);
+            if (recipients.Count == 0)
+            {
+                _logger.LogInformation(
+                    "[communication-arrived] communication {CommunicationId} thread {ThreadId}: 0 eligible recipients; nothing to deliver.",
+                    communicationId, threadRef.Id);
+                return;
+            }
+
+            // 4) Build the task-013 envelope ONCE (it describes the communication, identical for every recipient).
+            var envelope = BuildEnvelope(communicationId, threadRef.Id, message);
+            if (envelope is null)
+            {
+                return; // unclassifiable channel — logged in BuildEnvelope.
+            }
+
+            var regardingId = message.GetAttributeValue<string>(RegardingIdField);
+            var regardingType = message.GetAttributeValue<string>(RegardingTypeField);
+
+            // 5) Per recipient: durable outbox row FIRST, then best-effort ping. Ordering is structural
+            //    (PingUserAsync requires the outboxRowId that only exists after the write).
+            foreach (var recipientSystemUserId in recipients)
+            {
+                var outboxRowId = await _outbox.WriteAsync(
+                    recipientSystemUserId,
+                    NotificationKind.CommunicationArrived,
+                    envelope,
+                    regardingRecordId: string.IsNullOrWhiteSpace(regardingId) ? null : regardingId,
+                    regardingRecordType: string.IsNullOrWhiteSpace(regardingType) ? null : regardingType,
+                    expiresAt: null,
+                    cancellationToken: ct);
+
+                await _delivery.PingUserAsync(outboxRowId, recipientSystemUserId, NotificationKind.CommunicationArrived, ct);
+            }
+
+            _logger.LogInformation(
+                "[communication-arrived] emitted for communication {CommunicationId} thread {ThreadId} channel {Channel} to {RecipientCount} recipient(s).",
+                communicationId, threadRef.Id, envelope.Channel, recipients.Count);
+        }
+        catch (Exception ex)
+        {
+            // NFR-05: the producer is non-fatal — an exception here NEVER fails the persist call that triggered it.
+            _logger.LogWarning(ex,
+                "[communication-arrived] producer failed (non-fatal) for communication {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Builds the <see cref="CommunicationEnvelope"/> from the re-read row — IDs + minimal display metadata only.
+    /// Returns null when the channel cannot be classified (nothing emitted).
+    /// </summary>
+    private CommunicationEnvelope? BuildEnvelope(Guid communicationId, Guid threadId, Entity message)
+    {
+        var channel = MapChannel(message.GetAttributeValue<OptionSetValue>(CommunicationTypeField));
+        if (channel is null)
+        {
+            _logger.LogInformation(
+                "[communication-arrived] communication {CommunicationId} has an unclassifiable sprk_communicationtype; skipping emit.",
+                communicationId);
+            return null;
+        }
+
+        return new CommunicationEnvelope
+        {
+            Kind = NotificationKind.CommunicationArrived,
+            CommunicationId = communicationId,
+            ThreadId = threadId,
+            Channel = channel,
+            Direction = MapDirection(message.GetAttributeValue<OptionSetValue>(DirectionField)),
+            RegardingRecordId = message.GetAttributeValue<string>(RegardingIdField) ?? string.Empty,
+            SenderDisplay = SenderDisplayFor(channel),
+            Snippet = null, // NFR-02/03: content is NEVER placed on the spine in this task (privacy-conservative).
+            BadgeDelta = 1, // one new communication arrived.
+        }.Validate();
+    }
+
+    private static string? MapChannel(OptionSetValue? type) => type?.Value switch
+    {
+        (int)CommunicationType.Email => "email",
+        (int)CommunicationType.Message => "message",
+        (int)CommunicationType.TeamsMessage => "message",
+        (int)CommunicationType.SMS => "sms",
+        _ => null,
+    };
+
+    private static string MapDirection(OptionSetValue? direction) =>
+        direction?.Value == (int)CommunicationDirection.Outgoing ? "outbound" : "inbound";
+
+    /// <summary>
+    /// NFR-02/03: <c>senderDisplay</c> is "display NAME only — never an address". <c>sprk_communication</c> has
+    /// no display-name column and <c>NormalizedMessage.From</c> is an address, so we emit a privacy-safe channel
+    /// label rather than leak the address; the client re-fetches the real sender via the access-gated BFF. If a
+    /// display-name column is added later, populate it here.
+    /// </summary>
+    private static string SenderDisplayFor(string channel) => channel == "email" ? "New email" : "New message";
+}
