@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Author ADR-047 — Notification &amp; Action Spine (Concise + Full)</title>
+    <phase>1 Layer B + Contract + ADR-047</phase>
+    <gate>blocked-until:001</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation task (ADR authoring); no production code change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architecture ADR authoring — locks the spine's decision surface (typed signals, shared domain actions, per-source policy, SSE-as-presentation, outbox-before-ping, dumb-transport) that every downstream task in this project and three sibling projects builds against.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `.claude/adr/` and `docs/adr/` — main-session-only per root CLAUDE.md §3 sub-agent write boundary; must not run inside a parallel Agent-tool sub-agent.</parallel-reason>
+    <deps>001</deps>
+    <tags>docs, ai</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+  <prompt>Author ADR-047 (concise + full) locking the Notification &amp; Action Spine architecture — typed signals, shared domain actions, per-source policy, SSE-as-presentation, outbox-before-ping, dumb-transport — reflecting task 001's FR-01 mode decision, so downstream tasks and the three sibling projects (email-r4, messaging-r3, assistant-r1) build against one documented decision instead of re-litigating spine ownership.</prompt>
+  <role>SPAARKE platform developer authoring architecture decision records. Follow ADRs strictly. Mirror the structure and rigor of the existing ADR-043/ADR-045 concise+full pairs — this is a peer ADR, not a lighter-weight note.</role>
+  <goal>`.claude/adr/ADR-047-notification-action-spine.md` (concise, 100-150 lines) and `docs/adr/ADR-047-notification-action-spine.md` (full, with Context/Decision/Consequences) both exist, both state the six architectural commitments below, both reflect task 001's mode decision, `.claude/adr/INDEX.md` and `.claude/CHANGELOG.md` are updated, and the ADR-047 reservation entries in ADR-046/ADR-048 are honored (this is the claiming ADR).</goal>
+  <context>
+    <background>
+      ADR-047 is a reserved number — both ADR-046 (messaging-communication-app-r1) and ADR-048 (messaging-communication-app-r2) explicitly note "Sibling ADR-047 reserved for notification-spine-r1" / "ADR-047 reserved for notification-spine (not claimed)" in `.claude/adr/INDEX.md`. This task claims it. The spec's six architectural commitments (design §Executive Summary, spec.md ADR Tensions, and the project CLAUDE.md "Key Technical Constraints" section) are: (1) typed signals — a `kind`-discriminated envelope, not free-form payloads; (2) shared domain actions — one Layer-A seam behind the existing node executors, not per-consumer action logic; (3) per-source policy — grounding/gating decisions stay in producers (comms policy, suggestion gate), never in the spine; (4) SSE-as-presentation — SSE remains a chat-only presentation adapter, demoted conceptually, no SSE code rework, no second real-time channel; (5) outbox-before-ping — the durable outbox write always precedes the best-effort SignalR ping; (6) dumb-transport — the spine carries IDs + minimal display metadata only, never message bodies, privileged content, or pre-authorized action tokens.
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-048-communication-participant-index.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>projects/spaarke-notification-spine-r1/notes/spikes/fr-01-signalr-footprint.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="root CLAUDE.md §3">This task runs main-session only — do NOT delegate the `.claude/adr/` or `docs/adr/` writes to a parallel sub-agent via the Agent tool; sub-agents cannot write `.claude/` paths.</constraint>
+    <constraint source="project">The concise version stays 100-150 lines per `.claude/adr/INDEX.md`'s stated target; omit verbose context/history (that belongs in the full version only).</constraint>
+    <constraint source="project">The delivery-mode section (SignalR Serverless vs Default, and BFF-vs-out-of-BFF placement) MUST cite task 001's spike note and its recorded decision — do not restate the researcher-memory recommendations as if they were the decision; task 001's measured outcome is authoritative.</constraint>
+    <constraint source="ADR governance">Update `.claude/adr/INDEX.md`'s ADR-046 and ADR-048 rows' "Sibling ADR-047 reserved..." language to reflect that ADR-047 is now claimed/Accepted (or Proposed, per whatever status this task assigns), and add ADR-047's own row to the index table in the same format as the other rows.</constraint>
+    <constraint source="project">Add a `.claude/CHANGELOG.md` `[Unreleased]` entry citing the new ADR file(s) per the file's own "Every PR that touches .claude/adr/... MUST add an entry" convention — CHANGELOG.md's own header lists `.claude/adr/` implicitly via the skills/agents/settings/patterns/constraints/FAILURE-MODES/root-CLAUDE.md list; if `.claude/adr/` additions are not explicitly in that list, add the entry anyway (ADR authoring is squarely "procedure surface").</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>projects/spaarke-notification-spine-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="concise+full ADR pair" location=".claude/adr/ADR-043-ai-capability-execution-spine.md + docs/adr/ADR-043-ai-capability-execution-spine.md">Concise = Status/Domain/Builds-on header, Decision, Constraints (MUST/MUST NOT with code-pattern examples), Integration. Full = adds Deciders, Context (the "why" narrative with cited evidence), and cross-references back to the concise version.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read task 001's spike note (`notes/spikes/fr-01-signalr-footprint.md`) for the mode/placement decision; if the file does not exist or has no recorded decision, fire the escalation trigger below instead of proceeding.</step>
+    <step order="2">Read `.claude/adr/ADR-043-ai-capability-execution-spine.md` and its full-version counterpart as the structural template; read ADR-045/046/048 for how adjacent communication-architecture ADRs are framed (ADR-047 is adjacent, not overlapping, per spec §ADR Tensions).</step>
+    <step order="3">Draft `.claude/adr/ADR-047-notification-action-spine.md` (concise): Decision section states the six commitments (typed signals, shared domain actions, per-source policy, SSE-as-presentation, outbox-before-ping, dumb-transport) as MUST/MUST NOT rules with short code/contract examples; a delivery-mode subsection cites task 001's decision.</step>
+    <step order="4">Draft `docs/adr/ADR-047-notification-action-spine.md` (full): add Context (why a shared spine — the "each consumer forks its own push mechanism" failure mode this project prevents, citing email-r4/messaging-r3/assistant-r1 as the three would-be forks), Deciders, and a Consequences section noting the R3 contract-lock dependency (FR-19) and the Notification-flip ADR-043 tension (Path C, comply-sequenced) already resolved in spec.md.</step>
+    <step order="5">Update `.claude/adr/INDEX.md`: add ADR-047's row; update the ADR-046 and ADR-048 rows' reservation language to reflect ADR-047 is now authored.</step>
+    <step order="6">Add a `.claude/CHANGELOG.md` `[Unreleased]` → Added entry for the new ADR-047 files.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the spike (task 001) is not yet resolved — no spike note, or the spike note has no explicit go/no-go and mode decision — do not finalize the delivery-mode section of ADR-047; escalate and pause this task rather than guessing at the mode.</trigger>
+  </escalation>
+  <tools>
+    <tool name="terminal">Shell for file reads/greps across existing ADRs</tool>
+  </tools>
+  <outputs>
+    <output type="docs">.claude/adr/ADR-047-notification-action-spine.md</output>
+    <output type="docs">docs/adr/ADR-047-notification-action-spine.md</output>
+    <output type="docs">.claude/adr/INDEX.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given task 001's resolved spike note exists, when ADR-047 concise is authored, then its delivery-mode section cites the spike note's decision by file path and states the chosen mode (or the revised out-of-BFF placement if >60 MB was breached).</criterion>
+    <criterion testable="true">Given the six architectural commitments, when ADR-047 concise's Decision/Constraints sections are read, then all six (typed signals, shared domain actions, per-source policy, SSE-as-presentation, outbox-before-ping, dumb-transport) are each stated as an explicit MUST or MUST NOT rule.</criterion>
+    <criterion testable="true">Given `.claude/adr/ADR-047-notification-action-spine.md`, when its line count is checked, then it is within the 100-150 line target stated by `.claude/adr/INDEX.md`.</criterion>
+    <criterion testable="true">Given `docs/adr/ADR-047-notification-action-spine.md`, when read, then it contains a Context section explaining the fork-prevention rationale (email-r4/messaging-r3/assistant-r1 each independently designing push) and links back to the concise version.</criterion>
+    <criterion testable="true">Given `.claude/adr/INDEX.md`, when inspected after this task, then it contains an ADR-047 row AND the ADR-046/ADR-048 rows no longer describe ADR-047 as merely "reserved."</criterion>
+    <criterion testable="true">Given `.claude/CHANGELOG.md`, when inspected after this task, then its `[Unreleased]` section has an Added entry citing both new ADR-047 files.</criterion>
+    <criterion testable="true">Given the spike is unresolved (negative case), when this task is attempted, then it does NOT fabricate a mode decision — it fires the escalation trigger instead.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-18. Reflect the ADR Tensions table already resolved in spec.md (ADR-043 Path C — comply, sequenced via the "what lights up" audit) rather than re-deciding it; ADR-047 documents that resolution, it does not reopen it.</notes>
+  <justification>
+    <existing>ADR-043 (dispatch/execution spine) and ADR-045 (communication architecture) are the nearest ADRs — both adjacent (dispatch re-entry, communication persistence) but neither covers a cross-project delivery spine (typed signal → grounded action → push/poll delivery). Verified by grep: no ADR mentions "outbox" as a durable pending-signal store or "SignalR" as a delivery mechanism.</existing>
+    <extension>No — this is a new capability class (a shared delivery spine), not an extension of dispatch or communication architecture; ADR-046/ADR-048 already reserve the number specifically because their authors recognized it as a distinct, adjacent decision.</extension>
+    <cost-of-doing-nothing>Without this ADR, the next project needing server-initiated push (a fourth consumer beyond the three this project already unifies) has no documented decision to build against and re-litigates spine ownership from scratch — the exact fork risk root CLAUDE.md §6/§11 exists to prevent, and the exact failure mode spec §Executive Summary names explicitly ("no second push/delivery mechanism").</cost-of-doing-nothing>
+  </justification>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

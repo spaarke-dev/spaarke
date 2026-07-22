@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Comms Policy Layer — Tenant/Matter Rule Config + Confidence Gate</title>
+    <phase>4 Comms-RI Proving Producer + Policy</phase>
+    <gate>blocked-until:040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code implementation of a new BFF policy/gate service; tags include bff-api/ai; carries a binding architecture decision (rule-store: Binding rows vs a new thin table) that must be resolved WITH grep evidence before any schema work — a judgment boundary per root CLAUDE.md §8.5, not a mechanical extension.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>rule-store architecture decision; privilege governance</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Single blocking dependency on 040 (the producer whose signal this task consumes); the rule-store decision must be made serially, not in parallel with any other schema-touching task.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, api, ai, services</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Build the comms policy layer that decides WHETHER to act on a `communication_assessed` signal (from task 040): tenant/matter-scoped rule config + a confidence gate, reusing EventRulesService's gate PRIMITIVES (cost cap / confidence-threshold pattern) without its chat user/session scoping and without routing through `FireAsync`. The privilege dimension is flagged on every decision, never auto-decided (ADR-015). The rule-store choice (Binding rows vs a new thin table) must be decided at this task with grep evidence, not assumed.</prompt>
+
+  <role>SPAARKE platform developer with AI-facade (ADR-013) and rule/gate-evaluation experience. This task carries a real architecture judgment call (rule-store placement) — treat the §11 gate as binding: extend before you build new schema.</role>
+
+  <goal>A comms policy gate service exists that: (1) resolves the applicable rule(s) for an assessed communication's tenant/matter using the DECIDED rule store; (2) evaluates a confidence threshold using a pattern mirrored from `EventRulesOptions.ClassifyConfidenceThreshold` (dedicated config, not shared mutable state); (3) returns authorize/deny; (4) logs every decision (rule matched or not, confidence, authorize/deny) with the privilege dimension explicitly flagged; (5) never calls `IEventRulesService.FireAsync` and never keys state on chat `SessionId`/`UserOid`. The rule-store decision (Binding rows vs new table) is made and documented with grep evidence BEFORE any new table is created.</goal>
+
+  <context>
+    <background>
+      Spec FR-12 (comms policy layer) sits between task 040 (the `communication_assessed` producer, upstream) and task 042 (RI actions via the Layer-A seam, downstream — only reached when this gate authorizes). The spec's own Assumptions section leans toward reusing Binding (`sprk_playbookconsumer`) rows + `sprk_matchconditions` for the rule config, but reserves a thin comms-specific rule table ONLY if Binding provably cannot express tenant/matter match conditions — that provability check is this task's job, not a later one. Privilege (whether an RI action touches privileged/attorney-client content) is explicitly "flagged, never decided" per ADR-015 — this layer surfaces the flag, it does not resolve it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/EventRulesService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/EventRulesOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (task 040's producer + safe-default consumer registration)</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This layer MUST reuse gate PRIMITIVES from `EventRulesService` — the per-user/tenant cost-cap pattern (`EventRulesOptions.DailyExecutionCap`) and the confidence-threshold pattern (`EventRulesOptions.ClassifyConfidenceThreshold`) — as PATTERNS to mirror in a new, dedicated options surface. It MUST NOT call `IEventRulesService.FireAsync` and MUST NOT reuse `EventRulesService`'s chat-session/user state (`IEventPathUserState`, `SessionId`/`UserOid`-keyed counters) — those are chat/SSE-shaped and out of scope for comms-RI per the spec.</constraint>
+    <constraint source="ADR-015">Every policy decision this layer produces MUST carry an explicit privilege flag/field. The layer MUST NOT auto-decide privilege (e.g., silently suppress or silently allow based on a guessed privilege status) — flag it and let downstream/human review consume the flag.</constraint>
+    <constraint source="project">Rule match + confidence pass → the decision is "authorize" (actions are handed to task 042's future call point, not executed by this task). No match, or match with confidence below threshold → the decision is "deny" and MUST be logged (no silent drop, no silent action).</constraint>
+    <constraint source="project (§11 gate)">The rule-store choice (Binding `sprk_playbookconsumer` rows + `sprk_matchconditions` vs a new thin comms-rule table) MUST be decided AT THIS TASK with grep evidence — inspect `Binding.MatchConditionsJson`'s actual shape (flat key → string | string[]) and `ConsumerRoutingService`'s resolution logic to determine whether a tenant+matter compound match is expressible. Do not create a new Dataverse table without first proving Binding cannot express the match.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Binding match-condition contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs (ConsumerType, ConsumerCode, Environment, Priority, MatchConditionsJson)">The existing routing/config surface to evaluate first — a flat key→string|string[] JSON predicate; determine at this task whether tenant+matter compound match is expressible without an escalation.</pattern>
+      <pattern name="Gate primitive shape (NOT the seam)" location="src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/EventRulesOptions.cs (DailyExecutionCap, ClassifyConfidenceThreshold)">Mirror the shape of these two dials in a new, dedicated comms-policy options class — do not extend `EventRulesOptions` itself and do not share its bound configuration section.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Grep-evidence pass: read `Binding.cs`, `ConsumerRoutingService.cs`, `IConsumerRoutingService.cs` to determine concretely whether `sprk_matchconditions` (flat key → string | string[]) can express a tenant-AND-matter compound match condition, and whether a per-rule confidence-threshold override can ride alongside it. Record the concrete grep evidence (file:line + reasoning) in `projects/spaarke-notification-spine-r1/notes/`.</step>
+    <step order="2">Make the rule-store decision from step 1's evidence. If Binding is provably sufficient, proceed using Binding rows (new `ConsumerType`, e.g. `comms-ri`, resolved via the existing `IConsumerRoutingService`). If Binding is provably insufficient, STOP and follow the escalation trigger below BEFORE creating any new table — do not silently build a table without having escalated first.</step>
+    <step order="3">Implement the policy gate service (new file(s) under `Services/Communication/` or `Services/Ai/PublicContracts/` depending on the rule-store decision's placement implications — state the placement choice explicitly): resolves the matching rule(s) for the assessed communication's tenant/matter via the decided store, evaluates confidence against the new dedicated threshold option, and returns an authorize/deny result plus a decision record.</step>
+    <step order="4">Register the gate service in the appropriate DI module (unconditionally; ADR-032-consistent — no config flag exists to gate this on yet). Wire it as the real consumer behind the seam task 040 defined (replacing or extending the safe-default registration from 040, per that task's documented interim-default note).</step>
+    <step order="5">Attach an explicit privilege field to the decision record (flagged boolean/enum, not auto-resolved) per ADR-015; ensure it is present on BOTH authorize and deny decisions.</step>
+    <step order="6">Add tests covering all four branches: (a) rule match + confidence ≥ threshold → authorize; (b) no matching rule → deny + logged no-action; (c) rule match + confidence &lt; threshold → deny + logged no-action; (d) the gate never calls `IEventRulesService.FireAsync` (assert no dependency / no invocation). Place tests under the appropriate `tests/` KEEP path per `tests/CLAUDE.md` (behavior-with-branches → `tests/integration/data-mutation/**` if a decision/config row is persisted, else `tests/unit/domain/**` for pure threshold/match evaluation logic — state which and why).</step>
+    <step order="7">Verify BFF publish size ≤60 MB compressed (report absolute + diff vs ~49.63 MB incl-PDB baseline, state PDB convention); run `dotnet list package --vulnerable --include-transitive` (0 new HIGH CVE); state Placement Justification per `.claude/constraints/bff-extensions.md`.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Decide rule store (Binding rows vs thin table) at this task WITH grep evidence; if Binding cannot express tenant/matter match, escalate the §11 gate before adding a table.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Binding (`sprk_playbookconsumer`) rows + `sprk_matchconditions` JSON predicate (flat key → string | string[]) — the platform's one routing/config surface (ADR-039 single-routing-surface rule), verified at `Binding.cs:56` (`MatchConditionsJson`).</existing>
+    <extension>Yes (assumed lean per spec) — add Binding rows with a new `ConsumerType` for comms-RI and tenant/matter keys in `MatchConditionsJson`. A new thin comms-rule table is justified ONLY if this task's grep evidence proves `MatchConditionsJson` cannot express a tenant+matter compound match or cannot carry a per-rule confidence-threshold override — decide with evidence, do not assume the negative.</extension>
+    <cost-of-doing-nothing>Without a rule store and confidence gate, comms-RI either fires unmediated actions on every assessed communication (no tenant/matter control — a governance failure) or never fires any RI action at all (FR-12/13 value never ships).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell (grep evidence gathering, publish size, CVE scan)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ or Services/Ai/PublicContracts/ (NEW comms policy gate service — exact location stated per step 3's placement decision)</output>
+    <output type="test">tests/integration/data-mutation/Communication/ or tests/unit/domain/Communication/ (NEW — per step 6's KEEP-path decision)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/041-rule-store-decision.md (grep evidence + decision)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given this task starts, when the rule-store decision is made, then it is documented with concrete grep evidence (file:line) in `projects/spaarke-notification-spine-r1/notes/`, not assumed or deferred.</criterion>
+    <criterion testable="true">Given the grep evidence proves Binding cannot express a tenant+matter compound match, when this is discovered, then execution STOPS at the escalation trigger before any new Dataverse table is created.</criterion>
+    <criterion testable="true">Given an assessed-communication signal with a matching rule and confidence at or above the configured threshold, when the policy gate evaluates it, then it returns "authorize".</criterion>
+    <criterion testable="true">Given an assessed-communication signal with no matching tenant/matter rule, when the policy gate evaluates it, then it returns "deny" and logs a no-action decision (no side effect fires).</criterion>
+    <criterion testable="true">Given a matching rule but confidence below the configured threshold, when the policy gate evaluates it, then it returns "deny" and logs a no-action decision.</criterion>
+    <criterion testable="true">Given any decision path (authorize or deny), when inspected, then `IEventRulesService.FireAsync` was never invoked and no state was keyed on chat `SessionId`/`UserOid`.</criterion>
+    <criterion testable="true">Given any decision (authorize or deny), when logged/persisted, then it carries an explicit privilege flag field (not auto-resolved) per ADR-015.</criterion>
+    <criterion testable="true">Tests exist covering all four decision branches (match+pass, match+fail-confidence, no-match, FireAsync-never-called) under an appropriate `tests/` KEEP path with the placement choice stated.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed (absolute + diff vs baseline reported, PDB convention stated); 0 new HIGH-severity CVE; Placement Justification stated per `.claude/constraints/bff-extensions.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-12. Plan Phase 4 deliverable 2 / Key Technical Decision row 3 / Risk R6. This task does NOT execute RI actions (that's 042) and does NOT decide privilege (ADR-015 — flag only). If the §11 escalation fires, the follow-on schema work becomes a separate blocking sub-task before this task's remaining steps can complete.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

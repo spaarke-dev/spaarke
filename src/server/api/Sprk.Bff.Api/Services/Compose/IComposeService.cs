@@ -393,6 +393,21 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ParaIdMapEntry> ParaIdMap { get; init; } = Array.Empty<ParaIdMapEntry>();
 
     /// <summary>
+    /// Phase-1 mammoth removal (design <c>notes/design-server-side-docx-html-conversion.md</c>): the
+    /// server-side DOCX→editor projection — paraId-tagged HTML + status + fidelity warnings, produced by the
+    /// single-walk <see cref="ComposeDocxProjectionBuilder"/>. The client mounts <c>Projection.Html</c> via
+    /// <c>setContent</c> (the paraId extension parses <c>data-paraid</c>) instead of running mammoth +
+    /// position-stamping ids. Fail-closed: the client keys off <see cref="ComposeDocxProjection.Status"/> /
+    /// <see cref="ComposeDocxProjection.CanEdit"/>, NOT <c>Html.Length</c>. Defaulted so existing constructions
+    /// remain valid; <see cref="ComposeService.LoadAsync"/> always populates it. Tier-3 HTML — never logged.
+    /// </summary>
+    public ComposeDocxProjection Projection { get; init; } = new()
+    {
+        Status = ComposeProjectionStatus.Failed,
+        CanEdit = false,
+    };
+
+    /// <summary>
     /// FR-24 (task 050, import round-trip): the existing native Word tracked changes (<c>w:ins</c>/
     /// <c>w:del</c>, any authorship) recovered from the load-time <c>.docx</c> by the EXISTING
     /// <see cref="DocxAnnotationReader"/> (reused verbatim), run server-side ALONGSIDE the mammoth

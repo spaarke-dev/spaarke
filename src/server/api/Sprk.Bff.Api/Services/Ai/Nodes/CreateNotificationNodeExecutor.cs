@@ -1,6 +1,4 @@
 using System.Text.Json;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -47,13 +45,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
     /// Default priority for notifications when not specified in config (Important = 200000000).
     /// </summary>
     private const int DefaultPriority = 200_000_000;
-
-    /// <summary>
-    /// Dataverse <c>toasttype</c> option-set value for "Hidden" — the notification produces no visible toast.
-    /// Per FR-18, hidden-toast notifications skip <c>data.actions[]</c> population because the MDA native bell
-    /// surface that would render the action is not shown.
-    /// </summary>
-    private const int ToastTypeHidden = 100_000_000;
 
     /// <summary>
     /// Dataverse <c>toasttype</c> option-set default value ("Timed") — visible toast that auto-dismisses.
@@ -370,57 +361,62 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 recipientId,
                 category);
 
-            // Idempotency check: query for existing unread notification with same user + regarding + category
-            if (regardingId.HasValue && !string.IsNullOrWhiteSpace(category))
+            // Delegate the idempotency check + entity build + create to the session-agnostic
+            // NotificationActionCore (task 031). Template rendering + recipient/regarding/membership
+            // resolution stay here; source:"playbook" + correlationId:RunId preserve today's exact
+            // appnotification field values (sprk_source / sprk_playbookrunid).
+            var actionResult = await new NotificationActionCore(_entityService, _logger).CreateAsync(
+                new NotificationActionInput(
+                    Title: title,
+                    Body: body,
+                    Category: category,
+                    Priority: config.Priority ?? DefaultPriority,
+                    ToastType: config.ToastType ?? DefaultToastType,
+                    ActionUrl: actionUrl,
+                    RecipientId: recipientId.Value,
+                    RegardingId: regardingId,
+                    RegardingType: regardingType,
+                    DueDate: dueDate,
+                    RegardingName: regardingName,
+                    SourceEntityType: sourceEntityType,
+                    SourceId: sourceId,
+                    SourceModifiedOn: sourceModifiedOn,
+                    SourceOwningUser: sourceOwningUser,
+                    ViaMatterId: viaMatterId,
+                    ViaMatterName: viaMatterName,
+                    ViaMatterMemberships: viaMatterMemberships,
+                    Source: "playbook",
+                    CorrelationId: context.RunId.ToString()),
+                cancellationToken);
+
+            if (actionResult.Skipped)
             {
-                var isDuplicate = await CheckForDuplicateNotificationAsync(
-                    recipientId.Value,
-                    regardingId.Value,
-                    category,
-                    cancellationToken);
+                _logger.LogInformation(
+                    "CreateNotification node {NodeId} skipped — duplicate unread notification exists for user {UserId}, regarding {RegardingId}, category {Category}",
+                    context.Node.Id,
+                    recipientId,
+                    regardingId,
+                    category);
 
-                if (isDuplicate)
-                {
-                    _logger.LogInformation(
-                        "CreateNotification node {NodeId} skipped — duplicate unread notification exists for user {UserId}, regarding {RegardingId}, category {Category}",
-                        context.Node.Id,
-                        recipientId,
-                        regardingId,
-                        category);
-
-                    return NodeOutput.Ok(
-                        context.Node.Id,
-                        context.Node.OutputVariable,
-                        new
-                        {
-                            skipped = true,
-                            reason = "Duplicate unread notification exists",
-                            recipientId = recipientId,
-                            regardingId = regardingId,
-                            category = category
-                        },
-                        textContent: $"Notification skipped (duplicate): {title}",
-                        metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
-                }
+                return NodeOutput.Ok(
+                    context.Node.Id,
+                    context.Node.OutputVariable,
+                    new
+                    {
+                        skipped = true,
+                        reason = actionResult.SkipReason,
+                        recipientId = recipientId,
+                        regardingId = regardingId,
+                        category = category
+                    },
+                    textContent: $"Notification skipped (duplicate): {title}",
+                    metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
             }
-
-            // Build appnotification entity
-            var entity = BuildNotificationEntity(
-                title, body, category, config.Priority ?? DefaultPriority,
-                config.ToastType ?? DefaultToastType,
-                actionUrl, recipientId.Value, regardingId, regardingType,
-                dueDate,
-                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
-                viaMatterId, viaMatterName, viaMatterMemberships,
-                context);
-
-            // Create the notification via shared Dataverse client
-            var notificationId = await _entityService.CreateAsync(entity, cancellationToken);
 
             _logger.LogInformation(
                 "CreateNotification node {NodeId} completed — notification {NotificationId} created for user {UserId}: {Title}",
                 context.Node.Id,
-                notificationId,
+                actionResult.NotificationId,
                 recipientId,
                 title);
 
@@ -429,7 +425,7 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 context.Node.OutputVariable,
                 new
                 {
-                    notificationId = notificationId,
+                    notificationId = actionResult.NotificationId,
                     title = title,
                     recipientId = recipientId,
                     category = category,
@@ -548,22 +544,32 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
                 }
             }
 
-            // Idempotency check
-            if (regardingId.HasValue && !string.IsNullOrWhiteSpace(category))
-            {
-                var isDuplicate = await CheckForDuplicateNotificationAsync(recipientId.Value, regardingId.Value, category, cancellationToken);
-                if (isDuplicate) { skipped++; continue; }
-            }
+            // Idempotency check + entity build + create — delegated to the shared core (task 031).
+            var itemResult = await new NotificationActionCore(_entityService, _logger).CreateAsync(
+                new NotificationActionInput(
+                    Title: title,
+                    Body: body,
+                    Category: category,
+                    Priority: itemConfig.Priority ?? DefaultPriority,
+                    ToastType: itemConfig.ToastType ?? DefaultToastType,
+                    ActionUrl: actionUrl,
+                    RecipientId: recipientId.Value,
+                    RegardingId: regardingId,
+                    RegardingType: regardingType,
+                    DueDate: dueDate,
+                    RegardingName: regardingName,
+                    SourceEntityType: sourceEntityType,
+                    SourceId: sourceId,
+                    SourceModifiedOn: sourceModifiedOn,
+                    SourceOwningUser: sourceOwningUser,
+                    ViaMatterId: viaMatterId,
+                    ViaMatterName: viaMatterName,
+                    ViaMatterMemberships: viaMatterMemberships,
+                    Source: "playbook",
+                    CorrelationId: context.RunId.ToString()),
+                cancellationToken);
 
-            var entity = BuildNotificationEntity(
-                title, body, category, itemConfig.Priority ?? DefaultPriority,
-                itemConfig.ToastType ?? DefaultToastType,
-                actionUrl, recipientId.Value, regardingId, regardingType,
-                dueDate,
-                regardingName, sourceEntityType, sourceId, sourceModifiedOn, sourceOwningUser,
-                viaMatterId, viaMatterName, viaMatterMemberships,
-                context);
-            await _entityService.CreateAsync(entity, cancellationToken);
+            if (itemResult.Skipped) { skipped++; continue; }
             created++;
         }
 
@@ -604,194 +610,6 @@ public sealed class CreateNotificationNodeExecutor : INodeExecutor
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Checks for an existing unread appnotification matching user + regarding + category.
-    /// Returns true if a duplicate exists (skip creation).
-    /// </summary>
-    private async Task<bool> CheckForDuplicateNotificationAsync(
-        Guid recipientId,
-        Guid regardingId,
-        string category,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var query = new QueryExpression("appnotification")
-            {
-                ColumnSet = new ColumnSet("activityid"),
-                TopCount = 1,
-                Criteria = new FilterExpression(LogicalOperator.And)
-            };
-            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, recipientId);
-            query.Criteria.AddCondition("sprk_category", ConditionOperator.Equal, category);
-            query.Criteria.AddCondition("sprk_regardingid", ConditionOperator.Equal, regardingId.ToString());
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, cancellationToken);
-            return result.Entities.Count > 0;
-        }
-        catch (Exception ex)
-        {
-            // If idempotency check fails, log and proceed with creation
-            // (better to create a potential duplicate than to fail the entire node)
-            _logger.LogWarning(
-                ex,
-                "Idempotency check failed — proceeding with notification creation");
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Builds an SDK <see cref="Entity"/> representing the appnotification to create.
-    /// </summary>
-    /// <remarks>
-    /// Per FR-18 (P3): when <paramref name="actionUrl"/> is present, <c>data</c> is serialized as
-    /// <c>{ actions, customData }</c>. <c>customData.actionUrl</c> is populated regardless of
-    /// <paramref name="toastType"/> (consumed by the Daily Briefing UI). The <c>actions</c> array
-    /// (<c>[{ title: "Open", data: { url: actionUrl } }]</c>) is populated ONLY when the toast is
-    /// visible (<paramref name="toastType"/> != <see cref="ToastTypeHidden"/>) so the MDA native bell
-    /// icon shows a clickable "Open" button. Hidden-toast notifications skip <c>data.actions</c>
-    /// because no visible surface renders them.
-    /// </remarks>
-    private static Entity BuildNotificationEntity(
-        string title,
-        string body,
-        string? category,
-        int priority,
-        int toastType,
-        string? actionUrl,
-        Guid recipientId,
-        Guid? regardingId,
-        string? regardingType,
-        string? dueDate,
-        // FR-6 (R4 task 020): enrichment scalars + viaMatter projection.
-        // All inputs are optional — playbooks not yet migrated to enriched shape produce the
-        // legacy customData payload unchanged (AC-6b backward compat).
-        string? regardingName,
-        string? sourceEntityType,
-        string? sourceId,
-        string? sourceModifiedOn,
-        string? sourceOwningUser,
-        string? viaMatterId,
-        string? viaMatterName,
-        IReadOnlyList<object>? viaMatterMemberships,
-        NodeExecutionContext context)
-    {
-        var entity = new Entity("appnotification");
-        entity["title"] = title;
-        entity["body"] = body;
-        entity["priority"] = new OptionSetValue(priority);
-        entity["toasttype"] = new OptionSetValue(toastType);
-        entity["ownerid"] = new EntityReference("systemuser", recipientId);
-        entity["ttlinseconds"] = 604800; // 7 days default TTL (increased from 3d on 2026-06-22 after UAT showed 36 notifications TTL-purged before user could review them)
-
-        // Add category (custom field for idempotency grouping)
-        if (!string.IsNullOrWhiteSpace(category))
-        {
-            entity["sprk_category"] = category;
-        }
-
-        // FR-18 (P3) + FR-6 (R4 task 020): build appnotification.data payload.
-        // - customData.actionUrl is populated regardless of toasttype (Daily Briefing UI consumer).
-        // - customData.dueDate is populated when provided (R2.2 — Daily Briefing per-item due-date UX).
-        // - data.actions[] is populated ONLY when actionUrl is present AND toasttype != Hidden
-        //   (so MDA native bell icon shows a clickable "Open" button).
-        // - FR-6 enriched fields (regardingName, regardingEntityType, regardingId, viaMatter, source)
-        //   are added conditionally so old-shape playbooks remain backward compatible (AC-6b).
-        // - viaMatter is OMITTED entirely when no matter linkage (AC-6 / FR-6 requirement: omit, not null).
-        // - Payload typical <2KB, hard ceiling <10KB (AC-6c). Memberships array is the only field
-        //   that can grow; we don't truncate here — upstream LookupUserMembership already caps via
-        //   MembershipResolveOptions.DefaultLimit.
-        // R2.2: data is built whenever actionUrl OR dueDate is present (was: only actionUrl).
-        // R4 task 020: also build data when ANY FR-6 enrichment scalar is present (e.g., notifications
-        // with regarding info but no URL).
-        var hasActionUrl = !string.IsNullOrWhiteSpace(actionUrl);
-        var hasDueDate = !string.IsNullOrWhiteSpace(dueDate);
-        var hasRegardingName = !string.IsNullOrWhiteSpace(regardingName);
-        var hasRegardingId = regardingId.HasValue && regardingId.Value != Guid.Empty;
-        var hasRegardingType = !string.IsNullOrWhiteSpace(regardingType);
-        var hasSourceEntity = !string.IsNullOrWhiteSpace(sourceEntityType) || !string.IsNullOrWhiteSpace(sourceId)
-                             || !string.IsNullOrWhiteSpace(sourceModifiedOn) || !string.IsNullOrWhiteSpace(sourceOwningUser);
-        var hasViaMatter = !string.IsNullOrWhiteSpace(viaMatterId)
-                           && (!string.IsNullOrWhiteSpace(viaMatterName) || viaMatterMemberships is { Count: > 0 });
-
-        if (hasActionUrl || hasDueDate || hasRegardingName || hasRegardingId || hasSourceEntity || hasViaMatter)
-        {
-            var customData = new Dictionary<string, object?>();
-            if (hasActionUrl) customData["actionUrl"] = actionUrl;
-            if (hasDueDate) customData["dueDate"] = dueDate;
-
-            // FR-6: regardingName + regardingEntityType + regardingId — flat fields used by widget
-            // grounding + EntityNameValidator allow-list (FR-14).
-            if (hasRegardingName) customData["regardingName"] = regardingName;
-            if (hasRegardingType) customData["regardingEntityType"] = regardingType;
-            if (hasRegardingId) customData["regardingId"] = regardingId!.Value.ToString();
-
-            // FR-6: viaMatter object — present ONLY when matter linkage exists. Per FR-6 + AC-6b,
-            // omit field entirely (not null) when source-record has no matter linkage.
-            if (hasViaMatter)
-            {
-                var viaMatter = new Dictionary<string, object?>
-                {
-                    ["id"] = viaMatterId
-                };
-                if (!string.IsNullOrWhiteSpace(viaMatterName))
-                {
-                    viaMatter["name"] = viaMatterName;
-                }
-                // memberships[] — one entry per role per FR-6 + AC-6 spec.
-                viaMatter["memberships"] = viaMatterMemberships ?? (IReadOnlyList<object>)Array.Empty<object>();
-                customData["viaMatter"] = viaMatter;
-            }
-
-            // FR-6: source object — captures originating record identity for widget grounding +
-            // narration. Built when ANY source-* scalar is present (AC-6a).
-            if (hasSourceEntity)
-            {
-                var source = new Dictionary<string, object?>();
-                if (!string.IsNullOrWhiteSpace(sourceEntityType)) source["entityType"] = sourceEntityType;
-                if (!string.IsNullOrWhiteSpace(sourceId)) source["id"] = sourceId;
-                if (!string.IsNullOrWhiteSpace(sourceModifiedOn)) source["modifiedOn"] = sourceModifiedOn;
-                if (!string.IsNullOrWhiteSpace(sourceOwningUser)) source["owningUser"] = sourceOwningUser;
-                customData["source"] = source;
-            }
-
-            var isVisibleToast = hasActionUrl && toastType != ToastTypeHidden;
-            object dataObject = isVisibleToast
-                ? new
-                {
-                    actions = new[]
-                    {
-                        new
-                        {
-                            title = "Open",
-                            data = new { url = actionUrl }
-                        }
-                    },
-                    customData
-                }
-                : (object)new { customData };
-
-            entity["data"] = JsonSerializer.Serialize(dataObject);
-        }
-
-        // Add regarding info if specified. appnotification is NOT an activity entity
-        // (no polymorphic regardingobjectid lookup), so we store regarding as two text
-        // fields: sprk_regardingid (GUID string) + sprk_regardingtype (entity logical name).
-        // These are also used in CheckForDuplicateNotificationAsync for idempotency.
-        if (regardingId.HasValue && !string.IsNullOrWhiteSpace(regardingType))
-        {
-            entity["sprk_regardingid"] = regardingId.Value.ToString();
-            entity["sprk_regardingtype"] = regardingType;
-        }
-
-        // Add AI metadata (playbook run info)
-        entity["sprk_source"] = "playbook";
-        entity["sprk_playbookrunid"] = context.RunId.ToString();
-
-        return entity;
     }
 
     /// <summary>

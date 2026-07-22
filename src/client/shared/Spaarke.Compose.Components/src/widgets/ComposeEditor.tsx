@@ -87,7 +87,6 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
-  TextEditStyle20Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
@@ -97,7 +96,6 @@ import {
   composeSessionCommentThreadsToDocxAnnotations,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeStylesPane } from './ComposeStylesPane';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
@@ -127,6 +125,7 @@ import { applyImportedRevisions } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
   ParaIdMapEntry,
+  ComposeServerProjection,
   ComposeEditedParagraph,
   ComposeBaselineParaId,
   ComposeContentModel,
@@ -423,6 +422,18 @@ export interface ComposeEditorProps {
    * Privacy: `commentText`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
    */
   importedComments?: readonly ImportedComment[];
+
+  /**
+   * Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — the server-side
+   * DOCX→editor projection from a STORED-DOCUMENT Load. When present the editor mounts `projection.html`
+   * DIRECTLY (the paraId extension parses `data-paraid`) instead of running the client mammoth convert +
+   * position-based `stampParaIds` — eliminating the two-engine drift. Fail-closed: `canEdit === false`
+   * (or `status === 'failed'`) ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank
+   * editable doc over a non-empty baseline. Null/absent for a transient (Browse / assistant-upload /
+   * AI-draft) mount or an older BFF — those fall back to the mammoth convert.
+   * Privacy: `html` is Tier 3 (document content) — carried in-memory only, never logged.
+   */
+  projection?: ComposeServerProjection | null;
 
   /**
    * Document pointer used by PaneEventBus events + heartbeat endpoint URL.
@@ -1174,6 +1185,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       paraIdMap,
       importedRevisions,
       importedComments,
+      projection,
       documentRef,
       bffBaseUrl,
       sessionId = '',
@@ -1210,12 +1222,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const trackChangesExtension = React.useMemo(
       () =>
         TrackChangesExtension.configure({
-          initialEnabled: false,
+          // UAT round-4: Track Changes is ON by default — user edits show as redlines immediately (a
+          // freshly-loaded doc shows nothing until the first edit, since current == baseline).
+          initialEnabled: true,
           getBaseline: () => paraIdSnapshotRef.current,
         }),
       []
     );
-    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(false);
+    const [trackChangesEnabled, setTrackChangesEnabled] = React.useState<boolean>(true);
 
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
@@ -1272,12 +1286,6 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
       commentThreadsRef.current = threads;
     }, []);
-
-    // ----- Task 043 — FR-22 styles-pane toggle -----------------------------------------------------
-    // Additive sibling toggle to the comments panel above (mirrors its own independent open/close
-    // state; the two panels are never coupled). Its FAB is pinned to the OPPOSITE (top-left) corner of
-    // the editor scroll region — see `stylesToggleFab` — so it never collides with `commentsToggleFab`.
-    const [stylesOpen, setStylesOpen] = React.useState<boolean>(false);
 
     // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
     // The editor scroll region hides its native scrollbar (see `editorSurface`
@@ -1497,6 +1505,45 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // triggerSave keys the byte-branch off `editorRef.current.isDirty()` (= dirtyRef), NOT
       // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
       const isTransientMount = !documentRef?.speDriveItemId;
+
+      // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): when the host
+      // supplies a SERVER PROJECTION (a stored-document Load), mount its paraId-tagged HTML DIRECTLY — the
+      // paraId extension parses `data-paraid` on setContent, so there is NO client mammoth convert and NO
+      // position-based `stampParaIds` (the two-engine drift that caused the save-abort bug class). The
+      // imported-revision/comment overlays + the snapshot run EXACTLY as the mammoth path below, now keyed
+      // by the exact server paraIds. A transient/browse mount (no projection) still uses the mammoth
+      // fallback below (its create-on-save persists the original bytes, so paraId alignment is moot there).
+      if (projection) {
+        // Fail-closed (design §4 / GPT §11): a failed or non-editable projection MUST NOT mount a blank
+        // editable doc over a non-empty retained baseline — render the reference-only "Open in Word" state.
+        if (!projection.canEdit || projection.status === 'failed') {
+          editor.commands.setContent('<p></p>');
+          dirtyRef.current = false;
+          setReferenceOnly({ fileName: documentRef?.fileName });
+          onDirtyChange?.(false);
+          return;
+        }
+        editor.commands.setContent(projection.html);
+        // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot mirror the mammoth
+        // path below (applied AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers).
+        applyImportedRevisions(editor, importedRevisions);
+        applyImportedCommentAnchors(editor, importedComments);
+        paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
+        onDirtyChange?.(isTransientMount);
+        // Surface Partial fidelity gaps via the existing banner (codes only — no document content, ADR-015).
+        if (projection.status === 'partial' && projection.warnings.length > 0) {
+          onImportWarnings?.([
+            {
+              type: 'warning',
+              message:
+                'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+            },
+          ]);
+        }
+        return;
+      }
+
       let cancelled = false;
       setIsImporting(true);
       docxToTipTapHtml(docxBytes)
@@ -1825,14 +1872,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onThreadsChanged={handleCommentThreadsChanged}
           initialThreads={initialCommentThreads}
         />
-        {/* ===================================================================
-            FR-22 styles pane — task 043. Lists the loaded document's EXISTING paragraph styles and
-            applies a chosen one to the current selection. Toggled by the floating "Styles" button
-            pinned top-left of the editor scroll region (see below); dismissed by its own close
-            button. SCOPE GUARD: apply-existing-only — no create/rename/delete/manage affordance
-            anywhere in the pane (see ComposeStylesPane.tsx file-level JSDoc).
-            =================================================================== */}
-        <ComposeStylesPane editor={editor} open={stylesOpen} onClose={() => setStylesOpen(false)} />
+        {/* UAT round-4: the FR-22 styles pane mount was REMOVED per user request (the "Show styles"
+            toggle above it is gone too). Component + hook retained, unmounted. */}
         {/* NOTE (UAT 2026-07-19 P1 fix): the AI-actions <BubbleMenu> was RELOCATED to be
             the LAST child of this container (see just before the container's closing tag
             below). Rationale: TipTap's BubbleMenu plugin calls `this.element.remove()` on
@@ -2069,20 +2110,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               data-testid="compose-comments-toggle"
             />
           </Tooltip>
-          {/* FR-22 (task 043) — "Styles" pane toggle, pinned top-left (see `stylesToggleFab`). */}
-          <Tooltip content={stylesOpen ? 'Hide styles' : 'Show styles'} relationship="description" withArrow>
-            <Button
-              appearance={stylesOpen ? 'primary' : 'secondary'}
-              shape="circular"
-              size="large"
-              className={styles.stylesToggleFab}
-              icon={<TextEditStyle20Regular />}
-              aria-label="Toggle styles pane"
-              aria-pressed={stylesOpen}
-              onClick={() => setStylesOpen(prev => !prev)}
-              data-testid="compose-styles-toggle"
-            />
-          </Tooltip>
+          {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
+              styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
+              ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}
           {showScrollDown ? (
             <Button
               appearance="primary"

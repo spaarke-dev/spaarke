@@ -315,6 +315,14 @@ public static class AnalysisServicesModule
         // B1 — NotificationService (deps: IGenericEntityService, ILogger — both unconditional).
         services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
 
+        // spaarke-notification-spine-r1 task 012 — OutboxService (deps: IGenericEntityService,
+        // ILogger, TimeProvider — all unconditional). Layer B durable-store CRUD over
+        // sprk_notificationoutbox (task 011); no kill switch — every notification producer needs a
+        // durable place to write before any delivery mechanism (SignalR, task 020) is attempted.
+        // Registered here (not a new module) per CLAUDE.md §11 — mirrors the NotificationService B1
+        // promotion above (same "CRUD-only deps happen to live near AI/chat consumers" shape).
+        services.AddSingleton<Sprk.Bff.Api.Services.Notifications.OutboxService>();
+
         // B4 — IChatDataverseRepository + ChatDataverseRepository
         // (deps: IGenericEntityService, ILogger — all unconditional).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
@@ -1232,6 +1240,14 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
+
+        // IActionSeam (task 031 / FR-07, ADR-013) — session-agnostic Layer-A record actions
+        // (CreateNotification / CreateTask / UpdateRecord) that share the SAME extracted cores the
+        // three node executors call. Registered UNCONDITIONALLY: record creation is not AI-model-gated,
+        // so — unlike IBriefingAi — it needs no Null-Object fallback. Singleton matches the executors'
+        // profile (its deps IGenericEntityService/IFieldMappingDataverseService/IServiceScopeFactory
+        // are all Singleton). Consumed by Phase 4/5 producers via this facade only (never the executors).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam, Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>();
 
         // AgentServiceNodeExecutor — ExecutorType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.

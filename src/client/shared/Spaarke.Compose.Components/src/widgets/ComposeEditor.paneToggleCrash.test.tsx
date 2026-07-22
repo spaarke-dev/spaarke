@@ -80,45 +80,35 @@ function renderEditor() {
   return ref;
 }
 
-describe('ComposeEditor — P1: toggling Styles/Comments FABs with a live BubbleMenu does not crash', () => {
-  it('opens the Styles pane without an insertBefore DOM error', async () => {
+describe('ComposeEditor — P1: toggling the Comments FAB with a live BubbleMenu does not crash', () => {
+  // NOTE (UAT round-4): the Styles FAB was removed per user request; the Comments FAB alone still
+  // exercises the same null↔<div> sibling toggle that the BubbleMenu-last-child fix guards against.
+
+  it('opens the Comments pane without an insertBefore DOM error', async () => {
     renderEditor();
     await screen.findByRole('textbox'); // editor + BubbleMenu mounted
 
     // Before the fix, this click threw during React commit
     // ("NotFoundError: The child can not be found in the parent.").
-    fireEvent.click(screen.getByTestId('compose-styles-toggle'));
-
-    await waitFor(() => expect(screen.getByTestId('compose-styles-pane')).toBeInTheDocument());
-  });
-
-  it('opens the Comments pane without an insertBefore DOM error', async () => {
-    renderEditor();
-    await screen.findByRole('textbox');
-
     fireEvent.click(screen.getByTestId('compose-comments-toggle'));
 
     await waitFor(() => expect(screen.getByTestId('compose-comment-thread-panel')).toBeInTheDocument());
   });
 
-  it('toggles both panes open/closed repeatedly without crashing', async () => {
+  it('toggles the Comments pane open/closed repeatedly without crashing', async () => {
     renderEditor();
     await screen.findByRole('textbox');
 
-    const styles = screen.getByTestId('compose-styles-toggle');
     const comments = screen.getByTestId('compose-comments-toggle');
 
-    // Open styles, open comments, close styles, close comments — each toggle is a
-    // null↔<div> sibling change that previously could resolve its anchor to the
+    // Each toggle is a null↔<div> sibling change that previously could resolve its anchor to the
     // detached BubbleMenu node.
-    fireEvent.click(styles);
-    await screen.findByTestId('compose-styles-pane');
     fireEvent.click(comments);
     await screen.findByTestId('compose-comment-thread-panel');
-    fireEvent.click(styles);
-    await waitFor(() => expect(screen.queryByTestId('compose-styles-pane')).not.toBeInTheDocument());
     fireEvent.click(comments);
     await waitFor(() => expect(screen.queryByTestId('compose-comment-thread-panel')).not.toBeInTheDocument());
+    fireEvent.click(comments);
+    await screen.findByTestId('compose-comment-thread-panel');
 
     // The editor is still mounted and healthy (no WidgetErrorBoundary swap-out).
     expect(screen.getByRole('textbox')).toBeInTheDocument();

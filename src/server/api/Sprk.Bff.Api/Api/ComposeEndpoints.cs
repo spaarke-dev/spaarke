@@ -1257,6 +1257,20 @@ public static class ComposeEndpoints
                 ParaIdMap: result.ParaIdMap,
                 ImportedRevisions: result.ImportedRevisions,
                 ImportedComments: result.ImportedComments,
+                // Phase-1 mammoth removal: the server-side projection (paraId-tagged HTML + fail-closed status).
+                Projection: new ComposeProjectionResponse(
+                    Status: result.Projection.Status switch
+                    {
+                        ComposeProjectionStatus.Success => "success",
+                        ComposeProjectionStatus.Partial => "partial",
+                        _ => "failed",
+                    },
+                    CanEdit: result.Projection.CanEdit,
+                    Html: result.Projection.Html,
+                    Warnings: result.Projection.Warnings
+                        .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
+                        .ToList(),
+                    SchemaVersion: result.Projection.SchemaVersion),
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -2098,7 +2112,26 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ParaIdMapEntry> ParaIdMap,
     [property: JsonPropertyName("importedRevisions")] IReadOnlyList<ImportedRevision> ImportedRevisions,
     [property: JsonPropertyName("importedComments")] IReadOnlyList<ImportedComment> ImportedComments,
+    // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
+    // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
+    // mammoth. The client keys off Projection.status/canEdit, NOT html length.
+    [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
+/// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
+/// renders a read-only / "Open in Word" state. <c>warnings</c> carry codes + counts only (no content).</summary>
+public sealed record ComposeProjectionResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("canEdit")] bool CanEdit,
+    [property: JsonPropertyName("html")] string Html,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<ComposeProjectionWarningResponse> Warnings,
+    [property: JsonPropertyName("schemaVersion")] string SchemaVersion);
+
+/// <summary>Wire shape of a single projection fidelity warning (Tier-1 safe — code + count only).</summary>
+public sealed record ComposeProjectionWarningResponse(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("count")] int Count);
 
 /// <summary>Request body for <c>POST /api/compose/sessions/{sessionId}/annotations</c> (FR-29,
 /// task 102). Partial-replace: a <c>null</c> collection leaves the stored one unchanged; a non-null

@@ -89,6 +89,12 @@ builder.Services.AddFinanceModule(builder.Configuration);
 // Communication module (email sending via Graph API)
 builder.Services.AddCommunicationModule(builder.Configuration);
 
+// Notification spine Layer-C (spaarke-notification-spine-r1 task 020) — SignalR delivery service +
+// negotiate endpoint. Registered UNCONDITIONALLY (ADR-032): real Serverless impl when Azure SignalR
+// is configured, Null-Object no-op otherwise. Placement Justification (CLAUDE.md §10): the spine is
+// the sole real-time policy/token point per spec §8 — negotiate + delivery MUST stay in the BFF.
+builder.Services.AddNotificationsModule(builder.Configuration);
+
 // Membership module (R3 Part 1, task 012) — binds MembershipOptions from the
 // "Membership" appsettings section. Service registrations (discovery + resolver
 // + endpoints) arrive in later P4 tasks. ADR-010 + bff-extensions.md §A.

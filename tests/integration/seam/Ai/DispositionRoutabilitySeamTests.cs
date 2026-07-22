@@ -409,10 +409,11 @@ public sealed class DispositionRoutabilitySeamTests
     //     admittable-but-unroutable). No SessionOutput is stored (rejected before run).
     // ─────────────────────────────────────────────────────────────────────────
 
+    // Notification was in this set until task 033 (FR-14) realized its routing leg — it now admits/routes
+    // (see DispositionRoutabilityNotificationSeamTests). Overlay/Record remain not-yet-routable.
     [Theory]
     [InlineData(BindingDisposition.Overlay)]
     [InlineData(BindingDisposition.Record)]
-    [InlineData(BindingDisposition.Notification)]
     public async Task DispatchAsync_NotYetRoutableDisposition_RejectedPreRun_NeverSilentDrop(
         BindingDisposition disposition)
     {
@@ -491,8 +492,10 @@ public sealed class DispositionRoutabilitySeamTests
             BindingDisposition.Email,
             BindingDisposition.Compose,
             BindingDisposition.SurfaceLaunch,
-        }, "these five legs are realized in OutputRouter (SurfaceLaunch is a pass-through like Compose — " +
-           "assistant-enhancements-r1); overlay/record/notification are registered as loud not-yet-routable " +
+            BindingDisposition.Notification,
+        }, "these six legs are realized in OutputRouter (SurfaceLaunch is a pass-through like Compose — " +
+           "assistant-enhancements-r1; Notification creates an appnotification via IActionSeam — " +
+           "notification-spine-r1 task 033 / FR-14); overlay/record remain loud not-yet-routable " +
            "(they need a new side-effect mechanism)");
     }
 

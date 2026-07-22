@@ -59,6 +59,13 @@
          chat token rooted in the DI-injected central TokenCredential via the identity plane (ADR-028 /
          NFR-05) — NEVER a connection-string key. -->
     <PackageReference Include="Azure.Communication.Chat" Version="1.4.0" />
+    <!-- Microsoft.Azure.SignalR.Management 1.33.1 — Layer-C notification-spine delivery (Serverless/publish-only
+         mode) added by spaarke-notification-spine-r1 FR-01 spike (task 001). GO decision: send-only spine
+         topology structurally favors Serverless (no hosted hub); measured +0.30 MB compressed publish delta,
+         0 new HIGH CVE. See projects/spaarke-notification-spine-r1/notes/spikes/fr-01-signalr-footprint.md.
+         NOTE: reference is intentionally unwired here — task 020 adds the negotiate endpoint + DI (ADR-032
+         null-object) + Placement Justification (CLAUDE.md §10) and runs /conflict-check before its BFF PR. -->
+    <PackageReference Include="Microsoft.Azure.SignalR.Management" Version="1.33.1" />
     <!-- Cosmos DB SDK v3 — AI persistence (AIPU2-030: SessionPersistenceService, AIPU2-033: AuditLogService) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
     <PackageReference Include="Azure.AI.DocumentIntelligence" Version="1.0.0" />

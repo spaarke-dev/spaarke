@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
@@ -263,6 +264,12 @@ public static class EndpointMappingExtensions
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
+
+        // Notification spine Layer-C negotiate endpoint (spaarke-notification-spine-r1 task 020 /
+        // FR-04). Mapped UNCONDITIONALLY — its handler resolves SignalRDeliveryService, which is
+        // registered unconditionally (real or Null-Object) by AddNotificationsModule, so metadata
+        // generation succeeds at startup with SignalR OFF (ADR-032 — no asymmetric registration).
+        app.MapNotificationsEndpoints();
 
         // ACS Event Grid inbound ingress (messaging-communication-app-r1 task 030 / FR-02). Public webhook
         // (AllowAnonymous — Event Grid presents no OAuth token); authenticity enforced inside the ingress

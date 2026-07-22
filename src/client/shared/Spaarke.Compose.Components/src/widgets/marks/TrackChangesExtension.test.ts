@@ -10,10 +10,17 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { COMPOSE_R3_PARAID } from '../paraIdExtension';
+import { InsertionMark } from './InsertionMark';
+import { DeletionMark } from './DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey, buildTrackChangeDecorations } from './TrackChangesExtension';
 
 function makeEditor(content: string): Editor {
-  return new Editor({ extensions: [StarterKit, ...COMPOSE_R3_PARAID, TrackChangesExtension], content });
+  return new Editor({
+    // Include the AI-redline marks (production ComposeEditor has them) so the "skip AI-marked block" path
+    // is exercised with a real insertion/deletion mark in the schema.
+    extensions: [StarterKit, InsertionMark, DeletionMark, ...COMPOSE_R3_PARAID, TrackChangesExtension],
+    content,
+  });
 }
 
 /** Force a known paraId onto the FIRST text block and return it. */
@@ -86,6 +93,21 @@ describe('buildTrackChangeDecorations (doc vs baseline → DecorationSet)', () =
     // Baseline only knows a DIFFERENT paragraph id.
     const baseline = new Map([['OTHERID1', 'some other baseline text']]);
     const set = buildTrackChangeDecorations(editor.state.doc, baseline);
+    expect(set.find()).toHaveLength(0);
+    editor.destroy();
+  });
+
+  it('does NOT decorate a block that already carries an AI-suggestion redline mark (no double-draw; lightbulb stays visible)', () => {
+    const editor = makeEditor('<p>the quick brown fox</p>');
+    stampFirstParaId(editor, 'AAAAAAA1');
+    // Apply an insertion mark (an AI suggestion) to part of the block.
+    const insMark = editor.state.schema.marks.insertion;
+    if (insMark) {
+      editor.view.dispatch(editor.state.tr.addMark(5, 10, insMark.create({ ledgerRef: 'b1@t1' })));
+    }
+    // Even though the current text differs from this shorter baseline, the block is skipped because it
+    // carries an AI redline mark (it renders via that mark + the rationale lightbulb).
+    const set = buildTrackChangeDecorations(editor.state.doc, new Map([['AAAAAAA1', 'the brown fox']]));
     expect(set.find()).toHaveLength(0);
     editor.destroy();
   });

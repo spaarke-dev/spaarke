@@ -119,7 +119,14 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
     throw new Error('docxBridge: mammoth.convertToHtml export not found');
   }
 
-  const result = await convertToHtml({ arrayBuffer: docxBytes });
+  // UAT round-4 ROOT-CAUSE FIX: mammoth's DEFAULT `ignoreEmptyParagraphs: true` silently DROPS empty
+  // paragraphs (semantic-cleanup philosophy). On a real .docx that shifts the editor's paragraph set out
+  // of alignment with the server's document-order `w14:paraId` pre-parse — so the client's position-based
+  // paraId stamping drifts and edited paragraphs get ids that match no paragraph in the retained original
+  // (the recurring "a tracked change could not be located" / "matches no paragraph" save failures).
+  // Empirically, this option recovers 9 dropped paragraphs on the CIPO patent letter (48 vs 39), which is
+  // exactly the count-alignment the paraId mapping needs. Preserving empties keeps the round-trip faithful.
+  const result = await convertToHtml({ arrayBuffer: docxBytes }, { ignoreEmptyParagraphs: false });
 
   return {
     html: result.value,
@@ -246,6 +253,57 @@ function rejectStateText(block: TipTapNode): string {
   return out;
 }
 
+/** True for a redline mark that is an IMPORTED native Word revision (rides the retained-original bytes). */
+function isImportedRef(ledgerRef: unknown): boolean {
+  return typeof ledgerRef === 'string' && ledgerRef.startsWith('imported:');
+}
+
+/**
+ * The ACCEPT-STATE settled text of a block — the text as if every PENDING AI/user redline were ACCEPTED:
+ * insertion-marked text is KEPT, deletion-marked text is DROPPED. IMPORTED native revisions are treated
+ * exactly as {@link rejectStateText} treats them (imported insertion dropped, imported deletion kept) so
+ * an imported-only paragraph's accept-state EQUALS its baseline (reject-state) snapshot and is NOT
+ * re-synthesized — imported revisions ride the retained-original bytes untouched.
+ *
+ * Item-4/save-robustness fix (UAT round-4): the save delta uses this as the paragraph's NEW text so a
+ * pending suggestion persists via the POSITION-based synthesizer (paraId-keyed, FR-02) instead of the
+ * fragile server-side text-search (`DocxAnnotationWriter.LocateTarget`, which drops `<w:tab/>`/`<w:br/>`
+ * and 422s on tab-laid-out list items). A user edit (no redline marks) is unaffected — with no marks,
+ * accept-state == reject-state == the plain text.
+ */
+function acceptStateText(block: TipTapNode): string {
+  let out = '';
+  const walk = (n: TipTapNode): void => {
+    if (n.type === 'text') {
+      const insMark = n.marks?.find(m => m.type === 'insertion');
+      const delMark = n.marks?.find(m => m.type === 'deletion');
+      if (insMark) {
+        // Accept an AI/user insertion (keep); an IMPORTED insertion mirrors reject-state (drop).
+        if (!isImportedRef((insMark.attrs as { ledgerRef?: unknown } | undefined)?.ledgerRef) && n.text) {
+          out += n.text;
+        }
+        return;
+      }
+      if (delMark) {
+        // Accept an AI/user deletion (drop the struck text); an IMPORTED deletion mirrors reject-state (keep).
+        if (isImportedRef((delMark.attrs as { ledgerRef?: unknown } | undefined)?.ledgerRef) && n.text) {
+          out += n.text;
+        }
+        return;
+      }
+      if (n.text) out += n.text;
+      return;
+    }
+    if (n.type === 'hardBreak') {
+      out += '\n';
+      return;
+    }
+    (n.content ?? []).forEach(walk);
+  };
+  (block.content ?? []).forEach(walk);
+  return out;
+}
+
 /** Visit every paraId-bearing block (paragraph/heading), descending into lists + table cells (server parity). */
 function forEachBlock(node: TipTapNode, fn: (block: TipTapNode) => void): void {
   if (node.type && BLOCK_NODE_TYPES.has(node.type)) {
@@ -283,16 +341,31 @@ export function collectEditedParagraphs(
   snapshot: ReadonlyMap<string, string>
 ): ComposeEditedParagraph[] {
   const edited: ComposeEditedParagraph[] = [];
+  const seen = new Set<string>();
   forEachBlock(editor.getJSON() as TipTapNode, block => {
     const paraId = block.attrs?.paraId as string | undefined;
     if (!paraId) return;
+    seen.add(paraId);
     const original = snapshot.get(paraId);
     if (original === undefined) return; // new paraId (split/insert) — out of E1 delta scope
-    const current = rejectStateText(block);
+    // Save-robustness fix (UAT round-4): diff the ACCEPT-STATE text (pending AI/user redlines applied)
+    // against the reject-state baseline. A pending suggestion thus persists as a tracked change via the
+    // POSITION-based synthesizer (paraId-keyed) — never the fragile server text-search that 422s on
+    // tab-laid-out list items. A plain user edit is unaffected (no marks → accept-state == reject-state).
+    const current = acceptStateText(block);
     if (current !== original) {
       edited.push({ paraId, text: current });
     }
   });
+  // Structural delete/merge: a load-time paraId absent from the CURRENT doc (a suggestion or edit removed
+  // the whole paragraph) is emitted with empty text so the synthesizer strikes it (WordDiff(old,'') →
+  // all-delete). Without this the retained original kept the vanished paragraph verbatim → leftover/
+  // duplicate content (the silent Accept-first corruption the round-4 investigation found).
+  for (const paraId of snapshot.keys()) {
+    if (!seen.has(paraId)) {
+      edited.push({ paraId, text: '' });
+    }
+  }
   return edited;
 }
 

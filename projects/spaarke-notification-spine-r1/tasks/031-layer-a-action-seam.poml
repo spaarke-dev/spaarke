@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Extract session-agnostic Layer-A action seam behind CreateNotification/CreateTask/UpdateRecord node executors</title>
+    <phase>3 Layer A + Notification flip</phase>
+    <gate>blocked-until:030</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>High-blast-radius brownfield extraction directly behind three shipped, chat/playbook-dispatch-critical node executors; touches `.cs` in `Services/Ai/`; 6+ steps; deps on prior task.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius brownfield extraction behind shipped executors — regressing chat/playbook dispatch is R3 in the plan's risk register (High probability×High impact).</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield root-cause work on NodeExecutionContext coupling: the extraction must unwind the coupling without changing two of the three executors' public constructor signatures (existing unit tests depend on them), which requires genuine design judgment, not a mechanical move.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>030</deps>
+    <tags>bff-api, api, refactoring, ai</tags>
+    <estimated-effort>6-8h</estimated-effort>
+  </metadata>
+
+  <prompt>Extract a session-agnostic Layer-A action seam (Create Notification / Create Task / Update Record) BEHIND the three existing node executors, exposed via the `PublicContracts` facade (ADR-013), so that later phases (comms-RI Phase 4, suggestions Phase 5) can create these records WITHOUT a chat session or playbook run — while leaving today's chat/playbook dispatch behavior byte-for-byte unchanged (proven by task 030's characterization tests passing unmodified).</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in brownfield C# extraction, ADR-013 facade design, and preserving binary/behavioral compatibility of DI-constructed services under existing unit-test coverage.</role>
+
+  <goal>A new session-agnostic seam exists in `Services/Ai/PublicContracts/` (interface + implementation) exposing `CreateNotificationAsync`, `CreateTaskAsync`, and `UpdateRecordAsync` methods that accept plain typed request records (no `NodeExecutionContext`, no chat session, no playbook run) and perform the SAME Dataverse entity creation/update the three node executors perform today. The three executors are refactored to call shared extracted logic internally so their own behavior is unchanged. Task 030's characterization tests pass with ZERO modifications. `CreateTaskNodeExecutor` and `UpdateRecordNodeExecutor`'s existing unit tests (`CreateTaskNodeExecutorTests.cs`, `UpdateRecordNodeExecutorTests.cs`) pass with ZERO modifications, including their exact constructor call signatures. The new seam is independently invokable and covered by a new `tests/integration/seam/**` test proving it works without any chat/playbook infrastructure.</goal>
+
+  <context>
+    <background>
+      Today, `CreateNotificationNodeExecutor`, `CreateTaskNodeExecutor`, and `UpdateRecordNodeExecutor` are the ONLY code paths that can create an `appnotification`/`task` record or PATCH a Dataverse record from AI-driven logic — and all three require a full `NodeExecutionContext` (playbook run, node config, previous-node outputs, tenant/user context) to invoke. FR-11 (comms-RI, Phase 4), FR-13 (comms-RI actions), and FR-15 (suggestion producer, Phase 5) all need to create these SAME kinds of records from a fire-and-forget enrichment step or a Daily-Briefing render — neither of which has a playbook run or a chat session. Building a second, parallel record-creation path for those producers would violate CLAUDE.md §11 (component justification — extend, don't fork) and would drift from the executors' behavior over time. The correct move is to extract the actual Dataverse entity-building/creation logic that lives INSIDE the three executors into a session-agnostic core the executors themselves call, then expose that core as a facade under `PublicContracts` per ADR-013 (Layer-A seam consumed via the facade; no direct injection of AI internals into non-AI code).
+
+      CRITICAL CONSTRAINT (verified against existing tests 2026-07-20): `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs` constructs `new CreateTaskNodeExecutor(_templateEngineMock.Object, _entityServiceMock.Object, _loggerMock.Object)` — a 3-argument constructor call. `UpdateRecordNodeExecutorTests.cs` constructs `UpdateRecordNodeExecutor` with its current 4-argument constructor. Per the acceptance criteria (FR-07: "existing executor tests pass unmodified"), these constructor signatures MUST NOT change — adding a new constructor parameter (even with a default) breaks the letter of "unmodified" and risks a compile-time or DI-resolution regression. `CreateNotificationNodeExecutor` has NO existing unit test file (`CreateNotificationNodeExecutorTests.cs` does not exist anywhere under `tests/` as of 2026-07-20) — its constructor has more freedom, but for design consistency across all three executors, treat all three constructors as frozen for this task.
+
+      The correct extraction shape, therefore, is: pull the pure Dataverse entity-building + creation logic (currently private/static methods inside each executor, e.g. `BuildNotificationEntity`, `CheckForDuplicateNotificationAsync`, the inline `task` Entity construction in `CreateTaskNodeExecutor.ExecuteAsync`, and `CoerceFieldValue`/`CoerceStringMapping`/`CoerceChoiceFromMetadata`/`ResolveEntityMetadataAsync` in `UpdateRecordNodeExecutor`) into new session-agnostic core classes that take EXPLICIT typed parameters (title/body/recipientId/... — not `NodeExecutionContext`) plus the Dataverse-boundary service (`IGenericEntityService`/`IFieldMappingDataverseService`) passed in. Both (a) the existing executor — using its own already-injected Dataverse service field — and (b) the new `PublicContracts` seam — using its own separately-injected Dataverse service — call the SAME extracted core. Executor constructors, `Validate`, and public `ExecuteAsync` signatures do not change; only their PRIVATE internals are refactored to delegate to the shared core instead of duplicating the entity-building logic inline.
+
+      Two fields currently baked into `CreateNotificationNodeExecutor.BuildNotificationEntity` are playbook-specific and must become explicit parameters on the extracted core so non-playbook callers (Phase 4/5) can supply their own values: `entity["sprk_source"] = "playbook"` and `entity["sprk_playbookrunid"] = context.RunId.ToString()`. The executor's call site passes `source: "playbook"`, `correlationId: context.RunId.ToString()` to preserve today's exact appnotification field values (characterization-test parity); a future Phase 4/5 caller passes its own source string.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/NodeExecutionContext.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IBriefingAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/BriefingAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullBriefingAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/UpdateRecordNodeExecutorTests.cs</file>
+      <file>tests/integration/seam/Ai/Nodes/CreateNotificationNodeExecutorSeamTests.cs</file>
+      <file>tests/integration/seam/Ai/Nodes/CreateTaskNodeExecutorSeamTests.cs</file>
+      <file>tests/integration/seam/Ai/Nodes/UpdateRecordNodeExecutorSeamTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">The new seam is exposed via `Services/Ai/PublicContracts/` (interface `IActionSeam` + implementation, mirroring the existing facade pattern used by `IBriefingAi`/`BriefingAi`). Non-AI code (future Phase 4 comms-RI, Phase 5 suggestions) MUST consume the seam through this facade — never by injecting `CreateNotificationNodeExecutor`/`CreateTaskNodeExecutor`/`UpdateRecordNodeExecutor` directly, and never by constructing a `NodeExecutionContext` synthetically to satisfy the executor's existing signature.</constraint>
+    <constraint source="project">Do not change the public constructor signature of `CreateNotificationNodeExecutor`, `CreateTaskNodeExecutor`, or `UpdateRecordNodeExecutor` in this task. Extract shared logic into new internal core class(es) that both the executor (via its own existing injected fields) and the new `IActionSeam` implementation (via its own separately-injected fields) call — never by adding a constructor parameter to the executors.</constraint>
+    <constraint source="project">Task 030's characterization tests (`tests/integration/seam/Ai/Nodes/*SeamTests.cs`) MUST pass with zero modifications after this task's refactor. `CreateTaskNodeExecutorTests.cs` and `UpdateRecordNodeExecutorTests.cs` MUST pass with zero modifications. If any of these tests requires an edit to keep passing, the extraction changed observable behavior — stop and re-derive the extraction, do not edit the tests to match (root §6).</constraint>
+    <constraint source="project">Scope is strictly the THREE verified executors (`CreateNotification`, `CreateTask`, `UpdateRecord`) named in `plan.md`'s Reusable Code list. Do not invent a fourth "CreateEvent" node executor — no `CreateEvent*NodeExecutor.cs` exists under `Services/Ai/Nodes/` as of 2026-07-20 (verified: 18 executors total, none named CreateEvent). If a "Create Event" action is genuinely required by a later phase, that is a separate, explicitly-scoped decision for that phase's task, not this extraction.</constraint>
+    <constraint source="project">Preserve the P5 ack-contract and `SurfaceLaunch`/dispatch entry points exactly as-is: do not touch `DispatchSessionEndpoint.cs`, `OutputRouter.cs`'s `SurfaceLaunch`/`Compose`/`Email`/`WorkProduct` cases, or `IUiActionAckCoordinator` in this task. This extraction is confined to `Services/Ai/Nodes/**` (internal refactor only) and new files under `Services/Ai/PublicContracts/**`. `DispositionRoutability.cs` and `OutputRouter.cs`'s `Notification` leg are task 033's concern, not this task's.</constraint>
+    <constraint source="ADR-038">The new seam-invokable-standalone proof is a `tests/integration/seam/**` test (not a `tests/unit/**` test) — it must demonstrate the seam works with NO `NodeExecutionContext`, NO playbook run, and NO chat session in scope, per FR-07's acceptance criterion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR-013 facade pair" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IBriefingAi.cs + BriefingAi.cs">Interface + concrete implementation registered as the DI-visible surface; consumers outside `Services/Ai/` depend only on the interface. Follow this shape for `IActionSeam`/`ActionSeam`.</pattern>
+      <pattern name="Existing static/near-static coercion helpers" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs (CoerceFieldValue, CoerceStringMapping, CoerceChoiceFromMetadata — all already `NodeExecutionContext`-free)">These are the least-effort extraction target — they already take explicit parameters, not the execution context. Extracting `UpdateRecordAsync` is lower-risk than the Notification/Task legs.</pattern>
+      <pattern name="Session-specific vs session-agnostic split" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs BuildNotificationEntity">Template rendering + ConfigJson parsing (playbook-specific) stays IN the executor; the entity-building + idempotency-check + create call (session-agnostic) moves to the shared core. The executor renders templates from `NodeExecutionContext`, THEN calls the core with already-resolved plain values.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run task 030's new seam tests and the existing `CreateTaskNodeExecutorTests.cs`/`UpdateRecordNodeExecutorTests.cs` to confirm the pre-extraction baseline is green.</step>
+    <step order="2">Design and extract session-agnostic core logic: propose exact class/file names at task time (e.g. under a new `Services/Ai/Nodes/ActionCore/` or `Services/Ai/PublicContracts/` subfolder) for the Notification-create, Task-create, and UpdateRecord-update cores, each taking explicit typed parameters + the relevant Dataverse-boundary service instance (no `NodeExecutionContext`).</step>
+    <step order="3">Refactor `CreateNotificationNodeExecutor`, `CreateTaskNodeExecutor`, `UpdateRecordNodeExecutor` to call the extracted core internally from their existing `ExecuteAsync` — keep template rendering + ConfigJson parsing in the executor; keep the executors' constructors, `Validate`, `SupportedExecutorTypes`, `GetConfigSchema`, and public `ExecuteAsync` signature unchanged.</step>
+    <step order="4">Author `IActionSeam` (interface) and `ActionSeam` (implementation) under `Services/Ai/PublicContracts/`, each of `CreateNotificationAsync`/`CreateTaskAsync`/`UpdateRecordAsync` calling the same extracted core with its own DI-injected Dataverse-boundary service instances. Register `IActionSeam`/`ActionSeam` in DI alongside the existing `PublicContracts` registrations (grep for the `IBriefingAi` registration site and mirror the convention).</step>
+    <step order="5">Run task 030's characterization tests — confirm zero diffs required to pass. Run `CreateTaskNodeExecutorTests.cs`/`UpdateRecordNodeExecutorTests.cs` — confirm zero diffs required to pass.</step>
+    <step order="6">Author a new `tests/integration/seam/Ai/PublicContracts/ActionSeamTests.cs` proving each `IActionSeam` method is invokable and produces a correct Dataverse write with NO `NodeExecutionContext`, playbook run, or chat session constructed anywhere in the test.</step>
+    <step order="7">Verify BFF publish size + CVE scan per the standard BFF-touching-task checklist (no new package dependencies are expected for this task — confirm and report the delta as ~0 MB).</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="9">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If characterization tests (030) fail after extraction, STOP and escalate — do not adjust the tests to pass (root §6).</trigger>
+    <trigger>If preserving `CreateTaskNodeExecutor`'s or `UpdateRecordNodeExecutor`'s exact existing constructor signature turns out to be structurally impossible without duplicating logic (defeating the extraction's purpose), STOP and escalate — this is a legitimate ADR-013/CLAUDE.md §11 tension (extend-vs-fork), not a case to silently resolve by breaking the "unmodified tests" acceptance criterion.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ActionSeam.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateTaskNodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs</output>
+    <output type="test">tests/integration/seam/Ai/PublicContracts/ActionSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new `IActionSeam.CreateNotificationAsync`/`CreateTaskAsync`/`UpdateRecordAsync` methods, when invoked directly in a test with only a mocked Dataverse-boundary service (no `NodeExecutionContext`, no playbook run, no chat session), then each produces the same Dataverse write shape the corresponding node executor produces today.</criterion>
+    <criterion testable="true">Given task 030's characterization tests, when run against the post-extraction code, then they pass with ZERO source changes to the test files.</criterion>
+    <criterion testable="true">Given `CreateTaskNodeExecutorTests.cs` and `UpdateRecordNodeExecutorTests.cs`, when run against the post-extraction code, then they pass with ZERO source changes, including their existing constructor call signatures.</criterion>
+    <criterion testable="true">Given `CreateNotificationNodeExecutor`, `CreateTaskNodeExecutor`, `UpdateRecordNodeExecutor` public constructors, when compared before and after this task, then their parameter lists are byte-for-byte identical (diff shows no constructor signature change).</criterion>
+    <criterion testable="true">Given the `IActionSeam` interface, when grepped for consumers, then it is exposed ONLY under `Services/Ai/PublicContracts/` and is the sole documented entry point for non-chat/non-playbook Layer-A record creation (ADR-013).</criterion>
+    <criterion testable="true">Given `DispatchSessionEndpoint.cs`, `OutputRouter.cs`, and `DispositionRoutability.cs`, when diffed after this task, then they are unchanged (this task does not touch the dispatch/router/registry surface — that is task 033's scope).</criterion>
+    <criterion testable="true">Given the negative case of an unresolvable required field (e.g., `CreateNotificationAsync` called with no recipientId and no fallback), when the seam method runs, then it returns a typed error/failure result rather than throwing an unhandled exception or silently no-op'ing — the seam's failure contract is at least as strict as the executor's today.</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed (report absolute + diff vs ~49.63 MB incl-PDB baseline, state PDB convention); 0 new HIGH CVE (`dotnet list package --vulnerable --include-transitive`); Placement Justification stated per `.claude/constraints/bff-extensions.md` (new PublicContracts facade extends the existing `Services/Ai/` facade surface — no new package dependency expected).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-07, NFR-07. Plan refs: Phase 3 deliverables ("Layer-A seam invokable without a chat session or playbook run; existing executor tests pass unmodified"). The spec's phrase "Create Event/Task/Notification" is reconciled against the verified substrate as "Create Notification/Task/UpdateRecord" per plan.md's Reusable Code section — no CreateEvent executor exists; do not add one in this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

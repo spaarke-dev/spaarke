@@ -26,6 +26,12 @@ This directory contains authoritative documentation for Dataverse entity schemas
 | [sprk_communication.md](sprk_communication.md) | Communication entity | 2026-04-05 | 2026-04-05 | Current |
 | [sprk_communicationaccount.md](sprk_communicationaccount.md) | Communication account entity | 2026-04-05 | 2026-04-05 | Current |
 
+### Entity Documentation — Notification Spine
+
+| Document | Description | Last Updated | Last Reviewed | Status |
+|----------|-------------|--------------|---------------|--------|
+| [sprk_notificationoutbox.md](sprk_notificationoutbox.md) | Notification Outbox (Layer B) — durable, per-user, `kind`-typed pending-notification outbox; write/pending/delivered/dismissed/expired lifecycle; ADR-024 MINIMAL regarding pattern | 2026-07-21 | 2026-07-21 | Current |
+
 ### Entity Documentation — Financial
 
 | Document | Description | Last Updated | Last Reviewed | Status |
