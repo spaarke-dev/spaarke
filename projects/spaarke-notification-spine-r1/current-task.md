@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-22 (task 042 COMPLETE — Phase 4 DONE).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1`. Phases 1-3 (001-033) live on master; **Phase 4 (040/041/042) COMPLETE on branch** (batching master-merge per owner). Next: **050** (suggestion producer, Phase 5 start).
+> **Last Updated**: 2026-07-22 (context-handoff — tasks 024–050 ✅; task 051 design locked, NOT yet implemented).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (7 ahead of master, synced to master `f8e04ecdc`, all pushed; batching master-merge per owner). **Phases 1–4 COMPLETE** (024/025 on master; 040/041/042 on branch). **Phase 5**: 050 ✅ committed `c7ef339ae`; **051 = NEXT — design fully captured below (§"051 investigation + LOCKED design"), ready to implement in a fresh window**. Then 052 → 090.
 
 ---
 
