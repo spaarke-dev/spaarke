@@ -120,6 +120,7 @@ import {
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
   anchoredAnnotationsToDocxAnnotations,
+  DocxTrackChangeKind,
   type DocxAnnotationInput,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
@@ -1038,7 +1039,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // ride the annotation path (no position-based comment synthesis exists; a comment anchors a user
       // SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search remains for Push-to-Word.
       const redlineAnnotations: DocxAnnotationInput[] = [];
-      const commentAnnotations = composeDocxAnnotations; // anchoredAnnotationsToDocxAnnotations(anchoredAnnotations)
+      // Save-robustness fix (UAT round-4, 2026-07-21): the anchored-annotation → DocxAnnotation mapping
+      // (`composeDocxAnnotations`) also emits Insertion/Deletion REDLINES (an AI `insertion-suggestion` /
+      // `deletion-suggestion` becomes a text-searched track-change), not only comments. Those AI redlines
+      // are ALREADY persisted through the POSITION-based path — the materialized redline mark rides the
+      // paragraph's accept-state text in `collectEditedParagraphs` → the server synthesizer emits w:ins/w:del
+      // by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a tracked change
+      // could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic run at that
+      // location) — exactly why an AI edit saved at the document start but failed at an interior location.
+      // Keep ONLY Comments on the save annotation path (they have no position-based representation; a comment
+      // anchors a user selection, which rarely spans a tab). This completes the round-4b redline exclusion —
+      // the `redlineMarksToDocxAnnotations` source was already zeroed above; this was the SECOND source.
+      // (The push-to-Word path at `pushableAnnotations` intentionally keeps redlines — that IS the native
+      // Word track-change writer's job.)
+      const commentAnnotations = composeDocxAnnotations.filter(a => a.kind === DocxTrackChangeKind.Comment);
       // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
       // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
       // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an
