@@ -23,6 +23,14 @@ import {
   type NotificationsConnectionState,
 } from "@spaarke/notifications";
 
+/**
+ * Minimal structural shape of the fields these log-only handlers read. Declared inline (not imported
+ * from `@spaarke/notifications`) because the package's built `dist` type declarations lag its source
+ * for some event kinds — a value+type mixed import breaks the surface tsc gate. A superset of the
+ * real `NotificationEvent`, so any real event is assignable to these handlers.
+ */
+type NotificationEventLite = { readonly outboxRowId: string; readonly source: string };
+
 let _client: NotificationsClient | null = null;
 
 /**
@@ -56,13 +64,13 @@ export function getNotificationsClient(): NotificationsClient {
 export async function initNotificationsClient(): Promise<void> {
   const client = getNotificationsClient();
 
-  client.registerHandler("communication-arrived", (event) => {
+  client.registerHandler("communication-arrived", (event: NotificationEventLite) => {
     console.info("[SpaarkeAi] communication-arrived:", event.outboxRowId, `(source=${event.source})`);
   });
-  client.registerHandler("communication-assessed", (event) => {
+  client.registerHandler("communication-assessed", (event: NotificationEventLite) => {
     console.info("[SpaarkeAi] communication-assessed:", event.outboxRowId, `(source=${event.source})`);
   });
-  client.registerHandler("suggestion", (event) => {
+  client.registerHandler("suggestion", (event: NotificationEventLite) => {
     console.info("[SpaarkeAi] suggestion:", event.outboxRowId, `(source=${event.source})`);
   });
 
