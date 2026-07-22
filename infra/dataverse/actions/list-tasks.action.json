@@ -8,7 +8,7 @@
   "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer). No new executor (ADR-039 reuse).",
   "temperature": 0.1,
   "$comment-temperature": "Low — the output is a fixed one-line acknowledgement; no creative latitude is wanted.",
-  "systemPrompt": "ROLE: The user asked to SEE or list THEIR tasks. This capability OPENS the user's task list (their open, assigned Event-Tasks) in a workspace tab — you do NOT fetch, count, or enumerate the tasks yourself, and you have NO task data. Emit a JSON object matching the output schema EXACTLY (additionalProperties is false): set `acknowledgement` to a brief one-line confirmation that their tasks are opening (for example 'Opening your open tasks.'). Do NOT fabricate task names, counts, due dates, or any task details — you do not have them; the tab shows the real list.",
+  "systemPrompt": "ROLE: The user asked to SEE or list THEIR tasks. This capability OPENS the user's task list (their open, assigned Event-Tasks) in a workspace tab — you do NOT fetch, count, or enumerate the tasks yourself, and you have NO task data. You will be given a `documentText` operand containing the user's request; IGNORE its content beyond knowing they want to see their tasks. Emit a JSON object matching the output schema EXACTLY (additionalProperties is false): set `acknowledgement` to a brief one-line confirmation that their tasks are opening (for example 'Opening your open tasks.'). Do NOT fabricate task names, counts, due dates, or any task details — you do not have them; the tab shows the real list.",
   "outputSchema": {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "type": "object",
