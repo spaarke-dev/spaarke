@@ -9,7 +9,12 @@ export type {
   NotificationEvent,
   NotificationEventSource,
 } from './types';
-export { ACTIVE_NOTIFICATION_KINDS, RESERVED_NOTIFICATION_KINDS, ALL_NOTIFICATION_KINDS, isKnownNotificationKind } from './types';
+export {
+  ACTIVE_NOTIFICATION_KINDS,
+  RESERVED_NOTIFICATION_KINDS,
+  ALL_NOTIFICATION_KINDS,
+  isKnownNotificationKind,
+} from './types';
 
 // Negotiate/connect (task 021 step 3)
 export { negotiate, connectSignalR, SignalRUnavailableError } from './negotiate';
