@@ -7,6 +7,7 @@ using Moq;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Communication;
@@ -34,14 +35,14 @@ namespace Sprk.Bff.Api.Tests.Seam.Communication;
 /// Proven directly on the REAL filter (see the note below on why this axis is asserted at the filter boundary).</item>
 /// </list>
 ///
-/// <para><b>Note on the internal-only axis + the blocked #675 fix.</b> <see cref="CommunicationThreadReadService"/>
-/// currently composes <c>IsInternalUser: true</c> at its call sites (a SEPARATE, blocked change — awaiting the
-/// notification-spine <c>ISystemUserIdentityResolver</c> — will swap those to the real per-caller value; NOT in
-/// scope for task 043). So the non-internal-caller drop is asserted on the REAL
-/// <see cref="CommunicationAccessFilter"/> — the exact production component that will enforce it once #675 wires the
-/// real flag — rather than by forcing an external caller through the service. The service-level negative below uses
-/// the impersonation gate (which is caller-flag-independent and IS the R1 no-leak mechanism per
-/// <c>../messaging-communication-app-r1/notes/access-model-decision.md</c>).</para>
+/// <para><b>Note on the internal-only axis + the #675 fix (NOW APPLIED, GitHub #675 / ISS-006).</b>
+/// <see cref="CommunicationThreadReadService"/> previously hardcoded <c>IsInternalUser: true</c> at its read call
+/// sites, so <see cref="CommunicationAccessFilter"/> treated EVERY caller as internal and an external-licensed
+/// systemuser could read internal-only (D-05) messages (over-disclosure). The service now resolves the AUTHORITATIVE
+/// per-caller bit via <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> and passes
+/// <c>IsInternalUser: !isExternal</c>. Section D asserts the drop END-TO-END through the REAL service for an external
+/// caller (the exact over-disclosure the fix closes); section C keeps the filter-boundary assertion as the unit-level
+/// proof of the same axis.</para>
 /// </summary>
 public class CommunicationPrivilegePrivacySeamTests
 {
@@ -62,11 +63,19 @@ public class CommunicationPrivilegePrivacySeamTests
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new();
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
+    // #675 / ISS-006: the read service now consults the shared identity resolver for the per-caller internal/external
+    // bit. Default = INTERNAL (IsExternalAsync ⇒ false) so the parity/impersonation cases below are unchanged; the
+    // external-caller drop is asserted end-to-end through the REAL service in section D.
+    private readonly Mock<ISystemUserIdentityResolver> _identity = new();
 
+    // The loose _identity mock returns false (INTERNAL) by default for any caller; MarkExternal overrides a specific
+    // caller to external. (No blanket It.IsAny setup here — it would be configured AFTER MarkExternal in a test body
+    // and, being the last matching setup, would clobber the per-caller external override.)
     private CommunicationThreadReadService Sut() => new(
         _query.Object,
         new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
         _resolver.Object,
+        _identity.Object,
         Mock.Of<ILogger<CommunicationThreadReadService>>());
 
     private static ClaimsPrincipal Caller() =>
@@ -75,6 +84,13 @@ public class CommunicationPrivilegePrivacySeamTests
     private void ResolveCallerAs(Guid systemUserId) =>
         _resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
                  .ReturnsAsync(CallerSystemUserResolution.Resolved(systemUserId.ToString("D")));
+
+    /// <summary>Marks <paramref name="systemUserId"/> as an EXTERNAL-licensed systemuser (#675 / ISS-006) — a
+    /// caller Dataverse impersonation may still return internal-only rows to (a licensed systemuser can hold record
+    /// access), but whom the shared filter MUST treat as non-internal so those rows are dropped.</summary>
+    private void MarkExternal(Guid systemUserId) =>
+        _identity.Setup(i => i.IsExternalAsync(systemUserId, It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(true);
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
     // A. PARITY — the authorized caller sees the recipients + all three markers, exactly (no under-disclosure).
@@ -174,8 +190,75 @@ public class CommunicationPrivilegePrivacySeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+    // D. NEGATIVE (#675 / ISS-006 — external caller, END-TO-END through the REAL service). An external-licensed
+    //    systemuser CAN hold Dataverse record access, so impersonation may RETURN an internal-only row to them.
+    //    The read service must still DROP it because the caller is external (IsExternalAsync ⇒ true → IsInternalUser
+    //    false). This is the exact over-disclosure the previously-hardcoded IsInternalUser:true allowed; it must be
+    //    provably closed. A non-internal (regular) row in the same result MUST still surface (no under-disclosure).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ReadThreadAsync_ExternalCaller_InternalOnlyRowIsFilteredOut_ButRegularRowSurfaces()
+    {
+        var internalOnlyId = Guid.NewGuid();
+        var regularId = Guid.NewGuid();
+
+        ResolveCallerAs(UnauthorizedCallerId);
+        MarkExternal(UnauthorizedCallerId); // #675: authoritative per-caller bit = EXTERNAL
+
+        // Impersonation RETURNS BOTH rows to this external-but-record-authorized caller — Dataverse row-level access
+        // does not encode the internal-only business rule; that is the filter's job.
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { RestrictedRow(internalOnlyId), RegularRow(regularId) });
+        _query.Setup(q => q.QueryAsync(AttachmentSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(Array.Empty<Dictionary<string, JsonElement>>());
+        _query.Setup(q => q.QueryAsync(ThreadSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { new Dictionary<string, JsonElement> { ["sprk_name"] = El("Acme v. Roe") } });
+
+        var result = await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
+
+        // The internal-only communication is DROPPED — none of its identity/recipients/markers surface (no over-disclosure).
+        result.Messages.Select(m => m.MessageId).Should().NotContain(internalOnlyId);
+        result.Messages.SelectMany(m => m.To).Should().NotContain(RestrictedRecipients);
+        result.Messages.Where(m => m.IsInternalOnly).Should().BeEmpty(
+            "an external-licensed caller must NEVER see an internal-only (D-05) message — the #675 over-disclosure");
+
+        // The regular (non-internal-only) communication still surfaces — the filter is scoped, not a blanket deny.
+        result.Messages.Should().ContainSingle().Which.MessageId.Should().Be(regularId);
+    }
+
+    [Fact]
+    public async Task GetUnreadCountAsync_ExternalCaller_DoesNotCountInternalOnlyMessages()
+    {
+        // The unread scan shares the SAME per-caller filter — an external caller's unread count must exclude
+        // internal-only messages (parity with the thread-read drop above; the #675 fix is applied at all read sites).
+        ResolveCallerAs(UnauthorizedCallerId);
+        MarkExternal(UnauthorizedCallerId);
+
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), UnauthorizedCallerId, It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new[] { RestrictedRow(Guid.NewGuid()), RegularRow(Guid.NewGuid()) });
+
+        var result = await Sut().GetUnreadCountAsync(ThreadId, Caller(), since: null, CancellationToken.None);
+
+        result.UnreadCount.Should().Be(1, "only the non-internal-only message is countable for an external caller");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════════
     // Row builder — the restricted communication (mirrors the unit-test row shape; no new shape invented).
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+    // A plain, non-internal-only communication — must remain visible to any caller the impersonated query returns it to.
+    private static Dictionary<string, JsonElement> RegularRow(Guid id) => new()
+    {
+        ["sprk_communicationid"] = El(id.ToString()),
+        ["createdon"] = El("2026-07-19T12:05:00Z"),
+        ["sprk_communicationtype"] = El(TypeMessage),
+        ["sprk_body"] = El("routine, non-internal message"),
+        ["sprk_to"] = El("team@firm.com"),
+        ["sprk_isinternalonly"] = El(false),
+        ["sprk_isprivate"] = El(false),
+        ["sprk_privilegeclassification"] = El(PrivilegeNone),
+    };
 
     private static Dictionary<string, JsonElement> RestrictedRow(Guid id) => new()
     {

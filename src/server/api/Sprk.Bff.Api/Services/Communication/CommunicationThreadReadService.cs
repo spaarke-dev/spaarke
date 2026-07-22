@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -93,17 +94,20 @@ public sealed class CommunicationThreadReadService
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICommunicationAccessFilter _accessFilter;
     private readonly ICallerSystemUserResolver _callerResolver;
+    private readonly ISystemUserIdentityResolver _identityResolver;
     private readonly ILogger<CommunicationThreadReadService> _logger;
 
     public CommunicationThreadReadService(
         IImpersonatedCommunicationQuery query,
         ICommunicationAccessFilter accessFilter,
         ICallerSystemUserResolver callerResolver,
+        ISystemUserIdentityResolver identityResolver,
         ILogger<CommunicationThreadReadService> logger)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
         _accessFilter = accessFilter ?? throw new ArgumentNullException(nameof(accessFilter));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
+        _identityResolver = identityResolver ?? throw new ArgumentNullException(nameof(identityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -139,8 +143,13 @@ public sealed class CommunicationThreadReadService
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
         // 2) Apply the SHARED internal-only + privilege filter on top of the already-scoped rows.
+        // #675 / ISS-006: the internal-vs-external bit is the AUTHORITATIVE per-caller value (systemuser.sprk_isexternal
+        // via the shared resolver), NOT a hardcoded `true`. Hardcoding internal made CommunicationAccessFilter treat
+        // every caller as internal, so an external-licensed systemuser could read internal-only (D-05) messages
+        // (over-disclosure). IsExternalAsync fails closed (external) on an unresolvable id.
         var parsed = rows.Select(ParseMessageRow).ToList();
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
         var byId = parsed.ToDictionary(p => p.MessageId);
@@ -188,7 +197,10 @@ public sealed class CommunicationThreadReadService
         var odata = $"$select={select}&$filter={filter}&$top={MaxUnreadScan}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) — an unread scan must
+        // NOT count internal-only messages for an external-licensed caller (mirrors the thread-read filter above).
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var entities = rows.Select(r => ParseMessageRow(r).Entity).ToList();
         var filtered = _accessFilter.FilterMessages(context, entities);
         var unread = filtered.VisibleMessages.Count;
@@ -617,8 +629,12 @@ public sealed class CommunicationThreadReadService
         var odata = $"$select={select}&$filter={odataFilter}&$orderby={CreatedOnField} asc&$top={top}";
         var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
 
+        // #675 / ISS-006: authoritative per-caller internal/external bit (fail-closed external) on the SHARED read
+        // pipeline that both the by-regarding read (010) and the filtered query (011) compose onto — so an
+        // external-licensed caller cannot read internal-only (D-05) messages via ANY read path, not just thread-read.
         var parsed = rows.Select(ParseMessageRow).ToList();
-        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: true);
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
         var filtered = _accessFilter.FilterMessages(context, parsed.Select(p => p.Entity).ToList());
 
         var byId = parsed.ToDictionary(p => p.MessageId);

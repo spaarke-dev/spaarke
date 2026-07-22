@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -42,17 +43,26 @@ public class CommunicationThreadReadServiceTests
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new(MockBehavior.Strict);
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
+    // #675 / ISS-006: the read service now depends on the shared identity resolver for the per-caller
+    // internal/external bit. The default fixture models an INTERNAL caller (IsExternalAsync ⇒ false) so the
+    // pre-fix behavior (every R1/R3 timeline caller is internal) is preserved; the external-caller drop is a
+    // dedicated negative test in the privilege/privacy seam suite.
+    private readonly Mock<ISystemUserIdentityResolver> _identity = new();
 
     private CommunicationThreadReadService Sut()
     {
         _resolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
+        _identity
+            .Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         return new CommunicationThreadReadService(
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -387,6 +397,7 @@ public class CommunicationThreadReadServiceTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var act = () => sut.ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
@@ -436,6 +447,7 @@ public class CommunicationThreadReadServiceTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var act = () => sut.GetUnreadCountAsync(ThreadId, Caller(), since: null, CancellationToken.None);
