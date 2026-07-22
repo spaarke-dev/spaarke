@@ -706,6 +706,21 @@ public static class AnalysisServicesModule
         // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
 
+        // Daily-Briefing proactive kind=suggestion producer (spaarke-notification-spine-r1 task 050 / FR-15 /
+        // NFR-03). Runs as a SIBLING of narration in DailyBriefingCompositeService.RenderAsync (injected as the
+        // composite's optional trailing ctor param) — reads the collected high-priority items, applies ADR-039
+        // grounding + the ADR-041 proactive gate (declared-metadata admit decision via SuggestionGateOptions —
+        // reuses the gate discipline, NOT PendingPlanManager's chat/Redis machinery; owner decision 2026-07-22),
+        // and writes a kind=suggestion outbox row (task 012) + best-effort ping (task 020) ONLY on a grounded+
+        // gated pass. Deny-by-default (SuggestionGateOptions.Enabled=false) so the spine carries no proactive
+        // suggestion until explicitly enabled (NFR-03). Scoped — matches the Scoped composite; its OutboxService +
+        // SignalRDeliveryService deps are singletons (safe into a Scoped consumer). Placement Justification
+        // (root §10/§11): new grounded+gated write producer, distinct from the narration-only narrator + the
+        // dispatch-boundary composite; ZERO AI-internal injection (reads already-collected view models).
+        services.Configure<Sprk.Bff.Api.Configuration.SuggestionGateOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Configuration.SuggestionGateOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingSuggestionProducer>();
+
         // DailyBriefingCompositeService — the briefing's coded-composite dispatch boundary
         // (FR-P3-04, task 043). Resolves the Binding (ADR-039 single routing surface),
         // executes the coded workflow via ICodedWorkflowRegistry, writes the session-ledger

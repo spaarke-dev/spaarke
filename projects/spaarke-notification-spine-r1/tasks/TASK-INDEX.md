@@ -28,7 +28,7 @@
 | 040 | comms_assessed producer (FR-11) | 4 | ✅ | 031,024 + email-r4-W10 | opus/high | FULL | — |
 | 041 | Comms policy layer (FR-12) | 4 | ✅ | 040 | opus/xhigh | FULL | — |
 | 042 | RI actions via seam + mirror (FR-13) | 4 | ✅ | 040,041,012,020 | opus/high | FULL | — |
-| 050 | Suggestion producer — grounded+gated (FR-15) | 5 | 🔲 | 012,013,042 | opus/high | FULL | — |
+| 050 | Suggestion producer — grounded+gated (FR-15) | 5 | ✅ | 012,013,042 | opus/high | FULL | — |
 | 051 | Suggestion renderer branch (FR-16) | 5 | 🔲 | 050,021 | sonnet/high | FULL | — |
 | 052 | Suggestion dispatch parity (FR-17) | 5 | 🔲 | 051,031 | opus/high | FULL | — |
 | 090 | Project wrap-up | 6 | 🔲 | ALL | opus/high | FULL | ❌ main-session |
