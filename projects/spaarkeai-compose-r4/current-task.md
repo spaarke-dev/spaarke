@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Wave W0a ✅ complete (001, 002, 003). Next: Wave W0b (004, 005) |
+| **Task** | ✅ **Phase 0 COMPLETE** (001–006). Gate 🟢 GREEN — cutover authorized. Next: Phase 1 (010–013) |
 | **Step** | — |
-| **Status** | wave-complete — W0b startable |
-| **Next Action** | Say "continue" → run Wave W0b: 004 (byte-diff harness, deps 002) + 005 (applier spike + A/B, deps 002,003), both `parallel-safe:true` → parallel subagents. Then 006 (Phase 0 GATE). |
+| **Status** | Phase 0 done — Phase 1 startable |
+| **Next Action** | Run Phase 1 Ingest: W1 = 010 (persist paraId, deps 001) ∥ 011 (offset table, deps 001/003) → then 012 (opaque atoms, after 011) → 013 (seam). Autonomous per owner directive. |
 
 ### Files Modified This Session (Wave W0a)
 - `.claude/adr/ADR-049-compose-shadow-document.md` (new — task 001) + `.claude/adr/INDEX.md` (entry)

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THROWAWAY SPIKE (spaarkeai-compose-r4 task 005). NOT added to Spaarke.sln; NOT part of the
+    shipping build. Exists only to A/B the FR-04/FR-11 patch engine on the CIPO corpus doc.
+    Delete after the decision is recorded (notes/patch-engine-ab-decision.md). See that doc.
+
+    ISOLATION: references ONLY DocumentFormat.OpenXml 3.5.1 (already a BFF dep — zero-delta baseline)
+    and, behind the DOCXODUS_SPIKE constant, Docxodus 6.4.0 to MEASURE its transitive footprint in
+    isolation. The Docxodus reference is commented OUT by default so the OpenXML-SDK candidate builds
+    and runs with zero new packages; flip it on only to reproduce the size measurement.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>ComposeApplierSpike</AssemblyName>
+    <RootNamespace>ComposeApplierSpike</RootNamespace>
+    <!-- Keep this out of any solution-wide analyzers/CI. -->
+    <RunAnalyzers>false</RunAnalyzers>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <!-- CANDIDATE A footprint probe. Uncomment to reproduce the isolated size measurement.
+         6.4.0 is the ONLY net8-compatible line; 7.1.0 is net10-only. Both drag SkiaSharp.
+    <PackageReference Include="Docxodus" Version="6.4.0" />
+    -->
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Use the REAL task-003 op schema (fit check), not a copy. Linked, not project-referenced,
+         so the spike does not pull the whole BFF graph. -->
+    <Compile Include="..\..\..\..\src\server\api\Sprk.Bff.Api\Services\Compose\Operations\ComposeOperation.cs">
+      <Link>Schema\ComposeOperation.cs</Link>
+    </Compile>
+  </ItemGroup>
+
+</Project>

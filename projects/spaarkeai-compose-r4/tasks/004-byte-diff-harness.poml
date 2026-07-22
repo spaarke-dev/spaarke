@@ -3,7 +3,7 @@
     <title>Round-trip byte-diff harness — load → no-op save → byte-diff untouched subtrees (NFR-01)</title>
     <phase>0 Gate</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Through-the-wire seam-slice harness (`tests/integration/seam/**`) that is the NFR-01 acceptance verifier + the hard-replace safety net; a test-modifying task under ADR-038 — FULL unconditionally.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -16,8 +16,8 @@
     <tags>testing,docx,integration-test</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -139,6 +139,34 @@
     corpus directory so owner-supplied worst-offenders (arriving in Phase 0) are picked up automatically. Its
     results are direct input to the Phase-0 gate (task 006, criterion b) and to the spec Unresolved Question on
     strict document.xml byte-identity.
+
+    COMPLETED 2026-07-22. Built `tests/integration/seam/Compose/` (new dir; NO .csproj/.sln edit — compiled into
+    the existing tests/unit/Sprk.Bff.Api.Tests.csproj via its pre-existing `<Compile Include="..\..\integration\seam\**\*.cs">`
+    glob): ComposeCorpusFixtureLocator.cs (glob-enumerates every .docx under tests/fixtures/compose-corpus/ at
+    xUnit [MemberData] discovery time — NOT the 3 hardcoded filenames, per owner feedback; LFS-smudge guard
+    included), ComposeOoxmlPackagePartComparer.cs (generic OPC package-part-graph walker; classifies word/document.xml
+    separately from every other part; strictDocumentXmlByteIdentity switchable hook for the spec Unresolved Question),
+    ComposeNoOpRoundTripByteDiffSeamTests.cs (WebApplicationFactory-driven [Theory], reuses the existing
+    ComposeFidelitySeamFixture from tests/integration/seam/Ai/ComposeFidelitySeamTests.cs per CLAUDE.md §11 reuse —
+    no duplicate host config).
+
+    SCOPE: ComposeShadowPatchEngine doesn't exist yet (task 030) — this harness proves the NO-OP invariant (empty
+    operation log: no editedParagraphs/annotations/contentModel) via the EXISTING retained-original passthrough in
+    ComposeService.SaveAsync. Task 034 TODO left in-file: point a sibling test at the real Patch Engine with a
+    non-empty operation log, reusing the same comparer unchanged.
+
+    RESULTS: 3/3 corpus docs PASS (both strict byte-identical AND loose structurally-faithful modes; whole-file
+    byte-identity holds today). No escalation trigger fired. Regression check: sibling ComposeFidelitySeamTests
+    (2 tests) also green alongside the 3 new ones (5/5). Full findings:
+    projects/spaarkeai-compose-r4/notes/task-004-byte-diff-harness-findings.md.
+
+    Publish size: unaffected — zero src/server/api/Sprk.Bff.Api/** files touched (test-only addition), verified via
+    `git status --porcelain`.
+
+    Quality gates (Step 9.5, mandatory per test-modifying override): code-review CLEAN (0 critical/warning; no AI
+    code smells; files 100/172/203 lines, well under thresholds); adr-check CLEAN (ADR-038 — grep-verified zero
+    Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests; ADR-007 — no Microsoft.Graph type referenced;
+    ADR-013 — no AI-internal type referenced).
   </notes>
 
   <execution>

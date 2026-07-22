@@ -14,9 +14,9 @@
 | 001 | Shadow-Document ADR + R3 Path-B amendment | 0 Gate | opus / high | FULL | — | startable | ✅ |
 | 002 | Fidelity corpus as LFS fixtures (sample-docs) | 0 Gate | sonnet / medium | STANDARD | — | startable | ✅ |
 | 003 | Operation schema — the shared spine (FR-11) | 0 Gate | opus / xhigh | FULL | — | startable | ✅ |
-| 004 | Round-trip byte-diff harness (NFR-01) | 0 Gate | sonnet / high | FULL | 002 | startable | 🔲 |
-| 005 | Applier spike on CIPO + patch-engine A/B | 0 Gate | opus / xhigh | FULL | 002,003 | startable | 🔲 |
-| 006 | **Phase 0 GATE — go/no-go for cutover** | 0 Gate | opus / high | FULL | 003,004,005 | blocked | 🔲 |
+| 004 | Round-trip byte-diff harness (NFR-01) | 0 Gate | sonnet / high | FULL | 002 | startable | ✅ |
+| 005 | Applier spike on CIPO + patch-engine A/B | 0 Gate | opus / xhigh | FULL | 002,003 | startable | ✅ |
+| 006 | **Phase 0 GATE — 🟢 GREEN, cutover authorized** | 0 Gate | opus / high | FULL | 003,004,005 | passed | ✅ |
 | 010 | Persist w14:paraId on ingest (FR-01) | 1 Ingest | sonnet / high | FULL | 001 | blocked | 🔲 |
 | 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | blocked | 🔲 |
 | 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | blocked | 🔲 |
