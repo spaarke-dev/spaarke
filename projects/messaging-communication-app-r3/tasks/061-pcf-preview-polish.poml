@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="messaging-communication-app-r3">
+  <metadata>
+    <title>CommunicationConversationPanel PCF preview polish (8 UAT items)</title>
+    <phase>7 UAT hardening</phase>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies PCF .tsx + manifest (adds a property); UI polish with an accessibility surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified visual polish + one new manifest property; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns the CommunicationConversationPanel PCF preview chrome; does not edit the shared conversation components (062) or the BFF (060).</parallel-reason>
+    <deps>none</deps>
+    <tags>pcf, react, fluent-ui</tags>
+    <github-issue>https://github.com/spaarke-dev/spaarke/issues/677</github-issue>
+  </metadata>
+  <prompt>Apply the 8 PCF preview UAT refinements from notes/uat-feedback-phase4-2026-07-21.md §A to the CommunicationConversationPanel PCF preview (ConversationPreview.tsx + host/manifest). Scope changes to the PCF's own preview chrome; the channel-pill and message-block styling that is shared with the modal is task 062's — consume it, don't duplicate.</prompt>
+  <role>SPAARKE platform developer. Expert in PCF + Fluent v9.</role>
+  <goal>The PCF preview reflects the 8 UAT items: configurable Title (default MESSAGES) with the specified typography; gray-circle right-aligned count with 'New' when unread; no divider/bottom lines; box-arrow icon-only open; footer padding; left channel pills (green msg / blue email, no icon); sender name typography + date/time.</goal>
+  <context>
+    <background>The deployed CommunicationConversationPanel v1.0.0 preview needs visual refinement per UAT. Items: (1) add a Title PCF input property, default "MESSAGES"; (2) title 14px Segoe UI weight 600 color #242424, row height 20px; (3) message count in a gray circle, right-aligned; 'New' to the left of the count when there are unread/new; (4) remove the divider line; (5) box-with-arrow open icon (the standard open glyph), icon-only, no label; (6) no bottom line, add a little more padding to the "N of M · N messages" footer; (7) channel pill on the LEFT — green for message, light-blue for email, no icon inside the pill; (8) sender name Segoe UI 14px not bold, show date + time received.</background>
+    <relevant-files>
+      <file>src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/ConversationPreview.tsx</file>
+      <file>src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/ControlManifest.Input.xml (add Title property)</file>
+      <file>src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/CommunicationConversationPanelApp.tsx / Host.tsx</file>
+      <file>notes/uat-feedback-phase4-2026-07-21.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens + host dark mode; the #242424 title color is the UAT spec for light — use the equivalent semantic token (colorNeutralForeground1) so dark mode still adapts, matching the visual intent.</constraint>
+    <constraint source="ADR-026">Path-A PCF; no new previewer/host pattern.</constraint>
+    <constraint source="NFR-05">Open control + pin/count affordances keyboard-operable + labeled.</constraint>
+    <constraint source="manifest">Add the Title as an input property with default "MESSAGES"; NO apostrophes in description-key (noAposStringType).</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Read notes/uat-feedback-phase4-2026-07-21.md §A + ConversationPreview.tsx. Add a Title input property to the manifest (default MESSAGES) and thread it to the preview header.</step>
+    <step order="2">Apply the title typography, gray-circle right-aligned count + 'New', remove dividers/bottom line, box-arrow icon-only open, footer padding, left channel pills (no icon), name typography + date/time.</step>
+    <step order="3">Prefer semantic tokens that honor the UAT colors in light AND adapt in dark. Keep the ADR-021 dark-mode contract.</step>
+    <step order="4">Component tests for the new Title property + the count/'New' + pill rendering. Run npm run build:prod (PCF) — 0 lint/type errors. Do NOT bump the manifest version or pack the solution (task 063 redeploy handles versioning + deploy). Prettier changed files. Notes in task-061-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">Title is a configurable PCF property (default MESSAGES) with the specified typography.</criterion>
+    <criterion testable="true">Message count renders in a gray circle, right-aligned; 'New' shows to its left when unread.</criterion>
+    <criterion testable="true">Divider + bottom lines removed; footer has additional padding; open icon is the box-arrow, icon-only.</criterion>
+    <criterion testable="true">Channel pill is on the left, green (message) / light-blue (email), no icon inside.</criterion>
+    <criterion testable="true">Sender name 14px not bold + date/time received; dark mode still adapts (ADR-021); npm run build:prod clean.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
