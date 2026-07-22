@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>communication-arrived Producer — Emit at Persistence for All Channels</title>
+    <phase>2 Layer C + communication-arrived</phase>
+    <gate>blocked-until:012,013,020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the shared Services/Communication persist path (email-r4 + messaging-r3 merge-order coordination); adds tests/integration/seam/** tests — meets root CLAUDE.md §8 FULL criteria + test-modifying override row.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches shared Services/Communication persist path — email-r4 + messaging-r3 merge-order is a coordination judgment call, not a mechanical edit; multiple persist call sites must be enumerated correctly (capture AND send, all channels) without missing one.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared Services/Communication persist path — email-r4 W10 and messaging-r3's serial Phase-1 wave (their tasks 002-005) edit the same files; cannot run concurrently with another persist-path-touching task (NFR-08).</parallel-reason>
+    <deps>012,013,020</deps>
+    <tags>bff-api, api, services, integration-test</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Emit the spine's communication-arrived signal at PERSISTENCE time for every sprk_communication write — inbound capture and outbound send, all channels (email + messaging), identically — as a best-effort, non-fatal producer, so messaging-r3's task 045 (blocked on this exact contract) can consume a single, spine-owned event instead of wiring its own producer.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep experience with the Services/Communication persist path, fire-and-forget non-fatal producer patterns, and cross-project merge-order coordination.</role>
+
+  <goal>Every code path that persists an sprk_communication row (inbound capture via IncomingCommunicationProcessor.cs and Channels/MessagingIngestor.cs; outbound send via CommunicationService.cs's send variants) triggers a communication-arrived producer call immediately after the create succeeds. The producer builds a task-013 envelope, writes it to the task-012 outbox (durable truth), then calls task 020's delivery service to ping the fan-out recipients computed by task 023's targeting — durably and consistently regardless of channel or direction. The producer is fire-and-forget and non-fatal: a producer exception never fails the persist call that triggered it. A seam test proves both an email persist and a message persist each yield an outbox row + ping.</goal>
+
+  <context>
+    <background>
+      Spec FR-09 + NFR-05 + NFR-08. Trigger = persistence, not assessment — no enrichment/assessment prerequisite (that is task 040's separate communication_assessed producer, out of this task's scope). Owner Clarification (spec §Owner Clarifications): "Spine emits at persistence for all channels; R3 consumes only" — messaging-r3 MUST NOT wire its own communication-arrived producer; this task is that single spine-owned emit point. R3's contract-alignment note (already on file at their side: notes/notification-spine-contract-alignment.md) confirms trigger=persistence and that R3's task 045 step 2 becomes verify-only once this lands. This task is a coordination-sensitive edit to Services/Communication/** shared with email-r4 (owns the module until their W10 merges) and messaging-r3 (serially editing the same persist/read path in their Phase-1 wave, tasks 002-005) — /conflict-check is mandatory before this PR.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Trigger is persistence — the create-succeeded point of an sprk_communication row — NOT any assessment/enrichment outcome. Do NOT gate the emit on CommunicationEnrichmentService's assessment step (that gate belongs to task 040's separate communication_assessed producer).</constraint>
+    <constraint source="project">Emit identically for inbound capture AND outbound send, for BOTH channels (email + messaging) — enumerate ALL persist call sites (verified 2026-07-20: IncomingCommunicationProcessor.cs:576, Channels/MessagingIngestor.cs:220 for capture; CommunicationService.cs's multiple send-variant call sites for outbound) and confirm none is missed via a grep-based sweep before closing this task.</constraint>
+    <constraint source="NFR-05">The producer is fire-and-forget and non-fatal: an exception inside the producer (envelope build, outbox write, or ping) MUST NOT propagate to or fail the persist call that triggered it — the communication record must save successfully regardless of producer outcome; log the exception and continue.</constraint>
+    <constraint source="project">MUST write the outbox row BEFORE calling task 020's ping entrypoint (root CLAUDE.md Key Technical Constraint — durable truth before best-effort push); use task 023's targeting service to compute recipients, do not compute a fan-out list ad hoc in this producer.</constraint>
+    <constraint source="project">The envelope built here uses task 013's communication envelope shape exactly (kind=communication-arrived, IDs + minimal display metadata only per §5A.3: communicationId, threadId, channel, direction, senderDisplay, optional privacy-gated snippet, badgeDelta) — no message body, no privileged content.</constraint>
+    <constraint source="NFR-08">Run /conflict-check before this PR (Services/Communication/** is a heavily-contested hot path); confirm email-r4 W10 merge status and messaging-r3's Phase-1 wave state before touching shared persist-path files.</constraint>
+    <constraint source="ADR-013">If the producer needs AI-internal capability (it should not — this is a pure data-shape + delivery call), it MUST consume via Services/Ai/PublicContracts/ facade, never a direct AI-internal injection.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/conflict-check/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="fire-and-forget-non-fatal" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs">RunAssessmentEmissionAsync's Task.Run-wrapped, exception-isolated emit call (step 5, lines ~216-238) — mirror this non-fatal-isolation shape for the persistence-time emit, even though the trigger point differs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for this project's Services/Communication/** touches; confirm email-r4 W10 merge status. If W10 has NOT merged, STOP per escalation.</step>
+    <step order="2">Grep-sweep Services/Communication/** for every `_genericEntityService.CreateAsync(communication, ct)` (or equivalent) call site that persists an sprk_communication row — enumerate all inbound-capture and outbound-send variants; do not rely solely on the line numbers cited in context (verify against current HEAD, they may have shifted).</step>
+    <step order="3">Implement the communication-arrived producer (Services/Communication/ or Services/Notifications/ — decide per its dependency shape; it needs Communication read access for envelope fields and Notifications for outbox+delivery): build task-013 envelope, write to task-012 outbox, call task-023 targeting, call task-020 delivery ping — wrapped for non-fatal isolation per the RunAssessmentEmissionAsync precedent.</step>
+    <step order="4">Wire the producer call immediately after EACH enumerated persist call site (step 2), for both capture and send paths.</step>
+    <step order="5">Write the seam test under tests/integration/seam/Communication/: persisting an email communication AND persisting a message communication EACH yield an outbox row (kind=communication-arrived) + a delivery-service ping call; assert a producer exception (inject a failure) does NOT fail the triggering persist call.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 024 to ✅ completed.</step>
+    <step order="7">Document any deviations (e.g., persist call sites found beyond the ones cited in context) in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If email-r4 W10 has NOT merged, STOP and escalate merge-order (NFR-08) — run /conflict-check first; do not proceed to edit Services/Communication/** while it is still email-r4's exclusive ownership window.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationArrivedProducer.cs (or Services/Notifications/ — decide per step 3 justification)</output>
+    <output type="test">tests/integration/seam/Communication/CommunicationArrivedProducerSeamTests.cs</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/ (persist-call-site sweep results + any deviations)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email is persisted via inbound capture (IncomingCommunicationProcessor), when the create succeeds, then a communication-arrived outbox row is written and a ping is sent to the computed fan-out recipients.</criterion>
+    <criterion testable="true">Given an email is persisted via outbound send (CommunicationService), when the create succeeds, then a communication-arrived outbox row is written and a ping is sent — same shape as the inbound case.</criterion>
+    <criterion testable="true">Given a message is persisted via inbound capture (Channels/MessagingIngestor), when the create succeeds, then a communication-arrived outbox row is written and a ping is sent.</criterion>
+    <criterion testable="true">Given a message is persisted via outbound send, when the create succeeds, then a communication-arrived outbox row is written and a ping is sent — proving capture and send are treated identically across both channels.</criterion>
+    <criterion testable="true">Given the producer throws an exception during envelope build, outbox write, or ping, when a communication is being persisted, then the triggering persist call STILL SUCCEEDS (the sprk_communication row is saved) and the exception is logged, not propagated (NFR-05).</criterion>
+    <criterion testable="true">Given no communication assessment/enrichment has run, when a communication is freshly persisted, then the communication-arrived producer still fires — there is NO assessment prerequisite (distinguishing this from task 040's separate communication_assessed producer).</criterion>
+    <criterion testable="true">Given the outbox write and the delivery ping are both inspected for ordering, when the producer runs, then the outbox row is written BEFORE the ping call is made (never the reverse).</criterion>
+    <criterion testable="true">A tests/integration/seam/Communication/** test exists proving BOTH channels (email AND message) each yield an outbox row + ping from a single persist call, per ADR-038 DoD for dispatch-spine changes.</criterion>
+    <criterion testable="true">Given /conflict-check is run before this PR, when its output is reviewed, then it confirms email-r4 W10 has merged and messaging-r3's Phase-1 wave state is compatible with this touch (or the task escalated and stopped per the trigger above).</criterion>
+  </acceptance-criteria>
+
+  <notes>This task does NOT emit communication_assessed (task 040's job, gated on enrichment) — do not conflate the two producers. The recipient computation is task 023's targeting service; do not duplicate its logic here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

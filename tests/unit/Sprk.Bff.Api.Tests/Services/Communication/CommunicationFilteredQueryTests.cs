@@ -112,6 +112,30 @@ public class CommunicationFilteredQueryTests
         _messageQuery.Should().Contain(" and ", "multiple facets are AND-composed");
     }
 
+    [Fact]
+    public async Task QueryCommunicationsAsync_ProjectsEnrichedSenderIdentity_UniformWithOtherReadPaths()
+    {
+        // FR-18 uniform contract: the filtered query projects and flows Direction/SentBy/SentByName just like the
+        // single-thread and by-regarding reads (all three share QueryVisibleMessagesAsync / BuildDto).
+        var messageId = Guid.NewGuid();
+        var sender = Guid.NewGuid();
+        var sut = Sut(); // registers the default setups first...
+        // ...then override the message row to carry the enriched sender identity (later setup wins in Moq).
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => _messageQuery = odata)
+              .ReturnsAsync(new[] { MessageRow(messageId, ThreadId, type: TypeMessage,
+                  direction: 100000000, sentBy: sender, sentByName: "Bob") });
+
+        var result = await sut.QueryCommunicationsAsync(
+            ThreadId.ToString(), null, null, null, null, null, Caller(), CancellationToken.None);
+
+        _messageQuery.Should().Contain("sprk_direction").And.Contain("_sprk_sentby_value").And.Contain("sprk_sentbyname");
+        var msg = result.Messages.Single();
+        msg.Direction.Should().Be(100000000);
+        msg.SentBy.Should().Be(sender);
+        msg.SentByName.Should().Be("Bob");
+    }
+
     // ─────────────────────────── no-leak: access filter applied on the filtered path ───────────────────────────
 
     [Fact]
@@ -299,7 +323,10 @@ public class CommunicationFilteredQueryTests
 
     private static Dictionary<string, JsonElement> MessageRow(
         Guid id, Guid threadId, string? body = null, int? type = null,
-        bool internalOnly = false, int privilege = PrivilegeNone) => new()
+        bool internalOnly = false, int privilege = PrivilegeNone,
+        int? direction = null, Guid? sentBy = null, string? sentByName = null)
+    {
+        var row = new Dictionary<string, JsonElement>
         {
             ["sprk_communicationid"] = El(id.ToString()),
             ["_sprk_communicationthread_value"] = El(threadId.ToString()),
@@ -309,6 +336,11 @@ public class CommunicationFilteredQueryTests
             ["sprk_body"] = El(body ?? ""),
             ["sprk_communicationtype"] = El(type ?? TypeMessage),
         };
+        if (direction is not null) row["sprk_direction"] = El(direction.Value);
+        if (sentBy is not null) row["_sprk_sentby_value"] = El(sentBy.Value.ToString());
+        if (sentByName is not null) row["sprk_sentbyname"] = El(sentByName);
+        return row;
+    }
 
     private static Dictionary<string, JsonElement> ParticipantRow(Guid communicationId) => new()
     {

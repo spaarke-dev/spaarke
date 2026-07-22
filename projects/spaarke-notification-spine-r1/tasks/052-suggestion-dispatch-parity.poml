@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Proactive suggestion dispatch re-enters the shipped SurfaceLaunch/dispatch path — parity proof</title>
+    <phase>5 Suggestion consumer</phase>
+    <gate>blocked-until:051,031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dispatch-spine parity proof; BFF-touching + integration-test tags per root CLAUDE.md §8</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Dispatch-path parity proof — the core risk is a silent divergence between proactive and reactive dispatch that only a careful comparative test surfaces; the hard MUST NOT (no second action path) needs judgment to verify, not just implement</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 051 (the suggestion card that initiates the proactive dispatch) and 031 (the Layer-A action seam whose behavior this task proves is shared, not forked)</parallel-reason>
+    <deps>051,031</deps>
+    <tags>bff-api, ai, integration-test</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+
+  <prompt>Prove that acting on a proactive suggestion (task 051's card) re-enters the EXACT SAME `SurfaceLaunch`/`POST /api/ai/chat/sessions/{id}/dispatch` path a reactive chip click uses — no parallel proactive-action path exists — via a seam test comparing proactive vs reactive dispatch of the same action for behavioral identity.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the `DispatchSessionEndpoint`/`SurfaceLaunch` dispatch contract (ADR-039/043) and comparative seam-test design.</role>
+
+  <goal>A `tests/integration/seam/**` test drives the SAME target action (a `BindingDisposition.SurfaceLaunch` capability, e.g. create-matter) through TWO entry points — (1) the reactive Click-path `dispatchConsumer(bindingId, args)` call a chip click makes today, and (2) the proactive path task 051's suggestion card's click handler takes after its re-fetch/re-ground succeeds — and asserts the resulting server-side behavior (P5 ack-contract writes, `SurfaceLaunch` disposition value, dispatch response shape, downstream draft materialization) is identical between the two. If any step of the proactive flow requires a code path the reactive flow does not exercise, that is treated as a defect, not a variance to document.</goal>
+
+  <context>
+    <background>
+      Spec FR-17 / MUST rule: "Acting on a suggestion re-enters the shipped dispatch path (SurfaceLaunch disposition → pre-seeded wizard hand-off; P5 ack-gated 'done')... NO parallel proactive-action path." This is the project's sharpest hard-MUST-NOT (spec ADR Tensions notes ADR-043 is the ONE disposition source of truth; a second action path would recreate exactly the "forked consumer" failure mode the whole spine project exists to prevent — R5 in the risk register). Task 051 built the card's UI and its re-fetch/re-ground call; THIS task is the proof that the card's subsequent action call is not a new mechanism but a re-entry of the existing one.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/SuggestionCard.tsx</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/012-assistant-surface-handoff-design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">The proactive dispatch MUST route through `DispositionRoutability`'s registry exactly as the reactive path does — the parity test asserts the SAME `Entry`/`LedgerValue` resolution occurs for both, not an equivalent-but-separate resolution.</constraint>
+    <constraint source="ADR-039">The proactive path MUST call the same `POST /api/ai/chat/sessions/{id}/dispatch` endpoint with a `bindingId` — the client-side re-fetch/re-ground call (task 051) determines whether to proceed, it MUST NOT itself perform or replicate any part of the dispatch/execution logic.</constraint>
+    <constraint source="project">This task MUST NOT add a new endpoint, a new dispatch method overload with divergent behavior, or a proactive-only branch inside `DispatchSessionEndpoint`/the Layer-A seam. If parity requires a code change, the change is to make the EXISTING path handle both origins uniformly — not to add a sibling path.</constraint>
+    <constraint source="ADR-038">The comparison MUST be a `tests/integration/seam/**` test exercising both entry points against the real dispatch endpoint (or the closest integration-test harness already used for `DispatchSessionEndpoint`), not two separate unit tests that assert similarity by inspection.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarke-notification-spine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SurfaceLaunch dispatch re-entry" location="src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs">`POST /api/ai/chat/sessions/{id}/dispatch` is the ONE dispatch entry point; `SurfaceLaunch = 100000007` is `Routable=true` in `DispositionRoutability.cs`'s registry. Both the reactive chip and the proactive card MUST resolve through this single endpoint + registry entry.</pattern>
+      <pattern name="Client-side re-entry call shape" location="src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts">`createConsumerDispatcher`'s `dispatchConsumer(bindingId, args)` is the ONE client dispatch helper; task 051's suggestion-card action handler calls this SAME function (not a fork of it) after its re-fetch/re-ground succeeds.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Identify one concrete `SurfaceLaunch` capability already exercised by existing reactive-dispatch tests (e.g. create-matter) to use as the parity target — reuse an existing fixture/binding rather than authoring a new test capability.</step>
+    <step order="2">Write the reactive-path leg of the seam test: dispatch the target binding via the standard `dispatchConsumer`/`DispatchSessionEndpoint` call, capture the response shape (disposition, consumerType, draft payload) and any P5 ack-contract side effects.</step>
+    <step order="3">Write the proactive-path leg: simulate task 051's card action (re-fetch/re-ground succeeds → the SAME `dispatchConsumer`/dispatch endpoint call is made with the SAME bindingId/args shape) and capture the identical set of observations.</step>
+    <step order="4">Assert behavioral identity between the two legs: disposition value, consumerType, draft/materialized payload shape, and P5 ack-contract state transitions match exactly (modulo correlation/stream ids).</step>
+    <step order="5">If any divergence is found, trace whether it is a genuine second-path defect (fix it — collapse to the one path) or a false-positive from incidental test setup (document why); do not paper over a real divergence with a "known difference" note.</step>
+    <step order="6">Run `dotnet build` and `dotnet test`; confirm the new seam test passes and no existing `DispatchSessionEndpoint`/dispatch tests regress.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If proactive dispatch needs any code path the reactive path does not have, STOP and escalate — a second action path is a hard MUST NOT.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/** (proactive-vs-reactive dispatch parity test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the same SurfaceLaunch binding dispatched via the reactive Click-path and via the proactive suggestion-card path, when both complete, then the disposition value, consumerType, and draft/materialized payload shape are identical between the two.</criterion>
+    <criterion testable="true">Given the proactive dispatch, when it resolves the target capability, then it resolves through the SAME `DispositionRoutability` registry entry (`SurfaceLaunch`, Routable=true) the reactive dispatch resolves through — verified by asserting on the shared registry resolution, not by separately re-implementing the check.</criterion>
+    <criterion testable="true">Given the proactive dispatch, when it calls the dispatch endpoint, then it calls the SAME `POST /api/ai/chat/sessions/{id}/dispatch` route and the SAME client-side `dispatchConsumer` helper the reactive path uses — no new endpoint or client dispatch function is introduced by this task.</criterion>
+    <criterion testable="true">Given the P5 ack-contract, when the proactive dispatch completes, then the same ack-gated "done" state transition occurs as the reactive dispatch produces for the identical action.</criterion>
+    <criterion testable="true">A `tests/integration/seam/**` test exists that runs both legs and fails if any observed field diverges.</criterion>
+    <criterion testable="true">No new DI registration, endpoint, or branch inside `DispatchSessionEndpoint`/the Layer-A seam exists solely to special-case a "proactive" origin — the origin is a client-side fact (which UI surface initiated the call) that does not change server-side handling.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-17. This task is intentionally a PROOF task, not primarily a build task — expect zero-to-minimal server code changes if 031/051 were built correctly; a nontrivial code change here is itself a signal worth surfacing in notes/ (it likely means 031 or 051 introduced a latent divergence).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

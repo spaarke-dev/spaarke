@@ -234,10 +234,11 @@ public class OutputRouterTests
     // (email left this list at task 043; work_product at task 047 — their legs are
     // implemented; see the email + work_product facts below)
 
+    // Notification left this not-routable list at task 033 (FR-14) — its leg is now implemented (creates an
+    // appnotification via IActionSeam; see DispositionRoutabilityNotificationSeamTests). Overlay/Record remain.
     [Theory]
     [InlineData(BindingDisposition.Overlay, "overlay")]
     [InlineData(BindingDisposition.Record, "record")]
-    [InlineData(BindingDisposition.Notification, "notification")]
     public async Task RouteAsync_NonInformationalDisposition_StoresEntryThenThrowsLoudNotSupported(
         BindingDisposition disposition, string expectedLedgerValue)
     {

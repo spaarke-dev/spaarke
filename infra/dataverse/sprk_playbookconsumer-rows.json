@@ -219,6 +219,26 @@
       "toolDescription": "DEFAULT capability for drafting. Use whenever the user asks to draft, write, compose, or prepare a letter, memo, report, response, notice, agreement, or any document — INCLUDING when they say to 'send a letter' to someone (a letter is a document, even if later sent). Examples: 'draft a client reporting letter', 'send a letter to opposing counsel', 'write a memo responding to this notice'. Opens a complete draft in the Compose editor to review, edit, redline, and save. Use this for ALL drafting UNLESS the user explicitly says 'email'."
     },
     {
+      "$comment": "spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22) — Binding for list-tasks. DECLARES the `surface_launch` disposition (100000007 = BindingDisposition.SurfaceLaunch): dispatch emits a surface_launch SSE (BindingCapabilityTool → ChatSseSurfaceLaunchData) carrying consumerType=list-tasks, and the SpaarkeAi client (ConversationPane.handleSurfaceLaunch) opens the 'My Tasks' workspace grid tab (DataverseEntityViewWidget with the inline sprk_gridconfiguration ac05e4f1-8d85-f111-8075-7c1e5268570d: sprk_event Task-subtype + statecode=0 + ownerid eq-userid → the caller's own open tasks, queried CLIENT-SIDE by the DataGrid framework — no BFF query handler). The Action (list-tasks) drafts nothing; allowstools=false. risk 100000000 = None (read-only view, no confirmation turn); captureMode 100000000 = LoopElicitation; surfaces=assistant (agent-selectable in the chat loop). Live rows on spaarkedev1: action 57651aad-8e85-f111-8075-7c1e5268570d, binding 5b1870b9-8e85-f111-8075-7c1e5268570d. actionCode/name carry NO version suffix (owner hygiene).",
+      "consumerType": "list-tasks",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "List Tasks (default)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "list-tasks",
+      "ucid": null,
+      "disposition": 100000007,
+      "risk": 100000000,
+      "captureMode": 100000000,
+      "surfaces": "assistant",
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": "Use ONLY when the user asks to SEE, list, review, or check THEIR OWN tasks, to-dos, action items, deadlines, or open work — e.g. 'what are my tasks', 'show my open tasks', \"what's on my plate\", 'do I have any deadlines'. This OPENS the user's task list (their open, assigned Event-Tasks) in a workspace tab. Do NOT use it to CREATE a task (that is create-task), to create a to-do (create-todo), or to list ANOTHER person's tasks. It is read-only — it opens a view and modifies nothing."
+    },
+    {
       "$comment": "spaarkeai-compose-r2 DEF-11 — Click/text-path Binding for compose-revise-document, the ONE whole-document revision capability. DECLARES the core `compose` disposition: disposition 100000006 VERIFIED against Binding.cs BindingDisposition.Compose (same routing promotion as compose-draft-alternative/compose-draft-document — ToLedgerValue -> 'compose', OutputRouter pass-through store-before-render, ADR-040). UNLIKE compose-draft-alternative (a single selected clause, ONE edit) and compose-draft-document (drafts a brand-new document from scratch), this Action revises the WHOLE existing open document and emits a DUAL-CHANNEL payload (edits[] pending track-changes + comments[] anchored review flags) selected by revisionIntent (align-clauses/improve-clarity -> edits; flag-risks -> comments only; custom -> either/both). risk 100000000 = BindingRisk.None (the pending redlines + review comments ARE the review surface — the attorney accepts/replaces/undoes each edit and resolves/dismisses each comment before any persistence; no confirmation turn), captureMode 100000000 = BindingCaptureMode.LoopElicitation. surfaces=assistant,compose: selectable in the Assistant chat loop for whole-document revision intents AND materializes on the Compose editor/Workspace channel. §11 justification vs compose-draft-alternative/compose-draft-document lives in infra/dataverse/actions/compose-revise-document.action.json. Read-through the shipped session-dispatch seam — ZERO new BFF routes; the CHAT-session-vs-DOCUMENT-session routing decision (DEF-09 precedent) is made by BindingCapabilityTool reading ChatSession.ActiveDocument.DocumentSessionId when this Binding's disposition is Compose, NOT by a new route. actionCode/name carry NO version suffix (owner hygiene).",
       "consumerType": "compose-revise-document",
       "consumerCode": "default",

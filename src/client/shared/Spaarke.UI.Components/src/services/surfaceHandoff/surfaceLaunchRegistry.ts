@@ -73,7 +73,11 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     title: 'Create New Event',
     // Task-flavored Event subtype preset (authoritative — the capability is
     // specifically "create a task", so the Event wizard opens on the Task subtype).
-    preset: { sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID },
+    // D-013-03: carry the fixed display NAME alongside the GUID so the wizard's
+    // event-type LOOKUP renders "Task" instead of a blank label (the lookup shows
+    // `eventTypeName`, not a value resolved from the id). "Task" is the system
+    // subtype record's `sprk_name` (verified in dev).
+    preset: { sprk_eventtype_ref: EVENT_SUBTYPE_TASK_GUID, sprk_eventtype_ref_name: 'Task' },
   },
   'create-todo': {
     kind: 'oob-form',

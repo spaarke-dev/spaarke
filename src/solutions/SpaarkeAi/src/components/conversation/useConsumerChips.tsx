@@ -115,6 +115,12 @@ export interface ConsumerChipsDeps {
    * preference source exists yet; see that module's header).
    */
   chipDisplayPreference?: ChipDisplayPreference | null;
+  /**
+   * D-043-01 (option c): notified with the Binding id each time a real chip dispatches, so the host
+   * can record LEARNED usage that feeds `chipDisplayPreference` back on the next render. Local `local:*`
+   * action chips never reach here (they route through `onLocalChipAction`). Omitted → no usage tracking.
+   */
+  onChipDispatched?: (bindingId: string) => void;
 }
 
 export interface ConsumerChipsController {
@@ -158,6 +164,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     getAppendedLocalChips,
     onCorrespondenceDraft,
     chipDisplayPreference,
+    onChipDispatched,
   } = deps;
 
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
@@ -196,6 +203,9 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       // R4-10 (UAT 2026-07-19): surface a "Working…" spinner while the capability runs (the
       // summarize chip in particular had no visible progress). Cleared in .finally().
       setDispatching(true);
+
+      // D-043-01: record this Binding as LEARNED usage (feeds the chip-display reorder next render).
+      onChipDispatched?.(bindingId);
 
       // ADR-015: structural signal only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
@@ -339,6 +349,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       getSessionId,
       onCorrespondenceDraft,
       getAppendedLocalChips,
+      onChipDispatched,
     ]
   );
 

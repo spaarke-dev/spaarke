@@ -15,13 +15,14 @@
  *    when `confidence === 'high'`; ADR-039 — the deterministic resolver, not the
  *    LLM, authors closed-set values).
  *
- * NOTE (part-3 gap): the `create-task` registry preset injects the Task-subtype
+ * D-013-03 (RESOLVED): the `create-task` registry preset injects the Task-subtype
  * event-type GUID into `draftValues` under `sprk_eventtype_ref` (a bare GUID, not a
- * ResolvedLookup — see `surfaceLaunchRegistry.ts`). It is intentionally NOT mapped
- * here because the subtype's DISPLAY NAME is unknown client-side; binding an id
- * without a name would leave the dropdown label blank. Resolving the preset GUID to
- * its display name (or having the wizard resolve it on mount) is server-enrichment /
- * follow-up scope.
+ * ResolvedLookup — see `surfaceLaunchRegistry.ts`) alongside a companion
+ * `sprk_eventtype_ref_name` display name. When there is no high-confidence resolved
+ * event-type, we fall back to that preset PAIR (id + name) so the event-type lookup
+ * renders "Task" instead of a blank label. We bind ONLY when BOTH the id and a
+ * non-empty name are present — a bare id with no name is still skipped (never a blank
+ * label). The resolver's high-confidence lookup, when present, still wins.
  *
  * Pure + host-agnostic (ADR-012). Unit-tested in `__tests__/handoffSeedMapping.test.ts`.
  */
@@ -59,6 +60,10 @@ const EVENT_DESCRIPTION_KEYS = [
 
 const EVENT_TYPE_LOOKUP_KEYS = ['sprk_eventtype_ref', 'eventType', 'event_type', 'eventTypeId'] as const;
 
+// D-013-03: the bare-GUID preset (id) + its companion display name in `draftValues`.
+const EVENT_TYPE_PRESET_ID_KEYS = ['sprk_eventtype_ref', 'eventTypeId', 'event_type', 'eventType'] as const;
+const EVENT_TYPE_PRESET_NAME_KEYS = ['sprk_eventtype_ref_name', 'eventTypeName', 'event_type_name'] as const;
+
 function firstLookup(lookups: Record<string, ResolvedLookup>, keys: readonly string[]): ResolvedLookup | undefined {
   for (const key of keys) {
     const value = lookups[key];
@@ -94,6 +99,16 @@ export function mapEventHandoffSeed(seed: HandoffSeed | null | undefined): Parti
   if (eventType) {
     out.eventTypeId = eventType.id;
     out.eventTypeName = eventType.name;
+  } else {
+    // D-013-03: no resolver answer → fall back to the bare-GUID preset PAIR in draftValues
+    // (the create-task Task-subtype preset). Bind only when BOTH id and a non-empty display
+    // name are present, so the event-type lookup never renders a blank label.
+    const presetId = firstString(draft, EVENT_TYPE_PRESET_ID_KEYS);
+    const presetName = firstString(draft, EVENT_TYPE_PRESET_NAME_KEYS);
+    if (presetId && presetName) {
+      out.eventTypeId = presetId;
+      out.eventTypeName = presetName;
+    }
   }
 
   return Object.keys(out).length > 0 ? out : undefined;

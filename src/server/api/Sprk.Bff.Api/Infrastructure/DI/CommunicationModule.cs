@@ -278,6 +278,41 @@ public static class CommunicationModule
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
 
+        // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
+        // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
+        // producer loops them into SignalRDeliveryService.PingUserAsync). Placement Justification (root §10 / §11):
+        // its dependencies are ALL Communication-flavored (ICommunicationAccessFilter + IThreadPrivateGrantProvider +
+        // the sprk_communicationparticipant junction via IGenericEntityService), so ADR-010's feature-module home is
+        // HERE, not NotificationsModule (which owns the SignalR delivery leg + identity resolver). ZERO new access
+        // logic: it COMPOSES the two existing access primitives + the junction read-only (design §5 — leverage,
+        // don't rebuild). Singleton — all deps are singletons; mirrors the participant indexer/thread resolver.
+        //
+        // IThreadPrivateGrantProvider deny-all null-object (ADR-032): the task-042 read-path rework REMOVED the
+        // deny-all registration (the impersonation-based read filter no longer depends on it — see the task-042
+        // comment above), so the seam is currently UNREGISTERED. The fan-out service DOES consume it (private-thread
+        // gate), and it is reached from the unconditionally-mapped negotiate/producer path, so the null-object MUST
+        // be registered unconditionally for the consumer to resolve (ADR-032 asymmetric-registration rule; CLAUDE.md
+        // §10 bullet 6). TryAdd so the FUTURE Dataverse-backed provider (task-043 private-direct work) wins if it
+        // registers first — this only supplies the fail-closed default (private-thread fan-out is EMPTY until then).
+        services.TryAddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
+        services.AddSingleton<CommunicationFanOutTargetingService>();
+
+        // The single, spine-owned communication-arrived producer (spaarke-notification-spine-r1 task 024 /
+        // FR-09 / NFR-05). Emits the Layer-C refresh signal at PERSISTENCE for every sprk_communication write —
+        // inbound capture (email + messaging) + outbound send (email + messaging), identically — so messaging-r3
+        // task 045 consumes ONE spine event instead of wiring its own producer (Owner Clarification). Injected as
+        // an OPTIONAL trailing ctor param into the three persist orchestrators (IncomingCommunicationProcessor,
+        // MessagingIngestor, CommunicationService), each of which calls it AFTER its participant-index step (the
+        // point at which the fan-out junction, thread lookup, and regarding are populated — NOT the raw CreateAsync;
+        // see the producer's remarks + notes/024). Placement Justification (root §10 / §11): sits in
+        // Services/Communication/ beside its fan-out dependency (task 023) and depends "up" into the Notifications
+        // spine infra (OutboxService + SignalRDeliveryService) — the correct direction; ZERO new access logic, ZERO
+        // AI dependency (ADR-013 clean). Registered UNCONDITIONALLY (ADR-010 / ADR-032 — non-fatal producer consumed
+        // best-effort by all three call sites; no feature gate). Singleton — all deps (IGenericEntityService,
+        // CommunicationFanOutTargetingService, OutboxService, SignalRDeliveryService) are singletons, matching the
+        // three singleton orchestrators it is injected into (no captive-scope anti-pattern).
+        services.AddSingleton<CommunicationArrivedProducer>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).

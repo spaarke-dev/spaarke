@@ -43,6 +43,18 @@ public sealed class ThreadResolver : IThreadResolver
     // every CREATE path below rather than relying solely on the Dataverse column default.
     private const string NameIsAutoDerivedField = "sprk_nameisautoderived";
 
+    // FR-17 participant roll-up (task 004). Names a RECORD-LESS thread (no ADR-024 regarding anchor) from the
+    // people/addresses in its messages, via the MESSAGE-grain sprk_communicationparticipant junction (R2 tasks
+    // 003/050) — REUSE of the existing ADR-024/ADR-048 participant index, NOT a second participant store. Two
+    // bounded queries (the thread's messages, then those messages' participants) keep the read O(1) in message
+    // count (NFR-07 — no per-row fan-out).
+    private const string ParticipantEntity = "sprk_communicationparticipant";
+    private const string ParticipantMessageLookup = "sprk_communication"; // junction → sprk_communication (message)
+    private const string MessageThreadLookup = "sprk_communicationthread"; // sprk_communication → thread
+    private const int MaxRollupMessageScan = 200;      // bound the thread's message scan (NFR-07)
+    private const int MaxRollupParticipantScan = 500;  // bound the participant scan across those messages
+    private const int MaxNamesInRollup = 3;            // render "Alice, Bob, Carol, +N"
+
     private readonly IGenericEntityService _entityService;
     private readonly IReadOnlyDictionary<CommunicationType, IThreadKeyStrategy> _strategies;
     private readonly ILogger<ThreadResolver> _logger;
@@ -265,7 +277,20 @@ public sealed class ThreadResolver : IThreadResolver
                 ? new RegardingAnchor(recordId, recordType, recordName, recordUrl)
                 : null;
 
-            var newName = TruncateTo(BuildTopicFromRegardingAnchor(anchor), 200);
+            string newName;
+            if (anchor is not null)
+            {
+                // Record-anchored: name from the current regarding's display name (unchanged).
+                newName = TruncateTo(BuildTopicFromRegardingAnchor(anchor), 200);
+            }
+            else
+            {
+                // Record-LESS (no ADR-024 regarding anchor): FR-17 — roll up the thread's participants instead of
+                // the generic "Conversation" fallback. The master-thread guard + Edited-marker gate above are
+                // untouched, so this branch only runs for a non-master, Auto/legacy-null thread with no anchor.
+                var participantName = await BuildParticipantRollupNameAsync(threadId, ct);
+                newName = TruncateTo(participantName ?? "Conversation", 200);
+            }
             var currentName = thread.GetAttributeValue<string>("sprk_name");
             if (string.Equals(newName, currentName, StringComparison.Ordinal))
                 return; // No-op — avoid a needless write when the derived name hasn't actually changed.
@@ -284,6 +309,113 @@ public sealed class ThreadResolver : IThreadResolver
             // NFR-02: best-effort / non-fatal — never fail the caller.
             _logger.LogWarning(ex, "Thread name re-derive failed (non-fatal) | ThreadId: {ThreadId}", threadId);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default)
+    {
+        // Defense-in-depth (the endpoint also validates → 400). Truncate to the sprk_name field max (200).
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Thread name must not be blank.", nameof(name));
+
+        var persisted = TruncateTo(name.Trim(), 200);
+
+        // Edit-preserve (correctness-critical): set the user's name AND flip the marker to Edited ATOMICALLY in
+        // ONE UpdateAsync, so ReDeriveThreadNameAsync's marker gate (marker == false → return) short-circuits on
+        // the NEXT re-derive and never clobbers it. NOT wrapped in a non-fatal swallow — a user-initiated rename
+        // failure must surface to the endpoint (unlike the best-effort re-derive).
+        await _entityService.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            new Dictionary<string, object>
+            {
+                ["sprk_name"] = persisted,
+                [NameIsAutoDerivedField] = false,
+            },
+            ct);
+
+        _logger.LogInformation("Renamed thread {ThreadId} (naming-edited marker → Edited): {Name}", threadId, persisted);
+        return persisted;
+    }
+
+    /// <summary>
+    /// FR-17 participant roll-up (task 004): names a RECORD-LESS thread from the DISTINCT people/addresses in its
+    /// messages. Two bounded queries — the thread's messages, then those messages' participants from the
+    /// <c>sprk_communicationparticipant</c> junction (ADR-024/ADR-048 REUSE — no second participant store, no
+    /// per-row fan-out, NFR-07). A resolved person contributes its typed lookup's display name
+    /// (<c>sprk_systemuser</c> then <c>sprk_contact</c> — the SDK populates the <see cref="EntityReference.Name"/>);
+    /// an unresolved external party contributes its <c>sprk_addresstext</c>. Distinct names (case-insensitive) are
+    /// ordered DETERMINISTICALLY (ordinal, case-insensitive — independent of query order) and rendered
+    /// "Alice, Bob, +N". Returns <c>null</c> when the thread has no messages or no usable participant name, so the
+    /// caller keeps the generic "Conversation" fallback.
+    /// </summary>
+    private async Task<string?> BuildParticipantRollupNameAsync(Guid threadId, CancellationToken ct)
+    {
+        // 1) The thread's messages (bounded scan).
+        var messageQuery = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(false),
+            TopCount = MaxRollupMessageScan,
+            Criteria =
+            {
+                Conditions = { new ConditionExpression(MessageThreadLookup, ConditionOperator.Equal, threadId) },
+            },
+        };
+        var messages = await _entityService.RetrieveMultipleAsync(messageQuery, ct);
+        var messageIds = messages.Entities
+            .Select(m => m.Id)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (messageIds.Length == 0)
+            return null;
+
+        // 2) Those messages' participants (bounded scan). The junction carries the typed person lookups (whose
+        //    display name the SDK populates on the EntityReference) plus the raw address as provenance.
+        var participantQuery = new QueryExpression(ParticipantEntity)
+        {
+            ColumnSet = new ColumnSet("sprk_systemuser", "sprk_contact", "sprk_addresstext"),
+            TopCount = MaxRollupParticipantScan,
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression(
+                        ParticipantMessageLookup, ConditionOperator.In, messageIds.Cast<object>().ToArray()),
+                },
+            },
+        };
+        var participants = await _entityService.RetrieveMultipleAsync(participantQuery, ct);
+
+        // 3) Distinct display names in a deterministic order.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
+        foreach (var p in participants.Entities)
+        {
+            var display =
+                p.GetAttributeValue<EntityReference>("sprk_systemuser")?.Name
+                ?? p.GetAttributeValue<EntityReference>("sprk_contact")?.Name
+                ?? p.GetAttributeValue<string>("sprk_addresstext");
+            if (string.IsNullOrWhiteSpace(display))
+                continue;
+            var trimmed = display.Trim();
+            if (seen.Add(trimmed))
+                names.Add(trimmed);
+        }
+        if (names.Count == 0)
+            return null;
+
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return BuildParticipantDisplayName(names);
+    }
+
+    /// <summary>Renders up to <see cref="MaxNamesInRollup"/> distinct names as "Alice, Bob, +N" (deterministic).</summary>
+    private static string BuildParticipantDisplayName(IReadOnlyList<string> distinctOrderedNames)
+    {
+        var shown = distinctOrderedNames.Take(MaxNamesInRollup).ToList();
+        var remainder = distinctOrderedNames.Count - shown.Count;
+        var joined = string.Join(", ", shown);
+        return remainder > 0 ? $"{joined}, +{remainder}" : joined;
     }
 
     /// <summary>

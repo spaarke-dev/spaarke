@@ -111,6 +111,38 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // GET /api/communications/threads — list ALL threads the caller may see, INCLUDING record-less (Direct)
+        // threads, for the R3 workspace left pane + standalone code page (task 003 / FR-16, Surface 2). Impersonated
+        // (MSCRMCallerID — Dataverse row-level security is the ONLY visibility gate); NOT scoped to any regarding
+        // lookup (so Direct/record-less threads are included) and NO membership-union (retired 2026-07-16). Optional
+        // ?search=<name> (contains on sprk_name, injection-escaped), ?top=<n> page size, ?pageToken=<opaque cursor>
+        // for stable, non-overlapping keyset paging over createdon desc. A bare GET /threads is DISTINCT from
+        // GET /threads/{threadId}/messages, GET /threads/{threadId}/unread-count, and POST /threads/direct — no route
+        // collision (literal segment, no route param, GET verb). Fail-closed 403 on an unresolved caller.
+        group.MapGet("/threads", ListThreadsAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ListThreads")
+            .WithDescription("List all threads the caller may see (incl. record-less Direct threads); impersonated + access-filtered by Dataverse row-level security; no membership-union. Optional ?search=, ?top=, ?pageToken=.")
+            .Produces<ThreadListResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // POST /api/communications/threads/{threadId}/rename — set a user-chosen thread name (task 004 / FR-17).
+        // The caller is resolved server-side (never client-supplied); the write authorizes the caller AGAINST the
+        // thread by an IMPERSONATED visibility check (a caller MUST NOT rename a thread they cannot see → 403,
+        // ADR-028 / NFR-01), a blank name is a 400. The write sets sprk_name AND flips sprk_nameisautoderived to
+        // Edited in ONE update so the auto re-derive never overwrites the user's name (edit-preserve). This BFF
+        // write is the ONLY marker-flip path — NO Dataverse plugin (hard MUST NOT). Distinct route: POST verb +
+        // literal /rename segment, no collision with GET /threads/{threadId}/messages|unread-count or POST
+        // /threads/direct.
+        group.MapPost("/threads/{threadId:guid}/rename", RenameThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("RenameThread")
+            .WithDescription("Rename a communication thread (FR-17): sets sprk_name + flips sprk_nameisautoderived to Edited so the auto re-derive never overwrites it. Caller resolved server-side; 403 if the caller cannot see the thread; 400 on a blank name. No Dataverse plugin — this BFF write is the only marker-flip path.")
+            .Produces<RenameThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /api/communications/by-regarding/{entityType}/{id} — ALL of a regarding record's threads + their
         // messages for the record-level regarding-mode Timeline (R2 task 010 / FR-01, Surface 1). Entity-set-agnostic
         // across all 11 ADR-024 regarding families (matter, contact, …). Impersonated (Dataverse row-level security)
@@ -502,6 +534,66 @@ public static class CommunicationEndpoints
         }
 
         return parsed;
+    }
+
+    /// <summary>
+    /// List-all-threads for the R3 workspace left pane + standalone code page (task 003 / FR-16). Resolves the caller
+    /// server-side (never client-supplied) and delegates to the impersonated, access-parity list read. Optional
+    /// <c>?search=</c> (name contains), <c>?top=</c> (page size), <c>?pageToken=</c> (opaque keyset cursor). A malformed
+    /// <c>pageToken</c> is a 400 ProblemDetails (ADR-019); an unresolved caller is a 403 (fail closed).
+    /// </summary>
+    private static async Task<IResult> ListThreadsAsync(
+        CommunicationThreadReadService readService,
+        HttpContext context,
+        [FromQuery] string? search,
+        [FromQuery] int? top,
+        [FromQuery] string? pageToken,
+        CancellationToken ct)
+    {
+        var result = await readService.ListThreadsAsync(context.User, search, top, pageToken, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Rename a communication thread (task 004 / FR-17). Validates a non-blank name (400), authorizes the
+    /// server-resolved caller AGAINST the thread via an impersonated visibility check (403 if the caller cannot
+    /// see the thread — never rename an inaccessible thread), then sets <c>sprk_name</c> + flips
+    /// <c>sprk_nameisautoderived</c> to Edited in ONE write via <see cref="IThreadResolver.RenameThreadAsync"/>
+    /// (edit-preserve). Returns the persisted name. NO Dataverse plugin — this BFF write is the only marker-flip
+    /// path.
+    /// </summary>
+    private static async Task<IResult> RenameThreadAsync(
+        Guid threadId,
+        RenameThreadRequest request,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var name = request?.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "A non-blank thread name is required.",
+                statusCode: 400);
+        }
+
+        // Authorize the caller against the thread (impersonated visibility). ResolveCallerOrThrowAsync inside
+        // throws a 403 for an unresolved caller (fail closed); zero visible rows → the caller cannot see it → 403.
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_RENAME_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        var persisted = await threadResolver.RenameThreadAsync(threadId, name, ct);
+        return TypedResults.Ok(new RenameThreadResponse { ThreadId = threadId, Name = persisted });
     }
 
     /// <summary>

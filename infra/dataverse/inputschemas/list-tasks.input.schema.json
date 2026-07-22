@@ -1,0 +1,16 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for list-tasks (spaarkeai-assistant-enhancements-r1 task 050). The operand is declared as `documentText` (a ContextBinder OperandVocabulary field) DELIBERATELY: a prompted Action with no session file must present a STRUCTURED operand or the dispatch takes the file-operand path and hard-fails 'No session files available' (SessionDispatchOrchestrator.ResolveFileOperandAsync). documentText makes ContextBinder.HasStructuredOperand true → the no-file hard-stop is relaxed. Its CONTENT is unused — the tasks are queried client-side by the DataGrid framework (ownerid eq-userid). Property-level \"required\": true is FORBIDDEN (use the object-level required array). actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "list-tasks",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The user's request to see their tasks, in their own words (e.g. 'what are my tasks'). This is the action operand so the capability dispatches WITHOUT requiring any uploaded session file; its text is NOT used to find tasks — the workspace grid queries the user's open assigned tasks itself.",
+        "maxLength": 2000
+      }
+    }
+  }
+}

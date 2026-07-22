@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r1
 
-> **Last Updated**: 2026-07-21 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. This is a **UAT-driven remediation** stream (not formal POML task execution) — the Assistant repositioning features are shipped; we're iterating on UAT feedback (now through R6).
+> **Last Updated**: 2026-07-22 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. UAT remediation shipped through **R7**; now in **project close-out**. Immediate next: the owner-approved **membership-filter DataGrid feature** (design doc referenced below), then **051 → 054 → 090**.
 
 ---
 
@@ -9,11 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation — R7 fully shipped + deployed + merged; awaiting owner's next UAT pass. Open: R4-7 / R4-9 (need repro) + R7-5b append (owner decision). |
+| **Mode** | UAT remediation shipped through R7; pivoting to **project close-out** — formal tasks 050/051/054/090 + deferrals D-043-01 / D-013-03. |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` + **origin/master** all at **`5b952439e`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
-| **Deployed (dev)** | `sprk_spaarkeai` (**R7** — rebuilt from merged source, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4/R5/R6/R7** (`compose-draft-document` capability was already Active in the dev catalog — statecode=0). |
-| **Next Action** | Wait for owner's next UAT pass. **Open items: R4-7, R4-9** (need repro), **R7-5b** (append drafted content INTO the open Compose tab — needs a shared-lib Spaarke.Compose.Components append mode; owner chose "append"; NOT in this deploy — see R7 note). Rule: `/worktree-sync` before any BFF deploy (none needed all stream). |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`422a5b6f4`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **050 dispatch fix (2026-07-22)** | UAT: "what are my tasks?" errored "No session files available" — a prompted Action with no file/operand hits `ResolveFileOperandAsync` (hard-fails on 0 files). Fix: list-tasks input schema now declares **`documentText`** (a ContextBinder OperandVocabulary field) so `HasStructuredOperand`=true → structured path relaxes the no-file stop; content ignored (grid queries tasks client-side). Live Action `57651aad` sprk_inputschema+systemprompt updated + seed mirrors + BFF **restarted** (healthz 200). **AWAITING owner re-test.** Note: `compose-draft-document` likely has the SAME latent no-file issue (its `request` also isn't an operand-vocab field) — verify if a fileless "write a brief" fails; same fix applies. |
+| **Deployed (dev)** | `sprk_spaarkeai` (4825 KB — R7 + #8 Memory + D-043-01 chip reorder + **050 My Tasks**); `sprk_createeventwizard` (D-013-03); CommunicationActions PCF v1.1.4 (R6). **BFF unchanged across R4–R7 + close-out** (050 = catalog DATA + client only). Dev BFF **restarted 2026-07-22** to clear the capability cache (healthz 200) so `list-tasks` is discoverable. |
+| **Closed by owner** | **R4-7** (won't-fix) · **R7-5b** (dropped) · **R4-9** (separate project). |
+| **Close-out done (2026-07-22)** | **D-013-03** ✅ · **#8 Memory tool** ✅ · **D-043-01 v1** ✅ · **050 list-tasks / My Tasks grid tab** ✅ (deployed; catalog live: Binding `5b1870b9`, Action `57651aad`, grid config `ac05e4f1`; create-task/create-todo disambiguation cues live; eval debt E-050-01..12 logged). **Also fixed a master-breaking `@spaarke/notifications` build gap** (tsconfig path + vite source alias + `@microsoft/signalr` install + dedupe). **Pending: owner FR-J1 review of the 3 tool-descriptions** (presented 2026-07-22). |
+| **Next Action** | **Membership-filter DataGrid feature** (owner-approved 2026-07-22) — fixes 050 "my tasks" = **membership** (not `ownerid`) AND ships a reusable `behavior.membershipFilter` config any grid can opt into. **Full design + plan: [`notes/050-membership-filter-design.md`](notes/050-membership-filter-design.md).** Key: **NO BFF change, NO schema change** — the membership service is already a live HTTP endpoint (`GET /api/users/me/memberships/{entityType}` → record `ids[]`); DataGrid already filters `IN(ids)` via `overlayHostFilters`. Build = client resolver (`getMyMemberships`) + `behavior.membershipFilter` config field + a gated async resolve stage in `DataGrid.tsx` + `DataverseEntityViewWidget` `authenticatedFetch` plumbing; then update the 050 grid config `ac05e4f1` to `source=savedquery 12a510e4` (curated "My Tasks Open" columns) + `membershipFilter`, dropping `ownerid eq-userid`. **2 owner decisions open** (design §7): which roles for "my tasks"; Task-only vs the view's Deadline+Task+Reminder. Then close-out: **051** evals (NFR-06; E-050-01..12 logged) → **054** verify (DEV) → **090** wrap-up. |
+| **050 status** | ✅ FUNCTIONAL on dev — "what are my open tasks" opens the My Tasks grid tab (owner-tested 2026-07-22; `documentText` no-file fix live). Refinement pending: (1) columns are raw (hand-rolled inline layout) → switch to the curated saved query; (2) "my" = ownerid → upgrade to membership per the design doc. FR-J1 tool-descriptions ✅ approved. |
 
 ### Only open items (both need an owner repro; NO code written yet)
 - **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.

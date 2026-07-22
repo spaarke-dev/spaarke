@@ -41,6 +41,7 @@ public sealed class CommunicationService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -84,7 +85,8 @@ public sealed class CommunicationService
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
         IDirectThreadAccessService? directThreadAccess = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -99,6 +101,7 @@ public sealed class CommunicationService
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _logger = logger;
     }
@@ -432,16 +435,30 @@ public sealed class CommunicationService
         };
 
     /// <summary>
-    /// Resolves (find-or-create) the outbound message's thread and stamps <c>sprk_communicationthread</c>
-    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02). For EMAIL, a reply (<c>InReplyToMessageId</c>
-    /// set) joins its parent's thread and a fresh email creates one; the thread anchors to the record's
-    /// regarding (mapped at create time, ADR-024 reuse). For MESSAGE (chat), the authoritative ACS
-    /// <c>ChatThreadId</c> is carried by the inbound echo path (task 031/051), not surfaced here in R1, so
-    /// the resolver skips — no duplicate thread. MUST NOT fail the send.
+    /// Resolves the outbound EMAIL's thread and stamps <c>sprk_communicationthread</c>
+    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+    /// <b>(1) Explicit target (FR-19)</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied
+    /// (the "respond into the current thread" case), the lookup is stamped DIRECTLY to that thread via the SAME
+    /// <see cref="AssignExplicitThreadAsync"/> helper the Message path uses (<c>ResolveOutboundMessageThreadAsync</c>),
+    /// bypassing the find-or-create resolver below entirely — no new send path or assignment mechanism (ADR-045).
+    /// <b>(2) Find-or-create</b> — otherwise (no <c>ThreadId</c>), behavior is UNCHANGED: a reply
+    /// (<c>InReplyToMessageId</c> set) joins its parent's thread and a fresh email creates one; the thread anchors
+    /// to the record's regarding (mapped at create time, ADR-024 reuse). Both paths MUST NOT fail the send.
     /// </summary>
     private async Task ResolveOutboundThreadAsync(
         Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
     {
+        // (1) FR-19 explicit target: mirror the Message path — stamp the supplied thread directly and skip
+        // find-or-create. AssignExplicitThreadAsync is self-contained best-effort / non-fatal (NFR-02): a stamp
+        // failure never fails the already-sent + persisted email. Checked BEFORE the resolver-null guard so an
+        // explicit ThreadId is honored even when no find-or-create resolver is wired (parity with the Message path).
+        if (request.ThreadId.HasValue)
+        {
+            await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+            return;
+        }
+
+        // (2) Find-or-create (unchanged pre-FR-19 behavior).
         if (_threadResolver is null)
             return;
 
@@ -606,6 +623,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderEmail, senderParticipant,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
+                // (the same spine-owned producer + emit point the inbound + email send paths use — channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             // The response carries only the tracking record id + status — NO ACS token or admin capability
@@ -1234,6 +1257,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
                     request.To, request.Cc, request.Bcc, cancellationToken);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
             }
 
             return new SendCommunicationResponse
@@ -1539,6 +1568,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             return new SendCommunicationResponse

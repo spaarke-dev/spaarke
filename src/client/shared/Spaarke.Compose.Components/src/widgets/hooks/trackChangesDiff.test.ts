@@ -5,7 +5,7 @@
  * decoration layer (TrackChangesExtension) maps these to inline (insertion) + widget (deletion)
  * decorations, so getting the ops + offsets right here is what makes the live redline correct.
  */
-import { diffTokens, diffToRegions } from './trackChangesDiff';
+import { diffTokens, diffToRegions, cleanupSemantic } from './trackChangesDiff';
 
 describe('diffTokens (word-level baseline → current)', () => {
   it('reports no change for identical text', () => {
@@ -68,6 +68,57 @@ describe('diffTokens (word-level baseline → current)', () => {
         .join('')
     ).toBe('hello world');
     expect(ops.some(o => o.type === 'insert' && o.text.includes('world'))).toBe(true);
+  });
+});
+
+describe('cleanupSemantic (item 4 diff-quality — no salt-and-pepper fragmentation)', () => {
+  // Helper: baseline reconstruction = equal+delete; current reconstruction = equal+insert.
+  const rebuildBaseline = (ops: { type: string; text: string }[]) =>
+    ops
+      .filter(o => o.type !== 'insert')
+      .map(o => o.text)
+      .join('');
+  const rebuildCurrent = (ops: { type: string; text: string }[]) =>
+    ops
+      .filter(o => o.type !== 'delete')
+      .map(o => o.text)
+      .join('');
+
+  it('collapses a rewrite with a COINCIDENTAL short common word into ONE strike + ONE insert', () => {
+    // "item" recurs, so a naive LCS keeps it as a mid-phrase equality → fragmentation. Cleanup absorbs it.
+    const baseline = 'alpha item beta item gamma';
+    const current = 'alpha changed item swapped gamma';
+    const ops = diffTokens(baseline, current);
+
+    // The changed region between the "alpha " and " gamma" anchors is a SINGLE delete + SINGLE insert.
+    const deletes = ops.filter(o => o.type === 'delete');
+    const inserts = ops.filter(o => o.type === 'insert');
+    expect(deletes.length).toBeLessThanOrEqual(1);
+    expect(inserts.length).toBeLessThanOrEqual(1);
+    // And it still round-trips both sides exactly.
+    expect(rebuildBaseline(ops)).toBe(baseline);
+    expect(rebuildCurrent(ops)).toBe(current);
+  });
+
+  it('PRESERVES a genuinely-unchanged LONG anchor phrase (does not over-strike)', () => {
+    const baseline = 'Please review the indemnification clause carefully today';
+    const current = 'Kindly review the indemnification clause carefully now';
+    const ops = diffTokens(baseline, current);
+    // "review the indemnification clause carefully" is a long unchanged anchor → stays equal, unstruck.
+    expect(ops.some(o => o.type === 'equal' && o.text.includes('indemnification clause carefully'))).toBe(true);
+    expect(rebuildBaseline(ops)).toBe(baseline);
+    expect(rebuildCurrent(ops)).toBe(current);
+  });
+
+  it('leaves a clean single-word replacement unchanged (already one strike + one insert)', () => {
+    const ops = cleanupSemantic(diffTokens('the quick brown fox', 'the swift brown fox'));
+    expect(ops.filter(o => o.type === 'delete').map(o => o.text.trim())).toEqual(['quick']);
+    expect(ops.filter(o => o.type === 'insert').map(o => o.text.trim())).toEqual(['swift']);
+  });
+
+  it('is idempotent (running cleanup again changes nothing)', () => {
+    const once = diffTokens('alpha item beta item gamma', 'alpha changed item swapped gamma');
+    expect(cleanupSemantic(once)).toEqual(once);
   });
 });
 

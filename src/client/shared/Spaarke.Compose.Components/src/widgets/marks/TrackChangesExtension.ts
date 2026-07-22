@@ -68,6 +68,18 @@ export function buildTrackChangeDecorations(doc: PMNode, baseline: ReadonlyMap<s
     if (!TEXT_BLOCK_TYPES.has(node.type.name)) return true;
     const paraId = node.attrs?.[PARA_ID_ATTR] as string | undefined;
     if (!paraId) return true;
+    // A block that already carries an AI-suggestion redline (insertion/deletion mark) renders via those
+    // marks — with the 💡 rationale cue + accept/reject. The live Track Changes overlay is for the user's
+    // OWN free-typed edits only, so it must NOT also decorate an AI-suggestion block (that double-drew the
+    // redline and hid the lightbulb). Skip such blocks.
+    let hasRedlineMark = false;
+    node.descendants(child => {
+      if (child.isText && child.marks.some(m => m.type.name === 'insertion' || m.type.name === 'deletion')) {
+        hasRedlineMark = true;
+      }
+      return !hasRedlineMark;
+    });
+    if (hasRedlineMark) return true;
     const baselineText = baseline.get(paraId);
     if (baselineText === undefined) return true; // no baseline for this block — skip (new/split para)
     const currentText = node.textContent;

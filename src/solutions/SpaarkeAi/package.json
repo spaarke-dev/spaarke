@@ -2,7 +2,7 @@
   "name": "spaarke-ai",
   "version": "0.1.0",
   "private": true,
-  "description": "SpaarkeAi standalone Code Page \u00e2\u20ac\u201d three-pane AI workspace hosted as web resource sprk_spaarkeai",
+  "description": "SpaarkeAi standalone Code Page â€” three-pane AI workspace hosted as web resource sprk_spaarkeai",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.2",
+    "@microsoft/signalr": "^8.0.7",
     "@fluentui/react-button": "^9.8.2",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-dialog": "^9.17.2",
@@ -46,6 +47,7 @@
     "@spaarke/document-operations": "file:../../client/shared/Spaarke.DocumentOperations",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "@spaarke/legal-workspace": "file:../../client/shared/Spaarke.LegalWorkspace",
+    "@spaarke/notifications": "file:../../client/shared/Spaarke.Notifications",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",
@@ -61,6 +63,7 @@
     "@tiptap/extension-task-list": "^2.10.3",
     "@tiptap/extension-text-align": "^2.10.3",
     "@tiptap/extension-underline": "^2.10.3",
+    "@tiptap/extension-unique-id": "^2.27.2",
     "@tiptap/react": "^2.10.3",
     "@tiptap/starter-kit": "^2.10.3",
     "@types/dompurify": "^3.0.5",

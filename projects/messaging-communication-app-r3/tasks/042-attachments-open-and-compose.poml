@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Attachments — open/preview/download from a message + attach-on-compose (SPE-backed)</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>after:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches shared compose surface (SendEmailDialog/EmailComposer) and the BFF attachment surface; tags include bff-api + frontend; modifies .cs/.tsx.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change spanning shared compose + BFF attachment surface + SPE path; higher blast radius, benefits from stronger reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared EmailComposer/SendEmailDialog compose surface and the BFF attachment surface — conflicts with any other compose/BFF edit.</parallel-reason>
+    <deps>011, 020</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-20 attachments: from a message in the conversation, open/preview/download an attachment via the existing SPE document-viewer path; and support attach-on-compose in the shared composer. Follow the chat attachment policy (25 MB binary cap client-side, MIME allow-list). Do NOT build a new inline previewer; reuse the SPE document-viewer path.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Enable a user to open/preview/download an attachment from a message (SPE-backed) and to attach a file on compose, reusing the existing SPE document-viewer path and the existing send/compose surface — no new previewer, no new send path.</goal>
+  <context>
+    <background>FR-20 requires attachment open/preview/download from a message and attach-on-compose. The spec Assumptions state: reuse the existing SPE document-viewer path rather than a new inline previewer. Attachment sizing/MIME are governed by docs/standards/CHAT-ATTACHMENT-POLICY.md (25 MB binary cap is client-only; server enforces text-char caps; MIME allow-list). Compose extension builds on the email-in-flow / SendEmailDialog work (task 020) and the conversation-widget compose (task 011).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/**</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+    </relevant-files>
+    <dependencies>Task 011 (in-conversation compose). Task 020 (email-in-flow block / SendEmailDialog extension). Existing SPE document-viewer path (spe-integration).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR-20">Reuse the existing SPE document-viewer path for open/preview/download; do NOT build a new inline previewer.</constraint>
+    <constraint source="CHAT-ATTACHMENT-POLICY">Enforce 25 MB binary cap client-side; apply the MIME allow-list; server enforces text-char caps, not a binary cap. Follow the policy doc as the single source of truth for sizing/MIME.</constraint>
+    <constraint source="ADR-045">Attach-on-compose must go through the existing composer/send path; do NOT introduce a second send or upload path.</constraint>
+    <constraint source="ADR-028">All BFF calls via @spaarke/auth authenticatedFetch (or host webApi shim in embedded mode).</constraint>
+    <constraint source="NFR-01">Never expose an attachment to a user who lacks access — attachment open/download must respect the same access-filtering as the message read; do not over-disclose.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="spe-document-viewer" location="spe-integration skill / existing document open path">Reuse for open/preview/download of message attachments; do not reimplement.</pattern>
+      <pattern name="email-composer-attach" location="EmailComposer/**">Extend the composer's existing attachment affordance for attach-on-compose; reuse validation.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load CHAT-ATTACHMENT-POLICY.md and the SPE document-viewer path; confirm the existing composer attachment affordance and the message read DTO's attachment metadata.</step>
+    <step order="2">Add an open/preview/download affordance to a message's attachments in the conversation, routing to the existing SPE document-viewer path (access-filtered).</step>
+    <step order="3">Support attach-on-compose in the shared composer, enforcing the 25 MB client cap + MIME allow-list per policy.</step>
+    <step order="4">If (and only if) a new BFF endpoint is required, state Placement Justification per .claude/constraints/bff-extensions.md; prefer extending the existing CommunicationEndpoints/SPE surface. Add/update tests in tests/unit/Sprk.Bff.Api.Tests/ for any BFF change.</step>
+    <step order="5">Add component/ui tests: attachment opens + downloads; attach-on-compose validates cap + MIME; a rejected (oversize/disallowed-MIME) file surfaces an error, not a silent send.</step>
+    <step order="6">If BFF changed: run dotnet publish -c Release, measure compressed size vs ~46 MB baseline, verify ≤60 MB + 0 new HIGH CVE. Build/verify; run ui-test; update TASK-INDEX.md 042 to complete; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the existing SPE document-viewer path cannot serve message attachments without a new previewer, STOP and escalate (spec Assumptions forbid a new previewer) rather than building one.</trigger>
+  </escalation>
+  <justification>
+    <existing>SPE document-viewer path exists; EmailComposer has an attachment affordance; CommunicationEndpoints exists.</existing>
+    <extension>Yes — extend the composer + reuse the SPE path. Add a new BFF endpoint ONLY if attachment retrieval for messages has no existing surface; justify concretely if so.</extension>
+    <cost-of-doing-nothing>Without this, FR-20 fails: users cannot open/download message attachments or attach files on compose (success criterion 8).</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Edit, Bash, Skill(spe-integration), Skill(ui-test), Skill(conflict-check), Skill(task-execute)</tools>
+  <outputs>
+    <output type="code">Message attachment open/preview/download (SPE path) + attach-on-compose in the shared composer</output>
+    <output type="test">Component/ui tests + any BFF unit tests for attachment retrieval</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">An attachment on a message opens/previews and downloads via the existing SPE document-viewer path (no new previewer).</criterion>
+    <criterion testable="true">Attach-on-compose adds a file that sends through the existing composer/send path (no second send path).</criterion>
+    <criterion testable="true">A file over 25 MB or with a disallowed MIME type is rejected client-side with a visible error (negative: not silently accepted).</criterion>
+    <criterion testable="true">Attachment open/download is access-filtered — a user without access to the message/attachment cannot retrieve it (negative: no over-disclosure).</criterion>
+    <criterion testable="true">If a BFF endpoint was added/changed: Placement Justification stated in PR, tests updated, publish ≤60 MB compressed, 0 new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <ui-tests>Open + download a message attachment (SPE-backed); attach a file on compose and send; attempt an oversize/disallowed file and confirm rejection.</ui-tests>
+  <notes>BFF task IF an endpoint is added: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB compressed + 0 new HIGH CVE + update tests. Run /conflict-check before any PR touching Services/Communication or EmailComposer. Reference spec FR-20 and CHAT-ATTACHMENT-POLICY.md.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

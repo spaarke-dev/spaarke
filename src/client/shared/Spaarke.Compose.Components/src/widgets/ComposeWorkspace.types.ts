@@ -20,6 +20,7 @@ import type {
   ParaIdMapEntry,
   ImportedRevision,
   ImportedComment,
+  ComposeServerProjection,
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,16 @@ export interface ComposeWorkspaceState {
    * with `docxBytes` + `paraIdMap`. Empty for every other mount door.
    */
   importedComments: readonly ImportedComment[];
+  /**
+   * Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
+   * DOCX→editor projection from a STORED-DOCUMENT Load response. When present, the editor mounts
+   * `projection.html` directly (the paraId extension parses `data-paraid`) instead of running mammoth +
+   * position-stamping ids — eliminating the two-engine drift. Fail-closed: `canEdit === false` ⇒ the editor
+   * renders a read-only / "Open in Word" state, NEVER a blank editable doc. Null for a transient (Browse /
+   * assistant-upload / AI-draft) mount or an older BFF that predates the projection field — those fall back
+   * to the client mammoth convert.
+   */
+  projection: ComposeServerProjection | null;
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
@@ -157,6 +168,9 @@ export type ComposeWorkspaceAction =
       paraIdMap?: readonly ParaIdMapEntry[];
       importedRevisions?: readonly ImportedRevision[];
       importedComments?: readonly ImportedComment[];
+      // Phase-1 mammoth removal: the server DOCX→editor projection. Undefined (older BFF) → null in the
+      // reducer → the editor falls back to the client mammoth convert (backward compatible).
+      projection?: ComposeServerProjection | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -226,6 +240,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   paraIdMap: [],
   importedRevisions: [],
   importedComments: [],
+  projection: null,
   errorMessage: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
@@ -261,6 +276,8 @@ export function composeWorkspaceReducer(
         paraIdMap: action.paraIdMap ?? [],
         importedRevisions: action.importedRevisions ?? [],
         importedComments: action.importedComments ?? [],
+        // Phase-1 mammoth removal: the server projection (null for an older BFF → mammoth fallback).
+        projection: action.projection ?? null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -316,6 +333,8 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        // No server round-trip → no projection; the editor falls back to the client mammoth convert.
+        projection: null,
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -338,6 +357,8 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        // No server round-trip → no projection; the editor falls back to the client mammoth convert.
+        projection: null,
         errorMessage: null,
       };
     case 'requestSave':

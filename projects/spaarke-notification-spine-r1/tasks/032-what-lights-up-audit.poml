@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>"What lights up" audit — enumerate shipped chat capabilities that gain notification emission on the Notification-disposition flip</title>
+    <phase>3 Layer A + Notification flip</phase>
+    <gate>blocked-until:031</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation/audit deliverable — no code changes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judgment call across the shipped Binding catalog about which capabilities should be allowed to newly emit notifications, and whether a blanket registry flip is safe or requires per-capability remediation first — this is the analysis that directly gates a shipped-catalog behavior-surface change (ADR-043).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>031</deps>
+    <tags>docs, ai</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+
+  <prompt>Enumerate every shipped chat/playbook capability (Binding) that will start emitting a real `appnotification` the moment `DispositionRoutability.Notification.Routable` flips to `true`, and produce a reviewed, deliberate sequencing recommendation BEFORE task 033 performs the flip — because the flip is a single registry-wide switch (there is no per-Binding granularity in `DispositionRoutability`), so this audit is the only checkpoint before every Notification-disposition capability in the system starts firing simultaneously.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the ADR-043 disposition-registry architecture and the Binding/`sprk_playbookconsumer` capability catalog.</role>
+
+  <goal>A reviewed audit document exists enumerating: (1) every currently-shipped Binding/capability whose disposition resolves to `Notification`; (2) for each, what content it would write into the resulting `appnotification` and via what trigger (chat click / proactive / dispatch); (3) an explicit safe/risky assessment per capability (spam risk, privacy/content-leak risk, no known risk); (4) a sequencing recommendation for task 033 (flip immediately for all, or first remediate/disable specific risky Bindings). The document is the recorded gate task 033 requires before touching the registry.</goal>
+
+  <context>
+    <background>
+      FR-14 requires the Notification disposition leg to flip to `Routable=true` ONLY after this audit, because `DispositionRoutability` is ADR-043's ONE disposition source of truth and the flip is registry-wide: today, `DispositionRoutability.cs:98-102` marks `Notification` `Routable=false` for EVERY Binding that declares that disposition — the dispatch admit-gate rejects them all identically (loud 422, never a silent drop, per the registry's own doc comments). The instant the registry flips, `IsAdmissible`/`IsRoutable` return `true` for ALL of them at once — there is no way to flip Routable=true for "some" Bindings and not others; the registry entry is per-disposition-TYPE, not per-Binding. This audit is therefore the ONLY deliberate checkpoint in the whole flip: it must find every Binding that currently declares (or, per its Action/JPS definition, is capable of resolving to) `disposition=notification`, and judge whether it is safe for that Binding's user-facing notification content to start actually appearing the moment 033 lands.
+
+      Chat capabilities are authored as Binding rows (`sprk_playbookconsumer`) pairing a playbook/Action with a disposition. Search both the code (for `BindingDisposition.Notification` usages/references in seed data, fixtures, and Action-authoring documentation) and the live Dataverse catalog (via the Dataverse MCP tools) for Bindings whose disposition resolves to Notification.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">The audit's scope is the disposition registry as the ONE source of truth — do not propose or imply a second, ad hoc admission mechanism (e.g., a per-Binding config flag outside `DispositionRoutability`) to work around the registry's all-or-nothing granularity; if per-Binding granularity turns out to be genuinely required, that is a finding to escalate, not to design around here.</constraint>
+    <constraint source="project">Every capability the audit lists MUST cite concrete evidence (a Binding record id/name from the Dataverse query, or a specific code/seed-data reference) — "for future flexibility" or unverified guesses are refused per CLAUDE.md §11's evidence standard.</constraint>
+    <constraint source="NFR-02/NFR-03">When assessing a capability's risk, explicitly check whether its notification content (title/body/actionUrl fields it would render) could carry privileged content or PII inappropriate for the appnotification surface — flag any such capability as risky regardless of how likely it is to be exercised.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Disposition registry" location="src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs">The single table of dispositions; `Notification` entry currently `Routable=false` at lines 98-102 with `NotRoutableReason`. Every Binding whose disposition resolves here is currently rejected identically.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Grep the codebase for `BindingDisposition.Notification` and any seed/fixture/playbook JSON declaring a `notification` disposition value, to find candidate capabilities in source.</step>
+    <step order="2">Query the Dataverse `sprk_playbookconsumer` (Binding) catalog for rows whose disposition resolves to the `notification` ledger value (per `DispositionRoutability.ToLedgerValue`), using the Dataverse MCP tools.</step>
+    <step order="3">For each Binding found, document: Binding id/name, owning playbook/capability, entry surface (chat chip click, proactive dispatch, scheduled playbook), and the notification title/body/actionUrl content it would produce.</step>
+    <step order="4">Assess each Binding: spam risk (would it fire on every message / frequently?), content risk (could the rendered notification carry privileged/PII content per NFR-02/03?), or no known risk.</step>
+    <step order="5">Write the sequencing recommendation: safe to flip immediately for all found Bindings, or specific Bindings that must be paused/reconfigured (and how) before 033 flips the registry.</step>
+    <step order="6">Write `projects/spaarke-notification-spine-r1/notes/what-lights-up-audit.md` with the full enumeration + assessment + recommendation, and get it reviewed (per CLAUDE.md §6 human-escalation norms if any Binding is flagged risky) BEFORE task 033 starts.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the audit finds a Binding whose notification content would carry privileged or sensitive information inappropriate for the appnotification surface (NFR-02/03), STOP and escalate rather than recommending it be included in an immediate flip — flag it for remediation before 033's registry change lands.</trigger>
+    <trigger>If the audit finds that a safe rollout genuinely requires per-Binding (not per-disposition-type) admission control that `DispositionRoutability` cannot express today, STOP and escalate — this is an ADR-043 tension (§6.5 protocol), not something to route around informally in this task.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/what-lights-up-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the codebase + live Dataverse Binding catalog, when searched for Notification-disposition capabilities, then every match is listed in the audit doc with a concrete evidence citation (Binding id/name or code/seed reference) — no unverified entries.</criterion>
+    <criterion testable="true">Given each listed capability, when assessed, then the audit doc records an explicit safe/risky judgment with a one-line rationale (not merely "reviewed").</criterion>
+    <criterion testable="true">Given zero Notification-disposition Bindings are found in the current catalog, then the audit doc explicitly states this (a "nothing lights up yet, flip is a no-op for existing capabilities" finding is itself a valid, reviewable outcome — not an incomplete audit).</criterion>
+    <criterion testable="true">The audit doc contains an explicit sequencing recommendation for task 033 (immediate flip vs remediate-first, naming which Bindings if any) that task 033 can cite directly.</criterion>
+    <criterion testable="true">The audit doc is reviewed (human sign-off noted in the doc or in `current-task.md`) before task 033's gate opens.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-14 pre-req. Plan refs: Phase 3 deliverable ("What lights up" audit doc — every shipped chat capability that gains notification emission — reviewed BEFORE the flip). R7 risk in plan.md's risk register: "Notification flip lights up unintended chat capabilities" (Med/Med), mitigated by this audit.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

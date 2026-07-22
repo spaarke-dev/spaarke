@@ -4,29 +4,45 @@
 > **Last Updated**: 2026-07-18 (tasks 026 + 023 ✅ COMPLETE; next = 027 client cutover)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
-## ▶️ RESUME HERE — 3 UAT rounds FIXED + deployed + MERGED TO MASTER (2026-07-21). Re-UAT round 3 next.
+## ▶️ RESUME HERE — UAT ROUND 4 (2026-07-21). Save ROOT CAUSE found+fixed (mammoth). Coordinated deploy pending.
 
-**Full handoff: [`notes/uat-handoff-2026-07-21.md`](notes/uat-handoff-2026-07-21.md).** Everything through UAT round 3
-is committed AND merged to master. Worktree = origin/master = main-repo master = `6c60586ac` (0 uncommitted /
-unpushed / unmerged / behind).
+**FULL CONTEXT HANDOFF: [`notes/uat-round-4-handoff-CONTEXT.md`](notes/uat-round-4-handoff-CONTEXT.md)** — read this first.
+Round-3 handoff (superseded): `notes/uat-handoff-2026-07-21.md`.
 
-**Deployed on spaarkedev1:** `sprk_spaarkeai` (client) LIVE with ALL compose fixes through round 3
-(Dataverse-content-verified). BFF `spaarke-bff-dev` = round-2 build (47.08 MB, hash-verified) with C1 fold +
-C2 stamper — round-3 was client-only, so **no further BFF deploy needed for compose**. (Master also carries
-another project's BFF Communication-engine work, NOT yet deployed — that team deploys it; not our concern.)
+**Git:** branch `work/spaarkeai-compose-r3` HEAD = latest handoff commit; origin/master ≈ `ae6373957`+ (other
+projects merged more; a coordinated deploy must `/worktree-sync` them in). Branch is ~6 commits AHEAD of master,
+**NOT pushed/merged** (user gates merges). Round-4b/lightbulb/graceful-degradation/mammoth-fix all committed
+on the branch.
 
-**Fixes shipped (detail in commit messages + handoff note):**
-- Round 1 (`e31f99cf2`/`c1f57cb54`): P1 BubbleMenu insertBefore crash · P2 born-in-editor 2nd-save baseline · P3 Word-open · UX-1 Save-in-Word-dropdown.
-- Round 2 (`ef36acfcc`): C1 save-422 typographic fold · **C2 KEYSTONE** accept→save paraId abort (`ComposeBaselineParaIdStamper` stamps minted paraIds onto the baseline at save) · C3 redlines→Word · U1 rationale card · U2 empty-states.
-- Round 3 (`50045ccc7`): **Fix #1** cross-paragraph save-422 (per-block annotation split) · **Fix #4** client "target not found" whitespace-collapse fallback · U1 R2 (💡 on redline + responsive card, confidence-header, no "Suggested edit" label).
+**THE SAVE ROOT CAUSE (proven):** mammoth's DEFAULT `ignoreEmptyParagraphs: true` silently DROPS empty
+paragraphs → shifts the editor's paragraph set out of alignment with the server's document-order `w14:paraId`
+pre-parse → client position-based paraId stamping drifts → edited paragraphs carry ids the retained original
+lacks → save aborts ("a tracked change could not be located" / "matches no paragraph"). Proven on the real
+CIPO patent doc: mammoth default 39 `<p>`, with `ignoreEmptyParagraphs:false` 48 (recovered 9 empties).
 
-**Tests:** BFF compose 266/266; client compose 358/358 (parallel AND --runInBand).
+**KEY COMMITS (branch, not deployed yet):** `9cbea5d77` mammoth `ignoreEmptyParagraphs:false` (THE fix,
+client) · `3fd00afad` BFF graceful degradation (safety net — save applies matched paraIds, reports unmatched)
+· `8b5e348e7` round-4b (position-based accept-state save delta, noisy-diff cleanup, Track Changes default-on,
+remove Show Styles) · `a0ba8938e` Track Changes overlay stops double-drawing AI blocks (lightbulb restored).
 
-**NEXT:** (1) re-UAT round 3 on spaarkedev1 (hard-refresh first). (2) KNOWN CAVEAT: Fix #1 solved CROSS-paragraph
-422; if a save still 422s on INTRA-paragraph whitespace drift, the server `DocxAnnotationWriter.LocateTarget`
-needs the same whitespace-tolerant match Fix #4 gave the client (BFF change → BFF deploy) — get the TraceId.
-(3) A genuine AI paraphrase still correctly REFUSES to place (FR-19; not a bug). (4) After sign-off → task 082
-flagship gate (`ui-test`) → 090 wrap-up.
+**Deployed on spaarkedev1 (LIVE):** `sprk_spaarkeai` = round-4a + 4b + lightbulb. BFF `spaarke-bff-dev` =
+round-4a (whitespace matcher). **NOT yet deployed:** the mammoth fix (client) + graceful degradation (BFF).
+
+**Tests:** client compose 403 green; BFF compose 467 + synthesizer 22 green (incl. graceful-degradation).
+
+**IMMEDIATE NEXT (do on resume):**
+1. **Coordinated deploy** — user process: commit-all ✓ → `/push-to-github` → `/worktree-sync` (pull new master,
+   rebuild, re-verify) → deploy BFF (`Deploy-BffApi.ps1`, sync-first, SHA-256 hash-verify) + rebuild/deploy
+   SpaarkeAi (`Deploy-SpaarkeAi.ps1`, absolute path — cwd drifts). Ships other projects' merged work too.
+2. **Re-UAT the CIPO doc** (hard-refresh): open → AI + manual + paste edits → Save → should succeed with
+   correct tracked changes (empties preserved → paraIds align).
+3. **AWAITING USER DECISION:** whether to write an ADR-tension/design note for the STRATEGIC fix — replace
+   client-side mammoth with SERVER-SIDE paraId-tagged conversion via **OpenXmlPowerTools (Ms-PL, NFR-03-safe)**
+   (BFF already parses the docx). This kills the whole class of bug; mammoth fix is the interim. See CONTEXT note.
+
+**DEFERRED (user-requested, not done):** comments in a Word-style LEFT pane (editor-layout change); a client
+WARNING surfacing the BFF's `unresolvedParaIds` (currently server-logged only) so partial saves aren't silent.
+Then: push/merge to master (user's call) → task 082 flagship gate → 090 wrap-up.
 
 ### ⬇️ (prior) ALL IMPLEMENTATION COMPLETE (2026-07-19)
 

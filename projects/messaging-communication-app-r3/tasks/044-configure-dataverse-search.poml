@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Configure Dataverse Search to index sprk_communication (security-trimmed)</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Environment/org search configuration; no application code. Deterministic config task.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config-only; follows the Dataverse Search enablement recipe.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>deploy, dataverse, config</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-23: configure Dataverse Search so sprk_communication is indexed on subject/body/from/to and findable via the global search bar, security-trimmed. External dependency: Dataverse Search must be enabled for the org and sprk_communication added to the org search config.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Make a keyword search in the Dataverse global search bar return matching sprk_communication records (matching on subject/body/from/to), with results security-trimmed so a user without access to a communication does not see it.</goal>
+  <context>
+    <background>FR-23 requires global keyword search over communications. External dependency (spec §Dependencies): Dataverse Search enabled + sprk_communication added to the org search config. Dataverse Search is inherently security-trimmed (respects the user's access), which satisfies the NFR-01 non-disclosure requirement for search results.</background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+    </relevant-files>
+    <dependencies>Dataverse Search enabled for the target org (external). sprk_communication table present (R1/R2 schema).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR-23">Index sprk_communication on subject/body/from/to; findable via the global search bar.</constraint>
+    <constraint source="NFR-01">Results MUST be security-trimmed — a user without access to a communication MUST NOT see it in search results.</constraint>
+    <constraint source="spec-external-dep">Dataverse Search must be enabled at the org level; if it is not, this is an external prerequisite — surface it, do not attempt a workaround indexer.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-search-config" location="Power Platform admin — search settings + searchable fields">Enable org Dataverse Search; add sprk_communication to the searchable tables; select subject/body/from/to as searchable columns; publish.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm Dataverse Search is enabled for the target org. If not enabled, STOP and surface the external prerequisite (do not build an alternate indexer).</step>
+    <step order="2">Add sprk_communication to the org Dataverse Search configuration (searchable tables).</step>
+    <step order="3">Select the searchable columns: subject, body, from, to (map to the actual sprk_ logical names). Publish the search configuration.</step>
+    <step order="4">Wait for indexing, then verify: a keyword from a communication's subject/body/from/to returns that record via the global search bar.</step>
+    <step order="5">Verify security-trimming: as a user WITHOUT access to a communication, the same keyword does NOT return that record.</step>
+    <step order="6">Record the enabled columns + verification results in projects/messaging-communication-app-r3/notes/. Update TASK-INDEX.md 044 to complete; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If Dataverse Search is not enabled at the org level (a tenant/admin prerequisite), STOP and escalate the external dependency rather than attempting a bespoke search implementation.</trigger>
+  </escalation>
+  <tools>Read, PowerShell, Bash, Skill(task-execute)</tools>
+  <outputs>
+    <output type="config">sprk_communication added to org Dataverse Search config (subject/body/from/to searchable)</output>
+    <output type="note">projects/messaging-communication-app-r3/notes/ — enabled columns + verification results</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">sprk_communication is present in the org Dataverse Search configuration with subject/body/from/to as searchable columns.</criterion>
+    <criterion testable="true">A keyword matching a communication's subject/body/from/to returns that record via the global search bar.</criterion>
+    <criterion testable="true">NEGATIVE (security-trimmed): a user without access to a communication does NOT see it in search results for the same keyword.</criterion>
+    <criterion testable="true">If Dataverse Search was not enabled, the external prerequisite is surfaced/escalated rather than worked around.</criterion>
+  </acceptance-criteria>
+  <notes>Config-only (not BFF): no publish-size gate. Reference spec FR-23 + external dependency note. Dataverse Search is natively security-trimmed — verify it, do not add trimming logic.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

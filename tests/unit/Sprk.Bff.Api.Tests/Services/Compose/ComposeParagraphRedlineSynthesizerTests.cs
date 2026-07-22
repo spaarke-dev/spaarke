@@ -262,19 +262,38 @@ public sealed class ComposeParagraphRedlineSynthesizerTests
     }
 
     [Fact]
-    public void SynthesizeRedline_UnmatchedParaId_ThrowsAndModifiesNothing()
+    public void SynthesizeRedline_UnmatchedParaId_GracefullyDegrades_AppliesMatched_ReportsUnmatched()
     {
+        // UAT round-4: a real doc round-tripped through mammoth can drop empty/structural paragraphs and
+        // shift the client's order-based paraId mapping, leaving a few edited ids that match no original
+        // paragraph. The synthesizer must NOT abort the whole save (which blocked users) — it applies the
+        // redline to every id that DID resolve and reports the unmatched ones (non-silent) via the out param.
         var original = FiveParagraphDoc();
         var edits = new[]
         {
-            new ComposeEditedParagraph("0000000C", "This valid edit must NOT be applied when the batch fails."),
+            new ComposeEditedParagraph("0000000C", "Each Party shall perform its duties in a professional manner."),
             new ComposeEditedParagraph("DEADBEEF", "No paragraph has this id."),
         };
 
-        var act = () => _sut.SynthesizeRedline(original, edits, Author, Stamp);
+        var redline = _sut.SynthesizeRedline(original, edits, Author, Stamp, out var unresolved);
 
-        act.Should().Throw<ComposeRedlineException>().WithMessage("*DEADBEEF*")
-            .Which.Message.Should().Contain("aborted", "an unmatched paraId aborts the whole synthesis — no partial write");
+        // The resolvable edit WAS applied (tracked change present) — the save is not blocked by the bad id.
+        Revisions(redline).Ins.Should().BeGreaterThan(0, "the matched paragraph's edit is still redlined");
+        InsertedText(redline).Should().Contain("its duties");
+        // The unmatched id is reported (so the caller surfaces a precise, non-silent warning), never thrown.
+        unresolved.Should().ContainSingle().Which.Should().Be("DEADBEEF");
+    }
+
+    [Fact]
+    public void SynthesizeRedline_AllMatched_ReportsNoUnresolved()
+    {
+        var original = FiveParagraphDoc();
+        var redline = _sut.SynthesizeRedline(original,
+            new[] { new ComposeEditedParagraph("0000000C", "Each Party shall perform its duties professionally.") },
+            Author, Stamp, out var unresolved);
+
+        Revisions(redline).Ins.Should().BeGreaterThan(0);
+        unresolved.Should().BeEmpty("every edited paraId matched a paragraph in the retained original");
     }
 
     [Fact]

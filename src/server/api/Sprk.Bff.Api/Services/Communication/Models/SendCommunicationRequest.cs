@@ -115,8 +115,9 @@ public sealed record SendCommunicationRequest
     /// <c>MessagingThreadKeyStrategy</c>). R1 has no live channel (design §6.2/§8.5): the polling timeline
     /// reads persisted <c>sprk_communication</c> rows grouped by this lookup, so "respond into the thread"
     /// is satisfied by the Dataverse stamp alone — ACS-thread-session reuse (posting into the SAME ACS chat
-    /// thread for live delivery) is explicitly out of scope for R1 (deferred to R2). Ignored for Email sends.
-    /// Optional.
+    /// thread for live delivery) is explicitly out of scope for R1 (deferred to R2). Also honored on Email
+    /// sends (R3 FR-19): the outbound resolver pins the email to this thread (<c>AssignExplicitThreadAsync</c>)
+    /// instead of find-or-create — same send path, not a new branch. Optional.
     /// </summary>
     public Guid? ThreadId { get; init; }
 }

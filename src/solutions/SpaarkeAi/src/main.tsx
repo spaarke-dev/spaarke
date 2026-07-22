@@ -45,6 +45,7 @@ import {
 } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
+import { initNotificationsClient } from "./services/notificationsBootstrap";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
 // Round 4 Fix 4.1 (2026-05-21): SpaarkeAi embeds `LegalWorkspaceApp` as a
@@ -441,6 +442,17 @@ async function bootstrap(): Promise<void> {
     // fail individually and surface errors in the relevant components.
     console.warn("[SpaarkeAi] Eager auth init failed, will retry on first use:", err);
   }
+
+  // -------------------------------------------------------------------------
+  // 2a. Notification-spine FIRST consumer wiring (spaarke-notification-spine-r1
+  //     task 021, spec FR-05). Thin proof-of-wiring only (negotiate → connect →
+  //     kind-routed callback fires) — the real suggestion/communication UI is
+  //     task 051's job. Fire-and-forget + non-fatal, same pattern as auth init
+  //     above: a notifications-spine failure must never block SpaarkeAi's own
+  //     bootstrap. Started AFTER auth init so negotiate has a valid token.
+  //     See src/services/notificationsBootstrap.ts.
+  // -------------------------------------------------------------------------
+  void initNotificationsClient();
 
   // -------------------------------------------------------------------------
   // 3. Parse URL parameters for entity context.
