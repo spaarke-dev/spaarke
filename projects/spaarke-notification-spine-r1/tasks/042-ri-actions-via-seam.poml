@@ -4,7 +4,7 @@
     <title>RI Actions via Layer-A Seam — Outbox + Layer-C Ping + Appnotification Mirror</title>
     <phase>4 Comms-RI Proving Producer + Policy</phase>
     <gate>blocked-until:040,041,012,020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code implementation wiring RI actions through the Layer-A seam + Layer-B outbox + Layer-C ping + appnotification mirror; tags include bff-api/ai/integration-test — this task ADDS a tests/integration/seam/** file, so the TEST-MODIFYING override row (root CLAUDE.md §8) applies unconditionally; it also converges four upstream tasks (040, 041, 012, 020) into one E2E path.</rigor-reason>
     <model-tier>opus</model-tier>

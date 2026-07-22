@@ -11,8 +11,9 @@ namespace Sprk.Bff.Api.Services.Notifications.Envelopes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Field list is verbatim from design.md §5B.4 — exactly eight properties, no
-/// more, no fewer (guarded by a reflection-based test in
+/// Field list is verbatim from design.md §5B.4 — exactly nine properties
+/// (<c>regardingRecordType</c> added by task 052 / FR-17 so acting on a suggestion
+/// can open the regarding record), no more, no fewer (guarded by a reflection-based test in
 /// <c>tests/unit/Sprk.Bff.Api.Tests/Services/Notifications/EnvelopeSerializationTests.cs</c>).
 /// </para>
 /// <para>
@@ -38,6 +39,16 @@ public sealed record SuggestionEnvelope
     /// <summary>The matter/project/etc. the suggestion is about (ADR-024 regarding family). Dataverse record id.</summary>
     [JsonPropertyName("regardingRecordId")]
     public required string RegardingRecordId { get; init; }
+
+    /// <summary>
+    /// The Dataverse logical name of the regarding record (e.g. <c>"sprk_matter"</c>) — pairs with
+    /// <see cref="RegardingRecordId"/> so a consumer can OPEN the record (a record type is an
+    /// identifier, not display content or an action token — NFR-02/NFR-03 hold). Required: acting on a
+    /// suggestion opens the regarding record in a modal (spaarke-notification-spine-r1 task 052 / FR-17),
+    /// which needs both the type and the id.
+    /// </summary>
+    [JsonPropertyName("regardingRecordType")]
+    public required string RegardingRecordType { get; init; }
 
     /// <summary>Short display title.</summary>
     [JsonPropertyName("title")]

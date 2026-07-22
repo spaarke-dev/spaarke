@@ -29,17 +29,20 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IConfiguration _configuration;
+    private readonly ICommunicationAssessedProducer _assessedProducer;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
 
     public CommunicationEnrichmentService(
         IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IGenericEntityService genericEntityService,
         IConfiguration configuration,
+        ICommunicationAssessedProducer assessedProducer,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _genericEntityService = genericEntityService;
         _configuration = configuration;
+        _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
         _logger = logger;
     }
 
@@ -215,26 +218,42 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────
     /// <summary>
-    /// EMIT-ONLY (task 010). Emits a <c>communication_assessed</c> assessment signal. The consumer wiring
-    /// lands in task 052 (W5), gated by the 050 coordination gate with
-    /// <c>spaarke-ai-architecture-redesign-r2</c>.
+    /// Emits the <c>communication_assessed</c> signal (spec FR-11) via the
+    /// <see cref="ICommunicationAssessedProducer"/> seam. The interim registered default is log-only
+    /// (<see cref="LoggingCommunicationAssessedProducer"/>); task 041 registers the real comms-policy-gate
+    /// consumer behind the same seam, and task 042 (downstream of that gate) writes the
+    /// <c>kind=communication-assessed</c> outbox row + <c>appnotification</c> mirror — this method emits the
+    /// input signal only and MUST NOT write the outbox or call <c>IEventRulesService.FireAsync</c>.
     /// <para>
-    /// <b>Why a structured log and not <c>IEventRulesService.FireAsync</c> (ESCALATION E5):</b> the existing
-    /// <c>IEventRulesService</c> seam is chat-session/SSE-shaped (<c>SurfaceEventRequest{SessionId,UserOid,
-    /// FileIds}</c> → <c>IAsyncEnumerable&lt;ChatSseEvent&gt;</c>, token vocabulary <c>document_uploaded</c>
-    /// only). It does NOT fit a fire-and-forget <c>communication_assessed</c> emission and is owned by r2.
-    /// Task 052 must design/consume the correct non-SSE publish seam under <c>Services/Ai/PublicContracts/</c>.
-    /// 010 emits a durable, greppable signal so nothing is silently dropped in the interim.
+    /// <b>Fire-and-forget, non-fatal (NFR-05):</b> the producer call is wrapped so a producer exception is
+    /// caught + logged (distinct from the success path, correlatable by CommunicationId) and swallowed — the
+    /// enrichment step always completes. <c>RunStepAsync</c>'s outer guard is defense-in-depth.
+    /// </para>
+    /// <para>
+    /// <b>Why the seam is NOT <c>IEventRulesService.FireAsync</c>:</b> that seam is chat-session/SSE-shaped
+    /// (<c>SurfaceEventRequest{SessionId,UserOid,FileIds}</c> → <c>IAsyncEnumerable&lt;ChatSseEvent&gt;</c>)
+    /// and does not fit a fire-and-forget assessment emission — the original rationale still holds.
     /// </para>
     /// </summary>
-    private Task RunAssessmentEmissionAsync(
+    private async Task RunAssessmentEmissionAsync(
         Guid communicationId, CommunicationDirection direction, NormalizedMessage message, CancellationToken ct)
     {
-        _logger.LogInformation(
-            "communication_assessed | CommunicationId: {CommunicationId}, Direction: {Direction}, Subject: '{Subject}', From: {From}, RecipientCount: {RecipientCount}. " +
-            "Emit-only (task 010); consumer wiring is task 052 (W5) — ESCALATION E5.",
+        var signal = new CommunicationAssessedSignal(
             communicationId, direction, message.Subject, message.From, message.To.Count);
-        return Task.CompletedTask;
+
+        try
+        {
+            await _assessedProducer.PublishAsync(signal, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // NFR-05: the communication_assessed producer is fire-and-forget — a producer failure MUST NOT
+            // fail enrichment. Distinct log from the producer's own success path + RunStepAsync's generic guard.
+            _logger.LogWarning(
+                ex,
+                "communication_assessed producer failed (non-fatal) | CommunicationId: {CommunicationId}",
+                communicationId);
+        }
     }
 
     // ── Best-effort wrapper (NFR-06) ─────────────────────────────────────────────

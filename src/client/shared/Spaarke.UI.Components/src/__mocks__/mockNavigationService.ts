@@ -27,6 +27,7 @@ import type { INavigationService } from '../types/serviceInterfaces';
 export function createMockNavigationService(): jest.Mocked<INavigationService> {
   return {
     openRecord: jest.fn().mockResolvedValue(undefined),
+    openRecordModal: jest.fn().mockResolvedValue(undefined),
     openDialog: jest.fn().mockResolvedValue({ confirmed: true }),
     closeDialog: jest.fn(),
     openLookup: jest.fn().mockResolvedValue([]),

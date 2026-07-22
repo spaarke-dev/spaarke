@@ -107,12 +107,12 @@ export interface ResolvedConfig {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Default behavior. `parentContextFilter` is intentionally kept optional in the
- * resolved shape — it's a per-grid configuration (consumed when present, omitted
- * when absent). Other fields have sensible framework defaults.
+ * Default behavior. `parentContextFilter` and `membershipFilter` are intentionally
+ * kept optional in the resolved shape — both are per-grid overlay opt-ins (consumed
+ * when present, omitted when absent). Other fields have sensible framework defaults.
  */
-type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>> &
-  Pick<BehaviorConfig, 'parentContextFilter'>;
+type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter' | 'membershipFilter'>> &
+  Pick<BehaviorConfig, 'parentContextFilter' | 'membershipFilter'>;
 
 const FRAMEWORK_DEFAULT_BEHAVIOR: ResolvedBehavior = {
   selectionMode: 'multi',
