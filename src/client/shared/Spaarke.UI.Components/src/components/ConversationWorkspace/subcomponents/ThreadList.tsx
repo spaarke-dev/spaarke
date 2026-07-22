@@ -3,11 +3,17 @@
  *
  * The left-pane thread list of `<ConversationWorkspace />` (task 012, FR-01/10).
  * Rows show the thread's name + an unread indicator (NO preview text, per
- * FR-10) + a pin toggle (task 041, FR-24) — a word-filter box narrows the
- * displayed rows and a create-thread (＋) button invokes the host-supplied
- * `onCreateThread` callback (the NewThreadModal itself is task 024 — this
- * component only wires the callback). Pin only — no archive/mute/tag control
- * (spec FR-24).
+ * FR-10) + a pin toggle (task 041, FR-24). A create-thread (＋) icon button
+ * invokes the host-supplied `onCreateThread` callback (the NewThreadModal
+ * itself is task 024 — this component only wires the callback). Pin only — no
+ * archive/mute/tag control (spec FR-24).
+ *
+ * Teams-style side pane (R3 task 062 / UAT §B4-6): NO "Filter threads" text
+ * input (removed — not needed), the create control is an icon-only ＋ (not
+ * "＋ New"), and the pane carries a subtle contrast fill
+ * (`colorNeutralBackground2`) that sets it apart from the message pane
+ * (`colorNeutralBackground1`) — semantic tokens only, so the contrast adapts in
+ * dark mode.
  *
  * ARIA: `role="list"` / `role="listitem"` (NFR-05) with roving-tabIndex
  * keyboard navigation (ArrowUp/ArrowDown moves selection + focus, Enter/Space
@@ -17,7 +23,7 @@
  * `FluentProvider`.
  */
 import * as React from 'react';
-import { Button, Input, Spinner, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { AddRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 import { UnreadIndicator } from '../../CommunicationTimeline/subcomponents/UnreadIndicator';
 
@@ -45,8 +51,6 @@ export interface IThreadListProps {
   selectedThreadId?: string;
   onSelectThread: (threadId: string) => void;
   onMarkThreadRead?: (threadId: string) => void;
-  searchTerm: string;
-  onSearchTermChange: (value: string) => void;
   onCreateThread?: () => void;
   /**
    * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
@@ -68,22 +72,23 @@ const useStyles = makeStyles({
     borderRightWidth: tokens.strokeWidthThin,
     borderRightStyle: 'solid',
     borderRightColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground1,
+    // Subtle contrast fill vs. the message pane (`colorNeutralBackground1`) so
+    // the thread/side pane reads as distinct (task 062 / §B6). Semantic token —
+    // adapts in dark mode.
+    backgroundColor: tokens.colorNeutralBackground2,
   },
   toolbar: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
+    // Icon-only ＋ sits at the trailing edge (task 062 / §B5) — Teams-style.
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     padding: tokens.spacingHorizontalM,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
-  },
-  searchInput: {
-    flexGrow: 1,
-    minWidth: 0,
   },
   list: {
     flex: '1 1 auto',
@@ -163,8 +168,6 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   selectedThreadId,
   onSelectThread,
   onMarkThreadRead,
-  searchTerm,
-  onSearchTermChange,
   onCreateThread,
   onTogglePin,
   className,
@@ -213,23 +216,18 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
-        <Input
-          className={styles.searchInput}
-          contentBefore={undefined}
-          value={searchTerm}
-          placeholder="Filter threads"
-          aria-label="Filter threads by name"
-          onChange={(_e, data) => onSearchTermChange(data.value)}
-        />
-        <Button
-          appearance="primary"
-          icon={<AddRegular />}
-          aria-label="New thread"
-          onClick={() => onCreateThread?.()}
-          disabled={!onCreateThread}
-        >
-          New
-        </Button>
+        {/* Icon-only ＋ create control (task 062 / §B5) — the accessible name
+            stays "New thread" so keyboard + screen-reader users still identify
+            it despite the label being visually icon-only (NFR-05). */}
+        <Tooltip content="New thread" relationship="label">
+          <Button
+            appearance="primary"
+            icon={<AddRegular />}
+            aria-label="New thread"
+            onClick={() => onCreateThread?.()}
+            disabled={!onCreateThread}
+          />
+        </Tooltip>
       </div>
 
       {status === 'loading' && (
@@ -246,7 +244,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
 
       {status === 'ready' && rows.length === 0 && (
         <div className={styles.centeredState}>
-          <Text>{searchTerm ? 'No threads match your filter.' : 'No threads yet.'}</Text>
+          <Text>No threads yet.</Text>
         </div>
       )}
 

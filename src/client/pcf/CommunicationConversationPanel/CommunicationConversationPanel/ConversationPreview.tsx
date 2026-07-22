@@ -20,15 +20,12 @@
 
 import * as React from 'react';
 import { Button, Text, Caption1, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import {
-  ChevronDownRegular,
-  ChevronRightRegular,
-  ArrowExpandRegular,
-  MailRegular,
-  ChatRegular,
-} from '@fluentui/react-icons';
+import { ChevronDownRegular, ChevronRightRegular, OpenRegular } from '@fluentui/react-icons';
 import { MessageQuickView, type IMessageQuickViewProps, type TimelineMessage } from '@spaarke/ui-components';
 import type { PreviewModel, PreviewThread } from './previewModel';
+
+/** Stable empty-set default so `newThreadIds` omission never forces a re-render. */
+const EMPTY_THREAD_ID_SET: ReadonlySet<string> = new Set();
 
 // React 16 type seam: the shared lib's .d.ts is emitted against newer React
 // types, whose FC return type is incompatible with React 16's JSX element type.
@@ -46,14 +43,18 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     paddingInline: tokens.spacingHorizontalM,
     paddingBlock: tokens.spacingVerticalXS,
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
+    // Item 4 (UAT §A): the divider line under the title row is removed —
+    // no bottom border here.
   },
+  // Item 2 (UAT §A): section-header spec (docs/standards/UI-DESIGN-STANDARDS.md)
+  // — 14px / weight 600 / colorNeutralForeground1 / 20px line height. The
+  // UAT's literal #242424 IS colorNeutralForeground1 in light mode; the token
+  // (not the hex) is what lets dark mode adapt (ADR-021).
   headerTitle: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
   },
   scroll: { flex: 1, minHeight: 0, overflowY: 'auto' },
   threadHeaderButton: {
@@ -62,12 +63,46 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalM,
     paddingBlock: tokens.spacingVerticalXS,
   },
+  // Item 3 (UAT §A): the button's content fills the row and splits into a
+  // left (name) / right (New + count) group so the count can be right-aligned.
+  threadRowContent: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    minWidth: 0,
+    gap: tokens.spacingHorizontalS,
+  },
   threadName: {
     fontSize: tokens.fontSizeBase300,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
-  threadCount: { color: tokens.colorNeutralForeground3, marginInlineStart: tokens.spacingHorizontalXS },
+  threadCountGroup: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS, flexShrink: 0 },
+  newLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorBrandForeground1,
+    whiteSpace: 'nowrap',
+  },
+  // "Gray circle" count badge (UAT item 3) — neutral background ramp so it
+  // reads as gray in both light and dark themes (ADR-021, no hardcoded hex).
+  threadCountBadge: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: '20px',
+    height: '20px',
+    paddingInline: tokens.spacingHorizontalXS,
+    borderRadius: tokens.borderRadiusCircular,
+    backgroundColor: tokens.colorNeutralBackground5,
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+  },
   messageRow: {
     display: 'block',
     width: '100%',
@@ -79,12 +114,54 @@ const useStyles = makeStyles({
   messageInner: {
     display: 'flex',
     alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalS,
+    width: '100%',
+    minWidth: 0,
+  },
+  // Item 7 (UAT §A): channel pill on the LEFT, text only (no icon inside).
+  channelPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '18px',
+    paddingInline: tokens.spacingHorizontalXS,
+    borderRadius: tokens.borderRadiusCircular,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
+  channelPillMessage: {
+    backgroundColor: tokens.colorPaletteGreenBackground2,
+    color: tokens.colorPaletteGreenForeground2,
+  },
+  channelPillEmail: {
+    backgroundColor: tokens.colorPaletteBlueBackground2,
+    color: tokens.colorPaletteBlueForeground2,
+  },
+  messageText: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
+  messageSenderRow: {
+    display: 'flex',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalXS,
     width: '100%',
     minWidth: 0,
   },
-  messageText: { display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 },
-  messageSender: { fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
+  // Item 8 (UAT §A): sender name 14px, NOT bold.
+  messageSender: {
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  // Item 8 (UAT §A): date + time received, alongside the sender name.
+  messageDateTime: {
+    color: tokens.colorNeutralForeground3,
+    whiteSpace: 'nowrap',
+    flexShrink: 0,
+  },
   messageSnippet: {
     color: tokens.colorNeutralForeground2,
     overflow: 'hidden',
@@ -108,10 +185,9 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     paddingInline: tokens.spacingHorizontalM,
-    paddingBlock: tokens.spacingVerticalXS,
-    borderTopWidth: tokens.strokeWidthThin,
-    borderTopStyle: 'solid',
-    borderTopColor: tokens.colorNeutralStroke2,
+    // Item 6 (UAT §A): no bottom (top-of-footer) line + a little more padding
+    // than the prior spacingVerticalXS.
+    paddingBlock: tokens.spacingVerticalM,
   },
   counterGroup: { display: 'flex', alignItems: 'baseline', gap: tokens.spacingHorizontalXS },
   counter: { color: tokens.colorNeutralForeground2, fontWeight: tokens.fontWeightSemibold },
@@ -122,6 +198,14 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
   },
 });
+
+/** Formats an ISO timestamp as "Jul 20, 3:45 PM" (date + time received — UAT item 8). */
+function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
 
 /** Strips markup + collapses whitespace so the compact snippet shows words, not tags. */
 function toSnippet(message: TimelineMessage, max = 80): string {
@@ -142,14 +226,28 @@ function senderLabel(message: TimelineMessage): string {
 const MessagePreviewRow: React.FC<{ message: TimelineMessage }> = ({ message }) => {
   const s = useStyles();
   const isEmail = message.channelType === 'email';
+  const dateTimeLabel = formatDateTime(message.sentOn ?? message.createdOn);
   const trigger = (
     <Button appearance="subtle" className={s.messageRow} aria-label={`Preview message from ${senderLabel(message)}`}>
       <span className={s.messageInner}>
-        {isEmail ? <MailRegular aria-hidden="true" /> : <ChatRegular aria-hidden="true" />}
+        {/* Item 7 (UAT §A): channel pill on the left, text only, no icon. */}
+        <span
+          className={mergeClasses(s.channelPill, isEmail ? s.channelPillEmail : s.channelPillMessage)}
+          aria-hidden="true"
+        >
+          {isEmail ? 'Email' : 'Message'}
+        </span>
         <span className={s.messageText}>
-          <Text size={200} className={s.messageSender}>
-            {senderLabel(message)}
-          </Text>
+          <span className={s.messageSenderRow}>
+            <Text size={300} className={s.messageSender}>
+              {senderLabel(message)}
+            </Text>
+            {dateTimeLabel && (
+              <Text size={100} className={s.messageDateTime}>
+                {dateTimeLabel}
+              </Text>
+            )}
+          </span>
           <Text size={200} className={s.messageSnippet}>
             {toSnippet(message) || '(no preview)'}
           </Text>
@@ -169,9 +267,14 @@ const MessagePreviewRow: React.FC<{ message: TimelineMessage }> = ({ message }) 
   );
 };
 
-const ThreadPreview: React.FC<{ thread: PreviewThread; defaultExpanded: boolean }> = ({ thread, defaultExpanded }) => {
+const ThreadPreview: React.FC<{ thread: PreviewThread; defaultExpanded: boolean; isNew: boolean }> = ({
+  thread,
+  defaultExpanded,
+  isNew,
+}) => {
   const s = useStyles();
   const [expanded, setExpanded] = React.useState(defaultExpanded);
+  const countLabel = `${thread.threadMessageCount} message${thread.threadMessageCount === 1 ? '' : 's'}`;
 
   return (
     <div>
@@ -180,10 +283,17 @@ const ThreadPreview: React.FC<{ thread: PreviewThread; defaultExpanded: boolean 
         className={s.threadHeaderButton}
         icon={expanded ? <ChevronDownRegular /> : <ChevronRightRegular />}
         aria-expanded={expanded}
+        aria-label={`${thread.name}, ${countLabel}${isNew ? ', new' : ''}`}
         onClick={() => setExpanded(prev => !prev)}
       >
-        <span className={s.threadName}>{thread.name}</span>
-        <Caption1 className={s.threadCount}>({thread.threadMessageCount})</Caption1>
+        <span className={s.threadRowContent}>
+          <span className={s.threadName}>{thread.name}</span>
+          {/* Item 3 (UAT §A): count in a gray circle, right-aligned; "New" to its left when unread. */}
+          <span className={s.threadCountGroup} aria-hidden="true">
+            {isNew && <Text className={s.newLabel}>New</Text>}
+            <span className={s.threadCountBadge}>{thread.threadMessageCount}</span>
+          </span>
+        </span>
       </Button>
       {expanded &&
         (thread.messages.length > 0 ? (
@@ -212,6 +322,10 @@ export interface IConversationPreviewProps {
   model: PreviewModel;
   version: string;
   showVersionFooter: boolean;
+  /** Header title text (item 1, UAT §A) — configurable via the PCF `title` input property, default "MESSAGES". */
+  title: string;
+  /** Thread ids to flag "New" (item 3, UAT §A) — see the baseline-tracking note in CommunicationConversationPanelApp.tsx. */
+  newThreadIds?: ReadonlySet<string>;
   /** Raised by the header "Open conversations" affordance to launch the record-filtered modal. */
   onOpen: () => void;
   className?: string;
@@ -221,25 +335,27 @@ export const ConversationPreview: React.FC<IConversationPreviewProps> = ({
   model,
   version,
   showVersionFooter,
+  title,
+  newThreadIds,
   onOpen,
   className,
 }) => {
   const s = useStyles();
   const hasThreads = model.threads.length > 0;
+  const newIds = newThreadIds ?? EMPTY_THREAD_ID_SET;
 
   return (
     <div className={mergeClasses(s.root, className)}>
       <div className={s.header}>
-        <Text className={s.headerTitle}>Conversations</Text>
+        <Text className={s.headerTitle}>{title}</Text>
+        {/* Item 5 (UAT §A): box-with-arrow open icon, icon-only, no label. */}
         <Button
           appearance="subtle"
           size="small"
-          icon={<ArrowExpandRegular />}
+          icon={<OpenRegular />}
           onClick={onOpen}
           aria-label="Open conversations in full view"
-        >
-          Open
-        </Button>
+        />
       </div>
 
       <div className={s.scroll}>
@@ -249,6 +365,7 @@ export const ConversationPreview: React.FC<IConversationPreviewProps> = ({
               key={thread.threadId}
               thread={thread}
               defaultExpanded={thread.threadId === model.defaultExpandedThreadId}
+              isNew={newIds.has(thread.threadId)}
             />
           ))
         ) : (

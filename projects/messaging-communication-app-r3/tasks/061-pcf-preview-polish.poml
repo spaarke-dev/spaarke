@@ -3,7 +3,7 @@
   <metadata>
     <title>CommunicationConversationPanel PCF preview polish (8 UAT items)</title>
     <phase>7 UAT hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies PCF .tsx + manifest (adds a property); UI polish with an accessibility surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

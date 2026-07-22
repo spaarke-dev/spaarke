@@ -96,6 +96,7 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
   const manifestBffAppId = (context.parameters.bffAppId?.raw ?? '').trim();
   const manifestApiBaseUrl = (context.parameters.apiBaseUrl?.raw ?? '').trim();
   const showVersionFooter = context.parameters.showVersionFooter?.raw !== false;
+  const title = (context.parameters.title?.raw ?? '').trim() || 'MESSAGES';
 
   const hostEntityName = React.useMemo(() => getHostEntityName(), []);
   const hostRecordId = React.useMemo(() => getHostRecordId(), []);
@@ -147,6 +148,45 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
   const [result, setResult] = React.useState<IRegardingReadResultDto | null>(null);
   const [readError, setReadError] = React.useState<string | null>(null);
   const [modalOpen, setModalOpen] = React.useState(false);
+
+  // Session-local "New" affordance (UAT §A3): there is no persisted per-user
+  // last-seen watermark for threads (documented KNOWN LIMITATION in
+  // communicationThreadListApi.ts — getThreadUnreadCount needs a `since`
+  // cursor this compact preview does not own). Rather than mis-label every
+  // thread as "New" on every cold load (calling the unread endpoint with no
+  // `since` returns the whole readable count, not a true delta) or inventing
+  // a second persisted-watermark mechanism, this establishes an in-memory
+  // baseline of each thread's message count on the FIRST successful read
+  // after mount, then flags a thread "New" once its count grows past that
+  // baseline (or a thread appears that wasn't in the baseline) — i.e. "new
+  // since I started looking at this record's preview." Resets on remount;
+  // never persisted. Deliberately local to this PCF, not a shared mechanism.
+  const baselineThreadCountsRef = React.useRef<Record<string, number> | null>(null);
+  const [newThreadIds, setNewThreadIds] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  React.useEffect(() => {
+    if (!result) return;
+    const currentCounts: Record<string, number> = {};
+    for (const t of result.threads) currentCounts[t.threadId] = t.count;
+
+    if (baselineThreadCountsRef.current === null) {
+      baselineThreadCountsRef.current = currentCounts;
+      return;
+    }
+
+    setNewThreadIds(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const [threadId, count] of Object.entries(currentCounts)) {
+        const baseline = baselineThreadCountsRef.current?.[threadId];
+        if ((baseline === undefined || count > baseline) && !next.has(threadId)) {
+          next.add(threadId);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [result]);
 
   // Read the record's conversations (initial + ~5s poll to keep the glance fresh).
   React.useEffect(() => {
@@ -246,6 +286,8 @@ export const CommunicationConversationPanelApp: React.FC<ICommunicationConversat
         model={previewModel}
         version={version}
         showVersionFooter={showVersionFooter}
+        title={title}
+        newThreadIds={newThreadIds}
         onOpen={() => setModalOpen(true)}
       />
       {modalOpen && (

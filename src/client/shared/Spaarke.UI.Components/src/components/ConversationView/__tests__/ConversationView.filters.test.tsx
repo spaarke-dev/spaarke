@@ -236,19 +236,44 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     expect(store.reads).toBe(readsAfterLoad);
   });
 
-  it('the word dropdown narrows to matching items (additive with the type toggles)', async () => {
+  it('the search box (revealed by the search icon) narrows to matching items (additive with the type toggles)', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
     await waitFor(() => expect(emailBlock()).toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Filter by word' }));
-    // 'invoice' is drawn from the email's underlying body ('invoice details'),
-    // which the word filter still matches even though the block doesn't render it.
-    await userEvent.click(await screen.findByRole('option', { name: 'invoice' }));
+    // The text filter is hidden until the search icon is clicked (task 062 / §B7).
+    expect(screen.queryByRole('textbox', { name: 'Filter messages by text' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Search messages' }));
+
+    // 'invoice' matches the email's underlying body ('invoice details') + subject
+    // ('invoice memo'), which the word facet still matches even though the block
+    // doesn't render the body; 'quick chat' does not match.
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Filter messages by text' }), 'invoice');
 
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
     expect(emailBlock()).toBeInTheDocument();
+  });
+
+  it('the Unread facet (additive) hides already-loaded messages — they count as read on open', async () => {
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+
+    // Messages present at first load are "already read" (not newer than the
+    // initial-load watermark), so enabling Unread-only narrows them all out —
+    // proving the facet is wired + additive + keyboard-operable (aria-pressed).
+    await userEvent.click(screen.getByRole('button', { name: 'Show unread messages only' }));
+
+    expect(await screen.findByText('No messages match the current filters.')).toBeInTheDocument();
+    expect(emailBlock()).not.toBeInTheDocument();
+    expect(screen.queryByText('quick chat')).not.toBeInTheDocument();
+
+    // Toggling it back off restores the full set (presentational — no re-fetch).
+    await userEvent.click(screen.getByRole('button', { name: 'Show unread messages only' }));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    expect(screen.getByText('quick chat')).toBeInTheDocument();
   });
 
   it('the filter bar is hidden when the thread is empty (nothing to filter)', async () => {

@@ -15,6 +15,7 @@
     -->
     <property name="anchorField" display-name-key="Bound Field (anchor)" description-key="Bind to the record primary Name field. Anchors the control to the form; the control reads the record (entityType, id) from context, not from this value." of-type="SingleLine.Text" usage="bound" required="true" />
     <property name="apiBaseUrl" display-name-key="API Base URL" description-key="BFF API base URL" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="title" display-name-key="Title" description-key="Header title text shown above the conversation list. Defaults to MESSAGES." of-type="SingleLine.Text" usage="input" required="false" default-value="MESSAGES" />
     <property name="tenantId" display-name-key="Tenant ID" description-key="Azure AD tenant ID" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="clientAppId" display-name-key="Client App ID" description-key="Azure AD application (client) ID for PCF MSAL authentication" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="bffAppId" display-name-key="BFF App ID" description-key="BFF API application ID for OAuth scope construction" of-type="SingleLine.Text" usage="input" required="false" />

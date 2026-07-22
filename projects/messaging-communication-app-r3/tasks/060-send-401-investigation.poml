@@ -3,7 +3,7 @@
   <metadata>
     <title>Investigate + fix message send 401 "Denied by the resource provider" (ACS/BFF env-auth)</title>
     <phase>7 UAT hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Backend/env auth diagnosis on the send path; may touch BFF ACS wiring; correctness-sensitive.</rigor-reason>
     <model-tier>opus</model-tier>

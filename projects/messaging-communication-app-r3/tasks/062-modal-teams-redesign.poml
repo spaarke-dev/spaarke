@@ -3,7 +3,7 @@
   <metadata>
     <title>Conversation modal + shared components — Teams-style redesign (9 UAT items)</title>
     <phase>7 UAT hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared ConversationWorkspace/ConversationView/MessageBubble (.tsx) consumed by PCF + widget + code page; broad blast radius.</rigor-reason>
     <model-tier>opus</model-tier>

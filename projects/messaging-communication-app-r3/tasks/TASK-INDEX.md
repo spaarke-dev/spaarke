@@ -43,9 +43,9 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ⛔ | FULL/**opus**/high | 003 (+spine) | serial (blocked) |
 | 046 | FR-25 per-user read-state (best-effort) | 5 | ⏸ | FULL/opus/high | 003 | serial (deferred) |
 | 050 | Deploy full solution + UAT across 11 entities | 6 | 🔲 | STANDARD/sonnet/high | 034,041,042,043,044,045 | serial (prescriptive) |
-| 060 | UAT: send 401 "Denied by resource provider" investigation/fix ([#676](https://github.com/spaarke-dev/spaarke/issues/676)) | 7 | 🔲 | FULL/**opus**/**xhigh** | none | Wave 25 (F) |
-| 061 | UAT: CommunicationConversationPanel PCF preview polish — 8 items ([#677](https://github.com/spaarke-dev/spaarke/issues/677)) | 7 | 🔲 | FULL/sonnet/high | none | Wave 25 (F) |
-| 062 | UAT: conversation modal Teams-style redesign (shared components) ([#678](https://github.com/spaarke-dev/spaarke/issues/678)) | 7 | 🔲 | FULL/**opus**/high | none | Wave 25 (F) |
+| 060 | UAT: send 401 "Denied by resource provider" investigation/fix ([#676](https://github.com/spaarke-dev/spaarke/issues/676)) | 7 | ✅ | FULL/**opus**/**xhigh** | none | Wave 25 (F) |
+| 061 | UAT: CommunicationConversationPanel PCF preview polish — 8 items ([#677](https://github.com/spaarke-dev/spaarke/issues/677)) | 7 | ✅ | FULL/sonnet/high | none | Wave 25 (F) |
+| 062 | UAT: conversation modal Teams-style redesign (shared components) ([#678](https://github.com/spaarke-dev/spaarke/issues/678)) | 7 | ✅ | FULL/**opus**/high | none | Wave 25 (F) |
 | 063 | Redeploy all conversation surfaces (Phase 5 + UAT) to spaarkedev1 | 7 | 🔲 | STANDARD/sonnet/high | 061,062 | serial (prescriptive) |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, test-diet, lessons) | 6 | 🔲 | FULL/opus/high | all prior | serial (prescriptive) |
 

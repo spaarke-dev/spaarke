@@ -1,17 +1,29 @@
 /**
  * MessageBubble.tsx
  *
- * One rendered chat bubble in `<ConversationView />` (task 011, FR-02/03).
- * Bubble shape/alignment/spacing/token usage is anchored to
- * `SprkChat/SprkChatMessage.tsx` (`userContainer`/`assistantContainer`
- * styles) — same visual language, NOT a fork of its send/streaming/citation
- * logic (this component renders a persisted `sprk_communication` row, not an
- * AI chat message).
+ * One rendered chat bubble in `<ConversationView />` (task 011, FR-02/03),
+ * Teams-style (R3 task 062 / UAT §B9): the type pill + sender name + date/time
+ * sit ON A HEADER ROW ABOVE the bubble; the bubble body below is a soft
+ * LIGHT-GRAY fill for others and a LIGHT-BLUE fill for the current user. Bubble
+ * shape/spacing is still anchored to `SprkChat/SprkChatMessage.tsx` — same
+ * visual language, NOT a fork of its send/streaming/citation logic (this
+ * component renders a persisted `sprk_communication` row, not an AI chat
+ * message).
  *
  * Alignment is decided by the CALLER (`ConversationView.tsx`) via the
  * `isOwn` prop, computed STRICTLY from `message.senderSystemUserId ===
  * currentUserSystemUserId` (FR-02/FR-18) — this component itself performs no
  * identity comparison, it only renders the decision.
+ *
+ * All colors are Fluent v9 SEMANTIC tokens (ADR-021) — the light-gray
+ * (`colorNeutralBackground3`) and light-blue (`colorBrandBackground2`) bubbles
+ * both adapt to dark mode through the host `FluentProvider`; no hardcoded
+ * colors.
+ *
+ * PRESERVED behaviors: the type pill (`ChannelBadge`), the privacy/privilege
+ * markers (task 043 / FR-21 — `PrivacyMarkers`), and the attachment open
+ * affordances (task 042 / FR-20 — `MessageAttachments`) all still render; only
+ * their LAYOUT moved (pill+markers+name+time to the header row).
  *
  * HTML bodies come from persisted email content (external senders included)
  * and are UNTRUSTED — sanitized via DOMPurify before `dangerouslySetInnerHTML`,
@@ -45,8 +57,8 @@ const useStyles = makeStyles({
   row: {
     display: 'flex',
     flexDirection: 'column',
-    paddingTop: tokens.spacingVerticalXXS,
-    paddingBottom: tokens.spacingVerticalXXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
   },
@@ -56,11 +68,29 @@ const useStyles = makeStyles({
   rowOther: {
     alignItems: 'flex-start',
   },
+  // Teams-style meta header ABOVE the bubble (task 062 / §B9): type pill +
+  // privacy markers + sender name + date/time. Sits outside the fill so the
+  // bubble body reads as a clean chat bubble.
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: tokens.spacingHorizontalXS,
+    marginBottom: tokens.spacingVerticalXXS,
+    maxWidth: '75%',
+  },
+  headerOwn: {
+    // Trailing edge for own messages so the pill/time hug the right side above
+    // the right-aligned bubble.
+    justifyContent: 'flex-end',
+  },
   senderLabel: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground2,
-    marginBottom: tokens.spacingVerticalXXS,
-    marginLeft: tokens.spacingHorizontalXS,
+  },
+  headerTimestamp: {
+    fontSize: tokens.fontSizeBase100,
+    color: tokens.colorNeutralForeground3,
   },
   bubble: {
     display: 'flex',
@@ -73,19 +103,18 @@ const useStyles = makeStyles({
     borderRadius: tokens.borderRadiusMedium,
     wordBreak: 'break-word',
   },
+  // Light-blue fill for the current user (task 062 / §B9) — the soft brand
+  // background token (NOT the strong `colorBrandBackground`), so it reads as a
+  // pale blue in light mode and adapts in dark mode; neutral foreground stays
+  // legible on it.
   bubbleOwn: {
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
+    backgroundColor: tokens.colorBrandBackground2,
+    color: tokens.colorNeutralForeground1,
   },
+  // Light-gray fill for others (task 062 / §B9).
   bubbleOther: {
     backgroundColor: tokens.colorNeutralBackground3,
     color: tokens.colorNeutralForeground1,
-  },
-  metaRow: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    marginBottom: tokens.spacingVerticalXXS,
   },
   bodyHtml: {
     wordBreak: 'break-word',
@@ -101,24 +130,15 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXXS,
     marginTop: '4px',
   },
-  timestamp: {
-    fontSize: tokens.fontSizeBase100,
-  },
-  timestampOwn: {
-    color: tokens.colorNeutralForegroundOnBrand,
-    opacity: 0.8,
-  },
-  timestampOther: {
-    color: tokens.colorNeutralForeground3,
-  },
   statusText: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
     fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForegroundOnBrand,
-    opacity: 0.8,
+    color: tokens.colorNeutralForeground3,
   },
   statusFailed: {
     color: tokens.colorPaletteRedForeground2,
-    opacity: 1,
   },
   attachmentsRow: {
     display: 'flex',
@@ -163,7 +183,19 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
 
   return (
     <div className={mergeClasses(styles.row, isOwn ? styles.rowOwn : styles.rowOther)}>
-      {!isOwn && <Text className={styles.senderLabel}>{displayName}</Text>}
+      {/* Teams-style meta header ABOVE the bubble (task 062 / §B9): type pill +
+          privacy markers + sender name (others only) + date/time. Own messages
+          omit the redundant self-name (Teams convention). */}
+      <div className={mergeClasses(styles.header, isOwn ? styles.headerOwn : undefined)}>
+        <ChannelBadge channelType={message.channelType} />
+        <PrivacyMarkers
+          privilege={message.privilege}
+          isInternalOnly={message.isInternalOnly}
+          isPrivate={message.isPrivate}
+        />
+        {!isOwn && <Text className={styles.senderLabel}>{displayName}</Text>}
+        {timestampLabel && <Text className={styles.headerTimestamp}>{timestampLabel}</Text>}
+      </div>
 
       <div
         className={mergeClasses(styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleOther)}
@@ -171,15 +203,6 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
         tabIndex={0}
         aria-label={ariaLabel}
       >
-        <div className={styles.metaRow}>
-          <ChannelBadge channelType={message.channelType} />
-          <PrivacyMarkers
-            privilege={message.privilege}
-            isInternalOnly={message.isInternalOnly}
-            isPrivate={message.isPrivate}
-          />
-        </div>
-
         {message.body ? (
           message.bodyFormat === 'html' ? (
             <div className={styles.bodyHtml} dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
@@ -199,19 +222,14 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
           />
         )}
 
-        <div className={styles.footerRow}>
-          {timestampLabel && (
-            <Text className={mergeClasses(styles.timestamp, isOwn ? styles.timestampOwn : styles.timestampOther)}>
-              {timestampLabel}
-            </Text>
-          )}
-          {isOwn && status && (
+        {isOwn && status && (
+          <div className={styles.footerRow}>
             <Text className={mergeClasses(styles.statusText, status === 'failed' ? styles.statusFailed : undefined)}>
               {status === 'failed' ? <ErrorCircleRegular fontSize={12} /> : <CheckmarkCircleRegular fontSize={12} />}{' '}
               {statusLabel(status)}
             </Text>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

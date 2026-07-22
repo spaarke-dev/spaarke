@@ -139,32 +139,23 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     await waitFor(() => expect(screen.getByText('3 new messages')).toBeInTheDocument());
   });
 
-  it('the word filter narrows the list (all mode, server-side search)', async () => {
+  it('has NO thread-list text filter (task 062 / §B4 — removed in the Teams-style redesign)', async () => {
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByText('Direct: Alice')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText('Filter threads'), { target: { value: 'Direct' } });
-
-    await waitFor(() => expect(screen.queryByText('Acme Matter')).not.toBeInTheDocument(), { timeout: 2000 });
-    expect(screen.getByText('Direct: Alice')).toBeInTheDocument();
+    // The "Filter threads" input was removed; the full access-filtered set shows.
+    expect(screen.queryByPlaceholderText('Filter threads')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /filter threads/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Acme Matter')).toBeInTheDocument();
   });
 
-  it('the word filter narrows the list (record mode, client-side over the already-loaded set)', async () => {
-    renderWorkspace({ regarding: { entityType: 'sprk_matter', id: 'rec1' } });
-
-    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
-
-    fireEvent.change(screen.getByPlaceholderText('Filter threads'), { target: { value: 'zzz-no-match' } });
-
-    await waitFor(() => expect(screen.getByText('No threads match your filter.')).toBeInTheDocument());
-  });
-
-  it('the ＋ New button invokes onCreateThread', async () => {
+  it('the icon-only ＋ (create) button invokes onCreateThread', async () => {
     const onCreateThread = jest.fn();
     renderWorkspace({ onCreateThread });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // Icon-only now (task 062 / §B5) — identified by its "New thread" aria-label.
     fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onCreateThread).toHaveBeenCalledTimes(1);
