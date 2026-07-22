@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^4.28.2",
+    "@microsoft/signalr": "^8.0.7",
     "@fluentui/react-button": "^9.8.2",
     "@fluentui/react-components": "^9.46.2",
     "@fluentui/react-dialog": "^9.17.2",
@@ -46,6 +47,7 @@
     "@spaarke/document-operations": "file:../../client/shared/Spaarke.DocumentOperations",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "@spaarke/legal-workspace": "file:../../client/shared/Spaarke.LegalWorkspace",
+    "@spaarke/notifications": "file:../../client/shared/Spaarke.Notifications",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",
     "@spaarke/smart-todo-components": "file:../../client/shared/Spaarke.SmartTodo.Components",
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components",

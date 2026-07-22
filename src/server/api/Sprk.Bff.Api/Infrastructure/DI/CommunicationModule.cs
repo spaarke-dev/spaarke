@@ -278,6 +278,25 @@ public static class CommunicationModule
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
 
+        // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
+        // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
+        // producer loops them into SignalRDeliveryService.PingUserAsync). Placement Justification (root §10 / §11):
+        // its dependencies are ALL Communication-flavored (ICommunicationAccessFilter + IThreadPrivateGrantProvider +
+        // the sprk_communicationparticipant junction via IGenericEntityService), so ADR-010's feature-module home is
+        // HERE, not NotificationsModule (which owns the SignalR delivery leg + identity resolver). ZERO new access
+        // logic: it COMPOSES the two existing access primitives + the junction read-only (design §5 — leverage,
+        // don't rebuild). Singleton — all deps are singletons; mirrors the participant indexer/thread resolver.
+        //
+        // IThreadPrivateGrantProvider deny-all null-object (ADR-032): the task-042 read-path rework REMOVED the
+        // deny-all registration (the impersonation-based read filter no longer depends on it — see the task-042
+        // comment above), so the seam is currently UNREGISTERED. The fan-out service DOES consume it (private-thread
+        // gate), and it is reached from the unconditionally-mapped negotiate/producer path, so the null-object MUST
+        // be registered unconditionally for the consumer to resolve (ADR-032 asymmetric-registration rule; CLAUDE.md
+        // §10 bullet 6). TryAdd so the FUTURE Dataverse-backed provider (task-043 private-direct work) wins if it
+        // registers first — this only supplies the fail-closed default (private-thread fan-out is EMPTY until then).
+        services.TryAddSingleton<IThreadPrivateGrantProvider, DenyAllThreadPrivateGrantProvider>();
+        services.AddSingleton<CommunicationFanOutTargetingService>();
+
         // Job handler: processes incoming email notifications from Graph webhooks (Task 072)
         // Extracts message details from Graph, creates sprk_communication record, handles attachments.
         // JobType: "IncomingCommunication" — processed by dedicated CommunicationJobProcessor (not shared queue).

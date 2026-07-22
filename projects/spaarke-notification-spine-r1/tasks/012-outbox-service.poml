@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Outbox Write/Read/Expire Service — Layer B Durable Store</title>
+    <phase>1 Layer B + Contract + ADR-047</phase>
+    <gate>blocked-until:011</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF service implementation touching `.cs` in `Sprk.Bff.Api`, with a seam-test DoD obligation (ADR-038) — meets the FULL-rigor bar per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>CRUD-shaped service over a single new table; no architectural judgment beyond following the established ADR-032 registration pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on task 011's outbox table existing before the service can be written against real columns.</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api, api, services</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+  <prompt>Implement the outbox write/read/expire/dismiss service in `src/server/api/Sprk.Bff.Api/Services/Notifications/` over task 011's new outbox table — the durable source of truth that every producer (comms-arrived, comms-assessed, suggestion) writes to and that Layer C (SignalR) and the FR-06 poll endpoint both read from.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Write a plain CRUD-shaped service over the new Dataverse table — no AI internals, no direct SignalR dependency (that composition happens in task 020).</role>
+  <goal>An `IOutboxService` (or equivalent concrete-class-per-ADR-010 service) in `Services/Notifications/` with write, read-pending-by-user, dismiss, and expire operations against task 011's table; registered unconditionally in DI; a `tests/integration/seam/**` test proving write → pending → dismiss and write → pending → expiry both work end-to-end against the real service and a real (or test-tenant) Dataverse row.</goal>
+  <context>
+    <background>
+      This is the service half of Layer B (FR-02); task 011 built the table half. The outbox is the durable source of truth — live SignalR push (task 020, Phase 2) is acceleration on top of it, never a replacement; the FR-06 poll fallback endpoint (task 022) and the ADR-032 degrade path both read through this same service. No producer in this project writes to Dataverse directly for outbox rows — they all call this service, so the write path (envelope shape, `kind` validation, expiry defaulting) is centralized in one place.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>docs/data-model/sprk_notificationoutbox.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>tests/integration/seam/README.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-032">The outbox service itself carries no feature flag — there is no kill switch for "write the durable outbox row" (unlike the SignalR ping in task 020, which IS conditionally registered). Register it unconditionally in DI (ADR-032 P1 promote-to-unconditional pattern) — do NOT wrap its registration in an `if (flag)` block.</constraint>
+    <constraint source="project">The service is durable-store-only in this task — it MUST NOT take a direct dependency on `Microsoft.Azure.SignalR`/`.Management` or any delivery-layer type; task 020 composes delivery on top of this service's write operation (outbox-before-ping), not the other way around.</constraint>
+    <constraint source="ADR-013">Do not inject AI-internal types (`IOpenAiClient`, `IPlaybookService`, etc.) into this service — it is plain CRUD/Dataverse infrastructure consumed later by AI producers (Phase 4/5) via the `Services/Ai/PublicContracts/` facade, never the reverse.</constraint>
+    <constraint source="project">Expire semantics: a row past its `sprk_expiresat` timestamp is excluded from "pending" reads (read-time filtering, or an explicit expire operation that marks it — choose one and document which; either satisfies FR-02's "dismiss/expiry removes it" acceptance as long as it is deterministic and covered by the seam test).</constraint>
+    <constraint source="ADR-038">A `tests/integration/seam/**` test is the definition-of-done for this task (project CLAUDE.md "Seam tests are DoD"); a passing contract-shape/unit test alone does NOT satisfy this task.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/data-model/sprk_notificationoutbox.md</file>
+    </files>
+    <patterns>
+      <pattern name="Concrete-class CRUD service" location="src/server/api/Sprk.Bff.Api/Services/NotificationService.cs">Mirror this file's shape (concrete sealed-or-unsealed class, constructor-injected Dataverse client, plain async CRUD methods) for the new outbox service — same layer, same conventions, no new interface introduced solely for testability (ADR-010).</pattern>
+      <pattern name="seam test" location="tests/integration/seam/README.md">Real production types end-to-end; only external boundaries doubled. For this task the "seam" is producer-call → service write → Dataverse row → service read → dismiss/expire, using a real (or test-tenant) Dataverse table, not a mocked repository.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read task 011's `docs/data-model/sprk_notificationoutbox.md` for the final table/column names.</step>
+    <step order="2">Implement the service class in `src/server/api/Sprk.Bff.Api/Services/Notifications/` with: `WriteAsync` (create a pending row for a user + kind + envelope + regarding ref + expiry), `GetPendingAsync(userId)` (unexpired, undismissed rows for a user), `DismissAsync(rowId)`, and an expiry mechanism (read-time filter or explicit `ExpireAsync` sweep — pick one, document the choice).</step>
+    <step order="3">Register the service unconditionally in the appropriate DI module (P1 pattern per ADR-032 — no feature-gate wrapper).</step>
+    <step order="4">Write a `tests/integration/seam/**` test exercising write → `GetPendingAsync` returns it → `DismissAsync` → `GetPendingAsync` no longer returns it, AND a second scenario: write with a past-due expiry → `GetPendingAsync` does not return it.</step>
+    <step order="5">Measure BFF publish size (`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`); report absolute compressed size + diff vs the ~49.63 MB incl-PDB baseline (or task 001's spike-adjusted baseline if a SignalR SDK package was retained from that task), stating the PDB convention. Run `dotnet list package --vulnerable --include-transitive`; confirm 0 new HIGH CVE.</step>
+    <step order="6">State the Placement Justification (this service lives in `Sprk.Bff.Api/Services/Notifications/`, per `.claude/constraints/bff-extensions.md` decision criteria) in the task notes.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If task 011's table schema does not actually support the write/read/dismiss/expire operations this service needs (a column is missing or mistyped), STOP and escalate back to task 011's schema rather than working around it with client-side computation that the table should own.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="terminal">Shell for publish-size measurement</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Notifications/OutboxService.cs (or equivalent name chosen at task time)</output>
+    <output type="test">tests/integration/seam/OutboxServiceSeamTests.cs (or equivalent name)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a user and a kind+envelope, when `WriteAsync` is called, then a pending row exists in the outbox table (verified via `GetPendingAsync` returning it) — proven by a `tests/integration/seam/**` test using the real service and a real/test-tenant Dataverse row.</criterion>
+    <criterion testable="true">Given a pending row, when `DismissAsync` is called, then a subsequent `GetPendingAsync` for that user no longer returns the row.</criterion>
+    <criterion testable="true">Given a row written with an expiry timestamp in the past, when `GetPendingAsync` is called, then the row is excluded (negative case — expired rows never appear as pending).</criterion>
+    <criterion testable="true">Given the DI container, when inspected, then `OutboxService` (or its interface) is registered unconditionally — no `if (flag)` wrapper around its registration.</criterion>
+    <criterion testable="true">Given the service class, when its dependencies are inspected, then it has no compile-time or DI dependency on `Microsoft.Azure.SignalR`/`.Management` or any `Services/Ai/` internal type.</criterion>
+    <criterion testable="true">Given the BFF is published after this task, when measured, then compressed size is ≤60 MB (report absolute + diff vs baseline, PDB convention stated) and `dotnet list package --vulnerable --include-transitive` shows 0 new HIGH CVE; Placement Justification is stated per `.claude/constraints/bff-extensions.md`.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-02 (service half). Task 022 (FR-06 poll endpoint) and task 020 (FR-04 SignalR delivery) both consume this service — do not build the HTTP endpoint or the SignalR ping here; that is explicitly out of this task's scope per the TASK TABLE split.</notes>
+  <justification>
+    <existing>`Services/NotificationService.cs` (`appnotification` writes) is the nearest existing service, but it has no `kind`/envelope/delivered-dismissed-expiry semantics — confirmed by reading its current method signatures (title/body/category/priority only, no kind discriminator, no expiry).</existing>
+    <extension>No — `NotificationService` stays as the `appnotification` mirror target (consumed later, mirror-only, by Phase 4's RI actions); the new `Services/Notifications/` service is the outbox's own durable-store service, a distinct responsibility.</extension>
+    <cost-of-doing-nothing>Without this service, no producer (Phase 2's `communication-arrived`, Phase 4's `communication-assessed`, Phase 5's `suggestion`) has anywhere durable to write before pinging SignalR — the outbox-before-ping MUST rule (root CLAUDE.md "Key Technical Constraints") has no implementation to satisfy it.</cost-of-doing-nothing>
+  </justification>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

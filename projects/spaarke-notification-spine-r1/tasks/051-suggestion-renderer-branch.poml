@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Suggestion renderer branch in the Assistant — compact card from the envelope</title>
+    <phase>5 Suggestion consumer</phase>
+    <gate>blocked-until:050,021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New client surface consuming the SignalR/poll subscriber and the outbox envelope; frontend/fluent-ui tag; modifies .tsx in SpaarkeAi per root CLAUDE.md §8</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Renderer/UI task with a concrete visual anchor and closed contract (envelope shape from task 013, dispatch reuse from ConsumerChips) — well-specified, not architectural judgment</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 050 (producer must write real envelopes to render against) and 021 (shared client subscriber library the renderer subscribes through)</parallel-reason>
+    <deps>050,021</deps>
+    <tags>pcf, frontend, fluent-ui, react</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Add a suggestion renderer branch to the SpaarkeAi Assistant: when the shared client subscriber (task 021) delivers a `kind=suggestion` envelope, render it as a compact card — visually and structurally modeled on the existing `ConsumerChips.tsx` card treatment — that re-fetches/re-grounds via the BFF at action time and does not render if expired.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Fluent UI v9 (ADR-021, dark-mode-correct via design tokens) and the SpaarkeAi Assistant's conversation-pane component model (`ConversationPane.tsx`, `ConsumerChips.tsx`, `useConsumerChips.tsx`).</role>
+
+  <goal>A new suggestion-card component renders a `kind=suggestion` envelope (delivered via the task-021 shared subscriber or task-006-equivalent poll fallback) as a compact, dismissible card whose visual treatment mirrors `ConsumerChips.tsx`'s bordered-card styling (rounded corners via `tokens.borderRadiusMedium`, `tokens.colorNeutralBackground1` background, `tokens.colorBrandStroke2` border, hover/pressed states via `tokens.colorBrandBackground2Hover`/`Pressed`, Fluent v9 tokens only — no hardcoded colors). Clicking the card's action re-fetches/re-grounds the suggestion via a BFF call BEFORE acting (freshness + access re-check); an expired suggestion (per the envelope's `expiresAt`) does not render at all — filtered before mount, not rendered-then-disabled.</goal>
+
+  <justification>
+    <existing>`ConsumerChips.tsx` already renders a ranked, actionable card row (bordered surface, Fluent v9 tokens, dark-mode-correct) driven by server-declared chips with a `binding_id`, dispatched via the shared `dispatchConsumer` helper.</existing>
+    <extension>Cannot extend `ConsumerChips.tsx` directly — its input is a chip list carried on an active chat-session SSE stream (`chips` events on `dispatchConsumer`'s response), not a push-delivered, session-independent envelope arriving asynchronously from the Layer-C spine. A new sibling component is needed for the delivery/lifecycle difference; it reuses the SAME visual language and the SAME `dispatchConsumer`/`SurfaceLaunch` re-entry (task 052), so this is a renderer BRANCH, not a new dispatch mechanism.</extension>
+    <cost-of-doing-nothing>Without this branch, a grounded+gated suggestion (task 050) has a durable outbox row and a live ping but nothing renders it — R1.5's proactive value (the entire reason the assistant-r1.5 scope was absorbed into this project per spec Owner Clarifications) never reaches a user.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Absorbed assistant-R1.5 (spec §4A, FR-16): "Suggestion renderer branch in the Assistant: compact card (chip source) from the envelope; re-fetches/re-grounds via BFF at action time (freshness + access re-check); expired suggestions don't render." The renderer is explicitly a CHIP SOURCE reusing the shipped dispatch + ack-gate — no new pipeline, no second gate (spec Scope). `ConsumerChips.tsx` is the concrete visual + interaction precedent this task mirrors: bordered card treatment, Fluent v9 tokens exclusively, hover/pressed/disabled states via semantic tokens (already dark-mode-correct because tokens resolve per theme).
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConsumerChips.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/__tests__/ConsumerChips.test.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts</file>
+      <file>src/client/shared/** (task 021 shared client subscriber library — negotiate/connect + kind-routing)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 design tokens ONLY — no hardcoded colors, no inline hex/rgb values. The card MUST be visually correct in both light and dark themes purely through semantic token resolution, exactly as `ConsumerChips.tsx`'s `chip`/`moreChip` style classes already demonstrate.</constraint>
+    <constraint source="ADR-039">The card's action click MUST route through the existing `dispatchConsumer`/`SurfaceLaunch` re-entry (task 052) — the client carries ZERO routing logic and ZERO intent re-detection from the envelope's display text; the envelope's `actionHint` is presentation only.</constraint>
+    <constraint source="project">The card re-fetches/re-grounds the suggestion via a BFF call at click time BEFORE dispatching the action (freshness + access re-check) — it MUST NOT act directly on the stale envelope payload delivered at push time.</constraint>
+    <constraint source="project">A suggestion whose envelope `expiresAt` has passed MUST NOT render — filter it out of the rendered set entirely (not render-then-disable); this is a pre-mount filter, testable independent of the click path.</constraint>
+    <constraint source="project">This is a renderer BRANCH on the existing chip/card surface — it MUST NOT introduce a second dispatch pipeline, a second confirmation gate, or a parallel "NBA library" surface (per `ConsumerChips.tsx`'s own precedent of reusing `usePlaybookOptions.handleOpenLibraryModal` rather than inventing a new modal).</constraint>
+    <constraint source="project">Test ids follow the existing convention (`consumer-chip-{id}`-style) so the suggestion card is distinguishable in tests without a parallel test-id vocabulary.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-ui-dark-mode.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>projects/spaarke-notification-spine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bordered actionable card, Fluent v9 tokens" location="src/solutions/SpaarkeAi/src/components/conversation/ConsumerChips.tsx">Mirror the `chip` style class exactly in spirit: `tokens.borderRadiusMedium` corners, `tokens.colorNeutralBackground1` background, 1px `tokens.colorBrandStroke2` border, `tokens.shadow2`/`shadow4` elevation, `tokens.colorBrandBackground2Hover`/`Pressed` interaction states, `tokens.colorNeutralBackgroundDisabled` disabled state. This is the CONCRETE visual anchor — do not design a new visual language.</pattern>
+      <pattern name="Chip click → dispatch → re-arm" location="src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx">`runBindingDispatch` shows the dispatch+render+re-arm shape (single dispatch decision per click, failure surfaces as a stable local Assistant line per ADR-019). The suggestion card's action handler follows the equivalent shape, but front-loads a re-fetch/re-ground BFF call before calling `dispatchConsumer`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the task-013 suggestion envelope contract (kind=suggestion shape: actionHint, expiresAt, IDs + minimal display metadata) and the task-021 shared subscriber library's kind-routing contract to know exactly what payload this component receives.</step>
+    <step order="2">Build a `SuggestionCard` component in `src/solutions/SpaarkeAi/src/components/conversation/` (sibling to `ConsumerChips.tsx`), reusing its style-class shape (bordered card, tokens-only, hover/pressed states) verbatim in spirit.</step>
+    <step order="3">Implement the pre-mount expiry filter: an envelope whose `expiresAt` has passed is excluded from the rendered set before any card mounts.</step>
+    <step order="4">Implement the re-fetch/re-ground BFF call at click time (freshness + access re-check) — call the BFF, then on success call `dispatchConsumer`/`launchSurface` per the resolved binding (task 052's re-entry contract); on staleness/revocation, fail gracefully with a stable local message (mirror `useConsumerChips.tsx`'s catch-block pattern).</step>
+    <step order="5">Wire the component into the SpaarkeAi workspace via the task-021 subscriber's `kind=suggestion` route (a new render slot, not inside the existing `consumerChipsSlot` transcript footer — a suggestion arrives independent of an active dispatch turn).</step>
+    <step order="6">Write component + hook unit tests: renders from a valid envelope; does not render an expired envelope; click triggers re-fetch before dispatch; stale/revoked re-fetch fails gracefully without dispatching.</step>
+    <step order="7">Write the ui-tests section's ADR-021 dark-mode test: render the card under both `webLightTheme` and `webDarkTheme` FluentProvider wrappers and assert no hardcoded-color regression (token-only styling holds in both).</step>
+    <step order="8">Run the SpaarkeAi test suite; confirm zero regressions in `ConsumerChips.test.tsx` / `ConversationPane.event-path.test.tsx` (this task adds a sibling surface, it does not touch those files' behavior).</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="10">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <ui-tests>
+    <test name="renders-from-envelope">Given a valid, non-expired `kind=suggestion` envelope, when the SuggestionCard mounts, then it renders the card with the envelope's display text and an actionable button.</test>
+    <test name="expired-suggestion-does-not-render">Given an envelope whose `expiresAt` is in the past, when the render set is computed, then no card mounts for that envelope (verified via absence, not a disabled-state assertion).</test>
+    <test name="click-re-fetches-before-dispatch">Given a rendered card, when its action is clicked, then a BFF re-fetch/re-ground call fires BEFORE `dispatchConsumer`/`launchSurface` is invoked (call-order assertion, mocked BFF + mocked dispatcher).</test>
+    <test name="stale-suggestion-fails-gracefully">Given a card whose re-fetch returns a stale/revoked result, when the click handler runs, then no dispatch occurs and a stable local failure message renders (no raw server error surfaced, per ADR-019).</test>
+    <test name="dark-mode-token-correctness" adr="ADR-021">Given the SuggestionCard rendered inside a FluentProvider with `webDarkTheme`, when compared against the same render under `webLightTheme`, then all styling resolves via Fluent v9 semantic tokens (no hardcoded color literals in the component's style definitions) and the card is visually legible/bordered in both themes.</test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If rendering a suggestion or dispatching its action would require any code path outside the existing dispatchConsumer/SurfaceLaunch mechanism, STOP and escalate — a second dispatch pipeline is a hard MUST NOT (spec Scope, R5 risk register).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/SuggestionCard.tsx (new)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/useSuggestionCards.tsx (new — hook analog to useConsumerChips.tsx)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/components/conversation/__tests__/SuggestionCard.test.tsx (new, incl. dark-mode test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid, non-expired kind=suggestion envelope delivered via the task-021 subscriber, when the SpaarkeAi workspace receives it, then a compact card renders using the ConsumerChips.tsx bordered-card visual treatment (tokens.borderRadiusMedium, tokens.colorNeutralBackground1, tokens.colorBrandStroke2 border) via Fluent v9 tokens only.</criterion>
+    <criterion testable="true">Given an envelope whose expiresAt has already passed, when the render set is computed, then the card does not render at all (not rendered-and-disabled).</criterion>
+    <criterion testable="true">Given a rendered card, when its action is clicked, then a BFF re-fetch/re-ground call executes and completes BEFORE any dispatch/launchSurface call is made.</criterion>
+    <criterion testable="true">Given the re-fetch reveals the suggestion is stale or the user has lost access, when the click handler runs, then no dispatch occurs and a stable, non-raw failure message is shown to the user.</criterion>
+    <criterion testable="true">Given the card's action dispatches, when it resolves, then it routes through the exact same dispatchConsumer/SurfaceLaunch mechanism ConsumerChips.tsx uses today — no new dispatch endpoint or pipeline is introduced.</criterion>
+    <criterion testable="true">The dark-mode ADR-021 test passes: the component renders correctly (no hardcoded colors, tokens resolve) under both webLightTheme and webDarkTheme.</criterion>
+    <criterion testable="true">Existing ConsumerChips.tsx / useConsumerChips.tsx / ConversationPane tests pass unmodified — this task adds a sibling component, it does not alter the Click-path chip surface.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-16, NFR-02 (envelope carries no content a recipient couldn't read via the BFF — hence the mandatory re-fetch/re-ground). Visual anchor is literal: match `ConsumerChips.tsx`'s `chip` style-class token choices, not a generic "clean/modern" restyle. Task 052 defines the exact re-entry contract into `SurfaceLaunch`/dispatch this card's action must use — coordinate signatures with that task if sequencing allows, otherwise design against the documented `dispatchConsumer`/`launchSurface` contracts already shipped.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

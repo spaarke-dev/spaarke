@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>Project wrap-up — final gates, ADR-047 full, test-diet, docs finalization, closure</title>
+    <phase>6 Wrap-up</phase>
+    <gate>blocked-until:001,010,011,012,013,020,021,022,023,024,025,030,031,032,033,040,041,042,050,051,052</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Project-closing task; runs mandatory quality gates (code-review, adr-check, test-diet, repo-cleanup) across the whole project and finalizes binding governance artifacts (ADR-047 full, docs/data-model entry) per root CLAUDE.md §7 and §8</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-project synthesis + judgment across every prior task's output; ADR-047 full finalization is architectural documentation requiring the same judgment as its authoring</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on every other task in the project; must run last and alone</parallel-reason>
+    <deps>001,010,011,012,013,020,021,022,023,024,025,030,031,032,033,040,041,042,050,051,052</deps>
+    <tags>docs, testing</tags>
+    <estimated-effort>3-4h</estimated-effort>
+  </metadata>
+
+  <prompt>Close out spaarke-notification-spine-r1: run the final quality gates across all project code, reconcile tests per ADR-038 §7, finalize ADR-047 (full) and its CHANGELOG entries, finalize the outbox docs/data-model entry, run repo-cleanup, verify every graduation criterion in README.md, and transition README/plan/TASK-INDEX to Complete with a lessons-learned writeup.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in project-closure governance (root CLAUDE.md §7 task-transition rules, §8 test-diet gate, ADR-038 §7 build-vs-maintain classifier) and in synthesizing a multi-phase project's outcome into its permanent documentation artifacts.</role>
+
+  <goal>Every graduation criterion in `README.md` is checked off with a verification pointer; `/code-review` and `/adr-check` have run against the full set of project-touched code (Phases 0-5) with findings resolved or explicitly accepted per the ADR Conflict Resolution Protocol (root CLAUDE.md §6.5); `/test-diet` has reconciled every test added/modified during the project (MAINTAIN kept, SCAFFOLDING removed) with its report at `notes/test-diet-report.md`; ADR-047's full version at `docs/adr/ADR-047-notification-action-spine.md` is finalized (reflecting the FR-01 mode decision and any deviations discovered during Phases 1-5) with its `.claude/adr/INDEX.md` row updated to `Accepted`; the outbox table's `docs/data-model/` entry is finalized with its real name/column set (as created at task 011); `/repo-cleanup` has run; `README.md` status is `Complete`, `plan.md` status is `Complete`, every task in `tasks/TASK-INDEX.md` shows ✅; and `notes/lessons-learned.md` exists.</goal>
+
+  <context>
+    <background>
+      This is the terminal task of the Spaarke Notification &amp; Action Spine — R1 project (spec.md, plan.md Phase 6). It follows Phase 0 (gate-zero spike), Phase 1 (Layer B + contract + ADR-047 concise), Phase 2 (Layer C + communication-arrived, unblocking messaging-r3), Phase 3 (Layer A + Notification flip), Phase 4 (comms-RI producer + policy), and Phase 5 (suggestion consumer, tasks 050-052). Per root CLAUDE.md §7's project-close test-diet gate, `/test-diet` MUST run before this task marks the project complete — it is read-only and emits `git rm`/`git mv` commands for reviewer execution, it does not auto-execute. Per root CLAUDE.md §3, `.claude/` writes (including `.claude/adr/ADR-047-notification-action-spine.md`'s status update and `.claude/adr/INDEX.md`) are main-session-only — this task runs main-session, not as a delegated sub-agent, consistent with how task 010 authored the ADR-047 concise version.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-notification-spine-r1/README.md</file>
+      <file>projects/spaarke-notification-spine-r1/plan.md</file>
+      <file>projects/spaarke-notification-spine-r1/spec.md</file>
+      <file>projects/spaarke-notification-spine-r1/tasks/TASK-INDEX.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/ADR-047-notification-action-spine.md</file>
+      <file>docs/data-model/INDEX.md</file>
+      <file>.claude/CHANGELOG.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task runs MAIN-SESSION, not delegated to a sub-agent — `.claude/adr/ADR-047-notification-action-spine.md`, `.claude/adr/INDEX.md`, and `tasks/TASK-INDEX.md` are all `.claude/`-adjacent or project-tracking writes the sub-agent write boundary (root CLAUDE.md §3) forbids for parallel agents.</constraint>
+    <constraint source="root-clause-7">`/test-diet` MUST run BEFORE the project is marked complete (root CLAUDE.md §7 project-close test diet gate). It is read-only — it emits `git rm`/`git mv` commands; a human/this task's operator executes them, this task does not silently auto-delete tests.</constraint>
+    <constraint source="root-clause-6.5">Any code-review/adr-check finding that reflects a deliberate, already-surfaced ADR Tension (e.g. the ADR-043 Notification-flip tension logged in spec.md's ADR Tensions table, Path C) is NOT re-litigated here as a new violation — cite the existing resolution. A genuinely NEW finding follows the three-path protocol (A/B/C) with the required output format; it is not silently waived.</constraint>
+    <constraint source="project">Every one of the 11 numbered items in spec.md's "Success Criteria" section and every checkbox in README.md's "Graduation Criteria" section MUST be individually verified with a concrete pointer (test name, file, or note) — a criterion is not checked off on the basis that "the phase ran," it is checked off against its own Verify clause.</constraint>
+    <constraint source="project">ADR-047 full finalization MUST reflect the FR-01 mode decision (task 001's spike outcome) verbatim — do not restate a generic "SignalR" placement without citing the decided mode (Serverless/Default) and its rationale.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-notification-spine-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ADR full-version finalization" location="docs/adr/">Follow the shape of an already-Accepted full ADR (e.g. docs/adr/ADR-048-communication-participant-index.md) for section structure; the concise `.claude/adr/ADR-047-*.md` from task 010 is the source-of-truth decision content to expand, not a separate draft.</pattern>
+      <pattern name="Data-model entity doc" location="docs/data-model/sprk_communication.md">Follow this file's shape (schema table, relationships, JSON field notes) for the outbox table's finalized entry.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm every dependency task (001,010,011,012,013,020,021,022,023,024,025,030,031,032,033,040,041,042,050,051,052) shows ✅ in `tasks/TASK-INDEX.md`; if any is not ✅, STOP and escalate rather than proceeding (this task is the terminal gate, not a task-completer).</step>
+    <step order="2">Run `/code-review` against the full set of project-touched files (Phases 0-5 combined diff vs the project's base commit).</step>
+    <step order="3">Run `/adr-check` against the same diff.</step>
+    <step order="4">Triage every finding from steps 2-3: fix (Path C), cite an already-documented exception/tension (Path A, spec.md ADR Tensions), or escalate a new amendment candidate (Path B) per root CLAUDE.md §6.5 — do not leave any finding unresolved and undocumented.</step>
+    <step order="5">Run `/test-diet` (ADR-038 §7 build-vs-maintain classifier) against every test added/modified across the project's tasks; write `notes/test-diet-report.md`; execute the reviewer-approved `git rm`/`git mv` commands it emits.</step>
+    <step order="6">Finalize `docs/adr/ADR-047-notification-action-spine.md` (full version): expand the concise `.claude/adr/ADR-047-notification-action-spine.md` (task 010) into the full ADR shape, explicitly reflecting the FR-01 mode decision, the Phase 3 ADR-043 Notification-flip resolution (Path C), and any deviations logged in `projects/spaarke-notification-spine-r1/notes/` across Phases 1-5.</step>
+    <step order="7">Update `.claude/adr/INDEX.md`'s ADR-047 row to `Accepted` (or the correct terminal status) and append a `.claude/CHANGELOG.md` entry for the ADR-047 finalization.</step>
+    <step order="8">Finalize the outbox table's `docs/data-model/` entry (task 011's actual table/column names) — schema table, relationships (ADR-024 regarding lookup), JSON envelope column shape, delivered/dismissed/expiry semantics.</step>
+    <step order="9">Run `/repo-cleanup` for the project.</step>
+    <step order="10">Walk every checkbox in `README.md`'s "Graduation Criteria" section and every numbered item in `spec.md`'s "Success Criteria" section; check each off with a concrete verification pointer (test name / file path / note reference); do not check off any item without a pointer.</step>
+    <step order="11">Update `README.md` status to `Complete` (top status line + Current Status table); update `plan.md` status to `Complete`.</step>
+    <step order="12">Write `notes/lessons-learned.md`: what worked (wave ordering unblocking messaging-r3 early, the gate-zero spike), what was harder than expected, any ADR-047 deviations from the original design, and open items handed to sibling projects (messaging-r3, spaarkeai-assistant-enhancements-r1, spaarke-daily-update-service-r5).</step>
+    <step order="13">Verify `tasks/TASK-INDEX.md` shows ✅ for all 21 prior tasks plus this one.</step>
+    <step order="14">Update tasks/TASK-INDEX.md: set this task to ✅ completed</step>
+    <step order="15">Document any deviations in projects/spaarke-notification-spine-r1/notes/</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any dependency task is not ✅ complete when this task starts, STOP and escalate — do not attempt wrap-up against an incomplete project.</trigger>
+    <trigger>If /code-review or /adr-check surfaces a Critical finding with no existing ADR Tension covering it, STOP and run the root CLAUDE.md §6.5 protocol before proceeding to closure.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-047-notification-action-spine.md (finalized full version)</output>
+    <output type="docs">.claude/adr/INDEX.md (ADR-047 row → Accepted)</output>
+    <output type="docs">.claude/CHANGELOG.md (ADR-047 finalization entry)</output>
+    <output type="docs">docs/data-model/{outbox-table-name}.md (finalized)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/README.md (status → Complete)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/plan.md (status → Complete)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 21 dependency tasks (001,010,011,012,013,020,021,022,023,024,025,030,031,032,033,040,041,042,050,051,052) show ✅ in tasks/TASK-INDEX.md before this task begins its own work.</criterion>
+    <criterion testable="true">/code-review and /adr-check have run against the full project diff; every finding is resolved (fixed), cited against an existing ADR Tension (Path A), or escalated as an amendment candidate (Path B) — none are silently unaddressed.</criterion>
+    <criterion testable="true">/test-diet has produced notes/test-diet-report.md and its reviewer-approved git rm/git mv commands have been executed; no SCAFFOLDING-classified test from this project remains.</criterion>
+    <criterion testable="true">docs/adr/ADR-047-notification-action-spine.md exists as a finalized full ADR reflecting the FR-01 mode decision and the ADR-043 Notification-flip Path-C resolution; .claude/adr/INDEX.md's ADR-047 row shows a terminal Accepted status; a corresponding entry exists in .claude/CHANGELOG.md.</criterion>
+    <criterion testable="true">The outbox table has a finalized docs/data-model/ entry using its real (task-011-decided) table and column names — not placeholder names.</criterion>
+    <criterion testable="true">/repo-cleanup has run for the project with no unresolved hygiene findings.</criterion>
+    <criterion testable="true">Every graduation-criteria checkbox in README.md and every Success Criteria item in spec.md is checked with a concrete verification pointer (test name, file path, or note reference) — none is checked without one.</criterion>
+    <criterion testable="true">README.md status line reads Complete; plan.md status reads Complete; tasks/TASK-INDEX.md shows ✅ for all 22 tasks (21 dependencies + 090 itself).</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists and names concrete outcomes for each of the three sibling-project coordination points (messaging-r3 unblock, spaarkeai-assistant-enhancements-r1 R1.5 absorption, spaarke-daily-update-service-r5 coordination) — not generic "went well" statements.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Plan.md Phase 6 deliverables list is the authoritative checklist for this task's scope: ADR-047 full + CHANGELOG, /test-diet reconciliation, docs/data-model outbox entry, lessons-learned, README status. Root CLAUDE.md §7's binding test-diet gate applies because this IS a `090-wrapup-*`-equivalent task (project-close). If /test-diet or /repo-cleanup is skipped for any reason, that is a HARD WARNING per root CLAUDE.md §7 — the wrap-up notes MUST cite the report or document the skip rationale explicitly, never silently.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>
