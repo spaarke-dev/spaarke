@@ -41,6 +41,7 @@ public sealed class CommunicationService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -84,7 +85,8 @@ public sealed class CommunicationService
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
         IDirectThreadAccessService? directThreadAccess = null,
-        CommunicationParticipantIndexer? participantIndexer = null)
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
@@ -99,6 +101,7 @@ public sealed class CommunicationService
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _logger = logger;
     }
@@ -620,6 +623,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderEmail, senderParticipant,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
+                // (the same spine-owned producer + emit point the inbound + email send paths use — channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             // The response carries only the tracking record id + status — NO ACS token or admin capability
@@ -1248,6 +1257,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, senderResult.Email, null,
                     request.To, request.Cc, request.Bcc, cancellationToken);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
             }
 
             return new SendCommunicationResponse
@@ -1553,6 +1568,12 @@ public sealed class CommunicationService
                 await WriteParticipantIndexAsync(
                     communicationId.Value, userEmail, null,
                     request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
             }
 
             return new SendCommunicationResponse

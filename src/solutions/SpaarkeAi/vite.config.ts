@@ -185,17 +185,20 @@ export default defineConfig({
       // immediately without further vite/tsconfig plumbing.
       "@spaarke/events-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
       "@spaarke/events-components": path.resolve(__dirname, "../../client/shared/Spaarke.Events.Components/src"),
+      // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): @spaarke/notifications was added as a
+      // file: dep (notificationsBootstrap.ts) by a recent merge but its source alias / tsconfig path was
+      // never wired — the surface tsc gate could not resolve it (build-breaking on master). Mirror the
+      // other shared-lib source aliases so both vite AND the tsc gate resolve it to source.
+      "@spaarke/notifications/src": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
+      "@spaarke/notifications": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
       // messaging-communication-app-r2 task 030 (2026-07-19): @spaarke/communication-components
       // hosts CommunicationsWorkspaceWidget, consumed here transitively via
       // the aliased LegalWorkspace section shim (communications.registration.ts)
       // — DUAL-DEPLOY consumer (NFR-07).
       "@spaarke/communication-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
       "@spaarke/communication-components": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
-      // messaging-communication-app-r3 task 045 (2026-07-22): @spaarke/notifications
       // (notification-spine client lib) — consumed by SpaarkeAi's notificationsBootstrap.ts
       // + the R3 communications widget arrival badge/toast. Source-aliased like the rest.
-      "@spaarke/notifications/src": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
-      "@spaarke/notifications": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
       // R4 task 020 (2026-06-10): @spaarke/smart-todo-components consumed by the
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
@@ -258,6 +261,10 @@ export default defineConfig({
       "@fluentui/react-context-selector",
       "@lexical/react",
       "lexical",
+      // task 050 (2026-07-22): @spaarke/notifications is aliased to SOURCE, so its `@microsoft/signalr`
+      // peer import must resolve from THIS app's node_modules (where it's installed), not the shared
+      // package's own (empty) node_modules chain. dedupe forces the single app-root resolution.
+      "@microsoft/signalr",
     ],
   },
   build: {

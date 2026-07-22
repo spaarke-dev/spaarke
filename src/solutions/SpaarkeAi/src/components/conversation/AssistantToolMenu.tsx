@@ -65,6 +65,7 @@ import {
   MoreVerticalRegular,
   RocketRegular,
   PersonRegular,
+  NotebookRegular,
 } from "@fluentui/react-icons";
 import { QuickStartModal } from "./QuickStartModal";
 
@@ -101,6 +102,14 @@ export interface AssistantToolMenuProps {
    * inline nudge. Purely a visual hint — the menu behaviour is unchanged.
    */
   highlightMyAssistant?: boolean;
+
+  /**
+   * UAT 2026-07-21 (item #8): open the "What the Assistant remembers about you" surface (a review +
+   * delete view over `GET`/`DELETE /api/memory/user`). Host-owned (ConversationPane holds the dialog
+   * + `authenticatedFetch`), mirroring how Quick Start became host-owned in R7-1. Omitted → the
+   * Memory entry is hidden (nothing to open).
+   */
+  onMemory?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,13 +155,14 @@ function defaultMyAssistantHandler(): void {
 // ---------------------------------------------------------------------------
 
 interface AssistantToolEntry {
-  id: "quick-start" | "my-assistant";
+  id: "quick-start" | "my-assistant" | "memory";
   label: string;
 }
 
 const ASSISTANT_TOOLS: readonly AssistantToolEntry[] = [
   { id: "quick-start", label: "Quick Start" },
   { id: "my-assistant", label: "My Assistant" },
+  { id: "memory", label: "Memory" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -167,6 +177,7 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
   onQuickStart,
   onMyAssistant = defaultMyAssistantHandler,
   highlightMyAssistant = false,
+  onMemory,
 }) => {
   const styles = useStyles();
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -199,11 +210,19 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
       setMenuOpen(false);
       if (id === "quick-start") {
         handleQuickStart();
+      } else if (id === "memory") {
+        onMemory?.();
       } else {
         onMyAssistant();
       }
     },
-    [handleQuickStart, onMyAssistant],
+    [handleQuickStart, onMyAssistant, onMemory],
+  );
+
+  // Hide the Memory entry when the host doesn't supply a handler (back-compat / tests).
+  const tools = React.useMemo(
+    () => ASSISTANT_TOOLS.filter((t) => t.id !== "memory" || !!onMemory),
+    [onMemory],
   );
 
   return (
@@ -243,10 +262,18 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
         <MenuPopover data-testid="assistant-tool-menu-popover">
           <MenuList>
             <MenuGroupHeader>Assistant Tools</MenuGroupHeader>
-            {ASSISTANT_TOOLS.map((tool) => (
+            {tools.map((tool) => (
               <MenuItem
                 key={tool.id}
-                icon={tool.id === "quick-start" ? <RocketRegular /> : <PersonRegular />}
+                icon={
+                  tool.id === "quick-start" ? (
+                    <RocketRegular />
+                  ) : tool.id === "memory" ? (
+                    <NotebookRegular />
+                  ) : (
+                    <PersonRegular />
+                  )
+                }
                 onClick={() => handleSelect(tool.id)}
                 data-testid={`assistant-tool-${tool.id}`}
               >

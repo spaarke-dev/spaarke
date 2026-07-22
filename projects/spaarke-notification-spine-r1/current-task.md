@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-21 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` @ `c759dd4c8` (pushed, clean).
+> **Last Updated**: 2026-07-21 (task 024 COMPLETE).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1`. Phases 1-3 (001-033) live on master; **task 024 (communication-arrived producer) DONE + committed** (pending push/sync). Next: **025** (R3 contract-lock note, FR-19 — now unblocked).
 
 ---
 
@@ -9,10 +9,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Phase 3 COMPLETE (030→033 all ✅). Next: 024 — communication-arrived producer (Phase 2, Wave 6) — ⛔ BLOCKED on email-r4 W10 merge** |
-| **Step** | — (033 ✅ DONE: Notification disposition flipped routable + OutputRouter leg via IActionSeam; full suite 8781/0; both gates clean) |
-| **Status** | **project WAIT state** — every remaining task (024, 025, 040–052, 090) depends transitively on **024**, which is BLOCKED until **email-communication-solution-r4 W10** merges (it owns `Services/Communication/**` persist path). No unblocked forward work in this worktree until then. |
-| **Next Action** | **Wait on email-r4 W10 merge.** When merged: `/conflict-check`, then dispatch **024** via `task-execute` on `tasks/024-*.poml` (opus/high, FULL). Also outstanding (user actions, not code): 023 R-5 named-human security sign-off; `sprk_isexternal` backfill (10 users). |
+| **Task** | **025 — R3 contract-lock note (FR-19), Phase 2 Wave 7 — NOT STARTED** (deps 024✅ 021✅ 022✅ all met). Prior: 024 ✅ DONE. |
+| **Step** | Begin Step 1 of task 025 (`tasks/025-r3-contract-lock-note.poml`). MINIMAL rigor (doc deliverable — formalizes the communication-arrived contract so messaging-r3 task 045 becomes verify-only). |
+| **Status** | 024 shipped: `CommunicationArrivedProducer` emitting at 5 orchestration points (email/msg × in/out), non-fatal, outbox-before-ping. 8853/0 suite; both gates CLEAN; 46.09 MB; 0 new CVE. |
+| **Next Action** | Push/sync task 024 (commit made), then **"work on task 025"**. Or continue the critical path (040 needs 031✅+024✅+email-r4-W10✅ → now unblocked). |
+
+### 024 result (Phase 2, Wave 6 — ✅ DONE 2026-07-21)
+- **Single spine-owned `communication-arrived` producer** (`Services/Communication/CommunicationArrivedProducer.cs`): re-read comm+thread → task-023 fan-out → task-013 envelope → per-recipient task-012 outbox (BEFORE) → task-020 ping. Internally non-fatal (NFR-05). Concrete Singleton.
+- **DEVIATION (documented, POML step 2/7)**: emit at **5 orchestration points AFTER participant-index** (email `ProcessAsync` 4.8; msg `IngestAsync`; `Send{Message,,AsUser}Async` after `WriteParticipantIndexAsync`) — NOT the raw CreateAsync sites the checkpoint enumerated (junction empty + thread/regarding unstamped at raw-create → fan-out would be zero). Full rationale: `notes/024-communication-arrived-producer-notes.md`.
+- Injected as optional trailing ctor param into 3 singletons (IncomingCommunicationProcessor, MessagingIngestor, CommunicationService) — existing tests compile ZERO-edit.
+- Seam test (5 green, `tests/integration/seam/Communication/`): email/msg × in/out each yield outbox(kind=communication-arrived)+ping, outbox-before-ping ordering, non-fatal on failure.
+- **senderDisplay** = privacy-safe channel label (NFR-02/03: no address; no display-name column exists); **snippet** = null (conservative). Both documented as intentional.
+- Gates: code-review CLEAN (3 Suggestions); adr-check CLEAN. ArchTest 3 reds VERIFIED pre-existing (stash-confirmed). Escalation trigger did NOT fire (email-r4 W10 merged); conflict-check clean (#664 touches 0 persist files).
+
+### 024 investigation (DONE — the de-risking part)
+- **5 `sprk_communication` row-create persist sites (merged HEAD, authoritative)**:
+  1. `IncomingCommunicationProcessor.cs:576` — inbound capture (email)
+  2. `Channels/MessagingIngestor.cs:220` — inbound capture (messaging)
+  3. `CommunicationService.cs:775` — outbound send variant A (entity built at :735)
+  4. `CommunicationService.cs:1670` — outbound send variant B (entity built at :1603)
+  5. `CommunicationService.cs:1775` — outbound send variant C (entity built at :1732)
+  - EXCLUDED (not communication rows): threads (DirectThreadAccessService:89, ThreadResolver:156/468, MessagingThreadKeyStrategy:71), participants (CommunicationParticipantIndexer:104), attachment docs (CommunicationService 388/1972/2095/2140, IncomingCommunicationProcessor 790/824/903, MessageAttachmentMaterializer 151/163), and the read/update site (CommunicationThreadReadService:771 — has an id, it's an update).
+- **Producer design** (per POML + spec FR-09/NFR-05/08): build a **task-013 `CommunicationEnvelope`** (kind=communication-arrived; IDs + minimal display metadata only — communicationId/threadId/channel/direction/senderDisplay/optional privacy-gated snippet/badgeDelta; NO body) → **`OutboxService.WriteAsync`** (durable truth FIRST) → **`CommunicationFanOutTargetingService`** (task 023) to compute recipients → **`SignalRDeliveryService` ping** (best-effort, requires outboxRowId). Wrap the whole emit **fire-and-forget non-fatal**, mirroring `CommunicationEnrichmentService.RunAssessmentEmissionAsync` (~lines 216-238) — a producer exception MUST NOT fail the persist call (NFR-05).
+- **Files to read before implementing**: `Services/Notifications/Envelopes/*` (013 CommunicationEnvelope shape), `OutboxService.cs` (WriteAsync signature), `SignalRDeliveryService.cs` (ping signature — bottom half), `CommunicationFanOutTargetingService.cs` (023 targeting API), `CommunicationEnrichmentService.cs:~216-238` (fire-and-forget precedent), and each of the 5 sites' surrounding method for available locals (communicationId, thread, direction, channel, sender).
+- **Placement decision (POML step 3)**: producer needs Communication read (envelope fields) + Notifications (outbox + delivery) → likely `Services/Notifications/CommunicationArrivedProducer.cs` injected into the Communication persist path, OR `Services/Communication/`. Decide per dependency shape; state Placement Justification (§10).
+- **DoD**: seam test under `tests/integration/seam/Communication/` proving BOTH channels (email + message) each yield an outbox row (kind=communication-arrived) + a ping, AND a producer exception does NOT fail the persist. Outbox-before-ping ordering asserted.
 
 ### 033 Quality Gates (Step 9.5) — both CLEAN
 - **code-review**: 0 Critical / 0 Warning / 1 informational (OutputRouter.cs 523 lines >300 — cohesive Email-mirror leg, don't split). ADR-013 facade discipline confirmed; NFR-07 identifiers-only logging.
