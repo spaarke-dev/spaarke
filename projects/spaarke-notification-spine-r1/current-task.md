@@ -9,10 +9,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **041 — comms policy layer (FR-12), Phase 4 Wave 13 — NOT STARTED** (dep 040✅ met). Prior: 024✅ 025✅ 040✅. Phase 2/3 COMPLETE; Phase 4 in progress. |
-| **Step** | Begin Step 1 of task 041 (`tasks/041-comms-policy-layer.poml`). FULL rigor (opus/xhigh — rule-store decision: Binding vs table). Registers the REAL policy-gate consumer behind `ICommunicationAssessedProducer` (040's seam). |
-| **Status** | 024/025 on master (`1a5bc7d15`); 040 committed on branch (batching master-merge per owner). SpaarkeAi fresh-master build fixed + verified. |
-| **Next Action** | **"work on task 041"** (comms policy layer). Then 042 → Phase 5 (050-052) → 090. Master-merge of 025/040 batched for later per owner. |
+| **Task** | **042 — RI actions via seam + mirror (FR-13), Phase 4 Wave 14 — NOT STARTED** (deps 040✅ 041✅ 012✅ 020✅ met). Prior: 024✅ 025✅ 040✅ 041✅. Phase 2/3 COMPLETE; Phase 4 nearly done. |
+| **Step** | Begin Step 1 of task 042 (`tasks/042-ri-actions-via-seam.poml`). FULL rigor (opus/high). Executes RI actions when the 041 gate authorizes; writes `kind=communication-assessed` outbox row + appnotification mirror. Also the natural place to plumb a REAL assessment confidence into the signal. |
+| **Status** | 024/025 on master (`1a5bc7d15`); 040+041 committed on branch (batching master-merge per owner). Owner created `sprk_communicationrule` table (Path B) for 041. |
+| **Next Action** | **"work on task 042"** (RI actions). Then Phase 5 (050-052) → 090. Master-merge of 025/040/041 batched for later per owner. |
+
+### 041 result (Phase 4, Wave 13 — ✅ DONE 2026-07-22)
+- **§11 escalation fired** (Binding's shared r2-owned resolver can't see tenant/matter) → **owner chose Path B**: dedicated `sprk_communicationrule` Dataverse table (owner-created live). ADR-039 exception documented (Path A). Evidence + decision: `notes/041-rule-store-decision.md`.
+- **`CommunicationRuleGate`** (`Services/Communication/CommunicationRuleGate.cs`): reads the table, matches tenant(blank=all)∧matter(empty=all), lowest priority wins, authorize ⇔ confidence ≥ (rule threshold ?? `CommsPolicyOptions.DefaultConfidenceThreshold` 0.8), privilege FLAGGED never decided (ADR-015), logs every decision, fail-closed DENY on read error. Concrete (ADR-010).
+- **`RuleGatedAssessedConsumer`** replaces 040's log-only default behind the `ICommunicationAssessedProducer` seam (emit point unchanged); re-reads `sprk_regardingmatter`, runs the gate; on authorize EXECUTES NOTHING (that's 042). No outbox, no `FireAsync`.
+- **Confidence-source boundary (documented)**: signal gained `Confidence` (default 0 → DENY-by-default = safe; no ungoverned action). Real confidence plumbing is 042/downstream.
+- Tests 5/5 (4 branches + fallback + priority). Full suite 8860/0; code-review CLEAN; adr-check clean except documented ADR-039 exception; 49.83 MB (≤60); 0 new CVE. Notes: `notes/041-comms-policy-layer-notes.md`.
+- **For 042**: execute on the gate's authorize; write `kind=communication-assessed` outbox + appnotification mirror; plumb a real assessment confidence into the signal.
 
 ### 040 result (Phase 4, Wave 12 — ✅ DONE 2026-07-21)
 - `CommunicationEnrichmentService` step 5 now publishes `communication_assessed` via the NEW `ICommunicationAssessedProducer` seam (`Services/Communication/ICommunicationAssessedProducer.cs`: signal record + interface + `LoggingCommunicationAssessedProducer` interim log-only default). Fire-and-forget non-fatal (NFR-05, inner try/catch + `RunStepAsync` guard).

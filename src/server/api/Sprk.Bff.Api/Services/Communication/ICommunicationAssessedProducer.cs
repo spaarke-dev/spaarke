@@ -14,7 +14,12 @@ public sealed record CommunicationAssessedSignal(
     CommunicationDirection Direction,
     string? Subject,
     string? From,
-    int RecipientCount);
+    int RecipientCount,
+    // Assessment confidence [0–1] the comms policy gate (task 041) compares against a rule threshold. Additive
+    // and defaults to 0 (conservative — DENY under any positive threshold) because the enrichment pipeline does
+    // not yet compute an RI-confidence score; plumbing a real assessment confidence is a downstream concern
+    // (see notes/041-rule-store-decision.md "confidence source"). Existing 5-arg constructions stay valid.
+    double Confidence = 0);
 
 /// <summary>
 /// Producer seam for the <c>communication_assessed</c> signal emitted at enrichment step 5

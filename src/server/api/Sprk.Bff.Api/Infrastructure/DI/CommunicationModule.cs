@@ -208,7 +208,21 @@ public static class CommunicationModule
         // the kind=communication-assessed outbox row. Placement Justification (root §10/§11): the seam lives in
         // Services/Communication/ beside its sole emit point (the enrichment step), consumes nothing AI-internal
         // (ADR-013 clean), and is a genuine seam (≥2 implementations: this default + task 041's policy consumer).
-        services.AddSingleton<ICommunicationAssessedProducer, LoggingCommunicationAssessedProducer>();
+        // NOTE (task 041): the log-only default below is REPLACED by RuleGatedAssessedConsumer (next block);
+        // LoggingCommunicationAssessedProducer stays defined as the ADR-032 safe default / test double.
+
+        // Comms policy gate (spaarke-notification-spine-r1 task 041 / FR-12). Owner chose a dedicated
+        // sprk_communicationrule Dataverse table (Path B — notes/041-rule-store-decision.md).
+        // CommunicationRuleGate reads that table and evaluates tenant/matter match + a confidence threshold
+        // (per-rule sprk_confidencethreshold, falling back to CommsPolicyOptions.DefaultConfidenceThreshold),
+        // flags privilege (ADR-015 — flagged, NEVER decided), and returns authorize/deny. RuleGatedAssessedConsumer
+        // is the REAL consumer behind task 040's ICommunicationAssessedProducer seam — it REPLACES the interim
+        // LoggingCommunicationAssessedProducer; the enrichment step-5 emit point is unchanged. No outbox write, no
+        // IEventRulesService.FireAsync (RI action execution is task 042, downstream of authorize). Concrete
+        // singletons (ADR-010); all deps (IGenericEntityService, IOptions) are singletons.
+        services.Configure<CommsPolicyOptions>(configuration.GetSection(CommsPolicyOptions.SectionName));
+        services.AddSingleton<CommunicationRuleGate>();
+        services.AddSingleton<ICommunicationAssessedProducer, RuleGatedAssessedConsumer>();
 
         // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread
         // analog of the enrichment orchestrator above: find-or-create a sprk_communicationthread and stamp
