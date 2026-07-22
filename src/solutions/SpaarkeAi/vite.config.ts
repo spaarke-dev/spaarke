@@ -53,6 +53,10 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // from this shared lib per W4 architectural lock (shared lib = reusable
     // editor; solution = workspace-specific surfaces).
     path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
+    // messaging-communication-app-r3 task 045 (2026-07-22): @spaarke/notifications
+    // (notification-spine client lib) — SpaarkeAi's notificationsBootstrap.ts +
+    // the R3 communications widget consume it; resolve to source like the others.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
     // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
     // Spaarke.LegalWorkspace shared package resolves via a proper file: dep
     // in package.json (barrel re-exports the LegalWorkspace solution's src).
@@ -187,6 +191,11 @@ export default defineConfig({
       // — DUAL-DEPLOY consumer (NFR-07).
       "@spaarke/communication-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
       "@spaarke/communication-components": path.resolve(__dirname, "../../client/shared/Spaarke.Communication.Components/src"),
+      // messaging-communication-app-r3 task 045 (2026-07-22): @spaarke/notifications
+      // (notification-spine client lib) — consumed by SpaarkeAi's notificationsBootstrap.ts
+      // + the R3 communications widget arrival badge/toast. Source-aliased like the rest.
+      "@spaarke/notifications/src": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
+      "@spaarke/notifications": path.resolve(__dirname, "../../client/shared/Spaarke.Notifications/src"),
       // R4 task 020 (2026-06-10): @spaarke/smart-todo-components consumed by the
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),

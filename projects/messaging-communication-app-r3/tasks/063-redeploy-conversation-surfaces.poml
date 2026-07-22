@@ -3,7 +3,7 @@
   <metadata>
     <title>Redeploy all conversation surfaces with Phase 5 + UAT changes (spaarkedev1)</title>
     <phase>7 UAT hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deploy/orchestration; prescriptive; no new source logic.</rigor-reason>
     <model-tier>sonnet</model-tier>
