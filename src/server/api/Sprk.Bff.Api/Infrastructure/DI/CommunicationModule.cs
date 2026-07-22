@@ -199,6 +199,17 @@ public static class CommunicationModule
         // which already injects the scoped IPostUploadIndexingEnqueuer via the same pattern.
         services.AddSingleton<ICommunicationEnrichmentService, CommunicationEnrichmentService>();
 
+        // communication_assessed producer seam (spaarke-notification-spine-r1 task 040 / FR-11). Enrichment
+        // step 5 (RunAssessmentEmissionAsync) publishes the assessed signal through
+        // ICommunicationAssessedProducer instead of only logging. Registered UNCONDITIONALLY (ADR-032) with
+        // the interim log-only safe default (LoggingCommunicationAssessedProducer) — no outbox write, no
+        // IEventRulesService.FireAsync (both out of scope for FR-11). Task 041 replaces this registration with
+        // the real comms-policy-gate consumer behind the SAME seam; task 042 (downstream of that gate) writes
+        // the kind=communication-assessed outbox row. Placement Justification (root §10/§11): the seam lives in
+        // Services/Communication/ beside its sole emit point (the enrichment step), consumes nothing AI-internal
+        // (ADR-013 clean), and is a genuine seam (≥2 implementations: this default + task 041's policy consumer).
+        services.AddSingleton<ICommunicationAssessedProducer, LoggingCommunicationAssessedProducer>();
+
         // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread
         // analog of the enrichment orchestrator above: find-or-create a sprk_communicationthread and stamp
         // the sprk_communicationthread lookup, invoked from BOTH the inbound capture path (email:

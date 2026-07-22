@@ -4,7 +4,7 @@
     <title>Comms-Assessed Producer — RunAssessmentEmissionAsync Emit-Only Log to Fire-and-Forget Producer</title>
     <phase>4 Comms-RI Proving Producer + Policy</phase>
     <gate>blocked-until:031,024,email-r4-W10</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Code implementation modifying a shipped .cs file in Services/Communication/ plus a new producer type and DI registration; tags include bff-api; this task ADDS a tests/integration/seam/** file, so the TEST-MODIFYING override row (root CLAUDE.md §8) applies unconditionally regardless of the default STANDARD/FULL heuristic.</rigor-reason>
     <model-tier>opus</model-tier>

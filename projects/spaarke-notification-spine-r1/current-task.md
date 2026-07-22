@@ -9,10 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 — comms_assessed producer (FR-11), Phase 4 Wave 12 — NOT STARTED** (deps 031✅ 024✅ email-r4-W10✅ all met → UNBLOCKED). Prior: 024 ✅, 025 ✅ DONE. Phase 2 + Phase 3 COMPLETE. |
-| **Step** | Begin Step 1 of task 040 (`tasks/040-comms-assessed-producer.poml`). FULL rigor (opus/high — assessment-gated producer; touches Services/Communication). |
-| **Status** | 024+025 shipped & on master (`1a5bc7d15`). SpaarkeAi fresh-master build fixed (Notifications added to Build-AllClientComponents.ps1; verified end-to-end). messaging-r3 task 045 unblocked (contract-lock note delivered to their worktree). |
-| **Next Action** | **"work on task 040"** (comms_assessed — the enrichment-gated sibling of 024; do NOT conflate with 024). Then 041 → 042 → Phase 5 (050-052) → 090. |
+| **Task** | **041 — comms policy layer (FR-12), Phase 4 Wave 13 — NOT STARTED** (dep 040✅ met). Prior: 024✅ 025✅ 040✅. Phase 2/3 COMPLETE; Phase 4 in progress. |
+| **Step** | Begin Step 1 of task 041 (`tasks/041-comms-policy-layer.poml`). FULL rigor (opus/xhigh — rule-store decision: Binding vs table). Registers the REAL policy-gate consumer behind `ICommunicationAssessedProducer` (040's seam). |
+| **Status** | 024/025 on master (`1a5bc7d15`); 040 committed on branch (batching master-merge per owner). SpaarkeAi fresh-master build fixed + verified. |
+| **Next Action** | **"work on task 041"** (comms policy layer). Then 042 → Phase 5 (050-052) → 090. Master-merge of 025/040 batched for later per owner. |
+
+### 040 result (Phase 4, Wave 12 — ✅ DONE 2026-07-21)
+- `CommunicationEnrichmentService` step 5 now publishes `communication_assessed` via the NEW `ICommunicationAssessedProducer` seam (`Services/Communication/ICommunicationAssessedProducer.cs`: signal record + interface + `LoggingCommunicationAssessedProducer` interim log-only default). Fire-and-forget non-fatal (NFR-05, inner try/catch + `RunStepAsync` guard).
+- DI: unconditional `AddSingleton<ICommunicationAssessedProducer, LoggingCommunicationAssessedProducer>` (ADR-032). Required ctor param (no direct constructions exist). Stale "task 010/052/E5" XML doc refreshed.
+- **MUST NOTs honored**: no Layer-B outbox write, no `IEventRulesService.FireAsync` (grep-verified; those are task 042). Genuine seam (2 impls: default + task-041 consumer) → ADR-010 interface justified.
+- Seam test 2/2 (success signal shape + producer-throws non-fatal). Full suite 8855/0; both gates CLEAN; 46.09 MB; 0 new CVE. Notes: `notes/040-comms-assessed-producer-notes.md`.
+- **For 041**: register the real policy-gate consumer behind `ICommunicationAssessedProducer` (replaces the logging default); emit point unchanged.
 
 ### 025 result (Phase 2, Wave 7 — ✅ DONE 2026-07-21)
 - Delivered `notification-spine-contract-lock.md` to messaging-r3's worktree notes dir (`C:/code_files/spaarke-wt-messaging-communication-app-r3/.../notes/`) + mirrored to `notes/handoffs/`. Cites the ACTUAL shipped shapes (013 envelope, 020 negotiate, 021 `@spaarke/notifications` client, 022 `/pending`, 024's 5 call sites). MINIMAL rigor (docs-only; no gates).
