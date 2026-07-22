@@ -100,7 +100,12 @@ describe('AttachmentList', () => {
       // making both states render an identical (colorless) class. With mergeClasses
       // the two states carry different class strings.
       const uploaded: IAttachmentItem = {
-        attachmentId: '1', name: 'a.pdf', attachmentType: 100000000, documentId: 'd1', documentName: null, uploaded: true,
+        attachmentId: '1',
+        name: 'a.pdf',
+        attachmentType: 100000000,
+        documentId: 'd1',
+        documentName: null,
+        uploaded: true,
       };
       const notUploaded: IAttachmentItem = { ...uploaded, attachmentId: '2', uploaded: false };
 
