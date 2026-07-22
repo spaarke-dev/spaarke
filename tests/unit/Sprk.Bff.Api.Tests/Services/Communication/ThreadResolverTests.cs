@@ -585,4 +585,178 @@ public class ThreadResolverTests
         created.Should().ContainSingle();
         created[0].GetAttributeValue<bool>(NameIsAutoDerivedField).Should().BeTrue();
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // NEW — FR-17 (task 004): participant roll-up for a RECORD-LESS thread + BFF rename
+    // (sprk_name + Edited marker in ONE update) + edit-preserve on a later re-derive.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private const string ParticipantEntity = "sprk_communicationparticipant";
+
+    /// <summary>Sets up the thread's message scan (RetrieveMultiple on sprk_communication by thread lookup).</summary>
+    private void SetupThreadMessages(params Guid[] messageIds) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var c = new EntityCollection();
+                foreach (var id in messageIds)
+                    c.Entities.Add(new DataverseEntity("sprk_communication") { Id = id });
+                return c;
+            });
+
+    /// <summary>Sets up the participant scan (RetrieveMultiple on sprk_communicationparticipant across the messages).</summary>
+    private void SetupParticipants(params DataverseEntity[] participants) =>
+        _entity
+            .Setup(e => e.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == ParticipantEntity),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(participants.ToList<DataverseEntity>()));
+
+    /// <summary>One junction row: a resolved systemuser/contact (display name via EntityReference.Name) OR a raw address.</summary>
+    private static DataverseEntity Participant(string? systemUserName = null, string? contactName = null, string? address = null)
+    {
+        var p = new DataverseEntity(ParticipantEntity) { Id = Guid.NewGuid() };
+        if (systemUserName is not null)
+            p["sprk_systemuser"] = new EntityReference("systemuser", Guid.NewGuid()) { Name = systemUserName };
+        if (contactName is not null)
+            p["sprk_contact"] = new EntityReference("contact", Guid.NewGuid()) { Name = contactName };
+        if (address is not null)
+            p["sprk_addresstext"] = address;
+        return p;
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadWithParticipants_DerivesRollupName()
+    {
+        // FR-17: a record-less thread (marker Auto, NO regarding anchor) is named from its participants
+        // ("Alice, Bob") rather than the generic "Conversation".
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Conversation", nameIsAutoDerived: true)); // no regarding
+        SetupThreadMessages(Guid.NewGuid(), Guid.NewGuid());
+        SetupParticipants(
+            Participant(systemUserName: "Bob"),
+            Participant(contactName: "Alice"),
+            Participant(systemUserName: "Bob")); // duplicate → deduped
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        // Deterministic ordinal order → "Alice, Bob" regardless of the query order above.
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Alice, Bob"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadWithManyParticipants_TruncatesWithPlusCount()
+    {
+        // More than the shown cap (3) → "Alice, Bob, Carol, +N".
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Conversation", nameIsAutoDerived: true));
+        SetupThreadMessages(Guid.NewGuid());
+        SetupParticipants(
+            Participant(systemUserName: "Alice"),
+            Participant(systemUserName: "Bob"),
+            Participant(systemUserName: "Carol"),
+            Participant(systemUserName: "Dave"),
+            Participant(address: "erin@example.com"));
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Alice, Bob, Carol, +2"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReDeriveThreadNameAsync_WhenRecordLessThreadHasNoMessages_FallsBackToConversation()
+    {
+        // No messages → no participants to roll up → keep the generic "Conversation" fallback.
+        var threadId = Guid.NewGuid();
+        SetupThreadRead(threadId, Thread(threadId, name: "Old", nameIsAutoDerived: true));
+        SetupThreadMessages(/* none */);
+        var sut = CreateSut();
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread",
+            threadId,
+            It.Is<Dictionary<string, object>>(d => (string)d["sprk_name"] == "Conversation"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameThreadAsync_SetsNameAndFlipsMarkerToEditedInOneUpdate()
+    {
+        // FR-17 rename: sprk_name + sprk_nameisautoderived=false (Edited) written ATOMICALLY in ONE UpdateAsync.
+        var threadId = Guid.NewGuid();
+        Dictionary<string, object>? written = null;
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        var persisted = await sut.RenameThreadAsync(threadId, "  Case strategy  ", CancellationToken.None);
+
+        persisted.Should().Be("Case strategy"); // trimmed
+        written.Should().NotBeNull();
+        ((string)written!["sprk_name"]).Should().Be("Case strategy");
+        ((bool)written[NameIsAutoDerivedField]).Should().BeFalse("rename flips the marker to Edited");
+        // ONE update only (name + marker together) — not two writes.
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameThreadAsync_WhenNameBlank_ThrowsAndDoesNotWrite()
+    {
+        var sut = CreateSut();
+
+        var act = async () => await sut.RenameThreadAsync(Guid.NewGuid(), "   ", CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        _entity.Verify(e => e.UpdateAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RenameThenReDerive_OnEditedThread_IsNoOp_NamePreserved()
+    {
+        // End-to-end edit-preserve: rename flips the marker to Edited; a SUBSEQUENT re-derive reads that Edited
+        // marker and MUST NOT overwrite the user's name (the marker gate short-circuits — no participant/anchor
+        // roll-up is even attempted).
+        var threadId = Guid.NewGuid();
+        _entity
+            .Setup(e => e.UpdateAsync(
+                "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var sut = CreateSut();
+
+        await sut.RenameThreadAsync(threadId, "User's Custom Name", CancellationToken.None);
+
+        // Now the thread reads back as Edited (marker=false) — mirror what the rename persisted.
+        SetupThreadRead(threadId, Thread(
+            threadId, name: "User's Custom Name", nameIsAutoDerived: false,
+            regardingType: "sprk_matter", regardingId: Guid.NewGuid().ToString(), regardingName: "Some New Regarding"));
+
+        await sut.ReDeriveThreadNameAsync(threadId, CancellationToken.None);
+
+        // The rename wrote once; the re-derive wrote NOTHING (edit-preserve).
+        _entity.Verify(e => e.UpdateAsync(
+            "sprk_communicationthread", threadId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
 }

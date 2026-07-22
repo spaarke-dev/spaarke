@@ -291,6 +291,39 @@ export function buildCorrespondenceComposeHtml(record: Record<string, unknown>):
 }
 
 /**
+ * R7-4 (UAT 2026-07-21) — true when a payload is a `compose-draft-document` result: a
+ * `{ title?, body_html, document_kind?, cited_refs? }` shape carrying the LLM-authored, editor-ready
+ * document HTML (DEF-08). Discriminated by a non-empty `body_html` string — distinct from a
+ * draft-correspondence payload (which uses `body`, not `body_html`), so the two never collide.
+ */
+export function isComposeDraftDocument(payload: unknown): payload is Record<string, unknown> {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as Record<string, unknown>;
+  const bodyHtml = typeof record.body_html === 'string' ? record.body_html.trim() : '';
+  return bodyHtml.length > 0;
+}
+
+/**
+ * R7-4 — build the Compose seed for a `compose-draft-document` result. `body_html` is the
+ * LLM-authored, editor-ready document HTML (DEF-08 Part A) and is seeded VERBATIM (the Compose
+ * editor mounts it as `widget_load` → `widgetData.compose.draft.html`). Falls back to wrapping the
+ * title as plain text if `body_html` is somehow empty (never reached after `isComposeDraftDocument`).
+ * Returns the tab title too (from `title`, default "Draft document") for the tab label + confirmation.
+ */
+export function buildDraftDocumentComposeSeed(record: Record<string, unknown>): {
+  html: string;
+  title: string;
+} {
+  const bodyHtml = typeof record.body_html === 'string' ? record.body_html.trim() : '';
+  const title =
+    typeof record.title === 'string' && record.title.trim().length > 0
+      ? record.title.trim()
+      : 'Draft document';
+  const html = bodyHtml.length > 0 ? bodyHtml : assistantTextToDraftHtml(title);
+  return { html, title };
+}
+
+/**
  * Render an `event_output` payload (the STORED ledger entry, ADR-040 — render
  * follows store) as chat markdown.
  *

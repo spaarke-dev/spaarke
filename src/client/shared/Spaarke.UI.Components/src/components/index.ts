@@ -219,3 +219,31 @@ export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
 // indicator, and polls the BFF thread-read + unread-count endpoints
 // (task 050) on a configurable ~5s interval. NO client-side ACS SDK (NFR-04).
 export * from './CommunicationTimeline';
+
+// ConversationView - Teams-style chat-bubble renderer keyed on SENDER IDENTITY
+// (systemuserid, from FR-18), not email-string (task 011, FR-02/03). New
+// presentation over the CommunicationTimeline core (reducer/poll/buildTimeline
+// reused, not forked): mine-right/others-left alignment, day dividers, and
+// per-message status on own bubbles.
+export * from './ConversationView';
+
+// ConversationWorkspace - Mount-agnostic two-pane shell: thread list (name +
+// unread + word-filter + create-＋) beside a conversation, optional `regarding`
+// filter (task 012, FR-01/10/16). Right pane wired via the `renderConversation`
+// seam - Phase-4 hosts (PCF/widget/code-page) inject ConversationView + the
+// current user's systemuserid. All-mode -> FR-16 list; record-mode -> existing
+// by-regarding read (CLAUDE.md §6.5 Path A exception, both server-access-filtered).
+export * from './ConversationWorkspace';
+
+// MessageQuickView - Fluent v9 Popover: 200-char message preview (email shows
+// to/from/date/subject) + an open→pin action that calls the host-wired `onPin`,
+// which drives ConversationView's new `scrollToMessage(id)` imperative handle
+// (forwardRef) to scroll + transiently highlight the bubble (task 023, FR-05).
+export * from './MessageQuickView';
+
+// NewThreadModal - Fluent v9 modal to start (find-or-create) a 1:1 direct thread
+// via POST /threads/direct; reuses RecipientField/BodyEditor/AssociationChips
+// (no dup impl). Optional regarding (read-only AssociationChips) + optional body
+// (posted as the first Message via the existing send engine). name/description
+// omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
+export * from './NewThreadModal';

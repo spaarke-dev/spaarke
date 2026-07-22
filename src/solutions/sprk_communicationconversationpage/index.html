@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Conversation</title>
+    <style>
+      /* Reset styles for Dataverse Custom Page context */
+      /* `box-sizing: border-box` is REQUIRED — without it, the conversation
+         shell's inner padding adds to the 100%-of-viewport width/height and
+         overflows the Power Apps modal frame on the right and bottom (mirrors
+         sprk_communicationspage's DataGrid box-sizing note). */
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+      /* Ensure Fluent provider fills the container */
+      #root > div {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

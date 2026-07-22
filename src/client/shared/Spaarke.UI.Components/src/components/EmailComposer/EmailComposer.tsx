@@ -26,6 +26,7 @@ import { forwardRef, useImperativeHandle } from 'react';
 import {
   Field,
   Input,
+  Link,
   MessageBar,
   MessageBarBody,
   Text,
@@ -56,6 +57,9 @@ import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 // Attachment source defaults
 // ---------------------------------------------------------------------------
 
+// NOTE: `mapStateToSendRequest` now lives in `EmailComposer.reducer.ts` (moved
+// there by email-r4 task 104); it is imported above. R3 task 020's `threadId`
+// argument was re-applied to that reducer copy during the origin/master merge.
 function defaultAttachmentSources(
   attachmentSources: IComposerAttachmentSource[] | undefined,
   wizardContext: IEmailComposerProps['wizardContext']
@@ -64,6 +68,16 @@ function defaultAttachmentSources(
   return wizardContext
     ? [{ kind: 'wizard' }, { kind: 'related' }, { kind: 'local' }, { kind: 'spe' }]
     : [{ kind: 'local' }, { kind: 'related' }, { kind: 'spe' }];
+}
+
+/**
+ * Blocks script-executing schemes (`javascript:`/`data:`/`vbscript:`) before an
+ * (untrusted) `recordLink.url` is rendered into an `<a href>`. This is the
+ * shared send engine — a caller could build the url from record-derived data.
+ * Everything else (http(s), app-relative, mailto) is allowed.
+ */
+function isSafeHref(url: string): boolean {
+  return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
 // ---------------------------------------------------------------------------
@@ -206,7 +220,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      const request = mapStateToSendRequest(stateRef.current);
+      const request = mapStateToSendRequest(stateRef.current, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,
         bffBaseUrl: props.bffBaseUrl,
@@ -222,7 +236,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       throw err;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients]);
+  }, [props.authenticatedFetch, props.bffBaseUrl, props.allowEmptyBody, props.maxRecipients, props.threadId]);
 
   const saveDraft = React.useCallback(async (): Promise<{ communicationId: string }> => {
     if (!props.onSaveDraftRequest) {
@@ -292,6 +306,21 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {showAssociations && state.associations.length > 0 && (
         <div className={styles.section} role="region" aria-label="Linked records">
           <AssociationChips associations={state.associations} />
+        </div>
+      )}
+
+      {/* R3 task 020 (FR-07): optional record-link affordance when opened from a
+          conversation. Presentational only — semantic tokens, no hardcoded color.
+          Unsafe-scheme urls degrade to a non-clickable label (isSafeHref). */}
+      {props.recordLink && (
+        <div className={styles.section} role="region" aria-label="Related record">
+          {isSafeHref(props.recordLink.url) ? (
+            <Link href={props.recordLink.url} target="_blank" rel="noopener noreferrer">
+              {props.recordLink.label}
+            </Link>
+          ) : (
+            <Text>{props.recordLink.label}</Text>
+          )}
         </div>
       )}
 

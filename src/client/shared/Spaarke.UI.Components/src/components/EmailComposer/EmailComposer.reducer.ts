@@ -275,7 +275,7 @@ export function buildBodyWithAttachmentLinks(
  * Reuses the existing `SendCommunicationRequest.AttachmentDocumentIds` field —
  * NO new send-contract attachment field is introduced (task 104 / §11).
  */
-export function mapStateToSendRequest(state: EmailComposerState): SendCommunicationOptions {
+export function mapStateToSendRequest(state: EmailComposerState, threadId?: string): SendCommunicationOptions {
   return {
     to: state.to.map(r => r.email),
     cc: state.cc.length > 0 ? state.cc.map(r => r.email) : undefined,
@@ -283,6 +283,11 @@ export function mapStateToSendRequest(state: EmailComposerState): SendCommunicat
     subject: state.subject,
     body: buildBodyWithAttachmentLinks(state.body, state.bodyFormat, state.attachments),
     bodyFormat: state.bodyFormat === 'HTML' ? 'html' : 'text',
+    // R3 task 020 (FR-07/FR-19): pin the sent email to the active conversation
+    // thread when opened from a conversation. Omitted (undefined) for every
+    // existing caller → server find-or-create, unchanged. Same send path
+    // (ADR-045) — not a new branch.
+    threadId,
     attachmentDocumentIds: state.attachments
       .filter(a => a.selected !== false && a.documentId)
       .map(a => a.documentId as string),
@@ -290,6 +295,15 @@ export function mapStateToSendRequest(state: EmailComposerState): SendCommunicat
     associations: state.associations,
     sendMode: state.sendMode,
     fromMailbox: state.fromMailbox,
+    // Reply / Reply All / Forward inherit the parent communication's regarding associations
+    // (UAT R4 D12-1 / task 124). The new draft is composed from a source communication whose id is
+    // `state.communicationId`; the BFF copies that source's populated sprk_regarding* lookups onto the
+    // new record at create time (true inheritance — a direct copy, NOT an engine re-derivation). Only
+    // reply/forward set it (Reply All maps to the 'reply' mode); compose/draft/view do not inherit.
+    inheritRegardingFromCommunicationId:
+      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId
+        ? state.communicationId
+        : undefined,
   };
 }
 

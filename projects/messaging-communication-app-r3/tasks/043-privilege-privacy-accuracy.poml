@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Privilege / privacy accuracy — surface markers; recipient display = actual permitted recipients</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>after:011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Correctness-critical (NFR-01): privilege/privacy accuracy; touches shared read DTO + BFF + UI display. FULL gates mandatory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Access-model correctness across BFF + shared read + UI; over-disclosure is a high-severity failure — strongest reasoning tier required.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared single-thread read DTO and the shared conversation UI display path — conflicts with any other read/UI edit.</parallel-reason>
+    <deps>002, 011</deps>
+    <tags>frontend, bff-api, backend</tags>
+    <estimated-effort>2.5 days</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-21: surface isPrivate / isInternalOnly / privilegeClassification on communications, and make the participant/recipient display reflect the ACTUAL permitted recipients. NFR-01 correctness-critical: NEVER imply that someone received or saw a restricted communication. If the permitted-recipient set cannot be computed accurately server-side, STOP and escalate — do not display a best-guess list.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>Surface the three privilege/privacy markers on communications and render a recipient/participant list that is exactly the set of actually-permitted recipients — computed server-side under impersonation + the shared access-filter, with no membership-union and no best-guess fallback. A restricted communication must never imply access or receipt for an unauthorized viewer.</goal>
+  <context>
+    <background>FR-21 + NFR-01 are correctness-critical: privilege/privacy must be accurate. The recipient/participant list must reflect actual permitted recipients only — never over-disclose. Reads are impersonated + access-filtered with NO membership-union (retired 2026-07-16). Depends on the participant/regarding markers from task 002 and the conversation UI from task 011.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**</file>
+      <file>projects/messaging-communication-app-r1/notes/access-model-decision.md</file>
+    </relevant-files>
+    <dependencies>Task 002 (regarding lookups + privacy/privilege markers schema). Task 011 (conversation UI). R2 participant junction (sprk_communicationparticipant).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="NFR-01">Correctness-critical. The recipient/participant display MUST reflect ONLY actual permitted recipients. MUST NOT imply that an unauthorized user received or saw a restricted communication. No best-guess recipient list.</constraint>
+    <constraint source="access-model">Compute permitted recipients server-side under impersonation (MSCRMCallerID) + the shared access-filter; MUST NOT hand-compute a membership union.</constraint>
+    <constraint source="spec-FR-21">Surface isPrivate, isInternalOnly, and privilegeClassification on the communication; scope is these three markers + accurate recipient display — no new privacy taxonomy.</constraint>
+    <constraint source="ADR-028">All BFF calls via @spaarke/auth authenticatedFetch.</constraint>
+    <constraint source="ADR-021">Privilege/privacy markers render accessibly in light + dark.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/notes/access-model-decision.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="impersonated-access-filter" location="CommunicationThreadReadService.cs">Reads run impersonated + access-filtered; extend the read to compute permitted recipients the same way — no union.</pattern>
+      <pattern name="marker-display" location="CommunicationTimeline/**">Render isPrivate/isInternalOnly/privilegeClassification as accessible badges on the message/email block.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the access-model decision + CommunicationThreadReadService; confirm how impersonated access-filtering already scopes reads. Confirm the markers' storage from task 002.</step>
+    <step order="2">Enrich the read DTO to carry isPrivate / isInternalOnly / privilegeClassification and the server-computed permitted-recipient set (identity + display name), computed under impersonation + access-filter, no union.</step>
+    <step order="3">If the permitted-recipient set cannot be computed accurately server-side for a communication, return a signal that the UI renders as "recipients not available" — do NOT emit a partial/best-guess list. Trigger escalation per below.</step>
+    <step order="4">Surface the three markers + the permitted-recipient list in the conversation UI; render markers accessibly.</step>
+    <step order="5">Add seam tests in tests/integration/seam/Communication/ including the NEGATIVE case: a restricted communication never exposes recipients/receipt to an unauthorized viewer (no over-disclosure); plus a parity case (authorized viewer sees the correct permitted set). Add BFF unit tests for the recipient computation.</step>
+    <step order="6">Run dotnet publish -c Release, verify ≤60 MB compressed + 0 new HIGH CVE. Build/verify; run ui-test; update TASK-INDEX.md 043 to complete; document deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the permitted-recipient set cannot be computed accurately server-side (e.g. no reliable per-recipient access signal), STOP and escalate — do NOT display a best-guess recipient list. Render "recipients not available" and surface the gap to the human rather than risk over-disclosure.</trigger>
+  </escalation>
+  <justification>
+    <existing>Communications have privacy/privilege markers (task 002) but the read DTO does not surface them or a permitted-recipient set.</existing>
+    <extension>Yes — extend the existing impersonated read + DTO; no new read mechanism. The permitted-recipient computation is new but rides the existing access-filter.</extension>
+    <cost-of-doing-nothing>Without accurate server-side computation, the UI would either hide privilege state or imply receipt/access a user lacks — a correctness-critical over-disclosure failure (success criterion 9, NFR-01).</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Edit, Bash, Skill(ui-test), Skill(conflict-check), Skill(task-execute)</tools>
+  <outputs>
+    <output type="code">Read DTO enrichment (markers + permitted-recipient set) in CommunicationThreadReadService + endpoint</output>
+    <output type="code">Marker + recipient display in the conversation UI</output>
+    <output type="test">Seam test incl. negative over-disclosure case + parity; BFF unit tests for recipient computation</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">isPrivate, isInternalOnly, and privilegeClassification are surfaced on the communication and render accessibly in light + dark.</criterion>
+    <criterion testable="true">The recipient/participant list shown equals the server-computed set of actual permitted recipients, computed under impersonation + access-filter, with no membership-union.</criterion>
+    <criterion testable="true">NEGATIVE: for a restricted communication, an unauthorized viewer is never shown recipients/receipt that imply access they lack (no over-disclosure) — proven by a seam test.</criterion>
+    <criterion testable="true">When the permitted-recipient set cannot be computed accurately, the UI renders "recipients not available" and the condition is escalated — no best-guess list is emitted.</criterion>
+    <criterion testable="true">Seam tests in tests/integration/seam/Communication/ cover the negative case + an authorized-parity case; publish ≤60 MB compressed; 0 new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <ui-tests>As an authorized user, verify markers + correct permitted-recipient list; as an unauthorized user, verify a restricted comm never implies access/receipt.</ui-tests>
+  <notes>BFF task: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB compressed + 0 new HIGH CVE + update tests. Run /conflict-check before any PR touching Services/Communication. Reference spec FR-21 + NFR-01. This is the correctness-critical task — bias toward under-disclosure and escalation over any guess.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

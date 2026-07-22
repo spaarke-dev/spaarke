@@ -1,0 +1,70 @@
+<task id="124" project="email-communication-solution-r4">
+  <metadata>
+    <title>Reply / Reply All / Forward — inherit related-records (regarding) from the parent communication (UAT R4 D)</title>
+    <phase>Wave 12 — UAT round 4 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>104,042</dependencies>
+    <blocks>—</blocks>
+    <tags>communication, bff-api, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Changes reply/forward draft creation + regarding-field seeding; may touch BFF + client. Investigation + implementation. Code-review + adr-check.</rigor-reason>
+    <parallel-group>W12-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12, FR-13</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 4 (`notes/UAT-ROUND4-FEEDBACK.md` section D): a Reply / Reply All / Forward does NOT set the new email's
+    Related records; it should INHERIT the regarding/related records from the parent (source) communication. Owner:
+    "this can be either in how the email is created/sent OR maybe in the field mapping — investigate to see how this
+    is best handled."
+
+    INVESTIGATE FIRST, then implement the cleanest approach:
+      1. Trace the reply/forward flow: how the CommunicationActions PCF Reply/ReplyAll/Forward handlers seed the new
+         draft (client-side create? a BFF create-draft endpoint?), and where the SOURCE communication's
+         `sprk_regarding*` typed-lookup fields are available at that point.
+      2. Compare two mechanisms:
+         (a) SEND/CREATE PATH inheritance — when the reply/forward creates the new `sprk_communication`, copy the
+             source's `sprk_regarding*` fields (the additive typed-lookup set per the task-042 RegardingFieldMap)
+             onto the new record. Deterministic, immediate, mirrors the parent exactly (true inheritance).
+         (b) FIELD MAPPING FRAMEWORK — a mapping rule that inherits regarding from a source parent
+             (`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`). Consider whether the FMF's creation-time
+             source-parent model fits "reply's parent = source communication" without contortion.
+      3. Recommend + implement. Bias toward (a) if the reply/forward already creates the record with the source in
+         hand — copy ALL populated `sprk_regarding*` fields from source → new draft (inheritance, NOT re-running the
+         association engine / re-derivation). Preserve task-042 additive semantics (never clear-and-set).
+    Document the chosen approach + why (§6.5 / Placement Justification if BFF-touching).
+  </prompt>
+
+  <goal>
+    Reply / Reply All / Forward create a new communication whose regarding/related records are inherited (copied)
+    from the parent communication, so the reviewer sees the same associations without re-resolving. Approach chosen +
+    documented; task-042 additive write semantics preserved.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">After Reply / Reply All / Forward, the new draft communication carries the source communication's populated `sprk_regarding*` typed-lookup fields (matter/project/person/organization/etc. as present on the parent).</criterion>
+    <criterion testable="true">Inheritance COPIES the parent's regarding fields (does not re-run the association engine to re-derive); additive semantics preserved (never clears a sibling regarding field).</criterion>
+    <criterion testable="true">The chosen mechanism (send/create-path vs field-mapping) is documented with rationale; if BFF-touching, a Placement Justification (§10) is stated + publish-size/delta + no new HIGH CVE reported.</criterion>
+    <criterion testable="true">Unit/integration test covers the inheritance (source with N regarding fields → reply draft has the same N). If BFF: a Communication test; if client: a handler/seed test.</criterion>
+    <criterion testable="true">Existing send/reply/forward behavior (W10 tasks 103/104: recipients, attachments) is unaffected; existing Communication tests stay green.</criterion>
+    <criterion testable="true">Relevant build(s) clean (`dotnet build` if BFF; `npm run build:prod` if a PCF changed); version bump + repack any PCF host that changed.</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>INHERIT (copy from parent), do NOT re-derive via the association engine — the owner wants the reply to match the parent's associations.</constraint>
+    <constraint>Preserve task-042 additive typed-lookup semantics (mirror RegardingFieldMap; never clear-and-set). Do NOT add a new regarding mechanism (root CLAUDE.md — extend existing).</constraint>
+    <constraint>If BFF-touching: load `.claude/constraints/bff-extensions.md`, state Placement Justification, verify publish-size + CVE. Envelope-only where the engine is involved (ADR-045) — though inheritance should NOT invoke the engine.</constraint>
+    <constraint>Do NOT regress W10 103/104. ADR-028 auth; ADR-021 Fluent v9 for any UI.</constraint>
+  </constraints>
+
+  <notes>
+    Runs in its own wave slice (W12-b) AFTER the W12 batch (121/122/123) commits, because it may touch the
+    CommunicationActions host / EmailComposer send path that task 123 also touches — sequence to avoid a race. Read
+    the task-104 reply/forward seed code + the send request contract + the task-042 RegardingFieldMap first. Leave
+    changes UNCOMMITTED; do NOT touch TASK-INDEX/current-task/project CLAUDE.md.
+  </notes>
+</task>

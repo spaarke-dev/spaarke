@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Per-user read-state — last-seen + mark-read/unread (best-effort, NOT release-blocking)</title>
+    <phase>5 Release-gated must-haves</phase>
+    <gate>after:003</gate>
+    <status>deferred</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF read-state surface + schema + frontend; tags include bff-api. FULL gates if built.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Assumption-laden design (per-user last-seen mechanism left to implementer); benefits from stronger design reasoning if it proceeds.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a per-user read-state surface across BFF + frontend; conflicts with other BFF/UI edits.</parallel-reason>
+    <deps>003</deps>
+    <tags>bff-api, frontend</tags>
+    <estimated-effort>2 days (drop if it exceeds this)</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-25 (BEST-EFFORT, NOT release-blocking): per-user last-seen per thread + mark-read/unread. The mechanism is left to the implementer (spec Assumptions). DROP this task if it proves significant work — it is explicitly nice-to-have and must not block release. status=deferred.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+  <goal>If — and only if — it can be done within a small, additive footprint, give each user a per-thread last-seen marker plus explicit mark-read / mark-unread, so unread state is per-user. If the design balloons (data migration, cross-cutting read changes, heavy schema), STOP and drop it; it is not release-blocking.</goal>
+  <context>
+    <background>FR-25 is best-effort (spec §Owner Clarifications: "nice-to-have if not significant work"; §Assumptions: per-user last-seen marker per thread if built, mechanism left to the implementer; may be dropped). Risk register R5: read-state can balloon — drop if significant. This task is status=deferred by default; only promote it if P1 sizing shows it is small and additive.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/**</file>
+      <file>src/client/shared/Spaarke.Communication.Components/**</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/**</file>
+    </relevant-files>
+    <dependencies>Task 003 (participant junction — the natural per-user grain). R2 schema.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR-25">Best-effort. MUST NOT block release. If significant work, DROP the task and record the decision.</constraint>
+    <constraint source="spec-scope">Additive only — MUST NOT require a data migration or a cross-cutting change to existing reads. If either is needed, that is the signal to drop.</constraint>
+    <constraint source="ADR-028">All BFF calls via @spaarke/auth authenticatedFetch.</constraint>
+    <constraint source="NFR-01">Read-state is per-user and MUST NOT leak another user's read state or imply access; keep it scoped to the caller under impersonation.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="per-user-last-seen" location="implementer's choice — per-thread last-seen keyed to the caller">Minimal additive marker (e.g. a per-user/per-thread last-seen timestamp) driving unread; explicit mark-read/unread flips it.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">P1 sizing gate: estimate the mechanism (schema + read/write path). If it requires a data migration, a new junction, or cross-cutting read changes, STOP and drop the task — record the decision in notes/ and leave status=deferred.</step>
+    <step order="2">If small + additive: design the per-user last-seen marker (mechanism implementer's choice) scoped to the caller under impersonation.</step>
+    <step order="3">Add a BFF surface to read/update last-seen + mark-read/unread (state Placement Justification per bff-extensions.md; prefer extending CommunicationEndpoints).</step>
+    <step order="4">Wire the client: reflect per-user unread from last-seen; add mark-read/unread affordance.</step>
+    <step order="5">Add BFF unit tests + a component test; verify read-state is caller-scoped (no cross-user leak).</step>
+    <step order="6">If built: run dotnet publish -c Release, verify ≤60 MB + 0 new HIGH CVE. Build/verify; update TASK-INDEX.md 046 (complete OR dropped-with-rationale); document the decision + deviations in notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If sizing shows read-state requires a data migration, new junction, or cross-cutting read changes, STOP and drop the task (record rationale) — it is explicitly best-effort and must not block release or expand scope.</trigger>
+  </escalation>
+  <justification>
+    <existing>Unread is currently thread/participant-derived, not a per-user last-seen; no per-user read-state store exists.</existing>
+    <extension>No — a per-user last-seen marker is a new (small) additive surface if built; but it is best-effort and dropped if it cannot extend the existing grain cheaply.</extension>
+    <cost-of-doing-nothing>Without it, unread is not per-user last-seen; acceptable — FR-25 is explicitly non-blocking, so the cost of dropping is only the lost nice-to-have, not a failed release criterion.</cost-of-doing-nothing>
+  </justification>
+  <tools>Read, Edit, Bash, Skill(conflict-check), Skill(task-execute)</tools>
+  <outputs>
+    <output type="code">(If built) per-user last-seen + mark-read/unread BFF surface + client wiring</output>
+    <output type="note">projects/messaging-communication-app-r3/notes/ — build-or-drop decision + rationale</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A build-or-drop decision is recorded in notes/ with concrete sizing rationale; if dropped, TASK-INDEX reflects deferred/dropped and release is not blocked.</criterion>
+    <criterion testable="true">If built: per-user last-seen drives unread per user; mark-read/unread flips it and persists.</criterion>
+    <criterion testable="true">If built: read-state is caller-scoped under impersonation — a user never sees another user's read state (negative: no cross-user leak).</criterion>
+    <criterion testable="true">If built: change is additive (no data migration, no cross-cutting read change); publish ≤60 MB compressed; 0 new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>BFF task IF built: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB + 0 new HIGH CVE + update tests. status=deferred — this is the assumption-laden FR; the mechanism is left to the implementer and the task is DROPPED if significant. Reference spec FR-25 + risk R5. If read-state schema is built, it must be an additive Dataverse field (coordinate with a schema task, not a plugin).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
+</task>

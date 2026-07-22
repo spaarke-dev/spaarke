@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r1
 
-> **Last Updated**: 2026-07-20 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. This is a **UAT-driven remediation** stream (not formal POML task execution) — the Assistant repositioning features are shipped; we're iterating on UAT feedback (R3 → R4).
+> **Last Updated**: 2026-07-21 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. This is a **UAT-driven remediation** stream (not formal POML task execution) — the Assistant repositioning features are shipped; we're iterating on UAT feedback (now through R6).
 
 ---
 
@@ -9,11 +9,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Mode** | UAT remediation (R4 round-2 close-out shipped; awaiting owner's next UAT pass) |
+| **Mode** | UAT remediation — R7 fully shipped + deployed + merged; awaiting owner's next UAT pass. Open: R4-7 / R4-9 (need repro) + R7-5b append (owner decision). |
 | **Status** | in-progress — clean handoff point |
-| **Git** | branch + `origin/branch` at **`d3428b930`**, merged to **origin/master**. Working tree clean at commit. (Main repo `C:/code_files/spaarke` local master lags — blocked by ANOTHER worktree's uncommitted work; origin/master is correct.) |
-| **Deployed** | dev: `sprk_spaarkeai` (R6, rebuilt from merged source) + the R5 wizard code pages. BFF **unchanged** across R4/R5/R6. |
-| **Next Action** | All R6 items shipped. Optional follow-ups: deploy `sprk_communicationpage` (the shared R6-5b recipient-email fix is merged, not yet live on the standard modal); establish shared modal-width tokens (R6-4 recommendation). Still awaiting owner repro: **R4-7 / R4-9**. Rule: `/worktree-sync` before any BFF deploy (none has been needed). |
+| **Git** | branch + `origin/branch` + **origin/master** all at **`5b952439e`**. Main repo `C:/code_files/spaarke` local master synced. Working tree clean. |
+| **Deployed (dev)** | `sprk_spaarkeai` (**R7** — rebuilt from merged source, 4856 KB); CommunicationActions PCF v1.1.4 (R6); R5 wizard code pages. **BFF unchanged across R4/R5/R6/R7** (`compose-draft-document` capability was already Active in the dev catalog — statecode=0). |
+| **Next Action** | Wait for owner's next UAT pass. **Open items: R4-7, R4-9** (need repro), **R7-5b** (append drafted content INTO the open Compose tab — needs a shared-lib Spaarke.Compose.Components append mode; owner chose "append"; NOT in this deploy — see R7 note). Rule: `/worktree-sync` before any BFF deploy (none needed all stream). |
+
+### Only open items (both need an owner repro; NO code written yet)
+- **R4-7** — new session showed header *"Actions available for '…'"* (text from the file in Compose) but **no actions listed** beneath — confusing empty state.
+- **R4-9** — Context / **Execution-Trace pane** loads inconsistently; it logs the session's grounded tool calls from the ledger (so it reads empty when a turn made no tool call — see R5-6 answer). Owner to re-capture repro.
+
+### Deploy recipes (fast reference)
+- Client code page: `cd src/solutions/SpaarkeAi && rm -rf dist node_modules/.vite && npm run build` → PATCH `sprk_spaarkeai` web resource content + `PublishXml` (targeted, mirrors `Deploy-SpaarkeAi.ps1`). Catalog chips = live Web-API PATCH on `sprk_playbookconsumers.sprk_chiptransitions` (no deploy).
+- Wizard code pages need `npm install --legacy-peer-deps` first (no node_modules); deploy = PATCH the `sprk_*wizard` web resource content + publish.
+- **PCF** (e.g. CommunicationActions): bump 5 version locations, `npm install` + `npm run build:prod` (prebuild:prod auto-refreshes shared-lib `dist/`), copy `out/controls/<name>/{bundle.js,ControlManifest.xml,styles.css}` → `Solution/Controls/…`, `pack.ps1`, then `pac solution import --path bin/…zip --publish-changes` (disable `Directory.Packages.props` during import). pac is authed to SPAARKE DEV 1.
+
+### R6 shipped 2026-07-21 (incl. standard email modal via PCF)
+R6-1 Revise-document chip · R6-2 one chip row (revise-context vs consumer cards) · R6-3 redline whitespace-tolerant fallback (master's "Fix #4"; my dup dropped at merge) · R6-4 email dialog 760px · R6-5 recipient lookup wired on BOTH modals + shared `ILookupItem.email` fix (CommunicationActions PCF v1.1.4) · R6-6 rewrite→redline routing. Commits d3428b930 (batch) / f69a2ad46 (PCF+docs). Backlog: [`notes/uat-feedback-2026-07-21-R6.md`](notes/uat-feedback-2026-07-21-R6.md).
 
 ### R6 shipped 2026-07-21 (client + shared-lib email/compose)
 R6-1 Revise-document chip · R6-2 one chip row · R6-3 (already fixed on master via "Fix #4") · R6-4 email dialog 760px · R6-5 recipient lookup + shared ILookupItem.email fix · R6-6 rewrite→redline routing. Merged `d3428b930`. Backlog: [`notes/uat-feedback-2026-07-21-R6.md`](notes/uat-feedback-2026-07-21-R6.md).

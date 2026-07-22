@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.1.0" display-name-key="Communication Attachments" description-key="Communication attachments preview list." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="CommunicationAttachments" version="1.3.0" display-name-key="Communication Attachments" description-key="Communication attachments preview list." control-type="virtual">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>
@@ -11,6 +11,7 @@
     <property name="clientAppId" display-name-key="Client App ID" description-key="Client application ID. Falls back to the sprk_MsalClientId environment variable." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="bffAppId" display-name-key="API App ID" description-key="API application ID. Falls back to the sprk_BffApiAppId environment variable." of-type="SingleLine.Text" usage="input" required="false" />
     <property name="showVersionFooter" display-name-key="Show Version Footer" description-key="Show the version footer at the bottom of the control." of-type="TwoOptions" usage="input" required="false" default-value="true" />
+    <property name="sectionTitle" display-name-key="Section Title" description-key="Section title text. Defaults to ATTACHMENTS when left blank." of-type="SingleLine.Text" usage="input" required="false" default-value="ATTACHMENTS" />
     <resources>
       <code path="index.ts" order="1" />
       <css path="styles.css" order="1" />

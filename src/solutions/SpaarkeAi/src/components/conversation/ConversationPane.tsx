@@ -81,6 +81,7 @@ import { formatEventOutputMarkdown, toDisplayList } from "./DocumentUploadedEven
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
+import { detectDraftDocumentIntent } from "./composeDraftRouting";
 import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
 import {
   detectReviseThisDocumentIntent,
@@ -307,14 +308,29 @@ export function ConversationPane(): React.JSX.Element {
   // fetch kicks off the moment a revise is detected — well before the user reads the ask message and
   // clicks a chip, so the bindingId is resolved by dispatch time.
   const [reviseCapabilityNeeded, setReviseCapabilityNeeded] = React.useState<boolean>(false);
+  // R7-4 (UAT 2026-07-21): the SAME deferred capability-discovery seam also resolves the
+  // `compose-draft-document` bindingId for the substantial-output → Compose route. Enable the
+  // discovery fetch when EITHER a revise OR a draft-document intent is first detected (both stay
+  // inert on a mounted-but-idle pane).
+  const [draftCapabilityNeeded, setDraftCapabilityNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
-    enabled: reviseCapabilityNeeded,
+    enabled: reviseCapabilityNeeded || draftCapabilityNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
       launchableCapabilities.find((c) => c.consumerType === "compose-revise-document")?.bindingId ??
+      null,
+    [launchableCapabilities]
+  );
+  // R7-4: the `compose-draft-document` Binding id from the SAME closed capability catalog (ADR-039:
+  // bindingId only from discovery, never invented). The action is on the `assistant` surface, so it
+  // is returned on the default discovery. Null until the fetch resolves / when the catalog is
+  // unreachable (the decorate branch buffers the request until it resolves).
+  const draftBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find((c) => c.consumerType === "compose-draft-document")?.bindingId ??
       null,
     [launchableCapabilities]
   );
@@ -345,6 +361,13 @@ export function ConversationPane(): React.JSX.Element {
     null
   );
   const reviseDispatchSeqRef = React.useRef(0);
+
+  // R7-4 — a substantial-output "draft a document" request detected BEFORE capability discovery has
+  // resolved the `compose-draft-document` bindingId. Buffered here + dispatched by the effect below
+  // the moment `draftBindingId` back-fills (mirrors the named-intent revise buffer above).
+  const [pendingDraftDocument, setPendingDraftDocument] = React.useState<{ request: string } | null>(
+    null
+  );
 
   // R2 (race-safe revise) — when a natural-language "revise this document" arrives BEFORE the
   // uploaded file's registration has back-filled `activeSourceDocRef.sessionFileId`, we BUFFER the
@@ -466,21 +489,36 @@ export function ConversationPane(): React.JSX.Element {
       const { resolvedLookups: rawResolved, ...draftValues } = draft as Record<string, unknown> & {
         resolvedLookups?: Record<string, ResolvedLookup>;
       };
-      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's active source file (the file the
-      // draft was grounded on) BY REFERENCE — sessionId + the session documentId are all the wizard
-      // needs to fetch the binary (GET .../documents/{id}/content) and attach it to the new record
-      // via its existing upload+link pipeline. Never inline binary (envelope invariant). Absent →
-      // no file carried (the wizard opens with an empty Add-file step, as today).
+      // W-2/W-5 file leg (UAT 2026-07-17): carry the session's file(s) BY REFERENCE — sessionId +
+      // the session documentId(s) are all the wizard needs to fetch the binary
+      // (GET .../documents/{id}/content) and attach it to the new record via its upload+link
+      // pipeline. Never inline binary (envelope invariant).
+      //
+      // R7-3 (UAT 2026-07-21): "create a matter from this file" opened the wizard with NO file
+      // loaded. Root cause: this path carried ONLY the single `activeSourceDocRef`, which is often
+      // still null right after an upload (it back-fills on the summarize/draft flow, not every
+      // upload). Prefer ALL promoted session files — the SAME source Quick Start uses
+      // (`promotedFileIdsByNameRef`) — falling back to the single active source doc. Keeps the
+      // server's drafted field values (this is still the server-driven surface_launch path).
       const sessionId = getSessionId();
-      const activeFile = activeSourceDocRef.current;
-      const fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
+      const promoted = Array.from(promotedFileIdsByNameRef.current.entries());
+      let fileIds: string[] | undefined;
+      let sourceFiles: string[] | undefined;
+      if (promoted.length > 0) {
+        fileIds = promoted.map(([, id]) => id);
+        sourceFiles = promoted.map(([name]) => name);
+      } else {
+        const activeFile = activeSourceDocRef.current;
+        fileIds = activeFile?.sessionFileId ? [activeFile.sessionFileId] : undefined;
+        sourceFiles = activeFile?.fileName ? [activeFile.fileName] : undefined;
+      }
       void launchSurface({
         consumerType: payload.consumerType,
         draftValues,
         resolvedLookups: rawResolved ?? {},
         fileIds,
         source: sessionId ? { sessionId } : undefined,
-        provenance: activeFile?.fileName ? { sourceFiles: [activeFile.fileName] } : undefined,
+        provenance: sourceFiles && sourceFiles.length > 0 ? { sourceFiles } : undefined,
         bffBaseUrl,
       });
     },
@@ -1313,6 +1351,30 @@ export function ConversationPane(): React.JSX.Element {
           return null;
         }
       }
+
+      // R7-4 (UAT 2026-07-21): a substantial-output ask ("write a brief on X", "draft a memo",
+      // "analyze this agreement") should produce an editor-ready DOCUMENT in a Compose tab, NOT a
+      // long answer dumped into the chat. Route it to the shipped `compose-draft-document` capability
+      // (disposition = compose): the client dispatches it, `runBindingDispatch` opens a Compose tab
+      // from the result's `body_html` + posts a short confirmation + follow-on cards, and we SUPPRESS
+      // the raw agent turn. Deterministic (no reliance on the model picking the tool). The bindingId
+      // comes only from capability discovery (ADR-039); buffer until it resolves so the fetch latency
+      // never drops the request. Placed AFTER the revise branches so an open-document revise wins.
+      if (detectDraftDocumentIntent(messageText).isDraftDocument) {
+        setDraftCapabilityNeeded(true);
+        if (draftBindingId) {
+          chips.dispatchBinding(draftBindingId, { slots: { request: messageText } });
+        } else {
+          // Discovery not settled yet — acknowledge (never a silent dead-end) and buffer; the effect
+          // below dispatches the moment `draftBindingId` back-fills.
+          injection.enqueue(
+            makeLocalAssistantMessage("Preparing your document — I'll open it in the Compose tab.")
+          );
+          setPendingDraftDocument({ request: messageText });
+        }
+        return null;
+      }
+
       return handleDecorateOutboundBody(body);
     },
     [
@@ -1323,8 +1385,20 @@ export function ConversationPane(): React.JSX.Element {
       activeComposeDocSessionId,
       dispatchReviseDocument,
       selection.selectionChip,
+      draftBindingId,
+      chips,
     ]
   );
+
+  // R7-4 — fire a BUFFERED "draft a document" request the moment capability discovery resolves the
+  // `compose-draft-document` bindingId. Mirrors the named-intent revise effect: waits for BOTH a
+  // pending request AND the resolved bindingId, then dispatches once and clears the buffer.
+  React.useEffect(() => {
+    if (!pendingDraftDocument || !draftBindingId) return;
+    const { request } = pendingDraftDocument;
+    setPendingDraftDocument(null);
+    chips.dispatchBinding(draftBindingId, { slots: { request } });
+  }, [pendingDraftDocument, draftBindingId, chips]);
 
   // Wave 4 — fire a NAMED-intent revise the moment the auto-mount registers the document session.
   // `activeComposeDocSessionId` back-fills reactively from `registerComposeActiveDocument` (post-
@@ -1595,6 +1669,12 @@ export function ConversationPane(): React.JSX.Element {
                 rightSlot. task 042 (FR-F3): "My Assistant" opens the stated-profile
                 questionnaire. */}
             <AssistantToolMenu
+              // R7-1 (UAT 2026-07-21): route "Quick Start" to the ONE ConversationPane-owned modal
+              // (below) instead of AssistantToolMenu's own instance. That modal carries the session
+              // file context + email handler + the R7-2 next-step injection, and — because opening it
+              // never remounts SprkChat — the follow-up suggestion pills survive (the dual-modal path
+              // was the one that lost them). AssistantToolMenu delegates to this prop when supplied.
+              onQuickStart={() => setQuickStartOpen(true)}
               onMyAssistant={myAssistant.openDialog}
               highlightMyAssistant={myAssistant.needsProfile}
             />
@@ -1803,7 +1883,8 @@ export function ConversationPane(): React.JSX.Element {
         </div>
       </div>
 
-      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef). */}
+      {/* P1-8: Quick Start opened from the chips' "More…" card (see openLibraryModalRef) AND, since
+          R7-1, from the ⋮ "Quick Start" menu (onQuickStart above) — the ONE modal for both entries. */}
       <QuickStartModal
         open={quickStartOpen}
         onClose={() => setQuickStartOpen(false)}
@@ -1813,6 +1894,26 @@ export function ConversationPane(): React.JSX.Element {
         onSendEmail={() => {
           setQuickStartOpen(false);
           setEmailSeed({});
+        }}
+        // R7-2 (UAT 2026-07-21): a launched wizard opens in a separate tab, leaving the Assistant
+        // pane with no next step. Inject a determinative next-step message so the pane never
+        // dead-ends; the consumer cards (transcriptFooter) remain as follow-on actions. Only the
+        // wizard/surface cards navigate away — the in-app cards (Send Email / Meeting) don't need it.
+        onCardLaunched={(cardId) => {
+          const WIZARD_CARDS = [
+            "create-matter-wizard",
+            "create-project-wizard",
+            "assign-work",
+            "document-upload-wizard",
+            "find-similar-wizard",
+          ];
+          if (WIZARD_CARDS.includes(cardId)) {
+            injection.enqueue(
+              makeLocalAssistantMessage(
+                "I've started that for you in a separate tab. When you're back, you can attach a file, ask a question about it, or pick another next step below.",
+              ),
+            );
+          }
         }}
       />
 

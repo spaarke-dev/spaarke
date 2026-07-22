@@ -93,6 +93,13 @@ export interface QuickStartModalProps {
    * playbook-library web resource. Omitted → falls back to the legacy launchPlaybookIntent route.
    */
   onSendEmail?: () => void;
+  /**
+   * UAT R7-2 (2026-07-21): fired AFTER a card launches its wizard/surface, with the launched card id.
+   * The host injects a determinative next-step into the Assistant transcript so the pane never
+   * dead-ends (the launched wizard opens in a separate tab, leaving the Assistant with no context).
+   * Omitted → no next-step injected (back-compat / test override).
+   */
+  onCardLaunched?: (cardId: GetStartedCardId) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +129,7 @@ const useStyles = makeStyles({
  * `QuickStartModal` — Fluent v9 Dialog hosting `GetStartedCardsWidget`.
  * Launched from `AssistantToolMenu`'s "Quick Start" entry.
  */
-export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext, onSendEmail }) => {
+export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose, getFileContext, onSendEmail, onCardLaunched }) => {
   const styles = useStyles();
 
   const handleCardClick = React.useCallback(
@@ -198,12 +205,16 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({ open, onClose,
         }
       }
 
+      // R7-2: tell the host a card launched so it can inject a determinative next-step into the
+      // Assistant transcript (the wizard opens in a separate tab — without this the pane dead-ends).
+      onCardLaunched?.(cardId);
+
       // Every card click launches a wizard/dialog of its own — close Quick
       // Start so the two modals don't stack (MODAL-DECISION-CRITERIA anti-
       // pattern #5: don't nest modals from different chrome families).
       onClose();
     },
-    [onClose, getFileContext, onSendEmail],
+    [onClose, getFileContext, onSendEmail, onCardLaunched],
   );
 
   return (

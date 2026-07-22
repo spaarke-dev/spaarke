@@ -79,9 +79,10 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: formatName(e['fullname'] as string, e['internalemailaddress'] as string | undefined),
-    entityType: 'systemuser' as const,
-    // R6-5: carry the real email as a first-class field (no longer only inside `name`).
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
     email: (e['internalemailaddress'] as string | undefined) || undefined,
+    entityType: 'systemuser' as const,
   }));
 }
 
@@ -111,9 +112,10 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: formatName(e['fullname'] as string, e['emailaddress1'] as string | undefined),
-    entityType: 'contact' as const,
-    // R6-5: carry the real email as a first-class field (no longer only inside `name`).
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
     email: (e['emailaddress1'] as string | undefined) || undefined,
+    entityType: 'contact' as const,
   }));
 }
 

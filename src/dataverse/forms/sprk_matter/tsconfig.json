@@ -15,5 +15,5 @@
     "skipLibCheck": true,
     "types": []
   },
-  "files": ["insightWidgetOnLoad.ts", "insightCardMount.ts"]
+  "files": ["insightWidgetOnLoad.ts", "insightCardMount.ts", "communicationsGridOnLoad.ts"]
 }

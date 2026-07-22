@@ -269,9 +269,10 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
             renderer in that case — the shell owns the nav chrome to avoid
             double-rendering (the renderer's internal title-bar nav cluster
             is gated on `navigationTotal && currentIndex && onNavigate` ALL
-            being defined, so omitting them suppresses it). The renderer's
-            title text + 3-dot menu still render — they are the canonical
-            document-context UX and are kept for back-compat. */}
+            being defined, so omitting them suppresses it). The shell also
+            renders the document TITLE, so the renderer is mounted with
+            `showTitle={false}` to suppress its own title text and avoid a
+            duplicate "double header" (its 3-dot menu still renders). */}
         {open && navEnabled && (
           <div className={styles.shellWrap}>
             <RecordNavigationModalShell
@@ -298,6 +299,10 @@ export const RichFilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
                 isInWorkspace={isInWorkspace}
                 onFindSimilar={onFindSimilar}
                 /* nav props deliberately omitted — shell owns nav chrome */
+                /* shell already renders the title → suppress the renderer's own
+                   title text to avoid a duplicate "double header" (the renderer
+                   still shows its 3-dot menu). */
+                showTitle={false}
               />
             </RecordNavigationModalShell>
           </div>
