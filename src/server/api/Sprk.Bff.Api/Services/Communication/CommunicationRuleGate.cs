@@ -197,9 +197,11 @@ public sealed class CommunicationRuleGate
 /// incoming <see cref="CommunicationAssessedSignal"/> to a <see cref="CommunicationRuleDecisionRequest"/> and
 /// runs it through <see cref="CommunicationRuleGate"/>. Replaces the interim log-only default
 /// (<c>LoggingCommunicationAssessedProducer</c>) registered by task 040 — the emit point in enrichment step 5 is
-/// unchanged (that is the seam's whole point). On AUTHORIZE it does NOT execute any RI action (that is task 042's
-/// job, downstream of this gate) — it logs the authorization and hands off nothing yet; the outbox write +
-/// action execution land in 042. On DENY it is a logged no-op. Never calls <c>IEventRulesService.FireAsync</c>.
+/// unchanged (that is the seam's whole point). On AUTHORIZE it delegates to
+/// <see cref="CommunicationRiActionService"/> (task 042), which executes the RI action end-to-end (Layer-A seam
+/// record → Layer-B outbox → Layer-C ping → appnotification mirror). On DENY it is a logged no-op — NO seam
+/// call, NO outbox row, NO ping, NO appnotification (the short-circuit is structural: the RI service is only
+/// invoked inside the <c>if (decision.Authorize)</c> branch). Never calls <c>IEventRulesService.FireAsync</c>.
 /// </summary>
 public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 {
@@ -208,15 +210,18 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 
     private readonly IGenericEntityService _entityService;
     private readonly CommunicationRuleGate _gate;
+    private readonly CommunicationRiActionService _riAction;
     private readonly ILogger<RuleGatedAssessedConsumer> _logger;
 
     public RuleGatedAssessedConsumer(
         IGenericEntityService entityService,
         CommunicationRuleGate gate,
+        CommunicationRiActionService riAction,
         ILogger<RuleGatedAssessedConsumer> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
+        _riAction = riAction ?? throw new ArgumentNullException(nameof(riAction));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -250,12 +255,16 @@ public sealed class RuleGatedAssessedConsumer : ICommunicationAssessedProducer
 
         var decision = await _gate.EvaluateAsync(request, ct).ConfigureAwait(false);
 
-        // FR-12: this gate DECIDES; task 042 EXECUTES on authorize. Nothing is executed here.
+        // FR-12 decides; FR-13 (task 042) executes. The RI action path is invoked ONLY on authorize — a DENY
+        // returns here with NO seam call, NO outbox row, NO ping, NO appnotification (the short-circuit is
+        // structural: nothing below runs on the deny path).
         if (decision.Authorize)
         {
             _logger.LogInformation(
-                "[comms-policy] AUTHORIZED (RI action execution deferred to task 042) | CommunicationId: {CommunicationId}, RuleId: {RuleId}, PrivilegeFlagged: {PrivilegeFlagged}.",
+                "[comms-policy] AUTHORIZED → executing RI action (FR-13) | CommunicationId: {CommunicationId}, RuleId: {RuleId}, PrivilegeFlagged: {PrivilegeFlagged}.",
                 signal.CommunicationId, decision.MatchedRuleId, decision.PrivilegeFlagged);
+
+            await _riAction.ExecuteAuthorizedActionsAsync(signal, decision, ct).ConfigureAwait(false);
         }
     }
 }

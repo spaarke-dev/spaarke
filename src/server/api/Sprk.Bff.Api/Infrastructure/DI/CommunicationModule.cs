@@ -222,6 +222,21 @@ public static class CommunicationModule
         // singletons (ADR-010); all deps (IGenericEntityService, IOptions) are singletons.
         services.Configure<CommsPolicyOptions>(configuration.GetSection(CommsPolicyOptions.SectionName));
         services.AddSingleton<CommunicationRuleGate>();
+
+        // Comms-RI action orchestrator (spaarke-notification-spine-r1 task 042 / FR-13). Executes the RI action
+        // path when CommunicationRuleGate AUTHORIZES: converges the Layer-A action seam (task 031 IActionSeam,
+        // ADR-013 — creates a follow-up task, never a direct write), the Layer-B outbox (task 012, kind=
+        // communication-assessed row BEFORE the ping), the Layer-C SignalR ping (task 020, best-effort), and the
+        // ONE platform appnotification writer (NotificationService.CreateNotificationAsync — the Daily-Briefing
+        // mirror). RuleGatedAssessedConsumer (registered next) delegates to it ONLY inside its authorize branch, so
+        // a deny produces no side effect. Placement Justification (root §10/§11): sits in Services/Communication/
+        // beside the gate + arrived producer, depends "up" into the Notifications spine + the ADR-013 IActionSeam
+        // facade (never AI-internal types); ZERO new access logic, ZERO new Dataverse write path (the seam +
+        // NotificationService are the only writers). Concrete singleton (ADR-010) — all deps are singletons:
+        // IActionSeam + NotificationService (AnalysisServicesModule), OutboxService + SignalRDeliveryService
+        // (NotificationsModule), IGenericEntityService. MUST be registered BEFORE RuleGatedAssessedConsumer, which
+        // now takes it as a ctor dependency.
+        services.AddSingleton<CommunicationRiActionService>();
         services.AddSingleton<ICommunicationAssessedProducer, RuleGatedAssessedConsumer>();
 
         // Direction-symmetric thread resolver (messaging-communication-app-r1 task 040 / FR-06). The thread

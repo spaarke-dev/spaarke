@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-21 (task 024 COMPLETE).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1`. Phases 1-3 (001-033) live on master; **task 024 (communication-arrived producer) DONE + committed** (pending push/sync). Next: **025** (R3 contract-lock note, FR-19 — now unblocked).
+> **Last Updated**: 2026-07-22 (task 042 COMPLETE — Phase 4 DONE).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1`. Phases 1-3 (001-033) live on master; **Phase 4 (040/041/042) COMPLETE on branch** (batching master-merge per owner). Next: **050** (suggestion producer, Phase 5 start).
 
 ---
 
@@ -9,10 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **042 — RI actions via seam + mirror (FR-13), Phase 4 Wave 14 — NOT STARTED** (deps 040✅ 041✅ 012✅ 020✅ met). Prior: 024✅ 025✅ 040✅ 041✅. Phase 2/3 COMPLETE; Phase 4 nearly done. |
-| **Step** | Begin Step 1 of task 042 (`tasks/042-ri-actions-via-seam.poml`). FULL rigor (opus/high). Executes RI actions when the 041 gate authorizes; writes `kind=communication-assessed` outbox row + appnotification mirror. Also the natural place to plumb a REAL assessment confidence into the signal. |
-| **Status** | 024/025 on master (`1a5bc7d15`); 040+041 committed on branch (batching master-merge per owner). Owner created `sprk_communicationrule` table (Path B) for 041. |
-| **Next Action** | **"work on task 042"** (RI actions). Then Phase 5 (050-052) → 090. Master-merge of 025/040/041 batched for later per owner. |
+| **Task** | **050 — Suggestion producer (grounded+gated, FR-15), Phase 5 Wave 15 — NOT STARTED** (deps 012✅ 013✅ 042✅ met). Prior: 024✅ 025✅ 040✅ 041✅ **042✅**. **Phase 4 COMPLETE.** |
+| **Step** | Begin Step 1 of task 050 (`tasks/050-suggestion-producer.poml`). FULL rigor (opus/high). Reuses the 042 convergence pattern: grounded (ADR-039) + gated (ADR-041, origin=proactive) → `SuggestionEnvelope` (task 013) → OutboxService.WriteAsync (kind=suggestion) → best-effort ping. Grounding+gating are the INPUT to the outbox write, not after. |
+| **Status** | 024/025 on master (`1a5bc7d15`); **040+041+042 committed on branch** (4 ahead of master; batching master-merge per owner). Owner created `sprk_communicationrule` table (Path B) for 041. |
+| **Next Action** | **"work on task 050"** (suggestion producer). Then 051 (renderer branch) → 052 (dispatch parity) → 090 wrap-up. Master-merge of 025/040/041/042 batched for later per owner. |
+
+### 042 result (Phase 4, Wave 14 — ✅ DONE 2026-07-22)
+- **`CommunicationRiActionService`** (NEW, `Services/Communication/`): on the 041 gate's AUTHORIZE, converges four seams in order — Layer-A `IActionSeam.CreateTaskAsync` (031, ADR-013 — creates a `task`, never a direct write) → `OutboxService.WriteAsync` kind=communication-assessed (012) FIRST → best-effort `SignalRDeliveryService.PingUserAsync` (020) → explicit `NotificationService.CreateNotificationAsync` appnotification mirror. Whole path non-fatal (NFR-05). Concrete singleton.
+- **`RuleGatedAssessedConsumer`**: authorize branch now delegates to the RI service (was log-only). DENY unchanged → structural short-circuit (no seam/outbox/ping/appnotification). DI: `AddSingleton<CommunicationRiActionService>` before the consumer.
+- **Design**: seam action = `task` (mirror = appnotification → no double-write); recipient = communication `ownerid` (proving scope; matter-team fan-out is a documented future enhancement — surfaced to owner). Confidence still deny-by-default until real plumbing (authorize path fully seam-tested).
+- **2 seam tests** (E2E authorize ordering `seam→outbox→ping→mirror` + deny zero-side-effect). Full suite **8862/0**; both gates CLEAN; 46.10 MB (≤60); 0 new CVE. conflict-check SOFT WARN (r3 #664 disjoint files). Notes: `notes/042-ri-actions-via-seam-notes.md`.
+- **For Phase 5**: 050 reuses this exact producer pattern with `SuggestionEnvelope` (kind=suggestion).
 
 ### 041 result (Phase 4, Wave 13 — ✅ DONE 2026-07-22)
 - **§11 escalation fired** (Binding's shared r2-owned resolver can't see tenant/matter) → **owner chose Path B**: dedicated `sprk_communicationrule` Dataverse table (owner-created live). ADR-039 exception documented (Path A). Evidence + decision: `notes/041-rule-store-decision.md`.
