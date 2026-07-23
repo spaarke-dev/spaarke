@@ -454,6 +454,12 @@ public sealed class ComposeServiceCreateOnSaveTests
     [Fact]
     public async Task SaveAsync_ExistingDriveItem_ReplacesContent_DoesNotCreateDriveItem()
     {
+        // FR-08 (task 050): SaveAsync's replace-content branch fetches the live metadata (eTag) up front
+        // to assert the version stamp before applying. No prior stamp exists in these tests (a Strict mock
+        // must have an explicit setup for every invocation) — returning null degrades to "not stale".
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto("spe-existing", "existing.docx", null, 99, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "\"e2\"", false, null, "drive-existing"));
@@ -483,6 +489,11 @@ public sealed class ComposeServiceCreateOnSaveTests
     [Fact]
     public async Task SaveAsync_ReSaveWhenRowAlreadyExists_DoesNotDoubleCreateRow()
     {
+        // FR-08 (task 050): see the sibling test above — the staleness assert's metadata fetch needs an
+        // explicit Strict-mock setup; null degrades to "not stale".
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto("spe-existing", "existing.docx", null, 99, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "\"e3\"", false, null, "drive-existing"));

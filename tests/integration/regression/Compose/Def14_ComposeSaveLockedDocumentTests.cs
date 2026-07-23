@@ -105,6 +105,44 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
     }
 
     [Fact]
+    public async Task CreateOnSaveDocument_WhenSpeCreateItemLocked_Returns423WithActionableCopy_NotOpaque500()
+    {
+        // FR-08 (task 051/052, spaarkeai-compose-r4): extends the DEF-14 proof to the CREATE-ON-SAVE
+        // route. Before task 051, UploadSmallAsUserAsync (the SPE call this route drives) caught only the
+        // legacy (dead, per DEF-14) ServiceException type — a REAL Graph 423/412 on a transient-draft
+        // create fell through to the generic re-throw, leaking a raw ODataError up through
+        // ISpeFileOperations and surfacing as an opaque 500 at this same endpoint. Task 051 added the
+        // ODataError catch chain (mirroring ReplaceFileContentAsUserAsync's own DEF-14 fix) to
+        // UploadSmallAsUserAsync; this proves the create-on-save path now surfaces the SAME clean 423
+        // ProblemDetails the replace path already did — not a 500.
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DocumentLockedByWordException("spe-item-create-locked"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var body = new
+        {
+            containerId = "container-lock-03",
+            sessionId = Guid.NewGuid().ToString(),
+            tenantId = "tenant-aad-create-lock",
+            content = new byte[] { 0x50, 0x4B, 0x03, 0x04 }, // DOCX ZIP signature
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/compose/documents/create-on-save", body);
+
+        // Assert — 423 Locked, actionable copy, and NO ODataError / 500 leak.
+        response.StatusCode.Should().Be(HttpStatusCode.Locked,
+            "a create-on-save that hits a locked/checked-out SPE target must surface as 423, not an opaque 500");
+        var payload = await response.Content.ReadAsStringAsync();
+        payload.Should().Contain("checked out", "the 423 copy tells the user how to recover");
+        payload.Should().NotContain("ODataError", "the raw Graph error must never leak to the client");
+        ((int)response.StatusCode).Should().NotBe(500);
+    }
+
+    [Fact]
     public async Task SaveDocument_WhenEtagPreconditionFailed_Returns412WithActionableCopy_NotOpaque500()
     {
         // Arrange
@@ -168,6 +206,23 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
             "the Kiota ODataError (HTTP 412) must translate to the typed precondition exception");
+    }
+
+    [Fact]
+    public async Task UploadSmallAsUser_WhenGraphReturns423_ThrowsDocumentLockedByWordException()
+    {
+        // FR-08 (task 051/052): before task 051, UploadSmallAsUserAsync had NO ODataError translation at
+        // all (only the legacy, dead ServiceException catches) — a real Kiota ODataError on the
+        // create-on-save path leaked straight up through ISpeFileOperations (an ADR-007 violation) instead
+        // of translating to the typed domain exception. This proves the revived/added translation directly.
+        var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
+
+        var act = () => sut.UploadSmallAsUserAsync(
+            new DefaultHttpContext(), "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+
+        await act.Should().ThrowAsync<DocumentLockedByWordException>(
+            "the Kiota ODataError (HTTP 423 / resourceLocked) on a create-on-save upload must translate to the typed lock exception, not leak a raw Microsoft.Graph type");
     }
 
     private static UploadSessionManager BuildManager(HttpStatusCode status, string errorCode)

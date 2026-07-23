@@ -2,8 +2,8 @@
   <metadata>
     <title>HTTP 423 (Office lock) → user-actionable ProblemDetails (FR-08)</title>
     <phase>5 Concurrency + save</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF implementation on the Compose endpoint + save path modifying .cs; failure-mapping correctness (423 vs generic 5xx); tags include bff-api + spe.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,6 +120,53 @@
     The through-the-wire proof (423 surfaces a ProblemDetails, not a 500) is authored as the task 054 seam
     slice under `tests/integration/seam/Compose/`. Save path / endpoint shared with 050/051 — sequential
     (parallel-safe false). Run `/conflict-check` before the BFF PR.
+
+    IMPLEMENTED 2026-07-22, FOUND ALREADY LARGELY IN PLACE (documented, not re-invented):
+
+    On investigation, the REPLACE-content Save path (an existing item) ALREADY had this exact protocol —
+    the pre-existing "DEF-14" fix (see `tests/integration/regression/Compose/Def14_ComposeSaveLockedDocumentTests.cs`,
+    `[Trait("status","repaired")]`) had already: (1) added `ODataError` 423/`resourceLocked` detection to
+    `UploadSessionManager.ReplaceFileContentAsUserAsync` (the single shared implementation BOTH the
+    etag-less and `ifMatch` overloads delegate to — so the plain `SaveAsync` replace call, which uses the
+    etag-less overload, ALREADY threw the typed `DocumentLockedByWordException` on a Graph 423, lock
+    detection independent of whether an `If-Match` was sent); and (2) `ComposeEndpoints.ExecuteSaveAsync`
+    ALREADY caught `DocumentLockedByWordException` → a 423 ProblemDetails with actionable copy ("This
+    document is checked out or open in Word — check it in or close the other editor, then Save again. Your
+    Compose changes are safe and still pending.") — confirmed passing pre-existing regression test
+    `SaveDocument_WhenSpeItemLocked_Returns423WithActionableCopy_NotOpaque500`.
+
+    THE GENUINE GAP task 052 closed: the CREATE-ON-SAVE path (`UploadSmallAsUserAsync`, a transient draft
+    with no prior `DocumentSpeId`) had NO ODataError translation at all — task 051's fix (this same PR
+    chain, filed under 051 because it was the root cause discovered for the eTag-mismatch symptom) added
+    the SAME ODataError catch chain (403/413/412/423/429/generic) to `UploadSmallAsUserAsync`, INCLUDING
+    423→`DocumentLockedByWordException` — so this task's OWN acceptance criteria ("a locked item surfaces a
+    ProblemDetails... not a 500") is satisfied for BOTH Save routes by that one fix. No further
+    `ComposeService.cs`/`ComposeEndpoints.cs` change was needed — the endpoint-level mapping already covers
+    both routes (both `Save` and `CreateOnSave` funnel through the shared `ExecuteSaveAsync` catch chain).
+
+    NEW regression coverage added (task 052, extending the existing DEF-14 file rather than forking a
+    parallel one — CLAUDE.md §11 reuse-over-new): `CreateOnSaveDocument_WhenSpeCreateItemLocked_Returns423WithActionableCopy_NotOpaque500`
+    (route layer, WebApplicationFactory) and `UploadSmallAsUser_WhenGraphReturns423_ThrowsDocumentLockedByWordException`
+    (translation layer, real Kiota ODataError via a concrete non-Moq handler) — both green.
+
+    NEGATIVE criterion verified (non-lock 5xx not masked): the new `UploadSmallAsUserAsync` generic
+    `catch (ODataError ex)` fallback wraps as `InvalidOperationException($"Failed to upload file: {message}")`
+    — this message does NOT match the `ExecuteSaveAsync` "not found" `InvalidOperationException` filter, so
+    it falls through to the FINAL generic `catch (Exception ex)` → a standard 500 ProblemDetails
+    (`Results.Problem` with the exception type/message) — never silently swallowed, never misclassified as
+    a lock. No new test added for this specific negative (the code path is structurally unchanged from the
+    pre-existing generic-5xx handling `ReplaceFileContentAsUserAsync`'s sibling fallback already exercises
+    at the same catch site in `ExecuteSaveAsync`); flagged here per FR-08 negative for reviewer visibility.
+
+    Placement Justification: lock detection stays entirely behind `SpeFileStore`/`ISpeFileOperations`
+    (`Infrastructure/Graph/UploadSessionManager.cs`, task 051's fix); ProblemDetails mapping stays in the
+    EXISTING `ComposeEndpoints.ExecuteSaveAsync` catch chain (no new mapping code needed — it already
+    handled `DocumentLockedByWordException` for the sibling replace path). No new service, no new DI
+    registration, no new endpoint.
+
+    Full suite: 547 `Sprk.Bff.Api.Tests` Compose/Def14-scoped tests green (0 failures, incl. 2 new); ADR-013
+    Tier-1 NetArchTest green; no `Microsoft.Graph` type in `Services/Compose/` or `ComposeEndpoints` (the
+    lock signal crosses as the pre-existing `DocumentLockedByWordException` domain type, ADR-007).
   </notes>
 
   <execution>

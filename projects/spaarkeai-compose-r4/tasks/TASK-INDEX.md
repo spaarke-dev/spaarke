@@ -37,9 +37,9 @@
 | 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
 | 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
 | 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | done | ✅ |
-| 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | blocked | 🔲 |
-| 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | blocked | 🔲 |
-| 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | blocked | 🔲 |
+| 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | done | ✅ |
+| 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | done | ✅ |
+| 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | done | ✅ |
 | 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | blocked | 🔲 |
 | 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | blocked | 🔲 |
 | 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006,036,037** | blocked | 🔲 |

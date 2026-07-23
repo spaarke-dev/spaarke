@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
@@ -160,6 +162,17 @@ public class ComposeService : IComposeService
     // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
     // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
     private readonly ComposeDocxProjectionBuilder _projectionBuilder;
+    // FR-08 (task 050): the raw distributed cache handle for the save-path version stamp (Redis, ADR-009 —
+    // NOT IMemoryCache). Optional + defaults null so existing test constructors keep compiling; DI resolves
+    // the real IDistributedCache (AddStackExchangeRedisCache) in every non-test host, mirroring
+    // _pushSaveStatusStore's availability-gate pattern below.
+    private readonly IDistributedCache? _cache;
+    // FR-08 (task 050): the KEEP-asset fuzzy re-anchor engine (bands + ambiguity guard + never-silently-drop),
+    // REUSED verbatim as the stale-base / cross-Word-session fallback for the save-path operation log — see
+    // ReanchorStaleSaveAsync. Constructed only when a cache is available (same availability gate as
+    // _pushSaveStatusStore); null in a test host with no cache means staleness is asserted but never
+    // re-anchored (the save proceeds on the resolved baseline unchanged, R1-equivalent behavior).
+    private readonly AnnotationReanchorService? _reanchorService;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -204,6 +217,10 @@ public class ComposeService : IComposeService
         // ComposeService>) resolves the real IDistributedCache registered via
         // AddStackExchangeRedisCache in every non-test host, so production always persists.
         _pushSaveStatusStore = cache is not null ? new ComposePushSaveStatusStore(cache) : null;
+        // FR-08 (task 050): same availability gate as _pushSaveStatusStore above — ADR-009 Redis when
+        // present in every non-test host, null (no staleness re-anchor) in a bare test constructor.
+        _cache = cache;
+        _reanchorService = cache is not null ? new AnnotationReanchorService(cache) : null;
     }
 
     /// <inheritdoc />
@@ -568,6 +585,60 @@ public class ComposeService : IComposeService
         // its own bytes; there is no baseline to patch and the client sends no op-log there).
         var hasOperations = request.OperationLog is { Operations.Count: > 0 };
         var hasComments = request.Comments is { Count: > 0 };
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-08 (task 050, design §5 "Save + concurrency"): version-stamp + assert-before-apply +
+        // re-anchor-on-stale. Only meaningful for an EXISTING item (a transient create has no prior base
+        // that could have moved). Every save of an existing item fetches the LIVE SPE eTag (never a
+        // client-supplied precondition — the client cannot assert its own currency), and asserts it
+        // against the version stamp THIS SAME save path persisted after its own last write (ADR-009
+        // IDistributedCache, never IMemoryCache). No stamp yet (first Compose save of a pre-existing item)
+        // means nothing to assert against — proceeds unstaled, R1-equivalent. A genuine mismatch means the
+        // base moved under the client since it loaded (another writer landed a new version): re-anchor the
+        // operation log via AnnotationReanchorService (the KEEP asset, reused verbatim — never reimplemented)
+        // INSTEAD of blindly overwriting or throwing an eTag 500. AUTO (exact paraId match) re-anchors apply;
+        // REVIEW/ORPHAN surface for the user — never silently applied, never silently dropped.
+        // ────────────────────────────────────────────────────────────────────────────
+        string? preWriteETag = null;
+        ReanchorSummary? reanchorSummary = null;
+
+        if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
+        {
+            var currentMetadata = await _spe.GetFileMetadataAsUserAsync(
+                    httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+            preWriteETag = currentMetadata?.ETag;
+
+            if (preWriteETag is not null && request.ContentModel is null && (hasOperations || hasComments))
+            {
+                var storedStamp = await GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
+                    .ConfigureAwait(false);
+                var isStale = storedStamp is not null
+                    && !string.Equals(storedStamp.ETag, preWriteETag, StringComparison.Ordinal);
+
+                if (isStale)
+                {
+                    var (patchedBytes, summary) = await ReanchorStaleSaveAsync(
+                            request, contentToPersist, httpContext, observedAt, cancellationToken)
+                        .ConfigureAwait(false);
+
+                    contentToPersist = patchedBytes;
+                    reanchorSummary = summary;
+
+                    _logger.LogWarning(
+                        "Compose save: stale base for driveItem={DocumentSpeId} (stamped eTag={StoredETag}, live eTag={CurrentETag}) — re-anchored via AnnotationReanchorService: auto={Auto} review={Review} orphan={Orphan} of {Total} op(s)/comment(s). AUTO re-anchors applied; REVIEW/ORPHAN surfaced (never silently applied, never silently dropped).",
+                        request.DocumentSpeId, storedStamp?.ETag, preWriteETag,
+                        summary.AutoCount, summary.ReviewCount, summary.OrphanCount, summary.Total);
+
+                    // ReanchorStaleSaveAsync already applied the AUTO-band ops/comments through the Patch
+                    // Engine onto the freshly-fetched current bytes — skip the normal apply block below
+                    // (it would otherwise re-apply the FULL unfiltered log onto a now-stale baseline).
+                    hasOperations = false;
+                    hasComments = false;
+                }
+            }
+        }
+
         if (request.ContentModel is null && (hasOperations || hasComments))
         {
             // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's id-less
@@ -653,6 +724,13 @@ public class ComposeService : IComposeService
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
             using var contentStream = new MemoryStream(contentToPersist, writable: false);
+            // FR-08 (task 050): the write itself stays the existing etag-less overload (unchanged R1
+            // behavior + write-path signature) — preWriteETag is used above purely for the staleness
+            // ASSERT (comparing our own persisted version stamp to the live eTag) and below to SEED the
+            // next save's stamp when the write's own response carries no eTag. Upgrading this write to a
+            // Graph-level If-Match precondition is a further-hardening candidate, not required by this
+            // task's acceptance criteria (staleness is asserted + re-anchored via OUR OWN stamp, not via
+            // Graph's optimistic-concurrency response).
             var replaced = await _spe.ReplaceFileContentAsUserAsync(
                     httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -668,6 +746,13 @@ public class ComposeService : IComposeService
             effectiveDriveId = request.DriveId;
             fileName = replaced.Name ?? fileName;
         }
+
+        // FR-08 (task 050/051): version-stamp the save that just landed — the POST-WRITE eTag returned by
+        // THIS write (create or replace, whichever branch ran) becomes the assert-baseline for the NEXT
+        // save of this same item (never a pre-write/pre-create precondition). Best-effort: a Redis miss
+        // here never fails an already-successful save; it only means the next save's staleness assert
+        // degrades to "no stamp = not stale" (R1-equivalent), never a false negative that blocks a save.
+        await SetSaveVersionStampAsync(effectiveSpeId, saved.ETag, observedAt, cancellationToken).ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 2 — record (FR-06 idempotent promotion). Repeated saves see the existing row.
@@ -779,6 +864,7 @@ public class ComposeService : IComposeService
             Size = saved.Size,
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
+            ReanchorSummary = reanchorSummary,
         };
     }
 
@@ -862,6 +948,300 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    // =========================================================================
+    // FR-08 (task 050) — save-path version stamp + stale-base re-anchor (design §5 "Save + concurrency",
+    // NFR-08). The stamp (SPE eTag + operation-schema version) is persisted via IDistributedCache (ADR-009)
+    // after every save of an existing item and asserted against the LIVE eTag at the top of the NEXT save.
+    // A mismatch re-anchors the operation log via AnnotationReanchorService — REUSED verbatim, never
+    // reimplemented (CLAUDE.md §11 / task constraint).
+    // =========================================================================
+
+    private const string SaveVersionStampKeyPrefix = "sdap:compose:save-stamp:";
+    private static readonly JsonSerializerOptions SaveStampJsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>The save-path version stamp persisted per <c>documentSpeId</c> (ADR-009 Redis) — the SPE
+    /// eTag + operation-schema version this service last wrote, asserted against the live eTag at the top
+    /// of the next save of the same item.</summary>
+    private sealed record ComposeSaveVersionStamp(
+        [property: JsonPropertyName("eTag")] string ETag,
+        [property: JsonPropertyName("schemaVersion")] string SchemaVersion,
+        [property: JsonPropertyName("savedAtUtc")] DateTimeOffset SavedAtUtc);
+
+    /// <summary>Reads the persisted version stamp for <paramref name="documentSpeId"/> (null when absent, no
+    /// cache configured, or a Redis read fails — all three degrade to "not stale", never a false-positive
+    /// re-anchor and never a blocked save).</summary>
+    private async Task<ComposeSaveVersionStamp?> GetSaveVersionStampAsync(string documentSpeId, CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var json = await _cache.GetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
+            return json is null ? null : JsonSerializer.Deserialize<ComposeSaveVersionStamp>(json, SaveStampJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to read the version stamp for driveItem={DocumentSpeId} — treating as no prior stamp (not stale).",
+                documentSpeId);
+            return null;
+        }
+    }
+
+    /// <summary>Persists the version stamp for <paramref name="documentSpeId"/> after a successful write
+    /// (create or replace). Best-effort: a Redis write failure here never fails the already-successful save
+    /// — it only means the NEXT save's staleness assert degrades to "no stamp" (not stale), same as a
+    /// freshly-onboarded item that has never been stamped.</summary>
+    private async Task SetSaveVersionStampAsync(string documentSpeId, string? eTag, DateTimeOffset savedAtUtc, CancellationToken ct)
+    {
+        if (_cache is null || string.IsNullOrEmpty(eTag))
+        {
+            return;
+        }
+
+        try
+        {
+            var stamp = new ComposeSaveVersionStamp(eTag, ComposeOperationSchema.Version, savedAtUtc);
+            await _cache.SetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, JsonSerializer.Serialize(stamp, SaveStampJsonOptions), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: failed to persist the version stamp for driveItem={DocumentSpeId} — the save itself succeeded; a future assert may miss this save.",
+                documentSpeId);
+        }
+    }
+
+    /// <summary>
+    /// FR-08 (task 050): the base moved under the client since it was loaded (the persisted version stamp's
+    /// eTag no longer matches the live SPE eTag). Re-anchors <paramref name="request"/>'s operation log +
+    /// comments against the FRESHLY re-downloaded current bytes via <see cref="AnnotationReanchorService"/>
+    /// (the KEEP asset, reused verbatim), applies ONLY the exact-paraId AUTO band through the Patch Engine,
+    /// and returns the patched bytes alongside the full band summary. REVIEW/ORPHAN ops/comments are
+    /// deliberately NOT applied — an op's anchor is never rewritten (I-7, no write-path text-search), so a
+    /// fuzzy (non-exact-id) match is not safe to auto-apply; it surfaces in the summary instead, never
+    /// silently applied and never silently dropped.
+    /// </summary>
+    private async Task<(byte[] PatchedBytes, ReanchorSummary Summary)> ReanchorStaleSaveAsync(
+        SaveComposeDocumentRequest request,
+        byte[] originalBaseline,
+        HttpContext httpContext,
+        DateTimeOffset observedAt,
+        CancellationToken cancellationToken)
+    {
+        // Re-download the CURRENT (live) bytes — the base the op log must now be checked against. A
+        // download miss fails closed: every op/comment surfaces as ORPHAN (never a silent apply onto a
+        // baseline we could not verify).
+        Stream? stream;
+        try
+        {
+            stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor could not re-download the current bytes for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                request.DocumentSpeId);
+            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        if (stream is null)
+        {
+            return (originalBaseline, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        byte[] currentBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            currentBytes = buffer.ToArray();
+        }
+
+        IReadOnlyList<string> oldParagraphs;
+        IReadOnlyList<string?> oldParaIds;
+        IReadOnlyList<string> currentParagraphs;
+        IReadOnlyList<string?> currentParaIds;
+        try
+        {
+            oldParagraphs = AnnotationReanchorService.ExtractParagraphTexts(originalBaseline);
+            oldParaIds = AnnotationReanchorService.ExtractParaIds(originalBaseline);
+            currentParagraphs = AnnotationReanchorService.ExtractParagraphTexts(currentBytes);
+            currentParaIds = AnnotationReanchorService.ExtractParaIds(currentBytes);
+        }
+        catch (Exception ex) when (ex is DocxAnnotationException or ArgumentException)
+        {
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor could not read the paragraph corpus for driveItem={DocumentSpeId} — every op/comment surfaces as ORPHAN.",
+                request.DocumentSpeId);
+            return (currentBytes, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        var ops = request.OperationLog?.Operations ?? Array.Empty<ComposeOperation>();
+        var comments = request.Comments ?? Array.Empty<ComposeAnchoredComment>();
+
+        var priorAnchors = new List<PriorAnchor>(ops.Count + comments.Count);
+        for (var i = 0; i < ops.Count; i++)
+        {
+            var op = ops[i];
+            var hint = IndexOfParaId(oldParaIds, op.ParaId);
+            priorAnchors.Add(new PriorAnchor(
+                Id: $"op-{i}",
+                Type: op.GetType().Name,
+                TextPattern: hint >= 0 && hint < oldParagraphs.Count ? oldParagraphs[hint] : string.Empty,
+                ParagraphHint: hint,
+                Preview: null,
+                ParaId: op.ParaId));
+        }
+
+        for (var i = 0; i < comments.Count; i++)
+        {
+            var c = comments[i];
+            var hint = IndexOfParaId(oldParaIds, c.ParaId);
+            priorAnchors.Add(new PriorAnchor(
+                Id: $"comment-{i}",
+                Type: "comment",
+                TextPattern: hint >= 0 && hint < oldParagraphs.Count ? oldParagraphs[hint] : string.Empty,
+                ParagraphHint: hint,
+                Preview: c.CommentText,
+                ParaId: c.ParaId));
+        }
+
+        var summary = AnnotationReanchorService.Reanchor(priorAnchors, currentParagraphs, request.DocumentSpeId, observedAt, currentParaIds);
+
+        // Only an EXACT paraId match (confidence 1.0 — the paragraph's w14:paraId is still present,
+        // unchanged, in the current document) is safe to auto-apply verbatim: the op's anchor is never
+        // rewritten, so a fuzzy AUTO (a different paraId that merely scored well on content) would apply
+        // the op against the WRONG paragraph id and fail to resolve (or worse, silently mis-anchor). Fuzzy
+        // AUTO/REVIEW/ORPHAN all surface for review — never silently applied.
+        var autoIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var r in summary.Annotations)
+        {
+            if (r.Band == ReanchorBand.Auto && r.Confidence >= 1.0)
+            {
+                autoIds.Add(r.Id);
+            }
+        }
+
+        var autoOps = new List<ComposeOperation>();
+        for (var i = 0; i < ops.Count; i++)
+        {
+            if (autoIds.TryGetValue($"op-{i}", out _))
+            {
+                autoOps.Add(ops[i]);
+            }
+        }
+
+        var autoComments = new List<ComposeAnchoredComment>();
+        for (var i = 0; i < comments.Count; i++)
+        {
+            if (autoIds.TryGetValue($"comment-{i}", out _))
+            {
+                autoComments.Add(comments[i]);
+            }
+        }
+
+        byte[] patched;
+        try
+        {
+            patched = (autoOps.Count == 0 && autoComments.Count == 0)
+                ? currentBytes
+                : _patchEngine.Apply(
+                    currentBytes,
+                    new ComposeOperationLog { SchemaVersion = request.OperationLog?.SchemaVersion ?? ComposeOperationSchema.Version, Operations = autoOps },
+                    autoComments,
+                    ResolveRevisionAuthor(httpContext),
+                    observedAt);
+        }
+        catch (ComposePatchException ex)
+        {
+            // An AUTO-band op that still fails to resolve at patch time (an edge case beyond the reanchor's
+            // own exact-paraId check) is never silently applied — degrade the whole batch to ORPHAN rather
+            // than guess a partial apply that could mis-place bytes.
+            _logger.LogWarning(ex,
+                "Compose save: stale-base re-anchor's AUTO band failed to apply for driveItem={DocumentSpeId} ({Kind}) — degrading the whole batch to ORPHAN.",
+                request.DocumentSpeId, ex.Kind);
+            return (currentBytes, BuildAllOrphanSummary(request, observedAt));
+        }
+
+        if (_reanchorService is not null)
+        {
+            try
+            {
+                await _reanchorService.SaveSummaryAsync(request.DocumentSpeId!, summary, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose save: failed to persist the stale-base re-anchor summary for driveItem={DocumentSpeId} — the save itself succeeded.",
+                    request.DocumentSpeId);
+            }
+        }
+
+        return (patched, summary);
+    }
+
+    /// <summary>0-based index of the FIRST current paraId equal to <paramref name="paraId"/> (case-sensitive
+    /// — <see cref="AnnotationReanchorService.ExtractParaIds"/> already upper-cases every id), or -1 when
+    /// absent/null.</summary>
+    private static int IndexOfParaId(IReadOnlyList<string?> paraIds, string? paraId)
+    {
+        if (string.IsNullOrEmpty(paraId))
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < paraIds.Count; i++)
+        {
+            if (string.Equals(paraIds[i], paraId, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Fail-closed summary: every op/comment in <paramref name="request"/> surfaces as ORPHAN
+    /// (never silently applied, never silently dropped) when the current base could not be re-downloaded or
+    /// read.</summary>
+    private static ReanchorSummary BuildAllOrphanSummary(SaveComposeDocumentRequest request, DateTimeOffset observedAt)
+    {
+        var opsCount = request.OperationLog?.Operations.Count ?? 0;
+        var commentsCount = request.Comments?.Count ?? 0;
+        var total = opsCount + commentsCount;
+
+        var annotations = new List<ReanchoredAnnotation>(total);
+        for (var i = 0; i < opsCount; i++)
+        {
+            annotations.Add(new ReanchoredAnnotation(
+                Id: $"op-{i}", Type: request.OperationLog!.Operations[i].GetType().Name, Preview: null,
+                Band: ReanchorBand.Orphan, Confidence: 0.0, MatchedParagraphIndex: -1,
+                ContentSimilarity: 0.0, StructuralProximity: 0.0, Ambiguous: false, MatchedParagraphPreview: null));
+        }
+        for (var i = 0; i < commentsCount; i++)
+        {
+            annotations.Add(new ReanchoredAnnotation(
+                Id: $"comment-{i}", Type: "comment", Preview: request.Comments![i].CommentText,
+                Band: ReanchorBand.Orphan, Confidence: 0.0, MatchedParagraphIndex: -1,
+                ContentSimilarity: 0.0, StructuralProximity: 0.0, Ambiguous: false, MatchedParagraphPreview: null));
+        }
+
+        return new ReanchorSummary(
+            DocumentSpeId: request.DocumentSpeId,
+            Total: total,
+            AutoCount: 0,
+            ReviewCount: 0,
+            OrphanCount: total,
+            Annotations: annotations,
+            ComputedAtUtc: observedAt);
     }
 
     /// <summary>

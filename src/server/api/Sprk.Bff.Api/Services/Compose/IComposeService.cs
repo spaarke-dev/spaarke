@@ -645,6 +645,15 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }
+
+    /// <summary>
+    /// FR-08 (task 050): when this save detected a STALE base (the version stamp this service persisted
+    /// after its own last write no longer matched the live SPE eTag), the <see cref="AnnotationReanchorService"/>
+    /// band summary for the re-anchored operation log + comments — AUTO (exact paraId match) applied
+    /// through the Patch Engine; REVIEW/ORPHAN surfaced here for the client to present, never silently
+    /// applied and never silently dropped. Null on every non-stale save (the common case).
+    /// </summary>
+    public ReanchorSummary? ReanchorSummary { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>

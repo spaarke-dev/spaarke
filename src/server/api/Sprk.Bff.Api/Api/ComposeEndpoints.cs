@@ -1462,7 +1462,8 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 Size: result.Size,
                 WasPromotedThisSave: result.WasPromotedThisSave,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                ReanchorSummary: result.ReanchorSummary));
         }
         catch (ArgumentException ex)
         {
@@ -2206,7 +2207,12 @@ public sealed record SaveComposeDocumentResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("wasPromotedThisSave")] bool WasPromotedThisSave,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // FR-08 (task 050): populated ONLY when this save detected a stale base and re-anchored the operation
+    // log — AUTO applied; REVIEW/ORPHAN surfaced here so the client can present them. Null on every
+    // non-stale save (the common case). Optional/trailing so existing callers deserializing this response
+    // are unaffected.
+    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

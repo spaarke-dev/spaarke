@@ -104,6 +104,13 @@ public sealed class ComposeServiceSaveAnnotationsTests
 
     private void ArrangeReplaceExisting(out Func<byte[]> capturedBytesAccessor)
     {
+        // FR-08 (task 050): SaveAsync's replace-content branch fetches the live metadata (eTag) up front
+        // to assert the version stamp before applying. No prior stamp exists in these tests (a Strict mock
+        // must have an explicit setup for every invocation) — returning null degrades to "not stale".
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
         byte[]? captured = null;
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
