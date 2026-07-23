@@ -19,8 +19,7 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 import {
   ConversationView,
   ConversationWorkspace,
-  createXrmDataService,
-  searchUsersAndContacts,
+  createXrmNavigationService,
 } from '@spaarke/ui-components';
 import { authenticatedFetch } from './services/authInit';
 import { getBffBaseUrl } from './config/runtimeConfig';
@@ -48,21 +47,17 @@ export const App: React.FC = () => {
 
   const bffBaseUrl = getBffBaseUrl();
 
-  // Recipient directory search for the shell's built-in New-conversation modal
-  // (R3 UAT 2026-07-22 item 5a). Same host-context Xrm.WebApi users+contacts
-  // lookup the widget host and every Spaarke composer use (no BFF/OBO).
-  const lookupDataService = React.useMemo(() => createXrmDataService(), []);
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(lookupDataService, query),
-    [lookupDataService]
-  );
+  // Record-lookup service for the shell's built-in New-conversation modal (item 9
+  // — name + associate-to-record picker). Same shared Xrm-backed navigation
+  // adapter the widget host uses (createXrmNavigationService → Xrm lookup).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   return (
     <div className={styles.root}>
       <ConversationWorkspace
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
-        onSearchRecipients={handleSearchRecipients}
+        navigationService={navigationService}
         renderConversation={({
           threadId,
           authenticatedFetch: threadFetch,

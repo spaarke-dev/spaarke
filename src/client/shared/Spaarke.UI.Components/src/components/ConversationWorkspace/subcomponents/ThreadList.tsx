@@ -24,7 +24,7 @@
  */
 import * as React from 'react';
 import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { AddRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
+import { AddRegular, CommentMultipleRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 
 export interface IThreadListRow {
   threadId: string;
@@ -51,6 +51,19 @@ export interface IThreadListProps {
   onSelectThread: (threadId: string) => void;
   onCreateThread?: () => void;
   /**
+   * Collapse the thread pane. When wired, clicking the "Threads" title row
+   * collapses the pane (R3 UAT 2026-07-23 round 3 item 5 — no separate chevron).
+   * `ConversationWorkspace` owns the collapsed state + renders the icon-only
+   * re-expand strip. Omit to hide the collapse affordance.
+   */
+  onCollapse?: () => void;
+  /**
+   * Optional accessory rendered to the right of the "Threads" title (round 3
+   * item 3) — e.g. the widget's "N new communications" count. Kept out of the
+   * collapse click target.
+   */
+  titleAccessory?: React.ReactNode;
+  /**
    * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
    * inverse of the row's current `isPinned`). The host owns optimistic UI + rollback (see `ConversationWorkspace`);
    * this component only renders whatever `isPinned` it is given and reports the user's intent. Omit to hide the
@@ -66,27 +79,93 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
-    minWidth: '240px',
-    borderRightWidth: tokens.strokeWidthThin,
-    borderRightStyle: 'solid',
-    borderRightColor: tokens.colorNeutralStroke2,
-    // Subtle contrast fill vs. the message pane (`colorNeutralBackground1`) so
-    // the thread/side pane reads as distinct (task 062 / §B6). Semantic token —
-    // adapts in dark mode.
+    // FILL the parent pane's width at any resized width (round 4 PCF item 2 /
+    // widget) — without width:100% a flex child sizes to content, so the rows
+    // didn't scale as the splitter widened the pane. min-width:0 keeps the pane
+    // shrinkable below the 240px floor.
+    width: '100%',
+    minWidth: 0,
+    // Light-grey contrast fill vs. the white message pane (`colorNeutralBackground1`)
+    // so the thread pane reads as distinct (item 4). Semantic token — adapts in
+    // dark mode.
     backgroundColor: tokens.colorNeutralBackground2,
   },
+  // Thread-pane header (items 5/8/3): "Threads" title, a leading ＋ (create), and
+  // a collapse affordance. The title area + trailing chevron both collapse.
   toolbar: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    // Icon-only ＋ sits at the trailing edge (task 062 / §B5) — Teams-style.
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
+  },
+  // "Threads" title — icon + label, a clickable region that collapses the pane
+  // (round 3 item 5 — whole row collapses, no separate chevron). Content-width
+  // so the ＋ can right-align (item 6).
+  headerTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    backgroundColor: 'transparent',
+    borderTopStyle: 'none',
+    borderRightStyle: 'none',
+    borderBottomStyle: 'none',
+    borderLeftStyle: 'none',
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+    borderRadius: tokens.borderRadiusSmall,
+    cursor: 'pointer',
+    textAlign: 'left',
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    outlineStyle: 'none',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+    },
+  },
+  // Static (non-collapsible) title when no `onCollapse` is wired.
+  headerTitleStatic: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+  },
+  // "Threads" icon (round 3 item 4).
+  titleIcon: {
+    fontSize: '18px',
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
+  // Count accessory right of the title (item 3) — e.g. "82 new communications".
+  titleAccessory: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  // Pushes the ＋ to the right edge of the header row (item 6).
+  headerSpacer: {
+    flex: '1 1 auto',
+    minWidth: tokens.spacingHorizontalS,
   },
   list: {
     flex: '1 1 auto',
@@ -94,6 +173,9 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
+    // Hide the visible scrollbar (round 4) — wheel scroll still works.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { width: 0, height: 0 },
     // Breathing room between thread rows (R3 UAT 2026-07-22 item 5b).
     rowGap: tokens.spacingVerticalXS,
     paddingTop: tokens.spacingVerticalXS,
@@ -145,8 +227,9 @@ const useStyles = makeStyles({
     flexShrink: 0,
     minWidth: 'auto',
     padding: 0,
-    // Smaller pin glyph (item 5b) — the icon font-size drives the SVG size.
-    fontSize: tokens.fontSizeBase200,
+    // Smaller pin glyph (R3 UAT 2026-07-23 item 7) — the icon font-size drives
+    // the SVG size; base100 (~10px) is a subtle affordance.
+    fontSize: tokens.fontSizeBase100,
   },
   pinButtonActive: {
     color: tokens.colorBrandForeground1,
@@ -184,6 +267,8 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   selectedThreadId,
   onSelectThread,
   onCreateThread,
+  onCollapse,
+  titleAccessory,
   onTogglePin,
   className,
 }) => {
@@ -231,12 +316,33 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
-        {/* Icon-only ＋ create control (task 062 / §B5) — the accessible name
-            stays "New thread" so keyboard + screen-reader users still identify
-            it despite the label being visually icon-only (NFR-05). */}
+        {/* "Threads" title = icon + label (round 3 items 4/5). Clicking the row
+            collapses the pane when `onCollapse` is wired (no separate chevron);
+            otherwise a static label. */}
+        {onCollapse ? (
+          <button
+            type="button"
+            className={styles.headerTitle}
+            aria-label="Collapse threads pane"
+            onClick={onCollapse}
+          >
+            <CommentMultipleRegular className={styles.titleIcon} />
+            <span>Threads</span>
+          </button>
+        ) : (
+          <span className={styles.headerTitleStatic}>
+            <CommentMultipleRegular className={styles.titleIcon} />
+            <span>Threads</span>
+          </span>
+        )}
+        {/* Count accessory (item 3) — kept out of the collapse click target. */}
+        {titleAccessory && <span className={styles.titleAccessory}>{titleAccessory}</span>}
+        <span className={styles.headerSpacer} />
+        {/* ＋ create control right-aligned (item 6). */}
         <Tooltip content="New thread" relationship="label">
           <Button
-            appearance="primary"
+            appearance="subtle"
+            size="small"
             icon={<AddRegular />}
             aria-label="New thread"
             onClick={() => onCreateThread?.()}
@@ -292,11 +398,8 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                 onFocus={() => setFocusedThreadId(row.threadId)}
               >
                 <div className={styles.rowHeader}>
-                  <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
-                    {displayName}
-                  </Text>
-                  {/* Unread signal as a compact brand dot (item 5b) — replaces the
-                      former "N new messages" text + inline Mark-as-read row. */}
+                  {/* Unread signal as a compact brand dot, now on the LEFT of the
+                      row (R3 UAT 2026-07-23 item 6) — before the thread name. */}
                   {typeof row.unreadCount === 'number' && row.unreadCount > 0 && (
                     <span
                       className={styles.unreadDot}
@@ -305,6 +408,9 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                       title={`${row.unreadCount} unread message${row.unreadCount === 1 ? '' : 's'}`}
                     />
                   )}
+                  <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
+                    {displayName}
+                  </Text>
                   {onTogglePin && (
                     <Button
                       appearance="transparent"
