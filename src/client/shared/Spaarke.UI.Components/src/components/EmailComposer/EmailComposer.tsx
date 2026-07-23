@@ -44,6 +44,7 @@ import type {
   IEmailComposerHandle,
   IEmailComposerProps,
   IComposerAttachmentSource,
+  IPickedRecord,
   IValidationResult,
 } from './EmailComposer.types';
 
@@ -52,7 +53,6 @@ import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
-import { DocumentLookupDialog } from './subcomponents/DocumentLookupDialog';
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -81,6 +81,15 @@ function isSafeHref(url: string): boolean {
   return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
+/** Escape a plain string for safe interpolation into HTML (record-link label/href). */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ---------------------------------------------------------------------------
 // Styles — three mount variants (design §5.10). Layout density/chrome only;
 // all share the same Fluent semantic tokens (dark mode passes through the
@@ -90,6 +99,13 @@ function isSafeHref(url: string): boolean {
 const useStyles = makeStyles({
   // Shared across all mounts.
   base: {
+    // border-box so `width:100%` + padding fits the host container (the PCF/Dataverse
+    // host has no global border-box reset; without this the padded page mount overflowed
+    // its modal and got clipped on the left — owner UAT round 5).
+    boxSizing: 'border-box',
+    width: '100%',
+    maxWidth: '100%',
+    overflowX: 'hidden',
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
@@ -195,9 +211,34 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const [showBccToggle, setShowBccToggle] = React.useState(false);
   const bccVisible = showBccToggle || state.bcc.length > 0;
 
-  // Built-in document-lookup overlay (owner UAT round 3/4) — opened from AttachmentList's
-  // "look up a document" tool when the host supplies onSearchDocuments.
-  const [docLookupOpen, setDocLookupOpen] = React.useState(false);
+  // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
+  // (Attach/Link per row); any other record type is inserted as a link in the message body.
+  const handleRecordPicked = React.useCallback((picked: IPickedRecord) => {
+    if (picked.entityType === 'sprk_document') {
+      dispatch({
+        type: 'ADD_ATTACHMENT',
+        item: {
+          id: `doc:${picked.id}`,
+          source: 'related',
+          fileName: picked.name,
+          sizeBytes: picked.sizeBytes ?? 0,
+          documentId: picked.id,
+          linkUrl: picked.url,
+          selected: true,
+          linkSelected: false,
+        },
+      });
+      return;
+    }
+    if (!picked.url || !isSafeHref(picked.url)) return;
+    const cur = stateRef.current;
+    const label = picked.name || 'record';
+    const nextBody =
+      cur.bodyFormat === 'HTML'
+        ? `${cur.body}<p><a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a></p>`
+        : `${cur.body}${cur.body ? '\n' : ''}${label}: ${picked.url}`;
+    dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
+  }, []);
 
   // ── Re-derive state when mode/sourceRecord/communicationId change on an
   //    already-mounted instance (host swaps props rather than remounting) ──
@@ -407,7 +448,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
-          onBrowseDocuments={props.onSearchDocuments ? () => setDocLookupOpen(true) : undefined}
+          recordCatalog={props.recordLookupCatalog}
+          onLookupRecord={props.onLookupRecord}
+          onRecordPicked={handleRecordPicked}
           readOnly={state.readOnly}
           errorMessage={fieldErrors.attachments}
         />
@@ -494,30 +537,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         onReply={props.onReply}
         onForward={props.onForward}
       />
-
-      {props.onSearchDocuments && (
-        <DocumentLookupDialog
-          open={docLookupOpen}
-          onClose={() => setDocLookupOpen(false)}
-          onSearch={props.onSearchDocuments}
-          onAdd={doc =>
-            dispatch({
-              type: 'ADD_ATTACHMENT',
-              item: {
-                id: `doc:${doc.documentId}`,
-                source: 'related',
-                fileName: doc.fileName,
-                sizeBytes: doc.sizeBytes ?? 0,
-                mimeType: doc.mimeType,
-                documentId: doc.documentId,
-                linkUrl: doc.linkUrl,
-                selected: true,
-                linkSelected: false,
-              },
-            })
-          }
-        />
-      )}
     </div>
   );
 });

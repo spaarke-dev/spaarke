@@ -106,18 +106,30 @@ export interface IAttachmentItem {
 }
 
 /**
- * A document returned by the host's `onSearchDocuments` for the document-lookup overlay
- * (owner UAT round 3/4). The user can Attach it (its `documentId` flows into the send
- * payload) and/or Link it (a body hyperlink, when `linkUrl` is resolvable).
+ * One entity target in the composer's record-lookup menu (owner UAT round 5) — the
+ * RegardingResolver pattern: a search icon opens a menu of these, and choosing one runs
+ * the host's `onLookupRecord`.
  */
-export interface IDocumentSearchResult {
-  /** `sprk_document` GUID. */
-  documentId: string;
-  fileName: string;
+export interface IRecordLookupTarget {
+  /** Entity logical name, e.g. `sprk_matter`, `sprk_document`, `contact`. */
+  logicalName: string;
+  /** User-facing label shown in the lookup menu. */
+  displayName: string;
+}
+
+/**
+ * A record the user picked via the host's `onLookupRecord` (RegardingResolver-style
+ * `Xrm.Utility.lookupObjects`). A `sprk_document` pick is added to the attachments
+ * (Attach/Link per row); any OTHER record type is inserted as a link in the body.
+ */
+export interface IPickedRecord {
+  entityType: string;
+  id: string;
+  name: string;
+  /** Host-built record URL (deep-link) — used for the body link / the document Link option. */
+  url?: string;
+  /** File size in bytes when the pick is a document (optional). */
   sizeBytes?: number;
-  mimeType?: string;
-  /** Optional deep-link/preview URL — enables the Link option for this document. */
-  linkUrl?: string;
 }
 
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
@@ -347,13 +359,18 @@ export interface IEmailComposerProps {
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
 
   /**
-   * Search existing `sprk_document` records for the built-in document-lookup overlay
-   * (owner UAT round 3/4, 2026-07-22). When supplied, AttachmentList renders a "look
-   * up a document" tool that opens a modal OVER the composer; picks are added to the
-   * composer's attachment state (Attach and/or Link). Absent → only the from-computer
-   * add tool renders. Context-agnostic (ADR-012): the host binds the Dataverse query.
+   * Record-lookup targets for the attachments "look up a record" tool (owner UAT round 5).
+   * When supplied with {@link onLookupRecord}, a search icon opens a menu of these entity
+   * types (RegardingResolver pattern). A `sprk_document` pick attaches (Attach/Link); any
+   * other type inserts a link to the record in the message body.
    */
-  onSearchDocuments?: (query: string) => Promise<IDocumentSearchResult[]>;
+  recordLookupCatalog?: IRecordLookupTarget[];
+  /**
+   * Runs the host lookup for the chosen entity type (RegardingResolver-style
+   * `Xrm.Utility.lookupObjects`) and returns the picked record (or null if cancelled).
+   * Context-agnostic (ADR-012): the host owns the Xrm bridge + the record URL.
+   */
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
 
   // — Send-side behavior —
   sendMode?: CommunicationSendMode;

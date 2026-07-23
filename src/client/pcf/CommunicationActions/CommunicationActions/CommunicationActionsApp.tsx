@@ -44,7 +44,8 @@ import {
   type ISendEmailPageProps,
   type EmailComposerMode,
   type IAttachmentItem,
-  type IDocumentSearchResult,
+  type IRecordLookupTarget,
+  type IPickedRecord,
   searchUsersAndContacts,
   createXrmDataService,
 } from '@spaarke/ui-components';
@@ -63,6 +64,22 @@ const SendEmailPageR16 = SendEmailPage as unknown as React.ComponentType<ISendEm
 
 // sprk_communicationtype = Email (task-002 verified) — the only interactive channel.
 const COMMUNICATION_TYPE_EMAIL = 100000000;
+
+// Record-lookup targets for the composer's "look up a record" tool (owner UAT round 5,
+// RegardingResolver set). Document first (the primary attach case); the rest are linked.
+const RECORD_LOOKUP_CATALOG: IRecordLookupTarget[] = [
+  { logicalName: 'sprk_document', displayName: 'Document' },
+  { logicalName: 'sprk_matter', displayName: 'Matter' },
+  { logicalName: 'sprk_project', displayName: 'Project' },
+  { logicalName: 'sprk_event', displayName: 'Event' },
+  { logicalName: 'sprk_communication', displayName: 'Communication' },
+  { logicalName: 'sprk_workassignment', displayName: 'Work Assignment' },
+  { logicalName: 'sprk_invoice', displayName: 'Invoice' },
+  { logicalName: 'sprk_budget', displayName: 'Budget' },
+  { logicalName: 'sprk_analysis', displayName: 'Analysis' },
+  { logicalName: 'sprk_organization', displayName: 'Organization' },
+  { logicalName: 'contact', displayName: 'Contact' },
+];
 
 // "Create from this email" flows. Target-entity mapping + the modal launch itself
 // live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
@@ -319,29 +336,32 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     [dataService]
   );
 
-  // Document-lookup overlay search (owner UAT round 3/4): search sprk_document by name;
-  // linkUrl is the Dataverse record deep-link so the composer's "Link" option can insert it.
-  const handleSearchDocuments = React.useCallback(
-    async (query: string): Promise<IDocumentSearchResult[]> => {
-      const safe = query.replace(/'/g, "''");
-      const options =
-        `?$select=sprk_documentid,sprk_documentname,sprk_filename,sprk_filesize` +
-        `&$filter=contains(sprk_documentname,'${safe}')` +
-        `&$orderby=sprk_documentname asc&$top=15`;
-      const result = await dataService.retrieveMultipleRecords('sprk_document', options);
-      const base = resolveDataverseUrl();
-      return result.entities.map(e => {
-        const id = e['sprk_documentid'] as string;
-        return {
-          documentId: id,
-          fileName: (e['sprk_documentname'] as string) || (e['sprk_filename'] as string) || 'Document',
-          sizeBytes: (e['sprk_filesize'] as number) ?? 0,
-          linkUrl: base ? `${base}/main.aspx?pagetype=entityrecord&etn=sprk_document&id=${id}` : undefined,
-        };
-      });
-    },
-    [dataService]
-  );
+  // Record lookup (owner UAT round 5): the attachments search icon opens a menu of these
+  // entity types (RegardingResolver pattern). A Document pick attaches; any other record is
+  // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
+  const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
+    type XrmLike = {
+      Utility?: { lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string }>> };
+    };
+    const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
+    const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+    if (!xrm?.Utility?.lookupObjects) return null;
+    const results = await xrm.Utility.lookupObjects({
+      entityTypes: [entityType],
+      defaultEntityType: entityType,
+      allowMultiSelect: false,
+    });
+    if (!results || results.length === 0) return null;
+    const picked = results[0];
+    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const base = resolveDataverseUrl();
+    return {
+      entityType,
+      id,
+      name: picked.name,
+      url: base ? `${base}/main.aspx?pagetype=entityrecord&etn=${entityType}&id=${id}` : undefined,
+    };
+  }, []);
 
   // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
   // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
@@ -400,7 +420,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       authenticatedFetch,
       bffBaseUrl,
       onSearchRecipients: handleSearchRecipients,
-      onSearchDocuments: handleSearchDocuments,
+      recordLookupCatalog: RECORD_LOOKUP_CATALOG,
+      onLookupRecord: handleLookupRecord,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -410,7 +431,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, handleSearchDocuments, sourceAttachments]);
+  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, handleLookupRecord, sourceAttachments]);
 
   if (authError) {
     return (

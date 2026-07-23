@@ -15,7 +15,7 @@
 import * as React from 'react';
 
 import { EmailComposer } from '../EmailComposer';
-import type { EmailComposerMode, IAttachmentItem, IDocumentSearchResult } from '../EmailComposer.types';
+import type { EmailComposerMode, IAttachmentItem, IRecordLookupTarget, IPickedRecord } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -44,11 +44,12 @@ export interface ISendEmailPageProps {
    */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   /**
-   * Document-lookup search, forwarded to the engine's built-in document-lookup overlay
-   * (owner UAT round 3/4). When supplied, the attachments toolbar shows a "look up a
-   * document" tool. Hosts bind it to a `sprk_document` Web API search. Optional/additive.
+   * Record-lookup targets + host lookup for the attachments "look up a record" tool
+   * (owner UAT round 5, RegardingResolver pattern). Forwarded to the engine. A document
+   * pick attaches; any other record type is linked in the body. Optional/additive.
    */
-  onSearchDocuments?: (query: string) => Promise<IDocumentSearchResult[]>;
+  recordLookupCatalog?: IRecordLookupTarget[];
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;

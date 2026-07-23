@@ -17,12 +17,26 @@
  * `mapStateToSendRequest`) — a documented scope boundary, not a bug.
  */
 import * as React from 'react';
-import { Button, Text, ProgressBar, Checkbox, Tooltip, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import {
+  Button,
+  Text,
+  ProgressBar,
+  Checkbox,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+  makeStyles,
+  tokens,
+  mergeClasses,
+} from '@fluentui/react-components';
 import {
   DismissRegular,
   DocumentRegular,
   DocumentArrowUp20Regular,
-  DocumentAdd20Regular,
+  SearchRegular,
   ChevronDown20Regular,
   ChevronUp20Regular,
 } from '@fluentui/react-icons';
@@ -31,7 +45,13 @@ import {
   ATTACHMENT_MAX_TOTAL_BYTES,
   ATTACHMENT_WARN_TOTAL_BYTES,
 } from '../EmailComposer.reducer';
-import type { EmailComposerMode, IAttachmentItem, IComposerAttachmentSource } from '../EmailComposer.types';
+import type {
+  EmailComposerMode,
+  IAttachmentItem,
+  IComposerAttachmentSource,
+  IRecordLookupTarget,
+  IPickedRecord,
+} from '../EmailComposer.types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -63,11 +83,14 @@ export interface IAttachmentListProps {
   /** Toggle the body-link inclusion for a Document-backed attachment (task 104). */
   onToggleLink?: (id: string) => void;
   /**
-   * Open the host's document-lookup overlay (owner UAT round 3). When supplied,
-   * the "look up document" tool renders. The host returns the picked documents by
-   * calling `onAdd` for each. Absent → only the from-computer tool renders.
+   * Record-lookup targets (owner UAT round 5). With {@link onLookupRecord}/{@link onRecordPicked},
+   * a search-icon menu of these entity types renders (RegardingResolver pattern).
    */
-  onBrowseDocuments?: () => void;
+  recordCatalog?: IRecordLookupTarget[];
+  /** Host lookup for a chosen entity type (returns the picked record or null). */
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /** Called with a picked record so the composer can attach it (document) or link it (other). */
+  onRecordPicked?: (picked: IPickedRecord) => void;
   readOnly?: boolean;
   errorMessage?: string;
 }
@@ -162,7 +185,9 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   onRemove,
   onToggleSelected,
   onToggleLink,
-  onBrowseDocuments,
+  recordCatalog,
+  onLookupRecord,
+  onRecordPicked,
   readOnly,
   errorMessage,
 }) => {
@@ -175,7 +200,19 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   const showIncludeToggles = (item: IAttachmentItem): boolean => !readOnly && !!item.documentId;
 
   const showLocalAdd = !readOnly && sources.some(s => s.kind === 'local');
-  const showDocAdd = !readOnly && !!onBrowseDocuments;
+  const showRecordLookup = !readOnly && !!recordCatalog?.length && !!onLookupRecord && !!onRecordPicked;
+
+  const handleLookup = React.useCallback(
+    async (entityType: string) => {
+      try {
+        const picked = await onLookupRecord?.(entityType);
+        if (picked) onRecordPicked?.(picked);
+      } catch (err) {
+        console.error('[AttachmentList] record lookup failed:', err);
+      }
+    },
+    [onLookupRecord, onRecordPicked]
+  );
 
   const includedItems = items.filter(a => a.selected !== false);
   const totalBytes = includedItems.reduce((sum, a) => sum + a.sizeBytes, 0);
@@ -222,16 +259,23 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
               />
             </Tooltip>
           )}
-          {showDocAdd && (
-            <Tooltip content="Look up a document" relationship="label">
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<DocumentAdd20Regular />}
-                aria-label="Look up a document"
-                onClick={() => onBrowseDocuments?.()}
-              />
-            </Tooltip>
+          {showRecordLookup && (
+            <Menu positioning="below-end">
+              <MenuTrigger disableButtonEnhancement>
+                <Tooltip content="Look up a record — attach a document or link a record" relationship="label">
+                  <Button appearance="subtle" size="small" icon={<SearchRegular />} aria-label="Look up a record" />
+                </Tooltip>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {recordCatalog!.map(t => (
+                    <MenuItem key={t.logicalName} onClick={() => void handleLookup(t.logicalName)}>
+                      {t.displayName}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
           )}
           <Tooltip content={collapsed ? 'Expand attachments' : 'Collapse attachments'} relationship="label">
             <Button
