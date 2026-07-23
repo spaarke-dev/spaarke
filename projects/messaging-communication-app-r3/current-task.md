@@ -1,7 +1,7 @@
 # Current Task State — messaging-communication-app-r3
 
-> **Last Updated**: 2026-07-22 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. This file is self-contained — you can resume from it alone.
+> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. This file is self-contained — resume from it alone.
 
 ---
 
@@ -9,73 +9,56 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | UAT refinement of the Communications widget + modal (conversation UI). NOT a POML task — direct UAT iteration. |
-| **Status** | **IMPLEMENTED 2026-07-22 — all 7 UAT items done.** Tests green (ui-components 97/97, communication-components 9/9), both consumer packages typecheck clean. Not yet committed. |
-| **Next Action** | Commit the UAT batch (5 shared files + 2 hosts + tests + rebuilt dist), then HOLD deploy for coordinated rollout. See `notes/uat-feedback-comm-widget-2026-07-22.md` for the per-item resolution table. |
-| **Branch** | `work/messaging-communication-app-r3` — synced with master (a few notes commits ahead since last sync). |
-| **Deploy** | HELD for the operator's **coordinated cross-project rollout** — do NOT deploy without the user sequencing it. |
-| **Re-UAT watch** | Item 1 (full-height): if the "small box" persists after deploy, the cause is the OUTER dashboard wrapper (`WorkspaceWidgetRegistry` / `communications.registration.ts`), not these shared files — the shell's own height/width chain is now correct. |
+| **Active work** | UAT iteration on the Communications conversation UI (widget + `sprk_communicationconversationpage` modal code page + `CommunicationConversationPanel` PCF). Direct UAT loop, NOT a POML task. |
+| **Status** | **4 UAT rounds implemented, merged to master, and deployed.** Working tree clean, 0 behind master, HEAD `706b0a302`. |
+| **Next Action** | **Await the user's next UAT feedback.** Two items are best-effort and flagged for re-UAT (see "Watch on re-UAT"). Also: the user manually uploads the **PCF v1.5.0 zip** (path below) — code pages + BFF are already deployed by me. |
+| **Branch** | `work/messaging-communication-app-r3` — synced with master. |
+| **Deploy** | Code pages (SpaarkeAi + conversationpage) + BFF: I deploy directly. **PCF: I build + hand the zip; the user uploads to Dataverse.** |
 
 ### Critical Context (3 sentences)
-Task 045 (FR-22 notification awareness) is DONE + merged to master (Option A register-only wiring; consumer-only; no second producer). SpaarkeAi was just deployed carrying it. The current work is a 7-item UAT batch on the **shared** conversation components (`@spaarke/ui-components` `ConversationWorkspace`/`ConversationView` + `@spaarke/communication-components` `CommunicationsWorkspaceWidget`) — fixes reach BOTH the dashboard widget AND the modal code page (`sprk_communicationconversationpage`) because they share these components.
+The conversation UI is three surfaces sharing `@spaarke/ui-components` components (`ConversationWorkspace`, `ConversationView`, `ThreadList`, `NewThreadModal`) — a fix in the shared lib reaches the widget, the modal code page, AND the PCF. Item 9 (rounds 2+) added a **new BFF endpoint** `POST /api/communications/threads` (create named, record-anchored thread; no participant) + a redesigned `NewThreadModal` (name + `AssociateToStep` record picker + plain-text message). Deploy cadence per round: shared-lib change → rebuild `Spaarke.UI.Components` dist → rebuild+deploy the 2 Vite code pages (`Deploy-WebResourceInline.ps1` for conversationpage, `Deploy-SpaarkeAi.ps1` for SpaarkeAi) → bump+`build:prod` the PCF → hand zip.
 
----
+### 📦 Current PCF zip for the user to upload (v1.5.0)
+```
+C:\code_files\spaarke-wt-messaging-communication-app-r3\src\client\pcf\CommunicationConversationPanel\Solution\bin\CommunicationConversationPanelSolution_v1.5.0.zip
+```
 
-## UAT Work Item — Communications widget + modal (2026-07-22)
-
-Full checklist + file map also at `notes/uat-feedback-comm-widget-2026-07-22.md`. **All 5 files are shared — each fix reaches BOTH surfaces.** Update the matching `__tests__` alongside each change. Screenshots in the chat that produced this (operator UAT after the SpaarkeAi deploy).
-
-### Batch A — `Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx` (~1106 LOC)
-- **(4) Toolbar** (email/message/inbox/search icons): right-align; more spacing; **active state = dark-blue background (`tokens.colorBrandBackground` / brand), inactive = transparent** — mirror the Calendar widget filter button (`@spaarke/events-components` `CalendarFilterPane` active-button styling).
-- **(6) Send** = icon only (`SendRegular`), drop the "Send" text label.
-- **(7) Refresh** — move the `onRefresh` control OUT of the message-input row INTO the top toolbar with the other tools.
-- **(5c) Mark-as-read** — moves HERE: add "mark as read" as a MESSAGE toolbar tool (it is removed from thread rows in Batch C).
-
-### Batch B — `ConversationView/subcomponents/EmailInFlowBlock.tsx` (the email card)
-- **(2)** Email card redesign: **font too small/compressed → increase**; **REMOVE the attachment list**; **ADD ~first-100-char body snippet** (concat/preview); **ADD sent/received date**.
-
-### Batch C — `ConversationWorkspace.tsx` (373 LOC) + `ConversationWorkspace/subcomponents/ThreadList.tsx`
-- **(1) Full container height** — widget/modal content must fill the container (currently a small box w/ empty space below). Root `height:100%` / flex-fill through `CommunicationsWorkspaceWidget.tsx` → `ConversationWorkspace.tsx`.
-- **(3) Right pane resizes with message width** — stabilize: right pane `min-width:0` + fixed/stable flex-basis so it doesn't grow to the widest bubble.
-- **(5a) `+` new-thread button does NOT work** — fix the handler (`onCreateThread`/`+`) in `ConversationWorkspace.tsx`.
-- **(5b)** Thread rows: add **padding between rows**; "1 new message" text → **unread-dot ICON** (drop words); **smaller pin icon**.
-- **(5c) REMOVE per-row "Mark as read"** (moves to the message toolbar — Batch A).
-
-### Reference
-- Active-filter styling: Calendar widget filter button (dark-blue when on). `@spaarke/events-components` `CalendarFilterPane`.
-- Component roles: `ConversationWorkspace` = two-pane (threads + conversation); `ConversationView` = right pane (messages + toolbar + send + refresh); `ThreadList` = left pane rows; `EmailInFlowBlock`/`MessageBubble` = message cards.
+### Watch on re-UAT (best-effort, may need follow-up)
+1. **PCF modal centering** — fixed via `ReactDOM.createPortal(modal, document.body)` + re-wrapped `FluentProvider` in `ConversationModal.tsx` (escapes the Dataverse form's transformed ancestor that broke Fluent's `position:fixed`). If STILL top-anchored after v1.5.0 import, add an explicit viewport-fixed wrapper.
+2. **Widget full-container fill** — widget root `minHeight: calc(100vh - 200px)` (the workspace `SectionPanel` card + `WorkspaceShell` row are deliberately content-driven, so a widget must set its own floor; matches SmartTodo's pattern). If it overshoots/undershoots the tab, the `200px` chrome constant is the single knob.
 
 ---
 
 ## Full State (Detailed)
 
-### DONE + on master this session
-- **Auth popup-loop fix** (server config): created the missing `sprk_TenantId` env-var value record in spaarkedev1 (`a221a95e-…`) → tenant-specific MSAL authority (was `/organizations` → popup loop). Also added a `/api/config/client` tenant fallback in `@spaarke/auth` `resolveRuntimeConfig.ts`.
-- **by-regarding 500 fix**: read path selected the broken `sprk_sentbyname` column (`IsValidODataAttribute=false` in-env) → Dataverse 400 → 500 whenever a thread had messages. Fixed by sourcing `SentByName` from the `sprk_sentby` lookup's FormattedValue annotation (impersonated read now requests annotations). Verified 200.
-- **Task 045 (FR-22)**: Option A register-only wiring (seam `communicationArrivalsSeam.ts`; SpaarkeAi `initNotificationsClient()` binds the ONE shared client; removed rogue `new NotificationsClient()`). PR #682 merged. 9/9 tests pass.
+### Deployed surfaces (spaarkedev1)
+- **BFF** (`spaarke-bff-dev`): `POST /api/communications/threads` create-thread endpoint live (deployed round 2). No BFF change in rounds 3–4.
+- **conversationpage** code page (`sprk_communicationconversationpage.html`, id `4529e3ae-…`): published through round 4.
+- **SpaarkeAi** code page (`sprk_spaarkeai`, id `5206a442-…`): published through round 4.
+- **PCF** `CommunicationConversationPanel`: built to **v1.5.0**; zip handed to user each round (they upload). Current = v1.5.0.
 
-### DEPLOYED to spaarkedev1
-- BFF (by-regarding + sender-name fixes), conversation code page (tenant fallback), SpaarkeAi (task 045 — just deployed by operator), PCF v1.1.0.
-- `@spaarke/auth` tenant-fallback reaches SpaarkeAi only on its next rebuild (SpaarkeAi doesn't hit the loop — Xrm gives it the tenant).
+### UAT rounds shipped (all merged + deployed)
+- **Round 1 (2026-07-22, PR #683):** auth popup-loop fix, by-regarding 500 fix, FR-22 notification awareness (task 045), first 7-item widget/modal UAT batch.
+- **Round 2 (PR #685):** 7-item batch + **item 9 create-thread endpoint + NewThreadModal redesign** (name + AssociateToStep + plain message; `ThreadResolver.CreateRecordThreadAsync`; 4 contract tests). PCF v1.2.0→1.3.0.
+- **Round 3 (PR #686):** 16 items — 33/67 pane, ResizeObserver, Threads header (icon + count accessory + collapse-on-row), toolbar toggle colors, modal 1040×72vh, PCF v1.3.0→1.4.0.
+- **Round 4 (PR #687, HEAD 706b0a302):** 16 items — ThreadList `width:100%`, widget `calc(100vh-200px)`, hidden scrollbars, toolbar `appearance="primary"` active icons, New Thread modal sections/footer/textarea, PCF portal-to-body centering + `+` wiring, PCF v1.4.0→1.5.0.
 
-### PENDING (operator-coordinated)
-1. **Spine runtime config** for live communication badges: Azure SignalR (Tier 1) + `systemuser.sprk_isexternal` backfill (Tier 2) per `NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md` (in `spaarke-wt-spaarke-notification-spine-r1`).
-2. **Coordinated deploy** of the UAT batch once implemented.
+### Key architecture facts (for the next change)
+- **Shared components** live in `src/client/shared/Spaarke.UI.Components/src/components/` — `ConversationWorkspace/` (owns the resizable/collapsible two-pane layout via `useThreadPaneLayout.ts` + reused `PanelSplitter`), `ConversationView/` (right pane: bubbles + toolbar + compose), `ConversationWorkspace/subcomponents/ThreadList.tsx` (left pane), `NewThreadModal/`.
+- **Consumers read the built `dist`** (`@spaarke/ui-components` `main`/`types` = `dist/…`), EXCEPT SpaarkeAi which aliases to `src`. So after any shared-lib edit: `npm run build` in `Spaarke.UI.Components` BEFORE typechecking/building consumers. conversationpage reads `dist`; SpaarkeAi reads `src`; the PCF reads `dist`.
+- **PCF is React 16.14** (ADR-022) — shared components must stay React-16-safe (`useThreadPaneLayout` uses only `useState/useRef/useEffect/useCallback` + `ResizeObserver`).
+- **Modal centering:** NO shared modal shell exists; it's plain Fluent `Dialog`/`DialogSurface` (centers in code pages; top-anchors in PCF due to transformed ancestor → the round-4 portal-to-body fix).
+- **Widget fill:** `SectionPanel.card` + `WorkspaceShell.row` are content-driven (no `height:100%`; row has NO `minHeight:0` — deliberate, see `WorkspaceShell.styles.ts`). Widgets fill via an explicit height floor.
+- **Item 9 create model:** thread `sprk_communicationthread` carries a denormalized regarding pointer (`sprk_regardingrecordtype/id/name`), `sprk_threadtype` (RecordAnchored=100000000), owner = caller. Reuses `IThreadResolver`/`IGenericEntityService`/`ICallerSystemUserResolver` — no new DI/package (§10 satisfied; publish 47.48 MB).
 
-### Scope boundaries (do NOT drift)
-- Notification awareness = **SpaarkeAi/LegalWorkspace workspace widget ONLY**. The Matter-form conversation **PCF + Messages modal do NOT consume the spine** (separate host) — extending them is follow-on scope, not requested.
-- **No second producer** — the spine's `CommunicationArrivedProducer` is canonical (ADR-047).
-- Shared components: ADR-012 context-agnostic + ADR-021 Fluent v9 semantic tokens (NO hard-coded colors — use tokens for the toolbar active-state).
+### Tests (all green)
+- `@spaarke/ui-components`: 93 conversation tests (`ConversationView`/`ConversationWorkspace`/`ThreadList`/`NewThreadModal`/`EmailInFlow`).
+- `@spaarke/communication-components`: 9/9 (widget).
+- BFF: 46 Communication tests incl. 4 new create-thread contract tests (`tests/integration/contract/Api/Communication/CommunicationCreateRecordThreadContractTests.cs`).
 
-### Deploy discipline (operator memory)
-Before ANY env deploy: commit → `/push-to-github` → `/worktree-sync` → deploy via dedicated skills (`/bff-deploy`, `/code-page-deploy`, `/pcf-deploy` — hand over the full PCF zip path). Deploy currently HELD for cross-project coordination.
+### Pending (operator-coordinated, unchanged across rounds)
+- Spine runtime config for LIVE communication badges: Azure SignalR (Tier 1) + `systemuser.sprk_isexternal` backfill (Tier 2) per `spaarke-wt-spaarke-notification-spine-r1` guide. Not required for the UI/UAT work.
 
-### Key commits this session
-- by-regarding 500 fix `324f94d61` · sender-name + tenant-fallback `5fff139f0` (PR #680) · task 045 Option A `b11863c8b` (PR #682) · UAT capture `5b885f480`.
-
-### Files modified this session (all committed)
-- `Services/Communication/CommunicationThreadReadService.cs`, `Spaarke.Dataverse/DataverseWebApiService.cs` (annotation request)
-- `@spaarke/auth/resolveRuntimeConfig.ts` (tenant fallback)
-- `@spaarke/communication-components/.../CommunicationsWorkspaceWidget/{communicationArrivalsSeam.ts (new), useCommunicationArrivals.ts, CommunicationsWorkspaceWidget.tsx, index.ts, useCommunicationArrivals.test.tsx}`; deleted `createNotificationsClient.ts` + `types/spaarke-notifications.d.ts` + dead `@spaarke/notifications` dep/mock/mapper
-- `SpaarkeAi/src/services/notificationsBootstrap.ts` (seam wiring)
-- `tasks/045-notification-awareness.poml` + `tasks/TASK-INDEX.md` (gate cleared) + `notes/uat-feedback-comm-widget-2026-07-22.md`
+### Notes files
+- `notes/uat-feedback-comm-widget-2026-07-22.md`, `…-07-23.md` — earlier round feedback + resolutions.
+- Round 4 feedback was implemented directly (no separate notes file); the PR #687 body + this file capture it.
