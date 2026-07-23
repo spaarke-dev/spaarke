@@ -5,6 +5,12 @@
  * Sends what was authored — no conversion on toggle (each format keeps its own
  * buffer so switching back and forth doesn't lossily round-trip content).
  *
+ * Owner UAT 2026-07-22: default is rich text (HTML); the Rich text / Plain text
+ * toggle floats at the top-right, over the RTF toolbar (rich) or the textarea's
+ * top-right (plain). Plain mode inherently drops the RTF formatting tools (it
+ * renders a bare Textarea). No "Message" field label. The editor is vertically
+ * resizeable.
+ *
  * Reuses the existing `RichTextEditor` (Lexical, Code-Pages-only per ADR-012's
  * PCF-import table) for HTML mode — component justification: EmailComposer is
  * explicitly React-18/19-only with no PCF mount (task 020 §5.7), the exact
@@ -13,7 +19,7 @@
  * tested functionality for no benefit.
  */
 import * as React from 'react';
-import { Field, Textarea, ToggleButton, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { Textarea, ToggleButton, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { RichTextEditor } from '../../RichTextEditor';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
 
@@ -44,34 +50,38 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
   },
-  formatRow: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalXS,
-    // Owner UAT mockup 2026-07-22: Rich text / Plain text toggle sits at the top-right,
-    // above the editor toolbar (was top-left).
-    justifyContent: 'flex-end',
-  },
-  field: {
+  // Editor area — `position: relative` anchors the floating format toggle; the
+  // whole area is vertically resizeable (owner UAT #6).
+  editorArea: {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
-    flex: 1,
+    flexGrow: 1,
+    minHeight: 0,
+    resize: 'vertical',
+    overflow: 'auto',
+  },
+  // Rich/Plain toggle floats at the top-right, sitting at the right end of the RTF
+  // toolbar row (owner UAT #4). The RTF tools are left-aligned so this never overlaps them.
+  toggleFloat: {
+    position: 'absolute',
+    top: tokens.spacingVerticalXXS,
+    right: tokens.spacingHorizontalS,
+    zIndex: 1,
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+  },
+  editorFill: {
+    flexGrow: 1,
     minHeight: 0,
   },
   plainTextarea: {
-    flex: 1,
+    flexGrow: 1,
     minHeight: '180px',
     fontFamily: tokens.fontFamilyMonospace,
   },
   errorText: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  requiredMark: {
-    color: tokens.colorPaletteRedForeground1,
-  },
-  labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -85,55 +95,45 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
   onChange,
   onFormatChange,
   readOnly,
-  required,
   errorMessage,
   minHeight = 200,
 }) => {
   const styles = useStyles();
 
-  const renderLabel = (): React.ReactElement => (
-    <span className={styles.labelRow}>
-      Message
-      {required && (
-        <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
-        </span>
-      )}
-    </span>
-  );
-
   return (
     <div className={styles.wrapper} role="region" aria-label="Message body">
-      <div className={styles.formatRow} role="group" aria-label="Body format">
-        <ToggleButton
-          checked={format === 'HTML'}
-          onClick={() => onFormatChange('HTML')}
-          disabled={readOnly}
-          size="small"
-          appearance={format === 'HTML' ? 'primary' : 'outline'}
-        >
-          Rich text
-        </ToggleButton>
-        <ToggleButton
-          checked={format === 'PlainText'}
-          onClick={() => onFormatChange('PlainText')}
-          disabled={readOnly}
-          size="small"
-          appearance={format === 'PlainText' ? 'primary' : 'outline'}
-        >
-          Plain text
-        </ToggleButton>
-      </div>
+      <div className={styles.editorArea} style={{ minHeight }}>
+        {!readOnly && (
+          <div className={styles.toggleFloat} role="group" aria-label="Body format">
+            <ToggleButton
+              checked={format === 'HTML'}
+              onClick={() => onFormatChange('HTML')}
+              size="small"
+              appearance={format === 'HTML' ? 'primary' : 'outline'}
+            >
+              Rich text
+            </ToggleButton>
+            <ToggleButton
+              checked={format === 'PlainText'}
+              onClick={() => onFormatChange('PlainText')}
+              size="small"
+              appearance={format === 'PlainText' ? 'primary' : 'outline'}
+            >
+              Plain text
+            </ToggleButton>
+          </div>
+        )}
 
-      <Field label={renderLabel()} className={styles.field} validationState={errorMessage ? 'error' : 'none'}>
         {format === 'HTML' ? (
-          <RichTextEditor
-            value={value}
-            onChange={onChange}
-            readOnly={readOnly}
-            minHeight={minHeight}
-            placeholder="Compose your message..."
-          />
+          <div className={styles.editorFill}>
+            <RichTextEditor
+              value={value}
+              onChange={onChange}
+              readOnly={readOnly}
+              minHeight={minHeight}
+              placeholder="Compose your message..."
+            />
+          </div>
         ) : (
           <Textarea
             className={mergeClasses(styles.plainTextarea)}
@@ -145,7 +145,7 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
             resize="vertical"
           />
         )}
-      </Field>
+      </div>
 
       {errorMessage && (
         <span className={styles.errorText} role="alert">

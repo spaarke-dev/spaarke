@@ -47,9 +47,11 @@ export interface ISendEmailDialogRegarding {
 // scrolls while the dialog stays a clean rectangle.
 const useDialogStyles = makeStyles({
   surface: {
-    maxWidth: '720px',
+    // Landscape mid-size rectangle (owner UAT 2026-07-22 #1): the 720px width read as
+    // portrait — widen so the composer is a wider-than-tall rectangle like the mockup.
+    maxWidth: '1040px',
     width: '92vw',
-    height: '70vh',
+    height: '72vh',
     display: 'flex',
     flexDirection: 'column',
     // Surface itself never scrolls — the body owns the scroll region below.

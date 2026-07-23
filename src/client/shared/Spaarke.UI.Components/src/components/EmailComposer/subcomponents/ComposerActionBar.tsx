@@ -52,15 +52,21 @@ export interface IComposerActionBarProps {
 }
 
 const useStyles = makeStyles({
+  // Cancel on the LEFT, Save Draft + Send on the RIGHT (owner UAT 2026-07-22 #7).
   bar: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalM,
     borderTopWidth: tokens.strokeWidthThin,
     borderTopStyle: 'solid',
     borderTopColor: tokens.colorNeutralStroke2,
+  },
+  rightGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
   },
   spinnerRow: {
     display: 'flex',
@@ -105,13 +111,13 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
     'Send'
   );
 
-  return (
-    <div className={styles.bar} role="region" aria-label="Composer actions">
-      {mode === 'view' ? (
-        <>
-          <Button appearance="secondary" onClick={onCancel}>
-            Close
-          </Button>
+  if (mode === 'view') {
+    return (
+      <div className={styles.bar} role="region" aria-label="Composer actions">
+        <Button appearance="secondary" onClick={onCancel}>
+          Close
+        </Button>
+        <div className={styles.rightGroup}>
           {onReply && (
             <Button appearance="secondary" onClick={onReply}>
               Reply
@@ -127,24 +133,29 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
               Edit
             </Button>
           )}
-        </>
-      ) : (
-        <>
-          <Button appearance="secondary" onClick={onCancel} disabled={busy}>
-            Cancel
-          </Button>
-          <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
-            {isSavingDraft ? (
-              <span className={styles.spinnerRow}>
-                <Spinner size="tiny" />
-                Saving...
-              </span>
-            ) : (
-              'Save Draft'
-            )}
-          </Button>
+        </div>
+      </div>
+    );
+  }
 
-          {showSendModeChoice && onSendModeChange ? (
+  return (
+    <div className={styles.bar} role="region" aria-label="Composer actions">
+      <Button appearance="secondary" onClick={onCancel} disabled={busy}>
+        Cancel
+      </Button>
+      <div className={styles.rightGroup}>
+        <Button appearance="secondary" onClick={onSaveDraft} disabled={busy}>
+          {isSavingDraft ? (
+            <span className={styles.spinnerRow}>
+              <Spinner size="tiny" />
+              Saving...
+            </span>
+          ) : (
+            'Save Draft'
+          )}
+        </Button>
+
+        {showSendModeChoice && onSendModeChange ? (
             <Menu
               positioning="below-end"
               checkedValues={{ sendFrom: [sendMode] }}
@@ -181,8 +192,7 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
               {sendLabel}
             </Button>
           )}
-        </>
-      )}
+      </div>
     </div>
   );
 };

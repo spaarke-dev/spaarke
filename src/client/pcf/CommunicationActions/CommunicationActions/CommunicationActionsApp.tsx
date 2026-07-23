@@ -130,9 +130,10 @@ const useStyles = makeStyles({
   // height + flex column; dialogBody is the scroll region so the composer content scrolls while the
   // modal stays a clean rectangle (was 900px × 85vh).
   dialogSurface: {
-    maxWidth: '720px',
+    // Landscape mid-size rectangle (owner UAT 2026-07-22 #1): 720px read as portrait; widen.
+    maxWidth: '1040px',
     width: '92vw',
-    height: '70vh',
+    height: '72vh',
     padding: 0,
     display: 'flex',
     flexDirection: 'column',
