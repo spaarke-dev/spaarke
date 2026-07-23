@@ -119,6 +119,11 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
+    // Hide the visible scrollbar (round 4) — the jump-to-latest circle-down
+    // button + mouse wheel drive scrolling; the bar itself is suppressed. Scroll
+    // behavior (wheel, programmatic scrollTop) is unaffected.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { width: 0, height: 0 },
   },
   centerState: {
     flex: 1,
@@ -291,18 +296,6 @@ const useFilterStyles = makeStyles({
   // brand-active pattern. Semantic tokens only (ADR-021), so it adapts in dark
   // mode. Applied over an `appearance="subtle"` ToggleButton whose default
   // checked fill would otherwise be a low-contrast neutral.
-  toggleActive: {
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    ':hover': {
-      backgroundColor: tokens.colorBrandBackgroundHover,
-      color: tokens.colorNeutralForegroundOnBrand,
-    },
-    ':hover:active': {
-      backgroundColor: tokens.colorBrandBackgroundPressed,
-      color: tokens.colorNeutralForegroundOnBrand,
-    },
-  },
   // Inactive/OFF filter state (round 3 items 7/8/9): a BLUE icon on transparent
   // (vs the default neutral-gray), so the pair reads blue-icon-off →
   // white-on-blue-on. Semantic tokens only (ADR-021).
@@ -904,8 +897,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
             <>
               <ToggleButton
                 size="small"
-                appearance="subtle"
-                className={channelFilter === 'email' ? filterStyles.toggleActive : filterStyles.toggleInactive}
+                appearance={channelFilter === 'email' ? 'primary' : 'subtle'}
+                className={channelFilter === 'email' ? undefined : filterStyles.toggleInactive}
                 icon={<MailRegular />}
                 checked={channelFilter === 'email'}
                 aria-pressed={channelFilter === 'email'}
@@ -915,8 +908,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               />
               <ToggleButton
                 size="small"
-                appearance="subtle"
-                className={channelFilter === 'message' ? filterStyles.toggleActive : filterStyles.toggleInactive}
+                appearance={channelFilter === 'message' ? 'primary' : 'subtle'}
+                className={channelFilter === 'message' ? undefined : filterStyles.toggleInactive}
                 icon={<ChatRegular />}
                 checked={channelFilter === 'message'}
                 aria-pressed={channelFilter === 'message'}
@@ -926,8 +919,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               />
               <ToggleButton
                 size="small"
-                appearance="subtle"
-                className={searchOpen ? filterStyles.toggleActive : filterStyles.toggleInactive}
+                appearance={searchOpen ? 'primary' : 'subtle'}
+                className={searchOpen ? undefined : filterStyles.toggleInactive}
                 icon={<SearchRegular />}
                 checked={searchOpen}
                 aria-pressed={searchOpen}

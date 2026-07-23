@@ -96,12 +96,14 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     minWidth: 0,
-    // Fill the workspace container (round 3 item 1). The host panel/card is
-    // auto-height for a short two-pane shell, so `height:100%` collapses to
-    // content — a viewport-relative floor makes the widget claim the container
-    // instead of sitting in a short box. `height:100%` still wins when the host
-    // DOES constrain height (e.g. a bounded Direct-widget tile).
-    minHeight: '70vh',
+    // Fill the workspace container (round 3 item 1 / round 4). The SectionPanel
+    // card + WorkspaceShell row are content-driven (deliberately NOT height:100%
+    // — see WorkspaceShell.styles.ts), so a widget must declare its own height
+    // floor to claim the tab. This mirrors the established full-height widget
+    // pattern (SmartTodo's `calc(100vh - 200px)`): a floor that reaches the
+    // bottom of the tab (app header + tab bar + section header ≈ 200px chrome).
+    // `height:100%` still wins when the host DOES constrain height (bounded tile).
+    minHeight: 'calc(100vh - 200px)',
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },

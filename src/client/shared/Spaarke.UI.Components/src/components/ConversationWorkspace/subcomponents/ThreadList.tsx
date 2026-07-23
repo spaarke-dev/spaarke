@@ -79,8 +79,11 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
-    // Width is owned by the parent resizer (item 1/2); keep min-width:0 so the
-    // pane can shrink to ~20% without the 240px floor fighting the splitter.
+    // FILL the parent pane's width at any resized width (round 4 PCF item 2 /
+    // widget) — without width:100% a flex child sizes to content, so the rows
+    // didn't scale as the splitter widened the pane. min-width:0 keeps the pane
+    // shrinkable below the 240px floor.
+    width: '100%',
     minWidth: 0,
     // Light-grey contrast fill vs. the white message pane (`colorNeutralBackground1`)
     // so the thread pane reads as distinct (item 4). Semantic token — adapts in
@@ -170,6 +173,9 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
+    // Hide the visible scrollbar (round 4) — wheel scroll still works.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { width: 0, height: 0 },
     // Breathing room between thread rows (R3 UAT 2026-07-22 item 5b).
     rowGap: tokens.spacingVerticalXS,
     paddingTop: tokens.spacingVerticalXS,

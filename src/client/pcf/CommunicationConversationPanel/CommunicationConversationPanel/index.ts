@@ -28,7 +28,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { CommunicationConversationPanelHost } from './CommunicationConversationPanelHost';
 
-const CONTROL_VERSION = '1.4.0';
+const CONTROL_VERSION = '1.5.0';
 
 export class CommunicationConversationPanel implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   public init(
