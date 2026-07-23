@@ -1,7 +1,7 @@
 /**
  * ConversationModal — the open/expand affordance's destination (task 030 / FR-13).
  *
- * A proprietary Fluent v9 `<Dialog>` (Family 2 per docs/standards/
+ * A proprietary Fluent v9 modal (Family 2 per docs/standards/
  * MODAL-DECISION-CRITERIA.md — it hosts our OWN conversation surface, not an
  * OOB Dataverse form) that MOUNTS the shared two-pane `<ConversationWorkspace/>`
  * in RECORD mode: `regarding={{ entityType, id }}` scopes the thread list to the
@@ -15,28 +15,36 @@
  * The shared widget is reused AS-IS — this file mounts it and passes props; it
  * reimplements no thread-list / bubbles / quick-view (NFR-06).
  *
+ * ── CENTERING (R3 UAT round 5, 2026-07-23) ────────────────────────────────────
+ * Earlier rounds used a Fluent `<Dialog modalType="modal">` and then tried to fix
+ * its top-anchoring inside the model-driven form by portaling to `document.body`.
+ * That did NOT hold: Fluent's `<Dialog>` already portals its `DialogSurface` to
+ * `document.body`, and the top-anchoring is caused by a CSS `transform` on an
+ * app-shell ancestor (`html`/`body`/a wrapper) that redefines the containing
+ * block for `position:fixed` — which portaling to `body` cannot escape when the
+ * transform sits AT/above `body`. The repo has no proven recipe to viewport-center
+ * a fixed-size Fluent Dialog in that context.
+ *
+ * So we drop the Fluent Dialog envelope and use the transform-ROBUST pattern the
+ * `DocumentRelationshipViewer` PCF already ships: a full-viewport
+ * `position:fixed; inset:0` flex overlay that CENTERS the fixed-size surface. A
+ * near-full-viewport overlay renders the same regardless of a residual ancestor
+ * offset, so the surface reads as centered. We keep the `createPortal` to
+ * `document.body` + a re-wrapped `FluentProvider` purely for THEMING the portaled
+ * subtree (fluent-v9-portal-gotcha), and implement Esc/backdrop-dismiss ourselves
+ * (the Fluent Dialog used to give us those).
+ *
  * `<ConversationView/>`'s FR-12 header seam is wired: `title` (the selected
  * thread's name), `regarding` (the host record), and `onOpenRecord` — the last
  * delegated up to the host, which opens the record via the sanctioned OOB
  * `Xrm.Navigation.navigateTo` modal (Layout 1). All BFF reads flow through the
  * injected `authenticatedFetch` (ADR-028). Fluent v9 semantic tokens only —
- * dark mode passes through the host `FluentProvider` (ADR-021).
+ * dark mode passes through the re-wrapped `FluentProvider` (ADR-021).
  */
 
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import {
-  Dialog,
-  DialogSurface,
-  DialogBody,
-  DialogTitle,
-  DialogContent,
-  Button,
-  FluentProvider,
-  webLightTheme,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, FluentProvider, webLightTheme, makeStyles, tokens } from '@fluentui/react-components';
 import { DismissRegular } from '@fluentui/react-icons';
 import {
   ConversationWorkspace,
@@ -54,26 +62,50 @@ const ConversationWorkspaceR16 = ConversationWorkspace as unknown as React.Compo
 const ConversationViewR16 = ConversationView as unknown as React.ComponentType<ConversationViewProps>;
 
 const useStyles = makeStyles({
-  // "Our modal" size (round 3 items 13-15): 1040 × 72vh, centered (matches the
-  // shared NewThreadModal). 72vh (vs 85vh) leaves headroom so the modal reads as
-  // centered rather than top-anchored inside the Dataverse form host.
+  // Full-viewport dimmed overlay that CENTERS the surface (round 5) — copied from
+  // the DocumentRelationshipViewer PCF's transform-robust modal. `position:fixed;
+  // inset:0` + flex-center means a transformed ancestor can no longer top-anchor
+  // the surface: the overlay fills whatever box `fixed` resolves to and centers
+  // its child within it. High z-index for Dataverse form stacking.
+  overlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: tokens.colorBackgroundOverlay,
+    zIndex: 10000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // "Our modal" size (round 3 items 13-15): 1040 × 72vh, centered by the overlay.
+  // maxHeight caps it on short viewports so the footer/compose never clips.
   surface: {
+    position: 'relative',
     width: 'min(1040px, 95vw)',
     maxWidth: 'min(1040px, 95vw)',
     height: '72vh',
-    padding: 0,
+    maxHeight: '90vh',
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusLarge,
+    boxShadow: tokens.shadow64,
     display: 'flex',
     flexDirection: 'column',
-    // Anchor point for the absolutely-positioned close button (§B1).
-    position: 'relative',
+    overflow: 'hidden',
   },
-  body: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 },
   title: {
-    paddingInline: tokens.spacingHorizontalL,
+    display: 'flex',
+    alignItems: 'center',
+    paddingInlineStart: tokens.spacingHorizontalL,
     // Leave room so the "Messages" title never runs under the corner close button.
     paddingInlineEnd: tokens.spacingHorizontalXXL,
     paddingBlock: tokens.spacingVerticalM,
     margin: 0,
+    fontSize: tokens.fontSizeBase500,
+    lineHeight: tokens.lineHeightBase500,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
   // §B1 (UAT): the close "x" pinned to the modal's upper-right corner —
   // independent of the title row's own layout/padding, so it reads
@@ -84,7 +116,7 @@ const useStyles = makeStyles({
     right: tokens.spacingHorizontalM,
     zIndex: 1,
   },
-  content: { flex: 1, minHeight: 0, padding: 0, display: 'flex', flexDirection: 'column' },
+  content: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' },
   workspaceHost: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' },
 });
 
@@ -121,6 +153,28 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
   // create modal opens record-scoped (regarding = the host record, locked).
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  const surfaceRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Esc-to-dismiss (the Fluent Dialog gave us this for free before). Bound only
+  // while open. Keyed on `open`/`onClose` so it re-binds if the handler changes.
+  React.useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        ev.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => document.removeEventListener('keydown', onKeyDown, true);
+  }, [open, onClose]);
+
+  // Move focus into the surface when it opens so keyboard users land inside the
+  // modal (crude focus management — the surface is focusable via tabIndex=-1).
+  React.useEffect(() => {
+    if (open) surfaceRef.current?.focus();
+  }, [open]);
+
   const renderConversation = React.useCallback(
     (props: IConversationRendererProps) => (
       <ConversationViewR16
@@ -139,17 +193,25 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
     // component casts above). Runtime is unaffected.
   ) as unknown as ConversationWorkspaceProps['renderConversation'];
 
-  // Portal the whole modal to document.body (round 4 PCF item 1). Fluent's
-  // DialogSurface is `position:fixed`, which anchors to the nearest TRANSFORMED
-  // ancestor rather than the viewport — the Dataverse form host has one, so the
-  // modal top-anchored. Mounting at document.body escapes that ancestor so the
-  // surface centers on the viewport. The re-wrapped FluentProvider keeps the
-  // portaled subtree themed (fluent-v9-portal-gotcha).
-  const dialog = (
-    <Dialog open={open} onOpenChange={(_ev, data) => (!data.open ? onClose() : undefined)} modalType="modal">
-      <DialogSurface className={s.surface}>
-        {/* §B1 (UAT): moved out of DialogTitle's inline action slot so it pins to the
-            surface's literal upper-right corner regardless of title row padding. */}
+  if (!open) return null;
+
+  // Backdrop click (on the overlay itself, not a descendant) dismisses.
+  const handleOverlayMouseDown = (ev: React.MouseEvent<HTMLDivElement>) => {
+    if (ev.target === ev.currentTarget) onClose();
+  };
+
+  const overlay = (
+    <div className={s.overlay} onMouseDown={handleOverlayMouseDown}>
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
+      <div
+        ref={surfaceRef}
+        className={s.surface}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Messages"
+        tabIndex={-1}
+      >
+        {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
         <Button
           appearance="subtle"
           className={s.closeButton}
@@ -157,24 +219,26 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
           icon={<DismissRegular />}
           onClick={onClose}
         />
-        <DialogBody className={s.body}>
-          {/* §B2 (UAT): modal title = "Messages". */}
-          <DialogTitle className={s.title}>Messages</DialogTitle>
-          <DialogContent className={s.content}>
-            <div className={s.workspaceHost}>
-              <ConversationWorkspaceR16
-                authenticatedFetch={authenticatedFetch}
-                bffBaseUrl={bffBaseUrl}
-                regarding={{ entityType, id }}
-                renderConversation={renderConversation}
-                navigationService={navigationService}
-              />
-            </div>
-          </DialogContent>
-        </DialogBody>
-      </DialogSurface>
-    </Dialog>
+        {/* §B2 (UAT): modal title = "Messages". */}
+        <div className={s.title}>Messages</div>
+        <div className={s.content}>
+          <div className={s.workspaceHost}>
+            <ConversationWorkspaceR16
+              authenticatedFetch={authenticatedFetch}
+              bffBaseUrl={bffBaseUrl}
+              regarding={{ entityType, id }}
+              renderConversation={renderConversation}
+              navigationService={navigationService}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 
-  return ReactDOM.createPortal(<FluentProvider theme={webLightTheme}>{dialog}</FluentProvider>, document.body);
+  // Portal to document.body + re-wrap FluentProvider so the portaled subtree stays
+  // themed (fluent-v9-portal-gotcha). Centering no longer depends on the portal —
+  // the overlay's flex-center does that — but body-level mounting keeps the modal
+  // above the form's own stacking contexts.
+  return ReactDOM.createPortal(<FluentProvider theme={webLightTheme}>{overlay}</FluentProvider>, document.body);
 };

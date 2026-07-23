@@ -54,13 +54,20 @@ export const communicationsRegistration: SectionRegistration = {
   description: "Email, Teams, SMS, and notifications related to your work",
   icon: MailRegular,
   category: "data",
-  defaultHeight: "480px",
-  // spaarke-dataset-grid-framework-r2 FR-08 (task 005, 2026-07-02): replaces the
-  // prior tactical 80vh clamp wrapper inside renderContent. The framework now
-  // applies the clamp to the SectionPanel via `contentSizing: 'clamped'` (see
-  // `buildDynamicWorkspaceConfig`), producing visible Fluent scrollbars +
-  // lazy-load-on-scroll behavior for the dense entity-list grid.
-  contentSizing: "clamped",
+  // GROW pattern (R3 UAT round 5, 2026-07-23): `defaultHeight` with NO
+  // `contentSizing` becomes a `min-height` FLOOR on the SectionPanel card (see
+  // `buildDynamicWorkspaceConfig` "grow" branch), letting the section expand to
+  // fill the tab — same mechanism SmartTodo/Calendar use.
+  //
+  // WHY this changed: the prior `contentSizing:'clamped'` + `defaultHeight:480px`
+  // was correct when this section mounted the OLD dense DataGrid list (a bounded
+  // 480px scroll viewport). messaging-communication-app-r3 task 031 upgraded the
+  // body to the full two-pane `CommunicationsWorkspaceWidget` conversation shell,
+  // which must reach the bottom of the tab. `clamped` injected
+  // `maxHeight:480px + overflow:hidden` on the card, capping the shell at ~480px
+  // (grey space below); dropping it lets the widget root's `calc(100vh - 200px)`
+  // floor drive the true height. The floor below is just a minimum.
+  defaultHeight: "560px",
 
   factory(context: SectionFactoryContext): ContentSectionConfig {
     // spaarke-dataset-grid-framework-r2 DEF-005 / DEF-005b+c (2026-07-02, FR-03

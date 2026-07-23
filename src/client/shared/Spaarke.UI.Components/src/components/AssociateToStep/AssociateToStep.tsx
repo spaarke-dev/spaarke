@@ -80,8 +80,10 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
   onSkip,
   disabled = false,
   locked = false,
+  variant = 'default',
 }) => {
   const styles = useAssociateToStepStyles();
+  const compact = variant === 'compact';
 
   // ── State ────────────────────────────────────────────────────────────────
   // Initial entity type: if a `value` is pre-supplied (R3 task 032 / FR-16
@@ -190,12 +192,14 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
     return (
       <div className={styles.root}>
         <div className={styles.header}>
-          <Text as="h2" size={500} weight="semibold" className={styles.title}>
+          <Text as="h2" size={compact ? 300 : 500} weight="semibold" className={styles.title}>
             Associate To
           </Text>
-          <Text size={200} className={styles.subtitle}>
-            This record will be linked to the record you started from.
-          </Text>
+          {!compact && (
+            <Text size={200} className={styles.subtitle}>
+              This record will be linked to the record you started from.
+            </Text>
+          )}
         </div>
 
         {value?.recordId && (
@@ -215,14 +219,18 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Step header */}
+      {/* Step header. Compact variant (round-5 modal) shrinks the heading to
+          field-label size and drops the subtitle so "Associate To" reads as a
+          sibling field label rather than a wizard-step banner. */}
       <div className={styles.header}>
-        <Text as="h2" size={500} weight="semibold" className={styles.title}>
+        <Text as="h2" size={compact ? 300 : 500} weight="semibold" className={styles.title}>
           Associate To
         </Text>
-        <Text size={200} className={styles.subtitle}>
-          Link this record to an existing record.
-        </Text>
+        {!compact && (
+          <Text size={200} className={styles.subtitle}>
+            Link this record to an existing record.
+          </Text>
+        )}
       </div>
 
       {/* Error banner */}
@@ -286,10 +294,12 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
         </div>
       )}
 
-      {/* Helper text */}
-      <Text size={200} className={styles.skipHint}>
-        You can always link records later.
-      </Text>
+      {/* Helper text — suppressed in the compact (embedded-field) variant. */}
+      {!compact && (
+        <Text size={200} className={styles.skipHint}>
+          You can always link records later.
+        </Text>
+      )}
     </div>
   );
 };

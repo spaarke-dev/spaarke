@@ -136,6 +136,11 @@ const useStyles = makeStyles({
     minHeight: 0,
     flex: '1 1 auto',
   },
+  // Breathing room between the modal title ("New conversation") and the first
+  // section header (round 5) — the title otherwise sat flush against "New Thread".
+  title: {
+    paddingBottom: tokens.spacingVerticalL,
+  },
   content: {
     display: 'flex',
     flexDirection: 'column',
@@ -378,7 +383,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
     <Dialog open={open} onOpenChange={handleDialogOpenChange} modalType="modal">
       <DialogSurface className={styles.surface} aria-label={title}>
         <DialogBody className={styles.body}>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle className={styles.title}>{title}</DialogTitle>
           <DialogContent className={styles.content}>
             {/* Section 1 — New Thread: name + associate-to-record. The header rule
                 + indented body make the fields read as subordinate to the section. */}
@@ -402,6 +407,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
                   onChange={setAssociation}
                   disabled={submitting}
                   locked={recordLocked}
+                  variant="compact"
                 />
                 {associationError && (
                   <Text role="alert" className={styles.errorText}>
