@@ -1,0 +1,9 @@
+Archived: 2026-07-10
+Final status: Completed
+Closing PR: #611 (https://github.com/spaarke-dev/spaarke/pull/611)
+Project Issue: #653 (https://github.com/spaarke-dev/spaarke/issues/653) — closed, Status=Completed, Closed Date=2026-07-10
+Parent Epic: #421 SPAARKE AI
+Deferred items filed: #650 (Monitored-For D-3), #651 (EventDetailSidePane @odata.bind D-5), #652 (Email-briefing typed-note)
+Worktree: C:/code_files/spaarke-wt-spaarke-daily-update-service-r5 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/spaarke-daily-update-service-r5 (still on origin)
+Wrap-up gates: code-review ship-clean (0 critical); test-diet clean (11 files all MAINTAIN, 0 scaffolding — notes/test-diet-report.md)

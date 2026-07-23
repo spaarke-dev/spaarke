@@ -399,6 +399,13 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
                 aria-selected={false}
                 aria-disabled={!selectable}
                 tabIndex={selectable ? 0 : -1}
+                // CRITICAL: prevent the input from blurring when a suggestion is
+                // clicked. Without this, mousedown blurs the <Input> → `handleBlur`
+                // commits the half-typed draft (e.g. "ralp") as a free-text recipient
+                // AND hides this list, so the `onClick` below never fires and the
+                // selection is lost (UAT round: "selecting a name only takes 'ralp'").
+                // preventDefault on mousedown keeps focus, so onClick → handleSelectResult runs.
+                onMouseDown={e => e.preventDefault()}
                 onClick={selectable ? () => handleSelectResult(item) : undefined}
                 onKeyDown={
                   selectable

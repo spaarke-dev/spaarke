@@ -52,13 +52,18 @@ export class KindRouter {
    * one bad handler cannot prevent delivery to other handlers of the same
    * kind, or corrupt the caller's SignalR message loop / poll tick.
    */
-  dispatch(event: { outboxRowId: string; kind: string; envelope?: unknown; source: NotificationEvent['source'] }): void {
+  dispatch(event: {
+    outboxRowId: string;
+    kind: string;
+    envelope?: unknown;
+    source: NotificationEvent['source'];
+  }): void {
     if (!isKnownNotificationKind(event.kind)) {
       // eslint-disable-next-line no-console
       console.warn(
         `[@spaarke/notifications] Unrecognized notification kind "${event.kind}" — logged and skipped. ` +
           'The kind taxonomy is a closed set; a novel/reserved value activating server-side must not break ' +
-          'a host running an older library version.',
+          'a host running an older library version.'
       );
       return;
     }

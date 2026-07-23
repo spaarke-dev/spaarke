@@ -26,6 +26,7 @@ import * as React from 'react';
 import { Button, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { OpenRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
+import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
 import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 
 export interface IEmailInFlowBlockProps {
@@ -45,6 +46,9 @@ const SUBJECT_FALLBACK = '(no subject)';
 const FROM_FALLBACK = 'Unknown sender';
 const TO_FALLBACK = '—';
 
+/** Max characters of the body preview shown on the card (R3 UAT 2026-07-22 item 2). */
+const PREVIEW_MAX_CHARS = 100;
+
 const useStyles = makeStyles({
   row: {
     display: 'flex',
@@ -63,13 +67,13 @@ const useStyles = makeStyles({
   block: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    maxWidth: '75%',
+    gap: tokens.spacingVerticalXS,
+    maxWidth: '85%',
     minWidth: 0,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
     borderRadius: tokens.borderRadiusMedium,
     // Per-side longhands (griffel rejects the `border*` shorthands) — a thin
     // stroke plus the distinct background2 sets the compact email block apart
@@ -98,7 +102,11 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
+  // Item 2 (R3 UAT 2026-07-22): larger, less-compressed type — subject reads at
+  // base400, meta/snippet at base300 (was base200). Semantic tokens only (ADR-021).
   subject: {
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     wordBreak: 'break-word',
@@ -109,15 +117,30 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   metaLabel: {
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
     flexShrink: 0,
   },
   metaValue: {
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     minWidth: 0,
+  },
+  // ~100-char body preview (item 2) — clamped to two lines so a long snippet
+  // never blows out the card height.
+  snippet: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground2,
+    wordBreak: 'break-word',
+  },
+  // Sent/received date line (item 2).
+  dateLine: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -127,6 +150,40 @@ function withFallback(value: string | null | undefined, fallback: string): strin
   return trimmed ? trimmed : fallback;
 }
 
+/**
+ * ~100-char plain-text preview of the email body (item 2). Strips HTML tags from
+ * html bodies and collapses whitespace so the snippet reads as running text, then
+ * truncates on a character budget with an ellipsis. Returns '' when there's no body.
+ */
+function messagePreview(message: TimelineMessage, max = PREVIEW_MAX_CHARS): string {
+  const raw = message.body ?? '';
+  const text = (message.bodyFormat === 'html' ? raw.replace(/<[^>]*>/g, ' ') : raw).replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
+/**
+ * "Sent/Received {date}" line (item 2), from `sentOn ?? createdOn`. The verb is
+ * chosen from `sprk_direction` (outgoing → Sent, incoming → Received); when the
+ * direction is unknown the bare date is shown. Returns null when no valid
+ * timestamp is available so the line is simply omitted.
+ */
+function formatSentReceived(message: TimelineMessage): string | null {
+  const raw = message.sentOn ?? message.createdOn;
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  const when = date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const verb = message.direction === 'incoming' ? 'Received ' : message.direction === 'outgoing' ? 'Sent ' : '';
+  return `${verb}${when}`;
+}
+
 export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, isOwn, onOpen }) => {
   const styles = useStyles();
 
@@ -134,6 +191,8 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
   const from = withFallback(message.sender, FROM_FALLBACK);
   const recipients = (message.to ?? []).map(t => t.trim()).filter(Boolean);
   const to = recipients.length > 0 ? recipients.join(', ') : TO_FALLBACK;
+  const preview = messagePreview(message);
+  const sentReceived = formatSentReceived(message);
 
   const regionLabel = `Email: ${subject}, from ${from}`;
 
@@ -143,6 +202,11 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
         <div className={styles.headerRow}>
           {/* The SINGLE "Email" indicator — one per block, never per-recipient (FR-04). */}
           <ChannelBadge channelType="email" />
+          <PrivacyMarkers
+            privilege={message.privilege}
+            isInternalOnly={message.isInternalOnly}
+            isPrivate={message.isPrivate}
+          />
           <span className={styles.headerSpacer} />
           <Tooltip content="Open email" relationship="label">
             <Button
@@ -167,13 +231,17 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
         </div>
 
         <div className={styles.metaLine}>
-          <Text size={200} className={styles.metaLabel}>
-            To:
-          </Text>
-          <Text size={200} className={styles.metaValue} title={to}>
+          <Text className={styles.metaLabel}>To:</Text>
+          <Text className={styles.metaValue} title={to}>
             {to}
           </Text>
         </div>
+
+        {/* ~100-char body preview (item 2) — replaces the removed attachment list. */}
+        {preview && <Text className={styles.snippet}>{preview}</Text>}
+
+        {/* Sent/received date (item 2). */}
+        {sentReceived && <Text className={styles.dateLine}>{sentReceived}</Text>}
       </div>
     </div>
   );

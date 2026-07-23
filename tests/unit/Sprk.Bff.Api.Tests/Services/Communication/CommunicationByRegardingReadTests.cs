@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -53,6 +54,7 @@ public class CommunicationByRegardingReadTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -220,6 +222,7 @@ public class CommunicationByRegardingReadTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var act = () => sut.ReadByRegardingAsync("sprk_matter", RecordId, Caller(), CancellationToken.None);

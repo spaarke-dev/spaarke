@@ -31,6 +31,15 @@ export const BODY_FORMAT_HTML = 100000001;
 export const DIRECTION_INCOMING = 100000000;
 export const DIRECTION_OUTGOING = 100000001;
 
+/**
+ * `sprk_privilegeclassification` choice-int constants (R3 task 043 / FR-21), mirrors
+ * `Sprk.Bff.Api/Services/Communication/Access/CommunicationAccessModels.cs`
+ * `CommunicationPrivilegeClassification`. Privilege is a badge/review signal ONLY — it never gates a read (ADR-015).
+ */
+export const PRIVILEGE_NONE = 100000000;
+export const PRIVILEGE_POTENTIALLY_PRIVILEGED = 100000001;
+export const PRIVILEGE_PRIVILEGED = 100000002;
+
 // ---------------------------------------------------------------------------
 // Channel + body format (timeline's own friendly domain shape)
 // ---------------------------------------------------------------------------
@@ -101,6 +110,14 @@ export interface TimelineMessage {
   inReplyTo?: string | null;
   /** Access-filter-derived privilege flag (ADR-015 — never gates the read; badge-only signal). */
   privilege: number;
+  /**
+   * `sprk_isinternalonly` (FR-21) marker. Only ever `true` on a row this caller may already read (the BFF drops
+   * internal-only rows for external callers) — rendering it never implies access anyone lacks. Undefined on rows
+   * predating task 043; treated as `false` for display.
+   */
+  isInternalOnly?: boolean;
+  /** `sprk_isprivate` (FR-21) marker — display only; never a gate. Undefined on rows predating task 043 → `false`. */
+  isPrivate?: boolean;
   attachments: TimelineAttachment[];
 }
 
@@ -196,6 +213,19 @@ export interface CommunicationTimelineBaseProps {
 
   /** Fired when a poll or send fails (the component also renders an inline error). */
   onError?: (error: Error) => void;
+
+  /**
+   * Open/preview/download an attachment on a message via the existing SPE
+   * document-viewer path (task 042 / FR-20). Rendered on any message
+   * (`MessageRow`) whose attachment resolved to a governed `sprk_document`.
+   * Hands the attachment + message back so the HOST mounts the shared
+   * `<RichFilePreviewDialog />` (fed by `/api/documents/{id}/preview-url` +
+   * `/open-links`) — NOT a new inline previewer (FR-20). Context-agnostic
+   * (ADR-012): this component never mounts the viewer. Omit it and attachments
+   * render as non-interactive chips. Access-filtering per NFR-01 — see
+   * `MessageAttachments` header.
+   */
+  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 
   /** Optional className applied to the root layout container. */
   className?: string;

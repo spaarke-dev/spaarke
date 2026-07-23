@@ -137,4 +137,8 @@
 
 ---
 
-*Add new rows below as later catalog tasks (050 authoring, 044 grounding) accrue eval debt.*
+## CONSUMED by task 051 (2026-07-23)
+
+All owed cases above were authored into a dedicated R1 eval family joined to the `Category=GoldenUtteranceEval` merge gate — `tests/integration/contract/Eval/assistant-r1-eval-cases.json` (20 `AR1-###` cases) + `AssistantEnhancementsR1EvalTests.cs` (6 facts). The family covers create-todo (E-002-05/06), create-project (E-UAT1-01..06), list-tasks + VIEW-vs-CREATE (E-050-01..12), the FR-E4 profile-injection non-flip (operational, in-gate), and the AC3 incoherent practice-area × matter-type proof. Full gate GREEN 92/92. Surface-open behavior (E-*-1x) stays client-verified (012/013) by design. Dispatch-selection here is grounded against the real closed catalog (constant / mirror row / cited seeding task) rather than a live model — the same no-live-loop stance as the golden P0/P3 pending-by-design cases. See `tests/integration/contract/Eval/readme.md` → "Assistant-Enhancements-R1 eval family".
+
+*Add new rows above this section if a later catalog task accrues fresh eval debt.*

@@ -1,5 +1,6 @@
 # Implementation Plan — Assistant Enhancements R1 ("Follow-Through")
 
+> **Status**: ✅ **COMPLETE (2026-07-23)** — all 25 tasks done; deployed to dev; eval gate 92/92; /test-diet clean. See [`README.md`](README.md) graduation criteria + [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 > **Source**: [`spec.md`](spec.md) (R1 only). **Sequencing**: reactive-first — Phases 1–2 (structured-creation core) are the highest-value, most-broken flows and land first. **R1.5 (proactive push) is NOT in this plan.**
 > **Execution model**: Sonnet 5 @ high default; `opus`/`xhigh` for the dispatch-spine + resolver tasks (high blast radius). See CLAUDE.md §8.5.
 

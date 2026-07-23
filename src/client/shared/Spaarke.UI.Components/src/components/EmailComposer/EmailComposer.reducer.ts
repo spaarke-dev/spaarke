@@ -34,6 +34,69 @@ export const ATTACHMENT_MAX_COUNT = 150;
 export const ATTACHMENT_MAX_TOTAL_BYTES = 35 * 1024 * 1024; // 35 MB hard cap
 export const ATTACHMENT_WARN_TOTAL_BYTES = 25 * 1024 * 1024; // 25 MB soft warning
 
+/**
+ * Per-file BINARY size cap for a locally-picked attachment (raw bytes,
+ * pre-upload). Mirrors `docs/standards/CHAT-ATTACHMENT-POLICY.md` — 25 MB per
+ * file, the established Spaarke binary-attachment standard (aligned with
+ * DocumentUploadWizard, OfficeService, and SprkChat's `MAX_FILE_BYTES`). This
+ * is the PER-FILE gate; `ATTACHMENT_MAX_TOTAL_BYTES` remains the aggregate gate.
+ * Enforced CLIENT-SIDE ONLY (the policy's server gate operates on extracted
+ * text, not binary — FR-20 / CHAT-ATTACHMENT-POLICY) and applies to
+ * `source === 'local'` picks — governed Documents from spe/related/wizard have
+ * already passed their own upload gates.
+ */
+export const ATTACHMENT_MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * MIME allow-list for locally-picked attachments — the single-source-of-truth
+ * set from `docs/standards/CHAT-ATTACHMENT-POLICY.md` (plain text, Markdown,
+ * PDF, DOCX). Applies to `source === 'local'` picks only. A file whose `type`
+ * is not in this set is rejected client-side with a VISIBLE error, never
+ * silently accepted or sent (FR-20 negative acceptance criterion).
+ */
+export const ALLOWED_ATTACHMENT_MIME_TYPES: ReadonlySet<string> = new Set([
+  'text/plain',
+  'text/markdown',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
+/** A rejection surfaced by {@link validateLocalAttachmentFile} — the caller MUST show `message`. */
+export interface ILocalAttachmentRejection {
+  code: 'ATTACHMENT_TOO_LARGE' | 'ATTACHMENT_BLOCKED_TYPE';
+  message: string;
+}
+
+/**
+ * Validate a locally-picked file against the CHAT-ATTACHMENT-POLICY binary cap
+ * (25 MB) + MIME allow-list. Returns `null` when the file is acceptable, or a
+ * rejection (code + user-visible message) the caller MUST surface. A rejected
+ * file is never added to composer state and therefore never sent — this is the
+ * pick-time gate behind FR-20's "rejected with a visible error, not silently
+ * accepted" acceptance criterion. Pure (no I/O) so it is unit-testable and
+ * reusable by the pick handler.
+ */
+export function validateLocalAttachmentFile(file: {
+  size: number;
+  type: string;
+  name?: string;
+}): ILocalAttachmentRejection | null {
+  const label = file.name && file.name.trim() ? file.name : 'File';
+  if (file.size > ATTACHMENT_MAX_FILE_BYTES) {
+    return {
+      code: 'ATTACHMENT_TOO_LARGE',
+      message: `${label} exceeds the ${(ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)).toFixed(0)} MB per-file limit.`,
+    };
+  }
+  if (!ALLOWED_ATTACHMENT_MIME_TYPES.has(file.type)) {
+    return {
+      code: 'ATTACHMENT_BLOCKED_TYPE',
+      message: `${label} has an unsupported type${file.type ? ` (${file.type})` : ''}. Allowed types: TXT, Markdown, PDF, DOCX.`,
+    };
+  }
+  return null;
+}
+
 /** Default recipient cap (matches BulkSend cap per design §5.4). */
 export const DEFAULT_MAX_RECIPIENTS = 50;
 
@@ -301,9 +364,7 @@ export function mapStateToSendRequest(state: EmailComposerState, threadId?: stri
     // new record at create time (true inheritance — a direct copy, NOT an engine re-derivation). Only
     // reply/forward set it (Reply All maps to the 'reply' mode); compose/draft/view do not inherit.
     inheritRegardingFromCommunicationId:
-      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId
-        ? state.communicationId
-        : undefined,
+      (state.mode === 'reply' || state.mode === 'forward') && state.communicationId ? state.communicationId : undefined,
   };
 }
 
@@ -377,6 +438,31 @@ export function validateState(state: EmailComposerState, options: IValidateOptio
     });
   }
 
+  // Per-file binary cap + MIME allow-list for LOCALLY-picked files
+  // (`source === 'local'`), per CHAT-ATTACHMENT-POLICY.md. Defense-in-depth:
+  // the pick handler (AttachmentList) rejects an oversize/disallowed file at
+  // pick time with a visible error, and this send-time gate guarantees such a
+  // file can never be sent even if it reached state another way. Governed
+  // Documents (spe/related/wizard) are exempt — they passed their own upload
+  // gates and may legitimately be any type/size within the aggregate cap.
+  for (const a of includedAttachments) {
+    if (a.source !== 'local') continue;
+    if (a.sizeBytes > ATTACHMENT_MAX_FILE_BYTES) {
+      errors.push({
+        field: 'attachments',
+        code: 'ATTACHMENT_TOO_LARGE',
+        message: `${a.fileName} exceeds the ${(ATTACHMENT_MAX_FILE_BYTES / (1024 * 1024)).toFixed(0)} MB per-file limit.`,
+      });
+    }
+    if (a.mimeType === undefined || !ALLOWED_ATTACHMENT_MIME_TYPES.has(a.mimeType)) {
+      errors.push({
+        field: 'attachments',
+        code: 'ATTACHMENT_BLOCKED_TYPE',
+        message: `${a.fileName} has an unsupported type${a.mimeType ? ` (${a.mimeType})` : ''}.`,
+      });
+    }
+  }
+
   return { ok: errors.length === 0, errors };
 }
 
@@ -409,6 +495,22 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
 
     case 'REMOVE_ATTACHMENT':
       return { ...state, attachments: state.attachments.filter(a => a.id !== action.id), isDirty: true };
+
+    case 'RESOLVE_ATTACHMENT_DOCUMENT':
+      // A locally-picked file finished uploading to a governed sprk_document
+      // (task 042 / FR-20). Patch the item with its resolved `documentId` (+
+      // optional `driveItemId`) so it flows into the EXISTING send payload
+      // (`mapStateToSendRequest` → `attachmentDocumentIds`). No new send path
+      // (ADR-045) — the send engine is unchanged; this only makes the local
+      // pick send-eligible.
+      return {
+        ...state,
+        attachments: state.attachments.map(a =>
+          a.id === action.id
+            ? { ...a, documentId: action.documentId, driveItemId: action.driveItemId ?? a.driveItemId }
+            : a
+        ),
+      };
 
     case 'TOGGLE_ATTACHMENT_SELECTED':
       return {

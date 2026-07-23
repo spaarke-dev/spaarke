@@ -32,6 +32,21 @@ public sealed record ThreadAttachmentRef(
 /// <param name="SentByName">The sender's display name from <c>sprk_sentbyname</c>; null when unset.</param>
 /// <param name="Subject">The communication subject from <c>sprk_subject</c> (R3 task 021 / FR-04); null when unset. Projected metadata on the same access-filtered row (no new query/gate).</param>
 /// <param name="To">The email "To" header recipients from <c>sprk_to</c> (R3 task 021 / FR-04), semicolon-split; empty when unset. The authoritative recipient field of a row the caller is already permitted to read — NOT a fabricated/derived list, and NEVER BCC (BCC is stored separately and is never projected). Projected metadata on the same access-filtered row.</param>
+/// <param name="Privilege"><c>sprk_privilegeclassification</c> (FR-21): None=100000000 / PotentiallyPrivileged=100000001 / Privileged=100000002. Composed from the access-filter decision — it NEVER gated this read (ADR-015 / owner 2026-07-16); a display/review label only.</param>
+/// <param name="IsInternalOnly">
+/// <c>sprk_isinternalonly</c> (FR-21) — the D-05 internal-only marker. <b>Never over-discloses:</b> the shared
+/// <c>CommunicationAccessFilter</c> DROPS an internal-only row for a non-internal caller (Rule 1), so this flag is
+/// <c>true</c> here ONLY on a row the (permitted, internal) caller already sees. It rides the same access-filtered
+/// row as every other field — a row excluded upstream contributes nothing (no over-disclosure, NFR-01). Defaults to
+/// <c>false</c> when the column is unset on a visible row (display default; the access gate, not this label, is the
+/// fail-closed path).
+/// </param>
+/// <param name="IsPrivate">
+/// <c>sprk_isprivate</c> (FR-21) — the message-level privacy marker. Pure DISPLAY metadata: it NEVER gates a read.
+/// Private-thread visibility is enforced by Dataverse impersonation (base ownership/scoping per the access-model
+/// decision 2026-07-16), NOT by this flag — so surfacing it on a row the caller is already permitted to read cannot
+/// imply access anyone lacks. Defaults to <c>false</c> when unset.
+/// </param>
 public sealed record ThreadMessageDto(
     Guid MessageId,
     string? Body,
@@ -47,6 +62,8 @@ public sealed record ThreadMessageDto(
     DateTimeOffset? CreatedOn,
     string? InReplyTo,
     int Privilege,
+    bool IsInternalOnly,
+    bool IsPrivate,
     IReadOnlyList<ThreadAttachmentRef> Attachments);
 
 /// <summary>
@@ -59,11 +76,20 @@ public sealed record ThreadMessageDto(
 /// <c>sprk_communicationthread</c>, so a caller who cannot see the thread record gets <c>null</c> (fail closed — no
 /// existence leak).
 /// </summary>
+/// <param name="IsPinned">
+/// <c>sprk_ispinned</c> (R3 task 041 / FR-24). Populated ONLY on the by-regarding path (record-mode thread list —
+/// see <see cref="CommunicationThreadReadService.ReadByRegardingAsync"/>); defaults to <c>false</c> on the R1
+/// per-thread read (<c>ReadThreadAsync</c>), which is not consumed by the thread-list pane. A pre-existing thread
+/// row (created before task 040's schema addition) reads back <c>null</c> for <c>sprk_ispinned</c> — this is
+/// normalized to <c>false</c> here (never surfaced as a three-state value), so "not pinned" is the only falsy
+/// reading a caller ever observes (task 040 notes: <c>DefaultValue</c> does not backfill existing rows).
+/// </param>
 public sealed record ThreadReadResult(
     Guid ThreadId,
     string? Name,
     IReadOnlyList<ThreadMessageDto> Messages,
-    int Count);
+    int Count,
+    bool IsPinned = false);
 
 /// <summary>
 /// Unread-count endpoint result: the count of READABLE messages in the thread newer than the caller's
@@ -99,13 +125,16 @@ public sealed record RegardingReadResult(
 /// (Direct / non-record-anchored) threads are included exactly like record-anchored ones because that query is NOT
 /// scoped to any <c>sprk_regarding{type}</c> lookup. <see cref="ThreadType"/> is <c>sprk_threadtype</c>
 /// (Record-Anchored=100000000, Direct 1:1=100000001; null when unset); <see cref="CreatedOn"/> is the deterministic
-/// ordering key that also backs the opaque paging cursor.
+/// ordering key that also backs the opaque paging cursor. <see cref="IsPinned"/> is <c>sprk_ispinned</c> (R3 task
+/// 041 / FR-24), normalized from Dataverse's <c>null</c>-on-pre-existing-rows reading to <c>false</c> — the
+/// thread-list pane sorts/marks pinned threads on this field, never observing a three-state value.
 /// </summary>
 public sealed record ThreadListItem(
     Guid ThreadId,
     string? Name,
     int? ThreadType,
-    DateTimeOffset? CreatedOn);
+    DateTimeOffset? CreatedOn,
+    bool IsPinned);
 
 /// <summary>
 /// List-all-threads result (R3 task 003 / FR-16 / Success Criterion 5): a paged, name-searchable list of ALL threads

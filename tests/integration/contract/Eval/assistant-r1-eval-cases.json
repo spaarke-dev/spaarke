@@ -1,0 +1,288 @@
+{
+  "$comment": "spaarkeai-assistant-enhancements-r1 task 051 (NFR-06) — dedicated R1 eval family, joined to the Category=GoldenUtteranceEval merge gate via AssistantEnhancementsR1EvalTests.cs (same net-new-family pattern as the Resourcefulness / Origin-classification / Memory families — no shared golden-utterances.json edit, no CI-YAML change). Cases are DATA: each R1 catalog change owed an eval case (owed-eval-cases.md); the negative profile-injection + incoherent-combo cases are the FR-E4 / AC3 operational proofs. catalogStatus vocabulary: existing = ConsumerTypes.All constant; mirrored = row in infra/dataverse/sprk_playbookconsumer-rows.json; live-catalog = live on spaarkedev1, mirror/constant parity pending (honest — not invented, not yet mirrored).",
+  "schemaVersion": "assistant-r1-eval@v1",
+  "cases": [
+    {
+      "caseId": "AR1-001",
+      "family": "create-todo",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "add a to-do to review the indemnity clause",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-todo",
+        "catalogStatus": "live-catalog",
+        "seededBy": "task 002 (FR-A1/FR-A2) — CREATE-TODO@v1 Action + create-todo Binding live on spaarkedev1; mirror/constant parity pending"
+      },
+      "notes": "E-002-05 — explicit 'to-do' noun selects the To Do create capability"
+    },
+    {
+      "caseId": "AR1-002",
+      "family": "create-todo",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "make a to do for me to send the NDA",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-todo",
+        "catalogStatus": "live-catalog",
+        "seededBy": "task 002 (FR-A1/FR-A2) — live on spaarkedev1; mirror/constant parity pending"
+      },
+      "notes": "E-002-06 — personal-action 'to do' noun selects create-todo"
+    },
+    {
+      "caseId": "AR1-003",
+      "family": "create-project",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "create a project from this file",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-project",
+        "catalogStatus": "live-catalog",
+        "seededBy": "UAT1 (2026-07-18) — CREATE-PROJECT@v1 Action + create-project Binding live on spaarkedev1 (mirror of create-matter); mirror/constant parity pending"
+      },
+      "notes": "E-UAT1-01 — core project trigger. ucId=UC-B-6 (the conversational-creation trigger family; no distinct §3 project UC — mirrors create-matter's UC-B-6)"
+    },
+    {
+      "caseId": "AR1-004",
+      "family": "create-project",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "start a new project for the Acme migration",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-project",
+        "catalogStatus": "live-catalog",
+        "seededBy": "UAT1 (2026-07-18) — live on spaarkedev1; mirror/constant parity pending"
+      },
+      "notes": "E-UAT1-02 — start/set-up synonym"
+    },
+    {
+      "caseId": "AR1-005",
+      "family": "create-project",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "set up a project to track the ERP rollout",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-project",
+        "catalogStatus": "live-catalog",
+        "seededBy": "UAT1 (2026-07-18) — live on spaarkedev1; mirror/constant parity pending"
+      },
+      "notes": "E-UAT1-03 — 'set up' synonym"
+    },
+    {
+      "caseId": "AR1-006",
+      "family": "list-tasks",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what are my tasks?",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 — list-tasks Binding (surface_launch) live on spaarkedev1 AND mirrored in sprk_playbookconsumer-rows.json"
+      },
+      "notes": "E-050-01 — core VIEW trigger; opens the My Tasks workspace grid tab"
+    },
+    {
+      "caseId": "AR1-007",
+      "family": "list-tasks",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "show my open tasks",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 — mirrored in sprk_playbookconsumer-rows.json"
+      },
+      "notes": "E-050-02 — synonym"
+    },
+    {
+      "caseId": "AR1-008",
+      "family": "list-tasks",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what's on my plate?",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 — mirrored in sprk_playbookconsumer-rows.json"
+      },
+      "notes": "E-050-03 — colloquial VIEW"
+    },
+    {
+      "caseId": "AR1-009",
+      "family": "list-tasks",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "do I have any deadlines coming up?",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 — mirrored in sprk_playbookconsumer-rows.json"
+      },
+      "notes": "E-050-04 — deadline / open-work VIEW"
+    },
+    {
+      "caseId": "AR1-010",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what are my tasks?",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "notConsumerType": "create-task",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050"
+      },
+      "notes": "E-050-05 — a bare VIEW question must NOT select the create capability"
+    },
+    {
+      "caseId": "AR1-011",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "create a follow-up task to send this by Friday",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-task",
+        "notConsumerType": "list-tasks",
+        "catalogStatus": "existing"
+      },
+      "notes": "E-050-06 — a create / time-blocked utterance must NOT select the VIEW capability"
+    },
+    {
+      "caseId": "AR1-012",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "add a to-do to review the indemnity clause",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-todo",
+        "notConsumerType": "list-tasks",
+        "catalogStatus": "live-catalog",
+        "seededBy": "task 002"
+      },
+      "notes": "E-050-07 — explicit create-todo unaffected by the list cue"
+    },
+    {
+      "caseId": "AR1-013",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "show me my to-dos",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "notConsumerType": "create-todo",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050"
+      },
+      "notes": "E-050-08 — list-tasks is the VIEW capability for tasks AND to-dos"
+    },
+    {
+      "caseId": "AR1-014",
+      "family": "view-vs-create",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "create a matter from this file",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-matter",
+        "notConsumerType": "create-project",
+        "catalogStatus": "existing"
+      },
+      "notes": "E-UAT1-04 — the matter trigger must not be stolen by the new project capability"
+    },
+    {
+      "caseId": "AR1-015",
+      "family": "view-vs-create",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "create a project for the Beta acquisition",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "create-project",
+        "notConsumerType": "create-matter",
+        "catalogStatus": "live-catalog",
+        "seededBy": "UAT1 (2026-07-18)"
+      },
+      "notes": "E-UAT1-06 — the 'project' noun selects create-project, not create-matter"
+    },
+    {
+      "caseId": "AR1-016",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "summarize this document",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "chat-summarize",
+        "notConsumerType": "list-tasks",
+        "catalogStatus": "existing"
+      },
+      "notes": "E-050-09 — list-tasks must not steal a generic ask"
+    },
+    {
+      "caseId": "AR1-017",
+      "family": "view-vs-create",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "write a brief on the chevron doctrine",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "compose-draft-document",
+        "notConsumerType": "list-tasks",
+        "catalogStatus": "existing"
+      },
+      "notes": "E-050-10 — drafting never selects the VIEW capability"
+    },
+    {
+      "caseId": "AR1-018",
+      "family": "profile-injection",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "create a task to review the indemnity clause",
+      "expected": {
+        "outcomeClass": "profile-neutral",
+        "consumerType": "create-task",
+        "catalogStatus": "existing"
+      },
+      "notes": "FR-E4 — same utterance ±injected StatedProfile => identical dispatch selection (operational, in-gate; structural sibling: PreferenceNotPermissionInvariantTests, task 031)"
+    },
+    {
+      "caseId": "AR1-019",
+      "family": "profile-injection",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what are my tasks?",
+      "expected": {
+        "outcomeClass": "profile-neutral",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050"
+      },
+      "notes": "FR-E4 — a stated Litigation/Corporate profile does not add or remove the list-tasks capability from the grounded set"
+    },
+    {
+      "caseId": "AR1-020",
+      "family": "incoherent-combo",
+      "ucId": "UC-B-6",
+      "channel": "text",
+      "utterance": "create a matter from this file, practice area Employment, type Litigation",
+      "expected": {
+        "outcomeClass": "labels-only",
+        "consumerType": "create-matter",
+        "catalogStatus": "existing"
+      },
+      "notes": "AC3 / task 011 — an incoherent practice-area x matter-type pair cannot commit: CREATE-MATTER@v1 emits practice_area_suggestion + matter_type_suggestion as INDEPENDENT string LABELS (never GUIDs), allowstools=false, so the model emits no resolved closed-set value at all; each ref is resolved deterministically per-field downstream (task 010 resolver)"
+    }
+  ]
+}

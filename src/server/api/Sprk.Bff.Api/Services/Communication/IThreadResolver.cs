@@ -73,6 +73,15 @@ public interface IThreadResolver
     /// propagates to the caller (the rename endpoint) rather than being swallowed. A blank name is rejected.
     /// </summary>
     Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// FR-24 pin/unpin (task 041): sets <c>sprk_ispinned</c> in a single write. Mirrors
+    /// <see cref="RenameThreadAsync"/>'s shape — a user action, NOT best-effort (a write failure propagates to the
+    /// caller, i.e. the pin endpoint, rather than being swallowed like <see cref="ReDeriveThreadNameAsync"/>). This
+    /// BFF write is the ONLY pin-state write path — no Dataverse plugin. Returns the persisted value (echoed by the
+    /// endpoint).
+    /// </summary>
+    Task<bool> SetPinnedAsync(Guid threadId, bool pinned, CancellationToken ct = default);
 }
 
 /// <summary>

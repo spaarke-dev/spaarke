@@ -25,20 +25,13 @@
 // =============================================================================
 
 /** Kinds with a defined envelope shape + wired producer/consumer (this project). */
-export const ACTIVE_NOTIFICATION_KINDS = [
-  'suggestion',
-  'communication-assessed',
-  'communication-arrived',
-] as const;
+export const ACTIVE_NOTIFICATION_KINDS = ['suggestion', 'communication-assessed', 'communication-arrived'] as const;
 
 /** Valid discriminator values reserved for future kinds — no envelope shape, no consumer yet. */
 export const RESERVED_NOTIFICATION_KINDS = ['job-complete', 'share', 'system-alert'] as const;
 
 /** The full closed taxonomy (active + reserved) this library version recognizes. */
-export const ALL_NOTIFICATION_KINDS = [
-  ...ACTIVE_NOTIFICATION_KINDS,
-  ...RESERVED_NOTIFICATION_KINDS,
-] as const;
+export const ALL_NOTIFICATION_KINDS = [...ACTIVE_NOTIFICATION_KINDS, ...RESERVED_NOTIFICATION_KINDS] as const;
 
 /** The closed notification `kind` discriminator. Mirrors `NotificationKind` (C#). */
 export type NotificationKind = (typeof ALL_NOTIFICATION_KINDS)[number];
@@ -85,6 +78,8 @@ export interface SuggestionEnvelope {
   source: string;
   /** ADR-024 regarding record id. */
   regardingRecordId: string;
+  /** Dataverse logical name of the regarding record (e.g. `"sprk_matter"`) — pairs with `regardingRecordId` so acting on the suggestion can open the record. */
+  regardingRecordType: string;
   /** Short display title. */
   title: string;
   /** OPTIONAL short excerpt — access-checked by the producer before inclusion. */

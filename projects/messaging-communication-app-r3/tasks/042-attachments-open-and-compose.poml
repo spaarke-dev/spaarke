@@ -4,7 +4,7 @@
     <title>Attachments — open/preview/download from a message + attach-on-compose (SPE-backed)</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>after:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches shared compose surface (SendEmailDialog/EmailComposer) and the BFF attachment surface; tags include bff-api + frontend; modifies .cs/.tsx.</rigor-reason>
     <model-tier>opus</model-tier>

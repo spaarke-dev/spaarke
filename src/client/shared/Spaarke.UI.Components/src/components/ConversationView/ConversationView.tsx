@@ -36,9 +36,8 @@
 import * as React from 'react';
 import {
   Button,
-  Dropdown,
+  Input,
   Link,
-  Option,
   Spinner,
   Text,
   Textarea,
@@ -48,7 +47,17 @@ import {
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { ArrowClockwiseRegular, ArrowForwardRegular, SendRegular } from '@fluentui/react-icons';
+import {
+  ArrowCircleDownRegular,
+  ArrowClockwiseRegular,
+  ArrowForwardRegular,
+  ChatRegular,
+  MailReadRegular,
+  MailRegular,
+  MailUnreadRegular,
+  SearchRegular,
+  SendRegular,
+} from '@fluentui/react-icons';
 import { useThreadPoll } from '../CommunicationTimeline/hooks/useThreadPoll';
 import { buildTimeline, type TimelineEntry } from '../CommunicationTimeline/CommunicationTimeline.buildTimeline';
 import {
@@ -72,6 +81,10 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
+    // Full-width + min-width:0 so the pane's width is driven by its flex parent,
+    // NOT by the widest message bubble (R3 UAT 2026-07-22 item 3).
+    width: '100%',
+    minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Conversation title header (task 025 / FR-12) — only rendered when a `title`
@@ -243,11 +256,21 @@ const useComposeStyles = makeStyles({
   },
 });
 
+// Chat-area icon toolbar (task 062 / §B7): icon-only Email/Message/Unread
+// filters + a search icon that reveals a message text filter. Replaces the
+// former Email/Message text ToggleButtons + "All messages" word dropdown. The
+// additive filter SEMANTICS are unchanged (see `messagePassesFilters`); only
+// the controls became icon-only + a revealed search box. Semantic tokens only
+// (ADR-021).
 const useFilterStyles = makeStyles({
+  // Message toolbar (R3 UAT 2026-07-22 item 4): the tools right-align at the
+  // trailing edge with roomier spacing. Refresh (item 7) + Mark-as-read (item
+  // 5c) live here now alongside the icon filters.
   bar: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
@@ -258,8 +281,52 @@ const useFilterStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  word: {
-    minWidth: '160px',
+  spacer: {
+    flex: 1,
+    minWidth: 0,
+  },
+  search: {
+    minWidth: '180px',
+  },
+  // Active/ON filter state (R3 UAT 2026-07-22 item 4): dark-blue brand fill when
+  // the facet is on, transparent (subtle) when off — mirrors the Calendar
+  // brand-active pattern. Semantic tokens only (ADR-021), so it adapts in dark
+  // mode. Applied over an `appearance="subtle"` ToggleButton whose default
+  // checked fill would otherwise be a low-contrast neutral.
+  toggleActive: {
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackgroundHover,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
+    ':hover:active': {
+      backgroundColor: tokens.colorBrandBackgroundPressed,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
+  },
+});
+
+// Jump-to-latest affordance (task 062 / §B8): a circular down-arrow button
+// floating at the bottom of the message list, shown while the user is scrolled
+// up. Replaces reliance on a visible scrollbar; the auto-scroll behavior is
+// unchanged. Semantic tokens only (ADR-021).
+const useListStyles = makeStyles({
+  wrapper: {
+    position: 'relative',
+    flex: 1,
+    minHeight: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  jumpButton: {
+    position: 'absolute',
+    right: tokens.spacingHorizontalL,
+    bottom: tokens.spacingVerticalL,
+    zIndex: 1,
+    boxShadow: tokens.shadow8,
+    borderRadius: tokens.borderRadiusCircular,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
 });
 
@@ -373,23 +440,17 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
           aria-label="Message"
           resize="vertical"
         />
-        <Tooltip content="Refresh conversation" relationship="label">
+        {/* Send is icon-only (R3 UAT 2026-07-22 item 6) — no "Send" text label.
+            Refresh moved OUT of this row into the message toolbar (item 7). */}
+        <Tooltip content="Send message" relationship="label">
           <Button
-            appearance="subtle"
-            icon={<ArrowClockwiseRegular />}
-            aria-label="Refresh conversation"
-            onClick={onRefresh}
+            appearance="primary"
+            icon={<SendRegular />}
+            aria-label="Send message"
+            disabled={!canSend}
+            onClick={() => void submit()}
           />
         </Tooltip>
-        <Button
-          appearance="primary"
-          icon={<SendRegular />}
-          aria-label="Send message"
-          disabled={!canSend}
-          onClick={() => void submit()}
-        >
-          Send
-        </Button>
       </div>
       {/* No wrapper live region — each transient child is its own live region
           (role=status → polite, role=alert → assertive) to avoid nested-live-
@@ -580,20 +641,40 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     bffBaseUrl,
     pollIntervalMs,
     onError,
+    onMarkThreadRead,
     onOpenEmail,
     onForwardMessage,
+    onOpenAttachment,
     className,
   } = props;
 
   const styles = useStyles();
   const filterStyles = useFilterStyles();
+  const listStyles = useListStyles();
   const [state, dispatch] = React.useReducer(communicationTimelineReducer, initialTimelineState);
 
   // In-conversation filters (task 014 / FR-09). Purely presentational local
   // state — filtering the rendered set never re-fetches or mutates the core.
+  // The Email/Message type toggles + the word facet keep their original
+  // additive AND-of-facets semantics (see `messagePassesFilters`); task 062
+  // (§B7) only changed the CONTROLS (icon-only toggles + a revealed search box)
+  // and added an Unread facet.
   const [emailEnabled, setEmailEnabled] = React.useState(true);
   const [messageEnabled, setMessageEnabled] = React.useState(true);
   const [word, setWord] = React.useState('');
+  // Unread facet (task 062 / §B7). Additive with the type + word facets. A
+  // message counts as "unread" when it arrived AFTER the caller first opened
+  // this conversation (i.e. newer than the snapshot captured on the initial
+  // load) — the honest, data-available definition of "new since you looked",
+  // given the read-model carries no per-message read flag. See
+  // `initialCursorRef` below.
+  const [unreadOnly, setUnreadOnly] = React.useState(false);
+  // Search reveal (task 062 / §B7): the word facet's text box is hidden behind
+  // a search icon and revealed on demand, Teams-style.
+  const [searchOpen, setSearchOpen] = React.useState(false);
+  // Jump-to-latest visibility (task 062 / §B8): true while the user is scrolled
+  // up away from the newest message.
+  const [showJumpToLatest, setShowJumpToLatest] = React.useState(false);
 
   // Refs so the poll hook always reads the freshest cursor without re-subscribing its effect
   // (same pattern as `CommunicationTimeline.tsx`'s thread-id mode).
@@ -601,6 +682,11 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const unreadSinceRef = React.useRef<string | undefined>(undefined);
   const liveRegionRef = React.useRef<HTMLDivElement | null>(null);
   const prevMessageCountRef = React.useRef(0);
+  // Snapshot of the newest `createdOn` at the moment the conversation first
+  // finished loading — the watermark the Unread facet (task 062 / §B7) compares
+  // against. Captured once; messages strictly newer than it are "unread".
+  const initialCursorRef = React.useRef<string | undefined>(undefined);
+  const hasCapturedInitialCursorRef = React.useRef(false);
 
   React.useEffect(() => {
     let newest: string | undefined;
@@ -609,6 +695,19 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     }
     sinceCursorRef.current = newest;
   }, [state.messages]);
+
+  // Capture the initial-load watermark exactly once, when the first read
+  // resolves (`status === 'ready'`). An empty thread captures `''`, so any
+  // subsequently-arriving message counts as unread.
+  React.useEffect(() => {
+    if (hasCapturedInitialCursorRef.current || state.status !== 'ready') return;
+    let newest: string | undefined;
+    for (const m of state.messages) {
+      if (m.createdOn && (!newest || m.createdOn > newest)) newest = m.createdOn;
+    }
+    initialCursorRef.current = newest ?? '';
+    hasCapturedInitialCursorRef.current = true;
+  }, [state.status, state.messages]);
 
   const handleMessages = React.useCallback((incoming: TimelineMessage[]) => {
     dispatch({ type: 'MERGE_POLL', messages: incoming });
@@ -645,20 +744,29 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
 
   const timeline = React.useMemo(() => buildTimeline(state.messages), [state.messages]);
 
-  // Additive filters (FR-09) applied to the ALREADY-built timeline before
-  // day-divider grouping, so dividers recompute for the filtered set (no empty-
-  // day headers). `wordOptions` is derived from the UNFILTERED timeline so the
-  // dropdown stays stable as the user narrows.
+  // Additive filters (FR-09 + task 062 Unread facet) applied to the ALREADY-
+  // built timeline before day-divider grouping, so dividers recompute for the
+  // filtered set (no empty-day headers). The word facet is now driven by the
+  // revealed search box (task 062 / §B7) rather than a dropdown.
   const filters = React.useMemo<ConversationFilters>(
     () => ({ emailEnabled, messageEnabled, word }),
     [emailEnabled, messageEnabled, word]
   );
   const filteredTimeline = React.useMemo(
-    () => timeline.filter(entry => messagePassesFilters(entry.message, filters)),
-    [timeline, filters]
+    () =>
+      timeline.filter(entry => {
+        // Type + word facets (task 014 / FR-09) — unchanged semantics.
+        if (!messagePassesFilters(entry.message, filters)) return false;
+        // Unread facet (task 062 / §B7), additive: only messages strictly newer
+        // than the initial-load watermark pass when it's active.
+        if (!unreadOnly) return true;
+        const cursor = initialCursorRef.current;
+        if (cursor === undefined) return false; // watermark not captured yet — nothing counts as unread
+        return (entry.message.createdOn ?? '') > cursor;
+      }),
+    [timeline, filters, unreadOnly]
   );
   const renderItems = React.useMemo(() => buildConversationRenderItems(filteredTimeline), [filteredTimeline]);
-  const wordOptions = React.useMemo(() => extractWordOptions(timeline.map(entry => entry.message)), [timeline]);
 
   // Live-region announcement for newly-arrived messages (screen-reader affordance, NFR-05).
   React.useEffect(() => {
@@ -679,8 +787,39 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const handleScroll = React.useCallback(() => {
     const el = listRef.current;
     if (!el) return;
-    isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < AUTO_SCROLL_THRESHOLD_PX;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < AUTO_SCROLL_THRESHOLD_PX;
+    isAtBottomRef.current = atBottom;
+    // Show the circle down-arrow affordance (task 062 / §B8) whenever the user
+    // is scrolled up away from the newest message.
+    setShowJumpToLatest(!atBottom);
   }, []);
+
+  // Imperatively jump to the newest message (task 062 / §B8). Keyboard-operable
+  // (the affordance is a native <Button>); re-arms auto-scroll by marking the
+  // list as at-bottom.
+  const jumpToLatest = React.useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    isAtBottomRef.current = true;
+    setShowJumpToLatest(false);
+  }, []);
+
+  // "Mark as read" tool (R3 UAT 2026-07-22 item 5c — relocated from the thread
+  // row into the message toolbar). Advances the unread watermark so every
+  // currently-loaded message counts as read, clears the unread-only facet (else
+  // the filtered list would go empty), and lets the host clear this thread's
+  // list-pane badge via the `onMarkThreadRead` seam.
+  const markAsRead = React.useCallback(() => {
+    let newest: string | undefined;
+    for (const m of state.messages) {
+      if (m.createdOn && (!newest || m.createdOn > newest)) newest = m.createdOn;
+    }
+    initialCursorRef.current = newest ?? '';
+    hasCapturedInitialCursorRef.current = true;
+    setUnreadOnly(false);
+    onMarkThreadRead?.();
+  }, [state.messages, onMarkThreadRead]);
 
   React.useEffect(() => {
     const el = listRef.current;
@@ -689,10 +828,16 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
       el.scrollTop = el.scrollHeight;
       hasScrolledInitiallyRef.current = true;
       isAtBottomRef.current = true;
+      setShowJumpToLatest(false);
       return;
     }
     if (isAtBottomRef.current) {
       el.scrollTop = el.scrollHeight;
+      setShowJumpToLatest(false);
+    } else {
+      // New content arrived while the user is reading history — surface the
+      // jump-to-latest affordance instead of yanking the scroll position.
+      setShowJumpToLatest(true);
     }
   }, [renderItems.length]);
 
@@ -789,117 +934,186 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         </Text>
       )}
 
-      {/* Additive in-conversation filters (task 014 / FR-09) — only meaningful once there's a thread to filter. */}
-      {timeline.length > 0 && (
-        <div className={filterStyles.bar} role="group" aria-label="Filter messages">
-          <ToggleButton
-            size="small"
-            checked={emailEnabled}
-            aria-pressed={emailEnabled}
-            aria-label="Show email messages"
-            onClick={() => setEmailEnabled(prev => !prev)}
-          >
-            Email
-          </ToggleButton>
-          <ToggleButton
-            size="small"
-            checked={messageEnabled}
-            aria-pressed={messageEnabled}
-            aria-label="Show chat messages"
-            onClick={() => setMessageEnabled(prev => !prev)}
-          >
-            Message
-          </ToggleButton>
-          <Dropdown
-            className={filterStyles.word}
-            size="small"
-            aria-label="Filter by word"
-            placeholder="All messages"
-            value={word || 'All messages'}
-            selectedOptions={[word]}
-            onOptionSelect={(_, data) => setWord(data.optionValue ?? '')}
-          >
-            <Option value="" text="All messages">
-              All messages
-            </Option>
-            {wordOptions.map(w => (
-              <Option key={w} value={w} text={w}>
-                {w}
-              </Option>
-            ))}
-          </Dropdown>
+      {/* Chat-area icon toolbar (task 062 / §B7) — icon-only Email / Message /
+          Unread filters + a search icon that reveals a message text filter.
+          Replaces the former Email/Message text toggles + "All messages" word
+          dropdown; the additive AND-of-facets semantics are unchanged. Every
+          control keeps a resolvable accessible name; the toggles reflect state
+          via aria-pressed and the revealed input is labeled (NFR-05). Only
+          meaningful once there's a thread to filter. */}
+      {state.status === 'ready' && (
+        <div className={filterStyles.bar} role="group" aria-label="Message tools">
+          {/* Icon filter toggles (task 062 / §B7) + Mark-as-read (item 5c) only
+              matter once there's a thread to filter. Refresh (item 7) is always
+              present so an empty thread can still be polled on demand. */}
+          {timeline.length > 0 && (
+            <>
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={emailEnabled ? filterStyles.toggleActive : undefined}
+                icon={<MailRegular />}
+                checked={emailEnabled}
+                aria-pressed={emailEnabled}
+                aria-label="Show email messages"
+                title="Show email messages"
+                onClick={() => setEmailEnabled(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={messageEnabled ? filterStyles.toggleActive : undefined}
+                icon={<ChatRegular />}
+                checked={messageEnabled}
+                aria-pressed={messageEnabled}
+                aria-label="Show chat messages"
+                title="Show chat messages"
+                onClick={() => setMessageEnabled(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={unreadOnly ? filterStyles.toggleActive : undefined}
+                icon={<MailUnreadRegular />}
+                checked={unreadOnly}
+                aria-pressed={unreadOnly}
+                aria-label="Show unread messages only"
+                title="Show unread messages only"
+                onClick={() => setUnreadOnly(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={searchOpen ? filterStyles.toggleActive : undefined}
+                icon={<SearchRegular />}
+                checked={searchOpen}
+                aria-pressed={searchOpen}
+                aria-expanded={searchOpen}
+                aria-label="Search messages"
+                title="Search messages"
+                onClick={() =>
+                  setSearchOpen(prev => {
+                    const next = !prev;
+                    // Closing the search clears the active word facet so a hidden
+                    // filter never keeps silently narrowing the list.
+                    if (!next) setWord('');
+                    return next;
+                  })
+                }
+              />
+              {searchOpen && (
+                <Input
+                  className={filterStyles.search}
+                  size="small"
+                  contentBefore={<SearchRegular />}
+                  value={word}
+                  placeholder="Filter messages"
+                  aria-label="Filter messages by text"
+                  onChange={(_e, data) => setWord(data.value)}
+                />
+              )}
+              {/* Mark-as-read tool (item 5c) — relocated here from the thread row. */}
+              <Tooltip content="Mark conversation as read" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<MailReadRegular />}
+                  aria-label="Mark conversation as read"
+                  onClick={markAsRead}
+                />
+              </Tooltip>
+            </>
+          )}
+          {/* Refresh (item 7) — moved out of the compose row into the toolbar. */}
+          <Tooltip content="Refresh conversation" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ArrowClockwiseRegular />}
+              aria-label="Refresh conversation"
+              onClick={pollNow}
+            />
+          </Tooltip>
         </div>
       )}
 
-      <div ref={listRef} className={styles.list} role="log" aria-label="Conversation messages" onScroll={handleScroll}>
-        {isLoading && (
-          <div className={styles.centerState}>
-            <Spinner size="small" label="Loading conversation…" />
-          </div>
-        )}
+      <div className={listStyles.wrapper}>
+        <div
+          ref={listRef}
+          className={styles.list}
+          role="log"
+          aria-label="Conversation messages"
+          onScroll={handleScroll}
+        >
+          {isLoading && (
+            <div className={styles.centerState}>
+              <Spinner size="small" label="Loading conversation…" />
+            </div>
+          )}
 
-        {isErrorState && (
-          <div className={styles.centerState}>
-            <Text role="alert" className={styles.errorCenterState}>
-              {state.error ?? 'Failed to load conversation.'}
-            </Text>
-          </div>
-        )}
+          {isErrorState && (
+            <div className={styles.centerState}>
+              <Text role="alert" className={styles.errorCenterState}>
+                {state.error ?? 'Failed to load conversation.'}
+              </Text>
+            </div>
+          )}
 
-        {!isLoading && !isErrorState && isThreadEmpty && (
-          <div className={styles.centerState}>
-            <Text className={styles.emptyState}>No messages yet.</Text>
-          </div>
-        )}
+          {!isLoading && !isErrorState && isThreadEmpty && (
+            <div className={styles.centerState}>
+              <Text className={styles.emptyState}>No messages yet.</Text>
+            </div>
+          )}
 
-        {!isLoading && !isErrorState && isFilteredEmpty && (
-          <div className={styles.centerState}>
-            {/* No own live region — this sits inside the role="log" list, which
+          {!isLoading && !isErrorState && isFilteredEmpty && (
+            <div className={styles.centerState}>
+              {/* No own live region — this sits inside the role="log" list, which
                 already announces content changes (avoid nested live regions). */}
-            <Text className={styles.emptyState}>No messages match the current filters.</Text>
-          </div>
-        )}
+              <Text className={styles.emptyState}>No messages match the current filters.</Text>
+            </div>
+          )}
 
-        {!isLoading &&
-          !isErrorState &&
-          renderItems.map(item =>
-            item.kind === 'divider' ? (
-              <div key={item.key} role="separator" aria-orientation="horizontal" className={styles.divider}>
-                <Text size={200} className={styles.dividerLabel}>
-                  {item.label}
-                </Text>
-              </div>
-            ) : (
-              <div
-                key={item.key}
-                ref={setAnchorRef(item.entry.message.id)}
-                data-message-id={item.entry.message.id}
-                data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
-                className={mergeClasses(
-                  styles.messageAnchor,
-                  highlightedId === item.entry.message.id && styles.messageAnchorHighlight
-                )}
-              >
-                {/* Email-type communications render as a compact in-flow block
+          {!isLoading &&
+            !isErrorState &&
+            renderItems.map(item =>
+              item.kind === 'divider' ? (
+                <div key={item.key} role="separator" aria-orientation="horizontal" className={styles.divider}>
+                  <Text size={200} className={styles.dividerLabel}>
+                    {item.label}
+                  </Text>
+                </div>
+              ) : (
+                <div
+                  key={item.key}
+                  ref={setAnchorRef(item.entry.message.id)}
+                  data-message-id={item.entry.message.id}
+                  data-highlighted={highlightedId === item.entry.message.id ? 'true' : undefined}
+                  className={mergeClasses(
+                    styles.messageAnchor,
+                    highlightedId === item.entry.message.id && styles.messageAnchorHighlight
+                  )}
+                >
+                  {/* Email-type communications render as a compact in-flow block
                     (subject/from/to + single "Email" indicator + open-icon,
                     task 021 / FR-04); message-type keep the chat bubble. Only
                     the child swaps — the anchor wrapper (scrollToMessage) +
                     filters are untouched. */}
-                {item.entry.message.channelType === 'email' ? (
-                  <EmailInFlowBlock
-                    message={item.entry.message}
-                    isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                    onOpen={onOpenEmail}
-                  />
-                ) : (
-                  <MessageBubble
-                    message={item.entry.message}
-                    isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
-                    status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
-                  />
-                )}
+                  {item.entry.message.channelType === 'email' ? (
+                    <EmailInFlowBlock
+                      message={item.entry.message}
+                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
+                      onOpen={onOpenEmail}
+                    />
+                  ) : (
+                    <MessageBubble
+                      message={item.entry.message}
+                      isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
+                      status={isOwnMessage(item.entry.message, currentUserSystemUserId) ? 'sent' : undefined}
+                      onOpenAttachment={onOpenAttachment}
+                    />
+                  )}
 
-                {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
+                  {/* Forward affordance (task 022 / FR-08) — rendered in the anchor
                     wrapper so it applies uniformly to BOTH the chat bubble and
                     the email-in-flow block WITHOUT editing either subcomponent.
                     It only hands the message back to the host via
@@ -911,22 +1125,39 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                     button that does nothing. The accessible name is
                     contextualized per message so N Forward buttons are
                     distinguishable to a screen reader. */}
-                {onForwardMessage && (
-                  <div className={styles.messageActions} data-message-actions>
-                    <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
-                      <Button
-                        appearance="subtle"
-                        size="small"
-                        icon={<ArrowForwardRegular />}
-                        aria-label={forwardLabel(item.entry.message)}
-                        onClick={() => onForwardMessage(item.entry.message)}
-                      />
-                    </Tooltip>
-                  </div>
-                )}
-              </div>
-            )
-          )}
+                  {onForwardMessage && (
+                    <div className={styles.messageActions} data-message-actions>
+                      <Tooltip content={forwardLabel(item.entry.message)} relationship="label">
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={<ArrowForwardRegular />}
+                          aria-label={forwardLabel(item.entry.message)}
+                          onClick={() => onForwardMessage(item.entry.message)}
+                        />
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+        </div>
+
+        {/* Circle down-arrow jump-to-latest (task 062 / §B8) — shown only while
+            scrolled up; a native <Button> so it's keyboard-operable + labeled
+            (NFR-05). Auto-scroll behavior is unchanged. */}
+        {showJumpToLatest && (
+          <Tooltip content="Jump to latest messages" relationship="label">
+            <Button
+              className={listStyles.jumpButton}
+              shape="circular"
+              appearance="subtle"
+              icon={<ArrowCircleDownRegular />}
+              aria-label="Jump to latest messages"
+              onClick={jumpToLatest}
+            />
+          </Tooltip>
+        )}
       </div>
 
       <ConversationComposeBar

@@ -141,8 +141,18 @@ describe('CommunicationAttachmentsService.getFileAttachments', () => {
   it('enriches each attachment with its document SPE upload status via a single sprk_document read', async () => {
     const { api, docQueries } = makeRoutedWebApi(
       [
-        { sprk_communicationattachmentid: '1', sprk_name: 'a.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'd1' },
-        { sprk_communicationattachmentid: '2', sprk_name: 'b.docx', sprk_attachmenttype: AttachmentType.File, [DOC]: 'd2' },
+        {
+          sprk_communicationattachmentid: '1',
+          sprk_name: 'a.pdf',
+          sprk_attachmenttype: AttachmentType.File,
+          [DOC]: 'd1',
+        },
+        {
+          sprk_communicationattachmentid: '2',
+          sprk_name: 'b.docx',
+          sprk_attachmenttype: AttachmentType.File,
+          [DOC]: 'd2',
+        },
       ],
       [
         { sprk_documentid: 'd1', sprk_graphitemid: 'b!item-1' }, // uploaded (SPE item id)
@@ -168,7 +178,12 @@ describe('CommunicationAttachmentsService.getFileAttachments', () => {
         if (entity === 'sprk_document') throw new Error('boom');
         return {
           entities: [
-            { sprk_communicationattachmentid: '1', sprk_name: 'a.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'd1' },
+            {
+              sprk_communicationattachmentid: '1',
+              sprk_name: 'a.pdf',
+              sprk_attachmenttype: AttachmentType.File,
+              [DOC]: 'd1',
+            },
           ],
         } as { entities: never[] };
       }),

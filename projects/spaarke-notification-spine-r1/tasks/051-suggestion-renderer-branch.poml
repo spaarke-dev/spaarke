@@ -4,7 +4,7 @@
     <title>Suggestion renderer branch in the Assistant — compact card from the envelope</title>
     <phase>5 Suggestion consumer</phase>
     <gate>blocked-until:050,021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New client surface consuming the SignalR/poll subscriber and the outbox envelope; frontend/fluent-ui tag; modifies .tsx in SpaarkeAi per root CLAUDE.md §8</rigor-reason>
     <model-tier>sonnet</model-tier>

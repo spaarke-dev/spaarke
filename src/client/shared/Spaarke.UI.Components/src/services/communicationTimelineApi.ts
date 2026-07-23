@@ -94,7 +94,15 @@ export interface IThreadMessageDto {
   sentAt: string | null;
   createdOn: string | null;
   inReplyTo: string | null;
+  /** `sprk_privilegeclassification` (FR-21): None=100000000 / PotentiallyPrivileged=100000001 / Privileged=100000002. Display/review label — never gated the read (ADR-015). */
   privilege: number;
+  /**
+   * `sprk_isinternalonly` (FR-21). Only ever `true` on a row this (permitted, internal) caller may already read —
+   * the BFF's shared access filter drops internal-only rows for external callers, so this never over-discloses.
+   */
+  isInternalOnly: boolean;
+  /** `sprk_isprivate` (FR-21) — display-only privacy marker; never gates (impersonation enforces private-thread visibility server-side). */
+  isPrivate: boolean;
   attachments: IThreadAttachmentRefDto[];
 }
 

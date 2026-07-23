@@ -36,7 +36,10 @@ export interface NegotiateResponse {
  * (FR-06) rather than surfacing a hard error to the end user.
  */
 export class SignalRUnavailableError extends Error {
-  constructor(message: string, public readonly cause?: unknown) {
+  constructor(
+    message: string,
+    public readonly cause?: unknown
+  ) {
     super(message);
     this.name = 'SignalRUnavailableError';
     Object.setPrototypeOf(this, SignalRUnavailableError.prototype);
@@ -62,7 +65,7 @@ export async function negotiate(): Promise<NegotiateResponse> {
     if (err instanceof ApiError && err.status === 503) {
       throw new SignalRUnavailableError(
         'Real-time notification delivery is disabled for this environment; caller should rely on poll fallback (FR-06).',
-        err,
+        err
       );
     }
     throw err;

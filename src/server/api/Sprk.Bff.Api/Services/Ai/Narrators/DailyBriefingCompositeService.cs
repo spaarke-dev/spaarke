@@ -69,6 +69,7 @@ public class DailyBriefingCompositeService
     private readonly DailyBriefingCollector _collector;
     private readonly IOutputRouter _outputRouter;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
+    private readonly DailyBriefingSuggestionProducer? _suggestionProducer;
     private readonly ILogger<DailyBriefingCompositeService> _logger;
 
     public DailyBriefingCompositeService(
@@ -77,13 +78,19 @@ public class DailyBriefingCompositeService
         DailyBriefingCollector collector,
         IOutputRouter outputRouter,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
-        ILogger<DailyBriefingCompositeService> logger)
+        ILogger<DailyBriefingCompositeService> logger,
+        // Optional trailing dependency (task 050 / FR-15). The proactive kind=suggestion producer runs as a
+        // SIBLING of narration in the render leg — grounded+gated-before-outbox. Optional so the Null peer +
+        // existing composite tests construct unchanged; DI supplies the real Scoped producer in the compound-ON
+        // registration. Null → the briefing narrates only (pre-FR-15 behavior).
+        DailyBriefingSuggestionProducer? suggestionProducer = null)
     {
         _routing = routing ?? throw new ArgumentNullException(nameof(routing));
         _workflows = workflows ?? throw new ArgumentNullException(nameof(workflows));
         _collector = collector ?? throw new ArgumentNullException(nameof(collector));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
+        _suggestionProducer = suggestionProducer;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -115,6 +122,15 @@ public class DailyBriefingCompositeService
     {
         var (payload, highPriorityItems, collectMs) =
             await CollectAsync(systemUserId, windows, cancellationToken).ConfigureAwait(false);
+
+        // FR-15: the proactive kind=suggestion producer runs as a SIBLING of narration, grounded in the
+        // SAME collected high-priority items — NOT inside DailyBriefingNarrator (which stays narration-only).
+        // It runs BEFORE the empty-narrative short-circuit so a briefing with high-priority items but no
+        // channel narrative still surfaces suggestions. Non-fatal (the producer swallows its own errors).
+        if (_suggestionProducer is not null)
+        {
+            await _suggestionProducer.ProduceAsync(systemUserId, highPriorityItems, cancellationToken).ConfigureAwait(false);
+        }
 
         if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
         {

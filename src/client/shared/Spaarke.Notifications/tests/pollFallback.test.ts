@@ -31,9 +31,7 @@ describe('startPollFallback', () => {
 
   it('delivers each pending item as a poll-sourced NotificationEvent', async () => {
     authenticatedFetch.mockResolvedValue({
-      json: async () => [
-        { outboxRowId: 'row-1', kind: 'communication-arrived', envelope: { communicationId: 'c1' } },
-      ],
+      json: async () => [{ outboxRowId: 'row-1', kind: 'communication-arrived', envelope: { communicationId: 'c1' } }],
     });
     const onEvent = jest.fn();
 

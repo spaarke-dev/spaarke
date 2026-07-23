@@ -31,14 +31,26 @@
  *     XrmDataverseClient from `@spaarke/ui-components`.
  *   - ADR-021: Fluent v9 semantic tokens only.
  *   - ADR-022: React 19 functional component.
- *   - ADR-028: no token snapshots. `Xrm.WebApi` is Xrm-mediated auth — no
- *     `authenticatedFetch` involvement.
+ *   - ADR-028: no token snapshots. Row DATA flows over `Xrm.WebApi` (Xrm-mediated
+ *     auth — no token crosses the boundary). The OPTIONAL `behavior.membershipFilter`
+ *     scope is the sole BFF touch: when the widget is mounted inside an
+ *     `AiSessionProvider` (SpaarkeAi / Code Pages), it builds a `membershipResolver`
+ *     from the session's `authenticatedFetch` (function-based, no snapshot) and hands
+ *     it to `<DataGrid>`. Outside a provider (dev / pure MDA), the context read
+ *     returns null and the feature degrades to the base query — no crash.
  */
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { DataGrid, XrmDataverseClient } from '@spaarke/ui-components';
+import {
+  DataGrid,
+  XrmDataverseClient,
+  createMembershipResolver,
+  type MembershipResolver,
+} from '@spaarke/ui-components';
+import { buildBffApiUrl } from '@spaarke/auth';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
+import { AiSessionContext } from '../../providers/AiSessionProvider';
 
 // ---------------------------------------------------------------------------
 // Widget data contract
@@ -154,6 +166,20 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
     return new XrmDataverseClient();
   }, [xrm]);
 
+  // Membership resolver for the DataGrid `behavior.membershipFilter` feature.
+  // Read the AI session context OPTIONALLY (useContext, not useAiSession — the
+  // latter throws outside a provider, which would break this dual-use widget in
+  // LegalWorkspace / MDA / dev). When a session with an authenticated fetch is
+  // available, build a resolver bound to the BFF; otherwise pass undefined and
+  // the DataGrid degrades any membershipFilter config to its base query.
+  const session = React.useContext(AiSessionContext);
+  const membershipResolver = React.useMemo<MembershipResolver | undefined>(() => {
+    const authFetch = session?.authenticatedFetch;
+    const bffBaseUrl = session?.bffBaseUrl;
+    if (!authFetch || !bffBaseUrl) return undefined;
+    return createMembershipResolver((path, init) => authFetch(buildBffApiUrl(bffBaseUrl, path), init));
+  }, [session?.authenticatedFetch, session?.bffBaseUrl]);
+
   // ai-spaarke-ai-workspace-UI-r1 iter 2 round 9 (2026-06-09):
   // EventsPage Code Page works because its index.html sets `overflow: hidden`
   // on html/body/#root, so the FluentDataGrid (which renders at column-sum
@@ -229,6 +255,7 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
         <DataGrid
           configId={data.configId}
           dataverseClient={dataverseClient}
+          membershipResolver={membershipResolver}
           pageSize={data.pageSize}
           availableViewsAllowlist={data.availableViews}
         />
