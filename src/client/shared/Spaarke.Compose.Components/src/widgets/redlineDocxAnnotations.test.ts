@@ -7,7 +7,7 @@
  *     w:ins/w:del. This is the producer the redline marks (usePendingRedline) never had.
  *
  * (R3 task 027: the reject-state BASELINE reduction — formerly `buildRejectBaselineJson` — is now an
- * internal step of `collectEditedParagraphs`/`buildContentModel`; its behavior is covered by
+ * internal step of `captureParaIdSnapshot`/`buildContentModel`; its behavior is covered by
  * `docxBridge.contentModel.test.ts` through the real editor surface.)
  *
  * A pure tree transform — no editor, no docx packer — so these are fast domain tests.

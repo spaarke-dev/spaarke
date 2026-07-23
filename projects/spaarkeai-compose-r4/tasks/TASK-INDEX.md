@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Compose R4 (Shadow Document Architecture)
 
 > **Generated**: 2026-07-22 by `/project-pipeline`
-> **Total tasks**: 35 (6 Gate · 4 Ingest · 5 Capture · 7 Patch Engine · 3 AI · 5 Concurrency · 4 Hardening/cutover · 1 wrap-up) — 036 added 2026-07-22 (push-annotations scope discovery, task-032 Path A)
+> **Total tasks**: 36 (6 Gate · 4 Ingest · 5 Capture · 8 Patch Engine · 3 AI · 5 Concurrency · 4 Hardening/cutover · 1 wrap-up) — 036 (push-annotations) + 037 (born-in-editor tables) added 2026-07-22: two shipped constructs the closed op-schema can't express; both deferred owner Path B/C decisions blocking Success Criterion 7 (one byte-author).
 > **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ complete · 🔁 needs-retry · ⛔ blocked
 > **Cutover**: HARD-REPLACE. **Task 006 (Phase 0 gate) is a HARD prerequisite to every deletion/cutover task (023, 032, 060).**
 
@@ -24,12 +24,13 @@
 | 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | done | ✅ |
 | 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | done | ✅ |
 | 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | done | ✅ |
-| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,006,031,**032** | ⏸ deferred→032 (post-cutover cleanup) | 🔲 |
+| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,006,031,032 | done | ✅ |
 | 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | done | ✅ |
 | 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | done | ✅ |
 | 031 | Structural operations — split/merge/insert/delete (FR-05) + client wiring | 3 Patch Engine | opus / xhigh | FULL | 030 | done | ✅ |
 | 032 | Cutover: SAVE→engine + op-log send + retire redline-synthesizer (FR-06, re-scoped) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | done | ✅ |
-| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030 | blocked | 🔲 |
+| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030,**037** | ⏸ deferred→037 | 🔲 |
+| 037 | 🔔 Born-in-editor + table-authoring op (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 030,031, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | blocked | 🔲 |
 | 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | blocked | 🔲 |
 | 036 | 🔔 Retire DocxAnnotationWriter + push-annotations (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 032, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
@@ -41,7 +42,7 @@
 | 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | blocked | 🔲 |
 | 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | blocked | 🔲 |
 | 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | blocked | 🔲 |
-| 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006,036** | blocked | 🔲 |
+| 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006,036,037** | blocked | 🔲 |
 | 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | blocked | 🔲 |
 | 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | blocked | 🔲 |
 | 063 | **Flagship gate G — all 8 criteria green** | 6 Hardening | opus / high | FULL | 062 | blocked | 🔲 |

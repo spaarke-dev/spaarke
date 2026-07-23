@@ -2,8 +2,8 @@
   <metadata>
     <title>Delete the paragraph-diff export path from the client (FR-06, client half) — GATED on 006</title>
     <phase>2 Frontend capture</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <amendment date="2026-07-22" by="orchestrator (Phase-2 coverage-gate finding, Path A)">
       RE-SEQUENCED. The Phase-2 attempt hit this task's own Step-1 coverage check: `collectEditedParagraphs`
       captures whole-paragraph delete/merge via the `{paraId,text:''}` sentinel (docxBridge.ts:360-368 — the
@@ -175,6 +175,48 @@
     exception per root §6.5; C: pull forward minimal structural capture) in
     `projects/spaarkeai-compose-r4/BLOCKED.md`. No code was changed under this task — `docxBridge.ts`,
     `ComposeWorkspace.tsx`, `ComposeEditor.tsx`, `index.ts` are untouched.
+
+    **COMPLETED 2026-07-22** (re-run per Path A re-sequencing). Task 031 (structural ops + client wiring,
+    ✅) and task 032 (SAVE→engine cutover, ✅) closed the earlier coverage gap: the interceptor's op-log
+    now covers structural delete/merge via `ApplyDeleteParagraph`/step-level ops, and `ComposeWorkspace.
+    triggerSave` sends only the op-log (no `collectEditedParagraphs` call site existed in the save path —
+    it had already been superseded by task 032's op-log wiring; only the dead export + its ONLY exposure
+    point — the `ComposeEditor` imperative-handle method — remained).
+
+    Removed: `collectEditedParagraphs` + its now-dead-only helpers `acceptStateText`/`isImportedRef` from
+    `docxBridge.ts`; the `ComposeEditedParagraph` type from `types/compose-contracts.ts` (zero remaining
+    client usages); the `collectEditedParagraphs` export from `index.ts`; the import, type import,
+    `ComposeEditorHandle.collectEditedParagraphs()` interface method, and its implementation from
+    `ComposeEditor.tsx`. `buildContentModel` (docxBridge.ts, born-in-editor full-render path) is UNTOUCHED
+    per scope boundary — reserved for task 033.
+
+    Updated stale documentation (comments only, no logic change) in files that described
+    `collectEditedParagraphs` / the now-retired `ComposeParagraphRedlineSynthesizer` as the CURRENT
+    persistence mechanism (they were already stale post-task-032; task 023 fixed the reference while
+    already touching the surface): `ComposeWorkspace.tsx` (redline-annotation save-path comments),
+    `TrackChangesExtension.ts` + `trackChangesDiff.ts` (production, decoration-vs-mark design rationale),
+    and doc-only mentions in `TrackChangesExtension.test.ts` / `redlineDocxAnnotations.test.ts`.
+
+    Rewrote `docxBridge.contentModel.test.ts`'s `collectEditedParagraphs` describe block (5 tests,
+    compile-breaking after the deletion) into direct `captureParaIdSnapshot` reject-state-semantics tests
+    (3 tests: document-order capture, pending-insertion exclusion, pending-deletion retention) — same
+    reject-state reduction logic, now tested at its actual (surviving) call site instead of indirectly
+    through the removed diff function.
+
+    Verification: grep zero `collectEditedParagraphs` call sites (only historical "removed in task 023" /
+    "retired" doc comments remain, in-scope + out-of-scope files); `npm run typecheck` shows only the
+    known pre-existing `@spaarke/ai-widgets` / `@spaarke/document-operations` sibling-module-resolution
+    errors (unrelated, present on baseline); affected jest suites (`docxBridge.contentModel.test.ts`,
+    `TrackChangesExtension.test.ts`, `redlineDocxAnnotations.test.ts`) 22/22 pass; the broader
+    `ComposeEditor`/`ComposeWorkspace` jest run shows the same pre-existing 17-suite `@fluentui/react-icons`
+    unbuilt-dist failure documented in task 032's completion notes (not this change) — the 3 suites that
+    resolve show 17/17 tests passing. No `.claude/` writes. `TASK-INDEX.md` / `current-task.md` left for
+    the orchestrator per the calling instructions.
+
+    Quality gates (Step 9.5): code-review = clean (0 critical/warning; 1 non-blocking suggestion re:
+    documented coverage-owner pointer). adr-check = clean (ADR-028 client-auth-contract grep-verified
+    unaffected; ADR-021/ADR-010/ADR-038/NFR-03 all N/A or compliant; no ADR violations, no exceptions
+    needed).
   </notes>
 
   <execution>

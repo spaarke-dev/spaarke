@@ -1024,10 +1024,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
-      // R4 FR-06 (task 032, the write-path cutover): a dirty save of a LOADED doc now sends the ordered, rebased
-      // task-003 OPERATION LOG (ID-anchored (paraId, runIndex, run-local-offset) ops) the server applies via
-      // ComposeShadowPatchEngine — REPLACING the retired `collectEditedParagraphs()` paragraph-diff delta. Read
-      // ONCE here (serializing resets the log + the editor dirty flag, mirroring the old collect call). Ops whose
+      // R4 FR-06 (task 032, the write-path cutover; task 023 retired the paragraph-diff export this replaced):
+      // a dirty save of a LOADED doc sends the ordered, rebased task-003 OPERATION LOG (ID-anchored
+      // (paraId, runIndex, run-local-offset) ops) the server applies via ComposeShadowPatchEngine — the ONLY
+      // dirty-save capture path. Read ONCE here (serializing resets the log + the editor dirty flag). Ops whose
       // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
       // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
       // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
@@ -1051,24 +1051,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
       const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
 
-      // Save-robustness fix (UAT round-4): pending AI/user REDLINES are NO LONGER sent as text-searched
-      // annotations. `DocxAnnotationWriter.LocateTarget` re-locates each target in the raw OOXML by text,
-      // which 422s whenever the target spans a `<w:tab/>`/`<w:br/>` (tab-laid-out list items) or drifts —
-      // the recurring "a tracked change could not be located" error. Redlines now persist through the
-      // POSITION-based path instead: `collectEditedParagraphs` emits each changed paragraph's ACCEPT-STATE
-      // text (pending redline applied) keyed by paraId, and the server synthesizer diffs it against the
-      // retained original to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only COMMENTS still
-      // ride the annotation path (no position-based comment synthesis exists; a comment anchors a user
-      // SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search remains for Push-to-Word.
+      // Save-robustness fix (UAT round-4; superseded by task 032's op-log cutover): pending AI/user REDLINES
+      // are NO LONGER sent as text-searched annotations. `DocxAnnotationWriter.LocateTarget` re-locates each
+      // target in the raw OOXML by text, which 422s whenever the target spans a `<w:tab/>`/`<w:br/>`
+      // (tab-laid-out list items) or drifts — the recurring "a tracked change could not be located" error.
+      // Redlines now persist through the ID-ANCHORED op-log instead: the interceptor captures the underlying
+      // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored operations, and
+      // ComposeShadowPatchEngine applies them to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only
+      // COMMENTS still ride the annotation path (no op-anchored comment synthesis exists yet — task 036; a
+      // comment anchors a user SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search
+      // remains for Push-to-Word.
       const redlineAnnotations: DocxAnnotationInput[] = [];
-      // Save-robustness fix (UAT round-4, 2026-07-21): the anchored-annotation → DocxAnnotation mapping
-      // (`composeDocxAnnotations`) also emits Insertion/Deletion REDLINES (an AI `insertion-suggestion` /
-      // `deletion-suggestion` becomes a text-searched track-change), not only comments. Those AI redlines
-      // are ALREADY persisted through the POSITION-based path — the materialized redline mark rides the
-      // paragraph's accept-state text in `collectEditedParagraphs` → the server synthesizer emits w:ins/w:del
-      // by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a tracked change
-      // could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic run at that
-      // location) — exactly why an AI edit saved at the document start but failed at an interior location.
+      // Save-robustness fix (UAT round-4, 2026-07-21; superseded by task 032's op-log cutover): the
+      // anchored-annotation → DocxAnnotation mapping (`composeDocxAnnotations`) also emits Insertion/Deletion
+      // REDLINES (an AI `insertion-suggestion` / `deletion-suggestion` becomes a text-searched track-change),
+      // not only comments. Those AI redlines are ALREADY persisted through the ID-anchored op-log above —
+      // the materialized redline mark rides the granular ops ComposeShadowPatchEngine applies to emit
+      // w:ins/w:del by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a
+      // tracked change could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic
+      // run at that location) — exactly why an AI edit saved at the document start but failed at an interior
+      // location.
       // Keep ONLY Comments on the save annotation path (they have no position-based representation; a comment
       // anchors a user selection, which rarely spans a tab). This completes the round-4b redline exclusion —
       // the `redlineMarksToDocxAnnotations` source was already zeroed above; this was the SECOND source.

@@ -5,11 +5,12 @@
  * Item 4 asks for user edits on a (server-managed) document to render as LIVE tracked-change redlines.
  * The chosen design renders those redlines as a ProseMirror DECORATION overlay — NOT as content marks —
  * so the editor's document content stays equal to the user's REAL edited text. That matters because
- * persistence rides the EXISTING save path: `collectEditedParagraphs` (docxBridge.ts) sends the
- * paraId-keyed new settled text and the BFF `ComposeParagraphRedlineSynthesizer` (FR-02) diffs it
- * against the retained-original baseline to emit `w:ins`/`w:del` tracked changes in place. Content
- * marks would be stripped by `rejectStateText` and never persist; a decoration is a pure VIEW layer
- * that cannot change content or corrupt the document.
+ * persistence rides the save path's ID-ANCHORED OPERATION LOG (task 020/022/032): the step interceptor
+ * captures the underlying `insertText`/`deleteRange`/`replaceRange` steps as paraId+offset-anchored
+ * operations, and `ComposeShadowPatchEngine` applies them to emit `w:ins`/`w:del` tracked changes in
+ * place (the R3 paragraph-diff path — `collectEditedParagraphs` / `ComposeParagraphRedlineSynthesizer` —
+ * was retired by tasks 023/032). Content marks would be stripped by `rejectStateText` and never persist;
+ * a decoration is a pure VIEW layer that cannot change content or corrupt the document.
  *
  * This module is the pure diff engine behind that overlay: given a paragraph's BASELINE (load-time
  * reject-state) text and its CURRENT text, it returns an ordered op list the decoration builder maps to

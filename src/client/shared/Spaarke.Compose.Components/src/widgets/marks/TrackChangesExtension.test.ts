@@ -5,7 +5,7 @@
  * TipTap editor whose paragraphs carry `paraId` attrs (the same identity extension ComposeEditor
  * mounts), plus the plugin's enabled/disabled behavior. The decoration is a VIEW layer — these tests
  * assert it surfaces the right ranges WITHOUT mutating document content (the property that lets user
- * edits persist via the existing collectEditedParagraphs → FR-02 path).
+ * edits persist via the ID-anchored operation-log path — step interceptor → ComposeShadowPatchEngine).
  */
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';

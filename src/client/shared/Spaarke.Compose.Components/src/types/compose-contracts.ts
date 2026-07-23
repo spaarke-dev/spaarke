@@ -379,33 +379,19 @@ export interface ImportedComment {
 }
 
 // ---------------------------------------------------------------------------
-// R3 FR-01 / FR-01a — the client content-model save contract (task 027)
+// R3 FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //
-// Mirror of the server save DTOs (`Sprk.Bff.Api.Services.Compose.ComposeEditedParagraph` +
-// `ComposeContentModel`, task 022/026). The client STOPS authoring `.docx` bytes: a dirty save of a
-// loaded doc sends the paraId-keyed changed paragraphs (`ComposeEditedParagraph[]`) and the server
-// synthesizes the tracked-change delta onto the retained original; a born-in-editor save sends the full
-// `ComposeContentModel` and the server RENDERS the high-fidelity `.docx`. Field names are camelCase; the
-// BFF deserializes case-insensitively and `kind`/`alignment` map to the server enums (string values).
+// Mirror of the server save DTO `ComposeContentModel` (task 022/026). The client STOPS authoring
+// `.docx` bytes: a born-in-editor save sends the full `ComposeContentModel` and the server RENDERS the
+// high-fidelity `.docx`; a dirty save of a LOADED doc sends the ID-anchored task-003 operation log
+// (`stepOperationInterceptor.ts`) that `ComposeShadowPatchEngine` applies — the R3 paragraph-diff
+// contract (`ComposeEditedParagraph[]`) this section originally also mirrored was retired by tasks
+// 023/032. Field names are camelCase; the BFF deserializes case-insensitively and `kind`/`alignment`
+// map to the server enums (string values).
 //
 // Privacy: `text`/`runs[].text` carry document content (Tier 3) — carried in-memory to the Save request
 // only, never on an SSE frame / PaneEventBus payload / log surface (ADR-015).
-
-/**
- * One edited paragraph on a dirty-loaded save (FR-01): its `w14:paraId` (the E2 splice key) + its new
- * REJECT-STATE settled text (accepted edits baked in, pending AI redlines excluded — those ride the
- * `annotations` list). The server rewrites exactly this paragraph in the retained original as native
- * `w:ins`/`w:del`. Only paragraphs that EXISTED at load and whose settled text changed are emitted —
- * a paraId the retained original lacks (a split/insert) is out of E1 delta scope (the server synthesizer
- * fails fast on an unmatched paraId; structural insert/split is a future synthesizer extension).
- */
-export interface ComposeEditedParagraph {
-  /** The paragraph's `w14:paraId` (8-hex; must exist in the retained original). */
-  paraId: string;
-  /** The paragraph's new reject-state settled text. Tier 3 (document content). */
-  text: string;
-}
 
 /**
  * C2 fix (UAT 2026-07-20): one entry of the ordered load-time paraId map the save sends so the server

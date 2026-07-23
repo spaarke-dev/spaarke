@@ -3,10 +3,10 @@
  *
  * Exercises the CLIENT content-model export path through a HEADLESS TipTap `Editor` (the same schema
  * ComposeEditor mounts, minus React) — the replacement for the removed `docx.js` byte serializers:
- *   - `captureParaIdSnapshot` — load-time `{ paraId → reject-state text }` map;
- *   - `collectEditedParagraphs` — the dirty paragraphs (paraId-keyed), diffed against the snapshot, with
- *     REJECT-STATE semantics (a pending AI-insertion mark does NOT count as a settled-text change) and the
- *     existing-paraId-only rule (a new/split paraId is not emitted — out of E1 delta scope);
+ *   - `captureParaIdSnapshot` — load-time `{ paraId → reject-state text }` map (feeds the C2 minted-id
+ *     stamp + the live Track Changes decoration baseline; R4 task 023 removed the paragraph-diff export
+ *     `collectEditedParagraphs` that used to diff against it — dirty-save capture now routes only through
+ *     the step interceptor's operation log, covered by `stepOperationInterceptor.test.ts`);
  *   - `buildContentModel` — the full paraId-keyed model (headings/paragraphs/lists/tables + b/i/u runs)
  *     the server renders for a born-in-editor save.
  * This is also where the reject-state reduction (formerly `buildRejectBaselineJson`) is now covered.
@@ -24,7 +24,6 @@ import { DeletionMark } from '../widgets/marks/DeletionMark';
 import {
   stampParaIds,
   captureParaIdSnapshot,
-  collectEditedParagraphs,
   buildContentModel,
   buildBaselineParaIdMap,
 } from './docxBridge';
@@ -47,8 +46,8 @@ function makeEditor(content = '<p></p>'): Editor {
   });
 }
 
-describe('captureParaIdSnapshot + collectEditedParagraphs (FR-01)', () => {
-  it('emits only paragraphs whose settled text CHANGED, keyed by paraId; unchanged ones are omitted', () => {
+describe('captureParaIdSnapshot (FR-01) — reject-state text per paraId', () => {
+  it('captures each paragraph\'s current settled text keyed by paraId, in document order', () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>First clause.</p><p>Second clause.</p><p>Third clause.</p>');
     const map: ParaIdMapEntry[] = [
@@ -57,28 +56,24 @@ describe('captureParaIdSnapshot + collectEditedParagraphs (FR-01)', () => {
       { index: 2, paraId: 'CCCC0003', isMinted: false },
     ];
     stampParaIds(editor, map);
+
     const snapshot = captureParaIdSnapshot(editor);
-
-    // Edit ONLY the second paragraph's text.
-    editor.commands.setContent('<p>First clause.</p><p>Second clause, amended.</p><p>Third clause.</p>');
-    stampParaIds(editor, map); // re-stamp same ids (setContent re-created nodes)
-
-    const edited = collectEditedParagraphs(editor, snapshot);
-    expect(edited).toEqual([{ paraId: 'BBBB0002', text: 'Second clause, amended.' }]);
+    expect(Array.from(snapshot.entries())).toEqual([
+      ['AAAA0001', 'First clause.'],
+      ['BBBB0002', 'Second clause.'],
+      ['CCCC0003', 'Third clause.'],
+    ]);
     editor.destroy();
   });
 
-  it('emits a pending AI-insertion in ACCEPT-STATE so it persists via the position-based synthesizer (round-4 save fix)', () => {
+  it('excludes a PENDING AI-insertion mark from the reject-state text (round-4 baseline semantics)', () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>The Supplier shall indemnify the Customer.</p>');
-    const map: ParaIdMapEntry[] = [{ index: 0, paraId: 'AAAA0001', isMinted: false }];
-    stampParaIds(editor, map);
-    const snapshot = captureParaIdSnapshot(editor);
+    stampParaIds(editor, [{ index: 0, paraId: 'AAAA0001', isMinted: false }]);
 
     // INSERT new proposed text carrying a pending-insertion mark (an AI suggestion, not yet accepted).
-    // Round-4 save-robustness fix: the delta is now ACCEPT-STATE (insertion kept), so the paragraph IS
-    // emitted with the suggested text → the server synthesizer diffs it against the retained original by
-    // paraId and emits a `w:ins` tracked change. No server text-search, so no "target not found" 422.
+    // Reject-state treats it as NOT YET settled — the snapshot the op-log/Track-Changes baseline diffs
+    // against must not bake in an un-accepted suggestion.
     editor.commands.setTextSelection(editor.state.doc.content.size - 1);
     editor.commands.insertContent({
       type: 'text',
@@ -86,67 +81,22 @@ describe('captureParaIdSnapshot + collectEditedParagraphs (FR-01)', () => {
       marks: [{ type: 'insertion', attrs: { ledgerRef: 'b1@t1', binding: 'b1' } }],
     });
 
-    const edited = collectEditedParagraphs(editor, snapshot);
-    expect(edited).toEqual([{ paraId: 'AAAA0001', text: 'The Supplier shall indemnify the Customer. promptly' }]);
+    const snapshot = captureParaIdSnapshot(editor);
+    expect(snapshot.get('AAAA0001')).toBe('The Supplier shall indemnify the Customer.');
     editor.destroy();
   });
 
-  it('an IMPORTED native insertion is NOT emitted (it rides the retained-original bytes — no double-synthesis)', () => {
+  it('keeps deletion-marked original text in the reject-state snapshot (a pending deletion is not yet settled)', () => {
     const editor = makeEditor();
-    editor.commands.setContent('<p>The Supplier shall indemnify the Customer.</p>');
-    stampParaIds(editor, [{ index: 0, paraId: 'AAAA0001', isMinted: false }]);
-    const snapshot = captureParaIdSnapshot(editor);
-
-    // An IMPORTED revision (ledgerRef `imported:*`) is already a w:ins in the retained original. Accept-
-    // state mirrors reject-state for imported marks, so the paragraph's accept-state == its baseline
-    // snapshot → nothing emitted → the synthesizer does not re-create (double) it.
-    editor.commands.setTextSelection(editor.state.doc.content.size - 1);
-    editor.commands.insertContent({
-      type: 'text',
-      text: ' promptly',
-      marks: [{ type: 'insertion', attrs: { ledgerRef: 'imported:rev-7' } }],
-    });
-
-    const edited = collectEditedParagraphs(editor, snapshot);
-    expect(edited).toEqual([]);
-    editor.destroy();
-  });
-
-  it('emits a whole-paragraph DELETION (empty text) for a load-time paraId removed from the current doc', () => {
-    const editor = makeEditor();
-    editor.commands.setContent('<p>Keep me.</p><p>Delete me.</p>');
-    stampParaIds(editor, [
-      { index: 0, paraId: 'AAAA0001', isMinted: false },
-      { index: 1, paraId: 'BBBB0002', isMinted: false },
-    ]);
-    const snapshot = captureParaIdSnapshot(editor);
-
-    // The second paragraph is gone from the current doc (a restructuring edit removed it).
-    editor.commands.setContent('<p>Keep me.</p>');
+    editor.commands.setContent('<p>Keep this clause intact.</p>');
     stampParaIds(editor, [{ index: 0, paraId: 'AAAA0001', isMinted: false }]);
 
-    const edited = collectEditedParagraphs(editor, snapshot);
-    // The vanished load-time paraId is emitted with empty text → synthesizer strikes it (no leftover).
-    expect(edited).toContainEqual({ paraId: 'BBBB0002', text: '' });
-    editor.destroy();
-  });
+    editor.commands.setTextSelection({ from: 6, to: 10 }); // "this"
+    editor.commands.setMark('deletion', { ledgerRef: 'b1@t1', binding: 'b1' });
 
-  it('does NOT emit a brand-new paraId (split/insert is out of E1 delta scope)', () => {
-    const editor = makeEditor();
-    editor.commands.setContent('<p>Original.</p>');
-    stampParaIds(editor, [{ index: 0, paraId: 'AAAA0001', isMinted: false }]);
     const snapshot = captureParaIdSnapshot(editor);
-
-    // A new paragraph with an id the snapshot never saw.
-    editor.commands.setContent('<p>Original.</p><p>Inserted.</p>');
-    stampParaIds(editor, [
-      { index: 0, paraId: 'AAAA0001', isMinted: false },
-      { index: 1, paraId: 'FFFF9999', isMinted: true },
-    ]);
-
-    const edited = collectEditedParagraphs(editor, snapshot);
-    // Original unchanged, inserted paraId not in snapshot → nothing emitted.
-    expect(edited).toEqual([]);
+    // A pending (not-yet-accepted) deletion suggestion — reject-state keeps the original text.
+    expect(snapshot.get('AAAA0001')).toBe('Keep this clause intact.');
     editor.destroy();
   });
 });

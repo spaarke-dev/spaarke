@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Born-in-editor + table authoring in the op model — schema extension (FR-09 / FR-11 completion)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the FR-11 operation-schema spine (the shared contract both ends compile against) + the Patch Engine + the born-in-editor save path. High blast radius; FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Extending the closed operation-schema union (FR-11 spine) with a table-authoring family is a first-class design decision; the schema's own header flags any change as breaking to both ends.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared op schema (ComposeOperation.cs + compose-operations.ts), the engine, and ComposeService born-in-editor save — the most-shared surfaces; sequential.</parallel-reason>
+    <deps>030,031</deps>
+    <tags>bff-api,docx,frontend,contract</tags>
+    <estimated-effort>3-5 days (depends on Path B vs C)</estimated-effort>
+    <origin>Created 2026-07-22 by orchestrator (task-033 blocked — table-op schema gap). See notes/task-033-table-operation-gap.md.</origin>
+
+    <owner-decision-required>
+      🔔 PRODUCT/DESIGN DECISION (root §6.5 / §11) — the owner MUST choose before this task executes:
+      Born-in-editor documents can contain native OOXML tables today (live `insertTable` toolbar command,
+      mode-agnostic; `ComposeContentModel.Table` + `ComposeDocumentRenderer.SynthesizeDocument` author real
+      `w:tbl`), but the task-003 operation schema is a CLOSED 10-op union with NO table-authoring primitive, and
+      `ComposeShadowPatchEngine` only refuses-across tables (never authors them). So born-in-editor-with-a-table
+      cannot be saved under the unified op model. Choose:
+      • Path B — EXTEND the op schema (FR-11 spine) with a table-authoring family (`insertTable`/`insertTableRow`/
+        `insertTableCell`, or a coarser `insertBlock` carrying an embedded content sub-model), teach the engine to
+        author `w:tbl` onto an empty shadow package, then unify born-in-editor (FR-09) fully + retire
+        `ComposeDocumentRenderer`/`buildContentModel`. Preserves the shipped capability; completes I-5 one-byte-author.
+      • Path C — REMOVE table authoring from the born-in-editor surface (disable `insertTable` when there is no
+        loaded baseline); tables become import-only. Lets FR-09 "no separate full-render path" hold literally.
+        A product-visible feature regression — needs explicit owner sign-off.
+      Until chosen, born-in-editor stays on the `ComposeDocumentRenderer` path (working, no regression) — a
+      documented §6.5 Path-A interim exception (a scoped second byte-author).
+    </owner-decision-required>
+  </metadata>
+
+  <prompt>
+    Complete FR-09 (born-in-editor unification) and close the last op-model gap. Born-in-editor currently saves
+    via `ComposeDocumentRenderer.SynthesizeDocument` (a second byte-author) because the op schema cannot author a
+    table onto an empty shadow package. Per the owner-chosen Path B (extend the schema + engine to author tables,
+    then unify born-in-editor onto the op model and retire the renderer) or Path C (drop born-in-editor table
+    authoring, make tables import-only), make born-in-editor feed the SAME operation/patch model (FR-09) with NO
+    separate full-render byte-author path remaining. This is a prerequisite for Success Criterion 7 (one
+    byte-author, I-5) + task 060.
+  </prompt>
+  <role>SPAARKE platform developer — Open XML SDK (w:tbl authoring) + the R4 op schema (client TS mirror + server C# union) + ComposeService born-in-editor save. Understands the FR-11 "one spine both ends implement" contract. Follow ADRs strictly.</role>
+  <goal>Born-in-editor saves through the op model (Path B: schema+engine author tables, renderer retired) or table authoring removed from born-in-editor (Path C); no separate full-render byte-author path remains for born-in-editor; I-5 one-byte-author holds for the born-in-editor surface; tests + NetArch green.</goal>
+
+  <context>
+    <background>
+      task-033 block: notes/task-033-table-operation-gap.md documents the full evidence — the closed 10-op schema
+      (ComposeOperation.cs), the engine's refuse-across-tables logic, the live insertTable command, the tested
+      buildContentModel/ComposeDocumentRenderer table path, and the ComposeService born-in-editor branch
+      (ResolveSaveBaselineAsync ~814-825). ADR-049 (I-5 one byte-author, D5) is the target end-state. Spec
+      Success Criterion 7 is not fully met until this + task 036 land.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs — (Path B) add the table-authoring op family to the closed union</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts — the TS mirror (must stay identical to the C# union)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — (Path B) author w:tbl onto an empty shadow package</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — born-in-editor save through the engine (retire the ComposeDocumentRenderer branch)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — remove buildContentModel full-render (Path B) OR gate insertTable (Path C via ComposeFormatToolbar.tsx)</file>
+      <file role="reference">projects/spaarkeai-compose-r4/notes/task-033-table-operation-gap.md — full analysis + the 3 paths</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="complete">Patch Engine core.</dependency>
+      <dependency task="031" status="complete">Structural ops (paragraph-level) — table authoring is the next construct class.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / §6.5">Do NOT proceed until the owner selects Path B (extend) or Path C (drop). Path C removes a shipped capability (breaking change, root §6 sign-off).</constraint>
+    <constraint source="FR-11 / ADR-049">Path B: the schema change MUST be mirrored IDENTICALLY in the C# union + the TS type; round-trips validate both ends. Scope: the shared spine.</constraint>
+    <constraint source="ADR-007 / ADR-013">byte[] in/out; no Microsoft.Graph; no AI internals; Tier-1 NetArchTest green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Seam slice for the born-in-editor save path; no banned test types.</constraint>
+    <constraint source="project / §10">Placement Justification + publish size (delta, ≤60) + no new HIGH CVE; /conflict-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Op-schema table-authoring extension; w:tbl authoring onto an empty package; born-in-editor unification; one-byte-author completion</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/task-033-table-operation-gap.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/task-003-operation-schema-decisions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed op union (extend identically)" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">If Path B, add [JsonDerivedType] entries + mirror in compose-operations.ts; round-trip tests both ends.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor + owner-path confirmation">Output the FULL rigor declaration. CONFIRM the owner selected Path B or C (escalate per §6.5 if not). Load knowledge + the gap note.</step>
+    <step order="1" name="Execute chosen path">Path B: extend the schema (C# + TS identically) + teach the engine to author w:tbl + route born-in-editor through the engine + retire ComposeDocumentRenderer/buildContentModel. Path C: disable insertTable without a loaded baseline; make tables import-only; then unify born-in-editor onto ops (no table case).</step>
+    <step order="2" name="Verify one-byte-author">Grep: no separate full-render byte-author path remains for born-in-editor; ComposeDocumentRenderer retired (Path B) or table-free (Path C). I-5 holds for born-in-editor.</step>
+    <step order="3" name="Verify + size + index">Build BFF + client; Compose suite + seam slice; op-schema round-trips both ends; Tier-1 NetArch green; publish size + CVE; /conflict-check. Update TASK-INDEX.md: 037 ✅ + flip 033 to done (FR-09 satisfied) or fold 033 in. Record the §6.5 interim-exception closure in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The owner has NOT selected Path B or Path C — STOP and escalate per §6.5; do not choose unilaterally (Path C removes a shipped capability).</trigger>
+    <trigger>Path B: a table-authoring op cannot be expressed without a nested content sub-model that breaks the flat `{paraId,runIndex,offset}` anchor contract — surface for a schema-shape re-decision.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">Path B: extended op schema (C#+TS) + engine w:tbl authoring + born-in-editor via engine + renderer retired. Path C: insertTable gated + born-in-editor unified (table-free).</output>
+    <output type="report">One-byte-author grep proof for born-in-editor; op-schema round-trip both ends; Placement Justification; §6.5 interim-exception closure.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Owner selected Path B or Path C before execution (recorded).</criterion>
+    <criterion testable="true">No separate full-render byte-author path remains for born-in-editor (ComposeDocumentRenderer retired on Path B, or table-free born-in-editor on Path C); I-5 holds.</criterion>
+    <criterion testable="true">Path B: op schema extended IDENTICALLY in C# + TS; round-trips validate both ends; engine authors w:tbl onto an empty package. Path C: insertTable disabled without a loaded baseline; tables import-only.</criterion>
+    <criterion testable="true">FR-09 (born-in-editor via the op model) satisfied; task 033 completed or folded in.</criterion>
+    <criterion testable="true">BFF + client build green; Compose suite + seam slice green; Tier-1 NetArch green; publish ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created by the task-033 block (2026-07-22). Blocks Success Criterion 7 (one byte-author, with task 036) + task
+    060. The B-vs-C choice is a deferred owner decision surfaced at the Phase-3 boundary (alongside task 036's
+    push-annotations decision — same class: a shipped construct the closed op schema can't express). Full evidence:
+    notes/task-033-table-operation-gap.md.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

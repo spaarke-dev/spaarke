@@ -116,7 +116,6 @@ import {
   docxToTipTapHtml,
   stampParaIds,
   captureParaIdSnapshot,
-  collectEditedParagraphs,
   buildContentModel,
   buildBaselineParaIdMap,
 } from '../utils/docxBridge';
@@ -141,7 +140,6 @@ import { applyImportedCommentAnchors, groupImportedComments } from './importedCo
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
-  ComposeEditedParagraph,
   ComposeBaselineParaId,
   ComposeContentModel,
   ImportedRevision,
@@ -542,22 +540,13 @@ export interface ComposeEditorProps {
  */
 export interface ComposeEditorHandle {
   /**
-   * R3 FR-01 (task 027): the paragraphs the user CHANGED since load, each keyed by its `w14:paraId`
-   * with its new REJECT-STATE settled text (pending AI redlines excluded — those ride
-   * {@link getRedlineAnnotations}). The host sends these on a dirty save of a LOADED doc; the server
-   * synthesizes the tracked-change delta onto the retained original. Resets the dirty flag. The client
-   * NEVER authors `.docx` bytes — this replaced the removed `serialize()`.
-   */
-  collectEditedParagraphs(): ComposeEditedParagraph[];
-
-  /**
    * R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 OPERATION LOG snapshot
    * ({@link ComposeOperationLogSnapshot}) captured this dirty session — the ID-anchored
    * (`paraId, runIndex, run-local-offset`) op stream the host sends on a dirty save of a LOADED doc, which
-   * the server applies via `ComposeShadowPatchEngine`. REPLACES {@link collectEditedParagraphs} on the save
-   * path (that method survives for task-023 cleanup only). Serializing RESETS the log (mirrors
-   * `collectEditedParagraphs` resetting dirty), so a subsequent save starts empty and already-applied ops are
-   * never re-sent onto the new baseline. Ops flagged `deletedContentFlag` (their anchor landed in later-deleted
+   * the server applies via `ComposeShadowPatchEngine`. This is the ONLY dirty-save capture path — it
+   * replaced the retired paragraph-diff export `collectEditedParagraphs` (R3 FR-01, removed task 023).
+   * Serializing RESETS the log, so a subsequent save starts empty and already-applied ops are never
+   * re-sent onto the new baseline. Ops flagged `deletedContentFlag` (their anchor landed in later-deleted
    * content) are surfaced in the snapshot; the host excludes them from what it applies (never-silently-drop).
    */
   serializeOperationLog(): ComposeOperationLogSnapshot;
@@ -1270,8 +1259,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
     // R3 FR-01 (task 027): the LOAD-TIME `{ paraId → reject-state text }` snapshot, captured right after
-    // stampParaIds (and after a born-in-editor seed). `collectEditedParagraphs()` diffs the live doc
-    // against it to find the dirty paragraphs the server deltas onto the retained original.
+    // stampParaIds (and after a born-in-editor seed). Feeds `getBaselineParaIdMap()` (the C2 minted-id
+    // stamp) and the live Track Changes decoration baseline; the retired paragraph-diff export that used
+    // to diff against it (`collectEditedParagraphs`) was removed in task 023.
     const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
 
     // R4 FR-06 (task 032, the write-path cutover): the per-dirty-session ordered, rebased task-003 OPERATION
@@ -1318,7 +1308,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // (stable options) — `getBaseline` reads the load-time snapshot ref live, so the redline tracks
     // edits without re-registering the plugin. Enabled state is driven via a transaction meta (below),
     // NOT via re-configuring the extension. See TrackChangesExtension.ts for the decoration-not-mark
-    // design rationale (edits stay real content → persist via the existing collectEditedParagraphs path).
+    // design rationale (edits stay real content → persist via the step-interceptor operation-log path).
     const trackChangesExtension = React.useMemo(
       () =>
         TrackChangesExtension.configure({
@@ -1680,8 +1670,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
           // reject-state baseline, not read as a user edit on the next save.
           applyImportedCommentAnchors(editor, importedComments);
-          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
-          // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
+          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the baseline the C2
+          // minted-id map + the live Track Changes decoration diff against. Captured AFTER the stamp so
+          // every block carries its server paraId.
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
           // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced (the load is not a
           // user edit) so the op-log starts empty, aligned to this load-time reject-state baseline.
@@ -1824,22 +1815,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useImperativeHandle(
       ref,
       (): ComposeEditorHandle => ({
-        // R3 FR-01 (task 027): the paraId-keyed dirty-paragraph deltas (reject-state text) for a loaded
-        // doc. The server synthesizes the tracked change onto the retained original — the client authors
-        // no bytes. Resets the dirty flag (host collects then saves; the doc is clean after).
-        collectEditedParagraphs: () => {
-          if (!editor) {
-            throw new Error('ComposeEditor: cannot collect edited paragraphs — editor not mounted');
-          }
-          const edited = collectEditedParagraphs(editor, paraIdSnapshotRef.current);
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
-          return edited;
-        },
         // R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 operation-log snapshot
         // the host sends on a dirty save of a LOADED doc (the server applies it via ComposeShadowPatchEngine).
-        // RESETS the log after serializing (mirrors collectEditedParagraphs resetting dirty) so a subsequent
-        // save starts empty — already-applied ops are never re-sent onto the new baseline.
+        // RESETS the log after serializing so a subsequent save starts empty — already-applied ops are never
+        // re-sent onto the new baseline. This is the ONLY dirty-save capture path (task 023 removed the
+        // retired paragraph-diff export `collectEditedParagraphs`).
         serializeOperationLog: () => {
           if (!editor) {
             throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
