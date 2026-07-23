@@ -15,6 +15,20 @@ The Assistant does **zero intent detection** to decide what surface to open. The
 
 This is why surface routing is reliable: there is no second intent mechanism, no branching by capability name in the BFF, and no per-consumerType `if` ladders in the client.
 
+### 1.1 Scope — this is the REACTIVE path (vs the proactive spine)
+
+This document covers the **reactive** path: the user asks, the agent selects a capability, and a surface opens *in response*. There is a separate, **proactive** path — the Assistant surfacing something worth attention *without* being asked — and it does **NOT** go through this registry. Do not build a second push channel; reuse the spine.
+
+| | **Reactive surface launch** (this doc) | **Proactive push** (the notification spine) |
+|---|---|---|
+| Trigger | user message → agent selects a Binding | server-initiated typed signal (e.g. Daily Briefing) |
+| Path | `consumerType` → `surfaceLaunchRegistry` → open surface | outbox row → SignalR ping → `useSuggestionCards` → suggestion card |
+| "Open a record/thing" | wizard / form / grid via registry `kind` | `openRecordModal` on the regarding record |
+| Mechanism owner | `surfaceLaunchRegistry` (code) | `@spaarke/notifications` client + `OutboxService` (one spine) |
+| Doc | *(this doc)* | [SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md](SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md) |
+
+They are complementary and must stay distinct: a suggestion card's click opens a **record modal** (`openRecordModal`), which is the standard record-open — *not* a surface-launch-registry entry. If you need the Assistant to *proactively* surface something, add a **producer** to the spine (ADR-047), never a new channel here.
+
 ## 2. End-to-end flow
 
 ```
@@ -164,6 +178,7 @@ For the hand-off kinds, the surface is opened in a separate navigation context, 
 ---
 
 ## Related
+- **[Notification & Action Spine architecture](SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md)** — the **proactive** counterpart (§1.1). Server-initiated `kind`-typed signal → outbox → SignalR → suggestion card → `openRecordModal`. Reuse it for proactive push; never build a second channel ([ADR-047](../../.claude/adr/ADR-047-notification-action-spine.md)).
 - [ADR-039 — grounded execution & closed catalogs](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) (the "one decider" principle)
 - [ADR-040 — ledger store-before-render](../../.claude/adr/ADR-040-*.md) (the `OutputRouter` pass-through)
 - [SpaarkeAi workspace architecture](SPAARKEAI-WORKSPACE-ARCHITECTURE.md) · [DataGrid framework](SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md) (grid surfaces)

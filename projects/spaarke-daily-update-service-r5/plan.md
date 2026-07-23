@@ -1,6 +1,6 @@
 # Spaarke Daily Update Service R5 — Implementation Plan
 
-> **Status**: Ready for task decomposition
+> **Status**: ✅ Complete (2026-07-10) — all phases (0/A/B/D/E) + wrap-up shipped to master (PR #611); operator-UAT confirmed. Deferred items filed as issues #650/#651/#652.
 > **Created**: 2026-07-08
 > **Source**: `spec.md` (21 FRs) ← `design.md` v0.2
 > **Baseline**: synced to `origin/master` 2026-07-08 (incl. r2-core merges #580/#582); BFF build green (0 errors)

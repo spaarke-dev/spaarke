@@ -29,33 +29,69 @@ For privacy and security, a notification carries only identifiers and minimal di
 
 ## Part 2 — Turning it on (admins / operators)
 
-The feature is **off by default** and **degrades gracefully**: with nothing configured, a normal user simply sees nothing (no errors). Light it up per environment with the steps below.
+The feature is **off by default** and **degrades gracefully**: with nothing configured, a normal user simply sees nothing (no errors). Getting it operational is **three things that must be true** — the Dataverse schema is present, the BFF is configured, and the client is deployed — layered in **tiers** so you can get suggestions working with almost nothing and add real-time push + communication notifications incrementally.
 
-### Step 1 — Provision Azure SignalR (real-time push)
-Notifications are delivered over **Azure SignalR (Serverless mode)** hosted inside the BFF.
-- Create an Azure SignalR resource (Serverless) for the environment.
-- Store its connection string in Key Vault and set **`Notifications:SignalR:ConnectionString`** (per ADR-027/028).
-- **If you skip this**: there is no live push, but the client automatically falls back to **polling** the backend — notifications still arrive, just on a short delay.
+> Config keys below are verified against the shipped code (`SignalRDeliveryOptions.IsConfigured`, `NotificationsModule` null-object gating, `SuggestionGateOptions`). Nothing is committed to source — these are BFF **App Settings** / **Key Vault** values set per environment.
 
-### Step 2 — Allow the SignalR WebSocket in the environment CSP
-The Power Platform environment's Content-Security-Policy `connect-src` must allow **`wss://*.service.signalr.net`**.
-- **If you skip this**: the browser silently blocks the live connection → the client falls back to polling.
+### Hard requirements (nothing renders without all three)
 
-### Step 3 — Backfill the internal/external flag on users
-Communication fan-out targeting uses the authoritative **`systemuser.sprk_isexternal`** field (two-option, default *No*).
-- Backfill this field for the users who will receive communication notifications.
-- **If you skip this**: fan-out **fails closed** (zero recipients) for un-backfilled users — correct, but silently "no notifications" for them.
-
-### Step 4 — Enable proactive suggestions
-Proactive suggestions are gated by a deny-by-default policy dial:
-
-| Setting (`Notifications:Suggestions:*`) | Default | Meaning |
+| # | Requirement | Why it's non-negotiable |
 |---|---|---|
-| `Enabled` | **false** | Master switch. Set **true** to produce proactive suggestions at all. |
-| `MaxPerRun` | `3` | Cap on suggestions produced per Daily-Briefing render (avoids flooding). |
-| `TtlHours` | `24` | How long a suggestion stays live before it expires and stops rendering. |
+| 1 | **`sprk_notificationoutbox` table exists in the target Dataverse environment** | It's the durable store — producers write to it, the client reads `/api/notifications/pending` from it. No table → nothing persists → nothing shows (even via polling). |
+| 2 | **The SpaarkeAi code page is deployed** (current master build) | It ships the notifications consumer + suggestion renderer; the client auto-starts (negotiate → connect, else poll). Builds clean from tip. |
+| 3 | **`Notifications:Suggestions:Enabled = true`** | Master switch for proactive suggestions (defaults **false** — deny-by-default). |
 
-- Set **`Notifications:Suggestions:Enabled=true`** to switch suggestions on for the environment.
+> **Schema note (dev today):** `sprk_notificationoutbox` (and, for communication notifications, `systemuser.sprk_isexternal` + `sprk_communicationrule`) currently exist in the **dev** environment where they were created directly. They must exist in whatever environment you're lighting up. (No production packaging is needed yet — revisit a managed-solution export when a non-dev deploy is planned.)
+
+### Tier 0 — Suggestions, poll-only (~30 s), no Azure needed
+Requirements 1–3 above. That's the entire setup. Suggestions appear on the **poll fallback** with no Azure SignalR at all — just on a short delay instead of instantly.
+
+### Tier 1 — Real-time push (add on top of Tier 0)
+
+| Add | Detail |
+|---|---|
+| **Azure SignalR resource, Serverless mode** (`Microsoft.Azure.SignalR.Management`; per-customer per ADR-027) | Create it for the environment. |
+| **`Notifications:SignalR:ConnectionString`** = its connection string (**Key Vault reference**, ADR-028) | The real delivery service is registered **only** when `Notifications:SignalR:Enabled` (default `true`) **AND** a non-empty connection string are BOTH present; otherwise a no-op null-object is used (poll-only, never a startup error). |
+| **Env CSP `connect-src` allows `wss://*.service.signalr.net`** | Else the browser silently blocks the socket → poll fallback. Verify at provisioning. |
+
+(`Notifications:SignalR:HubName` defaults to `"notifications"` — leave it.)
+
+### Tier 2 — Communication notifications (email/message arrival badges)
+Needed by the **Communication Workspace**, *not* by suggestions.
+
+| Add | Why |
+|---|---|
+| Backfill **`systemuser.sprk_isexternal`** (two-option, default *No*) for recipients | Fan-out targeting **fails closed** (zero recipients) for un-backfilled users — correct, but silently "no notifications" for them. |
+| **`sprk_communicationrule`** table present | The `communication-assessed` policy gate reads it; deny-by-default without rules. |
+| **023 R-5 fan-out security sign-off** (named human) before enabling in a real environment | Fan-out is a compliance surface — a mis-targeted envelope is an incident. |
+
+### The config block (BFF App Settings / Key Vault)
+
+```jsonc
+"Notifications": {
+  "SignalR": {
+    "Enabled": true,                                  // default true; false forces poll-only
+    "ConnectionString": "@Microsoft.KeyVault(...)",   // Azure SignalR (Serverless). Absent → poll fallback
+    "HubName": "notifications"                         // leave default
+  },
+  "Suggestions": {
+    "Enabled": true,                                   // default FALSE — this is the suggestion master switch
+    "MaxPerRun": 3,                                    // cap per Daily-Briefing render (anti-flood)
+    "TtlHours": 24                                     // how long a suggestion stays live before it expires
+  }
+}
+```
+
+### What degrades gracefully (won't break anything)
+
+| If missing | Effect |
+|---|---|
+| Azure SignalR / connection string | Live push off → **poll fallback** (works, ~30 s slower). |
+| CSP `wss://*.service.signalr.net` entry | Socket blocked → **poll fallback**. |
+| `systemuser.sprk_isexternal` backfill | Communication fan-out silent-zero for those users — **suggestions unaffected**. |
+| `Notifications:Suggestions:Enabled=false` | No suggestions produced (silent, safe). |
+
+**Shortest path to seeing a suggestion:** deploy `sprk_notificationoutbox` + the SpaarkeAi code page, set `Notifications:Suggestions:Enabled=true`, and make sure the Daily Briefing runs. Real-time push and communication notifications layer on after.
 
 ---
 
@@ -73,9 +109,9 @@ Both checks run **before** anything is stored or pushed — nothing ungrounded o
 
 | Symptom | Likely cause & fix |
 |---|---|
-| No suggestions ever appear | `Notifications:Suggestions:Enabled` is `false` (default) — set it `true`. Also confirm the Daily Briefing is running and producing high-priority items. |
-| Suggestions appear but on a delay (not instant) | Live SignalR isn't connected — check Step 1 (connection string) and Step 2 (CSP `wss://*.service.signalr.net`). The client is on the poll fallback (working, just slower). |
-| Some users get communication notifications, others get none | The silent users are missing the `systemuser.sprk_isexternal` backfill (Step 3) — fan-out fails closed for them. Backfill the flag. |
+| No suggestions ever appear | `Notifications:Suggestions:Enabled` is `false` (default) — set it `true`. Then confirm the hard requirements: `sprk_notificationoutbox` exists in the env, the SpaarkeAi page is deployed, and the Daily Briefing is running and producing high-priority items. |
+| Suggestions appear but on a delay (not instant) | Live SignalR isn't connected — check Tier 1 (`Notifications:SignalR:ConnectionString` present + CSP allows `wss://*.service.signalr.net`). The client is on the poll fallback (working, just slower). |
+| Some users get communication notifications, others get none | The silent users are missing the `systemuser.sprk_isexternal` backfill (Tier 2) — fan-out fails closed for them. Backfill the flag. |
 | Clicking a suggestion shows "no longer available" | The suggestion expired or the record's access changed between the card appearing and the click — expected, safe behavior. Nothing opened by design. |
 | A record opens by *navigating away* instead of a modal | The surface used `openRecord` (navigate-away) instead of `openRecordModal` (Layout 1 modal). Suggestion cards use the modal; report any surface that doesn't. |
 
