@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r1
 
-> **Last Updated**: 2026-07-22 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. UAT remediation through **R7** + close-out shipped; this session added **membership grids, registry surface routing, proactive-suggestion (notification-spine) polish, dismiss endpoint, chip fixes, and 3 architecture/standard docs**. Immediate next: **owner UAT of this batch** (esp. suggestions + "add a task"), then **051 evals → 054 verify → 090 wrap-up**.
+> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. UAT remediation through **R7** + close-out shipped. **2026-07-23 close-out batch: 050 ✅ / 051 ✅ / 054 ✅** — R1 eval family authored + joined to the `Category=GoldenUtteranceEval` merge gate (92/92 green), deploy formalized (no re-deploy per owner), pre-090 doc review done. **ONLY 090 (wrap-up + /test-diet) remains.**
 
 ---
 
@@ -17,7 +17,8 @@
 | **Membership-filter feature (shipped earlier 2026-07-22)** | ✅ Reusable `behavior.membershipFilter` DataGrid feature + applied to 050 (`ac05e4f1` → savedquery `12a510e4` + `membershipFilter:true`). Graduated into `SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` §6.6. Awaiting owner UAT of "what are my tasks?" (membership-scoped). |
 | **Registry surface routing (shipped)** | `surfaceLaunchRegistry` drives `handleSurfaceLaunch` by `kind` (workspace-tab/wizard/oob-form); hardcoded `list-tasks` branch retired. Doc: `ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` (§1.1 reactive-vs-proactive). |
 | **Docs added this session** | `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` (+CLAUDE.md §17 pointer +CHANGELOG) · `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` (bubble/chip/card/tab criteria). r2 `surfaceTarget` project idea INVESTIGATED + ABANDONED (over-abstraction / data-defined routing) — folder deleted. |
-| **Next Action** | **Owner UAT of this batch** (suggestions card UX + dismiss + "add a task" clean elicitation + membership grid). Then per full **R1 UAT checklist** (given in chat 2026-07-22: structured creation, truthfulness, grounding-guard, User Model, membership, proactive, regression). Then close-out: **051** evals (E-050-01..12) → **054** verify (DEV) → **090** wrap-up (`/test-diet`). |
+| **Close-out status (2026-07-23)** | **050 ✅** (list-tasks + VIEW-vs-CREATE cue; FR-J1 via UAT) · **051 ✅** (R1 eval family `tests/integration/contract/Eval/assistant-r1-eval-cases.json` + `AssistantEnhancementsR1EvalTests.cs` → gate 92/92; Step 9.5 clean; commit `1ac8d2e42`) · **052 ✅** · **053 ✅** · **054 ✅** (deploy formalized, no re-deploy per owner — `notes/deploy-report.md`). Docs refreshed: eval README R1-family section, owed-eval-cases "CONSUMED by 051" note, root CLAUDE.md §17 UI-element-criteria pointer + CHANGELOG. |
+| **Next Action** | Run **090 wrap-up** (`task-execute` → `/test-diet` reconciles the R1 eval family against ADR-038 build-vs-maintain; README→Complete; worktree-sync). Then owner UAT of the shipped batch remains open (suggestions/dismiss/"add a task"/membership) but does NOT gate 090. | |
 | **Open follow-ups** | (a) "add a task" captureMode Modal-vs-Loop decision (owner). (b) `compose-draft-document` may have latent no-file issue (documentText fix pattern). (c) leave suggestions engine ON per owner (idempotency live). (d) SignalR not provisioned on dev (poll fallback only) — provision for live push if desired. |
 
 ### Only open items (both need an owner repro; NO code written yet)
