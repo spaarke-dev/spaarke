@@ -64,7 +64,13 @@ public sealed class CommunicationThreadReadService
     // Sender-identity enrichment (R3 task 002 / FR-18) — projected metadata over the already-visible row.
     private const string DirectionField = "sprk_direction";            // choice: Incoming=100000000, Outgoing=100000001
     private const string SentByValue = "_sprk_sentby_value";           // systemuser lookup value
-    private const string SentByNameField = "sprk_sentbyname";          // denormalized sender display name
+    // Sender display name comes from the sprk_sentby lookup's FormattedValue annotation (the systemuser's
+    // display name), which rides the already-selected _sprk_sentby_value lookup when the impersonated query
+    // requests annotations (DataverseWebApiService.RetrieveMultipleImpersonatedAsync). This REPLACES the
+    // denormalized sprk_sentbyname column, which is in a broken metadata state in the env
+    // (IsValidODataAttribute=false → 400 on $select) and was never written by the send path anyway
+    // (messaging-r3 2026-07-22). Null when sprk_sentby is unset (e.g. an inbound message with no systemuser sender).
+    private const string SentByFormattedValue = "_sprk_sentby_value@OData.Community.Display.V1.FormattedValue";
 
     // sprk_communicationattachment columns (pre-existing intersection, task 070).
     private const string AttachmentPkField = "sprk_communicationattachmentid";
@@ -132,12 +138,9 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) is intentionally NOT selected.
-            // The column is in a broken metadata state in the target env (IsValidODataAttribute=false —
-            // a partial/failed creation that cannot be published or deleted), so $select on it 400s and
-            // surfaces as a 500 on every thread that has messages. Nothing writes the column either, so
-            // SentByName is null regardless. Re-add here once the column is re-provisioned AND a writer
-            // populates it. Direction + SentBy (systemuserid) still drive the Teams-style bubble alignment.
+            // sprk_sentbyname is NOT selected — it is broken in the env (IsValidODataAttribute=false) and 400s the
+            // whole read. The sender display name instead comes from the _sprk_sentby_value lookup's FormattedValue
+            // annotation (the impersonated query requests annotations; ParseMessageRow reads it) — messaging-r3 2026-07-22.
             DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField,
         });
@@ -629,10 +632,9 @@ public sealed class CommunicationThreadReadService
         var select = string.Join(',', new[]
         {
             PkField, BodyField, BodyFormatField, TypeField, FromField, SubjectField, ToField,
-            // NOTE (2026-07-22 hotfix): SentByNameField (sprk_sentbyname) intentionally NOT selected —
-            // broken column in the target env (IsValidODataAttribute=false) that 400s $select → 500 on the
-            // by-regarding + filtered-query read paths. See the matching note in ReadThreadAsync. Nothing
-            // writes the column, so SentByName is null regardless. Re-add once re-provisioned + written.
+            // sprk_sentbyname is NOT selected — broken in the env (IsValidODataAttribute=false) → 400 → 500 on the
+            // by-regarding + filtered-query paths. Sender name comes from the _sprk_sentby_value FormattedValue
+            // annotation instead (see ReadThreadAsync + ParseMessageRow) — messaging-r3 2026-07-22.
             DirectionField, SentByValue,
             SentAtField, CreatedOnField, InReplyToField, InternalOnlyField, PrivilegeField, IsPrivateField, ThreadLookupValue,
         });
@@ -835,7 +837,7 @@ public sealed class CommunicationThreadReadService
             To = SplitRecipients(TryString(row, ToField)),
             Direction = TryInt(row, DirectionField),
             SentBy = TryGuid(row, SentByValue),
-            SentByName = TryString(row, SentByNameField),
+            SentByName = TryString(row, SentByFormattedValue),
             SentAt = TryDateTimeOffset(row, SentAtField),
             CreatedOn = TryDateTimeOffset(row, CreatedOnField),
             InReplyTo = TryString(row, InReplyToField),

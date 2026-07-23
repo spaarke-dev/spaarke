@@ -1925,7 +1925,17 @@ public class DataverseWebApiService : IDataverseService
         _logger.LogDebug(
             "[DATAVERSE-IMPERSONATE] GET {EntitySet} as caller {CallerSystemUserId}", entitySetName, callerSystemUserId);
 
-        var response = await SendGetAsync(url, ct, impersonateSystemUserId: callerSystemUserId);
+        // Request FormattedValue annotations so a lookup's display name (e.g. sprk_sentby → the sender's
+        // systemuser display name) rides the SAME impersonated row as the lookup value itself. This is the
+        // canonical Dataverse way to project a related record's name without a second query OR a broken/
+        // never-written denormalized name column (messaging-r3 2026-07-22 — replaced the unqueryable
+        // sprk_sentbyname column). Annotations are additive extra keys ("{field}@OData.Community.Display.
+        // V1.FormattedValue") that non-communication readers of this impersonated seam simply ignore.
+        using var request = await CreateAuthenticatedRequestAsync(
+            HttpMethod.Get, url, ct, impersonateSystemUserId: callerSystemUserId);
+        request.Headers.TryAddWithoutValidation(
+            "Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
+        var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
