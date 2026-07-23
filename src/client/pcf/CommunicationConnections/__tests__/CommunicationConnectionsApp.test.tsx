@@ -27,7 +27,12 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 jest.mock('@spaarke/ui-components', () => {
   const TODO_REGARDING_CATALOG = [
-    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter', navPropHint: 'matter' },
+    {
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      navPropHint: 'matter',
+    },
     { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
   ];
   return {
