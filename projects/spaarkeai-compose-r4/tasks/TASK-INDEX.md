@@ -29,11 +29,12 @@
 | 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | done | ✅ |
 | 031 | Structural operations — split/merge/insert/delete (FR-05) + client wiring | 3 Patch Engine | opus / xhigh | FULL | 030 | done | ✅ |
 | 032 | Cutover: SAVE→engine + op-log send + retire redline-synthesizer (FR-06, re-scoped) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | done | ✅ |
-| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030,**037** | folds into 037 | 🔲 |
-| 037 | Born-in-editor tables **import-only (Path C ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 030,031 | ✅ decision made → startable after 036 | 🔲 |
+| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030 | resolved: born-in-editor stays on renderer (cited I-5 exception, C-revised) | ✅ |
+| 037 | Born-in-editor tables + save unification | 3 Patch Engine | opus / xhigh | FULL | 030,031 | half-1 landed (73ca66e09); unification → **C-revised** (renderer kept, cited I-5 exc.); table gating superseded by 038 | ✅ |
+| 038 | **Zero-error guardrail pass** (disable unsupported edit-path controls + op-log loss-proofing) | 3 Patch Engine | opus / xhigh | FULL | 032,036 | ✅ startable — R4 no-errors gate | 🔄 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
 | 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ⏸ verified; Azure deploy held for owner | 🔲 |
-| 036 | Retire DocxAnnotationWriter + push-annotations **(Path B ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 032 | ✅ decision made → startable | 🔄 |
+| 036 | Retire DocxAnnotationWriter + push-annotations **(Path B ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 032 | done (bae44955b) | ✅ |
 | 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
 | 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
 | 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | done | ✅ |
@@ -42,7 +43,7 @@
 | 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | done | ✅ |
 | 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | done | ✅ |
 | 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | done | ✅ |
-| 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006,036,037** | blocked | 🔲 |
+| 060 | Hard-replace cutover completion — remove mammoth (FR-12); **KEEP renderer (C-revised)** | 6 Hardening | opus / high | FULL | 032,034,**006,036,038** | blocked on 038 | 🔲 |
 | 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | blocked | 🔲 |
 | 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | blocked | 🔲 |
 | 063 | **Flagship gate G — all 8 criteria green** | 6 Hardening | opus / high | FULL | 062 | blocked | 🔲 |
