@@ -136,7 +136,13 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     renderWorkspace({ authenticatedFetch });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('3 new messages')).toBeInTheDocument());
+    // R3 UAT 2026-07-22 item 5b: the "N new messages" text row + inline
+    // "Mark as read" button were replaced by a compact unread dot (the
+    // mark-as-read action moved to the message toolbar, item 5c). The dot
+    // carries the count in its accessible name.
+    await waitFor(() => expect(screen.getByLabelText('3 unread messages')).toBeInTheDocument());
+    expect(screen.queryByText('3 new messages')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark as read/i })).not.toBeInTheDocument();
   });
 
   it('has NO thread-list text filter (task 062 / §B4 — removed in the Teams-style redesign)', async () => {
@@ -159,6 +165,20 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onCreateThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the built-in New-conversation modal when onSearchRecipients is supplied (R3 UAT 2026-07-22 item 5a)', async () => {
+    const onSearchRecipients = jest.fn(async () => []);
+    renderWorkspace({ onSearchRecipients });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // No modal until the ＋ is clicked.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+
+    // The shell owns the create surface: NewThreadModal opens in-place.
+    expect(await screen.findByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
   });
 });
 

@@ -73,7 +73,13 @@ import {
   useToastController,
 } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { ConversationWorkspace, ConversationView, getCurrentUserId } from '@spaarke/ui-components';
+import {
+  ConversationWorkspace,
+  ConversationView,
+  getCurrentUserId,
+  createXrmDataService,
+  searchUsersAndContacts,
+} from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
 import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
 import { getCommunicationArrivalsSubscribe } from './communicationArrivalsSeam';
@@ -186,16 +192,30 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   // a safe degrade, never a crash.
   const currentUserSystemUserId = React.useMemo(() => getCurrentUserId() ?? '', []);
 
+  // Recipient directory search for the shell's built-in New-conversation modal
+  // (R3 UAT 2026-07-22 item 5a — the ＋ was inert because no host wired it).
+  // Reuses the host-context `Xrm.WebApi` users+contacts lookup every other
+  // Spaarke composer uses (searchUsersAndContacts → systemuser + contact; NO
+  // BFF/OBO per DATA-ACCESS-DECISION-CRITERIA). No second identity/search
+  // mechanism (root CLAUDE.md §11).
+  const lookupDataService = React.useMemo(() => createXrmDataService(), []);
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(lookupDataService, query),
+    [lookupDataService]
+  );
+
   // Right-pane renderer seam (see ConversationWorkspace.tsx module header
   // "Renderer seam") — wires the REAL `<ConversationView>` in, mounted (not
-  // re-implemented) per root CLAUDE.md §11.
+  // re-implemented) per root CLAUDE.md §11. Forwards the shell's
+  // `onMarkThreadRead` (item 5c) so the message-toolbar tool clears the list badge.
   const renderConversation = React.useCallback(
-    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl }: IConversationRendererProps) => (
+    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl, onMarkThreadRead }: IConversationRendererProps) => (
       <ConversationView
         threadId={threadId}
         authenticatedFetch={fetchFn}
         bffBaseUrl={bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
+        onMarkThreadRead={onMarkThreadRead}
       />
     ),
     [currentUserSystemUserId]
@@ -234,7 +254,11 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
             base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
             `resolveUrl` — the same behavior every other production
             `authenticatedFetch`-importing surface in this codebase relies on). */}
-        <ConversationWorkspace authenticatedFetch={authenticatedFetch} renderConversation={renderConversation} />
+        <ConversationWorkspace
+          authenticatedFetch={authenticatedFetch}
+          renderConversation={renderConversation}
+          onSearchRecipients={handleSearchRecipients}
+        />
       </div>
     </div>
   );

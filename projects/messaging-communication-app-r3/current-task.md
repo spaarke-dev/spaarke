@@ -1,178 +1,81 @@
-# Current Task State
+# Current Task State — messaging-communication-app-r3
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-21 (by context-handoff — Phase 3 at 5/6; tasks 013,014,020,021,022,023,024 done)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-07-22 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. This file is self-contained — you can resume from it alone.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-> **Last Updated**: 2026-07-22 (by context-handoff) — project FEATURE-COMPLETE + fully deployed to spaarkedev1.
-
 | Field | Value |
 |-------|-------|
-| **State** | **FEATURE-COMPLETE + DEPLOYED.** Branch `work/messaging-communication-app-r3` @ `f9a4a6076` — clean, 0 unpushed, 0 behind master, **19 ahead of master (Phase 5+ NOT merged to master; Phase 1-4 merged at `58baf317d`).** |
-| **All tasks done** | Phase 1-5 (incl 045), #675 (closed), Phase 7 UAT (060/061/062/063). Portfolio **32**. |
-| **Deployed to spaarkedev1** | **BFF** (`spaarke-bff-dev`, current R3 code — by-regarding now 401 unauth/healthz 200), **SpaarkeAi** (`sprk_spaarkeai`), both **code pages** (`sprk_communicationspage.html`, `sprk_communicationconversationpage.html`), **PCF v1.1.0** packed (zip). Send-401 FIXED (BFF UAMI granted "Communication and Email Service Owner" on `spaarke-acs-dev`). |
-| **Next Action** | **Operator UAT**: upload PCF v1.1.0 zip IF still on v1.0.0 (bundle is byte-identical to yesterday's v1.1.0 — `833509d9…`; re-upload only needed if never uploaded) + re-test the Matter-form PCF (the 500 was the stale BFF, now fixed) + verify a message send works. Then optionally run **090 wrap-up** (code-review/adr-check/repo-cleanup/`/test-diet`/lessons — runnable now, env-independent). **050** = 11-entity UAT rollout (operator form-wiring). **046** ⏸ deferred (best-effort read-state). |
-| **PCF zip** | `src/client/pcf/CommunicationConversationPanel/Solution/bin/CommunicationConversationPanelSolution_v1.1.0.zip` |
+| **Active work** | UAT refinement of the Communications widget + modal (conversation UI). NOT a POML task — direct UAT iteration. |
+| **Status** | **IMPLEMENTED 2026-07-22 — all 7 UAT items done.** Tests green (ui-components 97/97, communication-components 9/9), both consumer packages typecheck clean. Not yet committed. |
+| **Next Action** | Commit the UAT batch (5 shared files + 2 hosts + tests + rebuilt dist), then HOLD deploy for coordinated rollout. See `notes/uat-feedback-comm-widget-2026-07-22.md` for the per-item resolution table. |
+| **Branch** | `work/messaging-communication-app-r3` — synced with master (a few notes commits ahead since last sync). |
+| **Deploy** | HELD for the operator's **coordinated cross-project rollout** — do NOT deploy without the user sequencing it. |
+| **Re-UAT watch** | Item 1 (full-height): if the "small box" persists after deploy, the cause is the OUTER dashboard wrapper (`WorkspaceWidgetRegistry` / `communications.registration.ts`), not these shared files — the shell's own height/width chain is now correct. |
 
-### Critical context for resume
-1. **The `by-regarding` 500 was a STALE BFF** — this session redeployed all client surfaces but (until now) NOT the BFF. Root cause + fix: deployed current R3 BFF via `/bff-deploy` (`Deploy-BffApi.ps1` via `pwsh`). If an *authenticated* read still 500s, pull the live exception via `az webapp log tail -n spaarke-bff-dev -g rg-spaarke-dev` while the operator reloads — that would be a data/logic issue, not the stale-BFF one.
-2. **045 producer was DEDUPED at the last worktree-sync** — master's notification-spine shipped its canonical `CommunicationArrivedProducer` (task 024); per Owner Clarification I dropped my parallel `CommunicationArrivalNotifier` (+ its seam test) and kept the CLIENT consumer (`useCommunicationArrivals` → badge/toast) which consumes the spine's signal. Don't re-add a producer.
-3. **Deploy discipline (memory: deploy-sequence-preference)**: ALWAYS commit → push → `/worktree-sync` → deploy via the skills (`/bff-deploy`, `/code-page-deploy`, `/pcf-deploy`); when BFF code changed, the deploy wave MUST include `/bff-deploy`. Hand the operator the PCF zip path.
-4. **SpaarkeAi build-config gaps fixed this session** (from the spine merge): wired `@spaarke/notifications` into SpaarkeAi vite `resolve.alias` + tsconfig paths + roots list, installed `@microsoft/signalr@^8.0.0` + earlier `@tiptap/extension-unique-id`. These are committed.
-5. **Not merged to master** — 19 commits ahead. `/merge-to-master` when ready (master protection currently OFF → fast-forward path; verify build first).
-
-### Original Quick Recovery table (pre-2026-07-22 — superseded above)
-| Field | Value |
-|-------|-------|
-| **Task** | **FEATURE-COMPLETE + REDEPLOYED.** All planned tasks done: Phase 1-5 (incl 045 notification awareness), #675 security fix (closed), Phase 7 UAT (060 send-401→RBAC-fixed, 061 PCF polish, 062 Teams modal, 063 redeploy). Send-401 FIXED (BFF UAMI granted ACS role on spaarke-acs-dev). All 4 surfaces redeployed to spaarkedev1 (SpaarkeAi/2 code pages published; **PCF v1.1.0 zip packed → operator uploads**: `src/client/pcf/CommunicationConversationPanel/Solution/bin/CommunicationConversationPanelSolution_v1.1.0.zip`). **Remaining**: 046 ⏸ (deferred/optional read-state), 050 (11-entity UAT rollout — operator), 090 (wrap-up — code-review/adr-check/repo-cleanup/test-diet/lessons — runnable now). Portfolio 32. **Prior line:** Phase 1-4 ✅ (on master). **Phase 5 Round 1 ✅** — 043 (FR-21 privilege/privacy: DTO markers + permitted-recipient display, over-disclosure seam test, gate clean), 040 (FR-24 `sprk_ispinned` field CREATED live in spaarkedev1 — **041 must treat null as unpinned**), 044 (FR-23 search config — PREPARED; operator Maker-Portal steps in notes; cosmetic `description="test"` left on a Quick-Find view for operator cleanup). Verified: BFF build 0 err, shared-UI 157/157, tsc 0. **🔓 SPINE LANDED ON MASTER (23-commit merge, BFF builds 0-err, pushed `bbe4473a8`)** — `ISystemUserIdentityResolver` present (#675 UNBLOCKED) + notification spine present (`communication-arrived`/SignalR/Outbox → **045 UNBLOCKED**). **Revised path to done**: #675 fix IN FLIGHT (opus agent — inject resolver, swap 3 `IsInternalUser:true` sites, external-caller negative test) → then 045 (FR-22 notification awareness, serial, shares Services/Communication) → then 063 redeploy (incl. 045) → 046 (deferred/optional) → 050 deploy → 090 wrap-up. Portfolio 30/31. **Pending operator**: send-401 RBAC grant (#676 — BFF UAMI needs ACS role) + PCF v1.1.0 upload (063). Phase 7 UAT ✅ (060/061/062). **Phase 7 UAT wave DONE** — 3 parallel agents (file-disjoint): 060 (send-401 BFF/ACS, opus/xhigh — may escalate if env-config, #676), 061 (PCF preview polish 8 items + modal x/title, PCF dir, #677), 062 (conversation modal Teams-style redesign, shared ConversationWorkspace/ConversationView/MessageBubble — MUST preserve 043 markers/042 attachments/041 pin/filters/forward/scrollToMessage, #678). Then 063 (redeploy all 4 surfaces — they're currently STALE, predate Phase 5). Deployed surfaces confirmed live in spaarkedev1 but pre-Phase-5. UAT items promoted from notes → POMLs 060-063 + GitHub #676/#677/#678 (durable). **Phase 5 unblocked work ✅ COMPLETE** — 040 (pin field, live), 041 (pin UI + BFF PATCH /threads/{id}/pin), 042 (attachments), 043 (privilege/privacy), 044 (search config, prepared). All gated, committed, pushed. **Remaining**: 045 ⛔ (blocked on notification spine — not on master), 046 ⏸ (deferred/best-effort). **Phase 6**: 050 (full deploy + 11-entity UAT — partly gated by 045), 090 (wrap-up — needs all prior). Non-task backlog: UAT refinement wave (PCF polish + Teams-style modal, `notes/uat-feedback-phase4-2026-07-21.md`), send-401 (ACS/BFF env-auth), #675 (blocked). Portfolio 27/31. NOTE: Phase 5 is on the branch, NOT yet merged to master. |
-| **Step** | Wave 15 done. All 4 surfaces built + Step 9.5-gated by their agents; **main-session cross-surface build-verify GREEN** (Communication.Components jest 4/4 + tsc clean; AI.Widgets registry 40/40; LegalWorkspace dual-use consumer typechecks — only unrelated Events.Components tsc noise). No escalations. Committed locally; **needs push**. |
-| **Status** | 030 new PCF `CommunicationConversationPanel` (build:prod pass, 29 jest); 031 `CommunicationsWorkspaceWidget` body-swap to shared two-pane (identity `communications-list`/`communications` byte-unchanged; added jest infra + `@spaarke/auth` dep); 032 new Vite page `sprk_communicationconversationpage` (blocking auth bootstrap); 033 Email&Messages tab via DataGrid `hostFilters` + form onLoad (fail-CLOSED scoping fix). Solution packaging/version-footer bump/live ui-tests all deferred to **034**. |
-| **Next Action** | **`/push-to-github`** then **task 034** (deploy Phase 4 surfaces — Matter pilot; `<steps mode="prescriptive">`, STANDARD rigor). 034 deps 030-033 (all ✅). Cite in deploy PR: ADR-026 Path-A (030 PCF), ADR-006 Path-C (033 grid web-resource), the SpaarkeAi hot-path republish (031, coordinate per projects/INDEX.md), and the fail-closed regarding-scope hardening (033). **Known Phase-4 wiring gap** (not a blocker; see Critical Context #11): `ConversationWorkspace.renderConversation` forwards only `{threadId, authenticatedFetch, bffBaseUrl}`, so FR-12 title-link only lights up where the host knows the regarding (030 PCF record-mode wires it; 031/032 all-mode leave it unwired by design). |
-
-### Progress this session — 7 implementation tasks + backend enrichment, ALL gated + committed + PUSHED (PR #664)
-- **Phase 1 (001–006)** + **Phase 2 core (010,011,012)**: done in a PRIOR session, pushed.
-- **013** FR-06 in-conversation compose (ConversationView chat input via existing `sendTimelineMessage`, ACS branch; `pollNow` refresh). Gate fixed a Major double-send (`inFlightRef`). `notes/task-013-notes.md`.
-- **014** FR-09 additive filters (Email/Message toggles + word Dropdown; presentational). Ship. `notes/task-014-notes.md`.
-- **020** FR-07/19 SendEmailDialog thread-pin + auto-associate (opus). Gate fixed a Major stale-contract doc + 4 minors. `notes/task-020-notes.md`.
-- **021** FR-04 email-in-flow block **+ correctness-critical backend read-DTO Subject/To enrichment** (owner-approved escalation resolution). Recipient-disclosure gate-verified SAFE. `notes/task-021-notes.md`.
-- **022** FR-08 forward → SendEmailDialog forward mode. Ship (regarding-in-forward doc-mitigated). `notes/task-022-notes.md`.
-- **023** FR-05 MessageQuickView + ConversationView `scrollToMessage` handle. Ship. `notes/task-023-notes.md`.
-- **024** FR-11 NewThreadModal find-or-create. Fixed 3 Majors; §6.5 Path-A (name/desc omitted) accepted. `notes/task-024-notes.md`.
-- **025** FR-12 conversation title → record link. Added `ConversationView` header (`title`/`regarding`/`onOpenRecord` props); title is a Fluent `Link as="button" type="button"` when regarding+callback present, else plain `Text`; delegates open to host (no `Xrm`/iframe in shared lib — ADR-012/MODAL-DECISION-CRITERIA). Gate fixed 2 Minors (`type="button"` form-submit guard; `role="heading"` a11y), accepted 1 (parity `name`). 63/63 CV tests. `notes/task-025-notes.md`. **← Phase 3 complete.**
-- **Merges reconciled**: 54-commit master merge (email-r4 moved `mapStateToSendRequest` → `EmailComposer.reducer.ts` + added attachment body-links) + 2 CI-Prettier merges + **16-commit master merge this session** (1 conflict `SendEmailDialog.tsx` → union resolve `201a4e607`). All conflict-resolved, tests green.
-
-### Critical Context (carry forward — CURRENT)
-1. **Read DTO now carries `subject` + `to`** (task 021): `ThreadMessageDto` (backend) / `IThreadMessageDto` / `TimelineMessage` + `buildTimeline` mapping. Recipients = access-filtered `sprk_to` on the visible row (NEVER fabricated, NEVER BCC — `sprk_bcc` is separate, never selected). The email-in-flow block + the word filter use them.
-2. **Identity contract (FR-02/18)**: bubble alignment keys on `senderSystemUserId` (`SentBy`), NEVER email-string. **Access model (NFR-01)**: impersonated + shared access-filter; NO membership-union; client renders exactly what server returns.
-3. **`mapStateToSendRequest` lives in `EmailComposer.reducer.ts`** now (email-r4 moved it in the merged master) — Phase-4/future send-shaping edits go there, not `EmailComposer.tsx`. R3's `threadId` arg was re-applied there.
-4. **Decoupled host seams (ADR-012)** on ConversationView: `renderConversation` (012), `currentUserSystemUserId`, `scrollToMessage` handle via `forwardRef` (023), `onOpenEmail` (021), `onForwardMessage` (022). Phase-4 hosts (030 PCF / 031 widget / 032 code page) mount `ConversationView` into `ConversationWorkspace`'s `renderConversation` + wire these callbacks (open/forward → the extended `SendEmailDialog`; the enriched message builds the view/forward `sourceRecord`).
-5. **regarding-in-forward (ISS-005 #672)**: in `mode="forward"` the composer derives `associations` from `sourceRecord.associations`, dropping the dialog's `regarding` fold. Host MUST include regarding in `sourceRecord.associations` (documented in the `onForwardMessage`/`sourceRecord` JSDocs). `threadId` DOES survive forward.
-6. **§6.5 Path exceptions on record** (cite in deploy PRs): task 012 Path-A (`ConversationWorkspace` record-mode via `by-regarding`); task 024 Path-A (NewThreadModal name/desc omitted — endpoint has no field, ISS-004 #670); ADR-006 (task 033 DataGrid web-resource) + ADR-026 (task 030 Path-A PCF) both Path C.
-7. **⚠️ Worktree build gap**: sibling `@spaarke/auth`/`@spaarke/sdap-client` `dist/` unbuilt → exactly 2 unrelated tsc errors (`EntityCreationService.ts`/`useWizardPageBootstrap.ts`). Verify client work via **scoped `tsc --noEmit` (expect exactly those 2) + `npm test`**, NOT whole-package `npm run build`.
-8. **CI is now triggering** on PR #664 (8 checks). CI runs Prettier and pushes `style: auto-format` commits back — to avoid the reject/merge cycle, run `npx prettier --write` on changed client files BEFORE pushing.
-9. **Flaky-dialog tests**: the 2 Fluent-`Dialog`-open integration tests (`ConversationView.emailInFlow` open→dialog, `ConversationView.forward` forward→dialog) were hardened with `findByRole('dialog', {}, { timeout: 4000 })` (jsdom/tabster timing flake — not a logic bug).
-10. **Filed follow-ups**: #666/#667 (participant escaping, roll-up OrderBy), #669 (ISS-003 `useThreadPoll.pollNow` swallowed race), #670 (ISS-004 named-direct-threads Path-B), #672 (ISS-005 regarding-in-forward engine-union). All in `notes/defer-issues.md` with URLs (push-to-github Step 1.6 clean).
-11. **FR-12 title-link wiring boundary (Phase 4)**: `ConversationView` has the FR-12 props (`title`/`regarding`/`onOpenRecord`, task 025), but `ConversationWorkspace.renderConversation` forwards only `{threadId, authenticatedFetch, bffBaseUrl}` to the seam. So the title link lights up ONLY where the host itself knows the regarding: **030 PCF (record mode)** wires it (closes the Fluent dialog then `navigateTo` Layout 1); **031 widget + 032 code page (all mode)** correctly leave it unwired (no per-thread regarding/name at the seam — §11 dead-code avoidance). If the workspace/widget surfaces should later show record-linked titles, the enhancement is to have `ConversationWorkspace` thread per-thread regarding+name into `renderConversation` (own follow-up; not in R3 scope).
-12. **Phase 4 dual-use consequence (031)**: the `CommunicationsWorkspaceWidget` body-swap also changes what `LegalWorkspace/src/sections/communications.registration.ts` renders (same shared widget, Pattern-D dual-use) — intended NFR-06 "one shared widget" behavior, not a regression. Verified LegalWorkspace's registration still typechecks.
-
-### Files Modified This Session
-None uncommitted — **all work is committed + pushed**. Per-task detail in `notes/task-0NN-notes.md` (013,014,020,021,022,023,024); commits: `git log --oneline aff99a072..HEAD` (Wave-11 checkpoint → HEAD).
+### Critical Context (3 sentences)
+Task 045 (FR-22 notification awareness) is DONE + merged to master (Option A register-only wiring; consumer-only; no second producer). SpaarkeAi was just deployed carrying it. The current work is a 7-item UAT batch on the **shared** conversation components (`@spaarke/ui-components` `ConversationWorkspace`/`ConversationView` + `@spaarke/communication-components` `CommunicationsWorkspaceWidget`) — fixes reach BOTH the dashboard widget AND the modal code page (`sprk_communicationconversationpage`) because they share these components.
 
 ---
 
-## Active Task (Full Details)
+## UAT Work Item — Communications widget + modal (2026-07-22)
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | 025 |
-| **Task File** | `tasks/025-conversation-title-record-link.poml` |
-| **Title** | FR-12 conversation title → record-scoped modal link |
-| **Phase** | 3 (email-in-flow + quick-view + new-thread) |
-| **Status** | in-progress — merged origin/master first (SendEmailDialog conflict resolved as union: R3 `regarding`-fold + master R6-4 760px dialog); implementing header title link |
-| **Started** | 2026-07-21 |
+Full checklist + file map also at `notes/uat-feedback-comm-widget-2026-07-22.md`. **All 5 files are shared — each fix reaches BOTH surfaces.** Update the matching `__tests__` alongside each change. Screenshots in the chat that produced this (operator UAT after the SpaarkeAi deploy).
 
-### Approach (decided)
-- Impersonated `sprk_communicationthreads` query, NO regarding filter (record-less inclusion via impersonation).
-- `$select` = id, name, threadtype, createdon; `$orderby=createdon desc` (deterministic, stable paging).
-- Name search: `contains(sprk_name,'<escaped>')` — single-quote doubled (OData injection safe).
-- Paging: keyset/cursor on `createdon` (Dataverse Web API has no `$skip`; seam drops `@odata.nextLink`).
-  Opaque base64 `pageToken` = last row `createdon`; next-page filter `createdon lt <cursor>` (non-overlapping).
-- No new DI dependency (service already scoped); NO membership seam (retired union stays retired).
+### Batch A — `Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx` (~1106 LOC)
+- **(4) Toolbar** (email/message/inbox/search icons): right-align; more spacing; **active state = dark-blue background (`tokens.colorBrandBackground` / brand), inactive = transparent** — mirror the Calendar widget filter button (`@spaarke/events-components` `CalendarFilterPane` active-button styling).
+- **(6) Send** = icon only (`SendRegular`), drop the "Send" text label.
+- **(7) Refresh** — move the `onRefresh` control OUT of the message-input row INTO the top toolbar with the other tools.
+- **(5c) Mark-as-read** — moves HERE: add "mark as read" as a MESSAGE toolbar tool (it is removed from thread rows in Batch C).
 
----
+### Batch B — `ConversationView/subcomponents/EmailInFlowBlock.tsx` (the email card)
+- **(2)** Email card redesign: **font too small/compressed → increase**; **REMOVE the attachment list**; **ADD ~first-100-char body snippet** (concat/preview); **ADD sent/received date**.
 
-## Progress
+### Batch C — `ConversationWorkspace.tsx` (373 LOC) + `ConversationWorkspace/subcomponents/ThreadList.tsx`
+- **(1) Full container height** — widget/modal content must fill the container (currently a small box w/ empty space below). Root `height:100%` / flex-fill through `CommunicationsWorkspaceWidget.tsx` → `ConversationWorkspace.tsx`.
+- **(3) Right pane resizes with message width** — stabilize: right pane `min-width:0` + fixed/stable flex-basis so it doesn't grow to the widest bubble.
+- **(5a) `+` new-thread button does NOT work** — fix the handler (`onCreateThread`/`+`) in `ConversationWorkspace.tsx`.
+- **(5b)** Thread rows: add **padding between rows**; "1 new message" text → **unread-dot ICON** (drop words); **smaller pin icon**.
+- **(5c) REMOVE per-row "Mark as read"** (moves to the message toolbar — Batch A).
 
-### Completed Steps
-
-*No steps completed yet*
-
-### Current Step
-
-*No active task*
-
-### Files Modified (All Task)
-
-*No files modified yet*
-
-### Decisions Made
-
-*No decisions recorded yet*
+### Reference
+- Active-filter styling: Calendar widget filter button (dark-blue when on). `@spaarke/events-components` `CalendarFilterPane`.
+- Component roles: `ConversationWorkspace` = two-pane (threads + conversation); `ConversationView` = right pane (messages + toolbar + send + refresh); `ThreadList` = left pane rows; `EmailInFlowBlock`/`MessageBubble` = message cards.
 
 ---
 
-## Next Action
+## Full State (Detailed)
 
-**Next Step**: Execute task 001 (Phase 1 — backend read/thread spine)
+### DONE + on master this session
+- **Auth popup-loop fix** (server config): created the missing `sprk_TenantId` env-var value record in spaarkedev1 (`a221a95e-…`) → tenant-specific MSAL authority (was `/organizations` → popup loop). Also added a `/api/config/client` tenant fallback in `@spaarke/auth` `resolveRuntimeConfig.ts`.
+- **by-regarding 500 fix**: read path selected the broken `sprk_sentbyname` column (`IsValidODataAttribute=false` in-env) → Dataverse 400 → 500 whenever a thread had messages. Fixed by sourcing `SentByName` from the `sprk_sentby` lookup's FormattedValue annotation (impersonated read now requests annotations). Verified 200.
+- **Task 045 (FR-22)**: Option A register-only wiring (seam `communicationArrivalsSeam.ts`; SpaarkeAi `initNotificationsClient()` binds the ONE shared client; removed rogue `new NotificationsClient()`). PR #682 merged. 9/9 tests pass.
 
-**Pre-conditions**:
-- Tasks generated in `tasks/` (pipeline Step 3)
-- R2 participant junction confirmed applied in target env
+### DEPLOYED to spaarkedev1
+- BFF (by-regarding + sender-name fixes), conversation code page (tenant fallback), SpaarkeAi (task 045 — just deployed by operator), PCF v1.1.0.
+- `@spaarke/auth` tenant-fallback reaches SpaarkeAi only on its next rebuild (SpaarkeAi doesn't hit the loop — Xrm gives it the tenant).
 
-**Key Context**:
-- Refer to `spec.md` FR-16/17/18/19 for the backend increment
-- ADR-038 seam tests are DoD; no membership-union (NFR-01)
+### PENDING (operator-coordinated)
+1. **Spine runtime config** for live communication badges: Azure SignalR (Tier 1) + `systemuser.sprk_isexternal` backfill (Tier 2) per `NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md` (in `spaarke-wt-spaarke-notification-spine-r1`).
+2. **Coordinated deploy** of the UAT batch once implemented.
 
-**Expected Output**:
-- Phase 1 backend endpoints + enriched DTO + seam tests
+### Scope boundaries (do NOT drift)
+- Notification awareness = **SpaarkeAi/LegalWorkspace workspace widget ONLY**. The Matter-form conversation **PCF + Messages modal do NOT consume the spine** (separate host) — extending them is follow-on scope, not requested.
+- **No second producer** — the spine's `CommunicationArrivedProducer` is canonical (ADR-047).
+- Shared components: ADR-012 context-agnostic + ADR-021 Fluent v9 semantic tokens (NO hard-coded colors — use tokens for the toolbar active-state).
 
----
+### Deploy discipline (operator memory)
+Before ANY env deploy: commit → `/push-to-github` → `/worktree-sync` → deploy via dedicated skills (`/bff-deploy`, `/code-page-deploy`, `/pcf-deploy` — hand over the full PCF zip path). Deploy currently HELD for cross-project coordination.
 
-## Blockers
+### Key commits this session
+- by-regarding 500 fix `324f94d61` · sender-name + tenant-fallback `5fff139f0` (PR #680) · task 045 Option A `b11863c8b` (PR #682) · UAT capture `5b885f480`.
 
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-07-20 18:30
-- Focus: Project initialization (artifacts generated)
-
-### Key Learnings
-
-- Notification spine (`communication-arrived`, FR-22) is NOT yet in master — keep FR-22 late.
-
-### Handoff Notes
-
-*No handoff notes*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: messaging-communication-app-r3
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-045, ADR-046, ADR-024, ADR-026, ADR-028, ADR-038, ADR-021, ADR-006
-
-### Knowledge Files Loaded
-- `.claude/constraints/bff-extensions.md`, `docs/standards/CHAT-ATTACHMENT-POLICY.md`
-
----
-
-## Recovery Instructions
-
-**To recover context after compaction or new session:**
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above (< 30 seconds)
-2. **If more context needed**: Read Active Task and Progress sections
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: From task's `<knowledge>` section
-5. **Resume**: From the "Next Action" section
-
-**Commands**: `/project-continue` · `/context-handoff` · "where was I?"
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+### Files modified this session (all committed)
+- `Services/Communication/CommunicationThreadReadService.cs`, `Spaarke.Dataverse/DataverseWebApiService.cs` (annotation request)
+- `@spaarke/auth/resolveRuntimeConfig.ts` (tenant fallback)
+- `@spaarke/communication-components/.../CommunicationsWorkspaceWidget/{communicationArrivalsSeam.ts (new), useCommunicationArrivals.ts, CommunicationsWorkspaceWidget.tsx, index.ts, useCommunicationArrivals.test.tsx}`; deleted `createNotificationsClient.ts` + `types/spaarke-notifications.d.ts` + dead `@spaarke/notifications` dep/mock/mapper
+- `SpaarkeAi/src/services/notificationsBootstrap.ts` (seam wiring)
+- `tasks/045-notification-awareness.poml` + `tasks/TASK-INDEX.md` (gate cleared) + `notes/uat-feedback-comm-widget-2026-07-22.md`
