@@ -541,6 +541,19 @@ export function ConversationPane(): React.JSX.Element {
         ) ?? Promise.resolve(),
       []
     ),
+    // Dismiss 'x' (UAT 2026-07-22): POST /api/notifications/{id}/dismiss stamps sprk_dismissed
+    // server-side so the row leaves /pending (ownership enforced server-side). Also fired after a
+    // successful action so an acted-on suggestion does not reappear. Best-effort — a non-2xx is
+    // swallowed (the hook has already removed the card locally).
+    dismiss: React.useCallback(
+      async (outboxRowId: string): Promise<void> => {
+        await authenticatedFetch(
+          `${bffBaseUrl}/api/notifications/${encodeURIComponent(outboxRowId)}/dismiss`,
+          { method: "POST" }
+        );
+      },
+      [authenticatedFetch, bffBaseUrl]
+    ),
     inject: injection.inject,
   });
 

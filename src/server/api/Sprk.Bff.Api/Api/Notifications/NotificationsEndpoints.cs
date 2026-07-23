@@ -54,6 +54,14 @@ public static class NotificationsEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        group.MapPost("/{outboxRowId:guid}/dismiss", DismissAsync)
+            .WithName("NotificationsDismiss")
+            .WithDescription("Dismiss one of the CALLING user's pending outbox rows (stamps sprk_dismissed via OutboxService.DismissAsync so it no longer appears in /pending). Ownership is enforced server-side: the row must be in the caller's own owner-scoped pending set, so a caller can NEVER dismiss another user's notification (ADR-028, no cross-user writes). A row not owned by the caller (or already dismissed / expired / non-existent) returns 404 — indistinguishable from not-found, so no cross-user existence is disclosed. Derives identity from the JWT; accepts no target-user parameter.")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status401Unauthorized)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+
         return app;
     }
 
@@ -167,6 +175,56 @@ public static class NotificationsEndpoints
             .ToList();
 
         return TypedResults.Ok(new NotificationsPendingResponse { Items = items });
+    }
+
+    /// <summary>
+    /// Dismiss handler (UAT 2026-07-22). Stamps <c>sprk_dismissed</c> on ONE of the caller's own
+    /// pending outbox rows so it no longer appears in <see cref="GetPendingAsync"/>. Ownership is
+    /// enforced by intersecting the requested id with the caller's OWNER-SCOPED pending set
+    /// (<see cref="OutboxService.GetPendingAsync"/>) before dismissing — a caller can never dismiss a
+    /// row they do not own (ADR-028: no cross-user writes). A miss (not owned / already dismissed /
+    /// expired / non-existent) returns 404, disclosing no cross-user existence. Marked
+    /// <c>internal</c> for the seam test, mirroring <see cref="GetPendingAsync"/>.
+    /// </summary>
+    internal static async Task<IResult> DismissAsync(
+        Guid outboxRowId,
+        HttpContext context,
+        OutboxService outboxService,
+        ISystemUserIdentityResolver identityResolver,
+        CancellationToken ct)
+    {
+        // Derive the caller's identity SERVER-SIDE — the oid claim of the validated JWT ONLY (mirrors
+        // GetPendingAsync). No target-user parameter exists on this signature (ADR-028).
+        var oid = context.User.FindFirst("oid")?.Value
+            ?? context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (string.IsNullOrWhiteSpace(oid))
+        {
+            throw new SdapProblemException(
+                code: "OID_NOT_RESOLVED",
+                title: "Identity Not Resolved",
+                detail: "The caller's oid claim could not be resolved from the token; cannot dismiss a notification.",
+                statusCode: 403);
+        }
+
+        var systemUserId = await identityResolver.ResolveSystemUserIdAsync(oid, ct);
+        if (systemUserId is null)
+        {
+            // No Dataverse user mapping ⇒ the caller owns no rows ⇒ nothing to dismiss.
+            return TypedResults.NotFound();
+        }
+
+        // Ownership gate: the row MUST be in the caller's own owner-scoped pending set. Reusing
+        // GetPendingAsync (owner + undismissed + unexpired) means a caller can only ever dismiss a row
+        // they own — no separate ownership column read, no cross-user write path.
+        var pending = await outboxService.GetPendingAsync(systemUserId.Value, ct);
+        if (!pending.Any(row => row.Id == outboxRowId))
+        {
+            return TypedResults.NotFound();
+        }
+
+        await outboxService.DismissAsync(outboxRowId, ct);
+        return TypedResults.NoContent();
     }
 
     /// <summary>

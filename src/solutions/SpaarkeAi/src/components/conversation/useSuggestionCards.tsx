@@ -114,9 +114,18 @@ const useStyles = makeStyles({
     ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
     fontWeight: tokens.fontWeightSemibold,
     boxShadow: tokens.shadow2,
+    cursor: "pointer",
+    // No hover highlight (UAT 2026-07-22): the banner is a disclosure toggle, not a
+    // clickable record — only the suggestion cards (clickable rows) get hover. Explicitly
+    // pin the hover/active states to the resting appearance so the Fluent Button's built-in
+    // subtle-hover does not fire on the banner.
     ":hover": {
-      backgroundColor: tokens.colorBrandBackground2Hover,
-      color: tokens.colorBrandForeground2Hover,
+      backgroundColor: tokens.colorNeutralBackground1,
+      color: tokens.colorBrandForeground2,
+    },
+    ":hover:active": {
+      backgroundColor: tokens.colorNeutralBackground1,
+      color: tokens.colorBrandForeground2,
     },
   },
   bannerLabel: {
@@ -158,6 +167,14 @@ export interface SuggestionCardsDeps {
    * the host resolves `actionHint` → Binding.
    */
   readonly onSuggestionAction: (envelope: SuggestionEnvelopeLite) => void | Promise<void>;
+  /**
+   * Dismiss an outbox row server-side (`POST /api/notifications/{outboxRowId}/dismiss`) so it no
+   * longer appears in `/pending` (UAT 2026-07-22). Called by the card's dismiss 'x' AND after a
+   * successful action, so an acted-on / dismissed suggestion does not reappear on the next poll.
+   * Fail-soft: the hook removes the card locally regardless (a failed server dismiss just means it
+   * may reappear on a later poll — never an error to the user).
+   */
+  readonly dismiss: (outboxRowId: string) => Promise<void>;
   /** Stable local failure line injector (ADR-019) — wire to the injection queue's `inject`. */
   readonly inject: (message: IChatMessage) => void;
   /** Injected clock for deterministic expiry filtering in tests. Defaults to `Date.now`. */
@@ -199,7 +216,7 @@ function isExpired(expiresAt: string, nowMs: number): boolean {
 }
 
 export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsController {
-  const { subscribe, fetchPending, onSuggestionAction, inject, now } = deps;
+  const { subscribe, fetchPending, onSuggestionAction, dismiss, inject, now } = deps;
   const styles = useStyles();
 
   const [suggestions, setSuggestions] = React.useState<ReadonlyArray<RenderableSuggestion>>([]);
@@ -263,15 +280,31 @@ export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsCo
         }
         // Route through the host's EXISTING dispatch (task 052) — never a new path.
         await onSuggestionAction(item.envelope);
-        // Consume the suggestion once handed off.
+        // Consume the suggestion once handed off — locally AND server-side (dismiss the outbox row)
+        // so an acted-on suggestion does not reappear on the next poll. Dismiss is best-effort.
         setSuggestions((prev) => prev.filter((s) => s.outboxRowId !== item.outboxRowId));
+        void dismiss(item.outboxRowId).catch(() => {
+          /* best-effort: a failed server dismiss only risks a later re-appearance, never an error */
+        });
       } catch {
         inject(makeLocalAssistantMessage(FAIL_MESSAGE));
       } finally {
         setActing(false);
       }
     },
-    [fetchPending, onSuggestionAction, inject]
+    [fetchPending, onSuggestionAction, dismiss, inject]
+  );
+
+  // Explicit dismiss ('x') — remove the card locally and dismiss the outbox row server-side so it
+  // never reappears. Best-effort on the server call (local removal always happens).
+  const handleDismiss = React.useCallback(
+    (item: RenderableSuggestion): void => {
+      setSuggestions((prev) => prev.filter((s) => s.outboxRowId !== item.outboxRowId));
+      void dismiss(item.outboxRowId).catch(() => {
+        /* best-effort — a failed dismiss only risks the card reappearing on a later poll */
+      });
+    },
+    [dismiss]
   );
 
   const suggestionSlot = React.useMemo<React.ReactNode>(() => {
@@ -312,13 +345,14 @@ export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsCo
                 }}
                 disabled={acting}
                 onAction={() => void handleAction(s)}
+                onDismiss={() => handleDismiss(s)}
               />
             ))}
           </div>
         ) : null}
       </div>
     );
-  }, [rendered, acting, handleAction, expanded, styles.stack, styles.banner, styles.bannerLabel, styles.cardList]);
+  }, [rendered, acting, handleAction, handleDismiss, expanded, styles.stack, styles.banner, styles.bannerLabel, styles.cardList]);
 
   return React.useMemo(
     () => ({ suggestionSlot, count: rendered.length }),

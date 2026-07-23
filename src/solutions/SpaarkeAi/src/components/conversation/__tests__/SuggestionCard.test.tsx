@@ -82,19 +82,27 @@ function baseDeps(overrides: Partial<SuggestionCardsDeps> = {}): SuggestionCards
     subscribe: jest.fn(() => () => {}),
     fetchPending: jest.fn(async () => [] as ReadonlyArray<PendingSuggestionItem>),
     onSuggestionAction: jest.fn(),
+    dismiss: jest.fn(async () => {}),
     inject: jest.fn(),
     now: () => NOW_MS,
     ...overrides,
   };
 }
 
+/** Expand the collapsed-by-default disclosure banner so the card list renders. */
+function expandBanner(): void {
+  fireEvent.click(screen.getByTestId('suggestion-banner'));
+}
+
 describe('SuggestionCard (presentational)', () => {
   it('renders the card from a suggestion model with its title and a stable test id', () => {
     const onAction = jest.fn();
+    const onDismiss = jest.fn();
     renderWithTheme(
       <SuggestionCard
         suggestion={{ suggestionId: 'sugg-1', title: 'Review Acme v. Beta', actionHint: 'review' }}
         onAction={onAction}
+        onDismiss={onDismiss}
       />
     );
 
@@ -105,6 +113,11 @@ describe('SuggestionCard (presentational)', () => {
 
     fireEvent.click(card);
     expect(onAction).toHaveBeenCalledTimes(1);
+
+    // The dismiss 'x' is a distinct control (not nested in the main button) and calls onDismiss.
+    fireEvent.click(screen.getByTestId('suggestion-dismiss-sugg-1'));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onAction).toHaveBeenCalledTimes(1); // dismiss did NOT trigger the open action
   });
 
   // ADR-021: renders token-driven (no inline color) under BOTH themes.
@@ -116,6 +129,7 @@ describe('SuggestionCard (presentational)', () => {
       <SuggestionCard
         suggestion={{ suggestionId: 'sugg-x', title: 'Follow up on filing', actionHint: 'review' }}
         onAction={jest.fn()}
+        onDismiss={jest.fn()}
       />,
       theme as Theme
     );
@@ -140,6 +154,9 @@ describe('useSuggestionCards (lifecycle)', () => {
     renderWithTheme(<Harness deps={deps} />);
 
     fire(); // a live spine signal → re-ground from /pending
+    // The collapsed-by-default banner appears first; expand it to reveal the card list.
+    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
+    expandBanner();
     expect(await screen.findByTestId('suggestion-card-sugg-1')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-cards')).toBeInTheDocument();
   });
@@ -167,6 +184,8 @@ describe('useSuggestionCards (lifecycle)', () => {
     renderWithTheme(<Harness deps={deps} />);
 
     fire();
+    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
+    expandBanner();
     const card = await screen.findByTestId('suggestion-card-sugg-1');
     fireEvent.click(card);
 
@@ -211,6 +230,8 @@ describe('useSuggestionCards (lifecycle)', () => {
     renderWithTheme(<Harness deps={deps} />);
 
     fire();
+    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
+    expandBanner();
     const card = await screen.findByTestId('suggestion-card-sugg-1');
     fireEvent.click(card);
 
@@ -220,5 +241,47 @@ describe('useSuggestionCards (lifecycle)', () => {
     const injected = inject.mock.calls[0][0] as { content?: string };
     expect(typeof injected.content).toBe('string');
     expect(injected.content).toMatch(/no longer available/i);
+  });
+
+  it('collapses the cards behind a "You have N new notifications" banner by default', async () => {
+    const { subscribe, fire } = captureSubscribe();
+    const deps = baseDeps({
+      subscribe,
+      fetchPending: jest.fn(async () => [pendingItem(envelope())]),
+    });
+    renderWithTheme(<Harness deps={deps} />);
+
+    fire();
+    const banner = await screen.findByTestId('suggestion-banner');
+    expect(banner).toHaveTextContent('You have 1 new notification');
+    // Cards are hidden until the banner is expanded (they don't eat the conversation space).
+    expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument();
+    expandBanner();
+    expect(await screen.findByTestId('suggestion-card-sugg-1')).toBeInTheDocument();
+  });
+
+  it('dismisses a suggestion server-side and removes the card when the "x" is clicked', async () => {
+    const { subscribe, fire } = captureSubscribe();
+    const dismiss = jest.fn(async () => {});
+    const onSuggestionAction = jest.fn();
+    const deps = baseDeps({
+      subscribe,
+      fetchPending: jest.fn(async () => [pendingItem(envelope())]),
+      dismiss,
+      onSuggestionAction,
+    });
+    renderWithTheme(<Harness deps={deps} />);
+
+    fire();
+    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
+    expandBanner();
+    await screen.findByTestId('suggestion-card-sugg-1');
+
+    fireEvent.click(screen.getByTestId('suggestion-dismiss-sugg-1'));
+
+    // Server dismiss called with the outbox row id; the card is removed; NO action dispatched.
+    await waitFor(() => expect(dismiss).toHaveBeenCalledWith('row-1'));
+    await waitFor(() => expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument());
+    expect(onSuggestionAction).not.toHaveBeenCalled();
   });
 });
