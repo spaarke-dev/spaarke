@@ -22,6 +22,10 @@ import {
   NotificationsClient,
   type NotificationsConnectionState,
 } from "@spaarke/notifications";
+// FR-22 (messaging-communication-app-r3 task 045): the CommunicationsWorkspaceWidget consumes
+// communication-arrived awareness via THIS one shared client — the host wires the register-only seam
+// so the widget never constructs its own client (one-connection invariant, ADR-047).
+import { setCommunicationArrivalsSubscribe } from "@spaarke/communication-components";
 
 /**
  * Minimal structural shape of the fields these log-only handlers read. Declared inline (not imported
@@ -73,6 +77,13 @@ export async function initNotificationsClient(): Promise<void> {
   client.registerHandler("suggestion", (event: NotificationEventLite) => {
     console.info("[SpaarkeAi] suggestion:", event.outboxRowId, `(source=${event.source})`);
   });
+
+  // FR-22 (task 045): hand the CommunicationsWorkspaceWidget a register-only subscription bound to THIS
+  // shared client, so its unread badge + toast ride the SAME connection + negotiate as every other consumer
+  // (one-connection invariant). The widget reads this seam; it never constructs its own NotificationsClient.
+  setCommunicationArrivalsSubscribe(onArrival =>
+    client.registerHandler("communication-arrived", onArrival),
+  );
 
   try {
     await client.start();

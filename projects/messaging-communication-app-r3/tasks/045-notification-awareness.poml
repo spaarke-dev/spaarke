@@ -3,7 +3,7 @@
   <metadata>
     <title>New-communication awareness — emit + consume notification-spine communication-arrived</title>
     <phase>5 Release-gated must-haves</phase>
-    <gate>blocked</gate>
+    <gate>none</gate>
     <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF producer/consumer wiring + frontend awareness; tags include bff-api. FULL gates mandatory.</rigor-reason>
@@ -73,6 +73,8 @@
     <criterion testable="true">If the spine is unavailable, the feature degrades to polling-only and the dependency is escalated — no fabricated signal ships.</criterion>
     <criterion testable="true">Publish ≤60 MB compressed; 0 new HIGH CVE; BFF tests updated.</criterion>
   </acceptance-criteria>
-  <notes>BFF task: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB compressed + 0 new HIGH CVE + update tests. status=blocked/gate=blocked — do not start until the spine lands / contract is confirmed at P1. Run /conflict-check before any PR touching Services/Communication. Reference spec FR-22 + NFR-03 + Unresolved Question (spine contract).</notes>
+  <notes>BFF task: state Placement Justification in PR (cite .claude/constraints/bff-extensions.md) + verify publish ≤60 MB compressed + 0 new HIGH CVE + update tests. status=blocked/gate=blocked — do not start until the spine lands / contract is confirmed at P1. Run /conflict-check before any PR touching Services/Communication. Reference spec FR-22 + NFR-03 + Unresolved Question (spine contract).
+
+UNBLOCKED + COMPLETED 2026-07-22 (spine shipped to master via spaarke-notification-spine-r1). P1 contract confirmed against SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md. NO new producer added — the spine's canonical CommunicationArrivedProducer emits `communication-arrived` at 5 orchestration points (Layer D); this task is CONSUMER-only. Step 2 (BFF emit) satisfied by the shipped producer (directional step-mode adaptation) — hence no BFF publish-size/CVE delta. Consumer wiring corrected to Option A (register-only injection): the CommunicationsWorkspaceWidget consumes the host's ONE shared @spaarke/notifications client via a module-level seam (communicationArrivalsSeam.ts) that SpaarkeAi's initNotificationsClient() sets once (bound to getNotificationsClient().registerHandler('communication-arrived', …)). Removed the prior rogue `new NotificationsClient()` (ADR-047 one-connection violation) + the now-dead @spaarke/notifications dep/mock/type-shim. Awareness = unread CounterBadge + top-end Toaster; content still polls (~5s) — NFR-03 preserved. Live badges additionally need spine Tier-1/Tier-2 runtime config (Azure SignalR + sprk_isexternal backfill) per NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md. Deploy deferred to the coordinated cross-project rollout. Scope note: awareness surfaces in the SpaarkeAi/LegalWorkspace workspace widget ONLY — the Matter-form conversation PCF + modal are a separate host and do NOT consume the spine (would be follow-on scope). 9/9 package tests pass; surface typecheck 0 errors; code-review + adr-check clean (change ENFORCES ADR-047).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load knowledge first; follow task-execute.</protocol></execution>
 </task>
