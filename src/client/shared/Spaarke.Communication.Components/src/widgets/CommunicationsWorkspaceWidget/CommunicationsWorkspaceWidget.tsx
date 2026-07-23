@@ -61,10 +61,8 @@
 import * as React from 'react';
 import {
   makeStyles,
-  shorthands,
   tokens,
   Button,
-  CounterBadge,
   Toast,
   ToastTitle,
   ToastBody,
@@ -98,29 +96,23 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     minWidth: 0,
-    minHeight: 0,
+    // Fill the workspace container (round 3 item 1). The host panel/card is
+    // auto-height for a short two-pane shell, so `height:100%` collapses to
+    // content — a viewport-relative floor makes the widget claim the container
+    // instead of sitting in a short box. `height:100%` still wins when the host
+    // DOES constrain height (e.g. a bounded Direct-widget tile).
+    minHeight: '70vh',
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // FR-22 awareness bar — a slim, flex-shrink:0 strip above the conversation shell that shows the
-  // unread-arrival badge. Only rendered when there are unseen arrivals, so the zero state is visually
-  // identical to before (NFR-06 upgrade-in-place). Fluent v9 semantic tokens only (ADR-021).
-  awarenessBar: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    columnGap: tokens.spacingHorizontalS,
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground2,
+  // FR-22 awareness count (round 3 item 3) — rendered as the ThreadList header
+  // accessory instead of a separate bar; clickable to mark-as-seen (reset).
+  awarenessAccessory: {
+    minWidth: 0,
+    color: tokens.colorBrandForeground1,
     fontSize: tokens.fontSizeBase200,
   },
-  awarenessLabel: {
-    flexGrow: 1,
-    minWidth: 0,
-  },
-  // Body wrapper so the two-pane conversation shell fills the space beneath the (optional) awareness bar.
+  // Body wrapper so the two-pane conversation shell fills the whole widget.
   body: {
     display: 'flex',
     flexGrow: 1,
@@ -215,27 +207,24 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
     [currentUserSystemUserId]
   );
 
+  // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —
+  // replaces the separate awareness bar + duplicative circle badge. Clickable to
+  // mark-as-seen (reset). Only present when there are unseen arrivals.
+  const threadsHeaderAccessory =
+    unreadCount > 0 ? (
+      <Button
+        appearance="transparent"
+        size="small"
+        className={styles.awarenessAccessory}
+        onClick={reset}
+        title="Mark as seen"
+      >
+        {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
+      </Button>
+    ) : undefined;
+
   return (
     <div className={styles.root}>
-      {/* FR-22 awareness bar (unread badge) — only shown when there are unseen arrivals, so the zero
-          state is unchanged from before (NFR-06). Clicking "Mark as seen" clears the counter. */}
-      {unreadCount > 0 && (
-        <div className={styles.awarenessBar} role="status" aria-live="polite">
-          <CounterBadge
-            count={unreadCount}
-            appearance="filled"
-            color="informative"
-            aria-label={`${unreadCount} new communication${unreadCount === 1 ? '' : 's'}`}
-          />
-          <span className={styles.awarenessLabel}>
-            {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
-          </span>
-          <Button size="small" appearance="subtle" onClick={reset}>
-            Mark as seen
-          </Button>
-        </div>
-      )}
-
       {/* Awareness toaster — raises an info toast per consumed `communication-arrived` (signal-only). */}
       <Toaster toasterId={toasterId} position="top-end" />
 
@@ -252,6 +241,7 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
           authenticatedFetch={authenticatedFetch}
           renderConversation={renderConversation}
           navigationService={navigationService}
+          threadsHeaderAccessory={threadsHeaderAccessory}
         />
       </div>
     </div>
