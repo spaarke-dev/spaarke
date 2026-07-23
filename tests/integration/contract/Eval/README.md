@@ -88,6 +88,19 @@ The `eval-gate` job in `sdap-ci.yml` gates on the `Category=GoldenUtteranceEval`
 
 **Memory-poisoning eval families are explicitly OUT OF SCOPE and MUST NOT be added to this gate.** They are DEFERRED to the separate memory-governance project per spec FR-B-10 (`projects/spaarke-ai-architecture-redesign-r2/spec.md` item 38 + the Memory hard-governance rules deferral). This is a deliberate scope boundary, not an oversight — do not add a `[Trait("Category", "GoldenUtteranceEval")]` memory-poisoning case here until the governance project ships one.
 
+## Assistant-Enhancements-R1 eval family (task 051 / NFR-06)
+
+A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtteranceEval` trait — no CI-YAML change), authored by `spaarkeai-assistant-enhancements-r1` task 051. It is the operational eval coverage every R1 catalog change owed the suite (`projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md`) PLUS the two R1-specific proofs the golden-utterance schema does not model. It deliberately does **not** touch the shared `golden-utterances.json` (whose closed §3-UC set + P1/P2 activation guards are owned by the ai-architecture-redesign project) — a net-new family is the established way a project adds gate coverage.
+
+- **Seed data**: [`assistant-r1-eval-cases.json`](assistant-r1-eval-cases.json) — 20 cases across 6 families (`create-todo`, `create-project`, `list-tasks`, `view-vs-create`, `profile-injection`, `incoherent-combo`). Distinct schema from the golden cases (`AR1-###` ids; `catalogStatus` = existing | mirrored | live-catalog).
+- **Harness**: [`AssistantEnhancementsR1EvalTests.cs`](AssistantEnhancementsR1EvalTests.cs) — 6 mechanical facts (CI, no live model):
+  - inventory integrity + per-catalog-change coverage floors (AC1);
+  - **honest catalog grounding** — `existing` ⇒ a `ConsumerTypes` constant; `mirrored` ⇒ a row in `infra/dataverse/sprk_playbookconsumer-rows.json`; `live-catalog` ⇒ seeded on spaarkedev1 with mirror/constant parity pending (create-todo / create-project — surface-launch capabilities with no server-side `ConsumerTypes` dependency; cite `seededBy`);
+  - the **list-tasks** Binding row grounded against the real mirror: `surface_launch` disposition (100000007) + the authored **VIEW-vs-CREATE** cue naming create-task/create-todo (ADR-039 ambiguity-in-descriptions, not a classifier);
+  - **FR-E4 profile-injection non-flip** proven OPERATIONALLY in-gate over the R1 capability set (`AgentToolProjection.PreFilter` — a profiled vs. unprofiled caller yields a byte-identical grounded set). Structural sibling (unit, outside the gate): `PreferenceNotPermissionInvariantTests` (task 031);
+  - **AC3 incoherent practice-area × matter-type cannot commit** — CREATE-MATTER@v1 emits `practice_area_suggestion` + `matter_type_suggestion` as INDEPENDENT string LABELS (never enum/const/GUID), `additionalProperties:false`, allowstools=false, so no resolved closed-set value is ever model-emitted (each ref resolved deterministically per-field downstream — task 010 resolver).
+- **Not-vacuous**: the list-tasks + incoherent-combo facts carry discriminating assertions (disposition value, cue contents, independent-labels guard); the profile fact asserts an exact grounded set.
+
 ## Deletion-safety
 
 KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).
