@@ -79,6 +79,27 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 
 ---
 
+## 🚨 E2E Definition-of-Done (BINDING — added 2026-07-09 after the 5-slice E2E audit)
+
+**A compose task that adds or changes a create / write / dispatch / coordinate flow is NOT ✅ until a through-the-wire test proves the full vertical slice runs.** Unit-green ≠ done.
+
+**Why this exists**: a 5-slice audit ([notes/e2e-gap-register.md](notes/e2e-gap-register.md)) found ~30 gaps where tasks were marked ✅ on unit/build/orchestrator tests while the vertical slice was broken — the client never sent a field the server required, a service had no HTTP route, a UI affordance was unreachable, a subscription was never created, catalog rows were never deployed. The feature was "built in halves, unit-green, E2E-inert." The root cause was the **absence of a test that drives user-action → client → HTTP body → server DTO → service → data → back**.
+
+### The rule
+
+| Task touches… | Definition-of-done additionally requires… |
+|---|---|
+| A new/changed **endpoint or wire DTO** | a `WebApplicationFactory` test that POSTs through the **real route** and asserts the persisted side-effect (Dataverse row / SPE item / ledger entry) — not a service-level unit test |
+| A **client→server** flow (save, dispatch, upload, annotation) | the slice test drives the **HTTP body the client actually sends** (assert the server reads every field the client sends, and the client sends every field the server requires) |
+| A **client component** meant to be triggered/mounted (toolbar action, banner, receiver) | evidence it is **mounted + reachable** in the running host (not just built + unit-tested in isolation) |
+| A **catalog row / config key / subscription** | named in the [deploy/config prerequisite checklist](notes/e2e-gap-register.md#deploy--config-prerequisites) and its origin call/deploy step identified |
+
+- **`Mock<HttpMessageHandler>` and service-only unit tests do NOT satisfy this** — they are exactly what shipped the false-greens (per `tests/CLAUDE.md` bans + ADR-038). The test must cross the HTTP boundary.
+- Phase-9 remediation tasks (100–104) each carry this as a **non-waivable** acceptance criterion. New compose tasks inherit it.
+- If a slice genuinely cannot be tested through the wire yet (e.g. blocked on a live-env deploy), the task is **not ✅** — it is `✅◐ E2E-pending` with the blocking prerequisite named, never a clean ✅.
+
+---
+
 ## Execution Model & Tiering
 
 - **Planning** (design-to-spec, project-pipeline Steps 0–3): run the session on **Opus 4.8 / Fable 5**.

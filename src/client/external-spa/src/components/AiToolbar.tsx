@@ -23,6 +23,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  shorthands,
   tokens,
   Button,
   Spinner,
@@ -36,7 +37,6 @@ import {
   DialogActions,
   MessageBar,
   MessageBarBody,
-  Toolbar,
   ToolbarButton,
   Tooltip,
 } from '@fluentui/react-components';
@@ -72,9 +72,7 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalXS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalS}`,
     backgroundColor: tokens.colorNeutralBackground2,
-    borderWidth: '1px',
-    borderStyle: 'solid',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
   },
   toolbarLabel: {
@@ -304,8 +302,6 @@ export interface AiToolbarProps {
  * ```
  */
 export const AiToolbar: React.FC<AiToolbarProps> = ({ projectId, accessLevel, selectedDocumentId }) => {
-  const styles = useStyles();
-
   // Toolbar is invisible to ViewOnly users — enforced at render level
   if (accessLevel === AccessLevel.ViewOnly) {
     return null;

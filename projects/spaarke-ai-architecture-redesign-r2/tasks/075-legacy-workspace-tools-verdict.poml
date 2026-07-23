@@ -1,7 +1,7 @@
 <task id="AIR2-075" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Legacy workspace tools verdict — re-point or retire orphaned IWorkspaceStateService tools (contingent on 001)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>0.5 day</estimated-effort>

@@ -180,6 +180,52 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Test 2b — Wave 2 (UAT-R3 Test #2 fix): successful upload sets session.ActiveDocument
+    //           to a session-upload pointer carrying the new file's id (through the wire).
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Upload_Success_SetsActiveDocument_ToSessionUploadWithNewFileId()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        using var form = BuildMultipartForm(filename: "contract.pdf",
+            content: "Contract body text — this upload becomes the session's active document.");
+
+        var response = await client.PostAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        // The persisted session must now carry an ActiveDocument the chat→Compose bridge
+        // (SendWorkspaceArtifactHandler.ResolveActiveDocumentAsync) reads so "open this file"
+        // mounts the just-uploaded file (source-upload → compose.upload seed), not a blank tab.
+        var persisted = _fx.Sessions.PersistedSession;
+        persisted.Should().NotBeNull(
+            "the upload endpoint persists the session via UpdateSessionCacheAsync");
+        persisted!.ActiveDocument.Should().NotBeNull(
+            "Wave 2: a chat upload also becomes the session's ACTIVE document (most-recent-upload-wins)");
+
+        persisted.ActiveDocument!.Source.Should().Be(ActiveDocumentIdentity.SourceSessionUpload,
+            "the active document originates from a chat-session upload");
+        persisted.ActiveDocument.FileName.Should().Be("contract.pdf");
+        persisted.ActiveDocument.RegisteredAt.Should().NotBeNull();
+        persisted.ActiveDocument.DocumentSessionId.Should().BeNull(
+            "fail-soft: a later compose active-document registration sets DocumentSessionId, not the chat upload");
+
+        // The active document's SessionFileId is the SAME id as the appended ChatSessionFile —
+        // this is the pointer SendWorkspaceArtifactHandler resolves into a compose.upload mount.
+        persisted.UploadedFiles.Should().NotBeNull();
+        var appended = persisted.UploadedFiles!.Last();
+        persisted.ActiveDocument.SessionFileId.Should().Be(appended.FileId,
+            "the active document points at the just-uploaded ChatSessionFile by its FileId");
+        persisted.ActiveDocument.SprkDocumentId.Should().BeNull(
+            "a session upload has no stored sprk_document pointer");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Test 3 — 21st upload (cap reached) → 400 with `summarize.too-many-files`, no mutation
     // ─────────────────────────────────────────────────────────────────────────
 

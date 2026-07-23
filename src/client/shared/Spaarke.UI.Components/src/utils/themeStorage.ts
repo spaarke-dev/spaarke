@@ -89,7 +89,11 @@ export function detectDarkModeFromUrl(): boolean | null {
       const decoded = decodeURIComponent(flags);
       const flagPairs = new URLSearchParams(decoded);
       const themeOption = flagPairs.get('themeOption');
-      if (themeOption === 'dark') return true;
+      // Accept both `dark` and the legacy `darkmode` token — the MDA writer
+      // (MDA_DARK_MODE_FLAG) emits `themeOption=darkmode` while callers like the
+      // wizard-page navigate flow emit `themeOption=dark`. Tolerate both so
+      // writer/reader always agree (VHVU-020 token normalization).
+      if (themeOption === 'dark' || themeOption === 'darkmode') return true;
       if (themeOption === 'light') return false;
     }
 

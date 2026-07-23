@@ -64,7 +64,11 @@ public class JobSubmissionService
     /// Submits a communication job to the dedicated communication queue.
     /// Isolates email processing from the shared job queue to prevent cross-domain failures.
     /// </summary>
-    public async Task SubmitCommunicationJobAsync(JobContract job, CancellationToken ct = default)
+    /// <remarks>
+    /// Virtual to enable unit-test overriding via <c>Mock&lt;JobSubmissionService&gt;</c>
+    /// (mirrors <see cref="SubmitJobAsync"/>).
+    /// </remarks>
+    public virtual async Task SubmitCommunicationJobAsync(JobContract job, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(job);
 

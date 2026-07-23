@@ -88,7 +88,7 @@ import {
   makeStyles,
   tokens,
 } from "@fluentui/react-components";
-import { ChevronDownRegular } from "@fluentui/react-icons";
+import { HistoryRegular } from "@fluentui/react-icons";
 import { buildBffApiUrl, type AuthenticatedFetchFn } from "@spaarke/auth";
 import {
   logTelemetryError,
@@ -167,7 +167,9 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   itemTitle: {
-    fontWeight: tokens.fontWeightSemibold,
+    // R5-5 (UAT 2026-07-20): smaller + not bold — the list read too heavy.
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
     color: tokens.colorNeutralForeground1,
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -394,13 +396,16 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
       positioning="below-end"
     >
       <MenuTrigger disableButtonEnhancement>
-        <Tooltip content="Show chat history" relationship="label">
+        <Tooltip content="Chat history" relationship="label">
+          {/* P2-2 (UAT 2026-07-18): icon-only History trigger (Claude-Code style) —
+              the "History" word + chevron were replaced by a single HistoryRegular
+              icon so the three header controls read as icons (History / New session /
+              Tools). aria-label + tooltip preserve accessibility. */}
           <Button
             appearance="subtle"
             size="small"
-            icon={<ChevronDownRegular />}
-            iconPosition="after"
-            aria-label="Open chat history menu"
+            icon={<HistoryRegular />}
+            aria-label="Chat history"
             className={styles.trigger}
             data-testid="history-menu-trigger"
             onClick={(e) => {
@@ -409,9 +414,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
               // button click handler in ConversationPane).
               e.stopPropagation();
             }}
-          >
-            History
-          </Button>
+          />
         </Tooltip>
       </MenuTrigger>
 

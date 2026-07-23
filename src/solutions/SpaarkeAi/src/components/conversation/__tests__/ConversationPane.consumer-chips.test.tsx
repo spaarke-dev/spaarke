@@ -238,3 +238,54 @@ describe('Click path — chips carry binding_id; dispatchConsumer is the only di
     expect(deps.getSessionId()).toBe(TEST_SESSION_ID);
   });
 });
+
+// ---------------------------------------------------------------------------
+// task 043 / FR-G1 — SNS cards render only post-dispatch; "More" opens the
+// EXISTING playbook/capability library modal (no parallel modal surface).
+// ---------------------------------------------------------------------------
+
+describe('Suggested Next Steps cards — "More" affordance (task 043 / FR-G1)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let originalXrm: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const navigateToSpy = jest.fn<Promise<void>, [any, any?]>(() => Promise.resolve());
+
+  beforeEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    originalXrm = (window as any).Xrm;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Xrm = { Navigation: { navigateTo: navigateToSpy } };
+    navigateToSpy.mockClear();
+  });
+
+  afterEach(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).Xrm = originalXrm;
+  });
+
+  it('SNS cards render only AFTER chips arrive (not before) and include a "More" card', () => {
+    renderPane();
+    expect(screen.queryByTestId('consumer-chips')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('consumer-chips-more')).not.toBeInTheDocument();
+
+    deliverChips([{ target_binding_id: 'b-summarize-all', chip_label: 'Summarize all?' }]);
+
+    expect(screen.getByTestId('consumer-chips')).toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chip-b-summarize-all')).toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chips-more')).toBeInTheDocument();
+  });
+
+  it('clicking "More" opens the Quick Start modal (P1-8 — the playbook library is retired)', () => {
+    renderPane();
+    deliverChips([{ target_binding_id: 'b-summarize-all', chip_label: 'Summarize all?' }]);
+
+    expect(screen.queryByTestId('quick-start-modal')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('consumer-chips-more'));
+
+    // P1-8 (UAT 2026-07-18): the chips' "More…" affordance now opens Quick Start, NOT the
+    // retired sprk_playbooklibrary web resource. So it opens the in-app modal, not Xrm.Navigation.
+    expect(screen.getByTestId('quick-start-modal')).toBeInTheDocument();
+    expect(navigateToSpy).not.toHaveBeenCalled();
+  });
+});

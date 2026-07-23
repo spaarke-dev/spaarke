@@ -236,18 +236,10 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
         agent.Context.SystemPrompt.Should().Contain("never guess the year");
     }
 
-    [Fact]
-    public void BuildCurrentDateDirective_FormatsUtcDateDeterministically()
-    {
-        var text = SprkChatAgentFactory.BuildCurrentDateDirective(
-            new DateTimeOffset(2026, 7, 7, 18, 30, 0, TimeSpan.Zero));
-
-        text.Should().Contain("Today's date is 2026-07-07 (Tuesday, UTC)");
-        text.Should().Contain("'tomorrow'",
-            because: "the exact round-5 failure word is named in the resolution instruction");
-        text.Should().Contain("state the absolute date in your proposal",
-            because: "the user must be able to correct a mis-resolved date BEFORE confirming");
-    }
+    // Task 053 (FR-B-04): BuildCurrentDateDirective_FormatsUtcDateDeterministically moved to
+    // ContextSliceProducersTests (the current-date directive moved to
+    // ContextSliceProducers.EnvironmentFactsProducer). The CreateAgentAsync integration assertion
+    // above still pins that the directive is appended to the live system prompt (bytes unchanged).
 
     [Fact]
     public async Task CreateAgentAsync_ZeroToolsProjected_OmitsSideEffectHonestyDirective()
@@ -293,7 +285,7 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
-                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(ctx);
 
         services.AddSingleton(Mock.Of<IChatClient>());

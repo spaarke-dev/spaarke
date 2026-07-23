@@ -1,16 +1,17 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
-using Microsoft.Graph.Models.ODataErrors;
-using Microsoft.Graph.Users.Item.SendMail;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Channels;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
@@ -19,48 +20,918 @@ using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 namespace Sprk.Bff.Api.Services.Communication;
 
 /// <summary>
-/// Core communication service that validates requests, resolves approved senders,
-/// builds Graph Message payloads, sends email via GraphClientFactory.ForApp(),
-/// and creates a Dataverse sprk_communication tracking record (best-effort).
+/// Core communication service that validates requests, resolves approved senders, and orchestrates the
+/// send lifecycle (Dataverse tracking record, SPE archival, enrichment). Channel-specific transmit and
+/// archival are delegated to the channel seams (ADR-045 rule 4) via <see cref="CommunicationChannelDispatcher"/>,
+/// so this orchestrator is free of provider (Microsoft.Graph) types — a future channel is added by
+/// registering a new sender/archiver, with no change here (NFR-04).
 /// </summary>
 public sealed class CommunicationService
 {
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly CommunicationChannelDispatcher _channelDispatcher;
     private readonly ApprovedSenderValidator _senderValidator;
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
-    private readonly EmlGenerationService _emlGenerationService;
     private readonly SpeFileStore _speFileStore;
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
+    private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
+    private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly IDirectThreadAccessService? _directThreadAccess;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
+    /// <param name="threadResolver">
+    /// Direction-symmetric thread resolver (task 040 / FR-06) — optional so existing unit constructions that
+    /// predate it keep compiling; production DI always supplies it. Invoked best-effort on send to join a
+    /// reply's parent thread (email ancestry) or create a fresh thread (NFR-02, non-fatal).
+    /// </param>
+    /// <param name="scopeFactory">
+    /// Scope factory used to reach the Scoped <see cref="IIdempotencyService"/> from this Singleton service
+    /// (the codebase's canonical Singleton→Scoped bridge). Used on the outbound MESSAGE path (task 051 / FR-04)
+    /// to mark our own ACS message id processed so the Event Grid echo of our outbound message is a no-op inbound
+    /// (echo-dedup). Optional so existing unit constructions keep compiling; production DI always supplies it.
+    /// </param>
+    /// <param name="directThreadAccess">
+    /// Direct 1:1 thread access mechanics (task 043 / FR-09) — invoked best-effort right after an outbound
+    /// MESSAGE persists into a Direct-topology thread, to grant that ONE message Read access to the thread's
+    /// explicit participants (the CRITICAL RISK task 043 closes: <c>sprk_communication</c> is User-level and
+    /// every row is owned by the app-only identity, so without this grant neither participant can read a
+    /// Direct-thread message via the impersonated read, task 050). No-op for a non-Direct thread. Optional so
+    /// existing unit constructions keep compiling; production DI always supplies it.
+    /// </param>
+    /// <param name="participantIndexer">
+    /// Participant-index writer (task 050 / FR-08 / ADR-048) — invoked best-effort after a message persists to
+    /// write the (message × person/address × role) <c>sprk_communicationparticipant</c> rows the <c>participant=</c>
+    /// facet (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies
+    /// it. Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never fails the send.
+    /// </param>
     public CommunicationService(
-        IGraphClientFactory graphClientFactory,
+        CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
-        EmlGenerationService emlGenerationService,
         SpeFileStore speFileStore,
         CommunicationAccountService accountService,
         JobSubmissionService jobSubmissionService,
+        ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
-        ILogger<CommunicationService> logger)
+        ILogger<CommunicationService> logger,
+        IThreadResolver? threadResolver = null,
+        IServiceScopeFactory? scopeFactory = null,
+        IDirectThreadAccessService? directThreadAccess = null,
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
-        _graphClientFactory = graphClientFactory;
+        _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _documentService = documentService;
-        _emlGenerationService = emlGenerationService;
         _speFileStore = speFileStore;
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
+        _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
+        _scopeFactory = scopeFactory;
+        _directThreadAccess = directThreadAccess;
+        _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Archives an EXISTING communication on demand (task 044 — the "Save to SharePoint" action).
+    /// Reuses the same archival path as send/receive: generates the <c>.eml</c> via the channel
+    /// archiver seam, uploads it to SPE, and creates the archive <c>sprk_document</c> plus a
+    /// <c>sprk_document</c> for each attachment that does not already have one. Reconstructs the
+    /// <see cref="SendCommunicationRequest"/>/<see cref="SendCommunicationResponse"/> from the stored
+    /// record (there is no live Graph message on this path).
+    ///
+    /// Idempotent: if an email-archive Document already exists for this communication (the auto-archival
+    /// created it on send/receive), returns <see cref="ArchiveCommunicationResult.AlreadyArchived"/> = true
+    /// without creating duplicates. Attachment Documents are only created for attachments that lack one.
+    /// </summary>
+    public async Task<ArchiveCommunicationResult> ArchiveExistingAsync(Guid communicationId, CancellationToken ct)
+    {
+        // 1. Load the persisted communication.
+        DataverseEntity record;
+        try
+        {
+            record = await _genericEntityService.RetrieveAsync(
+                "sprk_communication",
+                communicationId,
+                new[] { "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_communicationtype", "sprk_direction", "sprk_sentat", "sprk_graphmessageid", "statuscode" },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Communication {CommunicationId} not found for archive", communicationId);
+            throw new SdapProblemException(
+                code: "COMMUNICATION_NOT_FOUND",
+                title: "Communication not found",
+                detail: $"Communication with ID '{communicationId}' does not exist.",
+                statusCode: 404);
+        }
+
+        // 2. Archive any attachments that lack a Document — run INDEPENDENTLY of the .eml
+        // gate so an attachment added after a prior archive is still picked up on a later
+        // call (code-review W3/S5). Each created Document is linked back onto its attachment.
+        var attachmentsCreated = await ArchiveExistingAttachmentsAsync(communicationId, ct);
+
+        // 3. Idempotency for the .eml archive — already archived? Return the existing archive
+        // Document (plus any newly-archived attachments above), no .eml duplicate.
+        var existingArchiveId = await FindExistingArchiveDocumentAsync(communicationId, ct);
+        if (existingArchiveId.HasValue)
+        {
+            _logger.LogInformation(
+                "Communication {CommunicationId} .eml already archived (Document {DocumentId}); returning idempotently",
+                communicationId, existingArchiveId);
+            return new ArchiveCommunicationResult
+            {
+                CommunicationId = communicationId,
+                ArchiveDocumentId = existingArchiveId,
+                AlreadyArchived = true,
+                AttachmentDocumentsCreated = attachmentsCreated,
+            };
+        }
+
+        // 4. Reconstruct the request/response the archiver expects from the stored record.
+        var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
+        var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
+        var from = record.GetAttributeValue<string>("sprk_from") ?? string.Empty;
+        var typeValue = record.GetAttributeValue<OptionSetValue>("sprk_communicationtype")?.Value ?? (int)CommunicationType.Email;
+        var commType = Enum.IsDefined(typeof(CommunicationType), typeValue) ? (CommunicationType)typeValue : CommunicationType.Email;
+        var sentAtDt = record.GetAttributeValue<DateTime?>("sprk_sentat");
+        var sentAt = sentAtDt.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(sentAtDt.Value, DateTimeKind.Utc), TimeSpan.Zero)
+            : DateTimeOffset.UtcNow;
+        var statusValue = record.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? (int)CommunicationStatus.Draft;
+
+        // Map communication direction (Incoming=100000000) → archive-Document email direction
+        // (Received=100000000 / Sent=100000001) so an on-demand archive of an INBOUND email is
+        // not mislabeled "Sent" (code-review W1). Default (no direction / outbound) → Sent.
+        var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
+        var emailDirection = directionValue == 100000000 ? 100000000 : 100000001;
+
+        var request = new SendCommunicationRequest
+        {
+            To = to.Length > 0 ? to : new[] { string.Empty },
+            Cc = cc.Length > 0 ? cc : null,
+            Subject = record.GetAttributeValue<string>("sprk_subject") ?? "(No Subject)",
+            Body = record.GetAttributeValue<string>("sprk_body") ?? string.Empty,
+            BodyFormat = BodyFormat.HTML,
+            FromMailbox = string.IsNullOrEmpty(from) ? null : from,
+            CommunicationType = commType,
+        };
+        var response = new SendCommunicationResponse
+        {
+            CommunicationId = communicationId,
+            GraphMessageId = record.GetAttributeValue<string>("sprk_graphmessageid") ?? string.Empty,
+            Status = Enum.IsDefined(typeof(CommunicationStatus), statusValue) ? (CommunicationStatus)statusValue : CommunicationStatus.Delivered,
+            SentAt = sentAt,
+            From = from,
+        };
+
+        // 5. Archive the .eml (reuses the same path as send-side archival; ADR-045 archiver seam),
+        // stamping the correct direction on the archive Document.
+        Guid archiveDocumentId;
+        try
+        {
+            archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct, emailDirection);
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new SdapProblemException(
+                code: "ARCHIVE_NOT_CONFIGURED",
+                title: "Archival not configured",
+                detail: ex.Message,
+                statusCode: 500);
+        }
+
+        // 6. Enqueue Document Profile (AppOnlyDocumentAnalysis) for the on-demand archived .eml, at parity
+        // with the outbound-send path (SendAsync) and the auto-inbound path (UAT #5). Best-effort/non-fatal —
+        // EnqueueDocumentAnalysisAsync swallows and logs any failure internally.
+        await EnqueueDocumentAnalysisAsync(archiveDocumentId, Guid.NewGuid().ToString(), ct);
+
+        return new ArchiveCommunicationResult
+        {
+            CommunicationId = communicationId,
+            ArchiveDocumentId = archiveDocumentId,
+            AlreadyArchived = false,
+            AttachmentDocumentsCreated = attachmentsCreated,
+        };
+    }
+
+    /// <summary>Split a Dataverse recipient string (";"- or ","-separated) into trimmed, non-empty addresses.</summary>
+    private static string[] SplitRecipients(string? raw) =>
+        string.IsNullOrWhiteSpace(raw)
+            ? Array.Empty<string>()
+            : raw.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// Reconstructs the channel-neutral <see cref="NormalizedMessage"/> envelope + <see cref="AssociationContext"/>
+    /// from a STORED <c>sprk_communication</c> record (task 074, Path C — the on-demand suggestion path). Reuses
+    /// the same record-read + <see cref="SplitRecipients"/> plumbing as <see cref="ArchiveExistingAsync"/>; there
+    /// is no live Graph message here. <b>Read-only</b> — never writes. Throws <see cref="SdapProblemException"/>
+    /// (404) when the record does not exist (mirrors the archive/status not-found mapping).
+    /// </summary>
+    /// <param name="communicationId">The <c>sprk_communication</c> record to reconstruct from.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<(NormalizedMessage Message, AssociationContext Context)> ReconstructEnvelopeAsync(
+        Guid communicationId, CancellationToken ct)
+    {
+        DataverseEntity record;
+        try
+        {
+            // Only columns that exist on sprk_communication (verified against IncomingCommunicationProcessor
+            // + CreateDataverseRecord*). sprk_conversationid is NOT persisted yet (see ThreadContinuityRung),
+            // and there is no sprk_references column — so thread continuity re-evaluates via In-Reply-To /
+            // Internet-Message-Id only, exactly as the inbound path stamped them.
+            record = await _genericEntityService.RetrieveAsync(
+                "sprk_communication",
+                communicationId,
+                new[]
+                {
+                    "sprk_subject", "sprk_from", "sprk_to", "sprk_cc", "sprk_body", "sprk_bodyformat",
+                    "sprk_communicationtype", "sprk_direction", "sprk_sentat",
+                    "sprk_internetmessageid", "sprk_inreplyto", "sprk_graphmessageid",
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Communication {CommunicationId} not found for suggestion", communicationId);
+            throw new SdapProblemException(
+                code: "COMMUNICATION_NOT_FOUND",
+                title: "Communication not found",
+                detail: $"Communication with ID '{communicationId}' does not exist.",
+                statusCode: 404);
+        }
+
+        var to = SplitRecipients(record.GetAttributeValue<string>("sprk_to"));
+        var cc = SplitRecipients(record.GetAttributeValue<string>("sprk_cc"));
+
+        // Direction: Outgoing when explicitly stamped outbound; otherwise Incoming (the engine decision is
+        // direction-symmetric — direction is recorded in provenance, not branched on).
+        var directionValue = record.GetAttributeValue<OptionSetValue>("sprk_direction")?.Value;
+        var direction = directionValue == (int)CommunicationDirection.Outgoing
+            ? CommunicationDirection.Outgoing
+            : CommunicationDirection.Incoming;
+
+        var body = record.GetAttributeValue<string>("sprk_body");
+        var isHtml = record.GetAttributeValue<OptionSetValue>("sprk_bodyformat")?.Value == (int)BodyFormat.HTML;
+
+        var sentAtDt = record.GetAttributeValue<DateTime?>("sprk_sentat");
+        var sentAt = sentAtDt.HasValue
+            ? new DateTimeOffset(DateTime.SpecifyKind(sentAtDt.Value, DateTimeKind.Utc), TimeSpan.Zero)
+            : (DateTimeOffset?)null;
+
+        var message = new NormalizedMessage
+        {
+            Direction = direction,
+            From = record.GetAttributeValue<string>("sprk_from"),
+            To = to,
+            Cc = cc,
+            Subject = record.GetAttributeValue<string>("sprk_subject"),
+            BodyText = isHtml ? null : body,
+            BodyHtml = isHtml ? body : null,
+            InternetMessageId = record.GetAttributeValue<string>("sprk_internetmessageid"),
+            InReplyTo = record.GetAttributeValue<string>("sprk_inreplyto"),
+            SentAt = sentAt,
+        };
+
+        // Mirror IncomingCommunicationProcessor's AssociationContext construction. On this stored-record path
+        // there is no live mailbox account or tenant key to hand the engine, so both are left null (Account is
+        // unused by the deterministic rungs; a null TenantKey ⇒ the global auto-file kill-switch applies).
+        var context = new AssociationContext();
+
+        return (message, context);
+    }
+
+    /// <summary>
+    /// Returns the id of an existing email-archive <c>sprk_document</c> for the communication, or null.
+    /// Used for idempotent on-demand archival (task 044).
+    /// </summary>
+    private async Task<Guid?> FindExistingArchiveDocumentAsync(Guid communicationId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet("sprk_documentid"),
+            TopCount = 1,
+            Criteria =
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId),
+                    new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true),
+                },
+            },
+        };
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
+    }
+
+    /// <summary>
+    /// Creates a <c>sprk_document</c> for each attachment of the communication that lacks one (has an SPE
+    /// item id but no linked document), using the attachment's OWN drive id (code-review W2), links the
+    /// created Document back onto the attachment so a later archive skips it (idempotency, code-review W3),
+    /// and enqueues AI analysis for parity with the send path. Returns the number archived. Per-attachment
+    /// failures are non-fatal.
+    /// </summary>
+    private async Task<int> ArchiveExistingAttachmentsAsync(Guid communicationId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_communicationattachment")
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid", "sprk_document"),
+            Criteria =
+            {
+                Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
+            },
+        };
+
+        var attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var correlationId = Guid.NewGuid().ToString();
+        var created = 0;
+
+        foreach (var att in attachments.Entities)
+        {
+            // Skip attachments that already have a Document, or that were never uploaded to SPE.
+            if (att.GetAttributeValue<EntityReference>("sprk_document") is not null) continue;
+            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(itemId)) continue;
+
+            // Prefer the attachment's own drive id; fall back to the archive container.
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            if (string.IsNullOrEmpty(driveId)) continue;
+
+            var fileName = att.GetAttributeValue<string>("sprk_name") ?? "Attachment";
+
+            try
+            {
+                var attachmentDoc = new DataverseEntity("sprk_document")
+                {
+                    ["sprk_documentname"] = TruncateTo(fileName, 200),
+                    ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
+                    ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                    ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
+                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_graphitemid"] = itemId,
+                    ["sprk_graphdriveid"] = driveId,
+                };
+
+                var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
+
+                // Link the Document back onto the attachment so a later archive skips it (W3).
+                await _genericEntityService.UpdateAsync(
+                    "sprk_communicationattachment",
+                    att.Id,
+                    new Dictionary<string, object> { ["sprk_document"] = new EntityReference("sprk_document", documentId) },
+                    ct);
+
+                // Enqueue AI analysis (parity with the send-side attachment archival).
+                await EnqueueDocumentAnalysisAsync(documentId, correlationId, ct);
+                created++;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to archive attachment '{FileName}' for communication {CommunicationId} (non-fatal)",
+                    fileName, communicationId);
+            }
+        }
+
+        return created;
+    }
+
+    /// <summary>
+    /// Builds the normalized envelope (ADR-045 / FR-09) for an outbound send, so enrichment operates
+    /// over <see cref="NormalizedMessage"/> — never a channel-specific type. Skeleton mapping for task 010;
+    /// task 011 finalizes the envelope shape.
+    /// </summary>
+    private static NormalizedMessage BuildOutboundEnvelope(SendCommunicationRequest request, string fromEmail)
+        => new()
+        {
+            Direction = CommunicationDirection.Outgoing,
+            From = fromEmail,
+            To = request.To ?? Array.Empty<string>(),
+            Cc = request.Cc ?? Array.Empty<string>(),
+            Subject = request.Subject,
+            BodyText = request.BodyFormat == BodyFormat.PlainText ? request.Body : null,
+            BodyHtml = request.BodyFormat == BodyFormat.PlainText ? null : request.Body,
+            // NOTE: reply-thread fields (InReplyTo/References/ConversationId) are left null here — the
+            // FR-06 send-path reply-thread columns are not present on this worktree branch (see ESCALATION
+            // E6). Task 011 finalizes the envelope; the Association Engine will populate thread rung (1) then.
+            SentAt = DateTimeOffset.UtcNow,
+        };
+
+    /// <summary>
+    /// Resolves the outbound EMAIL's thread and stamps <c>sprk_communicationthread</c>
+    /// (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+    /// <b>(1) Explicit target (FR-19)</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied
+    /// (the "respond into the current thread" case), the lookup is stamped DIRECTLY to that thread via the SAME
+    /// <see cref="AssignExplicitThreadAsync"/> helper the Message path uses (<c>ResolveOutboundMessageThreadAsync</c>),
+    /// bypassing the find-or-create resolver below entirely — no new send path or assignment mechanism (ADR-045).
+    /// <b>(2) Find-or-create</b> — otherwise (no <c>ThreadId</c>), behavior is UNCHANGED: a reply
+    /// (<c>InReplyToMessageId</c> set) joins its parent's thread and a fresh email creates one; the thread anchors
+    /// to the record's regarding (mapped at create time, ADR-024 reuse). Both paths MUST NOT fail the send.
+    /// </summary>
+    private async Task ResolveOutboundThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, string correlationId, CancellationToken ct)
+    {
+        // (1) FR-19 explicit target: mirror the Message path — stamp the supplied thread directly and skip
+        // find-or-create. AssignExplicitThreadAsync is self-contained best-effort / non-fatal (NFR-02): a stamp
+        // failure never fails the already-sent + persisted email. Checked BEFORE the resolver-null guard so an
+        // explicit ThreadId is honored even when no find-or-create resolver is wired (parity with the Message path).
+        if (request.ThreadId.HasValue)
+        {
+            await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+            return;
+        }
+
+        // (2) Find-or-create (unchanged pre-FR-19 behavior).
+        if (_threadResolver is null)
+            return;
+
+        try
+        {
+            var envelope = new NormalizedMessage
+            {
+                Direction = CommunicationDirection.Outgoing,
+                Subject = request.Subject,
+                InReplyTo = string.IsNullOrWhiteSpace(request.InReplyToMessageId) ? null : request.InReplyToMessageId,
+            };
+
+            await _threadResolver.ResolveAndAssignThreadAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = request.CommunicationType,
+                    Direction = CommunicationDirection.Outgoing,
+                    Message = envelope,
+                    AcsThreadId = null, // outbound ACS thread id is assigned by the inbound echo path in R1
+                },
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Outbound MESSAGE (ACS Chat) send path — persist-on-send + echo-dedup (task 051 / FR-04 / ADR-045 rule 3).
+    /// Dispatches through the EXISTING <see cref="CommunicationChannelDispatcher"/> (NOT a forked send path) to the
+    /// messaging <see cref="Channels.ICommunicationChannelSender"/>, which posts server-side over ACS Chat AS the
+    /// sending participant using a server-minted chat token (NFR-05 — no token reaches the client). It then persists
+    /// exactly ONE <c>sprk_communication</c> (type=Message, Direction=Outgoing) recording the ACS message id
+    /// (<c>sprk_acsmessageid</c>) + thread id (<c>sprk_acsthreadid</c>), and MARKS that ACS message id processed on
+    /// the shared <see cref="IIdempotencyService"/> using the SAME key the inbound handler dedupes on
+    /// (<see cref="IncomingMessagingJobHandler.IdempotencyKeyFor"/>) — so the Event Grid echo of our own outbound
+    /// message is a no-op inbound (the load-bearing exactly-once property). Thread resolution (task 040) and
+    /// enrichment are best-effort / non-fatal (NFR-02): a failure there never fails an already-sent + persisted
+    /// message. No ACS token or admin capability is returned to the caller (NFR-04/NFR-05).
+    /// </summary>
+    private async Task<SendCommunicationResponse> SendMessageAsync(
+        SendCommunicationRequest request,
+        HttpContext? httpContext,
+        string correlationId,
+        CancellationToken ct)
+    {
+        // A message must carry content. Recipients/subject are optional for chat — the ACS thread is the
+        // addressing unit and a chat thread may have no subject (the sender defaults a topic).
+        if (string.IsNullOrWhiteSpace(request.Body))
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "Message body is required.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        // The BFF posts AS the authenticated user (server-minted token — NFR-05). A message has no shared-mailbox
+        // concept, so an authenticated user context is required to identify the sending participant.
+        if (httpContext is null)
+        {
+            throw new SdapProblemException(
+                code: "OBO_CONTEXT_REQUIRED",
+                title: "HttpContext Required",
+                detail: "Sending a message requires an authenticated HttpContext to resolve the sending participant.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        var (senderParticipant, senderEmail, senderDisplayName) =
+            await ResolveMessageSenderAsync(httpContext, correlationId, ct);
+
+        try
+        {
+            // Dispatch by CommunicationType through the EXISTING dispatcher (ADR-045 — no second send path). The
+            // messaging sender resolves the sender's ACS identity (task 010), mints their chat token, resolves or
+            // creates the ACS thread (task 011), posts the message, and returns the ACS message id
+            // (ProviderMessageId = the echo-dedup key, FR-04) + ACS thread id (ProviderThreadId).
+            var sendResult = await _channelDispatcher.ResolveSender(CommunicationType.Message).SendAsync(
+                new ChannelSendRequest
+                {
+                    Communication = request,
+                    FromAddress = senderEmail,
+                    FromDisplayName = senderDisplayName,
+                    UserMode = false,
+                    CorrelationId = correlationId,
+                    SenderParticipant = senderParticipant,
+                    // R1 has no live client to supply a thread; the messaging sender creates/looks up the ACS
+                    // thread and returns it as ProviderThreadId (persisted + used for thread grouping below).
+                    AcsThreadId = null
+                },
+                ct);
+
+            // Persist-on-send (ADR-045 rule 3): exactly ONE sprk_communication, recording the ACS correlation ids.
+            Guid? communicationId = null;
+            try
+            {
+                communicationId = await CreateMessageDataverseRecordAsync(
+                    request, senderEmail, sendResult, correlationId, ct);
+            }
+            catch (Exception dvEx)
+            {
+                // Non-fatal: the message reached ACS. Without a persisted record we deliberately do NOT mark the
+                // echo processed below, so the inbound echo persists it instead (at-least-once backstop — still
+                // exactly one record). This mirrors the inbound handler's persist-before-mark ordering.
+                _logger.LogWarning(
+                    dvEx,
+                    "Message Dataverse record creation failed (non-fatal) | CorrelationId: {CorrelationId}",
+                    correlationId);
+            }
+
+            // Echo-dedup mark (FR-04 / NFR-03) — the load-bearing exactly-once seam. Mark the SAME key the inbound
+            // handler dedupes on so the Event Grid echo of our own outbound message is a no-op inbound. Marked
+            // AFTER a successful persist so a failed persist lets the echo capture the message rather than dropping
+            // it. Best-effort: a mark failure MUST NOT fail an already-sent + persisted message (NFR-02).
+            if (communicationId.HasValue && !string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
+            {
+                await MarkOutboundEchoProcessedAsync(sendResult.ProviderMessageId!, correlationId, ct);
+            }
+
+            // Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02). Unlike the email path the
+            // outbound message HAS its authoritative ACS thread id (ProviderThreadId), so the messaging key
+            // strategy can group by it now (find-or-create sprk_communicationthread + channel-ref row).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundMessageThreadAsync(
+                    communicationId.Value, request, sendResult.ProviderThreadId, correlationId, ct);
+            }
+
+            // Direction-symmetric enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, senderEmail),
+                        archivedDocumentId: null,
+                        ct);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. The sender
+            // is already resolved to a systemuser (ResolveMessageSenderAsync), so its row carries sprk_systemuser
+            // directly (no redundant lookup); recipients resolve via the shared email→contact resolver.
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderEmail, senderParticipant,
+                    request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index so the fan-out junction + thread lookup are populated
+                // (the same spine-owned producer + emit point the inbound + email send paths use — channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
+            }
+
+            // The response carries only the tracking record id + status — NO ACS token or admin capability
+            // reaches the caller (NFR-04/NFR-05).
+            return new SendCommunicationResponse
+            {
+                CommunicationId = communicationId,
+                GraphMessageId = correlationId,
+                Status = CommunicationStatus.Send,
+                SentAt = DateTimeOffset.UtcNow,
+                From = senderEmail,
+                CorrelationId = correlationId
+            };
+        }
+        catch (Exception ex) when (ex is not SdapProblemException)
+        {
+            _logger.LogError(
+                ex,
+                "Unexpected error sending message | CorrelationId: {CorrelationId}",
+                correlationId);
+
+            throw new SdapProblemException(
+                code: "CHANNEL_SEND_FAILED",
+                title: "Message Send Failed",
+                detail: $"Unexpected error: {ex.Message}",
+                statusCode: 500,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+    }
+
+    /// <summary>
+    /// Resolves the outbound message's sending participant from the authenticated user's claims: the Entra
+    /// <c>oid</c> → Dataverse <c>systemuserid</c> (the durable key <see cref="Acs.IAcsIdentityService"/> maps to
+    /// an ACS <c>communicationUserId</c>). Returns the participant plus the user's email + display name for the
+    /// persisted record + sender display. Throws RFC 7807 <see cref="SdapProblemException"/> (400) when the
+    /// claims or the systemuser mapping cannot be resolved — a message cannot be sent without a sending identity.
+    /// </summary>
+    private async Task<(ParticipantReference Participant, string Email, string? DisplayName)> ResolveMessageSenderAsync(
+        HttpContext httpContext, string correlationId, CancellationToken ct)
+    {
+        var userEmail = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? httpContext.User.FindFirst("preferred_username")?.Value
+            ?? httpContext.User.FindFirst("email")?.Value
+            ?? httpContext.User.FindFirst("upn")?.Value
+            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+            ?? httpContext.User.FindFirst("unique_name")?.Value;
+
+        var userObjectId = httpContext.User.FindFirst("oid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+
+        if (string.IsNullOrWhiteSpace(userObjectId))
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "Could not resolve the sending user's object id (oid) from authentication claims.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        Guid? systemUserId;
+        try
+        {
+            systemUserId = await _communicationService.QuerySystemUserByAzureAdOidAsync(userObjectId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to resolve systemuser for message sender (oid={UserObjectId}) | CorrelationId: {CorrelationId}",
+                userObjectId, correlationId);
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "Failed to resolve the sending user's Dataverse identity.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        if (!systemUserId.HasValue)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The sending user has no Dataverse systemuser record; cannot act as an ACS participant.",
+                statusCode: 400,
+                extensions: new Dictionary<string, object> { ["correlationId"] = correlationId });
+        }
+
+        var displayName = httpContext.User.FindFirst("name")?.Value
+            ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+
+        return (ParticipantReference.SystemUser(systemUserId.Value),
+                string.IsNullOrWhiteSpace(userEmail) ? userObjectId : userEmail,
+                displayName);
+    }
+
+    /// <summary>
+    /// Persists the outbound message as exactly one <c>sprk_communication</c> (type=Message, Direction=Outgoing),
+    /// recording the ACS correlation ids under the AS-BUILT schema names — <c>sprk_acsmessageid</c> (the
+    /// echo-dedup key) and <c>sprk_acsthreadid</c>. Mirrors <see cref="Channels.MessagingIngestor"/>'s persist
+    /// shape for the inbound direction so both directions land one comparable record.
+    /// </summary>
+    private async Task<Guid> CreateMessageDataverseRecordAsync(
+        SendCommunicationRequest request,
+        string senderEmail,
+        Channels.ChannelSendResult sendResult,
+        string correlationId,
+        CancellationToken ct)
+    {
+        var subject = string.IsNullOrWhiteSpace(request.Subject) ? "(No Subject)" : request.Subject;
+
+        var communication = new DataverseEntity("sprk_communication")
+        {
+            ["sprk_name"] = $"Message: {TruncateTo(subject, 200)}",
+            ["sprk_communicationtype"] = new OptionSetValue((int)CommunicationType.Message),   // 100000004
+            ["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send),
+            ["statecode"] = new OptionSetValue(0), // Active
+            ["sprk_direction"] = new OptionSetValue((int)CommunicationDirection.Outgoing),      // 100000001
+            ["sprk_bodyformat"] = new OptionSetValue((int)request.BodyFormat),
+            ["sprk_to"] = request.To is { Length: > 0 } ? string.Join("; ", request.To) : string.Empty,
+            ["sprk_from"] = senderEmail,
+            ["sprk_subject"] = subject,
+            ["sprk_body"] = request.Body,
+            ["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime,
+            ["sprk_correlationid"] = correlationId
+        };
+
+        // ACS transport ids (AS-BUILT schema names): the dedupe key + denormalized thread id. The
+        // sprk_communicationthread LOOKUP (grouping key) is set by task 040's resolver, NOT here.
+        if (!string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
+            communication["sprk_acsmessageid"] = sendResult.ProviderMessageId;
+        if (!string.IsNullOrWhiteSpace(sendResult.ProviderThreadId))
+            communication["sprk_acsthreadid"] = sendResult.ProviderThreadId;
+
+        if (request.Cc is { Length: > 0 })
+            communication["sprk_cc"] = string.Join("; ", request.Cc);
+
+        // Reply-thread continuity (task 062): stamp the parent message id when provided — mirrors the
+        // email path's sprk_inreplyto stamp (CreateDataverseRecordAsync / CreateAsUserRecordAsync). Not
+        // previously wired for the Message channel.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
+        // Reply regarding inheritance (UAT R4 D12-1 / task 124) — a Message reply/forward inherits the
+        // parent message's regarding the same way email does; copy before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
+        // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
+        MapAssociationFields(communication, request.Associations, _logger);
+
+        var recordId = await _genericEntityService.CreateAsync(communication, ct);
+
+        _logger.LogInformation(
+            "Persisted outbound message | CommunicationId: {RecordId}, AcsMessageId: {AcsMessageId}, AcsThreadId: {AcsThreadId}, CorrelationId: {CorrelationId}",
+            recordId, sendResult.ProviderMessageId, sendResult.ProviderThreadId, correlationId);
+
+        return recordId;
+    }
+
+    /// <summary>
+    /// Marks the outbound ACS message id processed on the shared <see cref="IIdempotencyService"/> using the
+    /// canonical key (<see cref="IncomingMessagingJobHandler.IdempotencyKeyFor"/>), so the Event Grid echo of our
+    /// own message hits the inbound handler's fast-path dedupe and is a no-op — exactly-once persistence (FR-04 /
+    /// NFR-03). Reaches the Scoped idempotency service from this Singleton via the scope factory (the codebase's
+    /// canonical Singleton→Scoped bridge). Best-effort / non-fatal (NFR-02): a mark failure never fails an
+    /// already-sent + persisted message (a rare double-persist on echo is preferable to failing the send).
+    /// </summary>
+    private async Task MarkOutboundEchoProcessedAsync(string acsMessageId, string correlationId, CancellationToken ct)
+    {
+        var key = IncomingMessagingJobHandler.IdempotencyKeyFor(acsMessageId);
+        try
+        {
+            if (_scopeFactory is null)
+            {
+                _logger.LogWarning(
+                    "No scope factory available to mark echo-dedup key {Key} (non-fatal) | CorrelationId: {CorrelationId}",
+                    key, correlationId);
+                return;
+            }
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
+            await idempotency.MarkEventAsProcessedAsync(key, expiration: null, ct);
+
+            _logger.LogInformation(
+                "Marked outbound ACS message {AcsMessageId} processed for echo-dedup (key={Key}) | CorrelationId: {CorrelationId}",
+                acsMessageId, key, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Echo-dedup mark failed (non-fatal) for ACS message {AcsMessageId} | CorrelationId: {CorrelationId}",
+                acsMessageId, correlationId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the outbound message's <c>sprk_communicationthread</c>. Two paths (task 062 / FR-12):
+    /// <b>(1) Explicit target</b> — when <see cref="SendCommunicationRequest.ThreadId"/> is supplied (the
+    /// "respond into the current thread" case), the lookup is stamped DIRECTLY to that thread, bypassing the
+    /// ACS-thread find-or-create resolver below entirely (R1 has no live channel — see the field's doc
+    /// comment; ACS-thread-session reuse is R2). <b>(2) Find-or-create</b> — otherwise, the task-040
+    /// <see cref="IThreadResolver"/> groups by the authoritative ACS thread id. Both paths are best-effort /
+    /// non-fatal (NFR-02) — a resolve failure MUST NOT fail the send. Returns the resolved thread id (or null
+    /// on failure/no resolver) so the caller can chain the task-043 Direct-thread message access grant.
+    /// </summary>
+    private async Task<Guid?> ResolveOutboundMessageThreadAsync(
+        Guid communicationId, SendCommunicationRequest request, string? acsThreadId, string correlationId, CancellationToken ct)
+    {
+        if (request.ThreadId.HasValue)
+        {
+            return await AssignExplicitThreadAsync(communicationId, request.ThreadId.Value, correlationId, ct);
+        }
+
+        if (_threadResolver is null)
+            return null;
+
+        try
+        {
+            var envelope = new NormalizedMessage
+            {
+                Direction = CommunicationDirection.Outgoing,
+                Subject = request.Subject,
+            };
+
+            var threadId = await _threadResolver.ResolveAndAssignThreadAsync(
+                new ThreadResolutionRequest
+                {
+                    CommunicationId = communicationId,
+                    ChannelType = CommunicationType.Message,
+                    Direction = CommunicationDirection.Outgoing,
+                    Message = envelope,
+                    AcsThreadId = string.IsNullOrWhiteSpace(acsThreadId) ? null : acsThreadId,
+                },
+                ct);
+
+            // task 043 CRITICAL RISK fix: sprk_communication is User-level and this message is owned by the
+            // app-only identity, so a Direct-thread message is invisible to BOTH participants under the
+            // impersonated read (task 050) unless explicitly shared. Best-effort inside GrantMessageAccessAsync
+            // itself (no-op for a non-Direct thread; failures are logged and swallowed).
+            if (threadId.HasValue && _directThreadAccess is not null)
+            {
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId.Value, ct);
+            }
+
+            return threadId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Thread resolution failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                correlationId, communicationId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// R1 "respond into the current thread" explicit-target path (task 062 / FR-12). Stamps
+    /// <c>sprk_communication.sprk_communicationthread</c> directly to <paramref name="threadId"/> — no
+    /// find-or-create, no ACS-thread key lookup (see <see cref="SendCommunicationRequest.ThreadId"/> for the
+    /// R1-vs-R2 scope note). Chains the SAME task-043 Direct-thread message-access grant the find-or-create
+    /// path uses, so a message stamped this way is equally visible under the impersonated read (task 050).
+    /// Best-effort / non-fatal (NFR-02): a stamp failure MUST NOT fail the already-sent + persisted message.
+    /// </summary>
+    private async Task<Guid?> AssignExplicitThreadAsync(
+        Guid communicationId, Guid threadId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            await _genericEntityService.UpdateAsync(
+                "sprk_communication",
+                communicationId,
+                new Dictionary<string, object>
+                {
+                    ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
+                },
+                ct);
+
+            _logger.LogInformation(
+                "Stamped explicit thread target {ThreadId} (respond-into-thread) | CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                threadId, communicationId, correlationId);
+
+            // task 043 CRITICAL RISK fix applies here too — grant this ONE message to the target thread's
+            // current participants (Direct two-party list or Open derived set; no-op for neither).
+            if (_directThreadAccess is not null)
+            {
+                await _directThreadAccess.GrantMessageAccessAsync(communicationId, threadId, ct);
+            }
+
+            return threadId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Explicit thread stamp failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}, ThreadId: {ThreadId}",
+                correlationId, communicationId, threadId);
+            return null;
+        }
     }
 
     /// <summary>
@@ -88,6 +959,15 @@ public sealed class CommunicationService
             request.CommunicationType,
             request.SendMode);
 
+        // Branch: MESSAGE (ACS Chat) sends take the persist-on-send + echo-dedup path (task 051 / FR-04).
+        // Dispatch still flows through the SAME CommunicationChannelDispatcher (ADR-045 — no second send path);
+        // this branch only supplies the messaging-specific sender-identity + persistence shape (participant, not
+        // mailbox; ACS correlation ids; echo-dedup mark), mirroring the SendMode.User branch below.
+        if (request.CommunicationType == CommunicationType.Message)
+        {
+            return await SendMessageAsync(request, httpContext, correlationId, cancellationToken);
+        }
+
         // Branch: User mode sends via OBO as the authenticated user
         if (request.SendMode == SendMode.User)
         {
@@ -98,7 +978,7 @@ public sealed class CommunicationService
         ValidateRequest(request, correlationId);
 
         // Step 1b: Download and validate attachments (if any)
-        List<FileAttachment>? fileAttachments = null;
+        List<ChannelAttachment>? fileAttachments = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             fileAttachments = await DownloadAndBuildAttachmentsAsync(
@@ -159,33 +1039,22 @@ public sealed class CommunicationService
                 });
         }
 
-        // Step 3: Build Graph message
-        var message = BuildGraphMessage(request, senderResult);
-
-        // Step 3b: Attach files to message (if any)
-        if (fileAttachments is { Count: > 0 })
-        {
-            message.Attachments = new List<Attachment>(fileAttachments);
-        }
-
-        // Step 4: Send via Graph API (app-only)
+        // Step 3+4: Send via the email channel seam (dispatch by CommunicationType — ADR-045 rule 4).
+        // The sender owns Graph message construction, transport, and provider-error mapping; a provider
+        // failure surfaces as SdapProblemException (GRAPH_SEND_FAILED) and propagates unchanged.
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
-
-            await graphClient.Users[senderResult.Email].SendMail.PostAsync(
-                new SendMailPostRequestBody
+            var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
+                new ChannelSendRequest
                 {
-                    Message = message,
-                    SaveToSentItems = true
+                    Communication = request,
+                    FromAddress = senderResult.Email!,
+                    FromDisplayName = senderResult.DisplayName,
+                    UserMode = false,
+                    Attachments = fileAttachments,
+                    CorrelationId = correlationId
                 },
-                cancellationToken: cancellationToken);
-
-            _logger.LogInformation(
-                "Communication sent successfully | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}",
-                correlationId,
-                senderResult.Email,
-                request.To.Length);
+                cancellationToken);
 
             // Step 4b: Increment daily send count (best-effort — don't fail the send)
             if (senderAccount is not null)
@@ -215,6 +1084,20 @@ public sealed class CommunicationService
                     dvEx,
                     "Dataverse record creation failed (non-fatal) | CorrelationId: {CorrelationId}",
                     correlationId);
+            }
+
+            // Step 5b: Persist the Internet-Message-Id the channel sender captured post-send (FR-06 —
+            // feeds W1 thread rung). Channel-agnostic Dataverse stamp; best-effort.
+            if (communicationId.HasValue && sendResult.ProviderMessageId is not null)
+            {
+                await StampInternetMessageIdAsync(
+                    communicationId.Value, sendResult.ProviderMessageId, correlationId, cancellationToken);
+            }
+
+            // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, cancellationToken);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
@@ -344,6 +1227,44 @@ public sealed class CommunicationService
                     correlationId);
             }
 
+            // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
+            // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
+            // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, senderResult.Email!),
+                        archivedDocumentId,
+                        cancellationToken);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (no pre-resolved sender identity on this path).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, senderResult.Email, null,
+                    request.To, request.Cc, request.Bcc, cancellationToken);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, cancellationToken);
+            }
+
             return new SendCommunicationResponse
             {
                 CommunicationId = communicationId,
@@ -357,26 +1278,6 @@ public sealed class CommunicationService
                 AttachmentCount = request.AttachmentDocumentIds?.Length ?? 0,
                 AttachmentRecordWarning = attachmentRecordWarning
             };
-        }
-        catch (ODataError ex)
-        {
-            _logger.LogError(
-                ex,
-                "Graph sendMail failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}",
-                correlationId,
-                ex.ResponseStatusCode,
-                ex.Error?.Code);
-
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: $"Graph API error: {ex.Error?.Message ?? ex.Message}",
-                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
-                extensions: new Dictionary<string, object>
-                {
-                    ["correlationId"] = correlationId,
-                    ["graphErrorCode"] = ex.Error?.Code ?? "unknown"
-                });
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
@@ -426,7 +1327,7 @@ public sealed class CommunicationService
         }
 
         // Step 1c: Download and validate attachments (if any)
-        List<FileAttachment>? fileAttachments = null;
+        List<ChannelAttachment>? fileAttachments = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             fileAttachments = await DownloadAndBuildAttachmentsAsync(
@@ -465,53 +1366,22 @@ public sealed class CommunicationService
             correlationId,
             userEmail);
 
-        // Step 3: Build Graph message (user as sender)
-        var message = new Message
-        {
-            Subject = request.Subject,
-            Body = new ItemBody
-            {
-                ContentType = request.BodyFormat == Models.BodyFormat.PlainText ? BodyType.Text : BodyType.Html,
-                Content = request.Body
-            },
-            ToRecipients = request.To.Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            CcRecipients = (request.Cc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            BccRecipients = (request.Bcc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList()
-        };
-
-        // Step 3b: Attach files to message (if any)
-        if (fileAttachments is { Count: > 0 })
-        {
-            message.Attachments = new List<Attachment>(fileAttachments);
-        }
-
-        // Step 4: Send via Graph API (OBO — /me/sendMail)
+        // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
+        // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
+        // SdapProblemException (GRAPH_SEND_FAILED, sendMode=User) and propagate unchanged.
         try
         {
-            var graphClient = await _graphClientFactory.ForUserAsync(httpContext, ct);
-
-            await graphClient.Me.SendMail.PostAsync(
-                new Microsoft.Graph.Me.SendMail.SendMailPostRequestBody
+            var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
+                new ChannelSendRequest
                 {
-                    Message = message,
-                    SaveToSentItems = true
+                    Communication = request,
+                    FromAddress = userEmail,
+                    UserMode = true,
+                    HttpContext = httpContext,
+                    Attachments = fileAttachments,
+                    CorrelationId = correlationId
                 },
-                cancellationToken: ct);
-
-            _logger.LogInformation(
-                "Communication sent as user (OBO) | CorrelationId: {CorrelationId}, From: {From}, To: {RecipientCount}",
-                correlationId,
-                userEmail,
-                request.To.Length);
+                ct);
 
             // Step 5: Create Dataverse communication record (best-effort)
             Guid? communicationId = null;
@@ -526,6 +1396,20 @@ public sealed class CommunicationService
                     dvEx,
                     "Dataverse record creation failed (non-fatal) | CorrelationId: {CorrelationId}",
                     correlationId);
+            }
+
+            // Step 5b: Persist the Internet-Message-Id the channel sender captured post-send (FR-06 —
+            // feeds W1 thread rung). Channel-agnostic Dataverse stamp; best-effort.
+            if (communicationId.HasValue && sendResult.ProviderMessageId is not null)
+            {
+                await StampInternetMessageIdAsync(
+                    communicationId.Value, sendResult.ProviderMessageId, correlationId, ct);
+            }
+
+            // Step 5c: Resolve the thread (task 040 / FR-06) — best-effort, non-fatal (NFR-02).
+            if (communicationId.HasValue)
+            {
+                await ResolveOutboundThreadAsync(communicationId.Value, request, correlationId, ct);
             }
 
             // Step 6: Archive to SPE if requested (best-effort)
@@ -653,6 +1537,45 @@ public sealed class CommunicationService
                     correlationId);
             }
 
+            // Step 8: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06).
+            // Closes the previously-missing OUTBOUND RAG-indexing half; full association/analysis
+            // direction-symmetry lands in task 011. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
+            if (communicationId.HasValue)
+            {
+                try
+                {
+                    await _enrichmentService.EnrichAsync(
+                        communicationId.Value,
+                        CommunicationDirection.Outgoing,
+                        BuildOutboundEnvelope(request, userEmail),
+                        archivedDocumentId,
+                        ct);
+                }
+                catch (Exception enrichEx)
+                {
+                    _logger.LogWarning(
+                        enrichEx,
+                        "Enrichment failed (non-fatal) | CorrelationId: {CorrelationId}, CommunicationId: {CommunicationId}",
+                        correlationId, communicationId.Value);
+                }
+            }
+
+            // Participant index (task 050 / FR-08 / ADR-048) — best-effort / non-fatal + idempotent. Addresses
+            // resolve via the shared email→contact resolver (the sender's typed identity is already on the
+            // record's sprk_sentby lookup; the junction is additive and back-fillable).
+            if (communicationId.HasValue)
+            {
+                await WriteParticipantIndexAsync(
+                    communicationId.Value, userEmail, null,
+                    request.To, request.Cc, request.Bcc, ct);
+
+                // communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal, emitted
+                // AFTER thread resolution + participant index (fan-out junction + thread lookup populated). Same
+                // spine-owned producer + emit point as the other four persist paths (channel-identical).
+                if (_arrivedProducer is not null)
+                    await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId.Value, ct);
+            }
+
             return new SendCommunicationResponse
             {
                 CommunicationId = communicationId,
@@ -666,27 +1589,6 @@ public sealed class CommunicationService
                 AttachmentCount = request.AttachmentDocumentIds?.Length ?? 0,
                 AttachmentRecordWarning = attachmentRecordWarning
             };
-        }
-        catch (ODataError ex)
-        {
-            _logger.LogError(
-                ex,
-                "Graph sendMail (OBO) failed | CorrelationId: {CorrelationId}, StatusCode: {StatusCode}, ErrorCode: {ErrorCode}",
-                correlationId,
-                ex.ResponseStatusCode,
-                ex.Error?.Code);
-
-            throw new SdapProblemException(
-                code: "GRAPH_SEND_FAILED",
-                title: "Email Send Failed",
-                detail: $"Graph API error (OBO): {ex.Error?.Message ?? ex.Message}",
-                statusCode: ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502,
-                extensions: new Dictionary<string, object>
-                {
-                    ["correlationId"] = correlationId,
-                    ["graphErrorCode"] = ex.Error?.Code ?? "unknown",
-                    ["sendMode"] = "User"
-                });
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
@@ -767,12 +1669,21 @@ public sealed class CommunicationService
         if (request.Bcc is { Length: > 0 })
             communication["sprk_bcc"] = string.Join("; ", request.Bcc);
 
+        // Reply-thread continuity (FR-06): stamp the parent's Internet-Message-Id when provided.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
         // Set attachment fields if attachments were included
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             communication["sprk_hasattachments"] = true;
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
+
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — see the shared-mailbox
+        // create path; copies the parent's regarding onto this new draft before explicit associations.
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
@@ -830,39 +1741,6 @@ public sealed class CommunicationService
         }
     }
 
-    private static Message BuildGraphMessage(SendCommunicationRequest request, ApprovedSenderResult sender)
-    {
-        return new Message
-        {
-            Subject = request.Subject,
-            Body = new ItemBody
-            {
-                ContentType = request.BodyFormat == BodyFormat.PlainText ? BodyType.Text : BodyType.Html,
-                Content = request.Body
-            },
-            From = new Recipient
-            {
-                EmailAddress = new EmailAddress
-                {
-                    Address = sender.Email,
-                    Name = sender.DisplayName
-                }
-            },
-            ToRecipients = request.To.Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            CcRecipients = (request.Cc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList(),
-            BccRecipients = (request.Bcc ?? Array.Empty<string>()).Select(email => new Recipient
-            {
-                EmailAddress = new EmailAddress { Address = email }
-            }).ToList()
-        };
-    }
-
     /// <summary>
     /// Creates a Dataverse sprk_communication record to track the sent email.
     /// </summary>
@@ -895,12 +1773,22 @@ public sealed class CommunicationService
         if (request.Bcc is { Length: > 0 })
             communication["sprk_bcc"] = string.Join("; ", request.Bcc);
 
+        // Reply-thread continuity (FR-06): stamp the parent's Internet-Message-Id when provided.
+        if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
+            communication["sprk_inreplyto"] = request.InReplyToMessageId;
+
         // Set attachment fields if attachments were included
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
             communication["sprk_hasattachments"] = true;
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
+
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — copy the parent's
+        // regarding onto this new draft BEFORE mapping any explicit association, so an explicitly-supplied
+        // association still wins on its field (CopyRegardingFromSourceAsync skips already-set fields).
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
         MapAssociationFields(communication, request.Associations, _logger);
@@ -928,6 +1816,9 @@ public sealed class CommunicationService
         ["sprk_budget"] = ("sprk_regardingbudget", "sprk_budgets"),
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
+        ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),
+        ["sprk_event"] = ("sprk_regardingevent", "sprk_events"),
+        ["account"] = ("sprk_regardingaccount", "accounts"),
     };
 
     /// <summary>
@@ -969,6 +1860,77 @@ public sealed class CommunicationService
     }
 
     /// <summary>
+    /// Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124). Copies the
+    /// parent (source) communication's regarding association onto a NEW draft <paramref name="communication"/>:
+    /// reads ALL populated <c>sprk_regarding*</c> typed lookups (<see cref="Engine.RegardingFieldMap.AllRegardingFields"/>)
+    /// plus the denormalized regarding pointer (id/type/name/url) + association count from the source, and writes
+    /// each populated value onto the new record. This is a DIRECT COPY — it never invokes the Association Engine
+    /// and never re-derives (per the task-124 constraint + owner intent). Additive: only populated source fields
+    /// are set; a sibling regarding field is never cleared (mirrors task-042 write semantics). Best-effort /
+    /// non-fatal — an inheritance-read failure MUST NOT fail the send (NFR-02).
+    /// </summary>
+    private async Task CopyRegardingFromSourceAsync(
+        DataverseEntity communication, Guid sourceCommunicationId, string correlationId, CancellationToken ct)
+    {
+        try
+        {
+            var columns = new List<string>
+            {
+                "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname",
+                "sprk_regardingrecordurl", "sprk_associationcount",
+            };
+            columns.AddRange(Engine.RegardingFieldMap.AllRegardingFields);
+
+            var source = await _genericEntityService.RetrieveAsync(
+                "sprk_communication", sourceCommunicationId, columns.ToArray(), ct);
+
+            var copied = 0;
+            foreach (var (entityLogicalName, field) in Engine.RegardingFieldMap.All)
+            {
+                // Only copy a populated typed lookup; never overwrite a value already set on the new
+                // record by an explicit association (MapAssociationFields runs AFTER this — explicit wins).
+                if (!communication.Attributes.ContainsKey(field)
+                    && source.GetAttributeValue<EntityReference>(field) is { } er)
+                {
+                    communication[field] = new EntityReference(
+                        string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id);
+                    copied++;
+                }
+            }
+
+            // Denormalized regarding pointer — copy only populated values (additive).
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordid");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordtype");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordname");
+            CopyStringIfPresent(source, communication, "sprk_regardingrecordurl");
+
+            var count = source.GetAttributeValue<int?>("sprk_associationcount");
+            if (count is > 0 && !communication.Attributes.ContainsKey("sprk_associationcount"))
+                communication["sprk_associationcount"] = count.Value;
+
+            _logger.LogInformation(
+                "Inherited {Count} regarding lookup(s) from source communication {SourceId} onto new draft | CorrelationId: {CorrelationId}",
+                copied, sourceCommunicationId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Regarding inheritance from source communication {SourceId} failed (non-fatal) | CorrelationId: {CorrelationId}",
+                sourceCommunicationId, correlationId);
+        }
+    }
+
+    /// <summary>Copies a non-empty string attribute from <paramref name="source"/> to <paramref name="target"/>
+    /// only when the target does not already carry it (additive; explicit values win).</summary>
+    private static void CopyStringIfPresent(DataverseEntity source, DataverseEntity target, string field)
+    {
+        if (target.Attributes.ContainsKey(field)) return;
+        var val = source.GetAttributeValue<string>(field);
+        if (!string.IsNullOrWhiteSpace(val)) target[field] = val;
+    }
+
+    /// <summary>
     /// Archives the sent communication as a .eml file in SharePoint Embedded
     /// and creates a sprk_document record linking to the archived file.
     /// </summary>
@@ -976,12 +1938,23 @@ public sealed class CommunicationService
         SendCommunicationRequest request,
         SendCommunicationResponse partialResponse,
         Guid communicationId,
-        CancellationToken ct)
+        CancellationToken ct,
+        int emailDirection = 100000001) // default Sent — send-path callers are always outbound
     {
-        // 1. Generate .eml via EmlGenerationService
-        var emlResult = _emlGenerationService.GenerateEml(request, partialResponse);
+        // 1. Fetch the communication's attachment bytes from SPE (best-effort per attachment; NFR-06)
+        // and generate the archival artifact via the channel archiver seam (dispatch by CommunicationType
+        // — ADR-045 rule 4) WITH those attachments embedded, so opening the .eml reproduces the original
+        // email intact (UAT #4 — faithful original). The attachments are STILL archived separately as
+        // sprk_document records elsewhere; both copies exist by design.
+        var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
 
-        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml
+        var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
+            .GenerateEml(request, partialResponse, emlAttachments);
+
+        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml.
+        // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
+        // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
+        // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
         var driveId = _options.ArchiveContainerId;
         if (string.IsNullOrWhiteSpace(driveId))
         {
@@ -1000,7 +1973,9 @@ public sealed class CommunicationService
         // 3. Create sprk_document record linking to the archived file
         var document = new DataverseEntity("sprk_document")
         {
-            ["sprk_documentname"] = $"Archived: {TruncateTo(request.Subject, 180)}",
+            // Display name carries the generated .eml file name (not a bare "Archived: {subject}" with no
+            // extension) so it reads as an email file in the DMS (UAT #4b). sprk_filename is unchanged.
+            ["sprk_documentname"] = TruncateTo(emlResult.FileName, 200),
             ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
@@ -1011,7 +1986,7 @@ public sealed class CommunicationService
             ["sprk_emailsubject"] = request.Subject,
             ["sprk_emailfrom"] = partialResponse.From,
             ["sprk_emailto"] = string.Join("; ", request.To),
-            ["sprk_emaildirection"] = new OptionSetValue(100000001), // Sent
+            ["sprk_emaildirection"] = new OptionSetValue(emailDirection), // 100000001 Sent (default) / 100000000 Received
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
 
@@ -1022,6 +1997,88 @@ public sealed class CommunicationService
             documentId, communicationId);
 
         return documentId;
+    }
+
+    /// <summary>
+    /// Fetches each attachment's bytes from SPE — via its own <c>sprk_graphdriveid</c>/<c>sprk_graphitemid</c>,
+    /// through the <see cref="SpeFileStore"/> facade (ADR-007, never a raw Graph client) — and projects them to
+    /// <see cref="EmlAttachment"/> for embedding in the archived .eml (UAT #4 faithful original). Best-effort per
+    /// attachment (NFR-06): a single attachment that lacks an SPE reference or fails to download is logged and
+    /// skipped; the .eml still archives with the body plus the attachments that succeeded, and the send/receive
+    /// flow never fails on it. Independent of the SEPARATE per-attachment <c>sprk_document</c> archival (which is
+    /// unchanged) — both copies exist by design.
+    /// </summary>
+    private async Task<List<EmlAttachment>> FetchEmlAttachmentsForEmbedAsync(Guid communicationId, CancellationToken ct)
+    {
+        var result = new List<EmlAttachment>();
+
+        EntityCollection attachments;
+        try
+        {
+            var query = new QueryExpression("sprk_communicationattachment")
+            {
+                ColumnSet = new ColumnSet("sprk_name", "sprk_graphitemid", "sprk_graphdriveid"),
+                Criteria =
+                {
+                    Conditions = { new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId) },
+                },
+            };
+            attachments = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to query attachments for .eml embedding (non-fatal) | CommunicationId: {CommunicationId}",
+                communicationId);
+            return result;
+        }
+
+        foreach (var att in attachments.Entities)
+        {
+            // Embed EVERY attachment that is stored in SPE, regardless of whether it also has a separate
+            // sprk_document — the embed is independent of the standalone archival.
+            var itemId = att.GetAttributeValue<string>("sprk_graphitemid");
+            if (string.IsNullOrEmpty(itemId)) continue;
+
+            // Prefer the attachment's own drive id; fall back to the archive container.
+            var driveId = att.GetAttributeValue<string>("sprk_graphdriveid");
+            if (string.IsNullOrEmpty(driveId)) driveId = _options.ArchiveContainerId;
+            if (string.IsNullOrEmpty(driveId)) continue;
+
+            var fileName = att.GetAttributeValue<string>("sprk_name") ?? "attachment";
+
+            try
+            {
+                await using var content = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                if (content is null)
+                {
+                    _logger.LogWarning(
+                        "Attachment '{FileName}' returned no content for .eml embedding (skipped) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                        fileName, communicationId, itemId);
+                    continue;
+                }
+
+                using var ms = new MemoryStream();
+                await content.CopyToAsync(ms, ct);
+
+                result.Add(new EmlAttachment
+                {
+                    FileName = fileName,
+                    Content = ms.ToArray(),
+                    ContentType = InferContentType(fileName),
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to download attachment '{FileName}' for .eml embedding (skipped, non-fatal) | CommunicationId: {CommunicationId}, ItemId: {ItemId}",
+                    fileName, communicationId, itemId);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -1173,13 +2230,13 @@ public sealed class CommunicationService
 
     /// <summary>
     /// Downloads files from SPE, validates attachment count and total size limits,
-    /// and builds a list of Graph FileAttachment objects for sendMail.
+    /// and builds a list of channel-neutral <see cref="Channels.ChannelAttachment"/> objects for the sender.
     /// </summary>
     /// <exception cref="SdapProblemException">
     /// Thrown when attachment count exceeds 150, total size exceeds 35MB,
     /// or an individual file download fails.
     /// </exception>
-    private async Task<List<FileAttachment>> DownloadAndBuildAttachmentsAsync(
+    private async Task<List<ChannelAttachment>> DownloadAndBuildAttachmentsAsync(
         string[] attachmentDocumentIds,
         string correlationId,
         CancellationToken ct)
@@ -1205,7 +2262,7 @@ public sealed class CommunicationService
         // matter), so each document carries its own sprk_graphdriveid (BU's
         // container) and sprk_graphitemid (file in that container).
         // The legacy _options.ArchiveContainerId is no longer used here.
-        var attachments = new List<FileAttachment>(attachmentDocumentIds.Length);
+        var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
@@ -1386,12 +2443,11 @@ public sealed class CommunicationService
                 contentBytes = ms.ToArray();
             }
 
-            attachments.Add(new FileAttachment
+            attachments.Add(new ChannelAttachment
             {
-                OdataType = "#microsoft.graph.fileAttachment",
-                Name = metadata.Name,
+                Name = metadata.Name ?? "attachment",
                 ContentType = InferContentType(metadata.Name),
-                ContentBytes = contentBytes
+                Content = contentBytes
             });
 
             _logger.LogDebug(
@@ -1441,4 +2497,70 @@ public sealed class CommunicationService
 
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Persists the RFC-2822 Internet-Message-Id that the channel sender captured post-send (FR-06),
+    /// so inbound replies can thread-match (W1 rung). Channel-agnostic Dataverse write — the Graph
+    /// Sent-Items lookup that produces the id lives in <see cref="Channels.EmailChannelSender"/>.
+    /// MUST NOT fail the send — any error is logged and swallowed (NFR-06).
+    /// </summary>
+    private async Task StampInternetMessageIdAsync(
+        Guid communicationId,
+        string internetMessageId,
+        string correlationId,
+        CancellationToken ct)
+    {
+        try
+        {
+            await _genericEntityService.UpdateAsync(
+                "sprk_communication",
+                communicationId,
+                new Dictionary<string, object> { ["sprk_internetmessageid"] = internetMessageId },
+                ct);
+
+            _logger.LogInformation(
+                "Stamped Internet-Message-Id on communication {CommunicationId} | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Internet-Message-Id stamp failed (non-fatal) for communication {CommunicationId} | CorrelationId: {CorrelationId}",
+                communicationId, correlationId);
+        }
+    }
+
+    /// <summary>
+    /// Writes the participant index (task 050 / FR-08 / ADR-048) for a persisted OUTBOUND message — one
+    /// <c>sprk_communicationparticipant</c> row per (message × person/address × role {From,To,Cc,Bcc}). Reuses
+    /// the shared <see cref="CommunicationParticipantIndexer"/> (which itself reuses the email→contact resolver;
+    /// no second resolver). The indexer is best-effort / non-fatal (it never throws) + idempotent, so a
+    /// junction-write failure never fails an already-sent + persisted message (NFR-02). No-op when the indexer
+    /// is not composed (test constructions that predate it).
+    /// </summary>
+    private Task WriteParticipantIndexAsync(
+        Guid communicationId,
+        string? fromAddress,
+        ParticipantReference? fromResolved,
+        string[]? to,
+        string[]? cc,
+        string[]? bcc,
+        CancellationToken ct)
+    {
+        if (_participantIndexer is null)
+            return Task.CompletedTask;
+
+        return _participantIndexer.WriteParticipantsAsync(
+            communicationId,
+            new CommunicationParticipantSet
+            {
+                FromAddress = fromAddress,
+                FromResolved = fromResolved,
+                To = to,
+                Cc = cc,
+                Bcc = bcc,
+            },
+            ct);
+    }
 }

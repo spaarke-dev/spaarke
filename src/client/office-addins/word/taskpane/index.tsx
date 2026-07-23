@@ -14,6 +14,9 @@ const CONFIG = {
   tenantId: process.env.TENANT_ID || 'a221a95e-6abc-4434-aecc-e48338a1b2f2',
   bffApiClientId: process.env.BFF_API_CLIENT_ID || '1e40baad-e065-4aea-a8d4-4b7ab273458c',
   bffApiBaseUrl: process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net',
+  // OfficeNaaStrategy legacy-client fallback popup redirect (task 072 / FR-25).
+  // Empty string lets AuthService fall back to `${origin}/auth-callback.html`.
+  fallbackRedirectUri: process.env.FALLBACK_REDIRECT_URI || '',
 };
 
 // Global root for error rendering
@@ -94,6 +97,7 @@ async function init() {
       clientId: CONFIG.clientId,
       tenantId: CONFIG.tenantId,
       bffApiClientId: CONFIG.bffApiClientId,
+      ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
     });
     console.log('[Spaarke] Auth service initialized');
   } catch (error) {

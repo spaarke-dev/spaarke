@@ -1,0 +1,129 @@
+<task id="041" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Curate the saved query/columns on grid config `e1826c4c-…` so the DataGrid framework auto-derives the right filter chips (channel / date / regarding / person); chips only appear when the column is in the view's layoutXml</title>
+    <phase>W4 — Standalone Page + Grid Polish (Surface 2) — ship it</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <deps></deps>
+    <blocks></blocks>
+    <tags>dataverse, config</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse configuration + saved-query/column curation on an EXISTING `sprk_gridconfiguration` record + its bound view — no code, no shared-path edit, no new component. The DataGrid framework auto-derives chips from the view's layoutXml (chipDiscovery.ts); the task adds the right columns to the view so the chips surface. STANDARD (Step 9.5 skipped) is correct — config-only curation, not a load-bearing code change.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse config/saved-query curation on the existing `sprk_communication` view + `sprk_gridconfiguration` `e1826c4c-…` — disjoint from BFF (C#), schema-add tasks (distinct entities), and the widget/page code tracks. Read-side config only; touches no source files.</parallel-reason>
+    <fr-refs>FR-11</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Curate the saved query (view) + columns behind the shipped "Active Communications" grid config so the DataGrid framework **auto-derives the right filter chips** for the All-Communications page (task 040) and the rich workspace widget (task 030) — FR-11 support.
+
+    The framework's chip discovery (`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts`) derives chips from the columns present in the view's `layoutXml`: Choice → optionset chip, Lookup → lookup chip, DateTime → daterange chip. **A chip only appears if its column is in the view's layoutXml** (investigation §3). So the task is to ensure the view bound to config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` includes the columns that map to the desired facets:
+    - **channel** — `sprk_communicationtype` (Choice → optionset chip)
+    - **date** — `sprk_sentat` (DateTime → daterange chip); include `createdon` as the fallback/secondary date if the view uses it
+    - **regarding** — the regarding lookups (`sprk_regardingmatter`, … the ADR-024 11-entity family, incl. `sprk_regardingperson`) that exist on `sprk_communication` (Lookup → lookup chip)
+    - **person** — `sprk_sentby` + `sprk_regardingperson` (Lookup → lookup chip)
+
+    Do NOT create a second grid config or a second default view (NFR-05). Curate the EXISTING config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` and its bound saved query in place. Verify against `chipDiscovery.ts` that each intended facet's column type maps to the chip you expect, and that the columns are actually in the view's `layoutXml` (not just the FetchXML).
+  </prompt>
+
+  <role>
+    Dataverse configuration engineer fluent in `savedquery` (system views) layoutXml/FetchXML, the `sprk_gridconfiguration` framework contract, and the DataGrid chip auto-derivation rules (`chipDiscovery.ts` — Choice/Lookup/DateTime → optionset/lookup/daterange chips). Familiar with the `sprk_communication` schema (channel/date/regarding/person columns) and the ADR-024 regarding family.
+  </role>
+
+  <goal>
+    The saved query bound to grid config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` has its columns curated so the DataGrid framework auto-derives the intended filter chips: channel (`sprk_communicationtype`), date (`sprk_sentat`/`createdon`), regarding (`sprk_regardingmatter`, … incl. `sprk_regardingperson`), and person (`sprk_sentby`, `sprk_regardingperson`). Each facet's column is present in the view's layoutXml (verified against `chipDiscovery.ts`). No second config, no second default view. The chips render on the standalone page (040) + the rich widget (030).
+  </goal>
+
+  <context>
+    <background>
+      Surface 2's grid + the "Active Communications" config are ALREADY BUILT (`ai-spaarke-ai-workspace-UI-r2`): config record `sprk_gridconfiguration` GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`, entity `sprk_communication`. The framework auto-derives views + filter chips from the bound saved query (investigation §3): `chipDiscovery.ts` maps Choice → optionset, Lookup → lookup, DateTime → daterange. Channel (`sprk_communicationtype`), person (`sprk_sentby`, `sprk_regardingperson`), date (`sprk_sentat`), and regarding are all supported OOB — but each chip only appears if its column is in the view's layoutXml. This task curates the view so the desired facets surface.
+
+      §11: extend-only — this curates the EXISTING config + view; no new component, no new grid config, no code. No §11 justification needed (config curation of an existing surface).
+
+      NFR-05 (no duplication): MUST NOT create a second `sprk_gridconfiguration` default for `sprk_communication` or a second default view — curate `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` and its bound saved query in place.
+
+      This is read-side Dataverse config — no BFF changes; root §10 does NOT apply. Coordinate with task 040 (the standalone page renders whatever this task curates) — 040 + 041 are the two parallel W4 grid-half tracks. The regarding lookups referenced here are the ADR-024 11-entity family already present on `sprk_communication` (the thread's typed lookups are a separate schema-add, task 002 — not this task).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts (READ — chip derivation rules: Choice→optionset, Lookup→lookup, DateTime→daterange; column must be in layoutXml)</file>
+      <file>sprk_gridconfiguration record `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` ("Active Communications") + its bound `savedquery` (CURATE — add channel/date/regarding/person columns to the view's layoutXml)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/types/DataGridConfiguration.ts (READ — config schema; savedquery-set binding)</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md (READ — the shipped config record's as-built definition to curate in place)</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (READ — grid config + saved-query authoring recipe)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11">Curate the views/columns on config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` so the framework auto-derives channel/person/date/regarding chips; chips only appear if the column is in the view's layoutXml.</constraint>
+    <constraint source="NFR-05">MUST NOT create a second `sprk_gridconfiguration` default or a second default view — curate the existing config + saved query in place.</constraint>
+    <constraint source="project">Verify each intended facet against `chipDiscovery.ts`: channel = `sprk_communicationtype` (Choice→optionset), date = `sprk_sentat`/`createdon` (DateTime→daterange), regarding + person = the lookups `sprk_regardingmatter`,… / `sprk_sentby`, `sprk_regardingperson` (Lookup→lookup). Confirm each column is in the view's layoutXml, not just the FetchXML.</constraint>
+    <constraint source="ADR-024">Regarding lookups mirror the 11-entity family (`RegardingFieldMap.All`) as they exist on `sprk_communication`; do NOT add a second regarding mechanism.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — read-side Dataverse config only (root §10 N/A). No code changes; use `dataverse-deploy` / Web API for the saved-query + config curation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/types/DataGridConfiguration.ts</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="Chip auto-derivation from layoutXml" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/filterChips/chipDiscovery.ts">
+        The framework reads the view's columns and maps by attribute type: Choice → optionset chip, Lookup → lookup chip, DateTime → daterange chip. A facet chip appears ONLY when its column is in the view's layoutXml. Add the desired columns to the view to surface the chips.
+      </pattern>
+      <pattern name="Curate the existing config in place (no second default)" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/types/DataGridConfiguration.ts">
+        Config `e1826c4c-…` binds a saved query via its `source.savedquery-set`; curate that view's columns — do NOT create a colliding second default config or view.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `chipDiscovery.ts` to confirm the exact chip-derivation rules (attribute-type → chip-type mapping; the layoutXml column requirement) and `DataGridConfiguration.ts` (how config `e1826c4c-…` binds its saved query). Read the shipped config record's as-built notes (`ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md`).</step>
+    <step order="2">Inspect the live `sprk_communication` schema + the current bound saved query (view) for config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` — enumerate which of channel/date/regarding/person columns are already in the view's layoutXml vs missing. Use `dataverse-mcp-usage` / Web API to read the `savedquery`.</step>
+    <step order="3">Curate the view's layoutXml to include the target facet columns: `sprk_communicationtype` (channel), `sprk_sentat` (+ `createdon` fallback) (date), the regarding lookups (`sprk_regardingmatter`,… incl. `sprk_regardingperson`), and `sprk_sentby` (person). Keep it the single default view for the config — do NOT create a second.</step>
+    <step order="4">Cross-check each curated column against `chipDiscovery.ts`: channel → optionset chip, date → daterange chip, regarding/person → lookup chip. Confirm the attribute types match the expected chip types.</step>
+    <step order="5">Deploy the saved-query + config changes via `dataverse-deploy` / Web API; verify (with task 040's page and/or task 030's widget, or via a smoke check) that the intended chips auto-derive and appear. Confirm no second config/view default was created.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (041 ✅) + `current-task.md`; record decisions (which columns were added to the view, the facet→chip mapping verified against `chipDiscovery.ts`, confirmation of single default config/view, coordination with task 040).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">`chipDiscovery.ts`, `DataGridConfiguration.ts`, the shipped config-record notes, DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE</tool>
+    <tool name="dataverse-mcp-usage">Read the live `sprk_communication` schema + the bound saved query for config `e1826c4c-…`</tool>
+    <tool name="dataverse-deploy">Curate + deploy the saved-query layoutXml + config binding (in place)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Curated `savedquery` (view) bound to config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` — layoutXml includes channel/date/regarding/person columns</output>
+    <output type="docs">Facet→chip mapping verified against `chipDiscovery.ts`; single-default-config confirmation (in current-task.md / PR)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The saved query bound to config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` includes `sprk_communicationtype` (channel), `sprk_sentat`/`createdon` (date), the regarding lookups (`sprk_regardingmatter`,… incl. `sprk_regardingperson`), and `sprk_sentby` (person) in its layoutXml.</criterion>
+    <criterion testable="true">Each facet's column type maps to the expected chip per `chipDiscovery.ts`: channel → optionset, date → daterange, regarding/person → lookup (verified).</criterion>
+    <criterion testable="true">The channel/person/date/regarding filter chips auto-derive and appear on the DataGrid (verified on task 040's page and/or task 030's widget).</criterion>
+    <criterion testable="true">No second `sprk_gridconfiguration` default and no second default view were created (NFR-05) — the existing config + saved query were curated in place.</criterion>
+    <criterion testable="true">No code changes and no BFF changes — read-side Dataverse config only (root §10 N/A).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Chips are auto-derived by the framework from the view's layoutXml — the curation is the only lever (no per-chip code). This task pairs with task 040 (the standalone page renders whatever is curated here) and feeds task 030's rich widget (same config). All three read the single default config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`.
+
+    The regarding lookups referenced here are the ADR-024 11-entity family already present on `sprk_communication` (written server-side by the association engine per investigation §1) — distinct from the thread's NEW typed lookups (task 002). This task does not add schema; it curates the view over existing columns.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. STANDARD rigor — Step 9.5 (code-review + adr-check) SKIPPED per `&lt;rigor-hint&gt;`. Read-side Dataverse config only: no code, no dotnet build, no publish-size/CVE (root §10 N/A). Curate the EXISTING config `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` + its saved query in place (NFR-05 — no second default). Deploy via `dataverse-deploy` / Web API. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

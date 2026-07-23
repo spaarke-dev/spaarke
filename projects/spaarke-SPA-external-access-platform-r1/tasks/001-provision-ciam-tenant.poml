@@ -1,0 +1,92 @@
+<task id="001" project="spaarke-SPA-external-access-platform-r1">
+  <metadata>
+    <title>Provision Entra External ID (CIAM) tenant + user-flow config</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <status-note>2026-07-19 COMPLETE. CIAM tenant spaarkeextid.onmicrosoft.com (tenantId 7052feba-bfc4-43e0-b09e-65014b429131), authority https://spaarkeextid.ciamlogin.com/7052feba-... — recorded in config/environments.json (dev.ciam) + config/spaarke-resources.yaml (external_identity). RP Microsoft.AzureActiveDirectory registered. Sign-up user flow 'SpaarkeExternalSignIn' (046a0529-1fb5-45d2-a91f-65a3b3ccdc64) created with isSignUpAllowed=false (set via Graph; admin-initiated-only per R1). SSPR Email OTP enabled (owner, Entra admin center). All acceptance criteria met.</status-note>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Config/infra task with explicit constraints</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config provisioning following a documented runbook</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-safe-reason>irreversible tenant provisioning, ops-gated</parallel-safe-reason>
+    <deps>none</deps>
+    <tags>azure, auth, config</tags>
+    <estimated-effort>0.5-1 day (ops-gated on Azure subscription access)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Provision a Microsoft Entra External ID (CIAM) tenant for the external Secure Project Workspace, configure its sign-in user flow with self-sign-up disabled, and enable SSPR (Email OTP) so admin-provisioned users can set their own password. Record the tenant/authority identifiers in config/environments.json. This is irreversible tenant provisioning — follow the runbook prescriptively and escalate rather than leaving sign-up open.
+  </prompt>
+
+  <role>
+    You are a cloud identity/infra engineer provisioning a CIAM tenant per a documented Spaarke auth runbook. You operate against a real Azure subscription and treat tenant creation as irreversible.
+  </role>
+
+  <goal>
+    A Microsoft Entra External ID (CIAM) tenant exists with a sign-in user flow configured `isSignUpAllowed=false` (via the beta `authenticationEventsFlows` Graph API) and SSPR (Email OTP) enabled; the tenant ID and CIAM authority (`*.ciamlogin.com`) are recorded in `config/environments.json`.
+  </goal>
+
+  <context>
+    <background>
+      R1 migrates the external portal's identity layer from Entra B2B guests to Entra External ID (CIAM), broker-only. This Phase-0 foundation task stands up the CIAM tenant itself so later phases can wire the BFF's second JwtBearer scheme and the admin-initiated provisioner against a real authority. Onboarding is admin-initiated in R1 (self-service sign-up + "Legal Front Door" are deferred), so the user flow MUST have sign-up disabled; provisioned users set their password via SSPR (Email OTP / "Forgot password"). The tenant/authority values recorded here are consumed by the SPA MSAL config and the BFF `Ciam` config section in Phase 2.
+    </background>
+    <relevant-files>
+      <file>config/environments.json</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: the external portal identity. External users MUST authenticate against the CIAM authority (`*.ciamlogin.com`) per Amendment A1 — provision the tenant with that authority, not a workforce or B2C tenant.</constraint>
+    <constraint source="spec">Scope: R1 onboarding model. The user flow MUST be configured `isSignUpAllowed=false` (self-service sign-up disabled); R1 is admin-initiated only.</constraint>
+    <constraint source="spec">Scope: password reset for provisioned users. SSPR MUST be enabled with Email OTP so an admin-provisioned account can set its password via "Forgot password".</constraint>
+    <constraint source="NFR-06">Scope: any credentials created during provisioning. No secrets in source or config — record only non-secret identifiers (tenant ID, authority) in `config/environments.json`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step>Read `docs/guides/auth-deployment-setup.md` and `.claude/agent-memory/researcher/ciam-user-provisioning-graph-2026-07-19.md` to confirm the CIAM tenant-creation runbook and the `authenticationEventsFlows` beta API shape.</step>
+    <step>Create the Entra External ID (CIAM) tenant in the target Azure subscription (external configuration), capturing the tenant ID and the `*.ciamlogin.com` authority.</step>
+    <step>Create/configure the sign-in user flow via the beta `authenticationEventsFlows` Graph API and set `isSignUpAllowed=false`. If the API is unavailable or the property cannot be set, STOP and escalate (do not leave sign-up open).</step>
+    <step>Enable SSPR with the Email OTP method for the tenant so provisioned users can set a password via "Forgot password".</step>
+    <step>Verify: attempt/inspect that an unprovisioned identity cannot self-sign-up (sign-up surface absent/blocked), and that SSPR Email OTP is enabled.</step>
+    <step>Record the tenant ID and CIAM authority in `config/environments.json` (non-secret identifiers only).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the beta `authenticationEventsFlows` API is unavailable, or `isSignUpAllowed` cannot be set to false through any supported mechanism, STOP and escalate per root CLAUDE.md §6 rather than leaving self-service sign-up enabled. A tenant with open sign-up violates the R1 admin-initiated-only decision and MUST NOT be recorded as complete.</trigger>
+  </escalation>
+
+  <outputs>
+    <output>A provisioned Entra External ID (CIAM) tenant with a configured sign-in user flow (`isSignUpAllowed=false`).</output>
+    <output>SSPR (Email OTP) enabled in the CIAM tenant.</output>
+    <output>Tenant ID + CIAM authority recorded in `config/environments.json` (non-secret).</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The CIAM tenant's sign-in user flow has `isSignUpAllowed=false` — verified by inspecting the `authenticationEventsFlows` configuration.</criterion>
+    <criterion testable="true">SSPR is enabled with the Email OTP method in the CIAM tenant.</criterion>
+    <criterion testable="true">The CIAM tenant ID and `*.ciamlogin.com` authority are recorded in `config/environments.json`.</criterion>
+    <criterion testable="true">Negative: an unprovisioned identity cannot self-sign-up against the tenant's user flow (sign-up surface is absent/blocked).</criterion>
+    <criterion testable="true">Negative: no secret/credential value is written to source or `config/environments.json` (identifiers only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is a config/infra provisioning task, not a code-surface addition — no §11 component justification required. Phase-2 verification spikes (OTP-only feasibility, `email` claim presence) are non-blocking and do NOT gate this task; the default onboarding model is password + force-change + SSPR. Tenant creation is irreversible — hence prescriptive steps and parallel-safe=false.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

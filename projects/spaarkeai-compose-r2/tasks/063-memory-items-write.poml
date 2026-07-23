@@ -1,65 +1,87 @@
 <task id="063" project="spaarkeai-compose-r2">
   <metadata>
-    <title>FR-30 workspace-scope MemoryItems via gated memory.write</title>
+    <title>FR-30 Record-scope MemoryItems via IComposeMemoryCapture facade (capture+recall; gate deferred)</title>
     <phase>6 Memory</phase>
-    <gate>blocked-on-core-A0</gate>
-    <status>blocked</status>
+    <gate>none</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
     <parallel-group>post-A0</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <dependencies>none (core Phase A0 `memory.write` gated tool)</dependencies>
+    <dependencies>none — core durable store (IMemoryItemStore) + recall paths already shipped and on master</dependencies>
     <tags>bff-api, testing</tags>
     <fr>FR-30</fr>
   </metadata>
 
   <prompt>
-    Persist AI-derived Compose insights as workspace-scope `MemoryItem`s via the core's GATED `memory.write`
-    tool, carrying the full governance envelope (tenant, scope, provenance, trustLevel, expiration). Un-gated
-    AI-derived content writing itself into persistent memory is the memory-poisoning vector; the gated tool
-    makes each insight-persist a governed, Policy-v2-visible side effect. Compose consumes the published
-    `MemoryItem v1` contract with NO local variant (charter §3.4). This task is BLOCKED until core R2 Phase A0
-    publishes the `memory.write` gated tool + `MemoryItem v1` contract (HANDOFF §5).
+    Persist AI-derived Compose insights as durable, recallable `MemoryItem`s so a document's key knowledge
+    (playbook deviations, defined-term canon, decisions) survives across sessions. Build the CAPABILITY now for
+    dev/UAT via a new owner-blessed PublicContracts facade `IComposeMemoryCapture` that delegates to the EXISTING
+    core durable store `IMemoryItemStore` (Cosmos `memory-items`) — the exact structural twin of the #615
+    `IDocumentProfileAi` facade (delegate to a shared core primitive, no forked logic, ADR-013-clean). The
+    untrusted-origin / memory-poisoning governance GATE (formerly AC3) is EXPLICITLY DEFERRED to the later
+    system-wide memory-governance project (tracked by GitHub #629) — it is a governance-plane hardening layered
+    ON TOP of this capture/recall stack, NOT a prerequisite for the capability. `TrustLevel` is carried on the
+    envelope but left inert (unenforced) until that project, mirroring how the core `MemoryWriteHandler` already
+    carries-but-does-not-enforce it.
   </prompt>
 
   <role>
-    Senior .NET developer familiar with the AI facade seam (ADR-013), the core memory service (D-M1/D-M3), and
-    governed side-effect writes in Sprk.Bff.Api.
+    Senior .NET developer familiar with the AI facade seam (ADR-013), the core memory store (IMemoryItemStore /
+    Cosmos `memory-items`), the #615 IDocumentProfileAi facade precedent, and create-on-save promotion in Sprk.Bff.Api.
   </role>
 
   <goal>
-    Compose-derived insights persist as workspace-scope `MemoryItem`s through the gated `memory.write` tool with
-    the full governance envelope; an insight-persist is a governed, Policy-v2-visible side effect; no local
-    MemoryItem variant exists. Tests prove the governance envelope is populated (tenant/scope/provenance/
-    trustLevel/expiration) and that an untrusted-origin write is gated.
+    Compose-derived insights persist as Record-scope `MemoryItem`s (keyed to the saved `sprk_document`) through a
+    new `IComposeMemoryCapture` PublicContracts facade that delegates to `IMemoryItemStore.UpsertAsync`, carrying
+    the full provenance envelope (tenant, scope, provenance{bindingId, ledgerRef}, trustLevel carried-but-inert).
+    A through-the-wire CAPTURE→RECALL test proves an insight written by the facade is readable back via the store,
+    the `GET /api/memory/records/{entity}/{id}` endpoint, AND lands in the chat Record prompt fragment. No local
+    MemoryItem variant is introduced. The untrusted-origin gate is deferred (documented, tracked by #629).
   </goal>
 
   <context>
     <background>
-      design.md §8 re-bases the 2026-07-03 `derivedInsights: DerivedInsight[]` proposal onto the core memory
-      model: derived insights become workspace-scope MemoryItems written via the gated `memory.write` tool
-      (core D-M3). The proposed `source: "ai-playbook"` shape is exactly what D-M3's untrusted-origin write
-      rules gate. Compose is the primary consumer; HANDOFF §5 states Compose's exact `memory.write` requirements
-      to the core.
+      Investigation (2026-07-15, #629 re-triage) established there is NO technical blocker to the capture/recall
+      CAPABILITY — only the poisoning gate is missing, and that is the owner's separate later governance project.
+      Grounded facts: (a) the durable store `IMemoryItemStore` → Cosmos `memory-items` container already exists,
+      is registered in `AiPersistenceModule` (NOT behind the compound-AI gate), and exposes
+      `UpsertAsync(MemoryItem, tenantId, ct)` decoupled from any chat context; (b) recall already works —
+      `GetForRecordAsync`, `ToRecordPromptFragmentAsync`, and `GET /api/memory/records/{entityLogicalName}/{id}`
+      (MemoryGovernanceEndpoints) have no chat-only guard; (c) the core `MemoryWriteHandler`'s
+      `SupportedInvocationContexts => Chat` guard is an UNIMPLEMENTED-PATH guard, not the governance gate — the
+      gate lives in `ConfirmationPolicyEngine`/`SideEffectGateAIFunction`. So the #615 facade pattern applies
+      directly: a new facade injects the same `IMemoryItemStore` the chat handler uses and upserts a Record-scope
+      MemoryItem. Scope-mapping was already resolved in HANDOFF-to-core-fr30-anchor-2026-07-12.md: anchor to the
+      `sprk_document` (Record scope), promoted at create-on-save, hook point
+      `ComposeService.SaveAsync → PromoteIfEphemeralAsync` (ComposeService.cs:362-371).
     </background>
     <relevant-files>
-      <file path="projects/spaarkeai-compose-r2/notes/HANDOFF-core-r2-A0-contract-requirements.md" role="contract">§5 memory.write gated tool + workspace-scope MemoryItem governance envelope — author against these shapes.</file>
-      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Emit insight-persist calls through the gated tool seam (never a direct store write).</file>
-      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs" role="reference">Dispatch/tool-invocation seam through which gated tools are reached.</file>
-      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 derivedInsights disposition + explicit deviation note.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMemoryItemStore.cs" role="reference">The shared durable store the facade delegates to — UpsertAsync (persist), GetForRecordAsync (recall). Do NOT reimplement; inject and call.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryItemStore.cs" role="reference">Cosmos-backed impl; deterministic id over (scope,factType,key) → upsert-by-key supersession. Enforces its own invariants (subject keying, DataverseFieldMirrorGuard).</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/MemoryWriteHandler.cs" role="reference">The envelope-construction reference (:288-311) — mirror the provenance/TrustLevel-carried-inert shape exactly. Do NOT route through this handler; it is chat-only.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IDocumentProfileAi.cs" role="reference">The #615 facade PRECEDENT to mirror in structure, ownership framing, best-effort/never-throw posture, and DI registration.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IComposeMemoryCapture.cs" role="create">NEW facade interface — owner-blessed canonical PublicContracts contract (same framing as IDocumentProfileAi).</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ComposeMemoryCapture.cs" role="create">NEW impl — injects IMemoryItemStore, builds Record-scope MemoryItem, UpsertAsync; best-effort/never-throw.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Inject ONLY IComposeMemoryCapture (optional ctor param, ADR-032 null-tolerant). Wire insight capture at SaveAsync → PromoteIfEphemeralAsync (:362-371).</file>
+      <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiPersistenceModule.cs" role="edit">Register the facade near IMemoryItemStore (or in the compound-AI gate if LLM distillation is involved).</file>
+      <file path="src/server/api/Sprk.Bff.Api/Api/Memory/MemoryGovernanceEndpoints.cs" role="reference">GET /api/memory/records/{entity}/{id} — the recall endpoint the E2E test reads back through.</file>
+      <file path="projects/spaarkeai-compose-r2/notes/HANDOFF-to-core-fr30-anchor-2026-07-12.md" role="contract">Resolved scope-mapping + anchor/hook point.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 derivedInsights disposition + deviation note.</file>
     </relevant-files>
     <dependencies>
-      <dependency task="core-A0" status="blocked">Core R2 Phase A0 must publish the `memory.write` gated tool + `MemoryItem v1` contract (HANDOFF §5). Do NOT build against a guessed shape.</dependency>
+      <dependency task="none" status="ready">Core durable store + recall paths are already on master. No core dependency remains for the capability.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="ADR-015">Memory tiers: insights are workspace-scope (Cosmos), governed, and carry retention/expiration semantics per the memory model.</constraint>
-    <constraint source="charter-3.4">Consume the published `MemoryItem v1` contract — NO local MemoryItem variant. (Contrast: `AnchoredAnnotation` in task 060 is the argued Path-A exception; insights are NOT — they are true MemoryItems.)</constraint>
-    <constraint source="ADR-013">`Services/Compose/` never injects AI/memory internals directly; the write goes through the gated `memory.write` tool seam (Tier-1 NetArchTest).</constraint>
-    <constraint source="ADR-040">Provenance on each MemoryItem references the ledger (`bindingId`/`ledgerRef`), never a duplicated payload.</constraint>
-    <constraint source="spec">Untrusted-origin (AI-derived) writes are gated — the write is a Policy-v2-visible side effect, not a silent persist.</constraint>
+    <constraint source="ADR-015">Memory tiers: insights are Record-scope (Cosmos Tier-3), governed, carry retention/expiration semantics per the memory model.</constraint>
+    <constraint source="charter-3.4">NO local MemoryItem variant — build the facade against the published `MemoryItem` contract and the existing `IMemoryItemStore`; add no Compose-owned memory type or store.</constraint>
+    <constraint source="ADR-013">`Services/Compose/` injects ONLY the `IComposeMemoryCapture` PublicContracts facade — never `IMemoryItemStore`, `IOpenAiClient`, memory internals, or the chat handler directly (Tier-1 NetArchTest must stay green). The facade impl lives under `Services/Ai/` and may depend on the store.</constraint>
+    <constraint source="ADR-040">Provenance on each MemoryItem references the ledger (`bindingId` / `ledgerRef` = `{bindingId}@t{n}`), never a duplicated payload.</constraint>
+    <constraint source="scope-decision-2026-07-15">Untrusted-origin / memory-poisoning GATE is DEFERRED (owner decision): capability now in dev/UAT, governance plane in a separate later project (#629). Carry `TrustLevel` on the envelope but DO NOT enforce it here. Document the deferral inline + in the facade header, referencing #629.</constraint>
+    <constraint source="best-effort">Capture NEVER throws to the caller (mirror IDocumentProfileAi) — a failed insight-capture must never fail or block a document Save.</constraint>
   </constraints>
 
   <knowledge>
@@ -72,39 +94,64 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="1">Confirm core Phase A0 has published `memory.write` + `MemoryItem v1`; read the published shapes against HANDOFF §5. If not published, remain blocked and escalate.</step>
-    <step order="2">Map Compose-derived insight shapes (playbook deviations, defined-term findings, decisions) to `MemoryItem v1` fields; do NOT create a local variant.</step>
-    <step order="3">Emit insight-persist through the gated `memory.write` tool with the full governance envelope (tenant, scope=workspace, provenance{bindingId,ledgerRef}, trustLevel=AI-derived, expiration).</step>
-    <step order="4">Verify the untrusted-origin gate fires for AI-derived writes (Policy-v2-visible side effect).</step>
-    <step order="5">Add tests: envelope populated; gate fires on AI-derived write; no local MemoryItem type introduced.</step>
-    <step order="6">Verify build + NetArchTest facade rule; report publish-size delta.</step>
+    <step order="1">Read the #615 `IDocumentProfileAi` facade + `IMemoryItemStore` + `MemoryWriteHandler` envelope construction. Confirm the store's `UpsertAsync` signature + the `MemoryItem` fields (scope, subjectType/subjectId, factType, key, value, provenance, trustLevel, expiration).</step>
+    <step order="2">Author `IComposeMemoryCapture` + `ComposeMemoryCapture`: build a Record-scope `MemoryItem` keyed to the resulting `sprk_document` (subjectType="sprk_document", subjectId=documentId), set the provenance envelope exactly as MemoryWriteHandler does (Source=AiDerived, bindingId, ledgerRef, sessionId, tenantId), carry `TrustLevel` inert, and call `store.UpsertAsync`. Best-effort/never-throw + logged. Canonical owner-blessed header framing (mirror #615), with the #629 gate-deferral note.</step>
+    <step order="3">Distill genuinely-durable insights (playbook deviations, defined-term canon, decisions) from the dispatched-action outputs — NOT raw action payloads. Map each to one MemoryItem (factType + stable key for upsert-by-key supersession).</step>
+    <step order="4">Wire into `ComposeService.SaveAsync → PromoteIfEphemeralAsync` (:362-371): inject the facade as an optional null-tolerant ctor param (ADR-032); capture insights for the promoted `sprk_document`. Do not block or fail Save on capture error.</step>
+    <step order="5">Register the facade in `AiPersistenceModule` (near `IMemoryItemStore`, or in the compound-AI gate if distillation is LLM-driven, mirroring `DocumentProfileAi`).</step>
+    <step order="6">CAPTURE→RECALL E2E slice test (compose E2E DoD): facade write → assert readable via `store.GetForRecordAsync`, via `GET /api/memory/records/sprk_document/{id}` (WebApplicationFactory through the real route), AND present in `ToRecordPromptFragmentAsync`. Plus unit tests: envelope fully populated; no-local-variant; capture-never-throws-on-store-failure.</step>
+    <step order="7">Verify build + Tier-1 NetArchTest facade rule green; report publish-size delta (BFF hygiene §10).</step>
   </steps>
 
   <justification>
-    <existing>Overlaps with the core Memory Service / `MemoryItem v1`. Verified: Compose consumes it; no Compose-owned store is needed.</existing>
-    <extension>Extends the core memory model by CONSUMING `memory.write` — Compose adds no memory store and no MemoryItem subtype.</extension>
-    <cost-of-doing-nothing>Without gated persistence, AI-derived insights either vanish between sessions (no continuity) or get written un-gated (memory-poisoning vector) — both are FR-30 failures.</cost-of-doing-nothing>
+    <existing>Overlaps with the core Memory subsystem (`IMemoryItemStore`, `MemoryItem`). Verified: the store + recall already exist and are decoupled from chat; Compose adds NO store and NO MemoryItem subtype — only a thin PublicContracts facade (ADR-013 requirement for CRUD→memory access).</existing>
+    <extension>Extends the core memory model by CONSUMING `IMemoryItemStore` through a facade — the exact #615 pattern. No new store, no MemoryItem variant, no forked persistence logic.</extension>
+    <cost-of-doing-nothing>Without durable capture, AI-derived Compose insights vanish between sessions (no continuity) — the core FR-30 user value (a document "remembers" its playbook deviations / defined-term canon / decisions) is inert despite the store existing.</cost-of-doing-nothing>
   </justification>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — gated insight-persist calls</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/MemoryWriteGatedTests.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IComposeMemoryCapture.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ComposeMemoryCapture.cs (new)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — wire capture at PromoteIfEphemeralAsync</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiPersistenceModule.cs — facade registration</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/ComposeMemoryCaptureTests.cs (facade unit)</output>
+    <output type="test">tests/integration/.../ComposeMemoryCaptureRecallTests.cs (CAPTURE→RECALL through the wire)</output>
     <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
   </outputs>
 
   <acceptance-criteria testable="true">
-    <criterion testable="true">Compose insights persist as workspace-scope `MemoryItem`s via the gated `memory.write` tool.</criterion>
-    <criterion testable="true">Each write carries the full governance envelope: tenant, scope=workspace, provenance{bindingId,ledgerRef}, trustLevel, expiration.</criterion>
-    <criterion testable="true">Untrusted-origin (AI-derived) writes are gated (Policy-v2-visible side effect) — test-verified.</criterion>
-    <criterion testable="true">No local MemoryItem variant is introduced; the published `MemoryItem v1` contract is consumed as-is.</criterion>
-    <criterion testable="true">BFF build + Tier-1 NetArchTest facade rule green.</criterion>
+    <criterion testable="true">Compose insights persist as Record-scope `MemoryItem`s (keyed to the saved `sprk_document`) via `IComposeMemoryCapture` → `IMemoryItemStore.UpsertAsync`.</criterion>
+    <criterion testable="true">Each write carries the full provenance envelope: tenant, scope=Record, provenance{bindingId, ledgerRef}, trustLevel (carried, inert), expiration.</criterion>
+    <criterion testable="true">CAPTURE→RECALL proven through the wire: a captured insight is readable via `store.GetForRecordAsync`, via `GET /api/memory/records/sprk_document/{id}`, AND appears in the chat Record prompt fragment.</criterion>
+    <criterion testable="true">No local MemoryItem variant is introduced; the existing `MemoryItem` contract + `IMemoryItemStore` are consumed as-is.</criterion>
+    <criterion testable="true">Capture never throws to the caller — a store failure does not fail or block a document Save (test-verified).</criterion>
+    <criterion testable="true">`Services/Compose/` injects only the facade; BFF build + Tier-1 NetArchTest facade rule green.</criterion>
+    <criterion testable="false" deferred="true" tracked-by="#629">DEFERRED to the later memory-governance project: untrusted-origin gate / TrustLevel ENFORCEMENT / poisoning evals. NOT built here (owner decision 2026-07-15). Documented inline + in the facade header.</criterion>
   </acceptance-criteria>
 
   <escalation>
-    <trigger>Core R2 Phase A0 has not published the `memory.write` gated tool + `MemoryItem v1` contract per HANDOFF §5. Do NOT build against a guessed shape (charter §3.4). Remain `blocked`; confirm core timing and the published envelope shape before starting. If the published envelope diverges from HANDOFF §5, negotiate the delta with the core rather than forking a local variant.</trigger>
+    <trigger>If the `MemoryItem` contract or `IMemoryItemStore.UpsertAsync` shape differs materially from what this task assumes (e.g., no Record-scope subject keying, or UpsertAsync requires a chat context), STOP and report — do NOT fork a local MemoryItem variant (charter §3.4). Re-confirm the store shape before proceeding.</trigger>
   </escalation>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-07-15 (re-scoped from the blocked "gated chat-tool" approach after investigation showed
+    NO blocker — the durable store IMemoryItemStore + recall already existed, decoupled from chat). Built
+    the #615-style facade IComposeMemoryCapture (Services/Ai/PublicContracts) delegating to the shared
+    IMemoryItemStore; ComposeService.SaveAsync distils session DefinedTermsTracking (AI/human defined-term
+    canon with a definition) into Record-scope MemoryItems keyed to the promoted sprk_document, best-effort
+    (never fails a Save). Untrusted-origin gate DEFERRED to #629 (TrustLevel carried inert). Quality gates:
+    adr-check fully COMPLIANT (013/015/032/040 + §10/§11); code-review — 1 MEDIUM (integration test gap)
+    FIXED with 4 ComposeService-level tests, 2 LOW addressed with a Term guard + collision/confidence
+    comments, 1 LOW (confidence 1.0) + 1 INFO (inline latency) accepted with rationale. Build 0-err; 37
+    tests green (4 facade + 2 recall seam + 31 ComposeService). AC3 CAPTURE→RECALL is ✅◐ E2E-pending: the
+    facade→store round-trip + supersession are proven against FakeMemoryItemStore (real BuildItemId +
+    DataverseFieldMirrorGuard); the true Cosmos+HTTP wire (recall via GET /api/memory/records/sprk_document/{id})
+    is dev/UAT verification. Files: IComposeMemoryCapture.cs, ComposeMemoryCapture.cs (new);
+    ComposeService.cs, AiPersistenceModule.cs (edit); ComposeMemoryCaptureTests.cs,
+    ComposeMemoryCaptureRecallTests.cs, ComposeServiceCreateOnSaveTests.cs (tests).
+  </notes>
 </task>

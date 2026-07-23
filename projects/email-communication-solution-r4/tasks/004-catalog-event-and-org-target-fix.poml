@@ -1,0 +1,138 @@
+<task id="004" project="email-communication-solution-r4">
+  <metadata>
+    <title>Add `sprk_event` to catalog/priority; correct the org association target to `sprk_organization`</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012, 013</blocks>
+    <tags>dataverse, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.cs` in `Sprk.Bff.Api` (`IncomingAssociationResolver`/`CommunicationService` domain-match logic); corrects a live behavioral bug (writes wrong entity for org association). Behavioral change to the inbound resolver → FULL rigor per CLAUDE.md §8; Step 9.5 gates + publish-size + CVE + placement justification required.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-04</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Two coupled fixes to the regarding target set:
+
+    1. **Add `sprk_event`** to the regarding catalog + priority as the sixth association target: additive entries in `CommunicationService.RegardingLookupMap`, `IncomingAssociationResolver.RegardingFieldPriority`, and `TODO_REGARDING_CATALOG` (mirror task 003's pattern for `sprk_servicerequest`). The `sprk_regardingevent` lookup should already exist or be confirmed on `sprk_communication` — verify via MCP; if absent, note it (do NOT create it here — flag for a schema follow-up if needed).
+
+    2. **Correct the organization association target to `sprk_organization`** (DEC-3, requirement #15). The current sender-domain match writes an OOB `account` regarding — WRONG. Fix it so a domain match writes `sprk_regardingorganization` → `sprk_organization` (Spaarke's first-class org entity), NOT OOB `account` and NOT OOB `organization`. No code path may write `account` for org association after this task.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `Services/Communication/` — `IncomingAssociationResolver` sender-domain matching, `CommunicationService.RegardingLookupMap`, and the ADR-024 regarding-write path. Familiar with the binding `.claude/constraints/bff-extensions.md` governance checklist.
+  </role>
+
+  <goal>
+    `sprk_event` is a resolvable association target (map + priority + catalog wired). The sender-domain org match writes `sprk_regardingorganization` → `sprk_organization`; grep confirms no remaining code path writes an OOB `account` (or OOB `organization`) regarding for org association. Build clean; existing Communication tests pass (plus a new/updated test asserting the org target); publish-size + CVE reported; placement justification stated.
+  </goal>
+
+  <context>
+    <background>
+      R4 extends the Association Engine to eight targets. `sprk_event` is the sixth (task 003 added `sprk_servicerequest`, the fourth). Separately, the existing inbound resolver has a latent correctness bug: its sender-domain match (org-by-domain) resolves to the OOB Dataverse `account` entity, but Spaarke's first-class organization entity is `sprk_organization`. DEC-3 / requirement #15 correct this. Because this is a behavioral change to the live inbound resolver (not merely additive), it is FULL rigor.
+
+      The org-target correction here is the schema/wiring foundation; task 013 (W1 rung 2) builds the fuller org-by-domain participant-correlation logic on top of the corrected target.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-04 / DEC-3 / req #15: domain match MUST write `sprk_regardingorganization` → `sprk_organization`. NO path may write OOB `account` or OOB `organization` for org association after this task.</constraint>
+    <constraint source="ADR-024">Extend the existing regarding family — additive `sprk_event` entry across map/priority/catalog. Keep writing ADR-024 typed lookups + denormalized fields.</constraint>
+    <constraint source="project (§11)">MUST NOT add a new regarding mechanism. `sprk_event` is additive; the org fix is a target correction, not a new abstraction.</constraint>
+    <constraint source="project (§10 BFF Hygiene)">State the Placement Justification in the PR/design even though the change stays in BFF (`Services/Communication/`). Load `.claude/constraints/bff-extensions.md` first.</constraint>
+    <constraint source="project (NFR-02)">Report publish-size (absolute + delta vs ~49.63 MB incl. PDBs baseline). Expected ≈ 0 delta (no packages added).</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the PR (BFF-touching; `Services/Ai` sole-owned by `spaarke-ai-architecture-redesign-r2` — this task touches `Services/Communication`, low overlap, but the check is mandatory).</constraint>
+    <constraint source="ADR-045">Task 005 codifies the engine target contract; keep `sprk_event` + the org correction consistent with it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="Regarding target extension" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs">
+        `RegardingLookupMap` maps entity logical name → regarding lookup field. Add `sprk_event` → `sprk_regardingevent`. Mirror in `RegardingFieldPriority` + `TODO_REGARDING_CATALOG` (same additive pattern task 003 used for `sprk_servicerequest`).
+      </pattern>
+      <pattern name="Org target correction" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs">
+        Locate the sender-domain match that resolves the org regarding. Replace the `account` target with `sprk_organization` + `sprk_regardingorganization`. Grep the whole `Services/Communication/` tree for any other `account` org-association write.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load `.claude/constraints/bff-extensions.md`. Read `IncomingAssociationResolver.cs` sender-domain match + `CommunicationService.RegardingLookupMap` + `RegardingFieldPriority` + `TODO_REGARDING_CATALOG`.</step>
+    <step order="2">Grep `Services/Communication/` for `account` and `sprk_regardingorganization` — enumerate every org-association write site. Confirm which write the OOB `account` target.</step>
+    <step order="3">Verify (MCP `describe`) that `sprk_regardingorganization` + `sprk_regardingevent` lookups exist on `sprk_communication`. If `sprk_regardingevent` is absent, record it in notes and flag a schema follow-up (do NOT create schema here — outside this task's authorization).</step>
+    <step order="4">Add the additive `sprk_event` entry to `RegardingLookupMap` (→ `sprk_regardingevent`), `RegardingFieldPriority`, and `TODO_REGARDING_CATALOG`.</step>
+    <step order="5">Correct the org target: change the sender-domain match (and any other org-association write found in step 2) to resolve `sprk_organization` + write `sprk_regardingorganization`. Remove the `account` write path.</step>
+    <step order="6">Add/update a unit test in `tests/unit/Sprk.Bff.Api.Tests/` asserting: (a) a sender-domain org match writes `sprk_regardingorganization` → `sprk_organization`, never `account`; (b) `sprk_event` resolves through the map (per NFR-08 test obligation).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (clean) + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` (green).</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB (incl. PDBs). Expected ≈ 0.</step>
+    <step order="9">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: run `/conflict-check` (BFF PR gate); invoke `code-review` on the diff; invoke `adr-check` against `spec.md` (focus ADR-024 + org-target correctness). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 004 ✅; confirm dependents 012/013 unblocked.</step>
+    <step order="11">Update `current-task.md` per task-execute: status → completed; record the org-target correction + `sprk_event` wiring in Decisions Made.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect resolver + maps + constraints</tool>
+    <tool name="grep">Enumerate every `account` org-association write site</tool>
+    <tool name="dataverse-mcp">Confirm `sprk_regardingorganization`/`sprk_regardingevent` lookups</tool>
+    <tool name="edit">Add `sprk_event` entries + correct org target + test</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">BFF PR gate at step 9.5</tool>
+    <tool name="code-review">FULL-rigor gate at step 9.5</tool>
+    <tool name="adr-check">FULL-rigor gate at step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (UPDATED — `sprk_event` priority + org-target correction)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (UPDATED — `RegardingLookupMap` `sprk_event` entry)</output>
+    <output type="code">`TODO_REGARDING_CATALOG` (UPDATED — `sprk_event` entry)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (org-target + `sprk_event` resolution tests)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta (per §10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sender-domain org match writes `sprk_regardingorganization` → `sprk_organization`.</criterion>
+    <criterion testable="true">Grep of `Services/Communication/` finds NO code path writing an OOB `account` (or OOB `organization`) regarding for org association.</criterion>
+    <criterion testable="true">`sprk_event` is present in `RegardingLookupMap`, `RegardingFieldPriority`, and `TODO_REGARDING_CATALOG`.</criterion>
+    <criterion testable="true">A unit test asserts the corrected org target AND `sprk_event` resolution.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing + new Communication tests pass.</criterion>
+    <criterion testable="true">Publish-size delta reported (≈ 0 expected); no new HIGH CVE.</criterion>
+    <criterion testable="true">`/conflict-check` run before PR; Placement Justification in PR description.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The org-target correction is a real behavioral bug fix, not cosmetic: the current code writes the wrong entity, so any org association resolved to `account` is downstream-invisible to Spaarke's `sprk_organization`-based views. Task 013 (W1) builds richer org-by-domain correlation on the corrected target.
+
+    If `sprk_regardingevent` does not exist on `sprk_communication`, this task does NOT create it (schema creation is task 001's remit) — record the gap and flag a follow-up; the `sprk_event` catalog entries can still be wired, but note the runtime dependency on the column.
+
+    Kept separate from task 003 because this touches inbound resolver domain-match LOGIC (behavioral, FULL) whereas 003 is purely additive.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates (conflict-check + code-review + adr-check) REQUIRED. Per §10: publish-size delta + CVE scan + Placement Justification all reportable in the PR description.
+    </protocol>
+  </execution>
+</task>

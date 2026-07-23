@@ -333,6 +333,21 @@ export class EventService {
       }
     }
 
+    // Assigned To (contact) -- spaarkeai-assistant-enhancements-r1 task 014 /
+    // FR-A4. Optional: an event/task may be created with no assignee. The
+    // nav-prop is discovered dynamically (never hardcoded) per the
+    // established `discoverNavProps`/`_findNavProp` pattern used throughout
+    // this method -- avoids the SchemaName/LogicalName @odata.bind casing
+    // gotcha (docs/standards/ODATA-NAMING-CONVENTION.md).
+    if (formValues.assignedToId) {
+      const navProp = _findNavProp(navProps, 'contact', 'assignedto');
+      if (navProp) {
+        entity[`${navProp}@odata.bind`] = `/contacts(${cleanGuid(formValues.assignedToId)})`;
+      } else {
+        warnings.push('Assignee could not be linked -- the Assigned To lookup was not found on this record type.');
+      }
+    }
+
     // Regarding record (parent) — ADR-024 Polymorphic Resolver.
     //
     // Writes the entity-specific `@odata.bind` lookup AND all 5 denormalized

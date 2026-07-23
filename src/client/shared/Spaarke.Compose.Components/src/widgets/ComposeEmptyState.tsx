@@ -69,7 +69,12 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Button, Card, Text } from '@fluentui/react-components';
-import { DocumentArrowUpRegular, SearchRegular } from '@fluentui/react-icons';
+import {
+  DocumentArrowUpRegular,
+  SearchRegular,
+  DocumentAddRegular,
+  DocumentBulletListRegular,
+} from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 semantic tokens only (ADR-021)
@@ -169,6 +174,21 @@ export interface ComposeEmptyStateProps {
   onSearchRequested: () => void;
 
   /**
+   * Item 7 (UAT round-4): invoked when the user clicks "Blank page". The parent
+   * mounts an empty born-in-editor working draft (create-on-save on first Save).
+   * Optional so existing direct-render call sites remain valid; the CTA renders
+   * only when supplied.
+   */
+  onBlankRequested?: () => void;
+
+  /**
+   * Item 7 (UAT round-4): invoked when the user clicks "Open template". Today the
+   * parent mounts a single generic starter scaffold; the affordance is the seam
+   * for a future template picker. Optional — the CTA renders only when supplied.
+   */
+  onTemplateRequested?: () => void;
+
+  /**
    * When `true`, both CTAs render as disabled (focusable but not actionable).
    * Use when the parent is mid-bootstrap (e.g. auth handshake) and cannot yet
    * route the actions safely. Defaults to `false`.
@@ -199,6 +219,8 @@ export interface ComposeEmptyStateProps {
 export function ComposeEmptyState({
   onBrowseRequested,
   onSearchRequested,
+  onBlankRequested,
+  onTemplateRequested,
   disabled = false,
 }: ComposeEmptyStateProps): React.JSX.Element {
   const styles = useStyles();
@@ -212,15 +234,42 @@ export function ComposeEmptyState({
     >
       <Card className={styles.card} appearance="subtle">
         <Text as="h2" size={500} className={styles.heading}>
-          Open a document to start composing
+          Start composing
         </Text>
         <Text size={300} className={styles.description}>
-          Browse and upload a file to draft from, or search for an existing Spaarke document.
+          Start from a blank page or a template, upload a file to draft from, or search for an existing Spaarke
+          document.
         </Text>
 
         <div className={styles.actions} role="group" aria-label="Open document options">
+          {onBlankRequested ? (
+            <Button
+              appearance="primary"
+              icon={<DocumentAddRegular />}
+              disabled={disabled}
+              onClick={onBlankRequested}
+              className={styles.cta}
+              aria-label="Start a new blank document"
+              data-testid="compose-empty-state-blank"
+            >
+              Blank page
+            </Button>
+          ) : null}
+          {onTemplateRequested ? (
+            <Button
+              appearance="outline"
+              icon={<DocumentBulletListRegular />}
+              disabled={disabled}
+              onClick={onTemplateRequested}
+              className={styles.cta}
+              aria-label="Start from a document template"
+              data-testid="compose-empty-state-template"
+            >
+              Open template
+            </Button>
+          ) : null}
           <Button
-            appearance="primary"
+            appearance={onBlankRequested ? 'outline' : 'primary'}
             icon={<DocumentArrowUpRegular />}
             disabled={disabled}
             onClick={onBrowseRequested}

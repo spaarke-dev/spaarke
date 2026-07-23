@@ -108,6 +108,8 @@ function makeForm(overrides?: Partial<ICreateEventFormState>): ICreateEventFormS
     description: '',
     regardingRecordId: '',
     regardingRecordName: '',
+    assignedToId: '',
+    assignedToName: '',
     ...overrides,
   };
 }

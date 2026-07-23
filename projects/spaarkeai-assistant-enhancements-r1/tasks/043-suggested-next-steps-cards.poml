@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Suggested Next Steps cards post-dispatch + reorder-for-display</title>
+    <phase>5: Assistant Surface</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>pcf, react, frontend, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New client card surface reusing ConsumerChips/OutcomeCard; well-patterned .tsx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Renders emitted chips as cards with a deterministic reorder; low ambiguity with existing substrate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Render emitted sprk_chiptransitions as ranked actionable cards after a capability runs (Click/Event/Text-dispatch), plus a "more" affordance opening the NBA-library modal. The reorder-for-display is deterministic + preference-keyed (from the profile) with NO model call.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9, the ConsumerChips/useConsumerChips substrate, and OutcomeCard v1.
+  </role>
+
+  <goal>
+    After a capability runs, emitted chips render as ranked actionable cards; a "more" affordance opens the NBA-library modal. Card order is a deterministic preference-keyed reorder (no model call). SNS appears only after a capability runs.
+  </goal>
+
+  <context>
+    <background>
+      Reactive SNS: chips already exist as a substrate (ConsumerChips). This task presents them as cards + adds the "more" affordance + the deterministic reorder. Reuse OutcomeCard v1 unless a parallel shape is justified.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The reorder is deterministic + preference-keyed; MUST NOT be a model-driven ranker (preference ≠ permission; not a second decider).</constraint>
+    <constraint source="ADR-040">Chip impressions/clicks are ledgered (store-before-render).</constraint>
+    <constraint source="project">Reuse ConsumerChips + OutcomeCard v1; justify any parallel card shape (CLAUDE.md §11). SNS renders only after a capability runs.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Consume useConsumerChips output; render ranked cards (OutcomeCard v1) after a capability runs.</step>
+    <step order="2">Add the deterministic preference-keyed reorder (from the profile fragment's preferences; no model call).</step>
+    <step order="3">Add a "more" affordance opening the NBA-library modal.</step>
+    <step order="4">Ledger impressions/clicks (store-before-render).</step>
+    <step order="5">UI + unit tests: cards render only post-dispatch; reorder is deterministic; dark-mode.</step>
+    <step order="6">npm run build:prod. Update TASK-INDEX.md 043 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (SNS cards + reorder + "more")</output>
+    <output type="test">SNS card UI/unit tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="SNS renders post-dispatch">
+      <steps>
+        <step>Run a capability</step>
+        <step>Verify chips render as ranked cards</step>
+        <step>Click "more"; verify the NBA-library modal opens</step>
+      </steps>
+      <expected>Cards appear only after dispatch; "more" opens the library</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Toggle dark mode; verify adaptation</step></steps>
+      <expected>Colors adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Emitted chips render as ranked actionable cards after a capability runs (not before).</criterion>
+    <criterion testable="true">A "more" affordance opens the NBA-library modal.</criterion>
+    <criterion testable="true">Card order is a deterministic preference-keyed reorder with no model call.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod passes; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-G1. "what are my tasks?" dispatching a list capability whose chips fire is authored in task 050 (FR-G2).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod. Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

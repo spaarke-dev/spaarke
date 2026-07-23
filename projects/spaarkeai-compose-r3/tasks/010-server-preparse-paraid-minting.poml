@@ -1,0 +1,198 @@
+<task id="010" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-08 server pre-parse + `w14:paraId` minting on Load (OOXML-valid, collision-checked)</title>
+    <phase>1 E2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W1-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api,docx,spe</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-08: on Load, a NEW server-side Open XML pre-parse component collects each
+    paragraph's `w14:paraId` from the source `.docx`, and mints an OOXML-valid id for every
+    paragraph that lacks one. This is the identity substrate the whole E2 track (and the E1
+    delta-save splice) depends on: paraId is the stable key that maps editor paragraphs back to
+    original OOXML paragraphs. The pre-parse runs alongside the existing mammoth convert inside
+    `ComposeService.LoadAsync` (`ComposeService.cs:168`) and produces an ordered `paraId →
+    paragraph` map that the Load response carries to the client (task 011 consumes it). Minted ids
+    MUST be valid `w14:paraId` values — a random 32-bit `ST_LongHexNumber` with `0 &lt; x &lt;
+    0x80000000` — and MUST be collision-checked against every id already present in the part
+    (including ids on paragraphs inside table cells and nested tables). The Open XML SDK exposes
+    `Paragraph.ParagraphId` but ships **no generator** (Open-XML-SDK #962), so we own the generator.
+    Do NOT rely on Word/TipTap to assign ids — this server pre-parse is the load-time id owner (S2).
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Microsoft Open XML SDK 3.x (`DocumentFormat.OpenXml`) and
+    the WordprocessingML `w14:paraId` / `ST_LongHexNumber` markup (MS-DOCX spec), comfortable
+    walking a `WordprocessingDocument` body incl. table-cell / nested-table paragraphs, and fluent
+    in the Spaarke `Services/Compose/` seams (`ComposeService.LoadAsync`, `SpeFileStore` facade).
+  </role>
+
+  <goal>
+    A NEW pre-parse component in `Services/Compose/` that, given the load-time `.docx` byte stream,
+    returns an ordered `paraId → paragraph-position` map in which EVERY body paragraph (incl.
+    table-cell and nested-table paragraphs) has a unique `w14:paraId`: existing ids are collected
+    verbatim; missing ids are minted as OOXML-valid random 32-bit values (`0 &lt; x &lt; 0x80000000`)
+    that are collision-checked against all ids already in the part. `ComposeService.LoadAsync`
+    (`ComposeService.cs:168`) is extended to invoke the pre-parse and project the map onto the Load
+    response for the client (task 011) to carry as hidden node attributes. Matching unit tests in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` assert uniqueness, OOXML-validity of minted
+    ids, collision-avoidance, and table-cell coverage; a through-the-wire slice test (NFR-06) proves
+    the Load response carries a complete paraId map.
+  </goal>
+
+  <context>
+    <background>
+      E2 (`w14:paraId` identity) is the substrate E1's delta save needs — paraId is the splice key
+      (design §4.2, §5, §8). S1/S1b proved Docxodus `WmlComparer` **preserves**
+      `w14:paraId` on unchanged paragraphs (incl. table cells + nested tables + 3-level numbering),
+      so a stable id minted at Load survives the round-trip. S2 proved `@tiptap/extension-unique-id`
+      does NOT auto-assign ids to `setContent`-loaded nodes, so **the server pre-parse owns load-time
+      ids** (this task) and the client extension owns split/merge minting (task 011). mammoth
+      flattens `.docx` to HTML and **discards** `w14:paraId` (`docxBridge.ts`), which is exactly why a
+      server-side Open XML pre-parse must run alongside the convert to capture the ids before they are
+      lost. `w14:paraId` is `ST_LongHexNumber`, unique within the part, `0 &lt; x &lt; 0x80000000`;
+      it is assigned on creation and preserved across edits (its sibling `w14:textId` refreshes on
+      content change — not needed here). The Open XML SDK is ALREADY a BFF dependency, so this task
+      adds no publish size for the pre-parse itself; task 001 has already added Docxodus + bumped
+      OpenXml to 3.5.1 (dep). Still measure + report publish size per §10.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs — NEW pre-parse component (this task): Open XML walk collecting/minting w14:paraId, incl. table-cell + nested-table paragraphs; returns the ordered paraId map</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — LoadAsync (ComposeService.cs:168) invokes the pre-parse alongside the mammoth convert and projects the paraId map onto the Load response</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — existing server-side Open XML body/table walk (reads w:ins/w:del/w:comment regardless of authorship); mirror its part-traversal + table-cell descent pattern, do NOT reimplement a divergent walk</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — reference for how Services/Compose operates on byte[] streams behind the facade (no Graph types)</file>
+      <file role="reference">projects/spaarkeai-compose-r3/notes/spikes/ — S1/S1b (paraId preservation on unchanged paragraphs incl. table/nested-table) + S2 (server pre-parse owns load-time ids); the validated substrate this task productionizes</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §5 (E2 paraId identity), §2 (Current State — anchoring rows: compose-contracts.ts:108-115 + AnnotationReanchorService.cs), §8 (LOAD pipeline), §10 (reuse map)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Adds `Docxodus` 7.1.0 (SkiaSharp excluded) + bumps `DocumentFormat.OpenXml` 3.4.1 → 3.5.1 and establishes the publish-size + CVE baseline. This task's Open XML pre-parse builds on the 3.5.1 SDK surface; do not add packages here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-08">Every body paragraph — INCLUDING paragraphs inside table cells and nested tables — MUST have a unique `w14:paraId` after Load. Existing ids are collected verbatim; only missing ids are minted.</constraint>
+    <constraint source="FR-08 / MS-DOCX spec">Minted ids MUST be OOXML-valid `w14:paraId`: a random 32-bit `ST_LongHexNumber` with `0 &lt; x &lt; 0x80000000`, and MUST be collision-checked against every id already present in the part before assignment.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade. The pre-parse operates on `byte[]`/`Stream` only; all SPE access stays behind the existing facade — never a `GraphServiceClient`, `DriveItem`, or other `Microsoft.Graph` type in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` MUST NOT inject `IOpenAiClient`, executor types, or `IConsumerRoutingService`. This is a deterministic OOXML operation with zero AI reach. Tier-1 NetArchTest enforces.</constraint>
+    <constraint source="ADR-010">Keep DI additions minimal — the pre-parser may be a single registered service; internal helpers (id generator, collision set) need not be DI-registered. Register unconditionally (no feature gate) so LoadAsync's dependency is symmetric (CLAUDE.md §10 F.1 asymmetric-registration rule).</constraint>
+    <constraint source="ADR-029 / NFR-01 / CLAUDE.md §10">Measure BFF publish size on this BFF-touching task: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report absolute compressed size + delta vs ~49.63 MB baseline (state the PDB convention). ≤60 MB ceiling; ≥+5 MB single-task delta → justify. Verify no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</constraint>
+    <constraint source="NFR-06">Ships a through-the-wire `WebApplicationFactory` seam slice test (`tests/integration/seam/**`) proving the Load response carries a complete paraId map for a formatted doc — unit-green ≠ done. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests (ADR-038).</constraint>
+    <constraint source="NFR-08">The pre-parse adds negligible latency to Load; do not re-parse the document multiple times — a single Open XML pass collects + mints.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification for the new pre-parse component in the PR description, citing `.claude/constraints/bff-extensions.md` decision criteria. Run `/conflict-check` before the BFF PR (LoadAsync is a shared seam; parallel-safe=false).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WordprocessingML `w14:paraId` / `ST_LongHexNumber`; server-side Open XML body + table-cell walk behind the Compose facade; BFF publish hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-service-facade.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r3/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Server-side Open XML body/table walk" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs">
+        Existing traversal of the document body incl. descent into table cells / nested tables — mirror its part-navigation and cell-recursion so the paraId walk covers the same paragraph set the annotation reader does.
+      </pattern>
+      <pattern name="LoadAsync convert seam" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs">
+        `LoadAsync` (line 168) runs the mammoth convert and assembles the Load response; add the pre-parse call alongside the convert and project the paraId map onto the response DTO (additive field).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm task 001 merged (Docxodus + OpenXml 3.5.1 present). Read S1/S1b/S2 spike notes + design §5/§8. Output the FULL rigor-level declaration. Load the knowledge files + `.claude/constraints/bff-extensions.md` before designing.</step>
+    <step order="1" name="Design the paraId map contract">Define the ordered `paraId → paragraph-position` map the pre-parse returns and the additive Load-response field that carries it to the client. Keep the DTO in `Services/Compose/`; mirror it to the client contract shape task 011 consumes (do not invent a parallel schema).</step>
+    <step order="2" name="Implement ParaIdPreParser">Open the source `.docx` with the Open XML SDK; walk the body incl. table-cell + nested-table paragraphs (mirror `DocxAnnotationReader`'s descent). Collect existing `w14:paraId`s into a seen-set; for each paragraph lacking one, mint a random 32-bit id `0 &lt; x &lt; 0x80000000`, reject-and-retry on collision with the seen-set, then assign + add to the set. Single pass; deterministic; no SkiaSharp / Docxodus `HtmlToWml` path.</step>
+    <step order="3" name="Wire into LoadAsync">Extend `ComposeService.LoadAsync` (`ComposeService.cs:168`) to invoke the pre-parse alongside the mammoth convert and project the ordered paraId map onto the Load response. Register the pre-parser unconditionally in the Compose DI module.</step>
+    <step order="4" name="Unit tests">Author `ParaIdPreParserTests` in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: assert every paragraph (incl. table-cell + nested-table) has a unique id; minted ids are `0 &lt; x &lt; 0x80000000`; existing ids preserved verbatim; a forced-collision fixture proves the retry avoids duplicates. Real docx round-trip; no transport mocks (ADR-038).</step>
+    <step order="5" name="Through-the-wire slice test (NFR-06)">Add a `WebApplicationFactory` Load slice test in `tests/integration/seam/**` that GETs the real Load route for a formatted fixture and asserts the response carries a complete paraId map (one id per body paragraph, incl. table cells).</step>
+    <step order="6" name="Verify + size/CVE report">Build BFF + run the new tests. Run publish-size + CVE, report absolute + delta vs ~49.63 MB baseline (state PDB convention). Run the NetArchTest facade check (Services/Compose has no AI-internal injection; no Graph type). Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs (NEW)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (LoadAsync extended to project the paraId map)</output>
+    <output type="code">Compose DI module registration for the pre-parser (unconditional)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ParaIdPreParserTests.cs</output>
+    <output type="test">tests/integration/seam/** — Load paraId-map through-the-wire slice test (NFR-06)</output>
+    <output type="report">Publish-size absolute + delta; CVE scan result; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing component mints/collects `w14:paraId`. `DocxAnnotationReader` walks the body to recover `w:ins`/`w:del`/`w:comment` but does not collect or mint paragraph ids; `ComposeService.LoadAsync` runs mammoth (which discards paraId) + assembles the Load response. Verified by grep across `Services/Compose/` — no `ParagraphId` / `paraId` minting surface exists.</existing>
+    <extension>Cannot be folded into `DocxAnnotationReader` (its responsibility is annotation recovery, and its output shape is `RecoveredRevision`/`RecoveredComment`, not an id map) nor into `ComposeService` (the SPE-lifecycle facade). The paraId walk + OOXML-valid minting + collision-checking is a cohesive, heavily unit-tested identity concern that warrants its own component (SRP); it is invoked from the existing `LoadAsync` seam — no new endpoint or SPE plumbing.</extension>
+    <cost-of-doing-nothing>Without a stable, complete paraId map minted at Load, there is no splice key for the E1 delta save (FR-12) and no stable anchor for E2/E3 (FR-11/FR-16): anchors stay fuzzy text+index and dirty saves cannot map edited editor paragraphs back to original OOXML paragraphs. Concrete failing contract: FR-08 acceptance "every body paragraph (incl. table cells) has a unique paraId after Load" is unmet, which cascades to block tasks 011/012/020.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">After Load, every body paragraph — including paragraphs inside table cells and nested tables — has a unique `w14:paraId` in the projected map (FR-08 acceptance).</criterion>
+    <criterion testable="true">Paragraphs that already carry a `w14:paraId` retain it verbatim; only paragraphs lacking one receive a minted id.</criterion>
+    <criterion testable="true">Every minted id is an OOXML-valid `ST_LongHexNumber` with `0 &lt; x &lt; 0x80000000`; a unit test asserts the range on a batch of minted ids.</criterion>
+    <criterion testable="true">A forced-collision fixture (a doc whose existing ids would collide with a candidate) proves the mint retries and never assigns a duplicate id within the part.</criterion>
+    <criterion testable="true">`ComposeService.LoadAsync` projects the ordered paraId map onto the Load response; a through-the-wire `WebApplicationFactory` slice test asserts the response carries one id per body paragraph for a formatted fixture (NFR-06).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (NetArchTest green) and no `Microsoft.Graph` type appears in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; PDB convention stated.</criterion>
+    <criterion testable="true">Matching unit tests exist and pass; BFF build is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    **Completed 2026-07-17** (Opus 4.8 @ xhigh, FULL rigor). Build green; 8 new tests pass.
+
+    **Files**:
+    - NEW `Services/Compose/ParaIdPreParser.cs` — single-pass Open XML walk. Key simplification:
+      `body.Descendants<Paragraph>()` is recursive + document-ordered, so it covers table-cell +
+      nested-table paragraphs with no special-case descent. Collects existing `w14:paraId` verbatim;
+      mints random 32-bit `0 < x < 0x80000000` (8-hex uppercase) for gaps, collision-checked against a
+      seen-set of ALL ids (collected first). Read-only open (no mutation); pure byte[]-in / record-out
+      (ADR-007/ADR-013 clean). Internal test-seam ctor accepts a deterministic id generator.
+    - `IComposeService.cs` — additive `IReadOnlyList<ParaIdMapEntry> ParaIdMap` on LoadComposeDocumentResult.
+    - `ComposeService.cs` — LoadAsync invokes the pre-parse on the buffered content (single pass, NFR-08)
+      and projects the map; BEST-EFFORT (try/catch → empty map + warning) so a malformed source never
+      fails Load. Optional ctor param `ParaIdPreParser? = null` (defaults `new`) — existing test ctors
+      unchanged; DI resolves the singleton.
+    - `ComposeModule.cs` — `AddSingleton<ParaIdPreParser>()` unconditional (symmetric per §10 F.1).
+    - Tests: `ParaIdPreParserTests` (uniqueness incl. table-cell/nested, verbatim-preserve, OOXML-range,
+      forced-collision retry, empty/malformed guards) + `ComposeServiceLoadParaIdTests` (LoadAsync
+      projects the complete map for a real docx; malformed → empty-map + Load still succeeds).
+
+    **§6.5 Path-C — NFR-06 seam scope**: the map-projection assertion is covered at the ComposeService
+    seam (LoadAsync wiring test, mocking the ISpeFileOperations module boundary per ADR-038 §4). The
+    HTTP through-the-wire `tests/integration/seam/**` slice rides **task 024** (which owns the Compose
+    endpoints fidelity seam suite) — consistent with the confirmed defer-to-seam doctrine + the POML's
+    own note that the through-the-wire test rides 022/024. TRACKING: task 024 must assert the Load
+    route carries a complete paraId map for a formatted fixture.
+
+    **Verification**: publish 47.28 MB compressed incl PDBs (+0.02 MB vs task-001 47.26 — negligible
+    IL-only; no new package); CVE scan clean (0 vulnerable, post Kiota 1.22.0 merge). ADR-013
+    ComposeFacade arch test PASSED; ParaIdPreParser absent from ADR-007 violation list (OpenXml-only).
+
+    **Pre-existing finding (NOT this task)**: `ADR007_GraphIsolationTests` is RED on the branch — but
+    the violators are `Services.Communication.GraphAttachmentAdapter` / `GraphMessageToEmlConverter` +
+    `Api/Office/Errors/*` + `Infrastructure/Errors/ProblemDetailsHelper`, ALL pre-existing on
+    origin/master, none in Compose. Out of scope for compose-r3; belongs to a Communication/Office arch
+    cleanup. Surfaced to owner.
+
+    **Placement Justification (§10)**: new cohesive OOXML identity component (SRP — not foldable into
+    DocxAnnotationReader's annotation-recovery shape nor ComposeService's SPE-lifecycle facade);
+    invoked from the existing LoadAsync seam; no new endpoint/SPE plumbing. In-BFF per bff-extensions.md.
+  </notes>
+</task>

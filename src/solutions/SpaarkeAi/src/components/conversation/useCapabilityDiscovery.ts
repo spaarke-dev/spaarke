@@ -34,6 +34,13 @@ export interface CapabilityDiscoveryDeps {
   authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>;
   /** Placement surface to request (default `"assistant"` — the soft-slash launcher's surface). */
   surface?: string;
+  /**
+   * When false, the hook stays inert — it performs NO fetch and returns an empty list. Lets a host
+   * defer the catalog read until a capability is actually needed (e.g. the first time a revise flow
+   * fires), so a mounted-but-idle host does not issue an eager background request. Defaults to true
+   * (eager) for backward compatibility with the soft-slash launcher.
+   */
+  enabled?: boolean;
 }
 
 export interface CapabilityDiscoveryState {
@@ -45,7 +52,7 @@ export interface CapabilityDiscoveryState {
 }
 
 export function useCapabilityDiscovery(deps: CapabilityDiscoveryDeps): CapabilityDiscoveryState {
-  const { bffBaseUrl, authenticatedFetch, surface } = deps;
+  const { bffBaseUrl, authenticatedFetch, surface, enabled = true } = deps;
 
   const [capabilities, setCapabilities] = React.useState<CapabilityDiscoveryItem[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -53,6 +60,9 @@ export function useCapabilityDiscovery(deps: CapabilityDiscoveryDeps): Capabilit
   const [refreshToken, setRefreshToken] = React.useState<number>(0);
 
   React.useEffect(() => {
+    // Inert until enabled — no fetch, no state churn (deferred-read hosts gate on their own signal).
+    if (!enabled) return;
+
     let cancelled = false;
 
     void (async () => {
@@ -101,7 +111,7 @@ export function useCapabilityDiscovery(deps: CapabilityDiscoveryDeps): Capabilit
     return () => {
       cancelled = true;
     };
-  }, [bffBaseUrl, authenticatedFetch, surface, refreshToken]);
+  }, [bffBaseUrl, authenticatedFetch, surface, refreshToken, enabled]);
 
   const refresh = React.useCallback(() => {
     setRefreshToken((t) => t + 1);

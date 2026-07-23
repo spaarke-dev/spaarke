@@ -1,0 +1,29 @@
+{
+  "name": "communication-page",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Channel-aware Communication React Code Page — renders a single sprk_communication record; layout is chosen by sprk_communicationtype (email interactive, other channels read-only). Single self-contained HTML web resource (ADR-026).",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "build:prod": "tsc --noEmit && vite build && node scripts/name-artifact.mjs",
+    "dev": "vite",
+    "lint": "eslint src --ext .ts,.tsx"
+  },
+  "dependencies": {
+    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
+  },
+  "devDependencies": {
+    "@fluentui/react-components": "^9.54.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "~5.7.0",
+    "vite": "^5.4.0",
+    "vite-plugin-singlefile": "^2.0.0"
+  }
+}

@@ -1,7 +1,7 @@
 <task id="AIR2-074" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Audit-container partition re-key — off bare /tenantId while small</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>1 day</estimated-effort>

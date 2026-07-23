@@ -1,6 +1,7 @@
 export * from './logger';
 export * from './lookupMatching';
 export * from './parseDataParams';
+export * from './quoteBody';
 export * from './safeRegister';
 export * from './themeDetection';
 export * from './themeStorage';

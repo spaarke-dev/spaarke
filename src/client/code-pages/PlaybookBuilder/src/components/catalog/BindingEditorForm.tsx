@@ -77,6 +77,7 @@ const DISPOSITION_LABELS: Record<BindingDisposition, string> = {
   [BindingDisposition.Email]: 'Email (Communication service, DRAFT-only)',
   [BindingDisposition.Record]: 'Record (Dataverse write)',
   [BindingDisposition.Notification]: 'Notification',
+  [BindingDisposition.Compose]: 'Compose',
 };
 
 const RISK_LABELS: Record<BindingRisk, string> = {

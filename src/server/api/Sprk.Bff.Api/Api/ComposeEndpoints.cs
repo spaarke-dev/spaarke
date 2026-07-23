@@ -6,7 +6,9 @@ using Microsoft.Extensions.Caching.Distributed;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 
@@ -48,7 +50,10 @@ public static class ComposeEndpoints
         group.MapPost("/upload", Upload)
             .WithName("ComposeUpload")
             .WithSummary("Serve a session-uploaded file's retained bytes for a transient Compose mount (FR-03)")
-            .RequireRateLimiting("ai-upload")
+            // Read-shaped: a deterministic Redis serve of already-retained bytes (NOT an SPE upload).
+            // Belongs on the read bucket like sibling Load (2), not the 5/min ai-upload ingest bucket —
+            // sharing ai-upload caused interactive drafting to 429 (UAT 2026-07-14).
+            .RequireRateLimiting("ai-context")
             .Produces<ComposeUploadResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -70,7 +75,27 @@ public static class ComposeEndpoints
         group.MapPost("/documents/{documentSpeId}/save", Save)
             .WithName("ComposeSaveDocument")
             .WithSummary("Save DOCX bytes to SPE (idempotent first-Save promotion per FR-06)")
-            .RequireRateLimiting("ai-upload")
+            // SPE persistence → ai-persist (20/min) per its documented purpose, not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
+            .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (3b) POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100).
+        // A TRANSIENT Browse/Upload draft has NO SPE drive-item, so the `{documentSpeId}` path
+        // segment on the replace route (3) would be empty → `/documents//save` 404s. This
+        // literal-segment sibling route carries no id in the path; the client sends the
+        // client-resolved BU `containerId` (Fork A) and no `documentSpeId`, reaching
+        // ComposeService.SaveAsync's transient-create branch (container → record → indexing).
+        // Distinct literal `create-on-save` cannot collide with `{documentSpeId}/save` (3) or
+        // GET `{documentSpeId}` (2) — different segment counts / verbs.
+        group.MapPost("/documents/create-on-save", CreateOnSave)
+            .WithName("ComposeCreateOnSaveDocument")
+            .WithSummary("Create a new sprk_document from a transient Compose draft in the client-resolved BU container (FR-05)")
+            // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -129,7 +154,8 @@ public static class ComposeEndpoints
         group.MapPost("/document/{documentSpeId}/push-annotations", PushAnnotations)
             .WithName("ComposePushAnnotations")
             .WithSummary("Render accepted Compose annotations as native Word track-changes + comments and push to SPE with If-Match")
-            .RequireRateLimiting("ai-upload")
+            // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
+            .RequireRateLimiting("ai-persist")
             .Produces<PushAnnotationsResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
@@ -138,6 +164,19 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status412PreconditionFailed)
             .Produces(StatusCodes.Status422UnprocessableEntity)
             .Produces(StatusCodes.Status423Locked)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (9b) POST /api/compose/document/{documentSpeId}/push-preview — FR-28 (task 055):
+        // Tier-2c PRE-CONFIRM preview (comment/track-change counts + Word-vs-Compose split).
+        // Non-mutating — no SPE download, no write. The clean seam the future Policy v2 Tier 2c
+        // gate dialog calls; this task builds no dialog/rendering.
+        group.MapPost("/document/{documentSpeId}/push-preview", PushPreview)
+            .WithName("ComposePushPreview")
+            .WithSummary("Compute the Tier-2c push preview (comment/track-change counts + Word-vs-Compose split) without writing")
+            .RequireRateLimiting("ai-context")
+            .Produces<PushPreviewResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status500InternalServerError);
 
         // (10) POST /api/compose/document/{documentSpeId}/pull-annotations — FR-25 (task 051):
@@ -227,6 +266,60 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (14) GET /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): read
+        // the CURRENT anchored annotations + defined-terms stored on a Compose session so the client
+        // can rehydrate them (Load already returns them on the document-open path; this is the
+        // standalone read for a Context-pane refresh or a re-sync). Session-keyed because the two
+        // collections live on the ChatSession (ADR-015 Tier 3), exactly matching
+        // ComposeService.GetComposeAnnotationsAsync. Read-only — no SPE/Graph, no AI dispatch
+        // (ADR-013/ADR-039). Injects only IComposeService (the CRUD facade), never an AI internal.
+        group.MapGet("/sessions/{sessionId}/annotations", GetAnnotations)
+            .WithName("ComposeGetAnnotations")
+            .WithSummary("Read a Compose session's anchored annotations + defined-terms (FR-29)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (15) POST /api/compose/sessions/{sessionId}/annotations — FR-29 (task 102, gap 4.3): the
+        // WRITE half that makes annotations survive a reopen. Persists the client's anchored
+        // annotations + defined-terms onto the EXISTING session via
+        // ComposeService.SaveComposeAnnotationsAsync (partial-replace: a null collection leaves the
+        // stored one unchanged; a non-null one replaces it wholesale). These are MUTABLE session
+        // UI state (accept/reject/edit), NOT the append-only ledger (contrast push-annotations,
+        // which writes native OOXML into the .docx). A malformed ADR-040 provenance ledgerRef 400s;
+        // a missing session 404s. No SPE/Graph, no AI dispatch (ADR-013/ADR-039).
+        group.MapPost("/sessions/{sessionId}/annotations", SaveAnnotations)
+            .WithName("ComposeSaveAnnotations")
+            .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
+            // Mutable session UI state in Redis (no SPE/Graph, no AI dispatch) → read/context bucket,
+            // not the 5/min ai-upload ingest bucket.
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeAnnotationsResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (16) POST /api/compose/active-document — task 113 (UAT defects 4/5): register the
+        // session-scoped ACTIVE-DOCUMENT so both surfaces resolve "the document the user is acting
+        // on" deterministically. Marks an already-landed session file (compose-direct Browse upload
+        // or a chat upload — its bytes become a ChatSessionFile via the existing chat upload
+        // endpoint, reused client-side) OR a stored sprk_document as active on the chat session.
+        // Deterministic ChatSession write via ChatSessionManager (no parallel document store —
+        // CLAUDE.md §11) — NOT AI dispatch (ADR-039) and NOT SPE/Graph access (ADR-007). Authz via
+        // the group's RequireAuthorization() (ADR-008 / ADR-028).
+        group.MapPost("/active-document", RegisterActiveDocument)
+            .WithName("ComposeRegisterActiveDocument")
+            .WithSummary("Register the session-scoped active document for the chat↔Compose bridge (task 113)")
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeActiveDocumentResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
         return routes;
     }
 
@@ -292,6 +385,7 @@ public static class ComposeEndpoints
                 TenantId = body.TenantId,
                 IfMatch = body.IfMatch,
                 Annotations = body.Annotations,
+                SessionId = body.SessionId,
             };
 
             var result = await composeService.PushAnnotationsAsync(request, httpContext, ct).ConfigureAwait(false);
@@ -303,7 +397,9 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 Size: result.Size,
                 AnnotationCount: result.AnnotationCount,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                Preview: result.Preview,
+                CompletionState: result.CompletionState));
         }
         catch (ArgumentException ex)
         {
@@ -372,6 +468,56 @@ public static class ComposeEndpoints
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while pushing annotations.");
+        }
+    }
+
+    // FR-28 (task 055): Tier-2c PRE-CONFIRM preview — deterministic comment/track-change counts +
+    // the Word-vs-Compose split for an annotation batch the caller is ABOUT to push. Non-mutating
+    // (no SPE download, no write, no ETag) — safe to call repeatedly while the user is still
+    // deciding accept/reject in the (not-yet-built) gate dialog. This route is the clean seam the
+    // future Policy v2 Tier 2c dialog calls; it renders no UI itself (ADR-013/ADR-039 — no AI
+    // dispatch either; pure deterministic categorization).
+    private static async Task<IResult> PushPreview(
+        string documentSpeId,
+        [FromBody] PushPreviewBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (body.Annotations is null || body.Annotations.Count == 0) return BadRequest("annotations must contain at least one annotation.");
+
+        try
+        {
+            var request = new PreviewPushAnnotationsRequest
+            {
+                TenantId = body.TenantId,
+                Annotations = body.Annotations,
+                SessionId = body.SessionId,
+            };
+
+            var preview = await composeService.PreviewPushAnnotationsAsync(request, ct).ConfigureAwait(false);
+
+            return Results.Ok(new PushPreviewResponse(
+                Preview: preview,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose push-preview: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while computing the push preview.");
         }
     }
 
@@ -763,6 +909,110 @@ public static class ComposeEndpoints
         }
     }
 
+    // FR-29 (task 102, gap 4.3): read a Compose session's anchored annotations + defined-terms.
+    // Pure delegation to IComposeService.GetComposeAnnotationsAsync (the CRUD facade — no AI
+    // internals per ADR-013). Returns empty collections (never null) for a session with none
+    // stored, or an unknown session id — same contract as the service.
+    private static async Task<IResult> GetAnnotations(
+        string sessionId,
+        [FromQuery] string tenantId,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
+
+        try
+        {
+            var state = await composeService.GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose get-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while reading annotations.");
+        }
+    }
+
+    // FR-29 (task 102, gap 4.3): persist a Compose session's anchored annotations + defined-terms.
+    // Delegates to IComposeService.SaveComposeAnnotationsAsync (partial-replace semantics). A
+    // malformed ADR-040 provenance ledgerRef surfaces as ArgumentException → 400; a missing session
+    // surfaces as InvalidOperationException("...not found") → 404.
+    private static async Task<IResult> SaveAnnotations(
+        string sessionId,
+        [FromBody] SaveComposeAnnotationsBody? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        logger.LogInformation(
+            "Compose save-annotations: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount} TraceId={TraceId}",
+            body.TenantId, sessionId, body.AnchoredAnnotations?.Count, body.DefinedTermsTracking?.Count, httpContext.TraceIdentifier);
+
+        try
+        {
+            var state = await composeService.SaveComposeAnnotationsAsync(
+                new SaveComposeAnnotationsRequest
+                {
+                    TenantId = body.TenantId,
+                    SessionId = sessionId,
+                    AnchoredAnnotations = body.AnchoredAnnotations,
+                    DefinedTermsTracking = body.DefinedTermsTracking,
+                },
+                ct).ConfigureAwait(false);
+
+            return Results.Ok(new ComposeAnnotationsResponse(
+                SessionId: sessionId,
+                AnchoredAnnotations: state.AnchoredAnnotations,
+                DefinedTermsTracking: state.DefinedTermsTracking,
+                CorrelationId: httpContext.TraceIdentifier));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Compose save-annotations: session not found. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Session Not Found",
+                detail: "The Compose session was not found. Annotations can only be saved onto an existing session (open the document first).",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose save-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while saving annotations.");
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // FR-03 (task 012): retained-bytes serving for the transient Compose mount.
     // The chat upload pipeline (ChatDocumentEndpoints.UploadDocumentAsync step 9b)
@@ -911,7 +1161,20 @@ public static class ComposeEndpoints
         [FromQuery] string tenantId,
         [FromQuery] Guid? documentRecordId,
         [FromQuery] string? displayName,
+        // FR-29/FR-33 (task 102, gap 4.1 — the linchpin): a reopen carries the KNOWN prior
+        // sessionId (and, when hosted on a Matter, the matterId) so ComposeService.LoadAsync
+        // RESUMES that session — restoring its anchored annotations, defined terms, and action
+        // history — instead of minting a fresh empty session on every reopen. Both are OPTIONAL:
+        // a missing/unmatched sessionId falls back to the R1 mint-new behavior unchanged, and a
+        // null matterId preserves the FR-29 DocumentId-only resume match (backward compatible).
+        [FromQuery] string? sessionId,
+        [FromQuery] string? matterId,
         IComposeService composeService,
+        // FR-26 (task 103, gap 3.2): the SPE change-detection origin call. EnsureSubscriptionAsync
+        // had ZERO callers, so the container was never tracked → the renewal service renewed an
+        // empty set forever AND the poll path had no state to build on. Opening a Compose document
+        // is the natural origin: it is exactly when return-from-Word change detection must begin.
+        SpeSyncOrchestrator syncOrchestrator,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -923,8 +1186,8 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
 
         logger.LogInformation(
-            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} TraceId={TraceId}",
-            tenantId, driveId, documentSpeId, documentRecordId, httpContext.TraceIdentifier);
+            "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} session={SessionId} matter={MatterId} TraceId={TraceId}",
+            tenantId, driveId, documentSpeId, documentRecordId, sessionId, matterId, httpContext.TraceIdentifier);
 
         try
         {
@@ -935,9 +1198,36 @@ public static class ComposeEndpoints
                 TenantId = tenantId,
                 DocumentRecordId = documentRecordId,
                 DisplayName = displayName,
+                // gap 4.1: honor the incoming resume key so a reopen resumes the SAME session.
+                SessionId = sessionId,
+                MatterId = matterId,
             };
 
             var result = await composeService.LoadAsync(request, httpContext, ct).ConfigureAwait(false);
+
+            // FR-26 (task 103, gap 3.2): ensure the SPE change-detection subscription exists for
+            // this document's drive so a return-from-Word save is detected. The drive id IS a valid
+            // container key here — SpeFileStore.ResolveDriveIdAsync returns a `b!` drive id unchanged
+            // (ISpeFileOperations contract), and EnsureSubscriptionAsync keys its Redis state by that
+            // value consistently with the poll/check-changes path (task 053). When the webhook config
+            // (Compose:Webhook:{SigningKey,ClientState,NotificationUrl}) is UNPROVISIONED (owner task
+            // 056 / DEF-03), EnsureSubscriptionAsync makes NO Graph call — it persists the container
+            // into the tracked index with FallbackToPolling=true, which (a) stops the renewal service
+            // renewing an empty set forever and (b) seeds the poll-fallback state the client's
+            // poll-on-focus check-changes path drives. Non-fatal by construction: a subscription
+            // failure degrades to poll and MUST NOT fail the document load.
+            // ✅◐ E2E-pending on task 056 for the webhook-DELIVERY leg (secrets); the origin call +
+            // poll fallback are fully wired + testable here.
+            try
+            {
+                await syncOrchestrator.EnsureSubscriptionAsync(result.DriveId ?? driveId, ct).ConfigureAwait(false);
+            }
+            catch (Exception subEx)
+            {
+                logger.LogWarning(subEx,
+                    "Compose load: EnsureSubscriptionAsync origin call failed for drive {DriveId} (non-fatal; change detection degrades to poll). TraceId={TraceId}",
+                    result.DriveId ?? driveId, httpContext.TraceIdentifier);
+            }
 
             return Results.Ok(new LoadComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
@@ -946,8 +1236,41 @@ public static class ComposeEndpoints
                 DocumentRecordId: result.DocumentRecordId,
                 Content: result.Content.ToArray(),
                 ETag: result.ETag,
+                VersionId: result.VersionId,
                 FileName: result.FileName,
                 Size: result.Size,
+                // gaps 4.2/4.4: surface the three collections the (unchanged) service already
+                // returns from the resumed/created session — previously dropped before the wire.
+                AnchoredAnnotations: result.AnchoredAnnotations,
+                DefinedTermsTracking: result.DefinedTermsTracking,
+                ActionHistory: result.ActionHistory,
+                // task 052 fix (FR-08/FR-24/FR-25 wire gap): ComposeService.LoadAsync has computed
+                // ParaIdMap (task 010)/ImportedRevisions (task 050)/ImportedComments (task 051) on
+                // LoadComposeDocumentResult since those tasks landed, but this response record never
+                // projected them onto the wire — every client Load silently received undefined for
+                // all three, so `ComposeEditor`'s paraIdMap/importedRevisions/importedComments props
+                // (which the client-side unit tests exercise only via direct prop injection, never via
+                // a real Load response) were dead in production. Surfaced by this task's through-the-wire
+                // seam test (ADR-038 "unit-green != done" — exactly the gap the vertical-slice-seam
+                // KEEP category exists to catch). Additive, camelCase, mirrors the existing client
+                // compose-contracts.ts ParaIdMapEntry/ImportedRevision/ImportedComment shapes verbatim.
+                ParaIdMap: result.ParaIdMap,
+                ImportedRevisions: result.ImportedRevisions,
+                ImportedComments: result.ImportedComments,
+                // Phase-1 mammoth removal: the server-side projection (paraId-tagged HTML + fail-closed status).
+                Projection: new ComposeProjectionResponse(
+                    Status: result.Projection.Status switch
+                    {
+                        ComposeProjectionStatus.Success => "success",
+                        ComposeProjectionStatus.Partial => "partial",
+                        _ => "failed",
+                    },
+                    CanEdit: result.Projection.CanEdit,
+                    Html: result.Projection.Html,
+                    Warnings: result.Projection.Warnings
+                        .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
+                        .ToList(),
+                    SchemaVersion: result.Projection.SchemaVersion),
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -997,25 +1320,121 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
-        if (body.Content is null || body.Content.Length == 0) return BadRequest("content is required and must be non-empty.");
+        // R3 task 027: the client no longer authors .docx bytes for a dirty save. The replace path accepts
+        // EITHER the retained-original Content (clean save / same-session baseline fast-path) OR a
+        // dirty-loaded delta ({ baselineVersionId, editedParagraphs }) where the server re-fetches the
+        // load-time version as the baseline. One of the two MUST be resolvable.
+        var hasContent = body.Content is { Length: > 0 };
+        var hasDeltaBaseline = body.EditedParagraphs is { Count: > 0 } && !string.IsNullOrWhiteSpace(body.BaselineVersionId);
+        if (!hasContent && !hasDeltaBaseline)
+            return BadRequest("Provide the retained-original 'content' bytes, or 'editedParagraphs' + 'baselineVersionId' for a dirty save (the client no longer authors .docx bytes).");
 
         logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} size={SizeBytes} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content.Length, httpContext.TraceIdentifier);
+            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} edits={EditCount} TraceId={TraceId}",
+            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.EditedParagraphs?.Count ?? 0, httpContext.TraceIdentifier);
 
+        var request = new SaveComposeDocumentRequest
+        {
+            DriveId = body.DriveId,
+            DocumentSpeId = documentSpeId,
+            // ContainerId is ignored on the replace path (DocumentSpeId present) but forwarded
+            // for symmetry so both save routes map the same body shape.
+            ContainerId = body.ContainerId,
+            Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
+            // Replace path still requires a session (guarded above at the endpoint); non-null here.
+            SessionId = body.SessionId!,
+            TenantId = body.TenantId,
+            DocumentRecordId = body.DocumentRecordId,
+            DisplayName = body.DisplayName,
+            // R3 FR-01/FR-06 (task 027): the paraId-keyed dirty-edit delta + the load-time baseline version.
+            BaselineVersionId = body.BaselineVersionId,
+            EditedParagraphs = body.EditedParagraphs,
+            ContentModel = body.ContentModel,
+            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
+            Annotations = body.Annotations,
+            // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before synthesis.
+            ParaIdMap = body.ParaIdMap,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100). Persists a
+    /// TRANSIENT Browse/Upload draft (no SPE drive-item yet) as a new <c>sprk_document</c> in the
+    /// client-resolved Business-Unit <c>containerId</c> (Fork A — the BFF does NOT resolve
+    /// BU→container; the client passes it in, same convention as the 7 Create*Wizards). Maps a
+    /// null <c>DocumentSpeId</c> into <see cref="SaveComposeDocumentRequest"/> so
+    /// <see cref="IComposeService.SaveAsync"/> takes its transient-create branch
+    /// (container → record → indexing), then rebinds the session's DocumentId to the new record.
+    /// </summary>
+    private static async Task<IResult> CreateOnSave(
+        [FromBody] SaveComposeDocumentBody body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
+        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        // sessionId is OPTIONAL on the transient-create path (task 110): a Browse/local-file first
+        // Save has no chat session. The FR-07 rebind is skipped server-side when it is absent; the
+        // SPE create + sprk_document create + indexing all complete without one.
+        // R3 task 027: create-on-save accepts EITHER retained-original Content (browse-local passthrough)
+        // OR a born-in-editor ContentModel (AI-draft/blank — the server RENDERS the .docx). One MUST be present.
+        var hasContent = body.Content is { Length: > 0 };
+        var hasContentModel = body.ContentModel is { Blocks.Count: > 0 };
+        if (!hasContent && !hasContentModel)
+            return BadRequest("Provide the retained-original 'content' bytes, or a 'contentModel' for a born-in-editor draft (the client no longer authors .docx bytes).");
+
+        logger.LogInformation(
+            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} contentBytes={SizeBytes} modelBlocks={BlockCount} TraceId={TraceId}",
+            body.TenantId, body.ContainerId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
+
+        var request = new SaveComposeDocumentRequest
+        {
+            // DocumentSpeId null → SaveAsync transient-create branch. DriveId is derived from
+            // ContainerId server-side; the client does not (and cannot) know it for a new draft.
+            DocumentSpeId = null,
+            DriveId = null,
+            ContainerId = body.ContainerId,
+            Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
+            // Empty when no session is bound (Browse/local-file first Save). The service treats an
+            // empty/whitespace SessionId as "no session" and skips the FR-07 rebind (task 110).
+            SessionId = body.SessionId ?? string.Empty,
+            TenantId = body.TenantId,
+            DocumentRecordId = null,
+            DisplayName = body.DisplayName,
+            // R3 FR-01a (task 027): the born-in-editor content model the server RENDERS into high-fidelity bytes.
+            ContentModel = body.ContentModel,
+            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
+            Annotations = body.Annotations,
+            // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
+            // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
+            ParaIdMap = body.ParaIdMap,
+        };
+
+        return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Shared save execution used by both the replace route (<see cref="Save"/>) and the
+    /// create-on-save route (<see cref="CreateOnSave"/>). Delegates to
+    /// <see cref="IComposeService.SaveAsync"/> and maps the result / exceptions to HTTP.
+    /// </summary>
+    private static async Task<IResult> ExecuteSaveAsync(
+        SaveComposeDocumentRequest request,
+        string? documentSpeId,
+        IComposeService composeService,
+        ILogger logger,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
         try
         {
-            var request = new SaveComposeDocumentRequest
-            {
-                DriveId = body.DriveId,
-                DocumentSpeId = documentSpeId,
-                Content = body.Content,
-                SessionId = body.SessionId,
-                TenantId = body.TenantId,
-                DocumentRecordId = body.DocumentRecordId,
-                DisplayName = body.DisplayName,
-            };
-
             var result = await composeService.SaveAsync(request, httpContext, ct).ConfigureAwait(false);
 
             return Results.Ok(new SaveComposeDocumentResponse(
@@ -1039,7 +1458,7 @@ public static class ComposeEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status404NotFound,
                 title: "Document Not Found",
-                detail: $"SPE drive-item '{documentSpeId}' was not found or could not be written.",
+                detail: $"SPE drive-item '{documentSpeId ?? "(transient create)"}' was not found or could not be written.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
         }
         catch (UnauthorizedAccessException ex)
@@ -1050,6 +1469,51 @@ public static class ComposeEndpoints
                 title: "Forbidden",
                 detail: "Caller lacks SPE ACL write permission for this drive-item.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.DocumentLockedByWordException ex)
+        {
+            // DEF-14: the SPE drive-item is checked out / open in Word for Web. The write layer
+            // (UploadSessionManager) translates the Graph 423/resourceLocked ODataError into this
+            // typed domain exception; we map it to a 423 with actionable copy instead of the opaque
+            // 500 that used to leak "ODataError". Mirrors the PushAnnotations handler.
+            logger.LogWarning(ex, "Compose save: drive-item locked by Word (423). TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status423Locked,
+                title: "Document Open or Checked Out",
+                detail: "This document is checked out or open in Word — check it in or close the other " +
+                        "editor, then Save again. Your Compose changes are safe and still pending.",
+                type: "https://tools.ietf.org/html/rfc4918#section-11.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
+        {
+            // DEF-14: the drive-item changed under the caller since load (If-Match precondition
+            // failed). Map to 412 rather than clobbering; the client's recovery is reload + reapply.
+            logger.LogWarning(ex, "Compose save: ETag precondition failed (412). TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status412PreconditionFailed,
+                title: "Document Changed",
+                detail: "This document changed since you opened it — reload and reapply your changes. " +
+                        "Nothing was overwritten.",
+                type: "https://tools.ietf.org/html/rfc7232#section-4.2");
+        }
+        catch (DocxAnnotationException ex)
+        {
+            // UAT-R7 #2/#3/#4: a redline/comment batch could not be rendered onto the baseline.
+            // Malformed baseline → 400; a tracked-change target span not found in the baseline → 422
+            // (mirrors the push-annotations mapping). Nothing partially wrote — Annotate runs BEFORE
+            // the SPE write in ComposeService.SaveAsync.
+            logger.LogWarning(ex, "Compose save: annotation render failed ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
+            return ex.Kind == DocxAnnotationErrorKind.TargetNotFound
+                ? Results.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Annotation Target Not Found",
+                    detail: "A tracked change could not be located in the document to save. Reload the document and reapply your changes.",
+                    type: "https://tools.ietf.org/html/rfc4918#section-11.2")
+                : Results.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Invalid Document",
+                    detail: "The document could not be annotated for save (its content is not a readable .docx).",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
         catch (Exception ex)
         {
@@ -1197,6 +1661,259 @@ public static class ComposeEndpoints
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // task 113 (UAT defects 4/5): session-scoped active-document registration.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST /api/compose/active-document — records which document the user is acting on
+    /// (session-scoped) so (a) chat can resolve a Compose-direct upload ("summarize this
+    /// document") and (b) <c>SendWorkspaceArtifactHandler</c> mounts the just-active document
+    /// when the LLM supplies no explicit pointer ("edit in Compose"). Provide EXACTLY ONE of
+    /// <c>sessionFileId</c> (a session-uploaded / compose-direct <see cref="ChatSessionFile"/>)
+    /// or <c>documentId</c> (a stored <c>sprk_document</c> GUID). Deterministic
+    /// <see cref="ChatSession"/> write via <see cref="ChatSessionManager"/> — no AI dispatch
+    /// (ADR-039), no SPE/Graph (ADR-007). The compose-direct file's BYTES are landed as a
+    /// ChatSessionFile by the EXISTING chat upload endpoint (reused client-side, CLAUDE.md §11);
+    /// this endpoint only records the pointer.
+    /// </summary>
+    private static async Task<IResult> RegisterActiveDocument(
+        [FromBody] ComposeActiveDocumentRequest? body,
+        ChatSessionManager sessionManager,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required.");
+
+        var hasSessionFile = !string.IsNullOrWhiteSpace(body.SessionFileId);
+        var hasDocument = !string.IsNullOrWhiteSpace(body.DocumentId);
+        if (!hasSessionFile && !hasDocument)
+            return BadRequest("Provide sessionFileId (a session-uploaded / compose-direct file) or documentId (a stored sprk_document).");
+        if (hasSessionFile && hasDocument)
+            return BadRequest("Provide at most one of sessionFileId or documentId — they are mutually exclusive (upload vs stored).");
+
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity not found in token claims.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
+        try
+        {
+            var (session, sessionKey) = await ResolveSessionAsync(sessionManager, tenantId, body.SessionId, ct)
+                .ConfigureAwait(false);
+            if (session is null)
+            {
+                logger.LogWarning(
+                    "Compose active-document: session not found tenant={TenantId} session={SessionId} TraceId={TraceId}",
+                    tenantId, body.SessionId, httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Session Not Found",
+                    detail: "The chat session was not found or has expired. Register the active document on an existing session.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
+            ActiveDocumentIdentity identity;
+            if (hasSessionFile)
+            {
+                // Best-effort display name from the session manifest (the bytes were landed as a
+                // ChatSessionFile by the existing chat upload endpoint — reused client-side).
+                var file = session.UploadedFiles?
+                    .FirstOrDefault(f => string.Equals(f.FileId, body.SessionFileId, StringComparison.Ordinal));
+                var source = string.IsNullOrWhiteSpace(body.Source)
+                    ? ActiveDocumentIdentity.SourceComposeDirect
+                    : body.Source!;
+                identity = new ActiveDocumentIdentity(
+                    Source: source,
+                    SessionFileId: body.SessionFileId,
+                    FileName: body.FileName ?? file?.FileName,
+                    RegisteredAt: DateTimeOffset.UtcNow,
+                    DocumentSessionId: body.DocumentSessionId);
+            }
+            else
+            {
+                identity = new ActiveDocumentIdentity(
+                    Source: ActiveDocumentIdentity.SourceStored,
+                    SprkDocumentId: body.DocumentId,
+                    SpeDriveItemId: body.SpeDriveItemId,
+                    SpeDriveId: body.SpeDriveId,
+                    FileName: body.FileName,
+                    RegisteredAt: DateTimeOffset.UtcNow,
+                    DocumentSessionId: body.DocumentSessionId);
+            }
+
+            // R3 WITHDRAW (spaarkeai-compose-r2 multi-Compose-tab): visible:false means "this document is
+            // no longer the active tab" (its tab was hidden / another Compose tab became active). A
+            // withdraw must NEVER set ActiveDocument to the withdrawing identity — that is the bug that
+            // left the Assistant pinned to the first document after a tab switch (the hidden tab's
+            // withdraw re-asserted itself as active). Clear ActiveDocument ONLY if it STILL points at
+            // THIS document; if a newer tab already took over, leave it untouched. This makes the
+            // register/withdraw pair that fires on every switch ORDER-INDEPENDENT.
+            //
+            // NOTE (race-narrowed, NOT race-free): the session store (ChatSessionManager
+            // .UpdateSessionCacheAsync → ITenantCache.SetSlidingAsync) is last-writer-wins Redis with
+            // NO optimistic-concurrency primitive (no etag/version/CAS). The stillActive guard below
+            // reads session.ActiveDocument from the snapshot loaded at the top of THIS handler, so a
+            // concurrent register(B) that commits between our load and our write can still be clobbered
+            // by this withdraw's write (a classic read-modify-write lost update). The guard narrows the
+            // window and makes the common tab-switch ordering safe; it does not eliminate the race.
+            // Full safety would require a CAS/version on the session cache (out of scope — a
+            // pre-existing store limitation this withdraw only slightly widens).
+            if (body.Visible == false)
+            {
+                var current = session.ActiveDocument;
+                var stillActive = current is not null && (
+                    (hasSessionFile && string.Equals(current.SessionFileId, body.SessionFileId, StringComparison.Ordinal)) ||
+                    (hasDocument && string.Equals(current.SprkDocumentId, body.DocumentId, StringComparison.Ordinal)));
+                if (stillActive)
+                {
+                    await sessionManager.UpdateSessionCacheAsync(session with { ActiveDocument = null }, ct).ConfigureAwait(false);
+                }
+                logger.LogInformation(
+                    "Compose active-document WITHDRAW: tenant={TenantId} session={SessionKey} kind={Kind} clearedActive={Cleared} TraceId={TraceId}",
+                    tenantId, sessionKey, hasSessionFile ? "session-file" : "stored", stillActive, httpContext.TraceIdentifier);
+                return Results.Ok(new ComposeActiveDocumentResponse(
+                    SessionId: body.SessionId,
+                    Source: identity.Source,
+                    SessionFileId: identity.SessionFileId,
+                    DocumentId: identity.SprkDocumentId,
+                    FileName: identity.FileName,
+                    CorrelationId: httpContext.TraceIdentifier,
+                    DocumentSessionId: identity.DocumentSessionId));
+            }
+
+            var updated = session with { ActiveDocument = identity };
+            await sessionManager.UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+            // DEF-11 doc-session dispatch fix (spaarkeai-compose-r2): the Compose "document session"
+            // (identity.DocumentSessionId) is client-minted (crypto.randomUUID) and is NEVER created
+            // via POST /api/ai/chat/sessions. A materializesInEditor compose dispatch therefore targets
+            // POST /api/ai/chat/sessions/{documentSessionId}/dispatch and 404s, because
+            // SessionDispatchOrchestrator loads GetSessionAsync(tenantId, documentSessionId) → null.
+            // Idempotently ensure a minimal, resolvable ChatSession exists keyed by documentSessionId
+            // so the dispatch resolves and OutputRouter can write its SessionOutput. This is a
+            // deterministic session-store write (same UpdateSessionCacheAsync the pointer path uses) —
+            // NOT AI dispatch (ADR-039) and NOT SPE/Graph (ADR-007). Session-creation stays OUT of the
+            // dispatch seam; this is the single natural creation hook.
+            await EnsureDocumentSessionResolvableAsync(
+                sessionManager, tenantId, identity.DocumentSessionId, session, ct).ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose active-document registered: tenant={TenantId} session={SessionKey} source={Source} kind={Kind} docSession={DocumentSessionId} TraceId={TraceId}",
+                tenantId, sessionKey, identity.Source, hasSessionFile ? "session-file" : "stored", identity.DocumentSessionId ?? "(none)", httpContext.TraceIdentifier);
+
+            return Results.Ok(new ComposeActiveDocumentResponse(
+                SessionId: body.SessionId,
+                Source: identity.Source,
+                SessionFileId: identity.SessionFileId,
+                DocumentId: identity.SprkDocumentId,
+                FileName: identity.FileName,
+                CorrelationId: httpContext.TraceIdentifier,
+                DocumentSessionId: identity.DocumentSessionId));
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose active-document: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while registering the active document.");
+        }
+    }
+
+    /// <summary>
+    /// DEF-11 (spaarkeai-compose-r2): idempotently ensures a resolvable <see cref="ChatSession"/>
+    /// exists keyed by <paramref name="documentSessionId"/> so a compose <c>materializesInEditor</c>
+    /// dispatch to <c>POST /api/ai/chat/sessions/{documentSessionId}/dispatch</c> resolves (200) rather
+    /// than 404-ing. The Compose document session is client-minted and never created via the chat
+    /// session-create endpoint, so this registration hook is its single natural creation point.
+    ///
+    /// <para><b>Idempotency (critical)</b>: if a session already resolves for
+    /// <paramref name="documentSessionId"/>, this method is a no-op — it does NOT clobber the existing
+    /// session. That preserves any <see cref="ChatSession.Outputs"/> (the compose-disposition ledger
+    /// the editor materializes) written by prior dispatches; re-registration across the multiple mount
+    /// doors (Browse, upload, stored-doc, DEF-08 draft) MUST NOT wipe pending redlines.</para>
+    ///
+    /// <para>When absent, a MINIMAL session is created (empty Messages/Outputs, timestamps=now,
+    /// carrying over the chat session's <see cref="ChatSession.HostContext"/> and tenant) and persisted
+    /// via the same <see cref="ChatSessionManager.UpdateSessionCacheAsync"/> write the pointer path uses.
+    /// Compose EDIT actions bind their operand from dispatch args (the structured-operand path — no
+    /// session files required), so a minimal persisted session is sufficient for the dispatch to run and
+    /// write its <c>SessionOutput</c>.</para>
+    /// </summary>
+    private static async Task EnsureDocumentSessionResolvableAsync(
+        ChatSessionManager sessionManager,
+        string tenantId,
+        string? documentSessionId,
+        ChatSession chatSession,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(documentSessionId))
+        {
+            return;
+        }
+
+        // Preserve an existing doc session wholesale (Outputs / ledger) — never clobber.
+        var (existing, _) = await ResolveSessionAsync(sessionManager, tenantId, documentSessionId, ct)
+            .ConfigureAwait(false);
+        if (existing is not null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var documentSession = new ChatSession(
+            SessionId: documentSessionId,
+            TenantId: tenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: now,
+            LastActivity: now,
+            Messages: [],
+            HostContext: chatSession.HostContext);
+
+        await sessionManager.UpdateSessionCacheAsync(documentSession, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resolves a chat session, probing the client-sent id then its GUID "N"/"D" normalizations —
+    /// the same tolerance the Compose upload path applies, since a client may send either spelling.
+    /// </summary>
+    private static async Task<(ChatSession? Session, string? Key)> ResolveSessionAsync(
+        ChatSessionManager sessionManager, string tenantId, string sessionId, CancellationToken ct)
+    {
+        foreach (var candidate in EnumerateSessionIdForms(sessionId))
+        {
+            var session = await sessionManager.GetSessionAsync(tenantId, candidate, ct).ConfigureAwait(false);
+            if (session is not null) return (session, candidate);
+        }
+        return (null, null);
+    }
+
+    private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
+    {
+        yield return sessionId;
+        if (Guid.TryParse(sessionId, out var g))
+        {
+            var n = g.ToString("N");
+            var d = g.ToString("D");
+            if (!string.Equals(n, sessionId, StringComparison.Ordinal)) yield return n;
+            if (!string.Equals(d, sessionId, StringComparison.Ordinal)) yield return d;
+        }
+    }
+
     private static IResult BadRequest(string detail) =>
         Results.Problem(
             statusCode: StatusCodes.Status400BadRequest,
@@ -1231,14 +1948,97 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("size")] long Size,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c>.</summary>
-public sealed record SaveComposeDocumentBody(
-    [property: JsonPropertyName("driveId")] string DriveId,
+/// <summary>
+/// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
+/// Registers the session-scoped active document on the chat session. Provide EXACTLY ONE of
+/// <see cref="SessionFileId"/> (a session-uploaded / compose-direct <see cref="ChatSessionFile"/>)
+/// or <see cref="DocumentId"/> (a stored <c>sprk_document</c> GUID, D form). <see cref="Source"/>
+/// is an optional provenance discriminant (defaults to <c>compose-direct</c> for a session file,
+/// <c>stored</c> for a document) — see <see cref="ActiveDocumentIdentity"/>.
+/// </summary>
+/// <param name="DocumentSessionId">
+/// DEF-11 (spaarkeai-compose-r2) — OPTIONAL id of the separate, coordinated Compose "document
+/// session" (<c>ComposeWorkspace.state.sessionId</c>) that hosts this document's compose-disposition
+/// ledger outputs. Additive: older clients omitting this field are unaffected (the active-document
+/// pointer still registers; <see cref="ActiveDocumentIdentity.DocumentSessionId"/> stays null and the
+/// text-path capability dispatch falls back to the chat session per its fail-soft rule). When
+/// supplied, <c>BindingCapabilityTool</c> routes text-path <c>compose</c>-disposition dispatches to
+/// THIS session instead of the chat session, matching the DEF-09 Click-path precedent.
+/// </param>
+public sealed record ComposeActiveDocumentRequest(
     [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("sessionFileId")] string? SessionFileId = null,
+    [property: JsonPropertyName("documentId")] string? DocumentId = null,
+    [property: JsonPropertyName("source")] string? Source = null,
+    [property: JsonPropertyName("fileName")] string? FileName = null,
+    [property: JsonPropertyName("speDriveItemId")] string? SpeDriveItemId = null,
+    [property: JsonPropertyName("speDriveId")] string? SpeDriveId = null,
+    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null,
+    // R3 visibility (spaarkeai-compose-r2 multi-Compose-tab): false = WITHDRAW this document from the
+    // session's active document (the tab was hidden / another Compose tab became active). Omitted/true
+    // = register as active. The client has always sent this; the server previously had no property for
+    // it, so it was silently dropped and EVERY post — including a hidden tab's withdraw — re-pinned that
+    // document as active, leaving the Assistant stuck on the first doc after a tab switch (UAT 2026-07-14).
+    [property: JsonPropertyName("visible")] bool? Visible = null);
+
+/// <summary>Response shape for <c>POST /api/compose/active-document</c> (task 113) — echoes the
+/// registered active-document pointer. <see cref="DocumentSessionId"/> added DEF-11 (spaarkeai-compose-r2).</summary>
+public sealed record ComposeActiveDocumentResponse(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("sessionFileId")] string? SessionFileId,
+    [property: JsonPropertyName("documentId")] string? DocumentId,
+    [property: JsonPropertyName("fileName")] string? FileName,
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("documentSessionId")] string? DocumentSessionId = null);
+
+/// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
+/// <c>POST /api/compose/documents/create-on-save</c> (FR-05 transient create path, task 100).
+/// On the create-on-save path <see cref="DriveId"/> is null and <see cref="ContainerId"/> carries
+/// the client-resolved BU container; on the replace path <see cref="ContainerId"/> is ignored.</summary>
+public sealed record SaveComposeDocumentBody(
+    /// <summary>Bound ChatSession id. OPTIONAL on the create-on-save (transient Browse/local-file)
+    /// path (task 110) — absent when the draft has no chat session; the server skips the FR-07
+    /// rebind. Still REQUIRED on the replace path (guarded at that endpoint).</summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("content")] byte[] Content,
+    /// <summary>The retained-original bytes (same-session fast-path baseline / clean-save passthrough).
+    /// OPTIONAL as of R3 task 027: a dirty-loaded save may instead send <see cref="BaselineVersionId"/> +
+    /// <see cref="EditedParagraphs"/> (the server re-fetches the load-time version), and a born-in-editor
+    /// save sends <see cref="ContentModel"/> (the server RENDERS the bytes). The client authors no
+    /// <c>.docx</c> bytes — the only bytes it ever sends are this retained original.</summary>
+    [property: JsonPropertyName("content")] byte[]? Content = null,
+    [property: JsonPropertyName("driveId")] string? DriveId = null,
+    /// <summary>Client-resolved SPE container id for the create-on-save path (Fork A —
+    /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
+    [property: JsonPropertyName("containerId")] string? ContainerId = null,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
-    [property: JsonPropertyName("displayName")] string? DisplayName = null);
+    [property: JsonPropertyName("displayName")] string? DisplayName = null,
+    /// <summary>Redline/comment save fidelity (UAT-R7 #2/#3/#4): accepted pending track-change
+    /// insertions/deletions + comments to materialize as native <c>w:ins</c>/<c>w:del</c>/
+    /// <c>w:comment</c> via <c>DocxAnnotationWriter</c> on top of the baseline <c>content</c> before
+    /// persisting (see <see cref="SaveComposeDocumentRequest.Annotations"/>). Absent/empty on a plain
+    /// no-redline Save — the baseline is then persisted unchanged. Same shape the push path uses.</summary>
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation>? Annotations = null,
+    /// <summary>R3 FR-06 (task 027): the LOAD-TIME SPE version id (from the Load response). Sent on a
+    /// dirty-loaded save when the client no longer holds the retained <see cref="Content"/> bytes so the
+    /// server re-fetches the load-time version as the delta baseline.</summary>
+    [property: JsonPropertyName("baselineVersionId")] string? BaselineVersionId = null,
+    /// <summary>R3 FR-01 (task 027): the editor paragraphs the user CHANGED, each keyed by its
+    /// <c>w14:paraId</c> with its new text. Drives the server-side tracked-change synthesizer onto the
+    /// resolved baseline — the client never authors the delta bytes.</summary>
+    [property: JsonPropertyName("editedParagraphs")] IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs = null,
+    /// <summary>R3 FR-01a (task 027): the paraId-keyed content model for a BORN-IN-EDITOR save (AI-drafted /
+    /// blank / browse-local — no retained original). The server RENDERS the high-fidelity <c>.docx</c> from
+    /// it (styles + style-linked multi-level numbering + tables + minted paraId). Mutually exclusive with
+    /// <see cref="Content"/> / <see cref="BaselineVersionId"/>.</summary>
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    /// <summary>C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
+    /// paragraph in document order (<c>{ index, paraId, text }</c>). Lets the server stamp minted ids
+    /// physically onto the baseline's id-less paragraphs before the synthesizer resolves (see
+    /// <see cref="SaveComposeDocumentRequest.ParaIdMap"/> / <c>ComposeBaselineParaIdStamper</c>).
+    /// Optional — an older client omits it and the stamp is skipped.</summary>
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ComposeBaselineParaId>? ParaIdMap = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(
@@ -1254,10 +2054,15 @@ public sealed record PushAnnotationsBody(
     [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("ifMatch")] string IfMatch,
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations);
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    /// <summary>FR-28 (task 055, additive/optional): bound ChatSession id — enables the
+    /// Compose-only side of the response's <c>preview</c> split. See
+    /// <see cref="PushAnnotationsRequest.SessionId"/> remarks.</summary>
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
 
 /// <summary>Response shape for <c>POST /api/compose/document/{id}/push-annotations</c> (FR-24) —
-/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token.</summary>
+/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token, plus
+/// (FR-28, task 055) the Tier-2c preview + per-step completion state as post-write evidence.</summary>
 public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1265,9 +2070,28 @@ public sealed record PushAnnotationsResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("annotationCount")] int AnnotationCount,
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("preview")] ComposePushSavePreview? Preview = null,
+    [property: JsonPropertyName("completionState")] Sprk.Bff.Api.Services.Ai.PublicContracts.JobAwareCompletionState? CompletionState = null);
+
+/// <summary>Request body for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28, task 055)
+/// — the Tier-2c PRE-CONFIRM preview call. Non-mutating: no SPE download, no write. Safe to call
+/// repeatedly as the user adjusts accept/reject choices before confirming the gate dialog (not
+/// built by this task — see <see cref="IComposeService.PreviewPushAnnotationsAsync"/> remarks).</summary>
+public sealed record PushPreviewBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
+    [property: JsonPropertyName("sessionId")] string? SessionId = null);
+
+/// <summary>Response shape for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28).</summary>
+public sealed record PushPreviewResponse(
+    [property: JsonPropertyName("preview")] ComposePushSavePreview Preview,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
-/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>.</summary>
+/// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>. The three FR-29/FR-33
+/// collections (task 102, gaps 4.2/4.4) are projected from the (unchanged)
+/// <see cref="LoadComposeDocumentResult"/> the service returns for the resumed/created session —
+/// this is what makes a reopen restore prior annotations, defined terms, and action history.</summary>
 public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
     [property: JsonPropertyName("driveId")] string? DriveId,
@@ -1275,8 +2099,55 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId,
     [property: JsonPropertyName("content")] byte[] Content,
     [property: JsonPropertyName("eTag")] string? ETag,
+    [property: JsonPropertyName("versionId")] string? VersionId,
     [property: JsonPropertyName("fileName")] string? FileName,
     [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
+    [property: JsonPropertyName("actionHistory")] IReadOnlyList<ComposeActionHistoryEntry> ActionHistory,
+    // task 052 fix: additive wire projection of LoadComposeDocumentResult.ParaIdMap (task 010) /
+    // ImportedRevisions (task 050) / ImportedComments (task 051) — computed server-side since those
+    // tasks landed but never serialized onto this response until this task's seam test surfaced the
+    // gap. Field shapes mirror the client compose-contracts.ts mirrors verbatim (camelCase).
+    [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ParaIdMapEntry> ParaIdMap,
+    [property: JsonPropertyName("importedRevisions")] IReadOnlyList<ImportedRevision> ImportedRevisions,
+    [property: JsonPropertyName("importedComments")] IReadOnlyList<ImportedComment> ImportedComments,
+    // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
+    // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
+    // mammoth. The client keys off Projection.status/canEdit, NOT html length.
+    [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
+/// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
+/// renders a read-only / "Open in Word" state. <c>warnings</c> carry codes + counts only (no content).</summary>
+public sealed record ComposeProjectionResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("canEdit")] bool CanEdit,
+    [property: JsonPropertyName("html")] string Html,
+    [property: JsonPropertyName("warnings")] IReadOnlyList<ComposeProjectionWarningResponse> Warnings,
+    [property: JsonPropertyName("schemaVersion")] string SchemaVersion);
+
+/// <summary>Wire shape of a single projection fidelity warning (Tier-1 safe — code + count only).</summary>
+public sealed record ComposeProjectionWarningResponse(
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("count")] int Count);
+
+/// <summary>Request body for <c>POST /api/compose/sessions/{sessionId}/annotations</c> (FR-29,
+/// task 102). Partial-replace: a <c>null</c> collection leaves the stored one unchanged; a non-null
+/// (possibly empty) collection replaces it wholesale — mirrors
+/// <see cref="SaveComposeAnnotationsRequest"/> (sessionId comes from the route).</summary>
+public sealed record SaveComposeAnnotationsBody(
+    [property: JsonPropertyName("tenantId")] string TenantId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations = null,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm>? DefinedTermsTracking = null);
+
+/// <summary>Response shape for the <c>GET/POST /api/compose/sessions/{sessionId}/annotations</c>
+/// routes (FR-29, task 102) — the CURRENT session collections after the read/write.</summary>
+public sealed record ComposeAnnotationsResponse(
+    [property: JsonPropertyName("sessionId")] string SessionId,
+    [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation> AnchoredAnnotations,
+    [property: JsonPropertyName("definedTermsTracking")] IReadOnlyList<DefinedTerm> DefinedTermsTracking,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/save</c>.</summary>

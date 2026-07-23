@@ -16,7 +16,7 @@
 | 013 | Default + Concat + Template engines | 1 | ✅ | 012 | sonnet/high | FULL | — |
 | 014 | Same-entity support + no-guard test | 1 | ✅ | 013 | sonnet/high | FULL | — |
 | 015 | Engine unit tests (all paths) | 1 | ✅ | 012,013,014 | sonnet/high | FULL | — |
-| 016 | matterService nav-prop convergence (deferred from 011, §6.5) | 1 | 🔲 | 011 | opus/xhigh | FULL | — |
+| 016 | matterService nav-prop convergence (deferred from 011, §6.5) | 1 | ✅ | 011 | opus/xhigh | FULL | — |
 | 020 | Wire event + matter + project | 2 | ✅ | 015,011 | sonnet/high | FULL | B |
 | 021 | Wire todo + workAssignment | 2 | ✅ | 015,011 | sonnet/high | FULL | B |
 | 022 | Wire invoice + reportCard | 2 | ✅ | 015,011 | sonnet/high | FULL | B |

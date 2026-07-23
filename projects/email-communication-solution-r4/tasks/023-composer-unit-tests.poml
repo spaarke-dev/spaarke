@@ -1,0 +1,141 @@
+<task id="023" project="email-communication-solution-r4">
+  <metadata>
+    <title>Unit tests — `&lt;EmailComposer /&gt;` engine + sub-components + wrappers + `sendCommunication()`</title>
+    <phase>Wave 2 — Client: composer engine + wrappers</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>020, 021, 022</dependencies>
+    <blocks></blocks>
+    <tags>frontend, testing, react</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <rigor-reason>Modifies `tests`/`__tests__` surface — per root CLAUDE.md §8 TEST-MODIFYING override, code-review + adr-check run UNCONDITIONALLY at Step 9.5 (overrides the STANDARD skip). Test additions follow ADR-038 KEEP-path categories.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client-only test files; disjoint from the server track. Aggregates the W2 engine/wrappers/service, so it runs after 020+021+022 land — the W2 tail.</parallel-reason>
+    <fr-refs>NFR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Write Jest + React Testing Library unit tests covering the W2 send-side surface: the `&lt;EmailComposer /&gt;` engine (reducer, validation, modes, imperative handle), the sub-components (RecipientField normalization, AttachmentList caps), the three wrappers (mount-locking + prop pass-through), and `communicationApi.ts` (`SendCommunicationError` parsing + one-shot deprecation warn). Follow ADR-038 KEEP-path categories and the existing `@spaarke/ui-components` Jest setup; mock at the boundary (`communicationApi.sendCommunication`, `Xrm.WebApi`, `searchUsersAndContacts`) — do NOT mock React internals or over-mock.
+
+    Test files to create under `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/` (+ `services/__tests__/`):
+
+    1. `EmailComposer.reducer.test.ts` — initial state per mode (compose/view/reply/forward/draft); `SET_FIELD`, `ADD_/REMOVE_/TOGGLE_ATTACHMENT`, `SET_MODE` transition matrix (view→reply, view→forward, view→compose, compose→draft), `BEGIN_/END_SEND` toggling isSending, `RESET`.
+    2. `validation.test.ts` — every canonical code triggered once: `TO_REQUIRED`, `TO_INVALID_EMAIL`, `TO_TOO_MANY`, `SUBJECT_REQUIRED`, `BODY_REQUIRED`, `ATTACHMENT_TOO_LARGE`, `ATTACHMENTS_TOO_MANY`, `ATTACHMENT_BLOCKED_TYPE`, `FROM_REQUIRED`, `FROM_NOT_APPROVED`; `forSend=false` skips SUBJECT/BODY required.
+    3. `RecipientField.test.tsx` — paste `"Alice &lt;alice@example.com&gt;; bob@example.com,charlie@example.com"` → 3 Tags (the canonical `;`/`,`/mixed normalization); invalid email + Enter → no Tag + TO_INVALID_EMAIL; Backspace removes last Tag; aria-labels for To/Cc/Bcc.
+    4. `AttachmentList.test.tsx` — 150-cap → ATTACHMENTS_TOO_MANY + Add disabled; 35 MB total → ATTACHMENT_TOO_LARGE; 25 MB → soft warning MessageBar (no hard block); source badges per kind; remove; forward-mode selection checkbox toggles TOGGLE_ATTACHMENT_SELECTED.
+    5. `modes.test.ts` — `dedupSubjectPrefix` (Re:/Fwd:/FW:, case-insensitive, no double prefix); `deriveReplyState` (to=original from, cc=[], `Re:` subject, wrapped body, associations carried); `deriveForwardState` (blank to, `Fwd:`, attachments carried selected); `deriveDraftState` (existingCommunicationId + `mapStateToDraftUpdate` shape).
+    6. `imperative-handle.test.tsx` — render `&lt;EmailComposer ref /&gt;`; `getState()`, `validate()`, `send()` (mocked `sendCommunication`), `saveDraft()`.
+    7. `wrappers.test.tsx` — `SendEmailStep` locks `mount='inline'` + forwards `composerRef`; `SendEmailDialog` locks `mount='dialog'` + `onSent`→onClose; `SendEmailPage` locks `mount='page'` + requires `mode`, `onClose`→onCancel.
+    8. `services/__tests__/communicationApi.test.ts` — `SendCommunicationError.fromResponse` parses ProblemDetails (status/code/detail/correlationId) + falls back on non-JSON; `sendCommunication()` throws `SendCommunicationError` on non-2xx; one-shot deprecation warn fires exactly once across multiple `attachmentDocumentIds` calls.
+  </prompt>
+
+  <role>
+    React + TypeScript developer with Jest + React Testing Library + reducer-testing experience; fluent in boundary-mocking and ADR-038 KEEP-path test classification.
+  </role>
+
+  <goal>
+    All test files green under `npm run test` in `@spaarke/ui-components`. Every canonical validation code exercised once; recipient `;`/`,`/mixed parsing tested; attachment caps tested at boundaries (150 / 35 MB / 25 MB); mode pre-fill helpers covered; imperative handle covered; wrapper mount-locking covered; `SendCommunicationError` parsing + one-shot deprecation warn covered. Coverage of `EmailComposer/` ≥ 80% lines. Tests are MAINTAIN-class per ADR-038 (behavior contracts, not scaffolding).
+  </goal>
+
+  <context>
+    <background>
+      W2 (tasks 020–022) built the engine, sub-components, wrappers, and `sendCommunication()` refinements. This task is the aggregation test surface (NFR-08). The engine's mode helpers (`dedupSubjectPrefix`, `derive*State`, `mapState*`) and `validateState` are pure and are the highest-value unit targets. Mock at the boundary only.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/ (NEW — test files)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/__tests__/communicationApi.test.ts (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.* (READ — existing config)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts (READ)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (READ)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Tests follow KEEP-path categories; no banned patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check). Behavior contracts, not scaffolding.</constraint>
+    <constraint source="constraints/testing.md">Arrange/Act/Assert; describe-per-unit; mock at the boundary; do not over-mock; do not pad for coverage.</constraint>
+    <constraint source="project">Cover all 10 canonical validation codes.</constraint>
+    <constraint source="project">Cover ≥5 mode transitions + all 4 attachment source kinds + all imperative handle methods.</constraint>
+    <constraint source="project">Cover wrapper mount-locking for all three wrappers.</constraint>
+    <constraint source="project">Cover `SendCommunicationError` parsing (JSON + non-JSON fallback) + one-shot deprecation warn.</constraint>
+    <constraint source="project">Coverage of `EmailComposer/` ≥ 80% lines; client-only (no BFF obligations).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>.claude/patterns/testing/mocking-patterns.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.reducer.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Unit test structure" location=".claude/patterns/testing/unit-test-structure.md">Authoritative for file layout + describe/it conventions.</pattern>
+      <pattern name="Xrm.WebApi global mock" location="existing shared-lib tests">Global `(global as any).Xrm = { WebApi: { retrieveRecord: jest.fn(), updateRecord: jest.fn(), createRecord: jest.fn() } }` for draft/view load paths.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Audit the existing Jest setup: locate `jest.config`, a sample test, common mocks (Xrm, Fluent render helpers). Document in task notes. Read the engine reducer/types + `communicationApi.ts` to confirm exported helper names.</step>
+    <step order="2">Author `EmailComposer.reducer.test.ts` — state-machine + transition matrix.</step>
+    <step order="3">Author `validation.test.ts` — all 10 canonical codes + forSend gating.</step>
+    <step order="4">Author `RecipientField.test.tsx` — `;`/`,`/mixed parsing (mock `searchUsersAndContacts`) + a11y labels.</step>
+    <step order="5">Author `AttachmentList.test.tsx` — caps at 150 / 35 MB / 25 MB + badges + remove + forward checkbox.</step>
+    <step order="6">Author `modes.test.ts` — `dedupSubjectPrefix` + `deriveReplyState`/`deriveForwardState`/`deriveDraftState` + map helpers.</step>
+    <step order="7">Author `imperative-handle.test.tsx` — ref methods with mocked `sendCommunication`.</step>
+    <step order="8">Author `wrappers.test.tsx` — mount-locking + prop pass-through for all three wrappers.</step>
+    <step order="9">Author `services/__tests__/communicationApi.test.ts` — `SendCommunicationError` parse/fallback + throw-on-non-2xx + one-shot deprecation warn.</step>
+    <step order="10">Run `npm run test` (all green) + `npm run test -- --coverage` (verify `EmailComposer/` ≥ 80%). Document any coverage gaps honestly; do NOT pad.</step>
+    <step order="9.5">TEST-MODIFYING quality gates (UNCONDITIONAL per root §8): invoke `code-review` on the test files; invoke `adr-check` against ADR-038. Address Critical + High findings.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md`: mark 023 ✅.</step>
+    <step order="12">Update `current-task.md` per task-execute protocol: status → completed; W2 complete → advance to next wave's first pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">audit existing Jest config + sample tests + exported helper names</tool>
+    <tool name="write">8 test files</tool>
+    <tool name="bash">npm run test + coverage</tool>
+    <tool name="code-review">Step 9.5 (unconditional)</tool>
+    <tool name="adr-check">Step 9.5 (unconditional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">EmailComposer/__tests__/EmailComposer.reducer.test.ts (NEW)</output>
+    <output type="test">EmailComposer/__tests__/validation.test.ts (NEW)</output>
+    <output type="test">EmailComposer/__tests__/RecipientField.test.tsx (NEW)</output>
+    <output type="test">EmailComposer/__tests__/AttachmentList.test.tsx (NEW)</output>
+    <output type="test">EmailComposer/__tests__/modes.test.ts (NEW)</output>
+    <output type="test">EmailComposer/__tests__/imperative-handle.test.tsx (NEW)</output>
+    <output type="test">EmailComposer/__tests__/wrappers.test.tsx (NEW)</output>
+    <output type="test">services/__tests__/communicationApi.test.ts (NEW)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 8 test files created + green under `npm run test`.</criterion>
+    <criterion testable="true">All 10 canonical validation codes exercised at least once.</criterion>
+    <criterion testable="true">Recipient `;`, `,`, and mixed `;,` parsing tested (canonical normalization).</criterion>
+    <criterion testable="true">Attachment caps tested at 150 / 35 MB / 25 MB boundaries.</criterion>
+    <criterion testable="true">≥5 mode transitions + imperative handle (`validate`/`send`/`saveDraft`/`getState`) covered.</criterion>
+    <criterion testable="true">All three wrappers' mount-locking + prop pass-through covered.</criterion>
+    <criterion testable="true">`SendCommunicationError.fromResponse` (JSON + non-JSON) + throw-on-non-2xx + one-shot deprecation warn covered.</criterion>
+    <criterion testable="true">Coverage of `EmailComposer/` ≥ 80% lines; no coverage-padding.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Tests are MAINTAIN-class (behavior contracts) — they survive the project-close `/test-diet` gate. Where the engine loads via `Xrm.WebApi` (draft/view), use the global Xrm mock pattern from existing shared-lib tests. If coverage falls short, record the gap in notes rather than adding low-value assertions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. TEST-MODIFYING → Step 9.5 (code-review + adr-check) runs UNCONDITIONALLY per root §8. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

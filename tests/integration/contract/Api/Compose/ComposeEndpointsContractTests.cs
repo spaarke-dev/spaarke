@@ -180,6 +180,14 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
                 ETag = "\"v1-etag\"",
                 FileName = "draft.docx",
                 Size = 4,
+                // Phase-1 mammoth removal: the server DOCX→editor projection the client mounts instead of
+                // running mammoth. Assert it round-trips onto the wire (endpoint→response mapping).
+                Projection = new ComposeDocxProjection
+                {
+                    Status = ComposeProjectionStatus.Success,
+                    CanEdit = true,
+                    Html = "<p data-paraid=\"AB12CD34\">projected body</p>",
+                },
             });
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -194,6 +202,12 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
         body.SessionId.Should().Be(sessionId);
         body.FileName.Should().Be("draft.docx");
         body.Content.Should().HaveCount(4);
+        // Phase-1 mammoth removal: the projection is projected onto the wire so the client mounts it
+        // (fail-closed on status/canEdit) instead of running the client mammoth convert.
+        body.Projection.Should().NotBeNull();
+        body.Projection.Status.Should().Be("success");
+        body.Projection.CanEdit.Should().BeTrue();
+        body.Projection.Html.Should().Contain("data-paraid=\"AB12CD34\"");
     }
 
     [Fact]

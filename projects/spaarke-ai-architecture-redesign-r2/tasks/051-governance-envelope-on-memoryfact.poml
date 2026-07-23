@@ -1,7 +1,7 @@
 <task id="AIR2-051" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Governance envelope on MemoryFact + tolerant-reader migration defaults</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1.5 days</estimated-effort>
@@ -96,4 +96,20 @@
     <criterion testable="true">NEGATIVE: a test asserts `sourceTrustLevel` (if present) participates in NO deny/reject path — the field is inert; enforcement is deferred.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-07-10 (main session, post-050 SHRANK scope — directional-mode adaptation documented).
+    The envelope was already COMPLETE when this task ran: MemoryItem v1 (task 016) carries all 14 envelope
+    fields and reuses MemoryFact verbatim via composition (MemoryItem.Fact); MemoryItemDocument (task 050)
+    flattens it 1:1 onto Cosmos. The POML's MatterMemoryService.cs input was deleted by 050. No production
+    code change was needed or made. Delivered the previously-unpinned contracts as tests + documentation:
+    (1) MemoryItemEnvelopeTests.cs — pre-envelope document deserializes with documented defaults (criterion 2);
+    future-additive unknown fields ignored (tolerant reader); MemoryItemMigration.FromLegacyMatterFact
+    Tier-3 defaults lossless (previously untested seam); inert trustLevel Theory incl. "untrusted"
+    (criterion 5); source: insights-engine construction with no special-casing (criterion 4).
+    (2) Store-level negative in MemoryItemStoreTests — UpsertAsync with trustLevel "untrusted" persists.
+    (3) notes/051-envelope-field-mapping.md — the documented field mapping (criterion 1) + default table +
+    Placement Justification (criterion 6: test-only change, publish delta 0, no new packages/CVE).
+    Verification: 134/134 Services.Ai.Memory suite tests green.
+  </notes>
 </task>

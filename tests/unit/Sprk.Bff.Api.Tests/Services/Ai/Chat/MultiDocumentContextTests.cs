@@ -504,7 +504,7 @@ public class MultiDocumentContextTests
             playbookServiceMock.Object,
             dataverseServiceMock.Object,
             loggerMock.Object,
-            Mock.Of<IMatterMemoryService>());
+            Mock.Of<IMemoryItemStore>());
 
         return (sut, scopeResolverMock, playbookServiceMock, dataverseServiceMock);
     }

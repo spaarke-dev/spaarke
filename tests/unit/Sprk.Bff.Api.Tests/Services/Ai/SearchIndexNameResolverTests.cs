@@ -1,9 +1,11 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Xunit;
 
@@ -23,11 +25,15 @@ public sealed class SearchIndexNameResolverTests
     private const string AliasedAttr = "idx.sprk_searchindexname";
     private const string LegacyText = "sprk_searchindexname";
 
+    private const string DefaultKnowledgeIndex = "spaarke-files-index";
+
     private readonly Mock<IGenericEntityService> _entityServiceMock = new();
     private readonly Mock<ILogger<SearchIndexNameResolver>> _loggerMock = new();
 
-    private SearchIndexNameResolver CreateResolver() =>
-        new(_entityServiceMock.Object, _loggerMock.Object);
+    private SearchIndexNameResolver CreateResolver(string knowledgeIndexName = DefaultKnowledgeIndex) =>
+        new(_entityServiceMock.Object,
+            Options.Create(new AiSearchOptions { KnowledgeIndexName = knowledgeIndexName }),
+            _loggerMock.Object);
 
     /// <summary>
     /// Builds an Entity that mimics the FetchXml result for a source-record fetch with
@@ -349,5 +355,44 @@ public sealed class SearchIndexNameResolverTests
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Never);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FR-26 / FAILURE-MODES G-9 — index-config split-brain consolidation.
+    // The resolver is the single source of the tenant-default index name for BOTH
+    // reads and writes; GetDefaultIndexName() returns AiSearchOptions.KnowledgeIndexName.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetDefaultIndexName_ReturnsCanonicalKnowledgeIndexName()
+    {
+        // Arrange — the single canonical read/write setting is AiSearch:KnowledgeIndexName.
+        var resolver = CreateResolver(knowledgeIndexName: "spaarke-file-index");
+
+        // Act + Assert
+        resolver.GetDefaultIndexName().Should().Be("spaarke-file-index");
+    }
+
+    [Fact]
+    public void GetDefaultIndexName_ReadAndWriteDefault_ResolveToSameIndex()
+    {
+        // FR-26 / G-9: the READ default (RagService reads AiSearchOptions.KnowledgeIndexName) and the
+        // WRITE default (indexing job handler, RAG endpoints, KnowledgeDeploymentService now call
+        // GetDefaultIndexName()) derive from the SAME single setting — flipping it moves both, so
+        // reads and writes can no longer silently target different indexes.
+        const string canonical = "spaarke-consolidated-index";
+        var options = new AiSearchOptions { KnowledgeIndexName = canonical };
+        var resolver = new SearchIndexNameResolver(
+            _entityServiceMock.Object,
+            Options.Create(options),
+            _loggerMock.Object);
+
+        // write-side default (what every write/stamp path now calls)
+        var writeDefault = resolver.GetDefaultIndexName();
+        // read-side default (the same field RagService reads for searches)
+        var readDefault = options.KnowledgeIndexName;
+
+        writeDefault.Should().Be(readDefault);
+        writeDefault.Should().Be(canonical);
     }
 }

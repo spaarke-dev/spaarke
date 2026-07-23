@@ -71,3 +71,17 @@ Shared `discoverNavProps` returns `INavPropEntry[]`; add a tiny shared adapter `
 ## Recommendation
 
 Path A for task 011 (dedupe the 6 identical copies now; unblocks task 012's lookup `@odata.bind` binding via the shared array-form `discoverNavProps` + existing `findNavProp`), and file matter's convergence (Path B/C) as a **separate** task so the create-payload change gets isolated review. Awaiting owner/main-session decision before writing any code.
+
+---
+
+## RESOLUTION (2026-07-12) — task 016 completed via approach C
+
+Owner chose to converge now (not defer) to avoid long-term divergence-drift between matter's map-form and the other 6's array-form. Task 016 executed approach **C**:
+
+- Added shared `toNavPropMap(entries): Record<string,string>` to `PolymorphicResolverService.ts` (co-located with `discoverNavProps`/`findNavProp`).
+- `matterService` now sources its map via `toNavPropMap(await discoverNavProps(entity))` at both sites (create-payload lookup binds + `sprk_document` link); private `_discoverNavProps`/`_navPropCache` removed, column-keyed `_resolveNavProp` retained.
+- Create payload proven **byte-identical** (keys/values/insertion order) by `CreateMatterWizard/__tests__/matterService.navProp.test.ts` (adapter last-wins unit test + e2e payload-equivalence incl. cleanGuid normalization). Shared-lib build green; matter + neighbor suites green.
+
+**§6.5 outcome:** resolves with **no ADR tension** — the payload is unchanged, so neither a project-scoped exception (Path A) nor an amendment (Path B) was needed. One nav-prop discovery implementation now serves all 7 create-wizard services.
+
+**Remaining independent discovery sites (out of task-016 scope, documented so they're not lost):** `CreateProjectWizard.tsx` (component-level `ManyToOneRelationships` fetch) and `TodoRegardingUpdateBuilder.ts` (own discovery) — neither is one of the 7 wizard *services*; candidates for a future dedup if desired.

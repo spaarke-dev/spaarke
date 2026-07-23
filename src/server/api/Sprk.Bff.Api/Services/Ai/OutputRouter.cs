@@ -54,8 +54,11 @@ public interface IOutputRouter
     /// to the session's host Dataverse record via <see cref="IWorkProductRecordPersister"/>
     /// AFTER the ledger write, then returns the stored entry (callers may still render it —
     /// storage, persistence, and rendering are independent contracts).
+    /// The <c>notification</c> disposition (FR-14, task 033) creates a durable <c>appnotification</c>
+    /// via <see cref="PublicContracts.IActionSeam"/> AFTER the ledger write (the payload must carry the
+    /// capability-supplied <c>notification</c> envelope), then returns the stored entry.
     /// Dispositions the ADR-043 §3 <see cref="DispositionRoutability"/> registry marks
-    /// not-yet-routable (overlay/record/notification) throw <see cref="NotSupportedException"/>
+    /// not-yet-routable (overlay/record) throw <see cref="NotSupportedException"/>
     /// AFTER the ledger write (a loud, registry-single-sourced stub — never a silent fallback to
     /// inline render). The dispatch admit-gate rejects those same dispositions PRE-RUN from the
     /// same registry, so admission and routing cannot disagree.
@@ -128,6 +131,7 @@ public sealed class OutputRouter : IOutputRouter
     private readonly ILogger<OutputRouter> _logger;
     private readonly IEmailDispositionSender? _emailSender;
     private readonly IWorkProductRecordPersister? _workProductPersister;
+    private readonly PublicContracts.IActionSeam? _actionSeam;
 
     /// <param name="sessionManager">Session persistence seam (the ledger write path).</param>
     /// <param name="logger">Logger (identifiers only per NFR-07).</param>
@@ -142,16 +146,27 @@ public sealed class OutputRouter : IOutputRouter
     /// shape as <paramref name="emailSender"/>): when null, the work_product leg fails
     /// LOUDLY at routing time — never a silent skip.
     /// </param>
+    /// <param name="actionSeam">
+    /// FR-14 (task 033) notification disposition seam — the Layer-A
+    /// <see cref="PublicContracts.IActionSeam"/> (task 031) whose
+    /// <c>CreateNotificationAsync</c> creates the durable <c>appnotification</c>. Same
+    /// optional-with-loud-failure shape as <paramref name="emailSender"/>: registered
+    /// unconditionally (record creation is not AI-model-gated), so DI always injects it;
+    /// when null (bare test construction), the notification leg fails LOUDLY at routing
+    /// time — never a silent skip.
+    /// </param>
     public OutputRouter(
         ChatSessionManager sessionManager,
         ILogger<OutputRouter> logger,
         IEmailDispositionSender? emailSender = null,
-        IWorkProductRecordPersister? workProductPersister = null)
+        IWorkProductRecordPersister? workProductPersister = null,
+        PublicContracts.IActionSeam? actionSeam = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _emailSender = emailSender;
         _workProductPersister = workProductPersister;
+        _actionSeam = actionSeam;
     }
 
     /// <inheritdoc />
@@ -220,6 +235,13 @@ public sealed class OutputRouter : IOutputRouter
         // therefore yields an OutcomeCard (NFR-09), riding this disposition surface with no
         // second rendering path. The card's next-step chips come from the Binding's DECLARED
         // transitions (catalog data); the trace ref defaults to the ledger key.
+        //
+        // Task 036 live-wiring (audit F-3): when the STORED payload embeds a JobAwareCompletionState
+        // (task 014 v1) under the reserved CompletionEngine.JobAwareCompletionStateField, the composer
+        // routes through ComposeJobAware so the OutcomeStatus is DERIVED from the job aggregate — a
+        // record whose downstream indexing/analysis is still pending renders Partial, never Succeeded
+        // (NFR-12 ingestion parity). A single-shot (non-job) payload is byte/behavior-identical to the
+        // legacy hardcoded-Succeeded composer.
         var outcome = CompletionEngine.ComposeForRoutedOutput(entry, binding);
 
         // ── 3. ROUTE by disposition — the ONLY rendering contract (ADR-040 / ADR-039).
@@ -258,6 +280,19 @@ public sealed class OutputRouter : IOutputRouter
             case BindingDisposition.Compose:
                 return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
 
+            // SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix): pre-seeded surface launch.
+            // Pass-through like Compose/Informational — the surface_launch SessionOutput is STORED above
+            // (store-before-render, ADR-040) carrying the capability's drafted launch payload, and the
+            // CLIENT re-materializes it into a pre-seeded wizard / OOB-form / workspace-tab launch. The
+            // leg performs NO server side-effect: "hand the user the pre-seeded UI," not "the server
+            // writes the record" — the client owns the hand-off id + sessionStorage rendezvous +
+            // target-surface mapping (task 012). The router stores + returns; it NEVER parses the opaque
+            // launch payload (the client owns it). Returns the Completion Engine OutcomeCard exactly like
+            // the Informational/Compose cases (Outcome = outcome) — the card rides this same disposition
+            // surface (task 035 / NFR-09); omitting it would silently drop surface-launch outputs' card.
+            case BindingDisposition.SurfaceLaunch:
+                return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
+
             // Email (FR-P3-04, task 043): deliver via the Communication (Email) service.
             // The capability supplies presentation IN the stored payload (`email` object:
             // to[] / subject / htmlBody — see IEmailDispositionSender remarks); the router
@@ -277,7 +312,19 @@ public sealed class OutputRouter : IOutputRouter
                 await PersistWorkProductAsync(entry, binding, session, cancellationToken).ConfigureAwait(false);
                 return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
 
-            // Not-yet-routable dispositions (overlay/record/notification) are rejected by the
+            // Notification (FR-14, task 033): create the durable appnotification via the Layer-A seam
+            // (IActionSeam.CreateNotificationAsync, task 031) — the SAME code path
+            // CreateNotificationNodeExecutor uses, now reachable from the dispatch/router surface. The
+            // capability supplies presentation IN the stored payload (a `notification` object:
+            // title/body/recipientId + optional category/priority/toastType/actionUrl/regarding — see
+            // CreateNotificationViaSeamAsync); the router supplies storage-then-creation. Storage already
+            // happened above (ADR-040 store-precedes-render); a creation failure propagates AFTER the
+            // ledger write — the entry stays addressable, the invocation fails loudly (mirrors Email).
+            case BindingDisposition.Notification:
+                await CreateNotificationViaSeamAsync(entry, cancellationToken).ConfigureAwait(false);
+                return new RoutedOutput { Entry = entry, Session = updated, Outcome = outcome };
+
+            // Not-yet-routable dispositions (overlay/record) are rejected by the
             // registry check ABOVE the switch — they never reach here. This default is the
             // registry/router-drift guard: a disposition the registry marks Routable=true but for
             // which no leg above matched (e.g. a new routable disposition registered without its
@@ -381,12 +428,87 @@ public sealed class OutputRouter : IOutputRouter
             "Ledger output {Key} routed to work_product disposition: entity={Entity} recordId={RecordId} targetField={TargetField}",
             receipt.LedgerKey, receipt.EntityLogicalName, receipt.RecordId, receipt.TargetField);
     }
+
+    /// <summary>
+    /// FR-14 (task 033) notification leg: parse the capability-supplied <c>notification</c> envelope
+    /// from the STORED payload and create the durable <c>appnotification</c> via
+    /// <see cref="PublicContracts.IActionSeam.CreateNotificationAsync"/>. Loud on every failure mode
+    /// (missing seam, missing/malformed envelope, seam-rejected content) — never a silent skip.
+    /// </summary>
+    /// <remarks>
+    /// Division of labor mirrors <see cref="DeliverEmailAsync"/>: the router validates the envelope
+    /// STRUCTURE (a <c>notification</c> object is present) and translates it into the seam request; the
+    /// seam validates CONTENT (title/body/recipientId required) and performs the idempotent write. A
+    /// seam-reported failure (<c>Success == false</c>) becomes a loud router exception; an idempotency
+    /// <c>Skipped</c> is a successful no-op (a duplicate unread notification already exists).
+    /// </remarks>
+    private async Task CreateNotificationViaSeamAsync(SessionOutput entry, CancellationToken cancellationToken)
+    {
+        if (_actionSeam is null)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the notification disposition but no IActionSeam " +
+                "is registered. The entry WAS stored (ADR-040); creation is unconfigured — register " +
+                "ActionSeam (it is registered unconditionally in AnalysisServicesModule).");
+        }
+
+        if (!entry.Payload.TryGetProperty("notification", out var n) || n.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the notification disposition but its payload carries no " +
+                "valid 'notification' envelope ({ title: string, body: string, recipientId: guid, ... }). The capability " +
+                "supplies presentation; the router supplies creation — fix the capability's routed payload.");
+        }
+
+        static string? Str(JsonElement o, string name) =>
+            o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        static Guid? Guid(JsonElement o, string name) =>
+            System.Guid.TryParse(Str(o, name), out var g) ? g : (Guid?)null;
+        static int? Int(JsonElement o, string name) =>
+            o.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i) ? i : (int?)null;
+
+        var request = new PublicContracts.CreateNotificationRequest
+        {
+            // Title/Body are `required` on the record; null coalesces to empty so the seam's own
+            // content validation (not the compiler) produces the loud "title/body is required" failure.
+            Title = Str(n, "title") ?? string.Empty,
+            Body = Str(n, "body") ?? string.Empty,
+            RecipientId = Guid(n, "recipientId"),
+            Category = Str(n, "category"),
+            ActionUrl = Str(n, "actionUrl"),
+            RegardingId = Guid(n, "regardingId"),
+            RegardingType = Str(n, "regardingType"),
+            DueDate = Str(n, "dueDate"),
+            // Dispatch/router origin — distinguishes these from the node executor's "playbook" source.
+            Source = "dispatch",
+            CorrelationId = entry.Key,
+        };
+        // Priority/ToastType default to the node defaults on the request record; override only if supplied.
+        var priority = Int(n, "priority");
+        var toastType = Int(n, "toastType");
+        if (priority is not null) request = request with { Priority = priority.Value };
+        if (toastType is not null) request = request with { ToastType = toastType.Value };
+
+        var result = await _actionSeam.CreateNotificationAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' notification creation failed: {result.Error}. The entry WAS " +
+                "stored (ADR-040 store-precedes-render); creation failed loudly — never a silent skip.");
+        }
+
+        // NFR-07: identifiers only.
+        _logger.LogInformation(
+            "Ledger output {Key} routed to notification disposition: notificationId={NotificationId} skipped={Skipped}",
+            entry.Key, result.NotificationId, result.Skipped);
+    }
 }
 
 /// <summary>
 /// Maps <see cref="BindingDisposition"/> (raw <c>sprk_disposition</c> option-set values)
 /// to the ledger wire vocabulary on <see cref="SessionOutput.Disposition"/>
-/// (<c>informational | work_product | overlay | email | record | notification | compose</c> —
+/// (<c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c> —
 /// canonical §6.2 / ADR-040).
 /// </summary>
 /// <remarks>

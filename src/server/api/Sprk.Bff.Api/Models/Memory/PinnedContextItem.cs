@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Models.Memory;
 ///
 /// <para>
 /// Storage: Cosmos container <c>memory</c> (reused — same container as
-/// <see cref="MatterMemory"/> + workspace-tab durable rows), partition key <c>/tenantId</c>
+/// legacy <c>MatterMemory</c> + workspace-tab durable rows), partition key <c>/tenantId</c>
 /// per ADR-014 (binding). Document discriminator <c>documentType = "pinned-context"</c>
 /// co-exists with matter-memory + workspace-tab documents on the same partition without
 /// id collision (the <c>pinned-context_</c> id prefix is the disambiguator — see
@@ -39,7 +39,7 @@ public sealed class PinnedContextItem
     /// <summary>
     /// Cosmos document id. Format: <c>pinned-context_{tenantId}_{userId}_{pinId}</c>.
     /// The <c>pinned-context_</c> prefix is the documentType-id discriminator that prevents
-    /// id collisions with <see cref="MatterMemory"/> docs (<c>{tenantId}_{matterId}</c>) and
+    /// id collisions with legacy <c>MatterMemory</c> docs (<c>{tenantId}_{matterId}</c>) and
     /// workspace-tab docs (<c>workspace-tab_{tenantId}_{tabId}</c>) on the same container.
     /// </summary>
     [JsonPropertyName("id")]
@@ -122,7 +122,7 @@ public sealed class PinnedContextItem
 
     /// <summary>
     /// Cosmos DB ETag for optimistic concurrency. Mirrors the
-    /// <see cref="MatterMemory.ETag"/> pattern. Mapped to the Cosmos system property
+    /// legacy <c>MatterMemory.ETag</c> pattern. Mapped to the Cosmos system property
     /// via the explicit <c>[JsonPropertyName("_etag")]</c> attribute.
     /// </summary>
     [JsonPropertyName("_etag")]

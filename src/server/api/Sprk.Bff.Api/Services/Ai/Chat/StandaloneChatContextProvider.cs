@@ -59,6 +59,17 @@ public class StandaloneChatContextProvider
     /// Adding new entity types here requires:
     ///   1. An entry in <see cref="EntityFieldCatalog"/>.
     ///   2. An entry in <see cref="EntityDisplayNames"/>.
+    ///
+    /// EXCEPTION — <c>sprk_document</c> (spaarkeai-compose-r2 Wave 4 / FIX F):
+    /// a document-hosted Compose tab requests a standalone context mapping for its
+    /// <c>sprk_document</c> host entity. A document has no well-defined structured
+    /// "context field" set the way the CRM entities above do, so we INTENTIONALLY
+    /// omit it from <see cref="EntityFieldCatalog"/>. It resolves through the
+    /// existing catalog-miss fallback in <see cref="BuildFromCatalog"/> to a valid
+    /// 200 response with an EMPTY <c>ContextFields</c> list (a graceful default,
+    /// not a fabricated mapping). This kills the prior client-side 400 console
+    /// noise while keeping the response honest. It DOES have a display-name entry
+    /// so the response carries a human-readable label.
     /// </summary>
     public static readonly IReadOnlySet<string> SupportedEntityTypes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -68,6 +79,8 @@ public class StandaloneChatContextProvider
             "opportunity",
             "incident",
             "sprk_matter",
+            // Compose document host — supported-but-unmapped (empty ContextFields).
+            "sprk_document",
         };
 
     /// <summary>
@@ -82,6 +95,10 @@ public class StandaloneChatContextProvider
             ["opportunity"] = "Opportunity",
             ["incident"] = "Case",
             ["sprk_matter"] = "Matter",
+            // Compose document host — no field catalog entry (empty ContextFields
+            // via BuildFromCatalog fallback); display name only. See FIX F note
+            // on SupportedEntityTypes.
+            ["sprk_document"] = "Document",
         };
 
     /// <summary>

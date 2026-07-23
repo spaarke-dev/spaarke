@@ -6,11 +6,12 @@
  * persists across modal closes (wizard popups, Semantic Search results modal)
  * so the pane returns to the user-selected tool instead of going blank.
  *
- * Tool ids:
- *   - 'quick-start'     — GetStartedCardsWidget (default for first-time users)
+ * Tool ids (decision-1, 2026-07-19 — 'quick-start' removed; default is now 'execution-trace'):
+ *   - 'execution-trace' — ComposeTraceHost ("what's happening"; the AT-REST default)
  *   - 'semantic-search' — SemanticSearchCriteriaTool (in-pane search criteria;
  *                         Search button launches the full sprk_semanticsearch
  *                         Code Page in a popup modal)
+ *   - 'pinned-memory'   — PinnedMemoryListWidget
  *
  * Storage split (task 101 — pin persistence fix):
  *   Task 095 originally stored the selected tool in `localStorage`. This
@@ -31,9 +32,9 @@
  *
  *   On cold mount (browser restart):
  *     1. sessionStorage is empty (browser was closed) → fall through.
- *     2. Read pinned tool. If set → use it. (pin is now AUTHORITATIVE on
- *        cold start. Bug A from the operator feedback resolved.)
- *     3. Else default to `'quick-start'`.
+ *     2. Read pinned tool. If set (and still valid) → use it. (pin is
+ *        AUTHORITATIVE on cold start. Bug A from the operator feedback resolved.)
+ *     3. Else default to `'execution-trace'`.
  *
  *   On within-session refresh (browser stays open):
  *     1. sessionStorage has the user's last-clicked tool → use it.
@@ -66,7 +67,11 @@ import { getPinnedContextTool } from '../services/contextToolPin';
  * Identifier for the active Context-pane tool. Add new entries here +
  * VALID_CONTEXT_TOOL_IDS below when new tools land.
  */
-export type ContextToolId = 'quick-start' | 'semantic-search' | 'pinned-memory' | 'execution-trace';
+// UAT 2026-07-19 (decision-1): the Context pane's "quick-start" (GetStartedCardsWidget) tool was
+// REMOVED — the pane now opens on the execution-trace ("what's happening") view. The remaining tools
+// are semantic-search, pinned-memory, execution-trace. (The Assistant-pane ⋮ → Quick Start modal is a
+// SEPARATE surface and is unaffected.)
+export type ContextToolId = 'semantic-search' | 'pinned-memory' | 'execution-trace';
 
 /** Public contract returned by useContextTool. */
 export interface UseContextToolResult {
@@ -91,11 +96,10 @@ export interface UseContextToolResult {
  */
 const STORAGE_KEY = 'spaarke:context:selected-tool';
 
-/** Default tool when no persisted value exists (first-time users). */
-const DEFAULT_TOOL: ContextToolId = 'quick-start';
+/** Default tool when no persisted value exists (decision-1: the "what's happening" trace view). */
+const DEFAULT_TOOL: ContextToolId = 'execution-trace';
 
 const VALID_CONTEXT_TOOL_IDS: ReadonlySet<string> = new Set<ContextToolId>([
-  'quick-start',
   'semantic-search',
   'pinned-memory',
   'execution-trace',
@@ -183,12 +187,12 @@ function readPersistedTool(): ContextToolId {
  * `selected-tool` value exists in sessionStorage, fall back to the pinned
  * default before the hardcoded `DEFAULT_TOOL`. The pin is the user's
  * "default on load" preference set via the ContextPaneMenu pin icons.
- * If no pin exists, use the hardcoded default (quick-start) — preserves
- * task 095 behaviour for users who have never pinned anything.
+ * If no pin exists, use the hardcoded default (execution-trace, decision-1).
  */
 function resolveFirstMountDefault(): ContextToolId {
   const pinned = getPinnedContextTool();
-  return pinned ?? DEFAULT_TOOL;
+  // Guard a stale pin (e.g. the removed 'quick-start') against the current valid set.
+  return pinned && VALID_CONTEXT_TOOL_IDS.has(pinned) ? pinned : DEFAULT_TOOL;
 }
 
 function writePersistedTool(id: ContextToolId): void {

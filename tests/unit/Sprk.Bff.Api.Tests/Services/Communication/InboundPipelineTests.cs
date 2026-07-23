@@ -15,9 +15,12 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -217,17 +220,27 @@ public class InboundPipelineTests
             _dataverseServiceMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                new IAssociationRung[]
+                {
+                    new ExplicitReferenceRung(_dataverseServiceMock.Object),
+                    new ThreadContinuityRung(_dataverseServiceMock.Object),
+                    new ParticipantCorrelationRung(_dataverseServiceMock.Object),
+                },
                 _dataverseServiceMock.Object,
                 _dataverseServiceMock.Object,
-                _graphClientFactoryMock.Object,
+                AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
+            new GraphMessageNormalizer(),
             _attachmentProcessorMock.Object,
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore — not used when ArchiveContainerId is null
             CreateMockJobSubmissionService(),
             Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Mock.Of<ITextExtractor>(),
+            Options.Create(new AttachmentMatchOptions { Enabled = false }),
             CreateConfiguration(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }

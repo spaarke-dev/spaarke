@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Deploy: BFF + SpaarkeAi code page + Dataverse catalog rows</title>
+    <phase>6: Authoring, Eval &amp; Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>053</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, azure, bff-api, dataverse, ci-cd</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; irreversible-adjacent; prescriptive sequence.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy following existing deployment guides; low ambiguity, high care.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment — irreversible; prescriptive; runs after 053 and all impl.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Deploy R1: the BFF to Azure App Service, the SpaarkeAi code page, and the Dataverse catalog rows + new columns (via solution promotion dev→prod). Follow the deployment guides exactly; verify each surface post-deploy.
+  </prompt>
+
+  <role>
+    SPAARKE deployment engineer expert in BFF Azure deploy, code-page deploy, and Dataverse solution promotion.
+  </role>
+
+  <goal>
+    All three R1 surfaces deployed + smoke-verified: BFF endpoints healthy, the SpaarkeAi Assistant surface loads with the drop-down/SNS, and the new Dataverse columns + catalog rows are present in the target environment.
+  </goal>
+
+  <context>
+    <background>
+      R1 ships the three surfaces together. The new sprk_userprofile columns + Binding rows must promote dev→prod via solution management.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="azure-deployment">Follow the azure-deployment constraints; publish-size gate (053) must be green first.</constraint>
+    <constraint source="project">Solution-management dev→prod promotion for the new Dataverse columns + catalog rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm task 053 (publish-size + CVE) is green.</step>
+    <step order="2">Deploy the BFF to Azure App Service per the deployment guide; verify /healthz.</step>
+    <step order="3">Deploy the SpaarkeAi code page; verify the Assistant surface loads with the drop-down + SNS.</step>
+    <step order="4">Promote the Dataverse solution (new columns + Binding rows) dev→prod; verify presence.</step>
+    <step order="5">Smoke-test each entry path (Click/Text/Event) end-to-end.</step>
+    <step order="6">Record deploy results in notes. Update TASK-INDEX.md 054 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any smoke test fails post-deploy, STOP and escalate before marking complete — do not proceed to wrap-up on a broken deploy.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish BFF</tool>
+    <tool name="pac">Power Platform solution operations</tool>
+    <tool name="npm">Build the code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r1/notes/deploy-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF deployed; /healthz green.</criterion>
+    <criterion testable="true">SpaarkeAi Assistant surface loads with the tool drop-down + SNS cards.</criterion>
+    <criterion testable="true">New Dataverse columns + Binding catalog rows are present in the target environment.</criterion>
+    <criterion testable="true">Each entry path (Click/Text/Event) smoke-tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Gated by 053. Precedes wrap-up 090.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Prescriptive deploy sequence.</protocol>
+  </execution>
+</task>

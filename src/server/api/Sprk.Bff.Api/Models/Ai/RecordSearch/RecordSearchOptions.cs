@@ -27,6 +27,25 @@ public sealed record RecordSearchOptions
     /// </summary>
     [JsonPropertyName("hybridMode")]
     public string HybridMode { get; init; } = RecordHybridSearchMode.Rrf;
+
+    /// <summary>
+    /// When <c>true</c>, the search skips the Azure <b>semantic reranker</b> and ranks purely by keyword
+    /// relevance (BM25), normalizing scores with a bounded saturating transform. Default <c>false</c>
+    /// (existing behavior — semantic reranking on).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The semantic reranker orders by conceptual similarity, which is the right default for RAG document
+    /// search but WRONG for matching a communication to a NAMED record: it buries exact-name matches under
+    /// conceptually-similar ones (email-r4 UAT 2026-07-17 — an email titled "New Matter … Smith v Smith"
+    /// floated a matter named "Test New Matter via Workspace" above the exact-name matter "Smith v Smith",
+    /// which BM25 ranked #1). The Association Engine's record-matching rungs set this flag so entity-name
+    /// resolution ranks by keyword relevance. Interactive record search (the endpoints) leaves it
+    /// <c>false</c> so its semantic ranking is unchanged.
+    /// </para>
+    /// </remarks>
+    [JsonPropertyName("preferKeywordRanking")]
+    public bool PreferKeywordRanking { get; init; }
 }
 
 /// <summary>

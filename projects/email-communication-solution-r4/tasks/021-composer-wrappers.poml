@@ -1,0 +1,139 @@
+<task id="021" project="email-communication-solution-r4">
+  <metadata>
+    <title>Build the three thin semantic wrappers — `&lt;SendEmailStep /&gt;` / `&lt;SendEmailDialog /&gt;` / `&lt;SendEmailPage /&gt;`</title>
+    <phase>Wave 2 — Client: composer engine + wrappers</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>060, 061</blocks>
+    <tags>frontend, fluent-ui, react, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>These wrappers are the caller-facing API for every email-send surface in Spaarke (wizards, dialogs, Code Page); they modify `.tsx` in the shared library and set the contract that W6 caller migrations (060/061) and the W4 Code Page (041) consume. Each is thin, but the prop-surface + `mount`-locking decisions are contract-level; a wrong prop shape ripples across every caller. FULL.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>All-client TypeScript disjoint from the W1 server track. Depends on 020's engine files; runs safely alongside W1/W3/W7. The three wrappers are independent of each other but small enough to ship in one task.</parallel-reason>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build the three canonical semantic wrappers in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/`. Each is ~30–60 LOC, locks one `mount` value, and exposes a tighter semantic prop API for its context. Wrappers contain NO business logic — they delegate to `&lt;EmailComposer /&gt;` (task 020). Callers import a wrapper, NOT the engine directly (design §5.1.2 — direct engine use requires a code-review-justified comment).
+
+    Authoring detail: `reference/r3-send-side-design.md` §5.1.1 (wrapper prop interfaces + delegation), §5.1.2 (when to use engine vs wrapper), §5.3 (mount shapes). Reuse the exact prop shapes there.
+
+    1. `SendEmailStep.tsx` — wizard-step caller. Locks `mount='inline'`, default `mode='compose'`. `forwardRef` passes `composerRef` through so the wizard host drives `validate()`/`send()` on its own Finish button. NO internal action bar (engine's ComposerActionBar returns null on inline). Props: `composerRef`, `mode?`, `initialTo?`, `initialSubject?`, `initialBody?`, `initialBodyFormat?`, `associations?`, `attachmentSources?`, `wizardContext?`, `authenticatedFetch`, `bffBaseUrl`, `onStateChange?`.
+
+    2. `SendEmailDialog.tsx` — popup caller (Fluent Dialog). Locks `mount='dialog'`, default `mode='compose'`. Owns open/close: `open`, `onClose`; wires engine `onSent` → `props.onSent?.(communicationId)` then `onClose()`. Props: `open`, `onClose`, `mode?`, `initialTo?`, `initialSubject?`, `associations?`, `attachmentSources?`, `authenticatedFetch`, `bffBaseUrl`, `onSent?`, `onError?`. (This replaces the old single-caller `SendEmailDialog` — it becomes the canonical dialog wrapper; W6 FilePreviewDialog migration consumes it.)
+
+    3. `SendEmailPage.tsx` — Code Page caller. Locks `mount='page'`, `mode` is REQUIRED (driven by the Code Page URL parameter). Props: `mode`, `communicationId?`, `initialTo?`, `initialSubject?`, `initialBody?`, `associations?`, `authenticatedFetch`, `bffBaseUrl`, `onSent?`, `onClose?` (mapped to engine `onCancel`). (W4 task 041 mounts this into the Communication Code Page.)
+
+    Export all three wrappers + their prop interfaces from `EmailComposer/index.ts` and confirm they surface through the shared-lib `src/index.ts` barrel.
+  </prompt>
+
+  <role>
+    Frontend developer comfortable with the thin-wrapper + `forwardRef` pass-through pattern and Fluent v9 Dialog composition.
+  </role>
+
+  <goal>
+    Three wrappers compile lint-clean, each ≤~60 LOC, each locking its `mount` value with the engine prop hard-coded. `SendEmailStep` forwards `composerRef`; `SendEmailDialog` owns open/close and maps `onSent`; `SendEmailPage` requires `mode` and maps `onClose`→`onCancel`. All three + prop types exported through the barrels. No `@spaarke/auth` import (injected `authenticatedFetch` only). `npm run build:prod` + `npm run lint` clean.
+  </goal>
+
+  <context>
+    <background>
+      Per FR-12 + design §5.1.1: thin wrappers carry the semantic prop API; the engine (020) carries all logic. The default code-review expectation is that callers import a wrapper. W6 consumers: `SendEmailStep` ← the shared `CreateRecordWizard/steps/SendEmailStep.tsx` (Project/Event/Todo/WorkAssignment) + `CreateMatter` fork (task 061); `SendEmailDialog` ← FilePreviewDialog + SummarizeFilesDialog (task 060); `SendEmailPage` ← the Communication Code Page (task 041).
+
+      Empirical Finding #5 (R4): only `CreateMatter/SendEmailStep.tsx` is a true LegalWorkspace fork — the other four wizards share the canonical `CreateRecordWizard/steps/SendEmailStep.tsx`. This wrapper is what that shared file will render after migration.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPage.tsx (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/index.ts (UPDATE — export three wrappers + prop types)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx (READ — engine props/handle)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts (READ — shared types)</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md (§5.1.1, §5.1.2, §5.3)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 only (inherited from engine); `SendEmailDialog` uses the Fluent `Dialog` primitive.</constraint>
+    <constraint source="ADR-028">No `@spaarke/auth` import — `authenticatedFetch` injected via props.</constraint>
+    <constraint source="ADR-012">Wrappers live in `@spaarke/ui-components`; exported via the lib barrel; no fork, no cross-package source import.</constraint>
+    <constraint source="ADR-045">Thin wrappers — engine is the only place with send logic; each wrapper ≤~60 LOC and only locks `mount` + shapes props.</constraint>
+    <constraint source="project">`SendEmailStep` locks `mount='inline'`; `SendEmailDialog` locks `mount='dialog'`; `SendEmailPage` locks `mount='page'` — hosts cannot override.</constraint>
+    <constraint source="project">`SendEmailStep` forwards `composerRef` (host owns Send/Finish). `SendEmailDialog` owns open/close + maps `onSent`. `SendEmailPage` requires `mode` + maps `onClose`→`onCancel`.</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — client-only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/api/send-email-integration.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.types.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Thin wrapper + forwardRef pass-through" location="projects/email-communication-solution-r4/reference/r3-send-side-design.md">
+        §5.1.1 — each wrapper renders `&lt;EmailComposer mount='...' {...props} /&gt;`, forwards `ref`, and translates a semantic prop API. No business logic.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `reference/r3-send-side-design.md` §5.1.1/§5.1.2/§5.3 for the exact wrapper prop interfaces + delegation. Read `EmailComposer.tsx` + `EmailComposer.types.ts` to confirm engine prop names + `IEmailComposerHandle`.</step>
+    <step order="2">Author `SendEmailStep.tsx` — `forwardRef&lt;IEmailComposerHandle, ISendEmailStepProps&gt;` rendering `&lt;EmailComposer mount='inline' mode={props.mode ?? 'compose'} ref={ref} {...rest} /&gt;`. Define `ISendEmailStepProps` reusing engine types.</step>
+    <step order="3">Author `SendEmailDialog.tsx` — locks `mount='dialog'`, wraps the engine in a Fluent `Dialog` keyed on `open`; wires `onSent` → `props.onSent?.(communicationId)` then `onClose()`; maps `onCancel` → `onClose`. Define `ISendEmailDialogProps`.</step>
+    <step order="4">Author `SendEmailPage.tsx` — locks `mount='page'`, requires `mode`, maps `onClose` → engine `onCancel`. Define `ISendEmailPageProps`.</step>
+    <step order="5">Update `EmailComposer/index.ts` — export the three wrappers + `ISendEmailStepProps`/`ISendEmailDialogProps`/`ISendEmailPageProps`. Confirm they flow through the shared-lib `src/index.ts` barrel.</step>
+    <step order="6">Verify each wrapper file is ≤~60 LOC. Grep-verify no `@spaarke/auth` import.</step>
+    <step order="7">Run `npm run build:prod` + `npm run lint` in `@spaarke/ui-components` — both clean.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the three wrappers; invoke `adr-check` against ADR-021, ADR-028, ADR-012, ADR-045. Address Critical + High findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 021 ✅; confirm 060 + 061 dependencies satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; advance to next pending W2 task.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">reference §5.1.1 + engine files</tool>
+    <tool name="write">SendEmailStep.tsx, SendEmailDialog.tsx, SendEmailPage.tsx</tool>
+    <tool name="edit">index.ts barrel</tool>
+    <tool name="bash">npm run build:prod + npm run lint + LOC + grep</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">EmailComposer/wrappers/SendEmailStep.tsx (NEW)</output>
+    <output type="code">EmailComposer/wrappers/SendEmailDialog.tsx (NEW)</output>
+    <output type="code">EmailComposer/wrappers/SendEmailPage.tsx (NEW)</output>
+    <output type="code">EmailComposer/index.ts (UPDATED — wrapper exports)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All three wrappers compile + lint-clean; each ≤~60 LOC.</criterion>
+    <criterion testable="true">`SendEmailStep` locks `mount='inline'` and forwards `composerRef` (host calls `composerRef.current.send()`).</criterion>
+    <criterion testable="true">`SendEmailDialog` locks `mount='dialog'`, owns `open`/`onClose`, and maps engine `onSent`→`props.onSent` + close.</criterion>
+    <criterion testable="true">`SendEmailPage` locks `mount='page'`, requires `mode`, maps `onClose`→`onCancel`.</criterion>
+    <criterion testable="true">All three wrappers + prop interfaces exported through `EmailComposer/index.ts` and the shared-lib barrel.</criterion>
+    <criterion testable="true">No `@spaarke/auth` import in any wrapper (grep-verified).</criterion>
+    <criterion testable="true">`npm run build:prod` + `npm run lint` clean in `@spaarke/ui-components`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Callers import wrappers, not the engine. Direct `&lt;EmailComposer /&gt;` use is reserved for non-standard mounts (side panel/drawer) and requires a justifying comment per design §5.1.2.
+
+    W6 consumers: task 060 (SummarizeFilesDialog/FilePreviewDialog/DocumentEmailWizard) uses `SendEmailDialog`/`SendEmailStep`; task 061 (5 create-record wizards + CreateMatter fork) uses `SendEmailStep`; W4 task 041 mounts `SendEmailPage`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

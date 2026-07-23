@@ -3,6 +3,7 @@ using FluentAssertions;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 
@@ -125,64 +126,69 @@ public class Phase1StableIdMigrationSuite
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Consumer 6 — AppOnlyAnalysisService:46 (task 020 / Document Profile Pattern B)
+    // Consumer 6 — AppOnlyAnalysisService / Document Profile resolution
     //
-    // Execution-path const — verify DocumentProfilePlaybookId const is present and
-    // has GUID format (sprk_playbookid alt-key value per Q&A 2026-06-22 Q1).
+    // UPDATED 2026-07-10 (F-6b, e2e-completion-audit): the task-020 hardcoded
+    // `DocumentProfilePlaybookId` const this test used to assert was REMOVED by
+    // ai-architecture-redesign-r1 FR-P3-01 (task 040, commit 2d61b1c) — the by-const
+    // GUID lookup was retired in favour of the `sprk_playbookconsumer` Binding table as
+    // the single routing surface. The stable-ID invariant is now pinned at the CURRENT
+    // resolution contract: AppOnlyAnalysisService resolves the Document Profile playbook
+    // through IConsumerRoutingService.ResolveAsync(ConsumerTypes.DocumentProfile), then
+    // materializes it via IPlaybookLookupService.GetByIdAsync — no by-name/by-const lookup.
     // ─────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void Consumer06_AppOnlyAnalysisService_DocumentProfilePlaybookId_IsStableGuidConst()
+    public void Consumer06_AppOnlyAnalysisService_ResolvesDocumentProfileViaBindingTable()
     {
-        // ARRANGE — DocumentProfilePlaybookId is private const string.
         var type = typeof(AppOnlyAnalysisService);
-        var field = type.GetField(
-            "DocumentProfilePlaybookId",
-            BindingFlags.NonPublic | BindingFlags.Static);
 
-        // ASSERT — const exists AND is a GUID-format string.
-        field.Should().NotBeNull(
-            "AppOnlyAnalysisService.DocumentProfilePlaybookId const must exist (task 020 Pattern B; Document Profile)");
-        field!.IsLiteral.Should().BeTrue(
-            "DocumentProfilePlaybookId must be `const` (execution-path Pattern B, not config)");
-
-        var value = field.GetRawConstantValue() as string;
-        value.Should().NotBeNullOrWhiteSpace();
-        Guid.TryParseExact(value, "D", out _).Should().BeTrue(
-            $"DocumentProfilePlaybookId must be GUID-format (sprk_playbookid alt-key per Q1); got '{value}'");
-
-        // ASSERT — type still depends on IPlaybookLookupService (so the const is actually used via GetByIdAsync).
+        // Stable-resolution contract: routes via the Binding table (IConsumerRoutingService)
+        // and materializes by immutable playbook id (IPlaybookLookupService.GetByIdAsync).
+        AssertConsumerWiredToConsumerRouting(
+            type, consumerLabel: "AppOnlyAnalysisService (Document Profile via Binding table)");
         AssertConsumerWiredToPlaybookLookupService(
-            type,
-            consumerLabel: "AppOnlyAnalysisService (task 020 / Document Profile)");
+            type, consumerLabel: "AppOnlyAnalysisService (Document Profile via Binding table)");
+
+        // The typed routing key exists (compile-time typo defense per ConsumerTypes) and is
+        // the stable string admins set in sprk_playbookconsumer.sprk_consumertype.
+        ConsumerTypes.DocumentProfile.Should().Be(
+            "document-profile",
+            "AppOnlyAnalysisService resolves Document Profile via ConsumerTypes.DocumentProfile (FR-P3-01)");
+
+        // Regression guard for the FR-P3-01 hard cutover: the retired hardcoded by-const GUID
+        // lookup MUST NOT reappear (a reintroduced fallback const would bypass the Binding table).
+        type.GetField("DocumentProfilePlaybookId", BindingFlags.NonPublic | BindingFlags.Static)
+            .Should().BeNull(
+                "the hardcoded DocumentProfilePlaybookId fallback const was deleted by FR-P3-01 " +
+                "(task 040) — resolution routes exclusively through the sprk_playbookconsumer Binding table");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Consumer 7 — AppOnlyAnalysisService:1068 (task 020 / Email Analysis Pattern B)
+    // Consumer 7 — AppOnlyAnalysisService / Email Analysis resolution
+    //
+    // UPDATED 2026-07-10 (F-6b): symmetric to Consumer 6 — the task-020
+    // `EmailAnalysisPlaybookId` const was removed by FR-P3-01 (task 040). Pin the current
+    // contract: resolution routes through the Binding table via
+    // ConsumerTypes.EmailAnalysis, materialized by immutable id.
     // ─────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void Consumer07_AppOnlyAnalysisService_EmailAnalysisPlaybookId_IsStableGuidConst()
+    public void Consumer07_AppOnlyAnalysisService_ResolvesEmailAnalysisViaBindingTable()
     {
-        // ARRANGE — EmailAnalysisPlaybookId is private const string.
         var type = typeof(AppOnlyAnalysisService);
-        var field = type.GetField(
-            "EmailAnalysisPlaybookId",
-            BindingFlags.NonPublic | BindingFlags.Static);
 
-        // ASSERT — const exists AND is GUID-format AND matches the known seed value bc71facf-….
-        field.Should().NotBeNull(
-            "AppOnlyAnalysisService.EmailAnalysisPlaybookId const must exist (task 020 Pattern B; Email Analysis)");
-        field!.IsLiteral.Should().BeTrue();
+        AssertConsumerWiredToConsumerRouting(
+            type, consumerLabel: "AppOnlyAnalysisService (Email Analysis via Binding table)");
+        AssertConsumerWiredToPlaybookLookupService(
+            type, consumerLabel: "AppOnlyAnalysisService (Email Analysis via Binding table)");
 
-        var value = field.GetRawConstantValue() as string;
-        value.Should().NotBeNullOrWhiteSpace();
-        Guid.TryParseExact(value, "D", out _).Should().BeTrue(
-            $"EmailAnalysisPlaybookId must be GUID-format; got '{value}'");
+        ConsumerTypes.EmailAnalysis.Should().Be(
+            "email-analysis",
+            "AppOnlyAnalysisService resolves Email Analysis via ConsumerTypes.EmailAnalysis (FR-P3-01)");
 
-        // Specific seed value from task 020 (DEV Dataverse query 2026-06-22; sprk_name = "Email Analysis").
-        value!.Should().StartWith(
-            "bc71facf-",
-            "EmailAnalysisPlaybookId must match the task 020 backfill value (bc71facf-…) " +
-            "tying the const to the Dataverse-seeded sprk_playbookid alt-key");
+        type.GetField("EmailAnalysisPlaybookId", BindingFlags.NonPublic | BindingFlags.Static)
+            .Should().BeNull(
+                "the hardcoded EmailAnalysisPlaybookId fallback const was deleted by FR-P3-01 " +
+                "(task 040) — resolution routes exclusively through the sprk_playbookconsumer Binding table");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -295,6 +301,32 @@ public class Phase1StableIdMigrationSuite
         lookupField.Should().NotBeNull(
             $"{consumerLabel} must store IPlaybookLookupService in a private field " +
             "(verifies the consumer actually uses the lookup, not just receives + discards it).");
+    }
+
+    /// <summary>
+    /// Asserts that a consumer type resolves its playbook through the <c>sprk_playbookconsumer</c>
+    /// Binding table by depending on <see cref="IConsumerRoutingService"/> (constructor parameter
+    /// + private field). This is the FR-P3-01 single-routing-surface invariant: the hardcoded
+    /// fallback GUIDs were deleted (task 040), so the consumer MUST route through
+    /// <see cref="IConsumerRoutingService.ResolveAsync"/> — the class would not compile without
+    /// the injected dependency.
+    /// </summary>
+    private static void AssertConsumerWiredToConsumerRouting(Type type, string consumerLabel)
+    {
+        var ctorWithRouting = type.GetConstructors()
+            .FirstOrDefault(c => c.GetParameters()
+                .Any(p => p.ParameterType == typeof(IConsumerRoutingService)));
+
+        ctorWithRouting.Should().NotBeNull(
+            $"{consumerLabel} must accept IConsumerRoutingService via DI " +
+            "(FR-P3-01 Binding-table routing; the hardcoded fallback GUIDs were deleted in task 040).");
+
+        var routingField = type.GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .FirstOrDefault(f => f.FieldType == typeof(IConsumerRoutingService));
+
+        routingField.Should().NotBeNull(
+            $"{consumerLabel} must store IConsumerRoutingService in a private field " +
+            "(verifies the consumer actually routes through the Binding table, not just receives + discards it).");
     }
 
     /// <summary>

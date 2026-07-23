@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Project wrap-up (gates, test-diet, deferrals, README→Complete, sync)</title>
+    <phase>7: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>054</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, deploy, devops, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Runs final quality gates + /test-diet (TEST-MODIFYING) + closes the project; irreversible doc-state changes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out following the standard wrap-up recipe; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>7</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; prescriptive; depends on everything.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Close the project: run final quality gates (/code-review + /adr-check), run the project-close /test-diet gate (ADR-038 §7), file the two deferrals (sprk_userpreferences plural client-reference bug; R1.5 proactive-push spec pass), update README + plan to Complete, document lessons learned, run /repo-cleanup, and run /devops-project-sync.
+  </prompt>
+
+  <role>
+    SPAARKE project-closeout engineer following the mandatory wrap-up recipe (task-create Step 3.7).
+  </role>
+
+  <goal>
+    All quality gates green (or issues filed), /test-diet report produced, both deferrals filed as tracked issues, README + plan set to Complete with graduation criteria checked, lessons-learned appended, ephemeral notes cleaned, and the portfolio Project #649 synced (Status → Completed candidate; Tasks Completed updated).
+  </goal>
+
+  <context>
+    <background>
+      Standard mandatory wrap-up. Two known deferrals: (1) sprk_userpreferences stays plural — fix the ~6 client references (no schema change), filed via project-defer-issue-tracking; (2) R1.5 proactive-push (Azure SignalR + durable outbox + Daily-Briefing producer) — designed in design.md §14.1a/§14.1b/§12.5/§15.4, decomposed in a later spec pass.
+    </background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r1/README.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/plan.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/lessons-learned.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Run the project-close /test-diet gate (§7 build-vs-maintain classifier); it is read-only (emits git rm/mv for the reviewer). Skipping is a HARD WARNING — cite the report in the wrap-up PR.</constraint>
+    <constraint source="project">File both deferrals as tracked issues (do not silently drop them).</constraint>
+    <constraint source="project">Do NOT decompose R1.5 here — only file the follow-on spec-pass issue.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/devops-project-sync/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review + /adr-check on all project code; fix criticals or file issues.</step>
+    <step order="2">Run /test-diet (ADR-038 §7); save projects/spaarkeai-assistant-enhancements-r1/notes/test-diet-report.md; apply reviewer-approved git rm/mv.</step>
+    <step order="3">File deferral 1: sprk_userpreferences plural client-reference bug (~6 refs, no schema change) via project-defer-issue-tracking.</step>
+    <step order="4">File deferral 2: R1.5 proactive-push spec-pass follow-on (link design.md §14.1a/§14.1b/§12.5/§15.4).</step>
+    <step order="5">Update README → Complete (check graduation criteria) + plan → Complete.</step>
+    <step order="6">Append lessons-learned.md (corrections + confirmed non-obvious approaches).</step>
+    <step order="7">Run /repo-cleanup projects/spaarkeai-assistant-enhancements-r1; approve removals.</step>
+    <step order="8">Run /devops-project-sync (Status → Completed candidate; Tasks Completed). Update TASK-INDEX.md 090 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Cleanup + status updates</tool>
+    <tool name="gh">File deferral issues + sync portfolio</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">README.md + plan.md set to Complete</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r1/notes/lessons-learned.md</output>
+    <output type="report">Two filed deferral issues + portfolio sync</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">/code-review + /adr-check run; no unresolved criticals (or issues filed).</criterion>
+    <criterion testable="true">/test-diet report exists and is cited; reviewer-approved deletions applied.</criterion>
+    <criterion testable="true">Both deferrals are filed as tracked issues.</criterion>
+    <criterion testable="true">README + plan are Complete with graduation criteria checked; lessons-learned appended; /devops-project-sync run.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mandatory final task. R1.5 is NOT decomposed here — only its spec-pass follow-on is filed.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Prescriptive close-out; /test-diet gate is mandatory.</protocol>
+  </execution>
+</task>

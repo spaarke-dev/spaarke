@@ -28,6 +28,7 @@ import { WizardShell } from '../Wizard/WizardShell';
 import type { IWizardShellHandle, IWizardStepConfig, IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
 
 import type { IUploadedFile, IFileValidationError } from '../FileUpload/fileUploadTypes';
+import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import { FileUploadZone } from '../FileUpload/FileUploadZone';
 import { UploadedFileList } from '../FileUpload/UploadedFileList';
 import { searchUsersAsLookup } from '../CreateMatterWizard/matterService';
@@ -39,6 +40,7 @@ import { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
 import type { AuthenticatedFetchFn } from './summarizeService';
+import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
 import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
@@ -94,6 +96,13 @@ export interface ISummarizeFilesDialogProps {
   bffBaseUrl?: string;
   /** When true, hides the built-in dialog chrome (for Dataverse embedded mode). */
   embedded?: boolean;
+  /**
+   * Assistant hand-off FILE references (UAT R5-8 — the create-flow file leg). When launched from
+   * the Assistant "Summarize Files" Quick Start card via the surface-launch envelope, `main.tsx`
+   * passes the hand-off seed's `{ sessionId, fileIds, fileNames }` here; the dialog fetches each
+   * file's binary and pre-seeds the upload step. `undefined`/no sessionId → opens empty as before.
+   */
+  initialFileRefs?: HandoffFileRefs;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +180,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   authenticatedFetch,
   bffBaseUrl,
   embedded,
+  initialFileRefs,
 }) => {
   const styles = useStyles();
   const shellRef = React.useRef<IWizardShellHandle>(null);
@@ -180,6 +190,10 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     uploadedFiles: [],
     validationErrors: [],
   });
+
+  // ── Assistant hand-off file leg (R5-8) ─────────────────────────────────
+  // Fetch the session document(s) and pre-seed the upload step (parity with the create wizards).
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authenticatedFetch ?? fetch, bffBaseUrl ?? '');
 
   // ── Analysis state ────────────────────────────────────────────────────
   const [summarizeStatus, setSummarizeStatus] = React.useState<SummarizeStatus>('idle');
@@ -229,6 +243,15 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       abortControllerRef.current?.abort();
     };
   }, [open]);
+
+  // ── Seed the hand-off file(s) into the upload step (R5-8) ──────────────
+  // Fires after the reset-on-open cleared the file state: the async file-leg fetch resolves later,
+  // so this pre-attaches the session document(s) once they arrive.
+  React.useEffect(() => {
+    if (open && handoffFiles.length > 0) {
+      fileDispatch({ type: 'ADD_FILES', files: handoffFiles });
+    }
+  }, [open, handoffFiles]);
 
   // ── Refs for dynamic step closures (prevents stale closure bug) ───────
   const summarizeResultRef = React.useRef(summarizeResult);
@@ -449,7 +472,11 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     let createdProjectId: string | undefined;
     let createdProjectName: string | undefined;
 
-    // ── Send Email via BFF ────────────────────────────────────────────
+    // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
+    // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
+    // wrapper so this follow-on shares the single canonical send path +
+    // ProblemDetails error contract (ADR-019). `bodyFormat: 'text'` maps to
+    // the BFF `PlainText` enum inside the wrapper.
     if (currentSelectedActions.includes('send-email') && currentEmailTo.trim()) {
       try {
         if (!authenticatedFetch) {
@@ -457,30 +484,24 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
             '[SummarizeFilesDialog] authenticatedFetch is required — unauthenticated BFF calls are not permitted.'
           );
         }
-        const fetchFn = authenticatedFetch;
-        const baseUrl = bffBaseUrl ?? '';
-        const response = await fetchFn(`${baseUrl}/api/communications/send`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        await sendCommunication(
+          {
             to: currentEmailTo
               .split(/[;,]/)
               .map((a: string) => a.trim())
               .filter(Boolean),
             subject: currentEmailSubject,
             body: currentEmailBody,
-            bodyFormat: 'PlainText', // BFF enum is BodyFormat.{PlainText,HTML} — 'Text' is rejected (2026-05-25)
-          }),
-        });
-
-        if (response.ok) {
-          completedActions.push('Email sent');
-        } else {
-          const errorText = await response.text().catch(() => 'Unknown error');
-          warnings.push(`Email failed: ${errorText}`);
-        }
+            bodyFormat: 'text',
+            sendMode: 'sharedMailbox',
+          },
+          { authenticatedFetch, bffBaseUrl }
+        );
+        completedActions.push('Email sent');
       } catch (err) {
-        warnings.push(`Email failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        const detail =
+          err instanceof SendCommunicationError ? err.detail : err instanceof Error ? err.message : 'Unknown error';
+        warnings.push(`Email failed: ${detail}`);
       }
     }
 

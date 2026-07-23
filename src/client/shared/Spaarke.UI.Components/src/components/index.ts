@@ -23,8 +23,8 @@ export * from './RichTextEditor';
 // Dialogs
 export * from './ChoiceDialog';
 
-// Event Due Date Card
-export * from './EventDueDateCard';
+// EventDueDateCard removed (VHVU-042): canonical copy now lives in @spaarke/visuals
+// (the only consumer, VisualHost, imports it from there). This copy was unused.
 
 // Side Pane components (reusable across entity detail side panes)
 export * from './SidePane';
@@ -194,3 +194,56 @@ export * from './WizardRegistry';
 // copies, removing the name collision that previously forced a curated re-export
 // here — so this is now a plain `export *`.
 export * from './WizardFollowOns';
+
+// EmailComposer - Canonical email-composer engine + sub-components + the three
+// semantic wrappers (task 020/021, FR-12, ADR-045). Replaces the 6 ad-hoc client
+// send-email implementations.
+export * from './EmailComposer';
+
+// Name-collision disambiguation (task 021): the NEW canonical dialog wrapper
+// (`EmailComposer/wrappers/SendEmailDialog`, mount='dialog', onSent/onClose API)
+// wins the `SendEmailDialog` / `ISendEmailDialogProps` names on the main barrel
+// over the LEGACY single-caller `components/SendEmailDialog` (onSend API) per
+// design §5.1.1 — "becomes the canonical dialog wrapper". An explicit re-export
+// shadows the two `export *` sources so the resolution is deterministic (both
+// legacy `export * from './SendEmailDialog'` above and the engine star would
+// otherwise silently drop the ambiguous name). The legacy component file is
+// preserved and still reachable via the `pcf-safe` subpath + its explicit path
+// until task 060 (W6) migrates FilePreviewDialog off the old `onSend` API.
+export { SendEmailDialog, type ISendEmailDialogProps } from './EmailComposer';
+
+// CommunicationTimeline - Polling conversation/timeline component (task 060,
+// FR-10, ADR-026 Path-A exception). Renders a thread's persisted
+// `sprk_communication` rows (email + chat interleaved, reply-nested), a
+// compose box reusing `<EmailComposer/>` sub-components, an unread
+// indicator, and polls the BFF thread-read + unread-count endpoints
+// (task 050) on a configurable ~5s interval. NO client-side ACS SDK (NFR-04).
+export * from './CommunicationTimeline';
+
+// ConversationView - Teams-style chat-bubble renderer keyed on SENDER IDENTITY
+// (systemuserid, from FR-18), not email-string (task 011, FR-02/03). New
+// presentation over the CommunicationTimeline core (reducer/poll/buildTimeline
+// reused, not forked): mine-right/others-left alignment, day dividers, and
+// per-message status on own bubbles.
+export * from './ConversationView';
+
+// ConversationWorkspace - Mount-agnostic two-pane shell: thread list (name +
+// unread + word-filter + create-＋) beside a conversation, optional `regarding`
+// filter (task 012, FR-01/10/16). Right pane wired via the `renderConversation`
+// seam - Phase-4 hosts (PCF/widget/code-page) inject ConversationView + the
+// current user's systemuserid. All-mode -> FR-16 list; record-mode -> existing
+// by-regarding read (CLAUDE.md §6.5 Path A exception, both server-access-filtered).
+export * from './ConversationWorkspace';
+
+// MessageQuickView - Fluent v9 Popover: 200-char message preview (email shows
+// to/from/date/subject) + an open→pin action that calls the host-wired `onPin`,
+// which drives ConversationView's new `scrollToMessage(id)` imperative handle
+// (forwardRef) to scroll + transiently highlight the bubble (task 023, FR-05).
+export * from './MessageQuickView';
+
+// NewThreadModal - Fluent v9 modal to start (find-or-create) a 1:1 direct thread
+// via POST /threads/direct; reuses RecipientField/BodyEditor/AssociationChips
+// (no dup impl). Optional regarding (read-only AssociationChips) + optional body
+// (posted as the first Message via the existing send engine). name/description
+// omitted — the shipped endpoint persists neither (§6.5 Path A, see task-024 notes).
+export * from './NewThreadModal';

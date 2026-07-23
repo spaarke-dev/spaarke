@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>sprk_risk gate-wiring → PendingPlanManager.RequiresConfirmation</title>
+    <phase>3: Action Truthfulness &amp; Risk Gate</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>022</blocks>
+    <tags>bff-api, ai, backend, integration-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dispatch-spine change; ADR-043 seam-test DoD; gate behavior is safety-relevant.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Dispatch-spine gate wiring; tier × risk × origin correctness with seam-test DoD — high blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dispatch-spine; sequential/main-session; 022 depends on it.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Pass the resolved Binding's sprk_risk into PendingPlanManager.RequiresConfirmation so the ConfirmationPolicyEngine gates by tier × risk × origin. Always Confirm renders a suggestion-that-launches; None runs without a gate.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SPAARKE dispatch spine, PendingPlanManager, and the ConfirmationPolicyEngine (ADR-041).
+  </role>
+
+  <goal>
+    The resolved Binding's sprk_risk flows into RequiresConfirmation. sprk_risk = Always Confirm produces a suggestion-that-launches gate; None runs without a gate. Covered by tests/integration/seam/** vertical-slice tests (ADR-043 DoD) plus unit tests.
+  </goal>
+
+  <context>
+    <background>
+      Owner decision: wire sprk_risk live (not side_effect_class-only). The gate already exists; this task feeds it the real risk value from the resolved Binding.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Gate/</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-041">Gate is tier × risk × origin. Feed the resolved Binding risk into RequiresConfirmation; do not bypass the ConfirmationPolicyEngine.</constraint>
+    <constraint source="ADR-043">Dispatch-spine change → tests/integration/seam/** vertical-slice DoD is MANDATORY.</constraint>
+    <constraint source="project">Reuse the shipped dispatch seam; MUST NOT add a new BFF dispatch endpoint.</constraint>
+    <constraint source="bff-extensions">Measure publish-size; ≤60 MB.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-041-judgment-confirmation-completion-policy.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read PendingPlanManager.RequiresConfirmation + the Gate folder; find where risk is currently sourced.</step>
+    <step order="2">Thread the resolved Binding's sprk_risk into RequiresConfirmation.</step>
+    <step order="3">Verify Always Confirm → suggestion-that-launches; None → no gate.</step>
+    <step order="4">Add tests/integration/seam/** vertical-slice tests covering each risk tier + unit tests.</step>
+    <step order="5">Build + publish-size. Update TASK-INDEX.md 021 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If sprk_risk is not present/resolvable on the Binding at dispatch time, STOP and escalate (the catalog authoring in 002/050 must supply it) rather than defaulting silently.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF (unit + seam)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (risk wiring)</output>
+    <output type="test">tests/integration/seam/ + unit tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_risk = Always Confirm renders a suggestion-that-launches gate.</criterion>
+    <criterion testable="true">sprk_risk = None runs without a gate.</criterion>
+    <criterion testable="true">tests/integration/seam/** vertical-slice tests cover the risk tiers (ADR-043 DoD); publish-size ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-D1. Sequential dispatch-spine task; 022 follows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. /conflict-check before BFF PR. FULL-rigor Step 9.5. Seam-test DoD is non-negotiable.</protocol>
+  </execution>
+</task>

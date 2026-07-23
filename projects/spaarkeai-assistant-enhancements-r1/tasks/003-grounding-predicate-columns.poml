@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Add grounding-predicate column(s) to the Binding catalog</title>
+    <phase>1: Catalog &amp; Schema Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>044</blocks>
+    <tags>dataverse, fields, ai, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse schema addition with explicit constraints; feeds the pure-predicate PreFilter (044).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive column with a clear semantic; the reasoning-heavy half is the code wiring in 044.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same Binding catalog table as 002 — main-session; sequence after/with 002.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add the grounding-predicate column(s) on the Binding (e.g. requires-no-attached-record) that the deterministic PreFilter branch (task 044) reads to remove impossible capabilities — e.g. hide "Create matter" when already inside a matter. This is the schema half of FR-H1.
+  </prompt>
+
+  <role>
+    SPAARKE Dataverse + AI-catalog developer. Follow ADR-039 (grounding = pure predicate).
+  </role>
+
+  <goal>
+    One or more boolean/choice predicate columns exist on the Binding catalog entity, populated for the R1 capabilities, expressing host-context preconditions (e.g. requires-no-attached-record) that a pure PreFilter predicate can evaluate with no model call.
+  </goal>
+
+  <context>
+    <background>
+      Grounding "removes the impossible" as a pure predicate — never a hardcoded tool-name list. The column is the declarative input; 044 is the code that reads it via AgentToolFilterContext + threads ChatHostContext.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Grounding is a pure predicate (removes-the-impossible). The column must express a precondition, NOT a scoring/ranking weight.</constraint>
+    <constraint source="project">Additive only — do not alter existing Binding columns. Populate predicate values for the R1 capabilities (create-matter/-todo/-event, file/open/close).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the Binding catalog entity + the AgentToolFilterContext members 044 will read (host-context: inside-a-matter, has-attached-record).</step>
+    <step order="2">Add the predicate column(s) (e.g. sprk_requiresnoattachedrecord boolean) with a clear description.</step>
+    <step order="3">Populate values for the R1 capabilities.</step>
+    <step order="4">Record the exact column logical name(s) in the schema-contract note for 044 to consume.</step>
+    <step order="5">Update TASK-INDEX.md 003 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Add/populate the predicate column</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Predicate column(s) on the Binding catalog + logical names recorded in notes for 044</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A predicate column expressing a host-context precondition exists on the Binding and is populated for R1 capabilities.</criterion>
+    <criterion testable="true">The column expresses a precondition (boolean/choice), not a ranking weight.</criterion>
+    <criterion testable="true">The exact logical name(s) are recorded for task 044.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-H1 (schema half). Code half = task 044. Coordinate with 002 (same table).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files before starting. Follow task-execute checklist.</protocol>
+  </execution>
+</task>

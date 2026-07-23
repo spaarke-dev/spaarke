@@ -176,9 +176,12 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           speDriveItemId: props.speDriveItemId,
           sprkDocumentId: props.sprkDocumentId,
           fileName: props.speFileName,
-          // containerId is unused in the BFF Load contract (driveId is what's
-          // queried); leave undefined and let the workspace resolve via runtime.
-          containerId: undefined,
+          // FR-05 (task 100, gap 1.3): containerId is intentionally NOT set here. This ref is the
+          // LOAD path (an existing stored document), where the BFF Load contract keys off driveId
+          // — containerId plays no role. The create-on-save container (for a NEW transient
+          // Browse/Upload draft) is resolved CLIENT-SIDE at the compose mount host
+          // (composeEditor.registration.ts → EntityCreationService.resolveUserBuDefaults) and
+          // threaded as the `containerId` prop, so it covers every entry path, not just this one.
         }
       : null;
 

@@ -47,6 +47,16 @@ const config: Config = {
     '^@spaarke/compose-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/$1',
     '^@spaarke/ai-context$': '<rootDir>/../../client/shared/Spaarke.AI.Context/src/index.ts',
     '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
+    // spaarke-notification-spine-r1 task 051: `@spaarke/notifications` ships ESM `dist`
+    // (Jest can't transform it) and drives a live SignalR connection. ConversationPane
+    // now imports it (via notificationsBootstrap). Map to a no-op stub — the unit tests
+    // inject their own subscriber doubles; they never exercise the real client.
+    '^@spaarke/notifications$': '<rootDir>/src/__mocks__/notifications.ts',
+    // messaging-communication-app-r2 task 030: @spaarke/communication-components
+    // hosts CommunicationsWorkspaceWidget (rich Pattern D communications-list
+    // widget). Map to source, mirrors the compose-components pair above.
+    '^@spaarke/communication-components$': '<rootDir>/../../client/shared/Spaarke.Communication.Components/src/index.ts',
+    '^@spaarke/communication-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.Communication.Components/src/$1',
     // d3-force ships pure ESM — ts-jest's CommonJS transform can't consume it.
     // Map to a tiny CJS stub so transitive imports of useForceSimulation don't
     // crash jsdom tests. (R5 task 038.) The stub returns the chainable
@@ -98,6 +108,7 @@ const config: Config = {
   },
   testRunner: 'jest-circus/runner',
   collectCoverage: false,
+  moduleDirectories: ['node_modules', '<rootDir>/node_modules'],
 };
 
 export default config;

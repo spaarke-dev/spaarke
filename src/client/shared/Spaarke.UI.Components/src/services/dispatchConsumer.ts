@@ -200,6 +200,21 @@ export interface AnalysisChunk {
    * Raw wire value; parse with {@link parseConsumerChips}.
    */
   chips?: unknown;
+  /**
+   * The dispatched Binding's disposition ledger value on the terminal `complete`
+   * chunk (assistant-enhancements-r1 task 013a — additive). `surface_launch` for a
+   * create capability whose drafted output opens a pre-seeded surface; the client
+   * branches on it WITHOUT any second intent mechanism (the server's disposition IS
+   * the routing decision — ADR-039 / ADR-040). Absent on non-create dispatches.
+   */
+  disposition?: string;
+  /**
+   * The dispatched Binding's `sprk_consumertype` on the terminal `complete` chunk
+   * (task 013a — additive). The static-registry key the client resolves the launch
+   * surface from (`create-matter` / `create-task` / `create-todo`). Absent when the
+   * disposition is not `surface_launch`.
+   */
+  consumerType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -268,6 +283,22 @@ export interface ConsumerDispatchDeps {
    * pacing.
    */
   readonly sectionRevealDelayMs?: number;
+  /**
+   * Compose-surface scoping (spaarkeai-compose-r2 task 112, UAT-R3 defect
+   * #3c): when `true`, this dispatcher instance does NOT publish `workspace`
+   * -channel events (`widget_load` / `streaming_started` / `section_started`
+   * / `section_completed` / `streaming_complete`) for ANY of its dispatches,
+   * and skips the paced section-reveal entirely (no artificial delay before
+   * the returned Promise settles). The Compose editor tab has no
+   * section-renderer subscriber for these discriminants
+   * (`useComposeWorkspaceReceivers` only reacts to `compose_context_insert` /
+   * `compose_assistant_insert` / `compose_qa_highlight`) — publishing them
+   * was dead output. Additive + default-false: other host surfaces (e.g.
+   * `useConsumerChips`'s own `createConsumerDispatcher` instance) are
+   * unaffected — this does NOT alter the shared dispatchConsumer contract for
+   * other surfaces (ADR-030).
+   */
+  readonly suppressWorkspaceSectionBridge?: boolean;
 }
 
 /** Per-dispatch arguments (all optional — a bare chip click passes none). */
@@ -278,6 +309,20 @@ export interface DispatchConsumerArgs {
    * against the Action's `sprk_inputschema` — the client never interprets.
    */
   readonly slots?: Record<string, unknown>;
+  /**
+   * Per-dispatch session-id override (spaarkeai-compose-r2 DEF-09). When present,
+   * this dispatch targets THIS session (`/api/ai/chat/sessions/{sessionIdOverride}
+   * /dispatch`) instead of the dispatcher's bound `getSessionId()`. Additive +
+   * default-undefined: every existing caller omits it and keeps its bound-session
+   * behavior unchanged. The Compose inline toolbar sets it to the editor's DOCUMENT
+   * session so a compose-disposition EDIT dispatch writes its `SessionOutput` into
+   * the SAME session `ComposeWorkspace` reads `compose-outputs` from — otherwise the
+   * write (chat session) and the materialize read (document session) diverge and the
+   * inline redline never appears. This is WHICH session-ledger the dispatch writes
+   * to (already part of the endpoint URL) — NOT routing (bindingId remains the sole
+   * binding-resolution datum; ADR-039).
+   */
+  readonly sessionIdOverride?: string;
   /** Whether the invoked capability requires session attachments (from the chip). */
   readonly requiresAttachments?: boolean;
   /** Current session attachment count — input to the empty-attachments guard. */
@@ -317,6 +362,19 @@ export interface DispatchConsumerResult {
    * Binding's `sprk_chiptransitions`), parsed. Undefined when none arrived.
    */
   readonly chips?: ReadonlyArray<ConsumerChip>;
+  /**
+   * The dispatched Binding's disposition (assistant-enhancements-r1 task 013),
+   * surfaced verbatim from the terminal `complete` chunk. `surface_launch` tells the
+   * host to open a pre-seeded create surface via `launchSurface`; undefined when the
+   * stream carried no disposition. The client never re-derives this (ADR-039).
+   */
+  readonly disposition?: string;
+  /**
+   * The dispatched Binding's `sprk_consumertype` (task 013), surfaced from the
+   * terminal `complete` chunk — the static-registry key for the launch surface.
+   * Undefined unless `disposition === 'surface_launch'`.
+   */
+  readonly consumerType?: string;
 }
 
 /**
@@ -381,7 +439,24 @@ async function mapDispatchHttpError(response: Response): Promise<Error> {
  * session id is re-read per dispatch through `deps.getSessionId`.
  */
 export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchConsumer {
-  const { bffBaseUrl, getSessionId, getAccessToken, publishPaneEvent, sectionRevealDelayMs } = deps;
+  const {
+    bffBaseUrl,
+    getSessionId,
+    getAccessToken,
+    publishPaneEvent,
+    sectionRevealDelayMs,
+    suppressWorkspaceSectionBridge,
+  } = deps;
+
+  // Compose-surface scoping (task 112) — see ConsumerDispatchDeps JSDoc.
+  // Additive no-op wrapper; the shared `publishPaneEvent` contract itself is
+  // untouched, and every OTHER dispatcher instance (suppressWorkspaceSectionBridge
+  // unset) publishes exactly as before.
+  const emitWorkspaceEvent: DispatchPaneEventPublisher = suppressWorkspaceSectionBridge
+    ? () => {
+        /* Compose surface: no section-renderer subscriber — see JSDoc above. */
+      }
+    : publishPaneEvent;
 
   return async function dispatchConsumer(
     bindingId: string,
@@ -392,7 +467,11 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
       throw new DispatchPreconditionError('binding-id-required', 'dispatchConsumer: bindingId is required');
     }
 
-    const sessionId = getSessionId();
+    // DEF-09: a per-dispatch `sessionIdOverride` wins over the bound getSessionId()
+    // so a Compose edit dispatch can target the editor's DOCUMENT session (see
+    // DispatchConsumerArgs.sessionIdOverride). Falls back to the bound session for
+    // every other caller (chips, wizards) — additive, default-undefined.
+    const sessionId = args?.sessionIdOverride ?? getSessionId();
     if (!sessionId) {
       throw new DispatchPreconditionError('no-session', 'dispatchConsumer: no active chat session');
     }
@@ -410,7 +489,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
 
     // ── Optional workspace render target (view config, not routing) ─────────
     if (args?.workspaceTarget) {
-      publishPaneEvent('workspace', {
+      emitWorkspaceEvent('workspace', {
         type: 'widget_load',
         widgetType: args.workspaceTarget.widgetType,
         widgetData: {
@@ -431,6 +510,12 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     // Event path — every chip click permanently emptied the strip).
     let terminalResult: unknown;
     let capturedChips: ConsumerChip[] | undefined;
+    // task 013: the terminal chunk's disposition + consumerType (013a additive
+    // fields) — the SERVER's create-flow routing decision. Surfaced verbatim to
+    // the host, which branches `surface_launch` → the pre-seeded surface launch
+    // (ADR-039 — the client re-derives nothing).
+    let terminalDisposition: string | undefined;
+    let terminalConsumerType: string | undefined;
     // task 039 / D-F5: the terminal chunk's section reveal is staggered (see
     // progressiveSectionReveal.ts), so it outlives the synchronous consumeChunk call.
     // Tracked here so the dispatch doesn't resolve until pacing + streaming_complete
@@ -440,7 +525,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     const publishStartedOnce = (): void => {
       if (started) return;
       started = true;
-      publishPaneEvent('workspace', { type: 'streaming_started', streamId });
+      emitWorkspaceEvent('workspace', { type: 'streaming_started', streamId });
     };
 
     /**
@@ -482,29 +567,45 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
 
         case 'complete': {
           terminalResult = chunk.result ?? chunk.summary ?? undefined;
+          // task 013a: capture the create-flow routing decision off the terminal
+          // chunk (additive; absent on non-create dispatches → stays undefined).
+          if (typeof chunk.disposition === 'string' && chunk.disposition.length > 0) {
+            terminalDisposition = chunk.disposition;
+          }
+          if (typeof chunk.consumerType === 'string' && chunk.consumerType.length > 0) {
+            terminalConsumerType = chunk.consumerType;
+          }
           sawComplete = true;
 
-          if (chunk.result && typeof chunk.result === 'object' && !Array.isArray(chunk.result)) {
+          if (
+            !suppressWorkspaceSectionBridge &&
+            chunk.result &&
+            typeof chunk.result === 'object' &&
+            !Array.isArray(chunk.result)
+          ) {
             // Section-keyed bridge (task 046 / amended ADR-037), now PACED (task 039 /
             // D-F5): one section per top-level result key, in declaration order,
             // revealed with a stagger so the output arrives in ≥2 visible steps rather
             // than one synchronous-batch paint. `chunk.result` is the STORED terminal
             // payload (ADR-040 — the BFF only emits this chunk after the ledger write);
             // this bridge never sees pre-store state, so pacing cannot introduce a
-            // render-ahead-of-store violation.
+            // render-ahead-of-store violation. SKIPPED ENTIRELY when
+            // `suppressWorkspaceSectionBridge` (task 112) — no renderer subscribes to
+            // these events on the Compose surface, so there is no reason to pay the
+            // paced-reveal latency before this dispatch's Promise can settle.
             const sections = extractRevealableSections(chunk.result as Record<string, unknown>);
             pendingReveal = (async () => {
               publishStartedOnce();
               await revealSectionsProgressively(
                 sections,
                 (section, index) => {
-                  publishPaneEvent('workspace', {
+                  emitWorkspaceEvent('workspace', {
                     type: 'section_started',
                     streamId,
                     sectionName: section.name,
                     sectionIndex: index,
                   });
-                  publishPaneEvent('workspace', {
+                  emitWorkspaceEvent('workspace', {
                     type: 'section_completed',
                     streamId,
                     sectionName: section.name,
@@ -518,7 +619,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
                 },
                 { delayMs: sectionRevealDelayMs }
               );
-              publishPaneEvent('workspace', {
+              emitWorkspaceEvent('workspace', {
                 type: 'streaming_complete',
                 streamId,
                 completionStatus: 'complete',
@@ -528,7 +629,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
           }
 
           publishStartedOnce();
-          publishPaneEvent('workspace', {
+          emitWorkspaceEvent('workspace', {
             type: 'streaming_complete',
             streamId,
             completionStatus: 'complete',
@@ -540,7 +641,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
           // No `streaming_error` discriminant exists (PaneEventTypes) —
           // terminal declined event; the helper rejects after the stream ends.
           publishStartedOnce();
-          publishPaneEvent('workspace', {
+          emitWorkspaceEvent('workspace', {
             type: 'streaming_complete',
             streamId,
             completionStatus: 'declined',
@@ -578,7 +679,7 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
       // HTTP error, network failure, or abort. Emit a terminal declined event
       // so subscribers clear UI state (only meaningful if a lifecycle began —
       // subscribers key on streamId either way), then reject to the caller.
-      publishPaneEvent('workspace', {
+      emitWorkspaceEvent('workspace', {
         type: 'streaming_complete',
         streamId,
         completionStatus: 'declined',
@@ -600,14 +701,28 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     // Defensive: stream ended without a terminal chunk — emit `empty` so
     // subscribers can clear UI state (server SHOULD always emit complete/error).
     if (!sawComplete) {
-      publishPaneEvent('workspace', {
+      emitWorkspaceEvent('workspace', {
         type: 'streaming_complete',
         streamId,
         completionStatus: 'empty',
       });
-      return { streamId, status: 'empty', result: terminalResult, chips: capturedChips };
+      return {
+        streamId,
+        status: 'empty',
+        result: terminalResult,
+        chips: capturedChips,
+        disposition: terminalDisposition,
+        consumerType: terminalConsumerType,
+      };
     }
 
-    return { streamId, status: 'complete', result: terminalResult, chips: capturedChips };
+    return {
+      streamId,
+      status: 'complete',
+      result: terminalResult,
+      chips: capturedChips,
+      disposition: terminalDisposition,
+      consumerType: terminalConsumerType,
+    };
   };
 }

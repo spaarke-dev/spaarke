@@ -5,15 +5,17 @@
  * endpoint accepts the request shape defined in
  * `Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs`.
  *
- * IMPORTANT — `attachmentDocumentIds` semantics
- * ---------------------------------------------
- * The BFF field `AttachmentDocumentIds` is forwarded into
- * `CommunicationService.DownloadAndBuildAttachmentsAsync(...)` which calls
- * `SpeFileStore.GetFileMetadataAsync(driveId, itemId)` — i.e. the BFF
- * currently expects **SPE driveItem IDs**, not `sprk_document` Dataverse
- * GUIDs (despite the field name). Callers in the UI typically have the
- * `sprk_document` GUID at hand; the responsibility for translating that to
- * a driveItem id lives upstream of this wrapper (see DocumentEmailWizard).
+ * IMPORTANT — `attachmentDocumentIds` semantics (CORRECTED 2026-07-14, R4 W0)
+ * ----------------------------------------------------------------------------
+ * `AttachmentDocumentIds` correctly carries Dataverse **`sprk_document`
+ * GUIDs** — email attachments are always tracked Documents; the server
+ * resolves each Document to its backing SPE File internally. The prior R3
+ * assessment ("the BFF expects raw SPE driveItem IDs, not sprk_document
+ * GUIDs") was a misread of `DownloadAndBuildAttachmentsAsync` and has been
+ * retracted by the project owner (see `projects/email-communication-solution-r4/
+ * current-task.md` "Key W0 decisions" + `[[email-r4-attachment-id-semantics]]`).
+ * `DocumentEmailWizard` sending `sprk_document` GUIDs here is correct
+ * behavior, not a bug — **do not "fix" it and do not rename this field.**
  *
  * This wrapper is intentionally a thin pass-through and does no translation.
  *
@@ -24,6 +26,21 @@
  *   - Returns `{ communicationId }` extracted from the BFF's
  *     `SendCommunicationResponse` (which carries additional fields the UI
  *     does not currently consume).
+ *
+ * `SendCommunicationError` (task 020 boundary note)
+ * --------------------------------------------------
+ * Task 022 (FR-13, "sendCommunication() refinements") owns the full typed
+ * error contract per design §5.9 / ADR-019. Task 020 (`<EmailComposer />`)
+ * depends on `SendCommunicationError` existing here for its `send()` error
+ * contract and landed first, so this file additively defines the minimal
+ * ProblemDetails-parsing error class task 020 needs — per the task 020 POML's
+ * own guidance ("if 022 has not landed when this task runs, import against
+ * the interface and coordinate ... define the import boundary cleanly").
+ * Task 022 should verify/extend this shape rather than redefining it.
+ * NOTE: `attachmentDocumentIds` is NOT renamed here — R4 W0 (owner decision,
+ * 2026-07-14) confirmed the existing field name is correct (it carries
+ * Dataverse Document GUIDs, not raw driveItem ids as R3 assumed); task 022's
+ * FR-13 rename premise is stale and should not be reintroduced.
  */
 
 import type { AuthenticatedFetchFn } from './EntityCreationService';
@@ -41,6 +58,14 @@ export type CommunicationSendMode = 'sharedMailbox' | 'user';
 /** Body format options. Matches BFF `BodyFormat`. */
 export type CommunicationBodyFormat = 'html' | 'text';
 
+/**
+ * Channel to send on. Matches BFF `CommunicationType` (string form via
+ * JsonStringEnumConverter — see `Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs`).
+ * Defaults to `'email'` when omitted (BFF default `CommunicationType.Email`).
+ * `'message'` = ACS Chat (`CommunicationType.Message` = 100000004; task 062).
+ */
+export type CommunicationChannelType = 'email' | 'message';
+
 /** Entity link to attach to the generated `sprk_communication` record. */
 export interface ICommunicationAssociation {
   /** Dataverse logical name (e.g. "sprk_matter", "sprk_document"). */
@@ -55,21 +80,56 @@ export interface ICommunicationAssociation {
 
 /** Options accepted by {@link sendCommunication}. */
 export interface SendCommunicationOptions {
-  /** Recipient email addresses (required, ≥ 1). */
-  to: string[];
+  /**
+   * Recipient email addresses. Required (≥ 1) when `communicationType` is
+   * `'email'` (default). Not required for `'message'` — ACS Chat addresses by
+   * thread, not by recipient list (the BFF's `MessagingChannelSender` does
+   * not read `to`); omit or pass `[]`.
+   */
+  to?: string[];
   /** Optional CC addresses. */
   cc?: string[];
   /** Optional BCC addresses. */
   bcc?: string[];
-  /** Subject line (required). */
-  subject: string;
+  /**
+   * Subject line. Required when `communicationType` is `'email'` (default).
+   * Optional for `'message'` (ACS Chat has no subject concept — the BFF
+   * defaults an internal topic when creating a new ACS thread).
+   */
+  subject?: string;
   /** Body content (required). HTML by default. */
   body: string;
   /** Body content format. Default `'html'`. */
   bodyFormat?: CommunicationBodyFormat;
   /**
-   * SPE driveItem ids for files to attach. See file-level note above —
-   * these are **driveItem ids**, not `sprk_document` GUIDs. Max 150
+   * Channel to send on. Default `'email'`. Set to `'message'` to send an ACS
+   * Chat message (task 062) — dispatches server-side by `sprk_communicationtype`,
+   * NOT a second send contract.
+   */
+  communicationType?: CommunicationChannelType;
+  /**
+   * "Respond/compose into the current thread" target: the target
+   * `sprk_communicationthread` record id (a **bare Dataverse record GUID** — the
+   * BFF binds it to `Guid?`, so braces/composite keys are rejected at
+   * deserialization with a 400). Honored on BOTH branches:
+   *   - `'message'` (task 062, FR-12): stamps the sent message's thread lookup
+   *     directly (Dataverse grouping only; NOT ACS-thread session reuse — R2).
+   *   - `'email'` (R3 task 005/020, **FR-19**): pins the sent email to this
+   *     thread, bypassing the server find-or-create — the same send path
+   *     (`AssignExplicitThreadAsync`), NOT a new branch (ADR-045).
+   * Omit for the default find-or-create behavior.
+   */
+  threadId?: string;
+  /**
+   * Parent message id for reply/respond continuity. For `'email'` this is the
+   * RFC-2822 `Internet-Message-Id`; for `'message'` this is the parent
+   * `sprk_communication` id. Stamped onto `sprk_communication.sprk_inreplyto`.
+   */
+  inReplyToMessageId?: string;
+  /**
+   * `sprk_document` GUIDs for files to attach. See file-level note above —
+   * despite historical confusion, this field correctly expects Dataverse
+   * Document GUIDs (the server resolves each to its SPE File). Max 150
    * attachments, 35 MB total (enforced server-side).
    */
   attachmentDocumentIds?: string[];
@@ -77,6 +137,14 @@ export interface SendCommunicationOptions {
   archiveToSpe?: boolean;
   /** Entity associations to link onto the generated `sprk_communication`. */
   associations?: ICommunicationAssociation[];
+  /**
+   * Reply / Reply All / Forward regarding INHERITANCE (UAT R4 D12-1 / task 124): the SOURCE
+   * (parent) `sprk_communication` GUID this draft is composed from. When set, the BFF copies ALL
+   * populated `sprk_regarding*` typed lookups (+ denormalized regarding pointer) from that source
+   * onto the new record at create time — a direct copy (true inheritance), never an engine
+   * re-derivation. Only reply/forward set it; omit for `+ New`/draft/view.
+   */
+  inheritRegardingFromCommunicationId?: string;
   /** Send mode. Default `'sharedMailbox'`. */
   sendMode?: CommunicationSendMode;
   /** Caller-provided correlation ID for tracing. Optional. */
@@ -89,6 +157,86 @@ export interface SendCommunicationOptions {
 export interface SendCommunicationResult {
   /** GUID of the created `sprk_communication` record. */
   communicationId: string;
+}
+
+/** Shape of a parsed ProblemDetails body (RFC 7807 + BFF `errorCode`/`correlationId` extensions). */
+interface IProblemDetailsBody {
+  /** RFC 7807 problem type URI. */
+  type?: string;
+  title?: string;
+  detail?: string;
+  status?: number;
+  /** RFC 7807 instance URI (used as a correlation fallback). */
+  instance?: string;
+  errorCode?: string;
+  code?: string;
+  correlationId?: string;
+  /** ASP.NET Core trace identifier (used as a correlation fallback). */
+  traceId?: string;
+}
+
+/**
+ * Typed error thrown by {@link sendCommunication} on any non-2xx response.
+ * Parses the BFF's RFC 7807 ProblemDetails body (ADR-019) so callers can
+ * branch on `status`/`code` instead of string-matching `message`.
+ *
+ * Canonical taxonomy note (task 020 / design §5.8-§5.9): `code` may also
+ * carry one of the composer's own canonical validation codes
+ * (`FROM_REQUIRED`, `FROM_NOT_APPROVED`) when the BFF rejects a send for a
+ * sender-identity reason the client cannot pre-validate — see
+ * `EmailComposer.types.ts` `ValidationErrorCode`.
+ *
+ * Construct instances from a failed {@link Response} via the async
+ * {@link SendCommunicationError.fromResponse} factory (task 022 / FR-13),
+ * which performs the ProblemDetails parse + non-JSON fallback.
+ */
+export class SendCommunicationError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly detail: string;
+  readonly correlationId?: string;
+
+  constructor(status: number, code: string, detail: string, correlationId?: string) {
+    super(`sendCommunication failed (${status}): ${detail}`);
+    this.name = 'SendCommunicationError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.correlationId = correlationId;
+    // Restore the prototype chain (extending built-ins across ES5/ts-jest
+    // transpilation targets can otherwise break `instanceof` checks).
+    Object.setPrototypeOf(this, SendCommunicationError.prototype);
+  }
+
+  /**
+   * Build a {@link SendCommunicationError} from a non-OK {@link Response}.
+   *
+   * Parses the BFF's RFC 7807 ProblemDetails body per ADR-019
+   * (`{ type, title, status, detail, instance | traceId, correlationId? }`),
+   * mapping `errorCode`/`code` → {@link SendCommunicationError.code},
+   * `detail`/`title` → {@link SendCommunicationError.detail}, and
+   * `correlationId`/`traceId`/`instance` → {@link SendCommunicationError.correlationId}.
+   *
+   * Falls back to a minimal error (status only, `HTTP_<status>` code) when the
+   * body is absent, non-JSON, or unparseable — never throws while parsing.
+   */
+  static async fromResponse(response: Response): Promise<SendCommunicationError> {
+    const status = response.status;
+    try {
+      const ct = response.headers.get('content-type') ?? '';
+      if (ct.includes('application/problem+json') || ct.includes('application/json')) {
+        const body = (await response.json()) as IProblemDetailsBody;
+        const code = body.errorCode ?? body.code ?? `HTTP_${status}`;
+        const detail = body.detail ?? body.title ?? `HTTP ${status}`;
+        const correlationId = body.correlationId ?? body.traceId ?? body.instance;
+        return new SendCommunicationError(status, code, detail, correlationId);
+      }
+      const text = await response.text();
+      return new SendCommunicationError(status, `HTTP_${status}`, text || `HTTP ${status}`);
+    } catch {
+      return new SendCommunicationError(status, `HTTP_${status}`, `HTTP ${status}`);
+    }
+  }
 }
 
 /** Dependencies for the wrapper (kept explicit for testability). */
@@ -117,27 +265,17 @@ function toBffBodyFormat(format: CommunicationBodyFormat | undefined): 'HTML' | 
   return format === 'text' ? 'PlainText' : 'HTML';
 }
 
+/** Map our friendly channel string to the BFF `CommunicationType` enum value. */
+function toBffCommunicationType(channel: CommunicationChannelType | undefined): 'Email' | 'Message' {
+  return channel === 'message' ? 'Message' : 'Email';
+}
+
 /** Resolve the request URL using the optional base. */
 function resolveUrl(base: string | undefined): string {
   const path = '/api/communications/send';
   if (!base) return path;
   // Trim trailing slash on base, leading slash on path is already present.
   return base.replace(/\/+$/, '') + path;
-}
-
-/** Attempt to extract a meaningful error message from a non-OK response. */
-async function extractErrorMessage(response: Response): Promise<string> {
-  try {
-    const ct = response.headers.get('content-type') ?? '';
-    if (ct.includes('application/problem+json') || ct.includes('application/json')) {
-      const body = (await response.json()) as { title?: string; detail?: string };
-      return body.detail ?? body.title ?? `HTTP ${response.status}`;
-    }
-    const text = await response.text();
-    return text || `HTTP ${response.status}`;
-  } catch {
-    return `HTTP ${response.status}`;
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -147,8 +285,16 @@ async function extractErrorMessage(response: Response): Promise<string> {
 /**
  * Send a communication via the BFF.
  *
- * Throws on HTTP failures (including validation errors); callers should
- * wrap the call in a try/catch and surface failures to the user.
+ * Throws {@link SendCommunicationError} on any non-2xx response (including
+ * validation errors) — parsed from the BFF's ProblemDetails body per ADR-019,
+ * so callers can branch on `status`/`code` rather than string-matching the
+ * message. Callers should wrap the call in a try/catch and surface failures to
+ * the user. (Argument-shape guards before the request still throw a plain
+ * `Error`; both are `instanceof Error`.)
+ *
+ * `attachmentDocumentIds` carries Dataverse `sprk_document` GUIDs — see the
+ * file-level note; the field is NOT renamed and the server resolves each
+ * Document to its backing SPE File.
  *
  * @example
  * ```ts
@@ -159,7 +305,7 @@ async function extractErrorMessage(response: Response): Promise<string> {
  *     subject: 'Documents for review',
  *     body: '<p>Please see attached.</p>',
  *     bodyFormat: 'html',
- *     attachmentDocumentIds: ['<driveItemId-1>', '<driveItemId-2>'],
+ *     attachmentDocumentIds: ['<sprk_document-guid-1>', '<sprk_document-guid-2>'],
  *     associations: [{ entityType: 'sprk_matter', entityId: matterId }],
  *     sendMode: 'sharedMailbox',
  *   },
@@ -172,13 +318,20 @@ export async function sendCommunication(
   opts: SendCommunicationOptions,
   client: ICommunicationApiClientOptions
 ): Promise<SendCommunicationResult> {
-  if (!opts.to || opts.to.length === 0) {
-    throw new Error('sendCommunication: at least one recipient is required.');
+  const isMessage = opts.communicationType === 'message';
+
+  // Email (default) keeps its original required-field contract exactly. Message (ACS Chat) only
+  // requires a body — `to`/`subject` are email concepts the BFF's messaging send path does not
+  // read (see SendCommunicationOptions.to/.subject docs; task 062).
+  if (!isMessage) {
+    if (!opts.to || opts.to.length === 0) {
+      throw new Error('sendCommunication: at least one recipient is required.');
+    }
+    if (!opts.subject || !opts.subject.trim()) {
+      throw new Error('sendCommunication: subject is required.');
+    }
   }
-  if (!opts.subject || !opts.subject.trim()) {
-    throw new Error('sendCommunication: subject is required.');
-  }
-  if (typeof opts.body !== 'string') {
+  if (typeof opts.body !== 'string' || (isMessage && !opts.body.trim())) {
     throw new Error('sendCommunication: body is required.');
   }
   if (!client.authenticatedFetch) {
@@ -186,12 +339,18 @@ export async function sendCommunication(
   }
 
   const requestBody = {
-    to: opts.to,
+    // `to`/`subject` are `required` members on the BFF DTO (System.Text.Json enforces PRESENCE at
+    // deserialize time even though Message doesn't need them) — always send a value, never omit.
+    to: opts.to ?? [],
     cc: opts.cc,
     bcc: opts.bcc,
-    subject: opts.subject,
+    subject: opts.subject ?? '',
     body: opts.body,
     bodyFormat: toBffBodyFormat(opts.bodyFormat),
+    communicationType: toBffCommunicationType(opts.communicationType),
+    threadId: opts.threadId,
+    inReplyToMessageId: opts.inReplyToMessageId,
+    inheritRegardingFromCommunicationId: opts.inheritRegardingFromCommunicationId,
     fromMailbox: opts.fromMailbox,
     sendMode: toBffSendMode(opts.sendMode),
     archiveToSpe: opts.archiveToSpe ?? false,
@@ -213,8 +372,7 @@ export async function sendCommunication(
   });
 
   if (!response.ok) {
-    const message = await extractErrorMessage(response);
-    throw new Error(`sendCommunication failed (${response.status}): ${message}`);
+    throw await SendCommunicationError.fromResponse(response);
   }
 
   // The BFF response (`SendCommunicationResponse`) carries multiple fields;

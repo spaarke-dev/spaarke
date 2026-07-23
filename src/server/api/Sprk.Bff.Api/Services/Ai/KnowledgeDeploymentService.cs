@@ -359,7 +359,12 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
                 TenantId = tenantId,
                 Name = "Default Shared Deployment",
                 Model = RagDeploymentModel.Shared,
-                IndexName = _options.SharedIndexName,
+                // FR-26 / G-9: the shared write-target index is the single canonical setting
+                // AiSearch:KnowledgeIndexName (same value the read path uses), consolidating the
+                // former read/write split-brain. Falls back to the deprecated
+                // Analysis:SharedIndexName only for legacy fixtures that construct this service
+                // without AiSearchOptions registered.
+                IndexName = _aiSearchOptions?.KnowledgeIndexName ?? _options.SharedIndexName,
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow
             },

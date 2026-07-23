@@ -76,6 +76,7 @@ public sealed class EventRulesService : IEventRulesService
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly EventRulesOptions _options;
     private readonly ILogger<EventRulesService> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public EventRulesService(
         ChatSessionManager sessionManager,
@@ -88,7 +89,8 @@ public sealed class EventRulesService : IEventRulesService
         EventRulesTelemetry telemetry,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         IOptions<EventRulesOptions> options,
-        ILogger<EventRulesService> logger)
+        ILogger<EventRulesService> logger,
+        TimeProvider? timeProvider = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -101,6 +103,10 @@ public sealed class EventRulesService : IEventRulesService
         _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Track-B hygiene sweep (R9, task 073): clock for the manifest readiness probe's
+        // Task.Delay — optional, defaults to TimeProvider.System (production/DI); tests
+        // inject a FakeTimeProvider for deterministic probe-delay assertions.
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -164,7 +170,14 @@ public sealed class EventRulesService : IEventRulesService
         {
             for (var attempt = 1; attempt <= _options.ReadinessProbeAttempts; attempt++)
             {
-                await Task.Delay(Math.Max(0, _options.ReadinessProbeDelayMs), cancellationToken).ConfigureAwait(false);
+                // Track-B hygiene sweep (R9, task 073): TimeProvider-driven delay (per
+                // ADR-038 §5) instead of raw Task.Delay — the SessionDispatchOrchestrator
+                // sibling probe converts identically; see that class for the shared-policy note.
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Math.Max(0, _options.ReadinessProbeDelayMs)),
+                        _timeProvider,
+                        cancellationToken)
+                    .ConfigureAwait(false);
                 var refreshed = await _sessionManager
                     .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
                     .ConfigureAwait(false);

@@ -141,9 +141,9 @@ Sequence: User → PCF (AnalysisWorkspace) or Chat → BFF (AnalysisEndpoints/Ch
 
 ## Data Flow: Email-to-Document Conversion
 
-See [email-processing-architecture.md](email-processing-architecture.md) for full design.
+See [communication-intelligence-architecture.md](communication-intelligence-architecture.md) for the current (R4) design. *(The legacy OOB-`email`/webhook `EmailToDocumentJobHandler` path described below was retired in R4 — inbound email is now 100% Graph via `IncomingCommunicationProcessor`; see §11–§12 of the canonical doc.)*
 
-Dual entry: Webhook (real-time) + EmailPollingBackupService (5-min backup) → EmailToDocumentJobHandler → SPE upload + Dataverse record + AI analysis enqueue.
+Legacy (retired) dual entry: Webhook (real-time) + EmailPollingBackupService (5-min backup) → EmailToDocumentJobHandler → SPE upload + Dataverse record + AI analysis enqueue.
 
 **Components involved:**
 
@@ -384,7 +384,7 @@ The 26 DI module files in `Infrastructure/DI/` have implicit ordering dependenci
 
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) — Auth pattern details (OBO bugs, dual strategies)
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF field mappings, container model, caching TTLs
-- [email-processing-architecture.md](email-processing-architecture.md) — Email pipeline design decisions
+- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — Communication pipeline design decisions (canonical R4)
 - [uac-access-control.md](uac-access-control.md) — Three-plane access control model
 - [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) — Office add-in architecture
 - [AI-ARCHITECTURE.md](AI-ARCHITECTURE.md) — AI tool framework and playbook architecture

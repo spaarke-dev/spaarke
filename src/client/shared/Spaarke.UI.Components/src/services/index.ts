@@ -143,6 +143,11 @@ export { SprkChatBridge } from './SprkChatBridge';
 // '@spaarke/ui-components/services/userLookup'`).
 export { searchUsersAndContacts, extractEmailKey } from './userLookup';
 
+// "Assign to me" current-user resolution (spaarkeai-assistant-enhancements-r1
+// task 014 / FR-A4) — reuses the Xrm current-user identity mechanism; see
+// `./userLookup` doc comments for the systemuser-vs-contact target rationale.
+export { getCurrentUserAsLookupItem, resolveCurrentUserAsContactAssignee } from './userLookup';
+
 // THE client capability-dispatch helper (Click path, ai-architecture-redesign-r1
 // task 023 / FR-P1-04 / ADR-039). Chips carry binding_id; dispatchConsumer is the
 // ONLY client dispatch entry (SSE consumption + PaneEventBus bridging inside).
@@ -165,7 +170,7 @@ export type {
 } from './dispatchConsumer';
 
 // Typed wrapper around POST /api/communications/send.
-export { sendCommunication } from './communicationApi';
+export { sendCommunication, SendCommunicationError } from './communicationApi';
 export type {
   SendCommunicationOptions,
   SendCommunicationResult,
@@ -173,7 +178,28 @@ export type {
   ICommunicationAssociation,
   CommunicationBodyFormat,
   CommunicationSendMode,
+  CommunicationChannelType,
 } from './communicationApi';
+
+// Typed wrapper around the polling-timeline read endpoints (task 050) +
+// a send delegate over `sendCommunication()` (task 060 / CommunicationTimeline).
+export {
+  readThread,
+  getUnreadCount,
+  readByRegarding,
+  sendTimelineMessage,
+  CommunicationTimelineReadError,
+} from './communicationTimelineApi';
+export type {
+  IThreadAttachmentRefDto,
+  IThreadMessageDto,
+  IThreadReadResultDto,
+  IUnreadCountResultDto,
+  IRegardingReadResultDto,
+  ICommunicationTimelineApiClientOptions,
+  IReadThreadOptions,
+  IGetUnreadCountOptions,
+} from './communicationTimelineApi';
 export type {
   SprkChatBridgeEventMap,
   SprkChatBridgeEventName,
@@ -198,3 +224,21 @@ export type {
 // types/FieldMappingTypes.ts with different (configuration-time) shapes.
 export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
 export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';
+
+// surfaceHandoff — Assistant → launched-surface entry-payload hand-off (task 012,
+// spaarkeai-assistant-enhancements-r1). The client transport carrying a
+// draft-in-chat create flow into a pre-seeded wizard / OOB form. Files by
+// reference; `resolvedLookups` slot filled by task 013.
+export * from './surfaceHandoff';
+
+// membership — client resolver for the shared user-record membership service.
+// Backs the DataGrid `behavior.membershipFilter` feature (task 050): resolves
+// "records the caller is on" via GET /api/users/me/memberships/{entityType} for
+// an IN(ids) overlay. Context-agnostic (host injects authenticatedFetch).
+export { createMembershipResolver } from './membership';
+export type {
+  MembershipResolver,
+  MembershipResolveOptions,
+  MembershipResponseBody,
+  MembershipFetch,
+} from './membership';

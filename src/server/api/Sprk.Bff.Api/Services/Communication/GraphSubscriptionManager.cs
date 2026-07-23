@@ -18,6 +18,12 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// Implements ADR-001 BackgroundService pattern with PeriodicTimer (30-minute interval).
 /// Graph mail subscriptions have a maximum lifetime of 3 days; this service renews them
 /// when expiry is less than 24 hours away.
+///
+/// Subscription resilience (FR-24 — Microsoft "belt and suspenders"): subscriptions are created
+/// with a <c>lifecycleNotificationUrl</c>, and <see cref="HandleLifecycleNotificationAsync"/> reacts
+/// to the three lifecycle events without human intervention — <c>reauthorizationRequired</c> and
+/// <c>subscriptionRemoved</c> renew/recreate the subscription, and <c>missed</c> triggers the
+/// <see cref="MailboxDeltaReconciliationService"/> delta backstop to recover missed messages.
 /// </summary>
 public sealed class GraphSubscriptionManager : BackgroundService
 {
@@ -28,24 +34,33 @@ public sealed class GraphSubscriptionManager : BackgroundService
     private readonly CommunicationAccountService _accountService;
     private readonly IGraphClientFactory _graphClientFactory;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly MailboxDeltaReconciliationService _reconciliation;
     private readonly ILogger<GraphSubscriptionManager> _logger;
     private readonly string _notificationUrl;
+    private readonly string _lifecycleNotificationUrl;
     private readonly string _clientState;
 
     public GraphSubscriptionManager(
         CommunicationAccountService accountService,
         IGraphClientFactory graphClientFactory,
         IGenericEntityService genericEntityService,
+        MailboxDeltaReconciliationService reconciliation,
         IOptions<CommunicationOptions> communicationOptions,
         ILogger<GraphSubscriptionManager> logger)
     {
         _accountService = accountService ?? throw new ArgumentNullException(nameof(accountService));
         _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _reconciliation = reconciliation ?? throw new ArgumentNullException(nameof(reconciliation));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         var options = communicationOptions?.Value ?? throw new ArgumentNullException(nameof(communicationOptions));
         _notificationUrl = options.WebhookNotificationUrl;
+        // Lifecycle notifications default to the same endpoint as change notifications (distinguished
+        // by the body-level lifecycleEvent field) unless an explicit URL is configured.
+        _lifecycleNotificationUrl = string.IsNullOrWhiteSpace(options.LifecycleNotificationUrl)
+            ? options.WebhookNotificationUrl
+            : options.LifecycleNotificationUrl!;
         _clientState = options.WebhookClientState;
     }
 
@@ -100,6 +115,154 @@ public sealed class GraphSubscriptionManager : BackgroundService
         }
 
         _logger.LogInformation("GraphSubscriptionManager stopped");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Lifecycle notification handling (FR-24)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Handles a Graph subscription lifecycle notification, invoked by the incoming-webhook endpoint
+    /// when a notification carries a <c>lifecycleEvent</c>. Reacts without human intervention:
+    ///   <list type="bullet">
+    ///     <item><c>reauthorizationRequired</c> → renew (reauthorize) the subscription; recreate on failure.</item>
+    ///     <item><c>subscriptionRemoved</c> → create a fresh subscription for the affected account.</item>
+    ///     <item><c>missed</c> → trigger the delta reconciliation backstop to recover missed messages.</item>
+    ///   </list>
+    /// All branches are best-effort and non-fatal (NFR-06): a failure is logged and never propagates
+    /// to the webhook response. Any unhandled/expired subscription is also self-healed by the periodic
+    /// <see cref="ManageSubscriptionsAsync"/> cycle.
+    /// </summary>
+    public async Task HandleLifecycleNotificationAsync(
+        string? lifecycleEvent, string? subscriptionId, string? resource, CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "Handling Graph lifecycle notification | LifecycleEvent={Event}, SubscriptionId={SubscriptionId}, Resource={Resource}",
+            lifecycleEvent, subscriptionId, resource);
+
+        switch (lifecycleEvent?.Trim().ToLowerInvariant())
+        {
+            case "reauthorizationrequired":
+                await ReauthorizeSubscriptionAsync(subscriptionId, ct);
+                break;
+
+            case "subscriptionremoved":
+                await RecreateRemovedSubscriptionAsync(subscriptionId, ct);
+                break;
+
+            case "missed":
+                // Graph could not deliver one or more change notifications; reconcile via delta to
+                // recover the missed messages.
+                await TriggerReconciliationAsync(subscriptionId, ct);
+                break;
+
+            default:
+                _logger.LogWarning(
+                    "Unknown or null lifecycle event '{Event}' for subscription {SubscriptionId}, ignoring",
+                    lifecycleEvent, subscriptionId);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Reauthorizes a subscription (reauthorizationRequired) by renewing it. On failure, delete +
+    /// recreate. Non-fatal — the periodic management cycle is the ultimate backstop.
+    /// </summary>
+    private async Task ReauthorizeSubscriptionAsync(string? subscriptionId, CancellationToken ct)
+    {
+        var account = await FindAccountBySubscriptionAsync(subscriptionId, ct);
+        if (account is null)
+        {
+            _logger.LogWarning(
+                "No receive-enabled account matches subscription {SubscriptionId} on reauthorizationRequired; " +
+                "periodic management cycle will reconcile",
+                subscriptionId);
+            return;
+        }
+
+        try
+        {
+            await RenewSubscriptionAsync(account, ct);
+            _logger.LogInformation(
+                "Reauthorized (renewed) subscription {SubscriptionId} for account {AccountId} ({Email})",
+                subscriptionId, account.Id, account.EmailAddress);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Reauthorization renewal failed for subscription {SubscriptionId}; attempting delete + recreate",
+                subscriptionId);
+            await TryDeleteSubscriptionAsync(subscriptionId!, account, ct);
+            await CreateSubscriptionAsync(account, ct);
+        }
+    }
+
+    /// <summary>
+    /// Recreates a subscription that Graph reported as removed (subscriptionRemoved). The old
+    /// subscription is already gone, so a fresh one is created for the affected account. Non-fatal.
+    /// </summary>
+    private async Task RecreateRemovedSubscriptionAsync(string? subscriptionId, CancellationToken ct)
+    {
+        var account = await FindAccountBySubscriptionAsync(subscriptionId, ct);
+        if (account is null)
+        {
+            _logger.LogWarning(
+                "No receive-enabled account matches subscription {SubscriptionId} on subscriptionRemoved; " +
+                "periodic management cycle will recreate",
+                subscriptionId);
+            return;
+        }
+
+        await CreateSubscriptionAsync(account, ct);
+        _logger.LogInformation(
+            "Recreated subscription for account {AccountId} ({Email}) after subscriptionRemoved",
+            account.Id, account.EmailAddress);
+    }
+
+    /// <summary>
+    /// Triggers the delta reconciliation backstop for a <c>missed</c> lifecycle event. Reconciles the
+    /// affected account when the subscription resolves to one; otherwise reconciles all accounts.
+    /// Non-fatal (NFR-06).
+    /// </summary>
+    private async Task TriggerReconciliationAsync(string? subscriptionId, CancellationToken ct)
+    {
+        try
+        {
+            var account = await FindAccountBySubscriptionAsync(subscriptionId, ct);
+            if (account is not null)
+            {
+                await _reconciliation.ReconcileAccountAsync(account, ct);
+                _logger.LogInformation(
+                    "Delta reconciliation triggered for account {AccountId} ({Email}) after `missed` lifecycle event",
+                    account.Id, account.EmailAddress);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "No account matched subscription {SubscriptionId} on `missed`; reconciling all receive-enabled accounts",
+                    subscriptionId);
+                await _reconciliation.ReconcileAllAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Delta reconciliation trigger for `missed` lifecycle event failed (non-fatal), SubscriptionId={SubscriptionId}",
+                subscriptionId);
+        }
+    }
+
+    /// <summary>
+    /// Finds the receive-enabled account whose stored Graph subscription id matches, or null.
+    /// </summary>
+    private async Task<CommunicationAccount?> FindAccountBySubscriptionAsync(string? subscriptionId, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(subscriptionId))
+            return null;
+
+        var accounts = await _accountService.QueryReceiveEnabledAccountsAsync(ct);
+        return accounts.FirstOrDefault(a =>
+            string.Equals(a.SubscriptionId, subscriptionId, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -266,6 +429,9 @@ public sealed class GraphSubscriptionManager : BackgroundService
         {
             ChangeType = "created",
             NotificationUrl = _notificationUrl,
+            // FR-24: pair change notifications with lifecycle notifications so Graph tells us when a
+            // subscription needs reauthorization, was removed, or missed notifications.
+            LifecycleNotificationUrl = _lifecycleNotificationUrl,
             Resource = $"users/{account.EmailAddress}/mailFolders/{monitorFolder}/messages",
             ExpirationDateTime = expirationDateTime,
             ClientState = _clientState

@@ -49,6 +49,8 @@ function makeForm(overrides?: Partial<ICreateEventFormState>): ICreateEventFormS
     description: '',
     regardingRecordId: '',
     regardingRecordName: '',
+    assignedToId: '',
+    assignedToName: '',
     ...overrides,
   };
 }
@@ -127,6 +129,38 @@ describe('resolveEventAssociateToStepConfig', () => {
     expect(config?.entityTypes).toEqual(EVENT_REGARDING_TARGETS);
     // Defensive copy — not the same array reference as the shared const.
     expect(config?.entityTypes).not.toBe(EVENT_REGARDING_TARGETS);
+  });
+
+  // -------------------------------------------------------------------------
+  // showAssociateToStep (task 014 / FR-A5) — additive 3rd gate
+  // -------------------------------------------------------------------------
+
+  describe('showAssociateToStep (task 014 / FR-A5)', () => {
+    it('still returns undefined without navigationService, even when showAssociateToStep is true', () => {
+      expect(resolveEventAssociateToStepConfig(undefined, undefined, undefined, true)).toBeUndefined();
+    });
+
+    it('preserves the Code Page regression guard when showAssociateToStep is falsy/omitted', () => {
+      expect(resolveEventAssociateToStepConfig(NAV_SERVICE, undefined, undefined)).toBeUndefined();
+      expect(resolveEventAssociateToStepConfig(NAV_SERVICE, undefined, undefined, false)).toBeUndefined();
+    });
+
+    it('surfaces the unlocked, un-seeded picker when showAssociateToStep is true (Assistant create-task launch, no pre-seed yet)', () => {
+      const config = resolveEventAssociateToStepConfig(NAV_SERVICE, undefined, undefined, true);
+      expect(config).toBeDefined();
+      expect(config?.initialAssociation).toBeUndefined();
+      expect(config?.lockAssociation).toBeUndefined();
+      // Offers matter/project/invoice/… (FR-A5) — the full EVENT_REGARDING_TARGETS set.
+      expect(config?.entityTypes).toEqual(EVENT_REGARDING_TARGETS);
+      expect(config?.entityTypes.some(t => t.entityType === 'sprk_matter')).toBe(true);
+      expect(config?.entityTypes.some(t => t.entityType === 'sprk_project')).toBe(true);
+      expect(config?.entityTypes.some(t => t.entityType === 'sprk_invoice')).toBe(true);
+    });
+
+    it('does not force-lock the step just because showAssociateToStep is set (user can still pick "none" via Skip)', () => {
+      const config = resolveEventAssociateToStepConfig(NAV_SERVICE, undefined, undefined, true);
+      expect(config?.lockAssociation).not.toBe(true);
+    });
   });
 });
 

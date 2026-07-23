@@ -1196,6 +1196,72 @@ public class GoldenUtteranceEvalSuiteTests
         }
     }
 
+    /// <summary>
+    /// DEF-11 golden + dispatch coverage for compose-revise-document, the whole-document revision
+    /// capability. Mirrors the ComposeDraftAlternativeDispatchCases pattern above: grounds the
+    /// "asserts the compose-disposition ledger write" acceptance criterion against the REAL Binding
+    /// row (disposition=100000006), and — the row-specific behavioral proof this family calls out by
+    /// name — asserts the DUAL-CHANNEL output shape (edits[] + comments[], both object-level required
+    /// but independently emptyable per revisionIntent) on the real output-schema mirror, so a schema
+    /// edit that collapses the family back to a single edits-only or comments-only shape fails CI here.
+    /// </summary>
+    [Fact]
+    public void ComposeReviseDocumentDispatchCases_AssertComposeDispositionLedgerWriteAndDualChannelPayload()
+    {
+        var suite = LoadSuite();
+        var goldenCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "compose-revise-document", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var dispatchCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "compose-revise-document-dispatch", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        goldenCases.Should().HaveCountGreaterOrEqualTo(5,
+            "DEF-11: the compose-revise-document golden family needs at least 5 cases covering its revision intents");
+        goldenCases.Should().OnlyContain(c => c.Channel.Equals("text", StringComparison.OrdinalIgnoreCase),
+            "compose-revise-document's text-path golden family is the Assistant/Compose-chat dispatch leg");
+
+        dispatchCases.Should().HaveCountGreaterOrEqualTo(5,
+            "DEF-11: the compose-revise-document dispatch family needs at least 5 cases");
+        dispatchCases.Should().OnlyContain(c => c.Channel.Equals("click", StringComparison.OrdinalIgnoreCase),
+            "compose-revise-document dispatches through the Compose editor's revise-document action seam");
+
+        // Ground the "asserts the compose-disposition ledger write" acceptance criterion against the
+        // REAL Binding row (not a restated fixture): disposition=100000006 (BindingDisposition.Compose).
+        var mirrorPath = Path.Combine(FindRepoRoot(), "infra", "dataverse", "sprk_playbookconsumer-rows.json");
+        using var mirror = JsonDocument.Parse(File.ReadAllText(mirrorPath));
+        var reviseDocumentRow = mirror.RootElement.GetProperty("rows").EnumerateArray()
+            .Single(r => r.GetProperty("consumerType").GetString() == "compose-revise-document"
+                         && r.GetProperty("consumerCode").GetString() == "default");
+
+        reviseDocumentRow.GetProperty("disposition").GetInt32().Should().Be((int)BindingDisposition.Compose,
+            "the compose-revise-document Binding row must declare the compose disposition — the dual-channel " +
+            "edits[]/comments[] payload is written to the SessionOutput ledger BEFORE the Workspace materializes " +
+            "the pending track-changes and anchored review comments (ADR-040)");
+
+        // Row-specific behavioral proof: the REAL output-schema mirror declares BOTH edits and
+        // comments as object-level required (always present, independently emptyable per
+        // revisionIntent) — the load-bearing shape distinguishing this family from
+        // compose-draft-alternative (edits only) and compose-defined-terms/compose-explain-clause
+        // (neither).
+        var schemaPath = Path.Combine(FindRepoRoot(), "infra", "dataverse", "outputschemas", "compose-revise-document.schema.json");
+        File.Exists(schemaPath).Should().BeTrue(
+            $"the compose-revise-document output-schema mirror must exist at {schemaPath}");
+        using var schemaDoc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        schemaDoc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "edits", "comments", "rationale", "sources" },
+                "DEF-11: the dual-channel contract — edits[] (pending track-changes) AND comments[] " +
+                "(anchored review flags) are both always-present top-level fields, selected by revisionIntent");
+        schemaDoc.RootElement.GetProperty("properties").GetProperty("edits")
+            .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "target_text", "new_text", "match_mode" },
+                "each edits[] item is exactly the compose-draft-alternative ComposeDraftPayload shape");
+        schemaDoc.RootElement.GetProperty("properties").GetProperty("comments")
+            .GetProperty("items").GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "target_text", "comment" },
+                "each comments[] item anchors a review-flag comment to a verbatim document span (DEF-13 path)");
+    }
+
     [Fact]
     public void ComposeSummarizeWordChangesDispatchCases_AssertReturnFromWordInvocation()
     {

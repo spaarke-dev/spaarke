@@ -17,9 +17,14 @@
  *   - Format `name` as "Full Name (email)" for disambiguation.
  *   - Short-circuit when the query is empty / < 2 chars (no API call).
  *   - Throw on Web API failure (caller decides how to surface).
+ *   - Tag each result's `ILookupItem.entityType` ('systemuser'/'contact') at
+ *     the source table (task 060, FR-10) — `RecipientField` surfaces this
+ *     onto `IRecipient.entityType` so a directory-resolved recipient carries
+ *     its typed identity through to the caller.
  */
 import type { IDataService } from '../types/serviceInterfaces';
 import type { ILookupItem } from '../types/LookupTypes';
+import { getCurrentUserId, getCurrentUserName } from '../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -66,7 +71,9 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=systemuserid,fullname,internalemailaddress` +
-    `&$filter=contains(fullname,'${safe}') and isdisabled eq false` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and isdisabled` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(internalemailaddress,'${safe}')) and isdisabled eq false` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 
@@ -74,6 +81,10 @@ export async function searchUsersAsLookup(dataService: IDataService, query: stri
   return result.entities.map(e => ({
     id: e['systemuserid'] as string,
     name: formatName(e['fullname'] as string, e['internalemailaddress'] as string | undefined),
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
+    email: (e['internalemailaddress'] as string | undefined) || undefined,
+    entityType: 'systemuser' as const,
   }));
 }
 
@@ -95,7 +106,9 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   const safe = escapeODataLiteral(query.trim());
   const options =
     `?$select=contactid,fullname,emailaddress1` +
-    `&$filter=contains(fullname,'${safe}') and statecode eq 0` +
+    // Match on name OR email (users often type the address). Parens are required
+    // so the `and statecode` binds outside the name/email OR, not just the email.
+    `&$filter=(contains(fullname,'${safe}') or contains(emailaddress1,'${safe}')) and statecode eq 0` +
     `&$orderby=fullname asc` +
     `&$top=${MAX_RESULTS_PER_TABLE}`;
 
@@ -103,6 +116,10 @@ export async function searchContactsAsLookup(dataService: IDataService, query: s
   return result.entities.map(e => ({
     id: e['contactid'] as string,
     name: formatName(e['fullname'] as string, e['emailaddress1'] as string | undefined),
+    // First-class email (task 123): recipient pickers resolve to THIS, not to
+    // the email re-parsed out of `name`. Undefined when the record has none.
+    email: (e['emailaddress1'] as string | undefined) || undefined,
+    entityType: 'contact' as const,
   }));
 }
 
@@ -168,4 +185,94 @@ export function extractEmailKey(name: string): string | null {
   const candidate = match[1].trim().toLowerCase();
   // Loose validation -- it just needs an "@" to count as an email key.
   return candidate.includes('@') ? candidate : null;
+}
+
+// ---------------------------------------------------------------------------
+// Current-user "Assign to me" resolution
+// ---------------------------------------------------------------------------
+//
+// spaarkeai-assistant-enhancements-r1 task 014 / FR-A4: "assign it to me" on
+// a Create*Wizard sets the assignee to the current user. Per the binding
+// project constraint, assignee resolution MUST reuse the current-user
+// identity mechanism already available to the client (`getCurrentUserId` /
+// `getCurrentUserName` in `utils/xrmContext.ts`) — it must NOT introduce a
+// second identity mechanism.
+//
+// Some assignee-style fields target `systemuser` directly (e.g.
+// `sprk_workassignment.sprk_assignedto`) — for those, the Xrm current-user
+// identity applies as-is (see `getCurrentUserAsLookupItem`). Others target
+// `contact` (e.g. `sprk_event.sprk_assignedto`, `sprk_todo.sprk_assignedto`
+// per the 2026-06-21 UAT migration) — for those, the current systemuser must
+// be translated to their own contact record. That translation chain
+// (systemuser id -> internalemailaddress -> matching contact by email) is
+// NOT a new identity mechanism: it is the exact pattern already established
+// in `CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.resolveCurrentUserEmail`
+// (systemuser lookup) chained onto the existing `contact` search already used
+// throughout this file — just composed once, here, for reuse.
+
+/**
+ * The current Dataverse user's own identity, straight from the Xrm host
+ * context — no data round-trip. Use for `systemuser`-targeted assignee
+ * fields (e.g. `sprk_workassignment.sprk_assignedto`).
+ *
+ * @returns `{ id, name }` or `null` when no Xrm host context is reachable.
+ */
+export function getCurrentUserAsLookupItem(): ILookupItem | null {
+  const id = getCurrentUserId();
+  const name = getCurrentUserName();
+  if (!id || !name) return null;
+  return { id, name };
+}
+
+/**
+ * Resolve the current Dataverse user onto their own OOB `contact` record.
+ * Use for `contact`-targeted assignee fields (e.g. `sprk_event.sprk_assignedto`,
+ * `sprk_matter`'s Assigned Attorney/Paralegal).
+ *
+ * Resolution chain (graceful at every step — returns `null` rather than
+ * throwing, so callers can fall back to manual search):
+ *   1. Current systemuser id (`getCurrentUserId` — Xrm host context)
+ *   2. `systemuser.internalemailaddress`
+ *   3. `contact` where `emailaddress1` equals that email (top 1)
+ *
+ * @param dataService - Abstracted Dataverse Web API.
+ * @param options.getCurrentUserId - Test-injection seam overriding the Xrm
+ *   probe (mirrors the established `eventService`/`workAssignmentService`
+ *   `getCurrentUserId` override convention).
+ * @returns The matching contact as an `ILookupItem`, or `null` when the
+ *   current user is unresolvable or has no corresponding contact record.
+ */
+export async function resolveCurrentUserAsContactAssignee(
+  dataService: IDataService,
+  options?: { getCurrentUserId?: () => string | undefined }
+): Promise<ILookupItem | null> {
+  const resolveUserId = options?.getCurrentUserId ?? getCurrentUserId;
+  const userId = resolveUserId();
+  if (!userId) return null;
+
+  try {
+    const user = await dataService.retrieveRecord(
+      'systemuser',
+      userId.replace(/[{}]/g, ''),
+      '?$select=internalemailaddress,fullname'
+    );
+    const email = user['internalemailaddress'] as string | undefined;
+    if (!email) return null;
+
+    const safeEmail = escapeODataLiteral(email);
+    const result = await dataService.retrieveMultipleRecords(
+      'contact',
+      `?$select=contactid,fullname&$filter=emailaddress1 eq '${safeEmail}'&$top=1`
+    );
+    const match = result.entities[0];
+    if (!match) return null;
+
+    return { id: match['contactid'] as string, name: match['fullname'] as string };
+  } catch (err) {
+    console.warn(
+      '[userLookup] resolveCurrentUserAsContactAssignee failed (non-fatal):',
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  }
 }

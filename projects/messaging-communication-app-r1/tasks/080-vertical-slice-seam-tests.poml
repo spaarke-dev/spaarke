@@ -1,0 +1,147 @@
+<task id="080" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Vertical-slice seam tests: messaging send/archive/ingest, `IThreadResolver`, privacy enforcement; preserve existing email-inbound matching under characterization tests</title>
+    <phase>W8 — Tests + Docs</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>031, 040, 042, 051</dependencies>
+    <blocks></blocks>
+    <tags>bff-api, testing</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <rigor-reason>Modifies `tests/**` and tags include `testing` → per root §8 TEST-MODIFYING override row, code-review + adr-check at Step 9.5 run UNCONDITIONALLY (binding ≥6 months from 2026-06-26, ADR-038 / spec FR-B07). Authors integration-heavy vertical-slice seam tests for the new channel + characterization tests guarding the shared email path; ADR-038 KEEP-path categories bind (esp. `tests/integration/seam/**`).</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Authors test files under `tests/**` disjoint from 081 (docs). Depends on the shipped spine (031 capture, 040 resolver, 042 privacy, 051 send) so the seams under test are real.</parallel-reason>
+    <fr-refs>NFR-08</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author the **integration-heavy vertical-slice seam tests** for the messaging channel per ADR-038, and PRESERVE the existing email-inbound matching behavior under characterization tests. Per NFR-08 the pyramid is integration-heavy; per ADR-038 the seam-level end-to-end tests live under `tests/integration/seam/**` (the vertical-slice-seam category is the DoD for dispatch-spine changes).
+
+    Cover these vertical slices (each a real end-to-end path through the shipped code, boundary-mocked only at true external edges per ADR-038):
+
+    1. **Messaging send/archive slice** (FR-01/FR-04/051) — outbound send dispatches through the channel dispatcher by `CommunicationType.Message`, persists exactly one `sprk_communication` (thread set), and the archiver writes a transcript artifact to SPE. Assert echo-dedup: the Event Grid echo of our own message is a no-op (idempotent on ACS message id) — sending once yields exactly one persisted record.
+    2. **Inbound ingest slice** (FR-02/031/NFR-03) — an inbound ACS `ChatMessageReceivedInThread` event flows webhook → Service Bus job → normalizer → `MessagingIngestor` persist → enrichment, producing exactly one persisted `sprk_communication`; **duplicate delivery yields one record** (idempotent on ACS message id); repeated failure dead-letters.
+    3. **`IThreadResolver` slice** (FR-06/040) — the direction-symmetric resolver: an email reply joins its parent's thread; a chat message joins its ACS thread; a fresh outbound message/email creates a thread.
+    4. **Privacy enforcement slice** (FR-08/042/NFR-06) — a private thread's messages are invisible to a user without a grant; an internal-only message is invisible to non-internal users; flipping a thread to open exposes only messages from that point forward (point-forward).
+
+    **Characterization guard (mandatory, NFR-08):** BEFORE the `IThreadResolver` extension is exercised, capture the EXISTING email inbound matching behavior as characterization tests and assert it stays green after (Success Criterion 4). If the email-r4 suite already covers this, extend/reference it (do NOT clone per ADR-038); if a gap exists, add the characterization test.
+
+    Follow ADR-038 strictly: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests; boundary mocks only; `TimeProvider` over `Stopwatch`. Tests are the deliverable — no product code change.
+  </prompt>
+
+  <role>
+    Spaarke test engineer authoritative on ADR-038 (integration-heavy pyramid, 7 KEEP-path categories, `tests/integration/seam/**` vertical-slice-seam DoD, banned mock patterns) and the shipped Communication spine (channel dispatcher, ingestor, thread resolver, privacy filter). Writes vertical-slice seam tests + characterization guards; does not modify product code.
+  </role>
+
+  <goal>
+    Vertical-slice seam tests exist (under `tests/integration/seam/**` where end-to-end, `tests/unit/Sprk.Bff.Api.Tests/` where unit-appropriate) covering messaging send/archive (echo-dedup), inbound ingest (idempotency + DLQ), `IThreadResolver` (both directions + fresh-thread), and privacy enforcement (private/internal-only/point-forward). Existing email inbound matching is captured/referenced as characterization tests and stays green. All tests follow ADR-038 (no banned mock patterns; boundary mocks only). `dotnet test` green; no product code changed.
+  </goal>
+
+  <context>
+    <background>
+      NFR-08 makes the test pyramid integration-heavy and specifically calls for vertical-slice seam tests for the new channel (send/archive/ingest), the `IThreadResolver`, and privacy enforcement, while preserving existing email inbound matching under characterization tests before extending. email-r4 established the pattern: task 017 added spine seam tests under `tests/integration/seam/Communication/` and per-rung tests by reference (no clone). Mirror that — this task adds the SECOND channel's seam coverage + the resolver + privacy slices.
+
+      §11 (test surface): reuse the email-r4 seam-test fixtures/harness under `tests/integration/seam/Communication/` rather than standing up a parallel harness; add messaging cases to it. The characterization guard is the load-bearing NFR-08 obligation — the shared `Services/Communication/` edit (040) is the project's highest-risk shared-path change, so the existing email behavior MUST be pinned green before/after.
+
+      ADR-038 bans (enforced by code-review at Step 9.5): no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration-only tests, no ctor null-check tests; use `TimeProvider` not `Stopwatch`; boundary mocks only (ACS SDK client, Service Bus, SPE store, Dataverse client at their true seams).
+    </background>
+    <relevant-files>
+      <file>tests/integration/seam/Communication/ (EXTEND — email-r4 spine seam tests; add messaging slices here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (EXTEND — unit-appropriate resolver/privacy/normalizer cases)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ (MessagingChannelSender, MessagingArchiver, CommunicationChannelDispatcher — under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (IThreadResolver, MessagingIngestor, IncomingCommunicationProcessor, privacy filter — under test)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/ (Event Grid capture job — idempotency + DLQ under test)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (KEEP-path categories + banned patterns)</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md (7 KEEP categories, mock-boundary rules)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-08">Integration-heavy; vertical-slice seam tests for the new channel (send/archive/ingest), the `IThreadResolver`, and privacy enforcement; preserve existing email inbound matching under characterization tests BEFORE extending.</constraint>
+    <constraint source="ADR-038">Seam end-to-end tests live under `tests/integration/seam/**` (vertical-slice-seam KEEP category = DoD for dispatch-spine changes). NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests; boundary mocks only; `TimeProvider` over `Stopwatch`.</constraint>
+    <constraint source="NFR-03">The inbound-ingest slice asserts idempotency — duplicate ACS-message-id delivery yields exactly one persisted record; repeated failure dead-letters.</constraint>
+    <constraint source="NFR-06">The privacy slice is security-sensitive — assert private/internal-only invisibility + point-forward open; ACS membership never exceeds Dataverse-derived access.</constraint>
+    <constraint source="project">§11 — EXTEND the email-r4 seam-test harness/fixtures; do NOT clone a parallel harness. Characterization-reference existing email tests rather than duplicating (ADR-038).</constraint>
+    <constraint source="root §8 TEST-MODIFYING">code-review + adr-check run UNCONDITIONALLY at Step 9.5 (override row; binding).</constraint>
+    <constraint source="project">Tests-only deliverable — no product code change. Because this touches the BFF test project, run the build + full targeted test run; publish-size/CVE unchanged (test-only) — state so.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spine seam tests (email-r4 precedent)" location="tests/integration/seam/Communication/">
+        email-r4 task 017 added spine seam tests here; extend the same harness with messaging send/archive/ingest + resolver + privacy slices — one harness, additive cases.
+      </pattern>
+      <pattern name="Idempotent-capture assertion" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">
+        Assert duplicate ACS-message-id delivery yields one persisted record + DLQ on repeated failure via the job-contract seam; boundary-mock Service Bus + the ACS client.
+      </pattern>
+      <pattern name="Characterization-by-reference" location="docs/adr/ADR-038-testing-strategy.md">
+        Reference/extend the existing email inbound matching tests to pin behavior; do not clone (ADR-038 no-duplication).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read ADR-038 (KEEP-path categories, `tests/integration/seam/**`, banned patterns), `TEST-ARCHITECTURE.md`, `tests/CLAUDE.md`, and the existing `tests/integration/seam/Communication/` harness (from email-r4 task 017). Read the shipped surfaces under test (031 ingestor/normalizer/job, 040 resolver, 042 privacy filter, 020/051 send/archive dispatch).</step>
+    <step order="2">Characterization guard FIRST: locate the existing email inbound matching tests. If they pin the behavior the 040 resolver extension touches, reference/extend them; if a gap exists, add characterization tests capturing current email inbound matching. Run them green as the baseline (NFR-08 / Success Criterion 4).</step>
+    <step order="3">Author the messaging send/archive slice (FR-01/04): send dispatches by `CommunicationType.Message`; exactly one persisted record; archiver writes the transcript to SPE (boundary-mock SPE); echo-dedup no-op (idempotent on ACS message id).</step>
+    <step order="4">Author the inbound ingest slice (FR-02/031/NFR-03): webhook → job → normalizer → `MessagingIngestor` persist → enrichment; exactly one record; duplicate delivery → one record; repeated failure → DLQ. Boundary-mock Service Bus + ACS client; `TimeProvider` for any timing.</step>
+    <step order="5">Author the `IThreadResolver` slice (FR-06/040): email reply joins parent's thread; chat message joins ACS thread; fresh outbound message/email creates a thread; direction-symmetric.</step>
+    <step order="6">Author the privacy enforcement slice (FR-08/042/NFR-06): private-thread invisibility without a grant; internal-only invisibility to non-internal users; point-forward open exposes only post-switch messages; ACS membership never exceeds Dataverse-derived access.</step>
+    <step order="7">Verify NO banned patterns (grep for `Mock&lt;HttpMessageHandler&gt;`, DI-registration-only tests, ctor null-check tests); place seam end-to-end tests under `tests/integration/seam/**`, unit-appropriate cases under `tests/unit/Sprk.Bff.Api.Tests/`.</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test` (targeted: Communication + seam filters, then the broad Communication suite) — all green, including the characterization baseline before + after.</step>
+    <step order="9.5">Step 9.5 (UNCONDITIONAL per TEST-MODIFYING): `code-review` on the new tests (focus: ADR-038 compliance, no banned mocks, boundary-only, characterization guard present); `adr-check` against ADR-038 + `spec.md` (NFR-08, NFR-03, NFR-06). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (080 ✅) + `current-task.md`; record decisions (which slices are seam vs unit, characterization approach [extend vs new], boundary mocks used, test count).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">ADR-038, TEST-ARCHITECTURE, existing seam harness, shipped surfaces under test</tool>
+    <tool name="write">Vertical-slice seam tests + characterization tests</tool>
+    <tool name="edit">Extend the email-r4 seam-test harness/fixtures</tool>
+    <tool name="bash">dotnet build + targeted/broad dotnet test; grep for banned patterns</tool>
+    <tool name="code-review">Step 9.5 (UNCONDITIONAL — TEST-MODIFYING)</tool>
+    <tool name="adr-check">Step 9.5 (UNCONDITIONAL — TEST-MODIFYING)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Communication/ (EXTENDED — messaging send/archive, inbound ingest, resolver, privacy slices)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (EXTENDED — unit-appropriate resolver/privacy/normalizer cases)</output>
+    <output type="test">Email inbound matching characterization tests (referenced or added; green before + after 040)</output>
+    <output type="docs">Test-diet-relevant notes: which tests are MAINTAIN-class vs scaffolding (feeds task 090 `/test-diet`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Messaging send/archive slice: send dispatches by `CommunicationType.Message`, persists exactly one record, archiver writes a transcript to SPE; echo-dedup asserted (one record despite the echo).</criterion>
+    <criterion testable="true">Inbound ingest slice: an ACS `ChatMessageReceivedInThread` event yields exactly one persisted record; duplicate delivery yields one record; repeated failure dead-letters (NFR-03).</criterion>
+    <criterion testable="true">`IThreadResolver` slice: email reply joins parent thread; chat message joins ACS thread; fresh outbound creates a thread (both directions).</criterion>
+    <criterion testable="true">Privacy slice: private-thread messages invisible without a grant; internal-only invisible to non-internal; point-forward open exposes only post-switch messages (NFR-06).</criterion>
+    <criterion testable="true">Existing email inbound matching is captured/referenced as characterization tests and stays green before + after the 040 resolver extension (Success Criterion 4).</criterion>
+    <criterion testable="true">No banned patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check); seam end-to-end tests under `tests/integration/seam/**`; `dotnet test` green; no product code changed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    TEST-MODIFYING rigor (root §8 override row) — Step 9.5 code-review + adr-check are UNCONDITIONAL. Depends on the shipped spine (031/040/042/051) so the seams are real. The characterization guard is the NFR-08 load-bearing obligation for the shared `Services/Communication/` edit (040).
+
+    Feed task 090's `/test-diet`: as you add tests, note which are MAINTAIN-class (seam + characterization → KEEP) vs any scaffolding, so the project-close reconciliation is straightforward.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. TEST-MODIFYING rigor — Step 9.5 (code-review + adr-check) UNCONDITIONAL per root §8. Touches the BFF test project: run `dotnet build` + `dotnet test`; publish-size/CVE unchanged (test-only) — state so. No product code change. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

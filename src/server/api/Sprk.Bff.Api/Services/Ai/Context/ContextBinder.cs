@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Context;
@@ -38,7 +39,12 @@ public sealed class ContextBinder : IContextBinder
     private readonly ChatSessionManager _sessionManager;
     private readonly IOrganizationalContextProvider _organizationalContextProvider;
     private readonly ICallerContactResolver _callerContactResolver;
+    private readonly ICallerSystemUserResolver _callerSystemUserResolver;
+    private readonly IStatedProfileReader _statedProfileReader;
+    private readonly IUserOrgContextReader _userOrgContextReader;
     private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly IMemoryItemStore? _memoryItemStore;
+    private readonly TimeProvider _timeProvider;
     private readonly ILogger<ContextBinder> _logger;
 
     /// <summary>
@@ -76,18 +82,69 @@ public sealed class ContextBinder : IContextBinder
     /// null in background/pre-session binds and in most tests. <see cref="ContextBindingRequest.Caller"/>,
     /// when supplied, always takes precedence over the ambient <c>HttpContext.User</c>.
     /// </param>
+    /// <param name="memoryItemStore">
+    /// Record/User structured-memory store (task 050). Optional — when null (or a caller constructs
+    /// <see cref="ContextBinder"/> directly, e.g. existing tests) the Binder self-produces NO Memory
+    /// references from host context (the Memory slice stays empty). When present AND a host record is
+    /// supplied, the Binder reads the record's memory (task 053, FR-B-04) with a DEFENSE-IN-DEPTH
+    /// Dataverse-field-mirror filter; a store read failure soft-fails to empty items (bind never takes
+    /// down dispatch). Registered unconditionally (AiPersistenceModule) so DI injects it in production.
+    /// </param>
+    /// <param name="timeProvider">
+    /// Clock for the Workspace slice's environment-facts (current-date) production (task 053). Optional —
+    /// defaults to <see cref="TimeProvider.System"/>; tests inject a fake for a deterministic date slice.
+    /// </param>
+    /// <param name="callerSystemUserResolver">
+    /// Deterministic claims→Dataverse-systemuser resolver (F-2 / D3) keying the User slice's user-memory
+    /// RECALL fragment. Optional — when the DI container has no registration (or a caller constructs
+    /// <see cref="ContextBinder"/> directly, e.g. existing tests), the Binder falls back to
+    /// <see cref="NullCallerSystemUserResolver"/> (ADR-032 empty default) so the User slice's user-memory
+    /// fragment stays honestly absent rather than throwing.
+    /// </param>
+    /// <param name="statedProfileReader">
+    /// User-scope STATED-profile reader (task 030, FR-E2) — the SIBLING of the user-memory RECALL fragment.
+    /// Reads the caller's typed <c>sprk_userprofile</c> row (keyed by the resolved systemuserid) + its N:N
+    /// practice-area names; <see cref="ContextBinder"/> renders it (<see cref="StatedProfileRenderer"/>) and
+    /// folds the block into the User slice's <c>userFragment</c> AHEAD of the memory-recall block. Optional —
+    /// when the DI container has no registration (or a caller constructs <see cref="ContextBinder"/> directly,
+    /// e.g. existing tests), the Binder falls back to <see cref="NullStatedProfileReader"/> (ADR-032 P2 quiet
+    /// no-op) so the stated-profile fragment stays absent rather than throwing. ADR-042: this is the STATED
+    /// typed profile, NOT a memory store. ADR-039: preference-only — never feeds AgentToolFilterContext.
+    /// </param>
+    /// <param name="userOrgContextReader">
+    /// User-scope ORG (business-unit + team NAME) reader (FR-E5 BU/team half, un-defer D-032-01) — a further
+    /// SIBLING of the stated-profile + user-memory RECALL fragments. Reuses the SAME resolved systemuserid
+    /// to key <c>IIdentityNormalizationService</c> for the (Redis-cached) BU/team IDs, resolves their NAMES,
+    /// and (Redis-cached, 10-min TTL) returns them; <see cref="ContextBinder"/> renders it
+    /// (<see cref="UserOrgContextRenderer"/>) as its OWN deterministic block folded into the User slice's
+    /// <c>userFragment</c> AFTER the stated-profile block and BEFORE the memory-recall block. Optional —
+    /// when the DI container has no registration (or a caller constructs <see cref="ContextBinder"/> directly,
+    /// e.g. existing tests), the Binder falls back to <see cref="NullUserOrgContextReader"/> (ADR-032 P2 quiet
+    /// no-op) so the org block stays absent rather than throwing. ADR-039: preference-only — this is context
+    /// that biases the one turn's prompt; it never feeds AgentToolFilterContext / grounding / dispatch.
+    /// </param>
     public ContextBinder(
         ChatSessionManager sessionManager,
         ILogger<ContextBinder> logger,
         IOrganizationalContextProvider? organizationalContextProvider = null,
         ICallerContactResolver? callerContactResolver = null,
-        IHttpContextAccessor? httpContextAccessor = null)
+        IHttpContextAccessor? httpContextAccessor = null,
+        IMemoryItemStore? memoryItemStore = null,
+        TimeProvider? timeProvider = null,
+        ICallerSystemUserResolver? callerSystemUserResolver = null,
+        IStatedProfileReader? statedProfileReader = null,
+        IUserOrgContextReader? userOrgContextReader = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _organizationalContextProvider = organizationalContextProvider ?? new NullOrganizationalContextProvider();
         _callerContactResolver = callerContactResolver ?? NullCallerContactResolver.Instance;
+        _callerSystemUserResolver = callerSystemUserResolver ?? NullCallerSystemUserResolver.Instance;
+        _statedProfileReader = statedProfileReader ?? NullStatedProfileReader.Instance;
+        _userOrgContextReader = userOrgContextReader ?? NullUserOrgContextReader.Instance;
         _httpContextAccessor = httpContextAccessor;
+        _memoryItemStore = memoryItemStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -114,7 +171,9 @@ public sealed class ContextBinder : IContextBinder
 
         var operand = ResolveOperand(request);
         var callerContactId = await ResolveCallerContactIdAsync(request, ct).ConfigureAwait(false);
-        var envelope = await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
+        var (envelope, recordMemoryFragment) =
+            await AssembleEnvelopeAsync(request, callerContactId, ct).ConfigureAwait(false);
+        var budgetReport = EvaluateAndLogBudget(request, envelope, recordMemoryFragment);
         var (fingerprint, updatedSession) = await WriteFingerprintAsync(request, envelope, ct).ConfigureAwait(false);
 
         return new BoundInputs
@@ -123,6 +182,8 @@ public sealed class ContextBinder : IContextBinder
             Operand = operand,
             Fingerprint = fingerprint,
             UpdatedSession = updatedSession,
+            BudgetReport = budgetReport,
+            RecordMemoryFragment = recordMemoryFragment,
         };
     }
 
@@ -342,15 +403,64 @@ public sealed class ContextBinder : IContextBinder
     // ── Context envelope assembly (frozen task-015 contract for User/Workspace/Business/Memory/Semantic;
     //    the Organizational slice is read through IOrganizationalContextProvider — task 060, FR-B-11) ──
 
-    private async Task<ContextEnvelope> AssembleEnvelopeAsync(
+    private async Task<(ContextEnvelope Envelope, string? RecordMemoryFragment)> AssembleEnvelopeAsync(
         ContextBindingRequest request, string? callerContactId, CancellationToken ct)
     {
+        // Task 053 self-production (FR-B-04): fold the six R1 primitives into the Binder. An EXPLICIT
+        // request fragment ALWAYS wins; otherwise the Binder produces the slice from the SAME
+        // ContextSliceProducers the interactive prompt-append sites use (one source, no dual path).
+        var hasHost = !string.IsNullOrWhiteSpace(request.HostEntityType)
+                      && !string.IsNullOrWhiteSpace(request.HostEntityId);
+
+        // Business: explicit fragment, else the host-identity block (id-only-or-provided-name shape;
+        // deterministic — no lazy name fetch here; the byte-pin is BusinessSliceDeterminismContractTests).
+        var businessFragment = request.BusinessFragment;
+        if (string.IsNullOrEmpty(businessFragment) && hasHost)
+        {
+            businessFragment = HostIdentityProducer.BuildEnrichmentBlock(
+                request.HostEntityType!, request.HostEntityId!, request.HostEntityName, request.HostPageTypeLabel);
+        }
+
+        // Workspace: explicit fragment, else ALWAYS the environment-facts (current-date) directive —
+        // environment facts exist every turn; day-granular, so byte-stable across turns within a UTC day.
+        var workspaceFragment = string.IsNullOrEmpty(request.WorkspaceFragment)
+            ? EnvironmentFactsProducer.BuildCurrentDateDirective(_timeProvider.GetUtcNow())
+            : request.WorkspaceFragment;
+
+        // User: explicit fragment, else the composed User-slice fragment = STATED-profile block (task 030,
+        // FR-E2) FIRST, then the USER-scope memory RECALL fragment (F-2 / D3). Both are resolved off the ONE
+        // server-side systemuserid resolution (claims→systemuser); each soft-fails to null independently so a
+        // profile/store outage never takes down a bind. An explicit request fragment ALWAYS wins.
+        var userFragment = string.IsNullOrEmpty(request.UserFragment)
+            ? await ResolveUserFragmentAsync(request, ct).ConfigureAwait(false)
+            : request.UserFragment;
+
+        // Memory items: explicit references, else record memory from the store when a host + store are
+        // available. DEFENSE-IN-DEPTH mirror filter + soft-fail (store outage → empty, never fails bind).
+        var memoryItems = request.MemoryItems;
+        if (memoryItems is null && hasHost && _memoryItemStore is not null)
+        {
+            memoryItems = await ResolveRecordMemoryReferencesAsync(
+                request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
+        }
+
+        // Record-memory PROMPT FRAGMENT (F-2/F-7/D6): produced from the SAME store method the interactive
+        // provider used (byte-identical). Carried on BoundInputs (NOT the envelope — Memory stays
+        // references-only, ADR-040/NFR-07); consumed by the interactive prompt (D1) + dispatch prompt (D6),
+        // and its measured token count feeds the live RecordMemory budget (D4). Soft-fail to null.
+        string? recordMemoryFragment = null;
+        if (hasHost && _memoryItemStore is not null)
+        {
+            recordMemoryFragment = await ResolveRecordMemoryFragmentAsync(
+                request.HostEntityType!, request.HostEntityId!, ct).ConfigureAwait(false);
+        }
+
         var envelope = ContextEnvelopeReferenceProducer.Assemble(
-            userFragment: request.UserFragment,
-            workspaceFragment: request.WorkspaceFragment,
-            businessFragment: request.BusinessFragment,
+            userFragment: userFragment,
+            workspaceFragment: workspaceFragment,
+            businessFragment: businessFragment,
             conversation: request.ConversationTail,
-            memoryItems: request.MemoryItems,
+            memoryItems: memoryItems,
             callerContactId: callerContactId);
 
         // Organizational slice (task 060, FR-B-11): read through the inbound provider seam rather than
@@ -363,7 +473,7 @@ public sealed class ContextBinder : IContextBinder
                 ct)
             .ConfigureAwait(false);
 
-        return envelope with
+        var assembled = envelope with
         {
             Organizational = new OrganizationalSlice
             {
@@ -378,6 +488,287 @@ public sealed class ContextBinder : IContextBinder
                 ProviderImplemented = orgResult.ProviderImplemented,
             },
         };
+
+        return (assembled, recordMemoryFragment);
+    }
+
+    // ── User-slice fragment composition (task 030, FR-E2; FR-E5 BU/team half added by un-defer D-032-01):
+    //    resolve the caller's systemuserid ONCE (server-side, deterministic) and compose, in a fixed
+    //    deterministic order, the three sibling producers: the STATED-profile block (FIRST), the ORG
+    //    (BU/team) context block (SECOND), then the USER-scope memory RECALL block (LAST). Each block
+    //    soft-fails to null independently; an unresolved caller yields no User fragment at all (none of the
+    //    blocks has a key). A bind is never taken down by any producer. ──────────────────────────────────
+
+    private async Task<string?> ResolveUserFragmentAsync(ContextBindingRequest request, CancellationToken ct)
+    {
+        var systemUserId = await ResolveCallerSystemUserIdAsync(request, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(systemUserId))
+        {
+            return null;
+        }
+
+        var statedProfileFragment = await ResolveStatedProfileFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        var orgContextFragment = await ResolveOrgContextFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        var memoryRecallFragment = await ResolveUserMemoryFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+
+        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall. Present
+        // blocks are joined by a blank line. This preserves the prior behavior exactly when the org block is
+        // absent (stated-only → stated; memory-only → memory; stated+memory → stated\n\nmemory). All absent → null.
+        var blocks = new List<string>(3);
+        if (statedProfileFragment is not null)
+        {
+            blocks.Add(statedProfileFragment);
+        }
+        if (orgContextFragment is not null)
+        {
+            blocks.Add(orgContextFragment);
+        }
+        if (memoryRecallFragment is not null)
+        {
+            blocks.Add(memoryRecallFragment);
+        }
+
+        return blocks.Count == 0 ? null : string.Join("\n\n", blocks);
+    }
+
+    // ── User-scope ORG context (FR-E5 BU/team half, un-defer D-032-01): read the caller's business-unit +
+    //    team NAMES (via IUserOrgContextReader — which reuses the SAME resolved systemuserid to key
+    //    IIdentityNormalizationService, then resolves + Redis-caches the names) and render a deterministic
+    //    block. Soft-fail to null (ADR-032 P2 quiet no-op — an org-less user or any read error degrades the
+    //    org block to absent; the reader already soft-fails internally, and NullUserOrgContextReader returns
+    //    null when unregistered). ADR-039: preference-only — this block only ever biases the one turn's
+    //    PROMPT; it never reaches AgentToolFilterContext / grounding / dispatch. ─────────────────────────────
+
+    private async Task<string?> ResolveOrgContextFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var context = await _userOrgContextReader.ReadAsync(systemUserId, ct).ConfigureAwait(false);
+            return UserOrgContextRenderer.Render(context);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: the reader already soft-fails internally, but the composition never throws.
+            _logger.LogWarning(ex,
+                "ContextBinder: user-org-context (BU/team) read failed for the resolved caller — the org " +
+                "block degrades to absent (soft-fail; a bind is never taken down by the org context). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── User-scope STATED profile (task 030, FR-E2): read the caller's typed sprk_userprofile row + its N:N
+    //    practice-area names and render a deterministic block. Soft-fail to null (ADR-032 P2 quiet no-op —
+    //    an absent/unprofiled user or any read error degrades the stated-profile block to absent; the reader
+    //    already swallows Dataverse errors, and NullStatedProfileReader returns null when unregistered). ──
+
+    private async Task<string?> ResolveStatedProfileFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        try
+        {
+            var profile = await _statedProfileReader.ReadAsync(systemUserId, ct).ConfigureAwait(false);
+            return StatedProfileRenderer.Render(profile);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: the reader already soft-fails internally, but the composition never throws.
+            _logger.LogWarning(ex,
+                "ContextBinder: stated-profile read failed for the resolved caller — stated-profile " +
+                "fragment degrades to absent (soft-fail; a bind is never taken down by the profile). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── User-scope memory recall (F-2 / D3): render the same-discipline USER prompt fragment for the
+    //    pre-resolved systemuserid. Soft-fail to null (a store outage degrades the User recall fragment to
+    //    absent; a bind is never taken down by memory). ──────────────────────────────────────────────────
+
+    private async Task<string?> ResolveUserMemoryFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        if (_memoryItemStore is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var fragment = await _memoryItemStore
+                .ToUserPromptFragmentAsync(systemUserId, ct)
+                .ConfigureAwait(false);
+            return string.IsNullOrEmpty(fragment) ? null : fragment;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ContextBinder: user-memory store read failed for the resolved caller — User recall " +
+                "fragment degrades to absent (soft-fail; a bind is never taken down by memory). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── Caller-systemuser resolution (F-2 / D3): mirrors ResolveCallerContactIdAsync — deterministic
+    //    claims→systemuser, server-side only. An explicit pre-resolved id wins; else resolve from the
+    //    caller principal (or the ambient HttpContext.User). NEVER reads Args / an LLM completion. ──────
+
+    private async Task<string?> ResolveCallerSystemUserIdAsync(ContextBindingRequest request, CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(request.CallerSystemUserId))
+        {
+            return request.CallerSystemUserId;
+        }
+
+        var principal = request.Caller ?? _httpContextAccessor?.HttpContext?.User;
+        var resolution = await _callerSystemUserResolver.ResolveAsync(principal, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved)
+        {
+            _logger.LogDebug(
+                "ContextBinder: caller-systemuser resolution unresolved (reason={Reason}) — User recall " +
+                "fragment stays absent (F-2 fail-honestly; never a guessed user).",
+                resolution.UnresolvedReason);
+            return null;
+        }
+
+        return resolution.SystemUserId;
+    }
+
+    // ── Record-memory PROMPT FRAGMENT (F-2/F-7/D6): produced from the SAME store method the interactive
+    //    provider used (byte-identical). Soft-fails to null so a store outage never takes down the bind. ──
+
+    private async Task<string?> ResolveRecordMemoryFragmentAsync(
+        string hostEntityType, string hostEntityId, CancellationToken ct)
+    {
+        try
+        {
+            var fragment = await _memoryItemStore!
+                .ToRecordPromptFragmentAsync(hostEntityType, hostEntityId, ct)
+                .ConfigureAwait(false);
+            return string.IsNullOrEmpty(fragment) ? null : fragment;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ContextBinder: record-memory fragment read failed for host {HostEntityType}/{HostEntityId} — " +
+                "the record-memory prompt fragment degrades to absent (soft-fail). NFR-07.",
+                hostEntityType, hostEntityId);
+            return null;
+        }
+    }
+
+    // ── Record-memory references (task 053, FR-B-04): read the host record's structured memory and
+    //    project it as identifier-only MemoryItemReferences. DEFENSE-IN-DEPTH mirror filter excludes any
+    //    fact whose key mirrors a live Dataverse field (the Binder reads those directly), and a store
+    //    read failure soft-fails to empty — the Memory slice must never take down a bind/dispatch. ──────
+
+    private async Task<IReadOnlyList<MemoryItemReference>> ResolveRecordMemoryReferencesAsync(
+        string hostEntityType, string hostEntityId, CancellationToken ct)
+    {
+        try
+        {
+            var items = await _memoryItemStore!
+                .GetForRecordAsync(hostEntityType, hostEntityId, ct)
+                .ConfigureAwait(false);
+            if (items.Count == 0)
+            {
+                return Array.Empty<MemoryItemReference>();
+            }
+
+            var references = new List<MemoryItemReference>(items.Count);
+            foreach (var item in items)
+            {
+                // FR-B-04 NEGATIVE criterion: a stored fact that merely mirrors a live Dataverse field is
+                // EXCLUDED from the envelope (the Binder reads live fields directly — a mirror would be a
+                // stale duplicate). Excluded item logged by identifier only (NFR-07).
+                if (DataverseFieldMirrorGuard.IsDataverseFieldMirror(item.Fact))
+                {
+                    _logger.LogDebug(
+                        "ContextBinder: excluded record-memory item {ItemId} — its fact key mirrors a live " +
+                        "Dataverse field; the Binder reads those directly (FR-B-04).",
+                        item.Id);
+                    continue;
+                }
+
+                references.Add(new MemoryItemReference
+                {
+                    ItemId = item.Id,
+                    Scope = item.Scope,
+                    Source = item.Source,
+                });
+            }
+
+            return references;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Soft-fail (mirrors the interactive provider's AppendRecordMemoryAsync posture): a store outage
+            // degrades the Memory slice to empty; the bind proceeds. NFR-07 identifiers only.
+            _logger.LogWarning(ex,
+                "ContextBinder: record-memory store read failed for host {HostEntityType}/{HostEntityId} — " +
+                "Memory items degrade to empty (soft-fail; a bind/dispatch is never taken down by memory).",
+                hostEntityType, hostEntityId);
+            return Array.Empty<MemoryItemReference>();
+        }
+    }
+
+    // ── Per-turn token-budget enforcement (task 054, FR-B-05) — evaluate the assembled envelope
+    //    against the binding EnvelopeBudget ceilings and EMIT per-slice counts as telemetry every turn
+    //    (identifiers/counts only, NFR-07). The Binder budgets the stable-prefix fragment slices it
+    //    assembles (Environment/User/Business) + the envelope ceiling; the Conversation ledger tail
+    //    carries NO content in the envelope (ADR-040 references-only), so it is 0 here and is gated where
+    //    it is rendered + by the breach-fails-eval merge gate. A breach is SURFACED (logged loud), never
+    //    silently truncated — a live turn is not failed on a budget breach (that would 500 a user), but
+    //    the golden-utterance eval gate turns the same breach into a hard pre-merge failure (FR-D-02). ──
+
+    private ContextBudgetReport EvaluateAndLogBudget(
+        ContextBindingRequest request, ContextEnvelope envelope, string? recordMemoryFragment)
+    {
+        // F-7 (D4): measure the VOLATILE TAIL live. The Conversation ledger tail and the Record-memory
+        // items carry NO content in the envelope (ADR-040 references-only), so their real rendered token
+        // counts are computed HERE from the SAME producers + the SAME estimator the budget-eval tests use
+        // (EnvelopeBudget.EstimateTokens = chars/4) — no new tokenizer. The ~8k Conversation worst case
+        // (task-002 escalation) now logs a live warn on a real turn (breach stays warn-never-500).
+        var conversationTokens = EnvelopeBudget.EstimateTokens(
+            ConversationContextProducer.BuildLedgerOutputsContext(request.LedgerOutputs));
+        var recordMemoryTokens = EnvelopeBudget.EstimateTokens(recordMemoryFragment);
+
+        var report = EnvelopeBudget.Evaluate(envelope, conversationTokens, recordMemoryTokens);
+
+        if (report.HasBreach)
+        {
+            // NFR-07: identifiers + counts only (the report's summary is content-free by construction).
+            _logger.LogWarning(
+                "[FR-B-05] ContextEnvelope token-budget BREACH (tenant={TenantId} session={SessionId} turn={Turn}): " +
+                "breached={BreachedSlices} budgets={BudgetSummary}. Surfaced, not truncated — the eval merge gate " +
+                "fails on this shape (FR-D-02).",
+                request.TenantId, request.SessionId, request.Turn,
+                string.Join(",", report.BreachedSlices), report.RenderSummary());
+        }
+        else
+        {
+            _logger.LogDebug(
+                "[FR-B-05] ContextEnvelope token budgets (tenant={TenantId} session={SessionId} turn={Turn}): {BudgetSummary}",
+                request.TenantId, request.SessionId, request.Turn, report.RenderSummary());
+        }
+
+        return report;
     }
 
     // ── Fingerprint writer (task-038 dark seam → live; ADR-040 store-before-render; NFR-07) ──────

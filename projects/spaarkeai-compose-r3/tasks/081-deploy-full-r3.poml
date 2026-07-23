@@ -1,0 +1,117 @@
+<task id="081" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>Deploy full R3 (BFF + SpaarkeAi/shared-lib) to spaarkedev1</title>
+    <phase>6 Wrap</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>025,032,040,041,042,043,044,052</deps>
+    <tags>deploy,bff-api,frontend</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the full R3 surface to spaarkedev1: the BFF (`Sprk.Bff.Api` — E1 delta save, E2 paraId
+    substrate, E3 confidence, import round-trip) AND the SpaarkeAi/shared-lib client
+    (`Spaarke.Compose.Components` — E2 paraId carry, E3 accept/reject UI, toolset: find/replace, tables,
+    sticky toolbar, styles pane, comment threads). This is the deploy that stages everything for the
+    flagship gate G-R3 (task 082). It follows the E1-core smoke deploy (task 025) and picks up the E3 UI
+    (032), the full toolset (040/041/042/043/044), and the import round-trip (052). Use the blessed deploy
+    skills; report the deployed BFF publish-size; confirm all surfaces are healthy before handing to 082.
+    Because this is a deploy of an irreversible-cutover system, the steps are PRESCRIPTIVE — follow them
+    in order.
+  </prompt>
+
+  <role>
+    Release engineer fluent in the Spaarke BFF App Service deploy (`bff-deploy`) and the SpaarkeAi/shared-lib
+    Code Page deploy (`code-page-deploy`), the spaarkedev1 environment, and post-deploy health verification.
+    Comfortable sequencing a coordinated backend + frontend deploy and confirming health before a UAT gate.
+  </role>
+
+  <goal>
+    R3 is fully deployed to spaarkedev1: the BFF App Service runs the E1/E2/E3 + import build (health
+    endpoint green, publish-size ≤ 60 MB reported), and the SpaarkeAi Code Page / shared-lib serves the R3
+    client (Compose editor with the paraId substrate, E3 accept/reject surface, and the full toolset). All
+    surfaces respond healthy; the deploy is recorded (versions, publish-size, health checks) so task 082 can
+    run the flagship gate against a known-good deployment.
+  </goal>
+
+  <context>
+    <background>
+      Task 025 already smoke-deployed the E1 fidelity core (BFF + client) to spaarkedev1; this task deploys
+      the COMPLETE R3 surface — E3 UI (032) + toolset (040/041/042/043/044) + import round-trip (052) on top
+      of the E1/E2 core. Hot-path per the project: BFF=Y · SpaarkeAi=Y. The BFF deploy uses the `bff-deploy`
+      skill/script; the client deploys via `code-page-deploy` (React Code Page web resource) — note the
+      shared lib build uses `npm install --legacy-peer-deps` (not `npm ci`) per root CLAUDE.md §12. This
+      deploy stages the flagship gate (082) and precedes the wrap-up (090).
+    </background>
+    <relevant-files>
+      <file role="deploy-target">src/server/api/Sprk.Bff.Api/ — BFF App Service deploy (E1/E2/E3 + import build) via `bff-deploy`</file>
+      <file role="deploy-target">src/client/shared/Spaarke.Compose.Components/ — R3 Compose client (shared lib) consumed by the SpaarkeAi Code Page; deploy via `code-page-deploy`</file>
+      <file role="skill">.claude/skills/bff-deploy/SKILL.md — the blessed BFF App Service deploy</file>
+      <file role="skill">.claude/skills/code-page-deploy/SKILL.md — the blessed React Code Page web-resource deploy</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §9 (BFF surface), §12 (hot-path declaration BFF=Y SpaarkeAi=Y)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="pending">Deploy + smoke-verify E1 fidelity core — the prior deploy this builds on.</dependency>
+      <dependency task="032" status="pending">FR-15 formatted AI insertions — E3 client surface included in this deploy.</dependency>
+      <dependency task="040" status="pending">FR-17 find/replace — toolset.</dependency>
+      <dependency task="041" status="pending">FR-18 basic tables — toolset.</dependency>
+      <dependency task="042" status="pending">FR-19/20/21 sticky toolbar + one-line bubble menu + dismissible warning — toolset.</dependency>
+      <dependency task="043" status="pending">FR-22 styles pane — toolset.</dependency>
+      <dependency task="044" status="pending">FR-23 richer comment-thread UI — toolset.</dependency>
+      <dependency task="052" status="pending">FR-26 imported anchors survive save — import round-trip complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="charter-10 / NFR-01">Report the deployed BFF publish-size (absolute + delta vs ~49.63 MB baseline) as part of the deploy record; confirm ≤ 60 MB.</constraint>
+    <constraint source="root CLAUDE.md §12">Shared-lib build uses `npm install --legacy-peer-deps --no-audit --no-fund` (NOT `npm ci`) — the build scripts handle this; do not add raw `npm ci`.</constraint>
+    <constraint source="project / deploy discipline">Use the blessed deploy skills (`bff-deploy`, `code-page-deploy`) — do NOT hand-roll az/pac commands. Confirm the target environment is spaarkedev1 before running.</constraint>
+    <constraint source="NFR-06">This deploy stages the flagship gate (082); it does not substitute for the browser-verified round-trip — health verification here is deploy-liveness, not the G-R3 acceptance.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF App Service deploy; React Code Page deploy; spaarkedev1 environment; post-deploy health verification</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1" name="Preflight">Declare rigor (STANDARD). Confirm all deps (025, 032, 040, 041, 042, 043, 044, 052) are ✅. Confirm the target environment is spaarkedev1. Confirm the branch is build-green (BFF + shared lib).</step>
+    <step order="2" name="Deploy BFF">Invoke `bff-deploy` to deploy `Sprk.Bff.Api` (E1/E2/E3 + import build) to the spaarkedev1 App Service. Capture the deployed publish-size (absolute + delta vs ~49.63 MB baseline; ≤ 60 MB).</step>
+    <step order="3" name="Verify BFF health">Confirm the BFF health endpoint (`/healthz`/`/ping`) responds healthy post-deploy.</step>
+    <step order="4" name="Build + deploy client">Build the `Spaarke.Compose.Components` shared lib (`npm install --legacy-peer-deps` path) and deploy the SpaarkeAi Code Page web resource via `code-page-deploy` to spaarkedev1.</step>
+    <step order="5" name="Verify client surface">Confirm the SpaarkeAi Code Page loads and the R3 Compose editor mounts (paraId substrate, E3 accept/reject surface, toolset visible) — deploy-liveness, not the G-R3 acceptance.</step>
+    <step order="6" name="Record + handoff">Record the deploy (BFF + client versions, publish-size, health checks) in task notes / PR description. Update TASK-INDEX. Hand off to task 082 (flagship gate) against this known-good deployment.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">BFF (`Sprk.Bff.Api`) deployed to spaarkedev1 App Service (E1/E2/E3 + import)</output>
+    <output type="deploy">SpaarkeAi Code Page / `Spaarke.Compose.Components` shared lib deployed to spaarkedev1</output>
+    <output type="report">Deploy record: BFF + client versions, publish-size (absolute + delta ≤ 60 MB), health-check results</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">The BFF (`Sprk.Bff.Api`, E1/E2/E3 + import build) is deployed to the spaarkedev1 App Service and its health endpoint responds healthy.</criterion>
+    <criterion testable="true">The SpaarkeAi Code Page / `Spaarke.Compose.Components` shared lib is deployed to spaarkedev1 and the R3 Compose editor mounts (paraId substrate + E3 surface + toolset visible).</criterion>
+    <criterion testable="true">The deployed BFF publish-size is reported absolute + delta vs ~49.63 MB and is ≤ 60 MB.</criterion>
+    <criterion testable="true">The deploy used the blessed skills (`bff-deploy`, `code-page-deploy`) against spaarkedev1; the deploy record (versions, publish-size, health) is captured for task 082.</criterion>
+    <criterion testable="true">All deployed surfaces respond healthy before handing to the flagship gate (082).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

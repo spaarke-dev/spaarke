@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Options;
@@ -9,6 +10,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Jobs;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
@@ -32,13 +34,20 @@ public sealed class IncomingCommunicationProcessor
     private readonly IGenericEntityService _genericEntityService;
     private readonly CommunicationAccountService _accountService;
     private readonly IncomingAssociationResolver _associationResolver;
+    private readonly GraphMessageNormalizer _messageNormalizer;
     private readonly IEmailAttachmentProcessor _attachmentProcessor;
     private readonly GraphMessageToEmlConverter _emlConverter;
     private readonly SpeFileStore _speFileStore;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
+    private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly IThreadResolver? _threadResolver;
+    private readonly CommunicationParticipantIndexer? _participantIndexer;
+    private readonly CommunicationArrivedProducer? _arrivedProducer;
     private readonly CommunicationOptions _options;
+    private readonly ITextExtractor _textExtractor;
+    private readonly AttachmentMatchOptions _attachmentMatchOptions;
     private readonly IConfiguration _configuration;
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
 
@@ -56,28 +65,42 @@ public sealed class IncomingCommunicationProcessor
         IGenericEntityService genericEntityService,
         CommunicationAccountService accountService,
         IncomingAssociationResolver associationResolver,
+        GraphMessageNormalizer messageNormalizer,
         IEmailAttachmentProcessor attachmentProcessor,
         GraphMessageToEmlConverter emlConverter,
         SpeFileStore speFileStore,
         JobSubmissionService jobSubmissionService,
         IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         NotificationService notificationService,
+        ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
+        ITextExtractor textExtractor,
+        IOptions<AttachmentMatchOptions> attachmentMatchOptions,
         IConfiguration configuration,
-        ILogger<IncomingCommunicationProcessor> logger)
+        ILogger<IncomingCommunicationProcessor> logger,
+        IThreadResolver? threadResolver = null,
+        CommunicationParticipantIndexer? participantIndexer = null,
+        CommunicationArrivedProducer? arrivedProducer = null)
     {
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _accountService = accountService;
         _associationResolver = associationResolver;
+        _messageNormalizer = messageNormalizer;
         _attachmentProcessor = attachmentProcessor;
         _emlConverter = emlConverter;
         _speFileStore = speFileStore;
         _jobSubmissionService = jobSubmissionService;
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
+        _enrichmentService = enrichmentService;
+        _threadResolver = threadResolver;
+        _participantIndexer = participantIndexer;
+        _arrivedProducer = arrivedProducer;
         _options = options.Value;
+        _textExtractor = textExtractor;
+        _attachmentMatchOptions = attachmentMatchOptions.Value;
         _configuration = configuration;
         _logger = logger;
     }
@@ -203,7 +226,8 @@ public sealed class IncomingCommunicationProcessor
                 {
                     config.QueryParameters.Select = new[]
                     {
-                        "id", "internetMessageId", "from", "toRecipients", "ccRecipients",
+                        "id", "internetMessageId", "internetMessageHeaders", "conversationId",
+                        "from", "toRecipients", "ccRecipients",
                         "subject", "body", "uniqueBody",
                         "receivedDateTime", "hasAttachments"
                     };
@@ -243,11 +267,22 @@ public sealed class IncomingCommunicationProcessor
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
 
-        // ── Step 4.5: Resolve associations (non-fatal) ────────────────────────────
+        // ── Boundary normalization (FR-09) ───────────────────────────────────────
+        // Map the Graph message → channel-neutral envelope ONCE, here at the pipeline boundary.
+        // Downstream (Association Engine + enrichment) see only NormalizedMessage, never Graph types.
+        var envelope = _messageNormalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        // ── Step 4.4: Attachment text as a MATCH signal (Phase 2, owner spec 2026-07-18) ─────────
+        // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
+        // association so an email whose matter/project name appears only in the attachment still matches.
+        // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
+        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+
+        // ── Step 4.5: Resolve associations via the Association Engine (non-fatal) ──
         try
         {
             await _associationResolver.ResolveAsync(
-                communicationId, mailboxEmail, graphMessageId, message, account, ct);
+                communicationId, envelope, new AssociationContext { Account = account }, ct);
         }
         catch (Exception ex)
         {
@@ -257,6 +292,64 @@ public sealed class IncomingCommunicationProcessor
                 "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
                 "GraphMessageId: {GraphMessageId}",
                 communicationId, graphMessageId);
+        }
+
+        // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
+        // Runs AFTER association (4.5) so the resolver can anchor a new thread to the message's resolved
+        // regarding (ADR-024 reuse). Reuses the SAME In-Reply-To/References ancestry the ThreadContinuityRung
+        // walks (email strategy) to join the parent's thread or create a new one. Same shared seam the chat
+        // inbound path (MessagingIngestor) and the outbound send path (CommunicationService) call. A resolver
+        // failure MUST NOT fail capture — the record already exists (without sprk_communicationthread).
+        if (_threadResolver is not null)
+        {
+            try
+            {
+                await _threadResolver.ResolveAndAssignThreadAsync(
+                    new ThreadResolutionRequest
+                    {
+                        CommunicationId = communicationId,
+                        ChannelType = CommunicationType.Email,
+                        Direction = CommunicationDirection.Incoming,
+                        Message = envelope,
+                    },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Thread resolution failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
+        }
+
+        // ── Step 4.7: Participant index (task 050 / FR-08 / ADR-048) — best-effort, non-fatal + idempotent ──
+        // Write one sprk_communicationparticipant row per (message × person/address × role {From,To,Cc}) so the
+        // participant= facet (task 051) surfaces this message's parties (resolved persons + unresolved external
+        // addresses, Q-D). Reuses the SAME normalized envelope built at the boundary above and the SAME
+        // email→contact resolver ParticipantCorrelationRung uses (no second resolver). The indexer never throws —
+        // a junction-write failure MUST NOT drop the already-captured message (the record already exists).
+        if (_participantIndexer is not null)
+        {
+            await _participantIndexer.WriteParticipantsAsync(
+                communicationId,
+                new CommunicationParticipantSet
+                {
+                    FromAddress = envelope.From,
+                    To = envelope.To,
+                    Cc = envelope.Cc,
+                },
+                ct);
+        }
+
+        // ── Step 4.8: communication-arrived (spaarke-notification-spine-r1 task 024 / FR-09) — non-fatal ──
+        // Emit the Layer-C refresh signal AFTER association (4.5) + thread (4.6) + participant index (4.7): the
+        // fan-out reads the participant junction just written, and the envelope needs the thread/regarding just
+        // stamped — so this is the correct emit point, NOT the raw CreateCommunicationRecordAsync. The producer is
+        // internally non-fatal (never throws), so capture never fails on a producer error (NFR-05).
+        if (_arrivedProducer is not null)
+        {
+            await _arrivedProducer.EmitCommunicationArrivedAsync(communicationId, ct);
         }
 
         // ── Step 5: Process attachments ──────────────────────────────────────────
@@ -269,7 +362,7 @@ public sealed class IncomingCommunicationProcessor
             try
             {
                 await ProcessIncomingAttachmentsAsync(
-                    message.Attachments, communicationId, ct);
+                    message.Attachments, mailboxEmail, graphMessageId, communicationId, ct);
             }
             catch (Exception ex)
             {
@@ -337,6 +430,31 @@ public sealed class IncomingCommunicationProcessor
                 ex,
                 "Email-received notification failed (non-fatal) | CommunicationId: {CommunicationId}, " +
                 "GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
+        }
+
+        // ── Step 9: Direction-agnostic enrichment (ADR-045 / FR-08) — best-effort, non-fatal (NFR-06) ──
+        // Wires the SAME enrichment entry point invoked by the outbound send path (direction symmetry
+        // at the entry-point level). Reuses the SAME normalized envelope built at the boundary above
+        // (task 011). archivedDocumentId is passed null: the inbound .eml + attachments are ALREADY
+        // RAG-indexed + AI-analyzed inline above (steps 5–6), so EnrichAsync's RAG/analysis steps
+        // intentionally no-op for inbound (the enrichment service gates those to outbound). Consolidating
+        // the inbound inline sequence into EnrichAsync is out of scope for FR-09 (task 011) and tracked
+        // separately. EnrichAsync is itself non-fatal; the guard is defense-in-depth.
+        try
+        {
+            await _enrichmentService.EnrichAsync(
+                communicationId,
+                CommunicationDirection.Incoming,
+                envelope,
+                archivedDocumentId: null,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Enrichment failed (non-fatal) | CommunicationId: {CommunicationId}, GraphMessageId: {GraphMessageId}",
                 communicationId, graphMessageId);
         }
 
@@ -476,13 +594,151 @@ public sealed class IncomingCommunicationProcessor
     /// and creates sprk_communicationattachment records.
     /// Reuses EmailAttachmentProcessor for filtering and SPE upload logic.
     /// </summary>
-    private async Task ProcessIncomingAttachmentsAsync(
-        IList<Attachment> graphAttachments, Guid communicationId, CancellationToken ct)
+    /// <summary>
+    /// Extracts bounded plain text from the message's attachments and returns the envelope with
+    /// <see cref="NormalizedMessage.AttachmentText"/> populated (Phase 2 match signal). Best-effort/non-fatal:
+    /// any failure returns the envelope unchanged (subject/body-only match surface). Bounded by
+    /// <see cref="AttachmentMatchOptions"/> (attachment count, per-attachment size, total chars) to contain
+    /// inbound-path cost. Runs independently of the SPE-upload path (Step 5) and of AutoCreateRecords —
+    /// matching should work even when document records are not created.
+    /// </summary>
+    private async Task<NormalizedMessage> AddAttachmentTextAsync(
+        NormalizedMessage envelope, Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    {
+        if (!_attachmentMatchOptions.Enabled)
+            return envelope;
+        if (message.HasAttachments != true || message.Attachments is not { Count: > 0 })
+            return envelope;
+
+        try
+        {
+            var fileAttachments = await ResolveFileAttachmentsWithContentAsync(
+                message.Attachments, mailboxEmail, graphMessageId, ct);
+            if (fileAttachments.Count == 0)
+                return envelope;
+
+            var sb = new StringBuilder();
+            var extractedCount = 0;
+
+            foreach (var attachment in fileAttachments)
+            {
+                if (extractedCount >= _attachmentMatchOptions.MaxAttachments) break;
+                if (sb.Length >= _attachmentMatchOptions.MaxTotalChars) break;
+
+                var bytes = attachment.ContentBytes;
+                if (bytes is null || bytes.Length == 0) continue;
+                if (bytes.Length > _attachmentMatchOptions.MaxAttachmentSizeBytes) continue;
+                if (attachment.IsInline == true) continue;
+
+                var fileName = attachment.Name ?? string.Empty;
+                var ext = Path.GetExtension(fileName);
+                if (string.IsNullOrEmpty(ext) || !_textExtractor.IsSupported(ext)) continue;
+
+                try
+                {
+                    using var stream = new MemoryStream(bytes);
+                    var result = await _textExtractor.ExtractAsync(stream, fileName, ct);
+                    if (result.Success && !string.IsNullOrWhiteSpace(result.Text))
+                    {
+                        if (sb.Length > 0) sb.Append('\n');
+                        sb.Append(result.Text);
+                        extractedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex,
+                        "Attachment text extraction failed for {FileName} (non-fatal)", fileName);
+                }
+            }
+
+            if (sb.Length == 0)
+                return envelope;
+
+            var text = sb.Length > _attachmentMatchOptions.MaxTotalChars
+                ? sb.ToString(0, _attachmentMatchOptions.MaxTotalChars)
+                : sb.ToString();
+
+            _logger.LogInformation(
+                "Extracted attachment text for matching | GraphMessageId: {GraphMessageId}, Attachments: {Count}, Chars: {Chars}",
+                graphMessageId, extractedCount, text.Length);
+
+            return envelope with { AttachmentText = text };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Attachment text extraction step failed (non-fatal) | GraphMessageId: {GraphMessageId}; " +
+                "proceeding with subject/body match only", graphMessageId);
+            return envelope;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the message's file attachments WITH content bytes, re-fetching from the dedicated Graph
+    /// attachments endpoint when the inline <c>$expand</c> returned metadata without <c>contentBytes</c> (same
+    /// size-dependent Graph behavior handled by <see cref="ProcessIncomingAttachmentsAsync"/>).
+    /// </summary>
+    private async Task<List<FileAttachment>> ResolveFileAttachmentsWithContentAsync(
+        IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId, CancellationToken ct)
     {
         var fileAttachments = graphAttachments
             .OfType<FileAttachment>()
             .Where(a => a.ContentBytes is { Length: > 0 })
             .ToList();
+
+        if (fileAttachments.Count == 0 && graphAttachments.Count > 0)
+        {
+            var graphClient = _graphClientFactory.ForApp();
+            var fetched = await graphClient.Users[mailboxEmail].Messages[graphMessageId]
+                .Attachments.GetAsync(cancellationToken: ct);
+            fileAttachments = (fetched?.Value ?? new List<Attachment>())
+                .OfType<FileAttachment>()
+                .Where(a => a.ContentBytes is { Length: > 0 })
+                .ToList();
+        }
+
+        return fileAttachments;
+    }
+
+    private async Task ProcessIncomingAttachmentsAsync(
+        IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId,
+        Guid communicationId, CancellationToken ct)
+    {
+        var fileAttachments = graphAttachments
+            .OfType<FileAttachment>()
+            .Where(a => a.ContentBytes is { Length: > 0 })
+            .ToList();
+
+        // The inline `$expand=attachments` on the message GET frequently returns attachment
+        // METADATA without `contentBytes` (size-dependent Graph behavior). When we have
+        // attachments but none carry usable bytes, re-fetch the attachments collection from
+        // the dedicated endpoint, which returns contentBytes for file attachments. Without
+        // this, incoming attachments silently never materialize into sprk_document records.
+        if (fileAttachments.Count == 0 && graphAttachments.Count > 0)
+        {
+            try
+            {
+                var graphClient = _graphClientFactory.ForApp();
+                var fetched = await graphClient.Users[mailboxEmail].Messages[graphMessageId]
+                    .Attachments.GetAsync(cancellationToken: ct);
+                fileAttachments = (fetched?.Value ?? new List<Attachment>())
+                    .OfType<FileAttachment>()
+                    .Where(a => a.ContentBytes is { Length: > 0 })
+                    .ToList();
+                _logger.LogInformation(
+                    "Re-fetched {Count} file attachment(s) with content for communication {CommunicationId} " +
+                    "(inline expand returned no contentBytes)",
+                    fileAttachments.Count, communicationId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Attachment re-fetch failed for communication {CommunicationId}; " +
+                    "attachments may be larger than the inline limit and require per-item $value fetch",
+                    communicationId);
+            }
+        }
 
         if (fileAttachments.Count == 0)
         {

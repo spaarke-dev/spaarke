@@ -1,0 +1,132 @@
+<task id="054" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rule config as Binding rows + `sprk_matchconditions`; privilege AI-FLAG-only; gate-enforcement + end-to-end fan-out tests</title>
+    <phase>Wave 5 — Responsive Intelligence</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>052, 053</dependencies>
+    <blocked-by>050</blocked-by>
+    <blocks></blocks>
+    <tags>bff-api, ai, testing</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <rigor-reason>Modifies `tests/**` (gate-enforcement + end-to-end fan-out) AND adds rule config touching `Services/Ai/` (r2-core-coordinated); TEST-MODIFYING override → code-review + adr-check at Step 9.5 UNCONDITIONALLY (root §8); BFF governance applies.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-19</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Configure the Responsive-Intelligence rules as **Binding rows + `sprk_matchconditions`** (e.g. "urgency=High AND category=Court/Deadline → create Event + notify assignee"), confirm the privilege signal is **AI-FLAG-only, never a decision** (ADR-015), and add the **gate-enforcement + end-to-end fan-out tests** that close FR-19. Rules are declarative config (Binding + `sprk_matchconditions`), NOT new hard-coded branches — reuse the EventRules Binding/Action model wired in task 052.
+
+    Implement per the gate-050 boundary: consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals. This is the wave's verification task — the tests are the primary deliverable alongside the rule config.
+  </prompt>
+
+  <role>
+    Spaarke BFF/AI engineer + test author. Authoritative on the EventRules Binding/Action + `sprk_matchconditions` config model, ADR-015 privilege-flag-only, and ADR-038 KEEP-path test categories. Works within the r2-core boundary + BFF hygiene governance.
+  </role>
+
+  <goal>
+    Responsive-Intelligence rules are expressed as Binding rows + `sprk_matchconditions` (declarative, no new hard-coded branches). Privilege is verified AI-FLAG-only (never auto-decided) end to end. A test suite proves: (a) `sprk_matchconditions` match → the configured artifacts (Event/Task/Notification) are created; (b) all EventRules gates (cost cap, opt-out, explicit-command supersede, M4 confidence) are enforced; (c) privilege is flagged, never decided; (d) full fan-out from `communication_assessed` fire → OutputRouter → executors works end to end. All tests follow ADR-038 KEEP paths; build clean; publish-size + CVE reported; `/conflict-check` clean.
+  </goal>
+
+  <context>
+    <background>
+      FR-19 acceptance: "an assessed communication creates the rule-configured artifacts; gates enforced; privilege only flagged, never decided (ADR-015)." Task 052 wired the fan-out plumbing + gate reuse; task 053 added the Triage narrative. This task lands the *configuration* that binds category/urgency conditions to artifact creation, and the *tests* that prove the whole loop — the FR-19 closing evidence.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/EventRulesService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+      <file>tests/integration/seam/</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GATE: gate 050 cleared first; implement per `notes/w5-ai-coordination.md`. Run `/conflict-check` before PR.</constraint>
+    <constraint source="FR-19">Rules configured as Binding rows + `sprk_matchconditions` — declarative, NOT new hard-coded branches; reuse the task-052 Binding/Action model.</constraint>
+    <constraint source="ADR-015">Privilege is FLAGGED only, never decided by any rule or gate — proven by test.</constraint>
+    <constraint source="FR-19">Gates enforced: cost cap, opt-out, explicit-command supersede, M4 confidence — each covered by a test.</constraint>
+    <constraint source="ADR-038">Tests follow the 7 KEEP-path categories; the end-to-end fan-out test belongs in the `tests/integration/seam/**` vertical-slice-seam category; ban `Mock&lt;HttpMessageHandler&gt;` / DI-registration / ctor-null tests; coverage is observation, not a gate.</constraint>
+    <constraint source="ADR-013">Consume `Services/Ai/PublicContracts/` seams; do NOT fork internals.</constraint>
+    <constraint source="root §8 TEST-MODIFYING override">code-review + adr-check at Step 9.5 run UNCONDITIONALLY (task modifies `tests/**`).</constraint>
+    <constraint source="root §10">Report publish-size + CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/w5-ai-coordination.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege-flag-only.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Binding + sprk_matchconditions rule config" location="src/server/api/Sprk.Bff.Api/Services/Ai/EventRulesService.cs">
+        Express a rule as a Binding row with `sprk_matchconditions` (e.g. `urgency=High &amp; category=Court/Deadline`) → ordered Actions (CreateEvent + CreateNotification).
+      </pattern>
+      <pattern name="Vertical-slice-seam test" location="tests/integration/seam/">
+        End-to-end fan-out: fire `communication_assessed` → gates → OutputRouter → executors; assert artifacts created (ADR-038 seam category).
+      </pattern>
+      <pattern name="Privilege-flag-only assertion" location="spec ADR-015">
+        Assert a privilege signal sets a flag but never routes/creates on its own or blocks a human decision.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `notes/w5-ai-coordination.md` + `EventRulesService.cs` Binding/Action model + `sprk_matchconditions` shape. Run `/conflict-check` scoped to `Services/Ai/`.</step>
+    <step order="2">Author the rule config as Binding rows + `sprk_matchconditions` for the worked example ("urgency=High AND category=Court/Deadline → create Event + notify assignee") plus the minimal set needed to exercise each gate. Declarative only — no new hard-coded rule branches.</step>
+    <step order="3">Confirm the privilege signal path is flag-only: trace it through EventRules → OutputRouter and verify no rule/gate makes a privilege *decision*.</step>
+    <step order="4">Write gate-enforcement tests (one per gate): cost cap blocks over-budget fan-out; opt-out suppresses; explicit-command supersedes; M4 confidence gate withholds low-confidence fan-out.</step>
+    <step order="5">Write the privilege-flag-only test: a privilege-flagged assessment sets the flag but does not auto-decide or auto-route on privilege (ADR-015).</step>
+    <step order="6">Write the end-to-end fan-out test in `tests/integration/seam/**`: fire `communication_assessed` with a matching payload → assert `sprk_event` + `appnotification` created via the configured Binding (and `task` where configured).</step>
+    <step order="7">Run `dotnet build` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` + the seam suite; confirm green. Verify tests sit in ADR-038 KEEP paths (no banned patterns).</step>
+    <step order="8">Run `dotnet publish -c Release ... -o deploy/api-publish/` (report size + delta vs ~49.63 MB) + `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE).</step>
+    <step order="9.5">Step 9.5 UNCONDITIONAL (TEST-MODIFYING): `code-review` on the diff; `adr-check` against `spec.md` (ADR-015/013/038). Address Critical findings. `/conflict-check` clean before PR.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 054 ✅ (W5 complete). Update `current-task.md` (record rule-config location + test inventory; advance / or W5 done).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect EventRules Binding model + test architecture + gate note</tool>
+    <tool name="edit">Author rule config + tests</tool>
+    <tool name="bash">Build, test (unit + seam), publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR overlap scan on Services/Ai/</tool>
+    <tool name="code-review">Step 9.5 gate (unconditional)</tool>
+    <tool name="adr-check">Step 9.5 gate (unconditional)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Responsive-Intelligence rule config (Binding rows + `sprk_matchconditions`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (gate-enforcement + privilege-flag tests)</output>
+    <output type="test">tests/integration/seam/ (end-to-end fan-out test)</output>
+    <output type="docs">PR description: Placement Justification + publish-size delta + CVE + rule-config summary</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rules are configured as Binding rows + `sprk_matchconditions` (declarative); grep confirms no new hard-coded rule branch.</criterion>
+    <criterion testable="true">A matching rule ("urgency=High &amp; category=Court/Deadline") creates the configured Event + notification end to end (seam test passes).</criterion>
+    <criterion testable="true">Each EventRules gate (cost cap, opt-out, explicit-command supersede, M4 confidence) has a passing enforcement test.</criterion>
+    <criterion testable="true">A privilege-flagged assessment sets the flag but never auto-decides/auto-routes on privilege (ADR-015 test passes).</criterion>
+    <criterion testable="true">Tests sit in ADR-038 KEEP paths (seam test in `tests/integration/seam/**`); no banned test patterns.</criterion>
+    <criterion testable="true">Build clean; all tests green; publish-size delta + CVE reported; `/conflict-check` clean; Step 9.5 (code-review + adr-check) run unconditionally.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is FR-19's closing evidence + the W5 verification task. It depends on both 052 (fan-out plumbing) and 053 (Triage narrative) so the end-to-end test exercises the full loop.
+
+    Per root §8 TEST-MODIFYING override, Step 9.5 gates are unconditional here even though much of the deliverable is tests + config.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Blocked until gate 050 clears. Load all `&lt;knowledge&gt;&lt;files&gt;` incl. gate note + ADR-038. TEST-MODIFYING rigor — Step 9.5 UNCONDITIONAL. BFF governance: publish-size + CVE + `/conflict-check` + Placement Justification. Declarative rules; consume seams; never fork internals; privilege flag-only.
+    </protocol>
+  </execution>
+</task>

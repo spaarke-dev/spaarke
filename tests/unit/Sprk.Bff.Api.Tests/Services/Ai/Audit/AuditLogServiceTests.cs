@@ -16,6 +16,22 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Audit;
 /// (c) Audit write failure does not throw to the caller.
 /// (d) Only CreateItemAsync is invoked — never Upsert, Replace, or Delete.
 /// </summary>
+/// <remarks>
+/// PARALLELISM-SAFETY (F-11a, e2e-completion-audit-2026-07-10; supersedes PE-D7/#618):
+/// <see cref="AuditLogService.LogInteractionAsync"/> is fire-and-forget — it dispatches the
+/// Cosmos write onto the shared <see cref="System.Threading.ThreadPool"/> via <c>Task.Run</c>
+/// and returns immediately. The three write-path tests below previously waited on a fixed
+/// <c>Task.Delay</c> (200ms/1000ms) for that background task to run. Under full-suite xUnit
+/// parallelism the ThreadPool is saturated by thousands of concurrently-scheduled test tasks,
+/// so the background write did not always run inside the delay window and the assertion fired
+/// before <c>CreateItemAsync</c> was invoked (16/16 in class isolation, flaky in the full run).
+/// The shared state was the ThreadPool, not any mock or static field — each test builds its own
+/// mocks and service instance, so no <c>[Collection]</c> serialization is required.
+/// FIX: each write-path test signals a <see cref="TaskCompletionSource"/> from inside the Moq
+/// callback the instant <c>CreateItemAsync</c> is reached, then awaits that signal (with a
+/// generous timeout ceiling) instead of guessing a wall-clock delay. This is contention-proof
+/// and removes the ADR-038-banned <c>Task.Delay</c> from the tests.
+/// </remarks>
 public class AuditLogServiceTests
 {
     // =========================================================================
@@ -147,6 +163,9 @@ public class AuditLogServiceTests
         // Arrange
         var logger = new Mock<ILogger<AuditLogService>>();
         var containerMock = new Mock<Container>();
+        // Signalled the instant the background write reaches CreateItemAsync (before it throws),
+        // so the test waits on the actual invocation rather than a wall-clock guess.
+        var writeAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         containerMock
             .Setup(c => c.CreateItemAsync(
@@ -154,26 +173,26 @@ public class AuditLogServiceTests
                 It.IsAny<PartitionKey>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
+            .Callback(() => writeAttempted.TrySetResult())
             .ThrowsAsync(new CosmosException("Cosmos unavailable", System.Net.HttpStatusCode.ServiceUnavailable, 503, "activity-1", 0));
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
         var entry = BuildEntry();
 
-        // Act — must complete without throwing
-        var act = async () =>
-        {
-            await service.LogInteractionAsync(entry);
-            // Allow the background Task.Run to complete
-            await Task.Delay(200);
-        };
-
-        // Assert
+        // Act — the fire-and-forget dispatch must return without throwing to the caller.
+        var act = async () => await service.LogInteractionAsync(entry);
         await act.Should().NotThrowAsync("audit write failures must never propagate to callers");
+
+        // Deterministically wait for the background Cosmos write to have been attempted (and thus
+        // for the CosmosException to have been raised + swallowed on the background task). The TCS
+        // completes the moment CreateItemAsync is reached, so this is immune to ThreadPool
+        // saturation under full-suite parallelism; the timeout is only a hang guard.
+        await writeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     [Fact]
@@ -182,7 +201,7 @@ public class AuditLogServiceTests
         var logger = new Mock<ILogger<AuditLogService>>();
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(new Mock<Container>().Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
@@ -202,6 +221,9 @@ public class AuditLogServiceTests
         // Arrange
         var logger = new Mock<ILogger<AuditLogService>>();
         var containerMock = new Mock<Container>();
+        // Signalled the instant the background write reaches CreateItemAsync — lets the test
+        // wait on the real invocation instead of a wall-clock guess (parallelism-safe; see class remarks).
+        var writeAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         // Track whether forbidden operations are called
         bool upsertCalled = false;
@@ -242,11 +264,12 @@ public class AuditLogServiceTests
                 It.IsAny<PartitionKey>(),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
+            .Callback(() => writeAttempted.TrySetResult())
             .ReturnsAsync((ItemResponse<AuditEntry>)null!);
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
@@ -254,18 +277,18 @@ public class AuditLogServiceTests
 
         // Act
         await service.LogInteractionAsync(entry);
-        // R6 PR #395 hotfix 2026-06-18: extended timing buffer from 200ms → 1000ms.
-        // The 200ms wait was insufficient on heavily-contended CI VMs (observed in
-        // PR #395 Build & Test runs), causing the test to assert before the
-        // background CreateItemAsync invocation had fired. 1000ms is conservative
-        // for sub-second background-task completion + keeps the test fast.
-        await Task.Delay(1000); // Allow background task to complete (CI-VM-safe buffer)
+        // F-11a (e2e-completion-audit-2026-07-10): replaced the prior fixed Task.Delay(1000)
+        // wall-clock buffer (R6 PR #395 hotfix) — under full-suite xUnit parallelism the shared
+        // ThreadPool is saturated and even 1000ms raced. Wait on the actual CreateItemAsync
+        // invocation via a TCS signalled in the mock callback; the timeout is only a hang guard.
+        await writeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Assert: CreateItemAsync called; forbidden operations never called
+        // Assert: CreateItemAsync called; forbidden operations never called.
+        // Partition key is the synthetic /partitionKey value (AIR2-074 re-key), NOT bare tenantId.
         containerMock.Verify(
             c => c.CreateItemAsync(
                 It.Is<AuditEntry>(e => e.Id == entry.Id),
-                It.Is<PartitionKey>(pk => pk == new PartitionKey(entry.TenantId)),
+                It.Is<PartitionKey>(pk => pk == new PartitionKey(entry.PartitionKey)),
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()),
             Times.Once,
@@ -335,12 +358,15 @@ public class AuditLogServiceTests
     // =========================================================================
 
     [Fact]
-    public async Task LogInteractionAsync_PartitionsByTenantId()
+    public async Task LogInteractionAsync_PartitionsByTenantAndMonthBucket_NotBareTenantId()
     {
         // Arrange
         var logger = new Mock<ILogger<AuditLogService>>();
         var containerMock = new Mock<Container>();
         PartitionKey capturedPk = default;
+        // Signalled the instant the background write reaches CreateItemAsync — lets the test
+        // wait on the real invocation instead of a wall-clock guess (parallelism-safe; see class remarks).
+        var writeAttempted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         containerMock
             .Setup(c => c.CreateItemAsync(
@@ -349,23 +375,38 @@ public class AuditLogServiceTests
                 It.IsAny<ItemRequestOptions>(),
                 It.IsAny<CancellationToken>()))
             .Callback<AuditEntry, PartitionKey?, ItemRequestOptions, CancellationToken>(
-                (_, pk, _, _) => capturedPk = pk!.Value)
+                (_, pk, _, _) => { capturedPk = pk!.Value; writeAttempted.TrySetResult(); })
             .ReturnsAsync((ItemResponse<AuditEntry>)null!);
 
         var cosmosClientMock = new Mock<CosmosClient>();
         cosmosClientMock
-            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit"))
+            .Setup(c => c.GetContainer(It.IsAny<string>(), "audit-partitioned"))
             .Returns(containerMock.Object);
 
         var service = new AuditLogService(cosmosClientMock.Object, "spaarke-ai", logger.Object);
-        var entry = BuildEntry(tenantId: "tenant-xyz");
+        // Construct with a fixed timestamp so the monthly bucket is deterministic (2026-03).
+        var entry = new AuditEntry
+        {
+            TenantId = "tenant-xyz",
+            UserId = "u",
+            SessionId = "s",
+            Action = "chat_response",
+            ResponseHash = "abc",
+            Timestamp = new DateTimeOffset(2026, 3, 15, 9, 0, 0, TimeSpan.Zero)
+        };
 
         // Act
         await service.LogInteractionAsync(entry);
-        await Task.Delay(200);
+        // F-11a: wait on the actual CreateItemAsync invocation (TCS signalled in the callback
+        // above) rather than a fixed Task.Delay — parallelism-safe; timeout is only a hang guard.
+        await writeAttempted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
-        // Assert
-        capturedPk.Should().Be(new PartitionKey("tenant-xyz"),
-            "partition key must always be tenantId (ADR-015 cross-tenant isolation)");
+        // Assert — AIR2-074 re-key (FR-D-05): partition is the synthetic tenant + monthly-bucket
+        // value, NOT bare /tenantId (which would collapse a dedicated tenant into one logical
+        // partition against the Cosmos 20 GB cap).
+        capturedPk.Should().Be(new PartitionKey("tenant-xyz|2026-03"),
+            "partition key must be the synthetic {tenantId}|{yyyy-MM} value");
+        capturedPk.Should().NotBe(new PartitionKey("tenant-xyz"),
+            "bare /tenantId must no longer be the partition key after the AIR2-074 re-key");
     }
 }

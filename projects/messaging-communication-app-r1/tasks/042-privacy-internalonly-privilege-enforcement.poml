@@ -1,0 +1,159 @@
+<task id="042" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Privacy / internal-only / privilege — BFF query-filter enforcement, point-forward</title>
+    <phase>W4 — Thread Resolver + Membership + Privacy</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>040,005,002</dependencies>
+    <blocks>050</blocks>
+    <tags>bff-api, communication, security</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>R1's highest-risk, SECURITY-SENSITIVE area (root §6, NFR-06): BFF query-filter enforcement of message/thread privacy, internal-only, and privilege classification. A defect leaks privileged/private content across the record-security boundary. Touches `.cs`; explicit `code-review` + `adr-check` at Step 9.5 are UNCONDITIONALLY REQUIRED.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-08, NFR-06</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Add BFF query-filter enforcement so a caller only ever sees messages/threads they are authorized to read — composed from EXISTING Dataverse record security, not a new authorization engine (design §5, owner directive: leverage Spaarke UAC / Dataverse security; do not rebuild core access control).
+
+    Three composable dimensions on `sprk_communication` / `sprk_communicationthread` (columns added in task 005):
+    • **Privacy** — message-level AND thread-level. A private thread's messages are invisible to users without an explicit per-record sharing grant (mechanism from task 002). Thread-level privacy lives on the thread entity.
+    • **Internal-only** — a user attribute (D-05). Internal-only messages are invisible to non-internal users (external participants in R2/R3 never see them).
+    • **Privilege** — classification metadata, DISTINCT from privacy; composes with it. **AI may FLAG but NEVER DECIDE** privilege (ADR-015) — enforcement acts on the classification field, never on an AI verdict.
+
+    **Point-forward privacy switch**: flipping a thread to open exposes ONLY messages from that moment forward; prior private messages STAY restricted (retroactive open is a separate audited action, out of R1).
+
+    **Invariants (NFR-06, security-sensitive):** no privileged/private content leaks; ACS membership never exceeds Dataverse-derived access (this task's read filter and task 041's membership projection MUST agree). This is a BFF read-path filter — the access boundary is the Dataverse record. Explicit `code-review` + `adr-check` at Step 9.5 are REQUIRED.
+  </prompt>
+
+  <role>
+    Spaarke BFF security engineer for the Communication subsystem. Authority on BFF authorization seams (ADR-003), endpoint filters (ADR-008), Dataverse record security composition, ADR-015 (AI flags never decides), ADR-024 (regarding anchor), §11 Component Justification, `.claude/constraints/bff-extensions.md`, and the design §5 privacy model. You treat every read filter as a leak-prevention control and default to deny.
+  </role>
+
+  <goal>
+    BFF read paths for `sprk_communication` / `sprk_communicationthread` enforce, in composition: message-level + thread-level privacy (invisible without an explicit grant), internal-only (invisible to non-internal users via the D-05 attribute), and privilege classification (composes with privacy; acts on the field, never an AI verdict — ADR-015). The privacy switch is point-forward (prior private messages stay restricted). No privileged/private content leaks; the read filter agrees with task 041's ACS membership projection (ACS ⊆ Dataverse-derived access). Build clean; publish-size + CVE + bff-extensions Placement Justification reported; explicit `code-review` + `adr-check` at Step 9.5 (security-sensitive); `/conflict-check` clean before PR.
+  </goal>
+
+  <context>
+    <background>
+      Design §5: "The access boundary is the Dataverse record, exactly as with email. The `sprk_communication` (and `sprk_communicationthread`) record wraps the message and IS the authoritative access boundary — whoever can read the record can read the message." This task adds a small number of fields (task 005) + BFF query filters + point-forward logic on top of existing record security. NO new authorization engine.
+
+      **Component Justification (§11) for the enforcement filter:**
+      1. **Existing** — BFF authorization seams (ADR-003) + endpoint filters (ADR-008) + Dataverse record security already exist; task 005 added the privacy/internal-only/privilege columns. This task adds the composition/filter logic, not a new engine (verify by grep).
+      2. **Extension** — Extend the existing BFF read path with a privacy-composition filter; reuse Dataverse record security for the base boundary and the task-002 grant primitive for private threads.
+      3. **Cost-of-doing-nothing (name the concrete leak that fails without this)** — Without enforcement, the thread-read endpoint (task 050) returns EVERY `sprk_communication` row on a thread to any caller who can read the thread record — so a **privileged attorney-work-product message, or a private-thread message the caller was never granted, or an internal-only message, is returned to an unauthorized user in the timeline poll response**. That is a concrete confidentiality breach (NFR-06), not "future flexibility."
+
+      **AI boundary (ADR-015):** privilege is a classification FIELD. AI may set/suggest a flag for human review; enforcement reads the field. Enforcement MUST NOT call AI or act on an AI verdict at read time — flag-never-decide.
+
+      **Consistency with task 041:** this read filter and the membership-reconcile projection are two views of the same rule (Dataverse-derived access). They MUST agree — the read filter is the authoritative in-request check; ACS membership is the reconciled transport projection. Neither may exceed Dataverse-derived access.
+
+      **Scope discipline:** filter + point-forward logic + fields wiring. Do NOT build a new ACL, a new sharing engine, or retroactive bulk-open tooling (out of R1). Do NOT let AI decide privilege.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (BFF read path / query composition)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IThreadResolver.cs (task 040 — thread identity for thread-level checks)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (task 005 — `sprk_communication`/`sprk_communicationthread` privacy/internal-only/privilege columns)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/PlaybookSharingService.cs / sprk_externalrecordaccess (task 002 — private-grant primitive)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ (endpoint filters, authorization seams — ADR-003/008)</file>
+      <file>IMembershipResolverService (ADR-034 — must agree with task 041's projection)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-08,NFR-06">BFF query-filter enforcement: message-level + thread-level privacy, internal-only (D-05 user attribute), privilege classification (composes with privacy; AI may flag never decide — ADR-015). Point-forward switch — prior private messages stay restricted.</constraint>
+    <constraint source="NFR-06-SECURITY">Security-sensitive (root §6): no privileged/private content leaks; ACS membership never exceeds Dataverse-derived access (agree with task 041). Explicit `code-review` + `adr-check` at Step 9.5 are REQUIRED. Default-deny on ambiguity.</constraint>
+    <constraint source="design-§5">Compose from EXISTING Dataverse record security — do NOT rebuild core access control. The Dataverse record is the authoritative access boundary; the SPE archive holds no separate ACL we depend on.</constraint>
+    <constraint source="ADR-015">AI may FLAG but NEVER DECIDE privilege. Enforcement acts on the classification field only; MUST NOT call AI or act on an AI verdict at read time.</constraint>
+    <constraint source="ADR-024">Thread anchor for record-scoped checks reuses the regarding family — MUST NOT add a second regarding mechanism.</constraint>
+    <constraint source="project">Point-forward privacy switch: opening a private thread exposes only messages from that moment forward; retroactive open is a separate audited action, OUT of R1 — do NOT build bulk-open tooling.</constraint>
+    <constraint source="ADR-003,ADR-008">Enforce via existing BFF authorization seams + endpoint filters; ProblemDetails on denial (ADR-019).</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~45.30 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-015-ai-flag-never-decide.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-regarding.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compose from record security (default-deny)" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        Start from Dataverse record readability, then subtract: message/thread privacy (no grant → hide), internal-only (non-internal → hide), point-forward (message timestamp before open → stay restricted). Deny wins; a row is visible only if it passes every dimension.
+      </pattern>
+      <pattern name="Flag-never-decide (ADR-015)" location=".claude/adr/ADR-015-ai-flag-never-decide.md">
+        Privilege enforcement reads the classification field a human owns; AI may suggest the flag upstream. No AI call at read time.
+      </pattern>
+      <pattern name="Point-forward switch" location="src/server/api/Sprk.Bff.Api/Services/Communication/">
+        On open, compare each message's timestamp to the thread's privacy-open timestamp; messages before it remain restricted. No retroactive exposure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 005's privacy/internal-only/privilege columns on `sprk_communication`/`sprk_communicationthread`, task 040's `IThreadResolver` (thread identity), task 002's private-grant decision, and the existing BFF authorization seams/endpoint filters (ADR-003/008). Confirm how task 041 derives the authorized set (must agree).</step>
+    <step order="2">Read design §5, `.claude/constraints/bff-extensions.md` §F, root §11, ADR-015, ADR-034 before designing the filter. Note the security-sensitive escalation posture (root §6 / §6.5).</step>
+    <step order="3">Implement the composition filter (default-deny) applied on the BFF read path for `sprk_communication` / thread reads: (a) base Dataverse record readability; (b) message-level privacy — hidden without grant; (c) thread-level privacy — thread hidden without an explicit per-record grant (task 002 primitive); (d) internal-only — hidden from non-internal users via the D-05 attribute; (e) privilege classification — composes with privacy, acts on the field only (ADR-015). A row is visible only if it passes EVERY dimension.</step>
+    <step order="4">Implement the point-forward privacy switch: record a privacy-open timestamp when a thread is opened; the filter keeps messages authored before that timestamp restricted. No retroactive exposure; no bulk-open tooling (out of R1).</step>
+    <step order="5">Ensure the read filter agrees with task 041's membership projection — both derive from Dataverse-derived access; neither may exceed it. Add an assertion/test that the filtered read set never includes a message the ACS-membership projection would exclude.</step>
+    <step order="6">Return ProblemDetails (ADR-019) on explicit denial paths; register the filter/service via `CommunicationModule` (ADR-010), unconditional.</step>
+    <step order="7">Write security enforcement tests (closed set, incl. negative/authorization cases): a private thread's messages are INVISIBLE to a user without a grant; an internal-only message is INVISIBLE to a non-internal user; a privileged message is not returned to an unauthorized caller; flipping a thread to open exposes ONLY messages after the open timestamp (prior private messages stay restricted); the read filter set ⊆ Dataverse-derived access (agrees with 041); AI is NOT called at read time (ADR-015).</step>
+    <step order="9.1">Run `dotnet build src/server/api/Sprk.Bff.Api/` then `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-042-publish/`; report compressed size + delta vs ~45.30 MB baseline.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE.</step>
+    <step order="9.5">FULL-rigor quality gates — UNCONDITIONALLY REQUIRED (security-sensitive, NFR-06): `code-review` on the diff with explicit focus on leak paths, default-deny, point-forward correctness, ADR-015 flag-never-decide, and agreement with task 041's projection; `adr-check` against `spec.md`. Address ALL Critical findings before PR. Per root §6, treat any ambiguity as a human-escalation trigger; per §6.5, surface any ADR tension rather than silently complying.</step>
+    <step order="9.6">Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path).</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (042 ✅) + reset `current-task.md`; record decisions (filter composition order, point-forward timestamp source, grant primitive used, 041-agreement assertion).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect privacy columns, thread identity, grant primitive, authorization seams</tool>
+    <tool name="edit">Composition filter; point-forward logic; DI registration; security tests</tool>
+    <tool name="bash">Build, security tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5) — UNCONDITIONALLY REQUIRED (security-sensitive)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5) — UNCONDITIONALLY REQUIRED (security-sensitive)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 9.6)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccessFilter.cs (NEW — default-deny privacy/internal-only/privilege composition)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (UPDATED — point-forward privacy-switch logic + read-path wiring)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — filter registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (private-invisible-without-grant, internal-only-invisible, privilege-not-leaked, point-forward-exposure, filter⊆Dataverse-access, no-AI-at-read-time)</output>
+    <output type="docs">PR description with §11 Component Justification (the concrete leak prevented) + bff-extensions Placement Justification + publish-size delta + CVE result + explicit security-review sign-off note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A private thread's messages are INVISIBLE to a user without an explicit grant (negative/authorization case).</criterion>
+    <criterion testable="true">An internal-only message is INVISIBLE to a non-internal user (D-05 attribute) (negative/authorization case).</criterion>
+    <criterion testable="true">A privileged message is NOT returned to an unauthorized caller; privilege composes with privacy; enforcement acts on the field, not an AI verdict (ADR-015 — no AI call at read time).</criterion>
+    <criterion testable="true">Point-forward switch: flipping a thread to open exposes ONLY messages authored after the open timestamp; prior private messages STAY restricted (negative case).</criterion>
+    <criterion testable="true">The BFF read filter set is a subset of Dataverse-derived access and agrees with task 041's ACS-membership projection (no read exceeds membership) — verified by test.</criterion>
+    <criterion testable="true">Enforcement composes from existing Dataverse record security (no new authorization engine); default-deny — a row is visible only if it passes every dimension.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta reported vs ~45.30 MB; no new HIGH CVE; explicit `code-review` + `adr-check` at Step 9.5 completed with all Critical findings resolved; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    R1's highest-risk area. Depends on 040 (thread identity), 005 (privacy columns), 002 (private-grant primitive). Blocks 050 (the thread-read endpoint MUST apply this filter). Parallel-safe with 041/043 after 040.
+
+    Default-deny is the design stance: if it is unclear whether a caller may see a row, hide it and escalate (root §6). Do NOT optimize the filter into an allow-by-default shape for performance — correctness dominates (NFR-06). Do NOT let AI decide privilege (ADR-015) — enforcement reads a human-owned field. If strict composition seems to force a worse outcome, surface it via §6.5 rather than silently deviating.
+
+    Retroactive bulk-open tooling is explicitly OUT of R1 — build only the point-forward switch.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 `code-review` + `adr-check` are UNCONDITIONALLY REQUIRED (security-sensitive, NFR-06). Default-deny; treat ambiguity as a human-escalation trigger (root §6). Per root §10 + §11: publish-size delta + CVE + bff-extensions Placement Justification + Component Justification (the concrete leak prevented) in the PR. Run `/conflict-check` before the PR. Model tier `opus` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

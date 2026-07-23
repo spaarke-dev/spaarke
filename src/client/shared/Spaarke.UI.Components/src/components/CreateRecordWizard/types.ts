@@ -243,6 +243,17 @@ export interface ICreateRecordWizardConfig {
   /** Subtitle for the Add Files step (optional override). */
   filesStepSubtitle?: string;
   /**
+   * Files to PRE-SEED into the "Add file(s)" step (assistant-enhancements-r1 UAT
+   * W-2/W-5 — the create-flow file leg). The launching surface (the Assistant
+   * create-flow) fetches the drafted-from session document(s) and passes them here
+   * so they ride the wizard's EXISTING upload+link+index pipeline into the new
+   * record's container. Seeded via an effect keyed on this array (it may arrive
+   * ASYNC after open); the reducer dedups by name+size and a user removal is not
+   * undone. Omitted by every wizard except the Assistant-launched Matter flow —
+   * fully backward compatible.
+   */
+  initialFiles?: IUploadedFile[];
+  /**
    * When `true`, the "Add file(s)" step is omitted entirely from the wizard's
    * step sequence — not merely skippable, but never shown.
    *
@@ -336,6 +347,22 @@ export interface ICreateRecordWizardConfig {
    * fields are applied — the user can still override everything.
    */
   getAssignWorkDefaults?: () => Partial<IAssignWorkFollowOnState>;
+  /**
+   * Optional "Assign to me" resolver for the Assign Work follow-on step's
+   * Assigned Attorney field (spaarkeai-assistant-enhancements-r1 task 014 /
+   * FR-A4). When supplied, `AssignWorkFollowOnStep` renders an "Assign to me"
+   * button next to Assigned Attorney that calls this resolver and applies the
+   * result via `onAttorneyChange`. The entity wizard supplies this using its
+   * own `IDataService` (e.g. `() => resolveCurrentUserAsContactAssignee(dataService)`
+   * from `services/userLookup.ts`) — `CreateRecordWizard` never resolves
+   * identity itself. Omitting this field hides the button entirely
+   * (fully backward compatible, opt-in only).
+   *
+   * @returns The current user resolved onto the target assignee entity
+   * (`ILookupItem`), or `null` when unresolvable — the caller degrades
+   * gracefully (field stays empty for manual search).
+   */
+  resolveCurrentUserAssignee?: () => Promise<ILookupItem | null>;
 
   /**
    * Optional override for the built-in "Next Steps" card set (default:

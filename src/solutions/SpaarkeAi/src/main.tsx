@@ -45,6 +45,7 @@ import {
 } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
+import { initNotificationsClient } from "./services/notificationsBootstrap";
 import { App } from "./App";
 import type { IRuntimeConfig } from "@spaarke/auth";
 // Round 4 Fix 4.1 (2026-05-21): SpaarkeAi embeds `LegalWorkspaceApp` as a
@@ -85,6 +86,13 @@ import type { WorkspaceRenderer } from "@spaarke/ui-components";
 // @spaarke/compose-components — the dependency runs the other way.)
 import { ComposeLaunchContext } from "@spaarke/compose-components";
 import type { ComposeLaunchContextValue } from "@spaarke/compose-components";
+// spaarkeai-compose-r2 Wave 5: register Compose as a first-class DIRECT
+// workspace widget (widgetType 'compose') alongside the existing layout path.
+// ADDITIVE — the "Compose" layout row, dropdown entry, DEF-08 single-tab reuse,
+// and standalone LegalWorkspace mount are all unchanged. Lives here (not in
+// @spaarke/ai-widgets) because the Direct factory resolves ComposeWorkspace
+// from @spaarke/compose-components, which ai-widgets must NOT depend on (cycle).
+import { registerComposeWidget } from "./components/workspace/registerComposeWidget";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -258,10 +266,40 @@ async function bootstrap(): Promise<void> {
             sessionFileId?: string;
             fileName?: string | null;
           };
+          // DEF-08: AI-drafted full-document seed (Part A ledgerRef / Part B inline html).
+          draft?: {
+            ledgerRef?: string;
+            sessionId?: string;
+            html?: string;
+            fileName?: string | null;
+          };
         }
       | undefined;
     if (!seed) {
       return app;
+    }
+
+    // DEF-08: an AI-drafted full document (a `compose-draft-document` output, or an "Open in
+    // Compose" per-message affordance) rides as `compose.draft` and mounts as a transient working
+    // draft (create-on-save). Checked before the upload/stored-document paths — mutually exclusive.
+    if (
+      seed.draft &&
+      ((typeof seed.draft.ledgerRef === "string" && seed.draft.ledgerRef.length > 0 &&
+        typeof seed.draft.sessionId === "string" && seed.draft.sessionId.length > 0) ||
+        (typeof seed.draft.html === "string" && seed.draft.html.length > 0))
+    ) {
+      const composeDraftLaunch: ComposeLaunchContextValue = {
+        composeMode: "editor",
+        document: null,
+        driveId: "",
+        draft: {
+          ledgerRef: seed.draft.ledgerRef,
+          sessionId: seed.draft.sessionId,
+          html: seed.draft.html,
+          fileName: seed.draft.fileName ?? undefined,
+        },
+      };
+      return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
 
     // FR-03 (task 012): an Assistant-UPLOADED file has no SPE pointer — it rides as
@@ -303,6 +341,12 @@ async function bootstrap(): Promise<void> {
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };
   setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
+
+  // spaarkeai-compose-r2 Wave 5: register the 'compose' Direct widget +
+  // getVisibleState into the WorkspaceWidgetRegistry (additive; the module also
+  // registers as a top-level side effect, this explicit call documents intent
+  // and guards against tree-shaking).
+  registerComposeWidget();
 
   // -------------------------------------------------------------------------
   // 1. Resolve runtime config
@@ -400,6 +444,17 @@ async function bootstrap(): Promise<void> {
   }
 
   // -------------------------------------------------------------------------
+  // 2a. Notification-spine FIRST consumer wiring (spaarke-notification-spine-r1
+  //     task 021, spec FR-05). Thin proof-of-wiring only (negotiate → connect →
+  //     kind-routed callback fires) — the real suggestion/communication UI is
+  //     task 051's job. Fire-and-forget + non-fatal, same pattern as auth init
+  //     above: a notifications-spine failure must never block SpaarkeAi's own
+  //     bootstrap. Started AFTER auth init so negotiate has a valid token.
+  //     See src/services/notificationsBootstrap.ts.
+  // -------------------------------------------------------------------------
+  void initNotificationsClient();
+
+  // -------------------------------------------------------------------------
   // 3. Parse URL parameters for entity context.
   //
   //    Dataverse passes data to web resources via two mechanisms:
@@ -417,9 +472,16 @@ async function bootstrap(): Promise<void> {
     dataParam ? decodeURIComponent(dataParam) : ""
   );
 
+  // Accept BOTH param keys: the R2 app + UAT URL contract use `entityType`, but
+  // the shared ribbon launcher (launch-resolver.ts buildLaunchUrl) emits
+  // `entityLogicalName`. Reading only `entityType` silently dropped the host
+  // record on every ribbon launch (Document "Open in Compose" → Assistant had no
+  // document context; DEF-UAT-1, 2026-07-12). Read either key.
   const entityLogicalName =
     searchParams.get("entityType") ??
     dataParams.get("entityType") ??
+    searchParams.get("entityLogicalName") ??
+    dataParams.get("entityLogicalName") ??
     undefined;
 
   const entityId =

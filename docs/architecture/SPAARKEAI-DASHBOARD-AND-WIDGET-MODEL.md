@@ -158,6 +158,8 @@ A "mount source" is **where the intent to mount a widget originates**. SpaarkeAi
 **Code reference**: `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePaneMenu.tsx`.
 **Status in R4**: Already shipping; no R4 changes.
 
+> **Orthogonality note (corrected 2026-07-13, spaarkeai-compose-r2 Wave 5):** the dropdown lists BFF LAYOUT ROWS (`useWorkspaceLayouts()` → `GET /api/workspace/layouts`), NOT the `WorkspaceWidgetRegistry`. Registry (Direct-widget) registration is therefore **orthogonal** to dropdown presence — a widget can be BOTH registered as a Direct widget (§2.2) AND have a `sprk_workspacelayout` row, in which case it still appears in the dropdown. Registering a component as a Direct widget does NOT remove its dropdown entry. **Compose** is the worked example: it registers as a Direct widget (`widgetType: 'compose'`, `getVisibleState` exposing the active-document identity) AND keeps its system "Compose" layout row, so it stays in the dropdown and mounts via the layout path unchanged. (Daily Briefing / Calendar likewise appear in the dropdown because they have layout rows, not because of any registry entry.)
+
 ### 3.2 Assistant pane → Workspace (R4 W-4 first end-to-end demo)
 
 **Trigger**: The user uploads a file or invokes a chat action in the Assistant pane that produces a widget-mountable result. Operator-recommended R4 demo: PDF upload in chat → DocumentViewer widget mounts as a workspace tab.

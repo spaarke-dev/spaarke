@@ -626,15 +626,40 @@ export class WorkspaceTabManager {
    * before this call, it remains active; otherwise activeTabId becomes the
    * Home tab id (if Home is present) or null.
    *
-   * @returns The number of (non-Home) tabs that were removed.
+   * **No-collateral-teardown scoping (task 020 / FR-C2 / UC-4).** An
+   * orchestrated action (e.g. an exclusive playbook selection triggered by, or
+   * running alongside, a record delete) must NOT tear down UNRELATED live
+   * surfaces. `options.preserveWidgetTypes` names widget types that hold live
+   * user work-product (notably `'compose'`, whose editor carries an unsaved
+   * draft/document) and are kept mounted across the clear. This keeps the
+   * dispatcher a "conductor, not stage": side-effects stay scoped to their own
+   * surface. Omitting the option preserves the original Home-only behavior.
+   *
+   * @param options.preserveWidgetTypes - widget types to KEEP (in addition to
+   *   Home) instead of removing. Defaults to `[]` (remove every widget tab).
+   * @returns The number of (non-Home, non-preserved) tabs that were removed.
    */
-  clearAllTabs(): number {
-    const homeTab = this._tabs.find((t) => t.kind === "home") ?? null;
-    const removedCount = this._tabs.filter((t) => t.kind === "widget").length;
+  clearAllTabs(options?: { preserveWidgetTypes?: readonly string[] }): number {
+    const preserve = options?.preserveWidgetTypes ?? [];
     const previousActiveId = this._activeTabId;
 
-    this._tabs = homeTab ? [homeTab] : [];
-    this._activeTabId = homeTab ? homeTab.id : null;
+    const isKept = (t: WorkspaceTab): boolean =>
+      t.kind === "home" ||
+      (t.kind === "widget" && preserve.includes(t.widgetType));
+
+    const removedCount = this._tabs.filter(
+      (t) => t.kind === "widget" && !preserve.includes(t.widgetType),
+    ).length;
+
+    this._tabs = this._tabs.filter(isKept);
+
+    // Active-tab successor: keep the previously-active tab if it SURVIVED the
+    // clear (e.g. a preserved Compose tab that was active); otherwise prefer
+    // Home, then the first surviving tab, then null.
+    if (!this._tabs.some((t) => t.id === previousActiveId)) {
+      const homeTab = this._tabs.find((t) => t.kind === "home");
+      this._activeTabId = homeTab?.id ?? this._tabs[0]?.id ?? null;
+    }
 
     this._notifyPersistChange();
     // Round 4 Fix 4: emit only when the active id actually changed (e.g.

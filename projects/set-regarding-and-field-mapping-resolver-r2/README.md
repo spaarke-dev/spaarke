@@ -1,6 +1,7 @@
 # Set-Regarding and Field-Mapping Resolver — R2
 
-> **Status**: Initialized — ready for task execution
+> **Portfolio**: [Project #638](https://github.com/spaarke-dev/spaarke/issues/638) · Parent [Epic #535](https://github.com/spaarke-dev/spaarke/issues/535) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
+> **Status**: ✅ Archived 2026-07-12 (Completed) — shipped to master; task 090 wrap-up intentionally left open. Worktree preserved.
 > **Owner**: Ralph Schroeder
 > **Created**: 2026-07-08 · **Initialized**: 2026-07-09
 

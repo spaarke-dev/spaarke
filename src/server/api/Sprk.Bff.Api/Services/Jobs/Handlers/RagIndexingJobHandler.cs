@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -31,7 +29,6 @@ public class RagIndexingJobHandler : IJobHandler
     private readonly IIdempotencyService _idempotencyService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ISearchIndexNameResolver _searchIndexNameResolver;
-    private readonly AnalysisOptions _analysisOptions;
     private readonly RagTelemetry _telemetry;
     private readonly ILogger<RagIndexingJobHandler> _logger;
 
@@ -45,7 +42,6 @@ public class RagIndexingJobHandler : IJobHandler
         IIdempotencyService idempotencyService,
         IDocumentDataverseService documentService,
         ISearchIndexNameResolver searchIndexNameResolver,
-        IOptions<AnalysisOptions> analysisOptions,
         RagTelemetry telemetry,
         ILogger<RagIndexingJobHandler> logger)
     {
@@ -53,7 +49,6 @@ public class RagIndexingJobHandler : IJobHandler
         _idempotencyService = idempotencyService ?? throw new ArgumentNullException(nameof(idempotencyService));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _searchIndexNameResolver = searchIndexNameResolver ?? throw new ArgumentNullException(nameof(searchIndexNameResolver));
-        _analysisOptions = analysisOptions?.Value ?? throw new ArgumentNullException(nameof(analysisOptions));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -210,6 +205,12 @@ public class RagIndexingJobHandler : IJobHandler
                     try
                     {
                         var completedAt = DateTime.UtcNow;
+                        // FR-26 / G-9: stamp the index the file actually landed in — the per-record
+                        // resolved value when set, otherwise the single canonical tenant default
+                        // from ISearchIndexNameResolver.GetDefaultIndexName() (AiSearchOptions.
+                        // KnowledgeIndexName). This closes the read/write split-brain: the stamp no
+                        // longer reads the deprecated Analysis:SharedIndexName.
+                        var stampedIndexName = resolvedSearchIndexName ?? _searchIndexNameResolver.GetDefaultIndexName();
                         var updateRequest = new UpdateDocumentRequest
                         {
                             // New canonical lifecycle marker (R3+)
@@ -217,15 +218,15 @@ public class RagIndexingJobHandler : IJobHandler
                             // Legacy dual-write (preserved during transition)
                             SearchIndexed = true,
                             SearchIndexedOn = completedAt,
-                            // Index routing (unchanged)
-                            SearchIndexName = _analysisOptions.SharedIndexName
+                            // Index routing (canonical single setting per FR-26)
+                            SearchIndexName = stampedIndexName
                         };
 
                         await _documentService.UpdateDocumentAsync(payload.DocumentId, updateRequest, ct);
 
                         _logger.LogInformation(
                             "Updated Dataverse search index tracking for document {DocumentId}: SearchIndexCompletedOn={CompletedAt}, SearchIndexed=true (dual-write), IndexName={IndexName}",
-                            payload.DocumentId, completedAt, _analysisOptions.SharedIndexName);
+                            payload.DocumentId, completedAt, stampedIndexName);
                     }
                     catch (Exception ex)
                     {

@@ -63,9 +63,14 @@ public class ContextEnvelopeContractTests
             meta!.Stability.Should().BeOneOf(
                 SliceStability.StablePrefix, SliceStability.SemiStable, SliceStability.VolatileTail);
 
-            // Budget field exists on every slice (int? — placeholder in v1). Present slices with a
-            // budget declared carry a positive placeholder; interface-only slices may declare none.
-            meta.BudgetIsProvisional.Should().BeTrue("all v1 budgets are placeholders pending task 054 (FR-B-05)");
+            // Budget field exists on every slice (int?). Task 054 (FR-B-05) ratified the budgeted slices
+            // against the FR-P0-02 measurement, so a budget-bearing slice is no longer provisional; the
+            // interface-only slices (Organizational/Semantic) declare no budget.
+            if (meta!.BudgetTokens is not null)
+            {
+                meta.BudgetIsProvisional.Should().BeFalse(
+                    $"the {kind} slice's budget was ratified by task 054 (FR-B-05) — no longer provisional");
+            }
         }
     }
 
@@ -77,15 +82,15 @@ public class ContextEnvelopeContractTests
     }
 
     [Fact]
-    public void Contract_BudgetPlaceholders_AccommodateMeasuredBaseline()
+    public void Contract_BindingBudgets_ClearMeasuredBaseline()
     {
         // Task 002 baseline (notes/prompt-assembly-baseline.md §4) measured Environment ~111 and
-        // Business ~1,118 — both ABOVE the a-priori D-M2 estimates (≤50 / ≤1,200). v1 placeholders
-        // MUST NOT bake in a ceiling the real assembly already exceeds. Task 054 sets binding values.
-        PlaceholderBudgets.Workspace.Should().BeGreaterThan(111,
-            "Workspace/Environment placeholder must clear the measured ~111 clock-directive floor");
-        PlaceholderBudgets.Business.Should().BeGreaterThan(1118,
-            "Business placeholder must clear the measured ~1,118 baseline");
+        // Business ~1,118 — both ABOVE the a-priori D-M2 estimates (≤50 / ≤1,200). Task 054's binding
+        // budgets (FR-B-05) MUST clear those measured floors so the real assembly is not born breaching.
+        EnvelopeBudget.Environment.Should().BeGreaterThan(111,
+            "Environment budget must clear the measured ~111 clock-directive floor");
+        EnvelopeBudget.Business.Should().BeGreaterThan(1118,
+            "Business budget must clear the measured ~1,118 baseline");
     }
 
     // ---------------------------------------------------------------------

@@ -60,8 +60,24 @@ public class ADR009_CachingTests
         // Check that cache services use IDistributedCache
         var violatingTypes = new List<string>();
 
+        // ADR-conflict resolution path A — documented exception (exact-name allowlist only).
+        // EndpointResponseCache is an INTENTIONAL in-process L1 response cache introduced by
+        // ci-cd-unit-test-remediation-r1 task 087 (spec FR-A06) to consolidate scattered
+        // IMemoryCache usage OUT of endpoints into a single, testable seam. It is a deliberate L1
+        // design, NOT a cross-request distributed-cache candidate — converting it to
+        // IDistributedCache would defeat its purpose (per-process response memoization). Only this
+        // exact type rides the exemption; any other *Cache using IMemoryCache is still a violation.
+        // See docs/adr/ADR-009-caching-redis-first.md "Documented exceptions".
+        var allowedMemoryCacheTypes = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "EndpointResponseCache"
+        };
+
         foreach (var type in cacheServiceTypes)
         {
+            if (allowedMemoryCacheTypes.Contains(type.Name))
+                continue;
+
             var constructors = type.GetConstructors();
             foreach (var ctor in constructors)
             {

@@ -1,7 +1,7 @@
 <task id="AIR2-017" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Seam-publication ordering + cross-project obligation filing (Compose r2)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>A0 — Contract-first</phase>
     <gate>G-R2-A (seam publication)</gate>
     <estimated-effort>0.5 day</estimated-effort>
@@ -100,4 +100,21 @@
   <escalation>
     <trigger>If verification finds a seam Compose r2 depends on is missing or not consumable (no contract test, or reachable only via an AI-internal path), STOP and surface it — Compose r2 is NOT unblocked, and the offending A0 contract task (010–016) must be completed/fixed before this task can close.</trigger>
   </escalation>
+
+  <notes>
+    Completed 2026-07-10. All six FR-A0-08 seams (ComposeDisposition, OutcomeCard, ContextEnvelope,
+    ledger provenance {bindingId}@t{n}, GateDecision v2/Policy v2 tier table, JobAwareCompletionState)
+    verified published + contract-tested under Services/Ai/PublicContracts/ (plus bonus MemoryItem +
+    TraceEvent contracts). Core-owes obligation filed at notes/seam-publication-ordering.md +
+    pointer in projects/INDEX.md. Reciprocal Compose-consumes obligation filed at
+    projects/spaarkeai-compose-r2/notes/HANDOFF-to-compose-r2-task-017-seam-ordering-closed.md.
+    No-fork rule (FR-D-03/task 072) + /conflict-check reaffirmed. DEVIATION (documented, not a STOP):
+    notes/SEAM-STATUS.md's full "ALL SEAMS PUBLISHED" header was NOT flipped — one dashboard row
+    (MemoryItem v1 + memory.write) has an outstanding half (task 057, outside this task's 010-016
+    dependency scope but a live Compose task-063 dependency per compose-r2's own CLAUDE.md). The
+    FR-A0-08 six-seam obligation (this task's actual acceptance-criteria scope) is fully closed;
+    the broader SEAM-STATUS "every row" milestone is left correctly partial pending task 057. See
+    notes/seam-publication-ordering.md §2 for full reasoning — flagged for operator visibility per
+    CLAUDE.md §6.5, not treated as task failure.
+  </notes>
 </task>

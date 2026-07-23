@@ -530,12 +530,14 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         const accessToken = await getAccessToken();
         const response = await fetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {
           headers: {
-            // D-AUTH-7 exception site: this hook is not yet wired through
-            // `authenticatedFetch` (Office Add-in has not adopted `@spaarke/auth`
-            // / `initAuth` yet — out of scope for 082). Bearer literal stays;
-            // staleness is eliminated by the per-call `await getAccessToken()`
-            // above. Full `useAuth()` migration is a future task once the Office
-            // Add-in bootstrap calls `initAuth({}, new OfficeNaaStrategy(cfg))`.
+            // D-AUTH-7 exception site (updated task 072): the Office Add-in bootstrap
+            // now composes `@spaarke/auth`'s `SpaarkeAuthProvider` + `OfficeNaaStrategy`
+            // (see shared/services/AuthService.ts), but this hook stays decoupled from
+            // any specific auth library — it takes an injected `getAccessToken`
+            // function (host-agnostic, per the shared-component design principle in
+            // src/client/shared/CLAUDE.md), not a hard `@spaarke/auth` import. Bearer
+            // literal stays; staleness is eliminated by the per-call
+            // `await getAccessToken()` above.
             Authorization: `Bearer ${accessToken}`,
           },
           signal: abortControllerRef.current?.signal,
@@ -881,11 +883,11 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         const idempotencyKey = await computeIdempotencyKey(request);
 
         // Submit save request.
-        // Auth v2 (D-AUTH-7 / task 082): acquire token inline — no snapshot.
-        // D-AUTH-7 exception: this hook is not yet wired through
-        // `authenticatedFetch` (Office Add-in has not adopted `@spaarke/auth` /
-        // `initAuth` yet — out of scope for 082). Per-call `getAccessToken()`
-        // eliminates staleness; the Bearer literal is the documented exception.
+        // Auth v2 (D-AUTH-7, updated task 072): acquire token inline — no snapshot.
+        // This hook stays decoupled from `@spaarke/auth` by design (injected
+        // `getAccessToken`, not a hard import — see the pollJobStatus D-AUTH-7 note
+        // above for the full rationale). Per-call `getAccessToken()` eliminates
+        // staleness; the Bearer literal is the documented exception.
         console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
         const saveToken = await getAccessToken();
         const response = await fetch(`${apiBaseUrl}/api/office/save`, {

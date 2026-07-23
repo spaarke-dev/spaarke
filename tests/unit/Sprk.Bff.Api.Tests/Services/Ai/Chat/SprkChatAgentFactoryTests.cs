@@ -38,7 +38,7 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedContext);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -70,6 +70,8 @@ public class SprkChatAgentFactoryTests
                 It.IsAny<ChatHostContext?>(),
                 It.IsAny<IReadOnlyList<string>?>(),
                 It.IsAny<IReadOnlyList<ChatSessionFile>?>(),
+                It.IsAny<string?>(),
+                It.IsAny<IReadOnlyList<SessionOutput>?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
@@ -81,7 +83,7 @@ public class SprkChatAgentFactoryTests
 
         // Assert
         contextProviderMock.Verify(
-            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()),
+            p => p.GetContextAsync(TestDocumentId, TestTenantId, TestPlaybookId, It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -91,7 +93,7 @@ public class SprkChatAgentFactoryTests
         // Arrange
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -116,10 +118,10 @@ public class SprkChatAgentFactoryTests
 
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc1, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt1, null, null, TestPlaybookId));
         contextProviderMock
-            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetContextAsync(doc2, It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatContext(prompt2, null, null, TestPlaybookId));
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -151,7 +153,7 @@ public class SprkChatAgentFactoryTests
         var contextProviderMock = new Mock<IChatContextProvider>();
         contextProviderMock
             .Setup(p => p.GetContextAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
-                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(), It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CreateDefaultContext());
 
         // Previous turn had a tool called "OldTool" that no longer appears in the current set.
@@ -231,7 +233,7 @@ public class SprkChatAgentFactoryTests
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
-                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(contextWithFiles);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -283,7 +285,7 @@ public class SprkChatAgentFactoryTests
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
-                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(contextWithoutFiles);
 
         var services = BuildServiceProvider(contextProviderMock.Object);
@@ -347,7 +349,7 @@ public class SprkChatAgentFactoryTests
             .Setup(p => p.GetContextAsync(
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(),
                 It.IsAny<ChatHostContext?>(), It.IsAny<IReadOnlyList<string>?>(),
-                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<CancellationToken>()))
+                It.IsAny<IReadOnlyList<ChatSessionFile>?>(), It.IsAny<string?>(), It.IsAny<IReadOnlyList<SessionOutput>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(contextWithFile);
 
         var services = BuildServiceProvider(contextProviderMock.Object);

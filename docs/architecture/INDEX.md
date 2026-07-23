@@ -47,6 +47,7 @@ This directory contains comprehensive architecture documentation covering system
 | [M365-COPILOT-INTEGRATION-ARCHITECTURE.md](M365-COPILOT-INTEGRATION-ARCHITECTURE.md) | M365 Copilot integration: Declarative Agent, API Plugin, agent gateway layer, Adaptive Cards | 2026-03-26 | 2026-04-05 | Verified |
 | [INSIGHTS-ENGINE-ARCHITECTURE.md](INSIGHTS-ENGINE-ARCHITECTURE.md) | Insights Engine: Fact/Observation/Inference taxonomy, Insight Index + Live Facts substrate, hybrid playbook + RAG paths, Spaarke Assistant tool-call contract v1.1 (SSE streaming + clickable citations) | 2026-06-04 | 2026-06-04 | Phase 1.5 shipped (r2) |
 | [membership-resolution-pattern.md](membership-resolution-pattern.md) | User-record membership resolution: metadata-driven discovery, 6-path identity normalization, Phase 1A live FetchXml → Phase 2 junction table + Service Bus topic + Redis pub/sub invalidation, strangler-fig migration. Includes naming-collision register vs `AssociationResolver` PCF. | 2026-06-22 | 2026-06-22 | New (r3) |
+| [COMPOSE-REDLINE-DERIVED-VIEWS.md](COMPOSE-REDLINE-DERIVED-VIEWS.md) | Compose (redline) pipeline: derived VIEWS of a redline suggestion (visual diff, `confidence_band`, character offsets) are computed CLIENT-SIDE at render from the durable opaque ledger payload + live editor doc — store-opaque → ship-opaque → client-derive. Supersedes FR-13 "server-derived confidence_band". ADR-013/040/039 alignment analysis + NFR-06 shift + headless-consumer revisit trigger. | 2026-07-19 | 2026-07-19 | New (compose-r3) |
 
 > For document processing and summarization pipeline (which consolidates former ai-document-summary-architecture.md), see [sdap-document-processing-architecture.md](sdap-document-processing-architecture.md) in the SDAP section above.
 
@@ -67,8 +68,8 @@ This directory contains comprehensive architecture documentation covering system
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [email-processing-architecture.md](email-processing-architecture.md) | Consolidated email-to-document pipeline (hybrid triggers, idempotency, .eml archival, RAG indexing) | 2026-04-05 | 2026-04-05 | New |
-| [communication-service-architecture.md](communication-service-architecture.md) | Communication service: outbound/inbound email, webhook/polling hybrid, mailbox verification, deduplication | 2026-04-05 | 2026-04-05 | Current |
+| [communication-intelligence-architecture.md](communication-intelligence-architecture.md) | **Canonical (R4)** — the Communication Intelligence substrate: normalized envelope, 6-rung Association Engine, confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, suggestion endpoint, shared inbound patterns (idempotency, .eml archival, attachment→Document, RAG). Absorbs the retired email-processing / email-to-document docs. | 2026-07-16 | 2026-07-16 | Canonical (r4) |
+| [communication-service-architecture.md](communication-service-architecture.md) | Communication send/inbound service mechanics: canonical Graph send, mailbox accounts, webhook/polling hybrid, mailbox verification, deduplication (points to the canonical intelligence doc for the engine) | 2026-07-16 | 2026-07-16 | Current (r4) |
 | [office-outlook-teams-integration-architecture.md](office-outlook-teams-integration-architecture.md) | Office, Outlook, and Teams integration | 2026-04-05 | 2026-04-05 | Current |
 
 ### Feature Architectures

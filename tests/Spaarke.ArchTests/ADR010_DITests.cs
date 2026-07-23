@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.RegularExpressions;
 using NetArchTest.Rules;
 using Xunit;
@@ -202,20 +203,73 @@ public class ADR010_DITests
 
         foreach (var type in configTypes)
         {
-            var constructors = type.GetConstructors();
-            foreach (var ctor in constructors)
-            {
-                var parameters = ctor.GetParameters();
-                // Options classes should have parameterless constructors or simple property injection
-                if (parameters.Length > 0)
-                {
-                    violatingTypes.Add($"{type.Name} has constructor dependencies (should be POCO)");
-                }
-            }
+            if (HasConstructorDependencies(type))
+                violatingTypes.Add($"{type.Name} has constructor dependencies (should be POCO)");
         }
 
         // Assert
         Assert.Empty(violatingTypes);
+    }
+
+    /// <summary>
+    /// Determines whether an "Options"/"Settings"-suffixed type is a genuine Options-pattern
+    /// violation: an appsettings-bound config POCO that wrongly declares constructor dependencies.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Positional-record parameter DTOs (e.g. <c>MembershipResolveOptions</c>,
+    /// <c>BriefingWindowOptions</c>, <c>DataverseAuthorizationFilterOptions</c>) merely SHARE the
+    /// "Options" suffix — they are method-argument bundles, never bound via
+    /// <c>Configure&lt;T&gt;</c> / <c>IOptions&lt;T&gt;</c> from configuration. The compiler
+    /// synthesizes a primary constructor whose positional parameters are DATA, not injected
+    /// services, so the raw "ctor has parameters" heuristic yields false positives on them.
+    /// The Options-pattern POCO rule (parameterless ctor + property binding) simply does not apply
+    /// to records, so they are excluded. Genuine config classes (hand-written POCOs) are still
+    /// flagged if they take constructor dependencies.
+    /// </para>
+    /// </remarks>
+    private static bool HasConstructorDependencies(Type type)
+    {
+        // Exclude records: their parameterized primary ctor carries data, not DI dependencies.
+        if (IsRecordType(type))
+            return false;
+
+        return type.GetConstructors().Any(ctor => ctor.GetParameters().Length > 0);
+    }
+
+    /// <summary>
+    /// Reflection-stable record detection: the C# compiler synthesizes a clone method named
+    /// <c>&lt;Clone&gt;$</c> for every record type. Its presence distinguishes a positional
+    /// parameter-DTO record from a hand-written configuration POCO.
+    /// </summary>
+    private static bool IsRecordType(Type type)
+        => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
+               .Any(m => m.Name == "<Clone>$");
+
+    // --- Negative controls for HasConstructorDependencies (live in the TEST assembly) ---
+
+    /// <summary>Non-record config class with a ctor dependency — a GENUINE violation.</summary>
+    private sealed class FakeConfigOptions
+    {
+        public FakeConfigOptions(IServiceProvider services) => _ = services;
+    }
+
+    /// <summary>Positional-record parameter DTO — the false positive the exclusion removes.</summary>
+    private sealed record FakeParameterDtoOptions(string Value, int Count);
+
+    [Fact(DisplayName = "ADR-010: Options ctor-dependency check flags non-record POCOs, excludes parameter-DTO records")]
+    public void OptionsConstructorDependencyCheck_NegativeControl_StillFlagsGenuineViolations()
+    {
+        // A non-record "Options" class that takes a DI dependency in its ctor MUST still be flagged.
+        // This proves the record-exclusion narrows false positives WITHOUT suppressing real violations.
+        Assert.True(
+            HasConstructorDependencies(typeof(FakeConfigOptions)),
+            "Non-record Options POCO with constructor dependencies must still be flagged.");
+
+        // A positional-record parameter DTO MUST be excluded (its ctor params are data, not DI deps).
+        Assert.False(
+            HasConstructorDependencies(typeof(FakeParameterDtoOptions)),
+            "Positional-record parameter-DTO must be excluded from the Options-pattern rule.");
     }
 
     /// <summary>

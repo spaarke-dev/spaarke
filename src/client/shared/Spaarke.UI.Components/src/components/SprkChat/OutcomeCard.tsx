@@ -57,6 +57,17 @@ export interface INextStepChip {
   actionKind: string;
   /** Optional server-composed navigation target for a `navigate` chip. */
   targetUrl?: string | null;
+  /**
+   * Optional target Binding row GUID (`sprk_playbookconsumer` id) for an
+   * `invoke_capability` chip — the dispatchable target the Click path's
+   * `dispatchConsumer(bindingId, args)` helper (`services/dispatchConsumer.ts`)
+   * needs (spaarke-ai-architecture-redesign-r2 task 062, FR-A1-06 gap close).
+   * The component does not dispatch this itself (context-agnostic per ADR-012);
+   * the host reads `chip.targetBindingId` in its `onNextStep` handler. Null for
+   * a bare `navigate` placeholder chip and for special affordance chips (e.g.
+   * the gate auto-execute path's "Undo" chip) that carry no declared Binding.
+   */
+  targetBindingId?: string | null;
 }
 
 /** One ordered step within a job-aware completion (mirrors server OutcomeStep). */

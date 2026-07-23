@@ -5,7 +5,7 @@ import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
 // Version information - synced with manifest version
-const APP_VERSION = '1.0.18';
+const APP_VERSION = '1.0.20';
 const BUILD_DATE = process.env.BUILD_DATE || 'Jan 23, 2026';
 
 // Configuration from environment or build-time injection
@@ -18,6 +18,9 @@ const CONFIG = {
   // When set, the "Create To Do" ribbon action opens the wizard from this URL
   // with the launch context query params. Empty string disables the action.
   smartTodoCodePageUrl: process.env.SMARTTODO_CODEPAGE_URL || '',
+  // OfficeNaaStrategy legacy-client fallback popup redirect (task 072 / FR-25).
+  // Empty string lets AuthService fall back to `${origin}/auth-callback.html`.
+  fallbackRedirectUri: process.env.FALLBACK_REDIRECT_URI || '',
 };
 
 /**
@@ -142,6 +145,7 @@ async function init() {
       clientId: CONFIG.clientId,
       tenantId: CONFIG.tenantId,
       bffApiClientId: CONFIG.bffApiClientId,
+      ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
     });
     console.log('[Spaarke] Auth service initialized');
   } catch (error) {

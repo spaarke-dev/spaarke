@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Wizard entry-payload envelope + hand-off (unify 5→7 wrappers)</title>
+    <phase>2: Structured Creation Core</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>013, 014</blocks>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Cross-cutting change across the Create*Wizard family (5→7 wrappers); modifies the launch/hand-off contract.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration of the wizard-wrapper family onto a shared entry-payload envelope — high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared Create*Wizard family — 013 and 014 build on it; keep serialized within the wizard chain.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Define a typed entry-payload envelope (files + resolved/proposed values + source metadata + TARGET SURFACE) that carries a draft-in-chat launch into a pre-seeded create surface. Per design §10.1 the envelope must launch BOTH (a) a pre-seeded custom Create*Wizard — riding wizard_step set-field (NOT applyFieldMappings, which is record-sourced) — AND (b) an OOB create form in a modal (Xrm.Navigation.navigateTo, e.g. the sprk_todo To Do form) pre-seeded via the OOB form's default-value/createFromEntity params. Consume the surface-launch routing metadata contract that task 002 defines. Unify the 5-of-7 embedded wrappers onto this envelope and close the 2 gaps.
+  </prompt>
+
+  <role>
+    PCF/React developer expert in Fluent UI v9, the SPAARKE Create*Wizard library, and the wizard_step set-field pre-fill mechanism.
+  </role>
+
+  <goal>
+    A typed entry-payload envelope type + a single hand-off path used by all 7 Create*Wizard wrappers. A handed-in file + seed values pre-fill the target wizard on launch via wizard_step set-field. The 2 previously-unwired wrappers are brought onto the envelope.
+  </goal>
+
+  <context>
+    <background>
+      R2 UAT: draft-in-chat dead-ended because the launch could not carry files/values into the wizard. 5 of 7 wrappers already embed; 2 gaps remain. This envelope is the hand-off contract 013 (smart pre-seed) and 014 (assign/associate) depend on.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Ride wizard_step set-field for custom-wizard pre-fill; do NOT use applyFieldMappings (record-sourced, wrong for chat-sourced seeds).</constraint>
+    <constraint source="project">The envelope carries the TARGET SURFACE (custom wizard vs OOB form modal) + pre-seed payload, consuming task 002's surface-launch routing contract. To Do routes to the OOB sprk_todo form in a modal (Xrm.Navigation.navigateTo per MODAL-DECISION-CRITERIA) — NOT a custom wizard (none exists).</constraint>
+    <constraint source="project">Reuse the existing CreateMatterWizardWidget + wizard_step pattern as the canonical reference for the custom-wizard branch; do NOT invent a parallel launch mechanism (CLAUDE.md §11).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; dark-mode compliant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+    </files>
+    <patterns>
+      <pattern name="wizard set-field pre-fill" location="src/client/shared/Spaarke.UI.Components/src/components/Wizard/">CreateMatterWizardWidget + wizard_step set-field is the canonical pre-seed reference to mirror.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Inventory the 7 Create*Wizard wrappers; identify the 5 embedded + the 2 gaps and their current launch shape.</step>
+    <step order="2">Define the typed entry-payload envelope (files, resolved values, proposed values, source metadata).</step>
+    <step order="3">Implement the single hand-off path riding wizard_step set-field; mirror CreateMatterWizardWidget.</step>
+    <step order="4">Migrate the 5 embedded wrappers onto the envelope; wire the 2 gap wrappers.</step>
+    <step order="5">Add unit/UI tests: a file + seed values pre-fill the launched wizard; dark-mode check.</step>
+    <step order="6">npm run build:prod. Update TASK-INDEX.md 012 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared UI + SpaarkeAi</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/ (envelope + hand-off)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (wrapper wiring)</output>
+    <output type="test">wizard hand-off unit/UI tests</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="Pre-seeded wizard launch">
+      <steps>
+        <step>From the Assistant, draft a create action with a file + seed values</step>
+        <step>Launch the target Create*Wizard</step>
+        <step>Verify the file is attached and seed values are pre-filled on the first step</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Wizard opens pre-seeded; no dead-end; no console errors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify wizard colors adapt via semantic tokens</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 Create*Wizard wrappers launch via the shared entry-payload envelope.</criterion>
+    <criterion testable="true">A handed-in file + seed values pre-fill a custom wizard on launch via wizard_step set-field (not applyFieldMappings).</criterion>
+    <criterion testable="true">The envelope also launches the OOB sprk_todo create form in a modal, pre-seeded (default values), per the design §10.1 To Do route.</criterion>
+    <criterion testable="true">Dark-mode compliant; npm run build:prod succeeds; tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-A1 / FR-A3. The envelope is the hand-off contract for 013 + 014.
+
+    COMPLETED 2026-07-16 (bg Opus subagent; reviewed + committed by main session). Client mechanism built + tested under `src/client/shared/Spaarke.UI.Components/`:
+    - NEW `src/services/surfaceHandoff/`: types.ts (SurfaceHandoffEnvelope + SurfaceHandoffResult + ResolvedLookup slot for 013), surfaceLaunchRegistry.ts (consumertype→{kind,surface,preset} per surface-launch-mechanism §3: create-matter→sprk_creatematterwizard, create-task→sprk_createeventwizard+preset{sprk_eventtype_ref=Task}, create-todo→oob-form sprk_todo), handoffStorage.ts (mintHandoffId h-<guid> + sessionStorage rendezvous + TTL), launchSurface.ts (mint→store-before-launch→launch→await close→read outcome→cleanup; never throws; P5 tie-in), readHandoff.ts (launched-surface read side), index.ts.
+    - MODIFIED (additive, byte-stable existing): wizardLaunchers.ts (+launchCreateEventWizard — the missing surface, name VERIFIED against Deploy-WizardCodePages.ps1 'sprk_createeventwizard'; +promise-returning navigateTo primitives for the return path; exported resolveXrmNavigation), useWizardPageBootstrap.ts (+handoff/handoffSeed/completeHandoff seam for wizard read side), barrels.
+    - 30 Jest tests pass; tsc type-clean (2 pre-existing external-pkg errors only, proven by stash-rebuild). Reuses wizardLaunchers (no fork, §11); files-by-reference; no new BFF endpoint (compose invariant); ADR-028 bffBaseUrl base-only.
+    Build-verify: sessionStorage same-origin sharing UNVERIFIABLE in code (needs live host) → primary path + graceful null fallback coded+flagged; navigateTo-resolves-on-close used as done-signal; key naming sprk.handoff.<id> per contract; event web-resource name verified.
+    SCOPED TO 013 (correctly, by design): (a) per-wizard field mapping (envelope.draftValues→initialFormValues; resolvedLookups→dropdown pre-select) — CreateMatterWizard has initialFormValues seam at formTypes.ts:201; (b) the SpaarkeAi call-site that detects a surface_launch dispatch + calls launchSurface() — needs `disposition`+`consumerType` surfaced on DispatchConsumerResult (the terminal `complete` chunk); server already stores UcId=Ucid??ConsumerType at OutputRouter.cs:184. This server→client dispatch-spine wire-up is task 013 (main-session, seam-test DoD). The client mechanism is fully built + tested + ready to receive that one wire-up.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Build with npm run build:prod (NOT npm run build). FULL-rigor Step 9.5 + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

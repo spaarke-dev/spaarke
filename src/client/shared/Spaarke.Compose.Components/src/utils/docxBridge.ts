@@ -40,6 +40,18 @@
  */
 
 import type { Editor } from '@tiptap/core';
+import type {
+  ParaIdMapEntry,
+  ComposeEditedParagraph,
+  ComposeBaselineParaId,
+  ComposeContentModel,
+  ComposeContentBlock,
+  ComposeInlineRun,
+  ComposeTable,
+  ComposeTableRow,
+  ComposeTableCell,
+  ComposeAlignment,
+} from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -107,7 +119,14 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
     throw new Error('docxBridge: mammoth.convertToHtml export not found');
   }
 
-  const result = await convertToHtml({ arrayBuffer: docxBytes });
+  // UAT round-4 ROOT-CAUSE FIX: mammoth's DEFAULT `ignoreEmptyParagraphs: true` silently DROPS empty
+  // paragraphs (semantic-cleanup philosophy). On a real .docx that shifts the editor's paragraph set out
+  // of alignment with the server's document-order `w14:paraId` pre-parse — so the client's position-based
+  // paraId stamping drifts and edited paragraphs get ids that match no paragraph in the retained original
+  // (the recurring "a tracked change could not be located" / "matches no paragraph" save failures).
+  // Empirically, this option recovers 9 dropped paragraphs on the CIPO patent letter (48 vs 39), which is
+  // exactly the count-alignment the paraId mapping needs. Preserving empties keeps the round-trip faithful.
+  const result = await convertToHtml({ arrayBuffer: docxBytes }, { ignoreEmptyParagraphs: false });
 
   return {
     html: result.value,
@@ -117,178 +136,375 @@ export async function docxToTipTapHtml(docxBytes: ArrayBuffer): Promise<MammothC
 }
 
 // ---------------------------------------------------------------------------
-// Export path: TipTap state → DOCX bytes (via docx)
+// R3 FR-08/FR-09/FR-10 — `w14:paraId` identity carry (design §5)
+// ---------------------------------------------------------------------------
+//
+// mammoth flattens `.docx` to HTML and DISCARDS `w14:paraId` (docxToTipTapHtml
+// above), so the paragraph ids arrive from the SERVER pre-parse map (task 010),
+// not from the imported HTML. `stampParaIds` owns the client-side carry: an
+// EXPLICIT transaction stamping the server ids onto the paragraph nodes
+// immediately after `setContent` (FR-09: load-time ids are server-owned, never
+// left to the minting extension's auto-assign). The OOXML-shaped id generator for
+// in-editor split minting lives with the extension in `../widgets/paraIdExtension`.
+
+/**
+ * Stamp the server pre-parse paraId map onto the editor's paraId-bearing nodes via
+ * a single EXPLICIT transaction, in document order (FR-09). Call immediately after
+ * `editor.commands.setContent(html)` on a docx Load: the Nth paraId-bearing node
+ * (`paragraph` or `heading` — see `PARAID_NODE_TYPES`; in ProseMirror document
+ * order, which — like the server's `body.Descendants<Paragraph>()` — descends into
+ * table cells and counts headings, since an OOXML heading is a `<w:p>`) receives
+ * `map[N].paraId`.
+ *
+ * Why explicit (not auto-assign): `@tiptap/extension-unique-id` DOES mint ids for
+ * id-less nodes on content change, but those would be random client ids, not the
+ * server's. Stamping explicitly AFTER setContent makes the server ids win, so the
+ * editor's load-time identity is the same substrate the retained-original save
+ * splices against (FR-12). Untouched paragraphs then keep these ids; a later split
+ * re-mints via the extension's built-in dedup (FR-10).
+ *
+ * The stamp is marked `addToHistory:false` — a load-time identity stamp is not a
+ * user edit and must not be undoable or flip the dirty flag.
+ *
+ * No-op when the map is empty (e.g. an AI-drafted seed with no server pre-parse —
+ * there the extension's own minting assigns fresh OOXML-shaped ids).
+ *
+ * @param editor  Live TipTap Editor (paraId attribute must be in schema — the
+ *                UniqueID extension is configured for `paragraph` in ComposeEditor)
+ * @param map     Ordered server paraId map from the Load response (task 010)
+ */
+export function stampParaIds(editor: Editor, map: readonly ParaIdMapEntry[] | undefined): void {
+  if (!map || map.length === 0) return;
+  const { state } = editor;
+  const tr = state.tr;
+  let paraIndex = 0;
+  let changed = false;
+  state.doc.descendants((node, pos) => {
+    // Match the SAME node set as the paraId extension's `PARAID_NODE_TYPES`
+    // (paragraph + heading): the server map counts every OOXML `<w:p>`, and a
+    // heading is a `<w:p>`, so headings must be counted here too or every id
+    // after the first heading misaligns. Keep in sync with paraIdExtension.ts.
+    if (node.type.name === 'paragraph' || node.type.name === 'heading') {
+      const entry = map[paraIndex];
+      if (entry && entry.paraId && node.attrs.paraId !== entry.paraId) {
+        // Positions are stable across attribute-only edits, so the pos captured
+        // during this walk stays valid for every setNodeMarkup on `tr`. Use
+        // setNodeMarkup (the same idiom @tiptap/extension-unique-id uses) to set
+        // the attribute — universally available and it preserves the other attrs.
+        tr.setNodeMarkup(pos, undefined, { ...node.attrs, paraId: entry.paraId });
+        changed = true;
+      }
+      paraIndex++;
+    }
+    return true; // descend into children (table cells hold paragraphs — server parity)
+  });
+  if (changed) {
+    tr.setMeta('addToHistory', false);
+    editor.view.dispatch(tr);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Export path (R3 FR-01/FR-01a, task 027): the client sends a STRUCTURED,
+// paraId-keyed content model — it never authors `.docx` bytes. `docx.js` is
+// removed; the SERVER owns all authoring (delta-onto-original via the
+// synthesizer for loaded docs, full render via ComposeDocumentRenderer for
+// born-in-editor docs).
 // ---------------------------------------------------------------------------
 
 /**
- * Convert a TipTap editor's current state to DOCX bytes.
- *
- * Lazy-loads `docx` on first call. Round-trip fidelity is governed by the
- * Spike #1 OOB subset — anything in the OOB inventory's "Preserved" rows
- * survives; "Degraded" rows survive with documented loss.
- *
- * Implementation: pulls the TipTap JSON document via `editor.getJSON()` and
- * walks the node tree, mapping each ProseMirror node to its docx equivalent
- * (Paragraph, Heading, Table, TextRun with marks). This is intentionally
- * a focused converter for the OOB subset — NOT a general ProseMirror-to-docx
- * library.
- *
- * The conversion strategy mirrors the locked Spike #1 reference at
- * `notes/spikes/spike-1-prototype/src/exportDocx.ts` but is re-authored here
- * for production conventions (typed nodes, error handling, ArrayBuffer
- * return type, dynamic-import-friendly destructuring).
- *
- * @param editor  Live TipTap Editor instance (from `useEditor`)
- * @returns       DOCX bytes ready for upload to SPE / BFF save endpoint
- * @throws        Error if the editor JSON is malformed or docx Packer fails
+ * TipTap JSON node shape (subset — covers the OOB extensions in scope). Retained for the paraId
+ * snapshot / edited-paragraph / content-model helpers below (all operate on `editor.getJSON()`).
  */
-export async function tipTapToDocxBytes(editor: Editor): Promise<ArrayBuffer> {
-  // Lazy-load docx (MIT). Pure-JS pack; ~90 KB minified-gzipped.
-  const docxModule = await import('docx');
-  const {
-    Document,
-    Packer,
-    Paragraph,
-    TextRun,
-    HeadingLevel,
-    Table: DocxTable,
-    TableRow: DocxRow,
-    TableCell: DocxCell,
-    AlignmentType,
-  } = docxModule;
+export type TipTapNode = {
+  type?: string;
+  content?: TipTapNode[];
+  text?: string;
+  attrs?: Record<string, unknown>;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+};
 
-  // TipTap JSON node shape (subset — covers OOB extensions in scope).
-  type TipTapNode = {
-    type: string;
-    content?: TipTapNode[];
-    text?: string;
-    attrs?: Record<string, unknown>;
-    marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+/** The paraId-bearing block node types (mirror `PARAID_NODE_TYPES` / the server's `<w:p>` count). */
+const BLOCK_NODE_TYPES = new Set(['paragraph', 'heading']);
+
+/**
+ * The REJECT-STATE settled text of a block node's inline content — the text as if every PENDING AI
+ * redline were REJECTED: text carrying an `insertion` mark (a proposed insert) is DROPPED; all other
+ * text (original, accepted edits — accept unsets the marks → normal text — and deletion-marked
+ * originals) is KEPT. This is the same reduction the retired `buildRejectBaselineJson` did, applied
+ * per-paragraph: it is what a dirty-save delta must diff against so a pending redline is NOT baked
+ * into the synthesizer delta (it rides the `annotations` list instead — the server composes it, task 023).
+ */
+function rejectStateText(block: TipTapNode): string {
+  let out = '';
+  const walk = (n: TipTapNode): void => {
+    if (n.type === 'text') {
+      const isPendingInsert = n.marks?.some(m => m.type === 'insertion') ?? false;
+      if (!isPendingInsert && n.text) out += n.text;
+      return;
+    }
+    if (n.type === 'hardBreak') {
+      out += '\n';
+      return;
+    }
+    (n.content ?? []).forEach(walk);
   };
+  (block.content ?? []).forEach(walk);
+  return out;
+}
 
-  const json = editor.getJSON() as TipTapNode;
+/** True for a redline mark that is an IMPORTED native Word revision (rides the retained-original bytes). */
+function isImportedRef(ledgerRef: unknown): boolean {
+  return typeof ledgerRef === 'string' && ledgerRef.startsWith('imported:');
+}
 
-  const headingMap: Record<number, (typeof HeadingLevel)[keyof typeof HeadingLevel]> = {
-    1: HeadingLevel.HEADING_1,
-    2: HeadingLevel.HEADING_2,
-    3: HeadingLevel.HEADING_3,
-    4: HeadingLevel.HEADING_4,
-    5: HeadingLevel.HEADING_5,
-    6: HeadingLevel.HEADING_6,
-  };
-
-  function alignmentFor(attrs?: Record<string, unknown>) {
-    const a = attrs?.textAlign as string | undefined;
-    if (a === 'center') return AlignmentType.CENTER;
-    if (a === 'right') return AlignmentType.RIGHT;
-    if (a === 'justify') return AlignmentType.JUSTIFIED;
-    return AlignmentType.LEFT;
-  }
-
-  function textRunsFromInline(nodes: TipTapNode[] | undefined): InstanceType<typeof TextRun>[] {
-    if (!nodes) return [];
-    const runs: InstanceType<typeof TextRun>[] = [];
-    for (const n of nodes) {
-      if (n.type === 'text' && n.text) {
-        const marks = new Set(n.marks?.map(m => m.type) ?? []);
-        runs.push(
-          new TextRun({
-            text: n.text,
-            bold: marks.has('bold'),
-            italics: marks.has('italic'),
-            strike: marks.has('strike'),
-            underline: marks.has('underline') ? {} : undefined,
-          })
-        );
-      } else if (n.type === 'hardBreak') {
-        runs.push(new TextRun({ text: '', break: 1 }));
+/**
+ * The ACCEPT-STATE settled text of a block — the text as if every PENDING AI/user redline were ACCEPTED:
+ * insertion-marked text is KEPT, deletion-marked text is DROPPED. IMPORTED native revisions are treated
+ * exactly as {@link rejectStateText} treats them (imported insertion dropped, imported deletion kept) so
+ * an imported-only paragraph's accept-state EQUALS its baseline (reject-state) snapshot and is NOT
+ * re-synthesized — imported revisions ride the retained-original bytes untouched.
+ *
+ * Item-4/save-robustness fix (UAT round-4): the save delta uses this as the paragraph's NEW text so a
+ * pending suggestion persists via the POSITION-based synthesizer (paraId-keyed, FR-02) instead of the
+ * fragile server-side text-search (`DocxAnnotationWriter.LocateTarget`, which drops `<w:tab/>`/`<w:br/>`
+ * and 422s on tab-laid-out list items). A user edit (no redline marks) is unaffected — with no marks,
+ * accept-state == reject-state == the plain text.
+ */
+function acceptStateText(block: TipTapNode): string {
+  let out = '';
+  const walk = (n: TipTapNode): void => {
+    if (n.type === 'text') {
+      const insMark = n.marks?.find(m => m.type === 'insertion');
+      const delMark = n.marks?.find(m => m.type === 'deletion');
+      if (insMark) {
+        // Accept an AI/user insertion (keep); an IMPORTED insertion mirrors reject-state (drop).
+        if (!isImportedRef((insMark.attrs as { ledgerRef?: unknown } | undefined)?.ledgerRef) && n.text) {
+          out += n.text;
+        }
+        return;
       }
-      // Link marks: `docx` exposes ExternalHyperlink; deliberately omitted for
-      // R1 scope to keep the converter focused — preserved as plain text per
-      // spike §3.2 row 14 "Preserved (basic)" carve-out.
+      if (delMark) {
+        // Accept an AI/user deletion (drop the struck text); an IMPORTED deletion mirrors reject-state (keep).
+        if (isImportedRef((delMark.attrs as { ledgerRef?: unknown } | undefined)?.ledgerRef) && n.text) {
+          out += n.text;
+        }
+        return;
+      }
+      if (n.text) out += n.text;
+      return;
     }
-    return runs;
-  }
+    if (n.type === 'hardBreak') {
+      out += '\n';
+      return;
+    }
+    (n.content ?? []).forEach(walk);
+  };
+  (block.content ?? []).forEach(walk);
+  return out;
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function paragraphsFromNode(node: TipTapNode): any[] {
-    if (node.type === 'paragraph') {
-      return [
-        new Paragraph({
-          alignment: alignmentFor(node.attrs),
-          children: textRunsFromInline(node.content),
-        }),
-      ];
+/** Visit every paraId-bearing block (paragraph/heading), descending into lists + table cells (server parity). */
+function forEachBlock(node: TipTapNode, fn: (block: TipTapNode) => void): void {
+  if (node.type && BLOCK_NODE_TYPES.has(node.type)) {
+    fn(node);
+    return; // don't descend into a block's own inline content
+  }
+  (node.content ?? []).forEach(child => forEachBlock(child, fn));
+}
+
+/**
+ * Capture the LOAD-TIME `{ paraId → reject-state text }` snapshot for the editor, in document order.
+ * Call immediately after {@link stampParaIds} on a load (or after a born-in-editor seed's setContent):
+ * {@link collectEditedParagraphs} diffs the current doc against this to find the dirty paragraphs.
+ */
+export function captureParaIdSnapshot(editor: Editor): Map<string, string> {
+  const snapshot = new Map<string, string>();
+  forEachBlock(editor.getJSON() as TipTapNode, block => {
+    const paraId = block.attrs?.paraId as string | undefined;
+    if (paraId) snapshot.set(paraId, rejectStateText(block));
+  });
+  return snapshot;
+}
+
+/**
+ * The paragraphs the user CHANGED since load (FR-01), each keyed by its `w14:paraId` with its new
+ * reject-state settled text. Diffs the current doc against the load-time {@link captureParaIdSnapshot}
+ * snapshot. Emits ONLY paragraphs that EXISTED at load (present in the snapshot) whose settled text
+ * changed — the server synthesizer edits matched paragraphs in place and fails fast on a paraId the
+ * retained original lacks, so a brand-new paraId (a split/insert) is intentionally NOT emitted here
+ * (structural insert/split/delete is out of the E1 delta scope — a future synthesizer extension).
+ * Unchanged paragraphs are omitted (sending them would needlessly rewrite their run structure).
+ */
+export function collectEditedParagraphs(
+  editor: Editor,
+  snapshot: ReadonlyMap<string, string>
+): ComposeEditedParagraph[] {
+  const edited: ComposeEditedParagraph[] = [];
+  const seen = new Set<string>();
+  forEachBlock(editor.getJSON() as TipTapNode, block => {
+    const paraId = block.attrs?.paraId as string | undefined;
+    if (!paraId) return;
+    seen.add(paraId);
+    const original = snapshot.get(paraId);
+    if (original === undefined) return; // new paraId (split/insert) — out of E1 delta scope
+    // Save-robustness fix (UAT round-4): diff the ACCEPT-STATE text (pending AI/user redlines applied)
+    // against the reject-state baseline. A pending suggestion thus persists as a tracked change via the
+    // POSITION-based synthesizer (paraId-keyed) — never the fragile server text-search that 422s on
+    // tab-laid-out list items. A plain user edit is unaffected (no marks → accept-state == reject-state).
+    const current = acceptStateText(block);
+    if (current !== original) {
+      edited.push({ paraId, text: current });
     }
-    if (node.type === 'heading') {
-      const lvl = (node.attrs?.level as number | undefined) ?? 1;
-      return [
-        new Paragraph({
-          heading: headingMap[lvl] ?? HeadingLevel.HEADING_1,
-          alignment: alignmentFor(node.attrs),
-          children: textRunsFromInline(node.content),
-        }),
-      ];
+  });
+  // Structural delete/merge: a load-time paraId absent from the CURRENT doc (a suggestion or edit removed
+  // the whole paragraph) is emitted with empty text so the synthesizer strikes it (WordDiff(old,'') →
+  // all-delete). Without this the retained original kept the vanished paragraph verbatim → leftover/
+  // duplicate content (the silent Accept-first corruption the round-4 investigation found).
+  for (const paraId of snapshot.keys()) {
+    if (!seen.has(paraId)) {
+      edited.push({ paraId, text: '' });
     }
-    if (node.type === 'bulletList' || node.type === 'orderedList') {
-      // Visual nested-list preservation; semantic numbering refs lost
-      // (spike §3.2 row 8 "Degraded" — most consequential R1 limitation).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items: any[] = [];
+  }
+  return edited;
+}
+
+/**
+ * C2 fix (UAT 2026-07-20): build the ordered baseline paraId map the save sends so the SERVER can stamp
+ * MINTED ids physically onto the retained-original baseline's id-less paragraphs before the synthesizer
+ * resolves (see `ComposeBaselineParaIdStamper`). Sourced from the LOAD-TIME {@link captureParaIdSnapshot}
+ * snapshot — document order, `paraId` → reject-state text — so each entry's `text` is exactly the baseline
+ * paragraph's text (the server's verification key), NOT the post-edit text. One entry per snapshot
+ * paragraph; `index` is its zero-based document-order position (the snapshot Map preserves insertion =
+ * document order). Returns `[]` for an absent/empty snapshot (e.g. a born-in-editor doc — the server
+ * renders its ids and the stamp is a no-op there anyway).
+ *
+ * Privacy (ADR-015 Tier 3): the text is document content — carried to the save request only, NEVER logged.
+ */
+export function buildBaselineParaIdMap(
+  snapshot: ReadonlyMap<string, string> | null | undefined
+): ComposeBaselineParaId[] {
+  if (!snapshot || snapshot.size === 0) return [];
+  const map: ComposeBaselineParaId[] = [];
+  let index = 0;
+  for (const [paraId, text] of snapshot) {
+    if (paraId) map.push({ index, paraId, text });
+    index++;
+  }
+  return map;
+}
+
+/**
+ * Build the full paraId-keyed {@link ComposeContentModel} from the editor for a BORN-IN-EDITOR save
+ * (FR-01a) — the server renders it into a high-fidelity `.docx`. Mirrors the server model: paragraphs /
+ * headings (with level) / list items (flattened from bulletList/orderedList with nesting depth) /
+ * native tables, each block carrying its `paraId` + inline runs (bold/italic/underline). Pending-insert
+ * text is excluded (reject-state parity) — a born-in-editor draft normally has no redlines.
+ */
+export function buildContentModel(editor: Editor): ComposeContentModel {
+  const blocks: ComposeContentBlock[] = [];
+  for (const node of (editor.getJSON() as TipTapNode).content ?? []) {
+    appendContentBlocks(node, blocks, 0);
+  }
+  return { blocks };
+}
+
+function appendContentBlocks(node: TipTapNode, out: ComposeContentBlock[], listDepth: number): void {
+  switch (node.type) {
+    case 'paragraph':
+      out.push({ kind: 'Paragraph', paraId: paraIdOf(node), runs: runsOf(node), alignment: alignmentOf(node) });
+      break;
+    case 'heading':
+      out.push({
+        kind: 'Heading',
+        level: (node.attrs?.level as number | undefined) ?? 1,
+        paraId: paraIdOf(node),
+        runs: runsOf(node),
+        alignment: alignmentOf(node),
+      });
+      break;
+    case 'bulletList':
+    case 'orderedList': {
+      const ordered = node.type === 'orderedList';
+      let firstItem = true;
       for (const item of node.content ?? []) {
-        if (item.type === 'listItem') {
-          for (const child of item.content ?? []) {
-            items.push(...paragraphsFromNode(child));
+        if (item.type !== 'listItem') continue;
+        for (const child of item.content ?? []) {
+          if (child.type === 'paragraph' || child.type === 'heading') {
+            out.push({
+              kind: 'ListItem',
+              level: listDepth,
+              ordered,
+              // A top-level ordered list restarts numbering at 1 on its first item.
+              startsNewList: ordered && firstItem && listDepth === 0,
+              paraId: paraIdOf(child),
+              runs: runsOf(child),
+            });
+            firstItem = false;
+          } else if (child.type === 'bulletList' || child.type === 'orderedList') {
+            appendContentBlocks(child, out, listDepth + 1);
           }
         }
       }
-      return items;
+      break;
     }
-    if (node.type === 'blockquote') {
-      return (node.content ?? []).flatMap(paragraphsFromNode);
-    }
-    if (node.type === 'horizontalRule') {
-      return [new Paragraph({ text: '—' })]; // em-dash visual approximation
-    }
-    if (node.type === 'taskList' || node.type === 'taskItem') {
-      // Task lists: docx has no native checkbox content control in this lib;
-      // convert items to paragraphs with a leading bullet character.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const items: any[] = [];
-      for (const child of node.content ?? []) {
-        items.push(...paragraphsFromNode(child));
-      }
-      return items;
-    }
-    return [];
+    case 'table':
+      out.push({ kind: 'Table', table: tableOf(node) });
+      break;
+    default:
+      // blockquote / other containers → flatten their block children (best-effort).
+      for (const child of node.content ?? []) appendContentBlocks(child, out, listDepth);
   }
+}
 
-  function tableFromNode(node: TipTapNode) {
-    const rows: InstanceType<typeof DocxRow>[] = [];
-    for (const row of node.content ?? []) {
-      if (row.type === 'tableRow') {
-        const cells: InstanceType<typeof DocxCell>[] = [];
-        for (const cell of row.content ?? []) {
-          const ps = (cell.content ?? []).flatMap(paragraphsFromNode);
-          cells.push(new DocxCell({ children: ps.length ? ps : [new Paragraph('')] }));
-        }
-        rows.push(new DocxRow({ children: cells }));
-      }
-    }
-    return new DocxTable({ rows });
+function runsOf(block: TipTapNode): ComposeInlineRun[] {
+  const runs: ComposeInlineRun[] = [];
+  for (const n of block.content ?? []) {
+    if (n.type !== 'text' || !n.text) continue;
+    const marks = new Set((n.marks ?? []).map(m => m.type));
+    if (marks.has('insertion')) continue; // reject-state parity: pending insert excluded
+    runs.push({
+      text: n.text,
+      bold: marks.has('bold') || undefined,
+      italic: marks.has('italic') || undefined,
+      underline: marks.has('underline') || undefined,
+    });
   }
+  return runs;
+}
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const children: any[] = [];
-  for (const node of json.content ?? []) {
-    if (node.type === 'table') {
-      children.push(tableFromNode(node));
-    } else {
-      children.push(...paragraphsFromNode(node));
+function tableOf(node: TipTapNode): ComposeTable {
+  const rows: ComposeTableRow[] = [];
+  for (const row of node.content ?? []) {
+    if (row.type !== 'tableRow') continue;
+    const cells: ComposeTableCell[] = [];
+    for (const cell of row.content ?? []) {
+      const isHeader = cell.type === 'tableHeader';
+      const cellBlocks: ComposeContentBlock[] = [];
+      for (const child of cell.content ?? []) appendContentBlocks(child, cellBlocks, 0);
+      cells.push({ blocks: cellBlocks, isHeader: isHeader || undefined });
     }
+    rows.push({ cells });
   }
+  return { rows };
+}
 
-  const doc = new Document({ sections: [{ children }] });
-  const blob = await Packer.toBlob(doc);
-  return blob.arrayBuffer();
+function paraIdOf(node: TipTapNode): string | undefined {
+  const paraId = node.attrs?.paraId;
+  return typeof paraId === 'string' && paraId.length > 0 ? paraId : undefined;
+}
+
+function alignmentOf(node: TipTapNode): ComposeAlignment | undefined {
+  switch (node.attrs?.textAlign as string | undefined) {
+    case 'left':
+      return 'Left';
+    case 'center':
+      return 'Center';
+    case 'right':
+      return 'Right';
+    case 'justify':
+      return 'Justify';
+    default:
+      return undefined; // inherit the style default (server maps undefined → Default)
+  }
 }

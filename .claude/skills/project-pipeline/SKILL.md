@@ -5,7 +5,7 @@ techStack: [all]
 appliesTo: ["projects/*/", "start project", "initialize project"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-17
+last-reviewed: 2026-07-16
 ---
 
 # project-pipeline
@@ -31,7 +31,7 @@ CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000
 # If running on older models, the previous prescription was 50000
 ```
 
-**Effort guidance**: invoke `/project-pipeline` on Opus with effort `high` or `max` — multi-phase, deep resource discovery, 100+ task files. Subagents the pipeline spawns (general-purpose, Explore) can run on `low` or `medium`.
+**Effort guidance**: invoke `/project-pipeline` on **Opus 4.8 / Fable 5** with effort `high` or `max` — planning phases (Steps 0–3: deep resource discovery, 100+ task files) want the top reasoning tier. (Task *execution* in Step 5 defaults to **Sonnet 5 @ high** per each POML's `<model-tier>`/`<effort>` — see root CLAUDE.md §8.5.) Subagents the pipeline spawns for discovery (general-purpose, Explore) can run on `low` or `medium`.
 
 **Why Output Tokens is Critical**:
 - **Resource Discovery (Step 2)**: Loads ADRs, skills, knowledge docs, and existing code patterns
@@ -48,12 +48,11 @@ For AI Document Intelligence R1 project:
 - 178 tasks generated with full context
 
 **Verify settings before proceeding**:
-```bash
-# Windows PowerShell
-echo $env:MAX_THINKING_TOKENS
+```powershell
+# Windows PowerShell — only CLAUDE_CODE_MAX_OUTPUT_TOKENS is load-bearing now
 echo $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS
-
-# Should output: 50000 and 64000
+# Should output: 64000
+# (MAX_THINKING_TOKENS is IGNORED on Opus 4.6+ — adaptive thinking applies; do NOT set it)
 ```
 
 **If output tokens not set**, the pipeline may produce truncated artifacts. See root [`CLAUDE.md`](../../../CLAUDE.md) for full guidance. (The legacy `MAX_THINKING_TOKENS` env var is IGNORED on Opus 4.6+ — adaptive thinking applies; invoke this skill on Opus with effort `high` or `max`.)
@@ -441,6 +440,22 @@ OUTPUT: Comprehensive resource discovery summary
   - M scripts available (for deployment/testing steps)
   - S schema validations (Dataverse entities checked via MCP, gaps flagged)
 
+STRUCTURED OUTPUT (added 2026-07-16 — Agent SDK best practice). When discovery is fanned out to subagents
+(general-purpose / Explore), have EACH return its findings against this schema so the orchestrator can
+consume + merge them without brittle prose-parsing, and so a missing field re-prompts the agent rather than
+silently dropping a resource:
+
+  { "adrs":        [ { "id": "ADR-0NN", "path": ".claude/adr/…", "why": "…" } ],
+    "skills":      [ { "name": "…", "path": ".claude/skills/…/SKILL.md" } ],
+    "knowledge":   [ { "path": "docs/…", "section": "…" } ],
+    "canonical":   [ { "path": "src/…", "reuse-as": "reference impl for X" } ],
+    "scripts":     [ { "path": "scripts/…", "use": "…" } ],
+    "schemaGaps":  [ { "entity": "sprk_…", "gap": "missing field/entity → creation task needed" } ] }
+
+  When authoring this as a Workflow (see "Dynamic Workflows" recommendation in
+  .claude/AUDIT-FINDINGS-PIPELINE-MODERNIZATION-2026-07-16.md), pass this shape as the `schema` option on the
+  discovery agent() calls — validation then happens at the tool-call layer and the subagent retries on mismatch.
+
 ⚠️ **DIFFERENCE from design-to-spec Step 3**:
 - design-to-spec: Preliminary (ADR constraints only for spec enrichment)
 - project-pipeline: Comprehensive (full ADRs, patterns, pattern pointers to canonical implementations)
@@ -515,11 +530,11 @@ ENHANCE CLAUDE.md with discovered resources:
 ```
 LOAD:
   - projects/{project-name}/plan.md (Phase Breakdown section)
-  - .claude/templates/task-execution.template.md (POML format)
+  - .claude/templates/task-execution.template.md (POML skeleton — POINTER; the AUTHORITATIVE field set is task-create Steps 3.5.x–3.85)
   - Tag-to-knowledge mapping (from task-create skill)
 
 REQUIREMENTS (from task-create):
-  - Each task file MUST follow the task-execution.template.md structure (root <task id="..." project="...">)
+  - Each task file MUST follow the canonical POML structure (root <task id="..." project="...">) with the FULL field set enumerated in "GENERATE .poml file" below — NOT just the minimal skeleton
   - Each task MUST include <knowledge><files> and it MUST NOT be empty
   - PCF tasks MUST include docs/guides/PCF-DEPLOYMENT-GUIDE.md and src/client/pcf/CLAUDE.md
   - Applicable ADRs MUST be included via docs/adr/*.md (see task-create Step 3.5)
@@ -538,15 +553,34 @@ FOR each phase in PLAN.md:
       - Phase 3 → 020, 021, 022...
       - (10-gap for insertions)
     
-    GENERATE .poml file:
-      - Valid POML/XML format
-      - <metadata> with tags, phase, estimate
-      - <prompt> with goal, context, constraints
-      - <knowledge> with auto-discovered files (based on tags)
-      - <steps> with concrete actions
-      - <tools> with Claude Code capabilities
-      - <outputs> with expected artifacts
-      - <acceptance-criteria> with verification steps
+    GENERATE .poml file — MUST carry the FULL canonical field set from task-create
+    (Steps 3.5.5 / 3.5.5b / 3.5.5c / 3.5.6 / 3.8 / 3.65 / 3.85). These are not optional: Step 5 below
+    DISPATCHES on <model-tier>/<effort> and reads goal-eligibility, so a POML missing them silently
+    under-specifies the wave. See the canonical skeleton in .claude/templates/task-execution.template.md.
+      - Valid POML/XML format, root <task id="..." project="...">
+      - <metadata>: title, phase, gate, status, tags,
+          <rigor> + <rigor-reason>                         (task-create Step 3.5.5)
+          <model-tier> + <model-tier-reason>, <effort>     (Step 3.5.5b — REQUIRED; Step 5 dispatches on these)
+          <parallel-group> + <parallel-safe>               (Step 3.8 — EVERY task, no exceptions)
+      - <prompt> / <role> / <goal>: explicit + literal (Sonnet-5 does not infer intent)
+      - <context> with <relevant-files> (name exact files + the canonical reference impl to copy)
+      - <constraints> with explicit ADR source attrs AND a scope clause on each
+      - <knowledge> with auto-discovered files (based on tags — Step 3.4 mapping; MUST be non-empty)
+      - <steps mode="directional|prescriptive">           (Step 3.5.5c — explicit mode)
+      - <escalation><trigger>                              (Step 3.5.5c — REQUIRED for tasks with a judgment boundary)
+      - <justification>                                    (Step 3.5.6 / CLAUDE.md §11 — REQUIRED for NEW-surface tasks)
+      - <ui-tests>                                         (Step 3.65 — REQUIRED for pcf/frontend/fluent-ui/e2e-test)
+      - <outputs> with exact file paths + type
+      - <acceptance-criteria> as a CLOSED SET incl. negative/authorization cases
+
+    PLACEMENT JUSTIFICATION (CLAUDE.md §10/§11) — for any task adding to src/server/api/Sprk.Bff.Api/ (or
+    Spaarke.Core/Spaarke.Dataverse consumed by BFF), the task's <constraints>/<notes> MUST require the
+    implementer to state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md)
+    and verify publish size ≤60 MB. This mirrors the §11 three-question gate task-create applies per-task.
+
+    COMPLETENESS LINT: after generating all POMLs, run the task-create Completeness Lint (or
+    pwsh scripts/Validate-TaskPoml.ps1 projects/{name}/tasks) and FAIL the step if any POML is missing a
+    required field — do not proceed to Step 4 with under-specified tasks.
 
 IDENTIFY task dependencies and parallel opportunities:
   - Mark explicit dependencies in task <metadata><dependencies>
@@ -832,13 +866,19 @@ PARALLEL EXECUTION REQUIREMENTS:
 BUILD VERIFICATION BETWEEN WAVES (MANDATORY):
   After each wave completes, main session MUST verify the codebase still builds:
   - If any `.cs` file was modified in the wave: `dotnet build src/server/api/Sprk.Bff.Api/`
-  - If any `.ts`/`.tsx` file was modified: `npm run build` in the relevant package
+  - If any `.ts`/`.tsx` file was modified: build the relevant package — **`npm run build:prod` for PCF** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1); `npm run build` for non-PCF packages that lack a `:prod` script
   - If build fails: STOP. Do not dispatch next wave. Report breakage with wave identifier.
   - This catches incoherent changes across parallel agents before they compound.
 
 FAILURE ISOLATION:
   - One agent failing does NOT abort the wave
   - Collect all agent outcomes (success/failure/timeout)
+  - STRUCTURED OUTCOME (added 2026-07-16): instruct each task subagent to end with a machine-readable result
+    the orchestrator can merge without prose-parsing —
+      { "taskId": "0NN", "status": "success|failed|blocked", "filesChanged": ["…"],
+        "gatesRun": { "codeReview": true, "adrCheck": true }, "escalation": null|"reason", "note": "…" }
+    A `blocked` status with an `escalation` reason (a fired <escalation> trigger → BLOCKED.md) is a legitimate
+    outcome, not a failure — do NOT retry it; surface it for the human (root CLAUDE.md §6/§6.5).
   - At wave completion, report: "Wave X: {N} succeeded, {M} failed"
   - Mark failed tasks in TASK-INDEX as 🔄 (needs retry) not ❌ (abandoned)
   - Main session decides whether to retry failed tasks sequentially or report and stop

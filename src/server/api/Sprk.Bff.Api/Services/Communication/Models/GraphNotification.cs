@@ -28,6 +28,15 @@ public sealed class GraphChangeNotification
     [JsonPropertyName("changeType")]
     public string? ChangeType { get; init; }
 
+    /// <summary>
+    /// Lifecycle event type for Graph subscription lifecycle notifications
+    /// (<c>reauthorizationRequired</c>, <c>subscriptionRemoved</c>, <c>missed</c>).
+    /// Null on ordinary change notifications; present only on lifecycle notifications
+    /// delivered to the subscription's <c>lifecycleNotificationUrl</c>.
+    /// </summary>
+    [JsonPropertyName("lifecycleEvent")]
+    public string? LifecycleEvent { get; init; }
+
     [JsonPropertyName("resource")]
     public string? Resource { get; init; }
 

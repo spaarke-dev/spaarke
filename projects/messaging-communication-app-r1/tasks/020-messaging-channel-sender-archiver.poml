@@ -1,0 +1,160 @@
+<task id="020" project="messaging-communication-app-r1">
+  <metadata>
+    <title>`MessagingChannelSender` + `MessagingArchiver` (ADR-045 seam impls; dispatch by `Message`; transcript → SPE)</title>
+    <phase>W2 — Channel Provider (ADR-045 seams)</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>006,007,010,011</dependencies>
+    <blocks>051,070</blocks>
+    <tags>bff-api, communication, acs</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds the SECOND channel implementation behind the shipped ADR-045 sender/archiver seams — net-new `Sprk.Bff.Api` services (`MessagingChannelSender`, `MessagingArchiver`) + DI registration + `CommunicationType`-keyed dispatch wiring. BFF-touching (Services/Communication hot-path), calls ACS server-side, writes to SPE. Tags include bff-api/acs; modifies `.cs`; requires publish-size + CVE + code-review + adr-check per root §10.</rigor-reason>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-01</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement the messaging channel provider as the SECOND set of implementations behind the ADR-045 channel seams that email-r4 shipped — proving the abstraction with a real second channel:
+
+    • **`MessagingChannelSender`** — implements `ICommunicationChannelSender` with `SupportedType =&gt; CommunicationType.Message`. `SendAsync` transmits the message over ACS Chat **server-side** by calling the W1 ACS services (task 010 token minting + task 011 thread/membership ops), acting as the sending participant with that participant's server-minted chat token. It owns ALL ACS-specific wire concerns (resolve `communicationUserId`, obtain the sender's minted token, call `ChatThreadClient.SendMessage`, map ACS SDK errors to `SdapProblemException`) and MUST NOT leak `Azure.Communication.*` types across the seam. It returns a `ChannelSendResult` whose `ProviderMessageId` is the **ACS message id** — this is the value the inbound ingestor dedupes on for echo-dedup (FR-04, task 031/051).
+
+    • **`MessagingArchiver`** — implements `ICommunicationArchiver` with `SupportedType =&gt; CommunicationType.Message`. `GenerateEml(...)` produces a **message-transcript artifact** (the `.eml` analog) as `EmlResult` bytes + filename; the pipeline writes it to SPE via `SpeFileStore` (ADR-007), exactly as `EmailArchiver` feeds `.eml` archival. Do NOT invent a new archive/storage path — reuse the same `ICommunicationArchiver` → SPE flow.
+
+    Register both keyed to `CommunicationType.Message` in `CommunicationModule` (ADR-010, unconditional). Mirror `EmailChannelSender` / `EmailArchiver` exactly in shape. `CommunicationService` MUST remain Graph-free AND ACS-free — it dispatches through `CommunicationChannelDispatcher.ResolveSender(Message)` / `ResolveArchiver(Message)`; it must not gain any `Azure.Communication.*` reference. Do NOT modify the dispatcher, the engine, enrichment, the regarding model, or the review UI — adding this channel is purely additive registration (that is the seam's whole point / NFR-04).
+  </prompt>
+
+  <role>
+    Spaarke BFF Communication architect. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-045 (channel seams — sender/archiver shipped R4), ADR-046 (ACS messaging channel — authored task 007), ADR-007 (SpeFileStore facade), ADR-010 (DI minimalism via `CommunicationModule`), ADR-032 (Null-Object), §11 Component Justification, and `.claude/constraints/bff-extensions.md`.
+  </role>
+
+  <goal>
+    `MessagingChannelSender` (`ICommunicationChannelSender`, `SupportedType = Message`) transmits over ACS Chat server-side using the sender's minted token and returns the ACS message id as `ProviderMessageId`; `MessagingArchiver` (`ICommunicationArchiver`, `SupportedType = Message`) emits a message-transcript artifact archived to SPE via `SpeFileStore`. Both are registered keyed to `CommunicationType.Message` in `CommunicationModule`, unconditional. `CommunicationChannelDispatcher.ResolveSender(Message)` / `ResolveArchiver(Message)` resolve them with NO dispatch-site edit. `CommunicationService` stays Graph-free and ACS-free (dispatches only). Build clean; seam + dispatch tests pass; publish-size (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + §11 Component Justification reported; `/conflict-check` before PR.
+  </goal>
+
+  <context>
+    <background>
+      **Mirror the email seam.** email-r4 task 016 hoisted send + `.eml` archival behind two `CommunicationType`-keyed seams: `ICommunicationChannelSender` (`EmailChannelSender` wraps the Graph send path) and `ICommunicationArchiver` (`EmailArchiver` wraps `.eml` generation), resolved by `CommunicationChannelDispatcher`. A new channel = register two impls keyed to a new `CommunicationType` — the dispatch site, engine, enrichment, regarding model, and review UI do NOT change. This task is that new channel: messaging over ACS Chat. Like email's `.eml`, an ACS chat message is a transport artifact the BFF processes into a `sprk_communication` (type=Message) record plus a transcript archive in SPE. **Dataverse is the record; ACS is transport.** (design §2, §3.1, §4.)
+
+      **§11 Component Justification (NEW surface — the two impls).**
+      • Existing: the seams (`ICommunicationChannelSender` / `ICommunicationArchiver`) already exist; there is NO messaging implementation of either — verified by grep (`grep -r "CommunicationType.Message" Services/Communication/Channels/` returns nothing before this task).
+      • Extension: cannot be an extension of `EmailChannelSender`/`EmailArchiver` — those own Graph/`.eml` concerns and are keyed to `CommunicationType.Email`; a second channel is by construction a second keyed implementation, not a modification of the first (the dispatcher's `ToDictionary(s =&gt; s.SupportedType)` requires exactly one impl per type).
+      • Cost-of-doing-nothing (concrete): without `MessagingChannelSender`, `CommunicationService.SendAsync` dispatching `CommunicationType.Message` throws `CHANNEL_NOT_SUPPORTED` (400) — no chat can be sent at all. Without `MessagingArchiver`, a sent message has no transcript archived to SPE — the `.eml`-analog artifact is absent, breaking the archive parity email has.
+
+      Scope discipline: this is the messaging sender + archiver + their registration ONLY. Do NOT build the ingestor (task 021), the Event Grid capture (030/031), the thread resolver (040), or the outbound persist-on-send wiring (051 owns `CommunicationService` dispatch of the Message type + echo-dedup). Keep the impls thin over the W1 ACS services — do not re-implement ACS identity/thread/token logic here (that is 010/011).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailArchiver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationChannelSender.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/ICommunicationArchiver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/CommunicationChannelDispatcher.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Acs/ (W1 — ACS identity/token minting task 010 + thread/membership ops task 011)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-01">Implement `ICommunicationChannelSender` + `ICommunicationArchiver` for `CommunicationType.Message`, registered in the channel dispatcher; sending a message dispatches through `CommunicationChannelDispatcher.ResolveSender(Message)`; the archiver writes a message-transcript artifact to SPE.</constraint>
+    <constraint source="ADR-045">Messaging is a channel provider over the shipped sender/archiver seams — dispatch by `sprk_communicationtype`. The dispatcher, engine, enrichment, regarding model, and review UI MUST NOT change to add this channel (NFR-04). Adding a channel = additive keyed registration only.</constraint>
+    <constraint source="ADR-046">ACS is transport; Dataverse is the record. Follow ADR-046 (task 007) for the ACS-transport / Dataverse-record / BFF-mints-tokens posture.</constraint>
+    <constraint source="ADR-007">The message-transcript artifact is archived to SPE via the `SpeFileStore` facade only — no direct Graph/`GraphServiceClient` injection.</constraint>
+    <constraint source="ADR-010">Register both impls via `CommunicationModule` only, keyed to `CommunicationType.Message`, unconditional (ADR-032 Null-Object if any dependency is feature-gated). `ToDictionary(s =&gt; s.SupportedType)` in the dispatcher requires exactly one impl per type — do not duplicate the Message key.</constraint>
+    <constraint source="ADR-028">ACS transmit uses the sender's server-minted chat token via the W1 ACS services; MUST NOT `new` a credential / `ConfidentialClientApplication`; use the central `TokenCredential`. No ACS admin capability or token is exposed to any client.</constraint>
+    <constraint source="NFR-02">Transcript archival and any enrichment side-effects MUST be best-effort and non-fatal — a transcript/archive failure MUST NOT fail the send. Mirror `EmailChannelSender`'s best-effort Internet-Message-Id capture pattern.</constraint>
+    <constraint source="project">ACS transport only for messaging; MUST NOT introduce a client-side ACS SDK; MUST NOT use Activities / OOB email / native Teams chat. `MessagingChannelSender` returns the ACS message id as `ProviderMessageId` so 031/051 can echo-dedup on it.</constraint>
+    <constraint source="project">`CommunicationService` MUST remain Graph-free AND ACS-free — no `Azure.Communication.*` reference leaks into it; it dispatches through the dispatcher only. Do NOT edit the dispatcher, engine, enrichment, or review UI.</constraint>
+    <constraint source="root §10">bff-extensions Placement Justification in the PR (messaging sender/archiver live in the BFF — sole ACS-token-minting + `sprk_communication` mutation point); publish-size delta vs ~45.30 MB baseline; no new HIGH CVE. Run `/conflict-check` before PR (shared `Services/Communication/` hot-path).</constraint>
+    <constraint source="§11">State each new impl's concrete cost-of-doing-nothing (CHANNEL_NOT_SUPPORTED 400 on send; missing SPE transcript) in the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Type-keyed channel seam impl" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailChannelSender.cs">
+        Implement `ICommunicationChannelSender` with `SupportedType =&gt; CommunicationType.Message`; own all provider (ACS) wire concerns; map provider errors to `SdapProblemException`; capture the provider message id into `ChannelSendResult.ProviderMessageId` best-effort. `MessagingChannelSender` mirrors this shape over ACS instead of Graph.
+      </pattern>
+      <pattern name="Thin archiver over transcript generation" location="src/server/api/Sprk.Bff.Api/Services/Communication/Channels/EmailArchiver.cs">
+        Implement `ICommunicationArchiver.GenerateEml(...)` returning `EmlResult` (bytes + filename); the pipeline archives to SPE. `MessagingArchiver` emits the chat-transcript equivalent — same seam, different artifact format.
+      </pattern>
+      <pattern name="Additive keyed registration" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs">
+        Register the new sender + archiver as additional `ICommunicationChannelSender` / `ICommunicationArchiver` implementations; the dispatcher's `IEnumerable` ctor injection + `ToDictionary(SupportedType)` picks them up with no dispatch-site change.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `EmailChannelSender.cs`, `EmailArchiver.cs`, `ICommunicationChannelSender.cs`, `ICommunicationArchiver.cs`, `CommunicationChannelDispatcher.cs`, and `CommunicationType.cs` to fix the exact seam shapes (`SupportedType`, `SendAsync`/`ChannelSendResult`, `GenerateEml`/`EmlResult`) to mirror. Confirm task 006 added `CommunicationType.Message = 100000004`.</step>
+    <step order="2">Read the W1 ACS services (`Services/Communication/Acs/` — task 010 token minting + task 011 thread/membership/`SendMessage` ops) to identify the exact server-side API `MessagingChannelSender` calls. Read `.claude/constraints/bff-extensions.md` §F + §11 + the ADR-046 channel posture.</step>
+    <step order="3">Implement `MessagingChannelSender : ICommunicationChannelSender` (`SupportedType =&gt; CommunicationType.Message`): resolve the sender's `communicationUserId` + minted chat token via the W1 services, call the ACS thread `SendMessage`, map ACS errors to `SdapProblemException` (a `CHANNEL_SEND_FAILED`-style code), and return `ChannelSendResult { ProviderMessageId = &lt;ACS message id&gt; }`. Keep it thin over W1 — no re-implementation of identity/thread/token logic.</step>
+    <step order="4">Implement `MessagingArchiver : ICommunicationArchiver` (`SupportedType =&gt; CommunicationType.Message`): `GenerateEml(...)` produces the chat-transcript artifact (`EmlResult` bytes + a message-transcript filename). Keep archival best-effort/non-fatal (NFR-02). Confirm the artifact is written to SPE via the existing `ICommunicationArchiver` → `SpeFileStore` flow (do not add a new storage path).</step>
+    <step order="5">Register both impls keyed to `CommunicationType.Message` in `CommunicationModule` (ADR-010, unconditional). Verify the dispatcher resolves them without any dispatch-site edit.</step>
+    <step order="6">Grep-verify `CommunicationService`, `CommunicationChannelDispatcher`, the engine, enrichment, regarding model, and review UI are UNCHANGED (no `Azure.Communication.*` reference in `CommunicationService`); confirm dispatch of `CommunicationType.Message` now resolves the messaging impls instead of throwing `CHANNEL_NOT_SUPPORTED`.</step>
+    <step order="7">Write tests: sending `CommunicationType.Message` routes through `MessagingChannelSender` (ACS `SendMessage` invoked; `ProviderMessageId` carries the ACS message id); archival routes through `MessagingArchiver` → SPE; the dispatcher resolves each by type; email dispatch is unaffected (regression). Prefer vertical-slice seam tests per ADR-038 (no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests).</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing email send/archive tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/msg-020-publish/`; report compressed size + delta vs ~45.30 MB baseline. ACS BFF SDKs (`Azure.Communication.Chat` 1.4.0 / `Azure.Communication.Identity` 1.3.1) are thin over `Azure.Core`; expect a small delta. If ≥+5 MB single-task, justify; ≥55 MB architecture review; ≥60 MB HARD STOP.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVE (note any introduced by the ACS packages).</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff; `adr-check` against `spec.md` (focus ADR-045 seam boundary + NFR-04 additive-registration + ADR-007 SPE archive + ADR-010/032 DI + §11 justification). Resolve Critical findings (path C) or surface an ADR conflict (root §6.5).</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` BFF hot-path — coordinate with email-r4 / notification-spine-r1).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (020 ✅) + `current-task.md`; record decisions (ACS send API used, transcript artifact format/filename, `ProviderMessageId` = ACS message id contract for 031/051 echo-dedup).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect email seam impls, dispatcher, W1 ACS services, SpeFileStore</tool>
+    <tool name="edit">Implement `MessagingChannelSender` + `MessagingArchiver`; register in `CommunicationModule`</tool>
+    <tool name="bash">Build, seam/dispatch tests, publish-size, CVE scan</tool>
+    <tool name="grep">Verify `CommunicationService`/dispatcher/engine/enrichment untouched + ACS-free</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingChannelSender.cs (NEW — ICommunicationChannelSender for Message)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingArchiver.cs (NEW — ICommunicationArchiver for Message; transcript → SPE)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — register both keyed to CommunicationType.Message)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (Message dispatch routes to messaging sender/archiver; ProviderMessageId = ACS message id; email regression)</output>
+    <output type="docs">PR description with §11 Component Justification (CHANNEL_NOT_SUPPORTED + missing SPE transcript failure modes) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MessagingChannelSender : ICommunicationChannelSender` exists with `SupportedType =&gt; CommunicationType.Message`; `MessagingArchiver : ICommunicationArchiver` exists with `SupportedType =&gt; CommunicationType.Message`.</criterion>
+    <criterion testable="true">Sending a `CommunicationType.Message` communication resolves via `CommunicationChannelDispatcher.ResolveSender(Message)` and transmits over ACS Chat server-side (no `CHANNEL_NOT_SUPPORTED` throw for Message).</criterion>
+    <criterion testable="true">`MessagingChannelSender.SendAsync` returns a `ChannelSendResult` whose `ProviderMessageId` is the ACS message id (the echo-dedup key for 031/051).</criterion>
+    <criterion testable="true">`MessagingArchiver` produces a message-transcript `EmlResult` archived to SPE via `SpeFileStore`; a transcript/archive failure does NOT fail the send (NFR-02).</criterion>
+    <criterion testable="true">Both impls are registered via `CommunicationModule`, unconditional, keyed to `CommunicationType.Message`; no duplicate-key registration error at startup.</criterion>
+    <criterion testable="true">`CommunicationService` contains no `Azure.Communication.*` (and no `Microsoft.Graph`) reference; the dispatcher, engine, enrichment, regarding model, and review UI are byte-unchanged by this task (grep/diff-verifiable).</criterion>
+    <criterion testable="true">No client-side ACS SDK is introduced anywhere (server-side only).</criterion>
+    <criterion testable="true">`dotnet build` clean; existing email send/archive tests pass; publish-size delta reported vs ~45.30 MB (≤60 MB); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 006 (`CommunicationType.Message` enum), 007 (ADR-046 posture), 010 (ACS identity + token minting), 011 (ACS thread + `SendMessage`/membership). Blocks 051 (outbound persist-on-send wiring consumes this sender + the `ProviderMessageId` echo-dedup contract) and 070 (attachment materialization feeds this send/archive path). `parallel-safe: true` within W2 — distinct new files from 021 (the ingestor).
+
+    Strict scope: messaging sender + archiver + their registration only. Do NOT implement the ingestor seam (021), Event Grid capture (030/031), thread resolver (040), or `CommunicationService` Message-dispatch/echo-dedup wiring (051). If a need seems to require editing `CommunicationService` or the dispatcher to add this channel, the seam is being used wrong — the whole point of ADR-045 is that a channel is additive registration (NFR-04). Keep the impls thin over the W1 ACS services.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Per root §10 + §11: publish-size delta (vs ~45.30 MB) + CVE + bff-extensions Placement Justification + Component Justification (per-impl failure mode) in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/` hot-path). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

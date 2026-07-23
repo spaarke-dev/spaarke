@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>preference≠permission negative test; not-a-second-decider</title>
+    <phase>4: User Model</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, unit-test, integration-test, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>TEST-MODIFYING override — any tests/** task runs FULL rigor unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified assertion test against a known contract (AgentToolFilterContext members); low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the negative test that mechanically enforces preference≠permission and not-a-second-decider: assert AgentToolFilterContext carries no profile/memory-derived members, and that the profile fragment never grants a capability (grounding still gates). Assert the chip reorder is deterministic + preference-keyed with no model call.
+  </prompt>
+
+  <role>
+    SPAARKE test engineer expert in the dispatch spine, AgentToolFilterContext, and ADR-039 invariants.
+  </role>
+
+  <goal>
+    A passing negative test proving (1) AgentToolFilterContext has no profile/memory-derived members, (2) an injected profile does not flip any dispatch/grounding decision, and (3) chip reorder is deterministic + preference-keyed (no model call).
+  </goal>
+
+  <context>
+    <background>
+      This is the mechanical proof of FR-E3/E4 and the ADR-039 project-scoped constraint. It guards against the User Model quietly becoming a second decider.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolProjection.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">preference ≠ permission; ONE decider. The test MUST fail if a profile-derived member appears in AgentToolFilterContext or if profile injection changes a grounding decision.</constraint>
+    <constraint source="ADR-038">Prefer unit + seam; no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Enumerate AgentToolFilterContext members; assert none are profile/memory-derived.</step>
+    <step order="2">Add a test: with vs without an injected profile, the set of grounded tools is identical.</step>
+    <step order="3">Add a test: chip reorder is deterministic + preference-keyed (same input → same order; no model call).</step>
+    <step order="4">Run; ensure red-before-green semantics (test would fail if a profile member leaked in).</step>
+    <step order="5">Update TASK-INDEX.md 031 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run unit + seam tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (preference≠permission negative test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A test asserts AgentToolFilterContext carries no profile/memory-derived members.</criterion>
+    <criterion testable="true">A test asserts profile injection does not change the grounded-tool set.</criterion>
+    <criterion testable="true">A test asserts chip reorder is deterministic + preference-keyed with no model call.</criterion>
+    <criterion testable="true">All added tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-E3 / FR-E4. TEST-MODIFYING rigor override applies.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. FULL-rigor Step 9.5 (TEST-MODIFYING override).</protocol>
+  </execution>
+</task>

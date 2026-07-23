@@ -164,22 +164,36 @@ public class CreateMatterCapabilityContractTests
     }
 
     [Fact]
-    public void LiveBindingMirror_DoesNotYetContainCreateMatter()
+    public void LiveBindingMirror_ContainsCreateMatter_CreateTaskConsistent()
     {
-        // Documents the deliberate defer-live-seed decision (task 020 precedent): adding this
-        // row to the LIVE mirror ahead of the live sprk_analysisaction row would misrepresent
-        // it as already-seeded and would report MISSING IN ENV drift on the next
-        // Seed-PlaybookConsumers.ps1 -DiffOnly run. When the deploy step (gate G-R2-A / task
-        // 049) lands the live row and refreshes this mirror via -Export, THIS test should be
-        // updated/removed in the SAME PR — its failure is the intended signal that the staged
-        // artifact graduated to live.
+        // create-matter GRADUATED to live on 2026-07-11 (FR-A1-13 deploy step): the live
+        // sprk_analysisaction (CREATE-MATTER@v1, id 63f086d3-767d-f111-ab0e-70a8a590c51c) +
+        // sprk_playbookconsumer (create-matter/default) rows were seeded on spaarkedev1, and this
+        // mirror was updated in the SAME PR (superseding the prior defer-live-seed tripwire per
+        // that test's own instruction). This assertion now protects the live routing shape: the
+        // mirror carries create-matter with the same drafting-then-gated-write conventions as
+        // create-task (Informational disposition, None risk, Loop-Elicitation capture), bound to
+        // the CREATE-MATTER@v1 Action and enabled.
         var mirrorPath = Path.Combine(RepoRoot(), "infra", "dataverse", "sprk_playbookconsumer-rows.json");
         using var mirror = JsonDocument.Parse(File.ReadAllText(mirrorPath));
+        var rows = mirror.RootElement.GetProperty("rows").EnumerateArray().ToArray();
 
-        mirror.RootElement.GetProperty("rows").EnumerateArray()
-            .Any(r => r.GetProperty("consumerType").GetString() == "create-matter")
-            .Should().BeFalse(
-                "create-matter is staged (not yet live) — see create-matter-binding-row-pending-seed.json's deploySequence");
+        var createMatter = rows.SingleOrDefault(r =>
+            r.GetProperty("consumerType").GetString() == "create-matter"
+            && r.GetProperty("consumerCode").GetString() == "default");
+        createMatter.ValueKind.Should().NotBe(JsonValueKind.Undefined,
+            "create-matter is live — the mirror must carry the seeded Binding row");
+
+        createMatter.GetProperty("actionCode").GetString().Should().Be(ActionCode);
+        createMatter.GetProperty("enabled").GetBoolean().Should().BeTrue();
+
+        var createTask = rows.Single(r =>
+            r.GetProperty("consumerType").GetString() == "create-task"
+            && r.GetProperty("consumerCode").GetString() == "default");
+        createMatter.GetProperty("disposition").GetInt32().Should().Be(createTask.GetProperty("disposition").GetInt32());
+        createMatter.GetProperty("risk").GetInt32().Should().Be(createTask.GetProperty("risk").GetInt32());
+        createMatter.GetProperty("captureMode").GetInt32().Should().Be(createTask.GetProperty("captureMode").GetInt32());
+        createMatter.GetProperty("surfaces").GetString().Should().Be(createTask.GetProperty("surfaces").GetString());
     }
 
     private static string RepoRoot()

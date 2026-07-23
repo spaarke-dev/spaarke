@@ -1,0 +1,38 @@
+<task id="VHVU-012" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Build Report Card wizard code page</title>
+    <status>complete</status>
+    <phase>A1</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>code-page, wizard, react, report-card</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-010</dependencies>
+    <parallel-group>A1-pages</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+  <prompt>Create a standalone code page that mounts the shared CreateReportCardWizard, mirroring the Event page via the bootstrapWizardPage() factory. Needed for VisualHost's "+" navigateTo cutover (VHVU-030).</prompt>
+  <role>Code-page developer</role>
+  <goal>A deployable Report Card wizard code page that mounts CreateReportCardWizard full-page via the shared factory.</goal>
+  <constraints>
+    <constraint source="ADR-028">Auth via @spaarke/auth only (through the factory).</constraint>
+    <constraint source="project">Mirror the Event/Invoice page structure; do not fork the bootstrap.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/solutions/CreateEventWizard/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CreateReportCardWizard/</file>
+      <file>src/client/webresources/js/sprk_wizard_commands.js</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Scaffold `src/solutions/CreateReportCardWizard/` mirroring the Event solution.</step>
+    <step id="2">Mount `CreateReportCardWizard` via `bootstrapWizardPage()`.</step>
+    <step id="3">Build; confirm web-resource envelope contract.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>Report Card wizard code page builds.</criterion>
+    <criterion>Uses the shared factory.</criterion>
+    <criterion>Web-resource naming follows convention.</criterion>
+  </acceptance-criteria>
+</task>

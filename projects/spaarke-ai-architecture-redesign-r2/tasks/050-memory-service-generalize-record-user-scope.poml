@@ -1,7 +1,7 @@
 <task id="AIR2-050" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Memory Service — generalize MatterMemoryService→RecordMemory + User scope + NEW subject-partitioned container</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>M — G-R2-B Memory</phase>
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>3 days</estimated-effort>
@@ -40,6 +40,8 @@
     <constraint source="ADR-040">Not a parallel session cache — Record/User are cross-session governed objects, a DIFFERENT concern from the Conversation ledger facade. State this by construction in code + comments.</constraint>
     <constraint source="ADR-013">CRUD/satellite consumers reach memory only via `Services/Ai/PublicContracts/`; do not export the concrete service.</constraint>
     <constraint source="project">Partition by SUBJECT (`entityId`/`userId`), NEVER `/tenantId` — dedicated-per-customer envs make `/tenantId` a single hot logical partition against the 20 GB cap. Cosmos partition keys can't change in place → NEW container reusing existing service code.</constraint>
+    <constraint source="operator-2026-07-09">RULED (pre-flight architecture review): (a) document model = PER-FACT documents aligned to the MemoryItem v1 contract (partition = `/subjectId`, doc id = fact id; keep `tenantId` as a plain metadata field on every doc, NOT the partition) — do NOT carry forward the legacy one-aggregate-doc-per-subject shape, and do NOT invent a third shape (the Cosmos doc is essentially MemoryItem v1 + `tenantId` + `_etag`); (b) migration = FRESH container, NO doc migration — leave the legacy matter-keyed docs untouched (purge is a post-069-UAT hygiene follow-up); (c) canonical `userId` for User-scope partitioning = Dataverse `systemuserid`, resolved via the existing ADR-028 one-hop oid→systemuserid machinery (same identity 055 uses) — document this on the model; (d) MEMORY HYGIENE: preserve upsert-by-(Type,Key)-per-subject supersession semantics so a repeated/updated capture REPLACES the prior fact for that key rather than accumulating duplicates or contradictions — silent AI-initiated writes (057) make this load-bearing; assert with a test.</constraint>
+    <constraint source="audit-2026-07-09">The legacy `memory` container is SHARED: PinnedContextRepository (`pinned-context_*`) and WorkspaceStateService (`workspace-tab_*`) docs live in it alongside the matter-memory docs. Do NOT retire, re-key, or touch the container itself — the migration decision covers ONLY the MatterMemoryService docs. New container: default TTL off (`-1`); per-item expiration lands in task 052 via `retentionClass` (legacy container's 90-day TTL is NOT the model). Keep the single production consumer (PlaybookChatContextProvider.AppendMatterMemoryAsync) working through the generalized service against the new container (it simply starts empty on dev).</constraint>
     <constraint source="project">Record memory keys generically by `(entityType, entityId)` — matter-only keying is the regression to remove. Record memory holds DERIVED knowledge only; never duplicate live Dataverse fields (the Binder reads those directly per FR-B-04).</constraint>
     <constraint source="project">Insights-Engine-as-consumer direction: the envelope + service must not preclude a `source: insights-engine` fact. Wiring is a follow-on, out of scope here.</constraint>
     <constraint source="ADR-038">Service tests are KEEP-path integration/service tests in `tests/unit/Sprk.Bff.Api.Tests/`; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
@@ -110,6 +112,6 @@
   </acceptance-criteria>
 
   <escalation>
-    <trigger>The live-doc migration decision (Step 3) is a judgment boundary with an irreversible consequence — Cosmos partition keys cannot change in place, and choosing "migrate" vs "fresh-container-and-leave-legacy" affects dev data and any downstream reads. Surface the decision with options + recommendation (CLAUDE.md §6 Human Escalation) BEFORE executing a destructive migration; do not silently drop or rewrite existing matter-keyed docs.</trigger>
+    <trigger>The live-doc migration decision (Step 3) is a judgment boundary with an irreversible consequence — Cosmos partition keys cannot change in place. PRE-RULED by the operator 2026-07-09: fresh-container-and-leave-legacy (non-destructive; nothing irreversible remains on this path). Record the ruling + rationale in project notes per Step 3. Escalate ONLY if implementation discovers the ruled path is unworkable, or if any step would drop/rewrite existing docs (forbidden).</trigger>
   </escalation>
 </task>

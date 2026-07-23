@@ -2,7 +2,7 @@
   <metadata>
     <title>FR-06a upload fidelity branch (original-if-unedited)</title>
     <phase>1 Entry</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <effort>high</effort>
     <dependencies>013</dependencies>
@@ -109,4 +109,56 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Implemented as a CLIENT-side branch (directional deviation, grounded in code): the retained
+    original bytes are ALREADY held for the whole mount lifetime in `ComposeWorkspace`'s
+    `state.docxBytes` (set once by the `loadSucceeded`/`mountTransient` reducer actions and never
+    mutated by any other action — verified by reading `ComposeWorkspace.types.ts`), so no new
+    plumbing was needed to "retain" the original (step 1 was already satisfied by the existing
+    R1/012 architecture). `triggerSave` now reads `editorRef.current.isDirty()` (the editor's own
+    authoritative dirty flag, exposed on `ComposeEditorHandle` — chosen over the local `isDirty`
+    React state because that state can lag an in-flight mammoth import per DEF-01) and only calls
+    `tipTapToDocxBytes` via `editor.serialize()` when dirty (or defensively, when no original bytes
+    were retained); otherwise it sends `state.docxBytes` verbatim. `ComposeService.SaveAsync`
+    required NO behavior change — it already treats `Content` as an opaque byte payload persisted
+    through the SpeFileStore/`ISpeFileOperations` facade (ADR-007) to whichever container
+    create-on-save (013) resolved; a documentation comment was added there to make the invariant
+    explicit and point at the new regression test. New test file
+    `ComposeServiceUploadFidelityTests.cs` (4 tests) guards BFF-side byte-identity for both the
+    create-on-save (Fork B) and replace-existing paths, plus the negative/no-op-edit case.
+
+    Verification: dotnet build 0 errors; Compose-scoped BFF tests 287/287 green (incl. the 4 new);
+    full BFF unit suite 8045/8046 pass (1 unrelated pre-existing flake,
+    `TenantCacheMetricsTests.GetAsync_MissThenHit_IncrementsMissesThenHits`, confirmed green in
+    isolation — a shared-static-counter flake under full-suite parallelism, not touched by this
+    task). Compose.Components: `tsc --noEmit` clean; jest 69/69 (8 suites) green — no new client
+    test was added (write boundary restricted this task to production code in
+    ComposeWorkspace.tsx only, not a new/edited jest file).
+
+    BFF hygiene: publish (Release) compressed 46.56 MB incl. PDBs — well under the 60 MB ceiling
+    and ~0 delta attributable to this task (no new packages/dependencies; the absolute number
+    differs from the CLAUDE.md-cited 49.63 MB reference point because many other tasks have landed
+    on this branch since that baseline was taken). `dotnet list package --vulnerable
+    --include-transitive` shows only the pre-existing Kiota HIGH advisory — no NEW HIGH CVE.
+
+    Quality gates (Step 9.5): code-review clean (no Critical/Warning on the ~28-line diff across
+    the two production files + the new test file; both touched files are pre-existing large files,
+    growth from this task is <2% each). adr-check: no violation attributable to this diff. Ran
+    `Spaarke.ArchTests` for completeness — 5 pre-existing failures exist on this branch
+    (ADR-007/009/010, all in `Sprk.Bff.Api.Services.Communication.*` / `Api.Office.Errors.*` /
+    `Infrastructure.Errors.*` / caching / options-pattern classes) — none reference Compose and
+    none are introduced or touched by this task; flagged as pre-existing debt, out of this task's
+    scope.
+
+    Deferrals discovered (NOT fixed — out of file-list bounds / separate FRs): (1) `SaveComposeDocumentBody`
+    (ComposeEndpoints.cs) has no `containerId` wire field and `ComposeWorkspace.tsx` never sets
+    `documentRef.containerId` or sends it on Save — the client→BFF create-on-save (013) `ContainerId`
+    plumbing appears incomplete end-to-end; (2) `ComposeToolbar`'s Save button is disabled whenever
+    `documentId` is empty (`hasDocument` check), which is always true for a transient
+    Browse/Upload mount before its first Save — the Save button cannot be clicked for a brand-new
+    unsaved draft (Ctrl+S still works, bypassing the toolbar). Both look like pre-existing gaps in
+    task 013's/010's frontend wiring, not introduced here; recommend `/project-defer-issue-tracking`
+    entries if not already tracked.
+  </notes>
 </task>

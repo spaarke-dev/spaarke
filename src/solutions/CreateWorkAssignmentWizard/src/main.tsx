@@ -6,6 +6,7 @@ import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { WorkAssignmentWizardDialog } from "@spaarke/ui-components/components/CreateWorkAssignmentWizard";
+import { readHandoffFromUrl, handoffSeed as computeHandoffSeed } from "@spaarke/ui-components/services/surfaceHandoff";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
 
 function App() {
@@ -48,6 +49,15 @@ function App() {
   const dataService = React.useMemo(() => createXrmDataService(), []);
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // UAT R5-8 (the create-flow file leg): when launched from the Assistant "Assign Work" Quick Start
+  // card via the surface-launch envelope, read this page's hand-off and pass the session file refs
+  // so the wizard fetches + pre-attaches them. `undefined` on a direct open (no handoffId on the URL).
+  const initialFileRefs = React.useMemo(() => {
+    const seed = computeHandoffSeed(readHandoffFromUrl());
+    if (!seed || !seed.sessionId || seed.fileIds.length === 0) return undefined;
+    return { sessionId: seed.sessionId, fileIds: seed.fileIds, fileNames: seed.fileNames };
+  }, []);
+
   // Resolve SPE container ID from the user's business unit
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +99,7 @@ function App() {
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
         tenantId={resolvedTenantId}
+        initialFileRefs={initialFileRefs}
       />
     </FluentProvider>
   );

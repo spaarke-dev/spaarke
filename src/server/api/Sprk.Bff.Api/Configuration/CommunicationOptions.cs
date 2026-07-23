@@ -64,6 +64,16 @@ public class CommunicationOptions
     /// </summary>
     [Required(ErrorMessage = "Communication:WebhookSigningKey is required (HMAC-SHA256 webhook validation). See Key Vault secret 'communication-webhook-signing-key'.")]
     public string WebhookSigningKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Public URL that Microsoft Graph calls back to for subscription <b>lifecycle</b> notifications
+    /// (<c>reauthorizationRequired</c>, <c>subscriptionRemoved</c>, <c>missed</c>). Optional: when
+    /// null or empty, <see cref="WebhookNotificationUrl"/> is used (the same endpoint handles both
+    /// change and lifecycle notifications, distinguished by the <c>lifecycleEvent</c> body field).
+    /// Set this only when lifecycle notifications must be routed to a different URL than change
+    /// notifications.
+    /// </summary>
+    public string? LifecycleNotificationUrl { get; set; }
 }
 
 /// <summary>

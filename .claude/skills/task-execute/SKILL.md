@@ -5,7 +5,7 @@ techStack: [all]
 appliesTo: ["execute task", "run task", "start task", "work on task", "continue", "next task", "resume task", "pick up where I left off"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-17
+last-reviewed: 2026-07-16
 ---
 
 # task-execute
@@ -90,7 +90,7 @@ IF invoked for multiple tasks:
       d. Aggregate results (success/failure per task)
       e. **MANDATORY BUILD VERIFICATION**:
          - If any wave task modified `.cs` files: `dotnet build src/server/api/Sprk.Bff.Api/`
-         - If any wave task modified `.ts`/`.tsx`: `npm run build` in the relevant package
+         - If any wave task modified `.ts`/`.tsx`: **`npm run build:prod` for PCF** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1); `npm run build` for non-PCF packages without a `:prod` script
          - If build fails: STOP. Report breakage. Do not start next wave.
       f. Update TASK-INDEX.md statuses (🔲 → ✅ for success, 🔄 for retry)
       g. Proceed to next wave
@@ -131,10 +131,15 @@ ELSE (single task invocation):
 > 2. Cross-reference against the Hot-Path Watchlist in [`.claude/skills/conflict-check/SKILL.md`](../conflict-check/SKILL.md) (BFF, SpaarkeAi, ci-workflows, skill-directives, root-CLAUDE.md, BFF entry/DI).
 > 3. **If ANY watchlist trigger fires** (POML output/input file matches a watchlist glob, OR task tags include `bff-api`/`spaarke-ai`/`ci-workflows`/`skill-directive`/`root-claude`), invoke `/conflict-check` skill immediately. Read its output before proceeding to the rigor decision below.
 > 4. If `/conflict-check` reports a hard warn (file overlap with another active worktree), pause and escalate to user. Soft warns and silent passes proceed normally.
+> 5. **`projects/INDEX.md` maintenance (CLAUDE.md §17)**: if this task is the project's FIRST touch of a hot-path surface (BFF / SpaarkeAi / ci-workflows / skill-directives / root-CLAUDE) and the project's row in [`projects/INDEX.md`](../../../projects/INDEX.md) does not yet reflect that Y, update the row (main-session-only — `projects/INDEX.md` is outside `.claude/` but the registry is maintained atomically here + by project-pipeline Step 2, no cron).
 >
 > The Hot-Path Auto-Invoke check is binding for all tasks that touch the watchlist surfaces. The check itself takes seconds; the value is preventing concurrent edits on the same hot files.
 
-**BEFORE executing any task, determine rigor level using this decision tree:**
+**BEFORE executing any task, determine rigor level.** FIRST read the POML's authored `<rigor>` field (canonical
+name; accept the deprecated `<rigor-hint>` as an alias) — it is `task-create` Step 3.5.5's considered hint. Then
+validate it against the decision tree below. Use the authored `<rigor>` unless the tree clearly warrants a HIGHER
+level (e.g. the POML says STANDARD but the task actually modifies `.cs`/`.ts`/`.tsx` or has `bff-api`/`auth` tags →
+override UP to FULL and say so). Never silently override DOWN. If the POML has no `<rigor>`, compute from the tree.
 
 ```
 ┌─ Task has ANY of these characteristics? ─────────────────┐
@@ -368,7 +373,7 @@ FOR each pattern in <knowledge><patterns>:
 ADDITIONAL MODULE-SPECIFIC FILES:
   - pcf tags → READ src/client/pcf/CLAUDE.md
   - pcf tags → READ docs/guides/PCF-DEPLOYMENT-GUIDE.md
-  - bff-api tags → READ src/server/api/CLAUDE.md (if exists)
+  - bff-api tags → READ src/server/api/Sprk.Bff.Api/CLAUDE.md
   - dataverse tags → READ .claude/skills/dataverse-deploy/SKILL.md
   - deploy tags → READ .claude/skills/dataverse-deploy/SKILL.md
 
@@ -462,16 +467,18 @@ IF task involves modifying 4+ files:
      - Files where one imports from another → MUST serialize
 
   3. DELEGATE to subagents:
-     - Use Task tool with subagent_type="general-purpose"
-     - Send ONE message with MULTIPLE Task tool calls for parallel work
+     - Use the **Agent tool** with subagent_type="general-purpose"
+     - Send ONE message with MULTIPLE Agent tool calls for parallel work
      - Each subagent handles one module/component
      - Provide each subagent with:
        • Specific files to modify
        • Relevant constraints from task POML
        • Expected changes (from task steps)
+     - NOTE: subagents CANNOT write to `.claude/` (sub-agent write boundary, CLAUDE.md §3) — keep any
+       `.claude/`-touching work in the main session.
 
   4. COORDINATE results:
-     - Use TaskOutput tool to check completion
+     - You are notified when each background Agent completes (no polling tool needed)
      - Merge changes if needed
      - Run integration checks after all subagents complete
 
@@ -491,11 +498,11 @@ EXAMPLE - Task modifies 6 files:
       - Subagent 2: ComponentA.tsx
       - Subagent 3: ComponentB.tsx
 
-  Task tool call (Phase 2):
-    Send ONE message with THREE Task tool calls:
-    - Task 1: "Implement API endpoints A, B, C"
-    - Task 2: "Update ComponentA with new types"
-    - Task 3: "Update ComponentB with new types"
+  Agent tool call (Phase 2):
+    Send ONE message with THREE Agent tool calls:
+    - Agent 1: "Implement API endpoints A, B, C"
+    - Agent 2: "Update ComponentA with new types"
+    - Agent 3: "Update ComponentB with new types"
 
 WHEN NOT to parallelize:
   - Task has only 1-3 files (overhead not worth it)
@@ -1035,7 +1042,7 @@ When task has `pcf`, `react`, or `fluent-ui` tags:
 - [ ] Version bumped in Solution.xml
 - [ ] Version bumped in extracted ControlManifest.xml
 - [ ] Version shown in UI footer
-- [ ] Build succeeds: `npm run build`
+- [ ] Build succeeds: `npm run build:prod` (PCF prod build — NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1)
 - [ ] If deploying: Use `pac pcf push` or solution import
 - [ ] current-task.md updated with files modified
 
@@ -1045,11 +1052,14 @@ When task has `pcf`, `react`, or `fluent-ui` tags:
 
 When task has `bff-api`, `api`, or `minimal-api` tags:
 
-- [ ] Read `src/server/api/CLAUDE.md` (if exists)
+- [ ] Read `src/server/api/Sprk.Bff.Api/CLAUDE.md`
+- [ ] Load `.claude/constraints/bff-extensions.md` and state the **Placement Justification** (CLAUDE.md §10) in the PR/notes
 - [ ] Follow ADR-001 Minimal API patterns
 - [ ] Follow ADR-008 endpoint filter patterns
 - [ ] Build succeeds: `dotnet build`
 - [ ] Tests pass: `dotnet test`
+- [ ] **Publish-size verified (CLAUDE.md §10 / NFR-01)**: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` — report absolute compressed size + delta vs prior baseline (~49.63 MB incl. PDBs); **≤60 MB HARD ceiling**; ≥+5 MB single-task delta → justify; ≥55 MB cumulative → flag architecture review
+- [ ] No new HIGH CVE: `dotnet list package --vulnerable --include-transitive`
 - [ ] current-task.md updated with files modified
 
 ---

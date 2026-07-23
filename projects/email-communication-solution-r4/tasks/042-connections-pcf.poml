@@ -1,0 +1,138 @@
+<task id="042" project="email-communication-solution-r4">
+  <metadata>
+    <title>Connections PCF — multi-association review (typed slots + per-slot confidence/confirm + create-from-email) in the OOB form's accessories column</title>
+    <phase>Wave 4 — OOB form + PCFs (association review)</phase>
+    <status>completed</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>001, 002, 015</dependencies>
+    <blocks>043</blocks>
+    <tags>pcf, frontend, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PCF hosting the multi-association review surface (reads task-015 provenance, writes ADR-024 regarding via PolymorphicResolverService, fires create-from-email actions); cross-cuts ADR-022 (PCF React 16 / platform libraries), ADR-024, ADR-015, ADR-003/008; FULL Step 9.5 gates required.</rigor-reason>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-17</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Build a **Connections PCF** that hosts the multi-association review surface on the OOB `sprk_communication` model-driven form's right "accessories" column (the 34% side of the native 66/34 layout — the same column that already hosts the RELATED RECORD PCF). This REPLACES the Code-Page review surface (W4 architecture pivot, 2026-07-15 — see `notes/W4-architecture-pivot-oob-form-pcf.md`).
+
+    An email is regarding MANY records at once (Matter + Organization + Contact + Invoice …, per ADR-024's regarding family and task-015's multi-field candidates). The PCF renders each typed association slot with its own suggestion + confidence + confirm/change, lets the user add missing dimensions, and offers "create from this email" actions (Event / To Do / Invoice) — some engine-suggested from the structural-detector signals (task 014).
+
+    **Design source (do NOT redesign — port it):** the converged prototype `ConnectionsEditor` + `provenance.ts` at
+    `src/client/code-pages/CommunicationPage/src/components/{ConnectionsEditor,provenance,CommunicationHeader}.tsx`
+    (iterated live in `spaarke-prototype/projects/email-comm-r4-uat`). The chosen host is the right-rail (34%) layout. Port that component into the PCF's React root; keep the token-based Fluent v9 look (RegardingResolver already proves Fluent-v9-in-PCF on this form).
+
+    On confirm/accept, write the chosen regarding via the EXISTING regarding machinery — `PolymorphicResolverService.applyResolverFields` (ADR-024 typed lookup + denormalized fields); set `sprk_associationstatus` → Resolved when all review slots are confirmed. Capture an override reason (feedback signal only, no learning loop). Add the "Communications Awaiting Association" Dataverse view (`sprk_associationstatus in (Suggested, Pending Review, Ambiguous)`, matter-level auth-scoped, ADR-003/008; AI-flagged privilege shown as a flag, never decided — ADR-015).
+  </prompt>
+
+  <role>
+    Spaarke PCF engineer. Expert on PCF lifecycle (init/updateView/destroy, ADR-022 platform libraries), Fluent v9 in PCF, the regarding family (`RegardingResolver`, `PolymorphicResolverService.applyResolverFields`, `TODO_REGARDING_CATALOG`), and model-driven form control placement.
+  </role>
+
+  <goal>
+    A deployable PCF bound to the `sprk_communication` form (right column) that: (1) reads `sprk_associationprovenance` (task-015 JSON) + `sprk_associationstatus` from the control context; (2) renders the multi-connection editor (typed slots, per-slot confidence band + confirm/change, Accept-all, Link-another, create-from-email actions with engine-suggested ones flagged) — ported from the prototype ConnectionsEditor; (3) on confirm, writes regarding via `PolymorphicResolverService.applyResolverFields` and advances status; (4) captures override reason as a feedback signal; (5) the "Communications Awaiting Association" view exists, auth-scoped. PCF prod-builds clean; no new regarding mechanism; Step 9.5 gates pass.
+  </goal>
+
+  <context>
+    <background>
+      W4 pivoted from a Code Page to enhancing the OOB form with PCFs (owner decision 2026-07-15). The OOB form already carries a Spaarke PCF (RELATED RECORD v1.4.6) in the right column; this is the next PCF there. The multi-association model matches the engine: task-015 provenance emits candidates across multiple regarding fields simultaneously; the PCF surfaces them as independent typed slots. Create-from-email actions tie to task-014 detector signals (invoice → Invoice, calendar-invite → Event, deadline-response → To Do) and foreshadow W5's CreateEvent/Task/Notification.
+    </background>
+    <relevant-files>
+      <file>src/client/code-pages/CommunicationPage/src/components/ConnectionsEditor.tsx (PROTOTYPE design source — port)</file>
+      <file>src/client/code-pages/CommunicationPage/src/components/provenance.ts (PROTOTYPE — parse/derive helpers to port)</file>
+      <file>src/client/pcf/RegardingResolver/ (PCF + Fluent-v9-in-PCF reference; regarding write path)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (applyResolverFields — reuse)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts (optional on-accept field mapping)</file>
+      <file>projects/email-communication-solution-r4/notes/W4-architecture-pivot-oob-form-pcf.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="pivot">Host in the OOB form's right accessories column as a PCF — do NOT build/replace the form with a Code Page (W4 pivot; ADR-026 Path-A exception in spec.md).</constraint>
+    <constraint source="ADR-022">PCF platform-library React/Fluent per ADR-022; PCF lifecycle (init/updateView/destroy); read record via control context (no self-bootstrapped MSAL; host context supplies auth).</constraint>
+    <constraint source="ADR-024">Reuse the regarding family — `PolymorphicResolverService.applyResolverFields` + `TODO_REGARDING_CATALOG`. Write typed regarding lookups + denormalized fields. MUST NOT add a new regarding mechanism (§11).</constraint>
+    <constraint source="project">Port the converged prototype ConnectionsEditor — do NOT redesign the UX. Multi-slot per-entity, per-slot confidence band + confirm, Accept-all, Link-another, create-from-email (engine-suggested flagged).</constraint>
+    <constraint source="NFR-07">Review + "Communications Awaiting Association" view are matter-level auth-scoped (ADR-003/008); AI privilege flagged, never decided (ADR-015).</constraint>
+    <constraint source="project">Override reasons persisted as a feedback SIGNAL only — no learning loop (out of scope).</constraint>
+    <constraint source="project">View filter uses task-002-verified option-set integers for Suggested/Ambiguous (do NOT hardcode unverified integers).</constraint>
+    <constraint source="project">Build the PCF with `npm run build:prod` (NOT `npm run build`); deploy per `pcf-deploy` conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/notes/W4-architecture-pivot-oob-form-pcf.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-015-ai-privilege-flag-only.md</file>
+      <file>.claude/adr/ADR-003-authorization.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 in PCF" location="src/client/pcf/RegardingResolver/">
+        React root + FluentProvider inside a PCF control; read context.parameters + context.webAPI; write via services.
+      </pattern>
+      <pattern name="Regarding apply" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">
+        `applyResolverFields` writes the ADR-024 typed regarding lookup + denormalized fields for a chosen target.
+      </pattern>
+      <pattern name="Prototype component to port" location="src/client/code-pages/CommunicationPage/src/components/ConnectionsEditor.tsx">
+        Multi-slot editor + provenance derivation; the converged design — port, don't redesign.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read the prototype `ConnectionsEditor.tsx` + `provenance.ts` (the converged design) and `RegardingResolver/` (PCF + Fluent-v9-in-PCF + regarding write). Confirm `PolymorphicResolverService.applyResolverFields` signature.</step>
+    <step order="2">Scaffold the PCF (`src/client/pcf/CommunicationConnections/` or per pcf conventions): manifest binding the control to the `sprk_communication` form; platform-library React/Fluent (ADR-022); React root + FluentProvider.</step>
+    <step order="3">Port the ConnectionsEditor + provenance helpers into the PCF React tree. Source the record's `sprk_associationprovenance` + `sprk_associationstatus` + regarding fields from `context` (parameters/webAPI), not a URL.</step>
+    <step order="4">Wire per-slot Confirm / Accept-all → `PolymorphicResolverService.applyResolverFields` for the chosen target(s); set `sprk_associationstatus` → Resolved when all review slots resolved. Handle ambiguous slots (pick one). Optional Field Mapping on accept via `FieldMappingService`.</step>
+    <step order="5">Wire "Link another record…" (regarding catalog picker) + override-reason capture (feedback signal field/note; no learning loop).</step>
+    <step order="6">Wire "create from this email" actions (Event / To Do / Invoice); engine-suggested ones flagged from provenance signals. For R4, these may stub the create flow / navigate to a create form (full create-and-link wiring may defer to W5) — do NOT re-implement association logic client-side.</step>
+    <step order="7">Author the "Communications Awaiting Association" Dataverse view (`sprk_associationstatus in (Suggested, Pending Review, Ambiguous)`, matter-level auth-scoped; privilege flag column, never auto-decide).</step>
+    <step order="8">`npm run build:prod` the PCF — clean single bundle.</step>
+    <step order="9.5">FULL-rigor gates: `code-review` on the diff; `adr-check` against `spec.md` (ADR-022/024/015/003/008 + §11 reuse + ADR-026 Path-A pivot). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (042 ✅) + `current-task.md`; record catalog-extension decisions + feedback-signal storage. Deploy is task 043.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Prototype ConnectionsEditor + RegardingResolver PCF + resolver service</tool>
+    <tool name="write">Scaffold + port PCF</tool>
+    <tool name="edit">Wire confirm/accept/create + view</tool>
+    <tool name="bash">PCF prod build</tool>
+    <tool name="code-review">FULL-rigor gate</tool>
+    <tool name="adr-check">FULL-rigor gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationConnections/ (NEW — Connections PCF; ports prototype ConnectionsEditor + provenance)</output>
+    <output type="config">Dataverse "Communications Awaiting Association" view (auth-scoped)</output>
+    <output type="docs">Task notes: PCF manifest/binding, regarding write path, feedback-signal storage, create-action stubs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A PCF exists (`src/client/pcf/CommunicationConnections/`) bound to the `sprk_communication` form, prod-building via `npm run build:prod`.</criterion>
+    <criterion testable="true">It reads `sprk_associationprovenance` + status from context and renders the multi-slot connections editor (typed slots, per-slot confidence band + confirm/change, Accept-all, Link-another) ported from the prototype.</criterion>
+    <criterion testable="true">Confirm/Accept writes the chosen regarding via `PolymorphicResolverService.applyResolverFields` (grep confirms reuse; no new regarding mechanism) and advances `sprk_associationstatus`.</criterion>
+    <criterion testable="true">"Create from this email" actions render, with engine-suggested ones (from provenance signals) flagged.</criterion>
+    <criterion testable="true">Override reason captured as a feedback signal (no learning loop invoked).</criterion>
+    <criterion testable="true">"Communications Awaiting Association" view exists with the task-002-verified option-set integers, matter-level auth-scoped; privilege shown as a flag (ADR-015).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    W4 pivot (2026-07-15): OOB form + PCFs, not a Code Page. This PCF is the design-novel value; the composer + send/archival + attachment subgrid already exist (see the pivot note's capability audit). The prototype ConnectionsEditor is the converged UX — port it, don't redesign. Full create-and-link flows for Event/To Do may stub here and complete in W5 (CreateEvent/Task/Notification).
+
+    Depends on task 015 (`sprk_associationprovenance` shape) + task 002 (option-set integers). Reuses the regarding family — extend the catalog if a target type is missing; add no new branches.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files`. Apply FULL rigor — Step 9.5 REQUIRED. Port the converged prototype ConnectionsEditor; reuse the regarding family; PCF prod build (`npm run build:prod`). Deploy is task 043.
+    </protocol>
+  </execution>
+</task>

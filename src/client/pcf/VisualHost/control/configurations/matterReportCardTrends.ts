@@ -13,10 +13,10 @@
  * with the correct data bindings per performance area.
  */
 
-import type { TrendDirection } from '../components/TrendCard';
+import type { TrendDirection } from '../../../../shared/Spaarke.Visuals/src/components/TrendCard';
 export type { TrendDirection };
 
-export { calculateSlope, getTrendDirection } from '../utils/trendAnalysis';
+export { calculateSlope, getTrendDirection } from '../../../../shared/Spaarke.Visuals/src/utils/trendAnalysis';
 
 /**
  * Configuration for a single TrendCard instance on the Report Card tab.

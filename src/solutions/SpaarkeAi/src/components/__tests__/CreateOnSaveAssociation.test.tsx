@@ -32,6 +32,8 @@ import type { AssociationResult, IDataService, INavigationService } from '@spaar
 import { CreateOnSaveAssociationPrompt } from '../compose/CreateOnSaveAssociationPrompt';
 import { associateDocumentToParent } from '../compose/documentAssociationWrite';
 import { useCreateOnSaveAssociation } from '../compose/useCreateOnSaveAssociation';
+import { useCreateOnSaveAssociationGate } from '../compose/useCreateOnSaveAssociationGate';
+import { CreateOnSaveAssociationGateDialog } from '../compose/CreateOnSaveAssociationGateDialog';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -212,6 +214,224 @@ describe('CreateOnSaveAssociationPrompt', () => {
       expect(screen.getByTestId('association-choice-radio-group')).toBeInTheDocument();
       // No bespoke confirmation banner/dialog surface of its own.
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gate-dialog hosting (task 014-split) — the REMAINING half: render the picker
+// INSIDE the Tier-2c gate dialog and wire selection → setAssociation → the
+// already-landed associate() write on create-on-save completion.
+// ---------------------------------------------------------------------------
+
+/**
+ * Harness mirroring the real ThreePaneShell wiring: `useCreateOnSaveAssociationGate`
+ * owns the gate; a button stands in for the ComposeLaunchContext
+ * `onCreateOnSaveComplete(newDocumentId)` callback that ComposeWorkspace fires
+ * once a transient draft is persisted.
+ */
+function GateHarness(props: {
+  navigationService: INavigationService;
+  dataService: IDataService;
+  documentId: string;
+}) {
+  const { onCreateOnSaveComplete, dialogProps } = useCreateOnSaveAssociationGate({
+    dataService: props.dataService,
+    navigationService: props.navigationService,
+  });
+  return (
+    <>
+      <button data-testid="fire-create-on-save" onClick={() => onCreateOnSaveComplete(props.documentId)}>
+        fire create-on-save
+      </button>
+      <CreateOnSaveAssociationGateDialog {...dialogProps} />
+    </>
+  );
+}
+
+/** Nav-prop discovery fetch mock — resolves sprk_document → sprk_Matter nav prop. */
+function stubNavPropFetch() {
+  const fetchMock = jest.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      value: [
+        {
+          ReferencingAttribute: 'sprk_matter',
+          ReferencingEntityNavigationPropertyName: 'sprk_Matter',
+          ReferencedEntity: 'sprk_matter',
+        },
+      ],
+    }),
+  });
+  (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
+  return fetchMock;
+}
+
+describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
+  describe('picker-renders-in-gate', () => {
+    it('gateIsClosedUntilCreateOnSaveCompletes', () => {
+      renderLight(
+        <GateHarness
+          navigationService={createMockNavigationService()}
+          dataService={createMockDataService()}
+          documentId="doc-guid-1"
+        />
+      );
+
+      // Inert until a create-on-save fires — no dialog, no picker mounted.
+      expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('rendersThePickerInsideTheGateDialogOnCreateOnSave', async () => {
+      const user = userEvent.setup();
+      renderLight(
+        <GateHarness
+          navigationService={createMockNavigationService()}
+          dataService={createMockDataService()}
+          documentId="doc-guid-1"
+        />
+      );
+
+      await user.click(screen.getByTestId('fire-create-on-save'));
+
+      // The gate dialog is now open and HOSTS the FR-05 picker (all five choices),
+      // inside the real Tier-2c dialog surface — not a bespoke banner.
+      expect(await screen.findByTestId('create-on-save-association-gate')).toBeInTheDocument();
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      expect(screen.getByTestId('create-on-save-association-prompt')).toBeInTheDocument();
+      expect(screen.getByTestId('association-choice-none')).toBeInTheDocument();
+      expect(screen.getByTestId('association-choice-sprk_matter')).toBeInTheDocument();
+      expect(screen.getByTestId('association-choice-sprk_project')).toBeInTheDocument();
+      expect(screen.getByTestId('association-choice-sprk_invoice')).toBeInTheDocument();
+      expect(screen.getByTestId('association-choice-sprk_workassignment')).toBeInTheDocument();
+    });
+  });
+
+  describe('select→setAssociation→associate (with cleanGuid)', () => {
+    it('writesTheChosenParentWithACleanGuidWrappedDocumentIdOnConfirm', async () => {
+      const user = userEvent.setup();
+      stubNavPropFetch();
+      const dataService = createMockDataService();
+      // Braced + uppercase parent id from the Xrm lookup, AND a braced + uppercase
+      // document id from the server-minted sprk_documentid — both MUST be
+      // cleanGuid-normalized before the @odata.bind / entityset URL.
+      const navigationService = createMockNavigationService({
+        id: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}',
+        entityType: 'sprk_matter',
+        name: 'Smith v. Jones',
+      });
+
+      renderLight(
+        <GateHarness
+          navigationService={navigationService}
+          dataService={dataService}
+          documentId="{FFFFFFFF-1111-2222-3333-444444444444}"
+        />
+      );
+
+      // create-on-save completes → gate opens.
+      await user.click(screen.getByTestId('fire-create-on-save'));
+      await screen.findByTestId('create-on-save-association-gate');
+
+      // User picks Matter, then selects a record (→ onChange → setAssociation).
+      await user.click(screen.getByTestId('association-choice-sprk_matter'));
+      await user.click(screen.getByTestId('associate-to-step-select-record-button'));
+
+      // Confirm ("Done") → associate(newDocumentId) writes the @odata.bind.
+      await user.click(screen.getByTestId('association-gate-confirm'));
+
+      await waitFor(() => {
+        expect(dataService.updateRecord).toHaveBeenCalledWith(
+          'sprk_document',
+          // documentId cleanGuid-normalized (braces stripped, lowercased)
+          'ffffffff-1111-2222-3333-444444444444',
+          {
+            // parent id cleanGuid-normalized inside the @odata.bind entityset URL
+            'sprk_Matter@odata.bind': '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)',
+          }
+        );
+      });
+
+      // Gate closes after a successful write.
+      await waitFor(() => {
+        expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('none-path-is-a-graceful-no-op (Save never blocked)', () => {
+    it('confirmingWithNoneWritesNothingAndClosesTheGate', async () => {
+      const user = userEvent.setup();
+      const dataService = createMockDataService();
+
+      renderLight(
+        <GateHarness
+          navigationService={createMockNavigationService()}
+          dataService={dataService}
+          documentId="doc-guid-1"
+        />
+      );
+
+      await user.click(screen.getByTestId('fire-create-on-save'));
+      await screen.findByTestId('create-on-save-association-gate');
+
+      // Default choice is "None" — confirm immediately (a standalone document is valid).
+      await user.click(screen.getByTestId('association-gate-confirm'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
+      });
+      expect(dataService.updateRecord).not.toHaveBeenCalled();
+    });
+
+    it('skippingTheGateWritesNothingAndLeavesAStandaloneDocument', async () => {
+      const user = userEvent.setup();
+      const dataService = createMockDataService();
+
+      renderLight(
+        <GateHarness
+          navigationService={createMockNavigationService({
+            id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+            entityType: 'sprk_matter',
+            name: 'Smith v. Jones',
+          })}
+          dataService={dataService}
+          documentId="doc-guid-1"
+        />
+      );
+
+      await user.click(screen.getByTestId('fire-create-on-save'));
+      await screen.findByTestId('create-on-save-association-gate');
+
+      // Even after picking a parent type, "Skip" abandons the association — the
+      // document stays standalone; Save is never blocked on a parent.
+      await user.click(screen.getByTestId('association-choice-sprk_matter'));
+      await user.click(screen.getByTestId('association-gate-skip'));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
+      });
+      expect(dataService.updateRecord).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('dark-mode', () => {
+    it('rendersTheGateDialogUnderDarkThemeWithoutError', async () => {
+      const user = userEvent.setup();
+      renderDark(
+        <GateHarness
+          navigationService={createMockNavigationService()}
+          dataService={createMockDataService()}
+          documentId="doc-guid-1"
+        />
+      );
+
+      await user.click(screen.getByTestId('fire-create-on-save'));
+
+      expect(await screen.findByTestId('create-on-save-association-gate')).toBeInTheDocument();
+      expect(screen.getByTestId('create-on-save-association-prompt')).toBeInTheDocument();
+      expect(screen.getByTestId('association-gate-confirm')).toBeInTheDocument();
     });
   });
 });

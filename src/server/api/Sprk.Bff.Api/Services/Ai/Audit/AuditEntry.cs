@@ -5,7 +5,10 @@ namespace Sprk.Bff.Api.Services.Ai.Audit;
 /// <summary>
 /// Compliance audit record for a single AI interaction (ADR-015 Tier 2: Compliance Audit).
 ///
-/// Storage: Cosmos DB container <c>audit</c>, partition key <c>/tenantId</c>.
+/// Storage: Cosmos DB container <c>audit-partitioned</c>, partition key <c>/partitionKey</c>
+/// (a synthetic tenant + monthly-time-bucket value — see <see cref="PartitionKey"/>). Re-keyed off
+/// bare <c>/tenantId</c> by task AIR2-074 (FR-D-05) to stay under the Cosmos 20 GB logical-partition
+/// cap in customer-dedicated deployments.
 /// Retention: 7 years (configured at container provisioning time — no TTL on container).
 /// Immutability: enforced by both infrastructure policy and code (CreateItemAsync only).
 ///
@@ -21,11 +24,26 @@ public sealed class AuditEntry
     public string Id { get; init; } = $"{Guid.NewGuid()}_{Guid.NewGuid()}";
 
     /// <summary>
-    /// Tenant identifier used as the Cosmos DB partition key (/tenantId).
-    /// Every audit record is scoped to a single tenant — cross-tenant queries are blocked (ADR-015).
+    /// Tenant identifier. Retained as a first-class queryable field for cross-tenant isolation
+    /// (ADR-015) and as the tenant segment of the synthetic <see cref="PartitionKey"/>. Since the
+    /// AIR2-074 re-key, this is NO LONGER the raw Cosmos partition key on its own — the partition is
+    /// <c>{tenantId}|{yyyy-MM}</c> (tenant + monthly bucket) so a single tenant's audit trail does not
+    /// collapse into one logical partition against the 20 GB cap.
     /// </summary>
     [JsonPropertyName("tenantId")]
     public required string TenantId { get; init; }
+
+    /// <summary>
+    /// Synthetic Cosmos DB partition-key value (path <c>/partitionKey</c>): <c>{tenantId}|{yyyy-MM}</c>,
+    /// derived deterministically from <see cref="TenantId"/> and the record's <see cref="Timestamp"/>
+    /// via <see cref="AuditPartitionKey.Build"/>. Get-only + serialized so the persisted document
+    /// carries the value Cosmos extracts for the partition, while callers keep constructing
+    /// <see cref="AuditEntry"/> exactly as before (they set <c>TenantId</c> + <c>Timestamp</c>).
+    /// Re-keyed off bare <c>/tenantId</c> by task AIR2-074 (FR-D-05); mirrors the single-synthetic-key
+    /// discipline of the memory-items store (task AIR2-050 / ADR-042).
+    /// </summary>
+    [JsonPropertyName("partitionKey")]
+    public string PartitionKey => AuditPartitionKey.Build(TenantId, Timestamp);
 
     /// <summary>Azure AD object ID of the user who initiated the AI interaction.</summary>
     [JsonPropertyName("userId")]

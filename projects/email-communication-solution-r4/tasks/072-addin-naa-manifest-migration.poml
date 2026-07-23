@@ -1,0 +1,132 @@
+<task id="072" project="email-communication-solution-r4">
+  <metadata>
+    <title>Outlook add-in — migrate to `@spaarke/auth` `OfficeNaaStrategy` + unified JSON manifest + org-URL fix</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies></dependencies>
+    <blocks>074</blocks>
+    <tags>office-addins, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Migrates the Outlook add-in off deprecated auth services onto the canonical NAA strategy, converges two mismatched manifests, and removes a hardcoded org URL. Auth-surface change with real security + deployment impact; `office-addins` + `auth` tags trigger FULL rigor; must respect ADR-028 (no self-built credential; `OfficeNaaStrategy` only). Uses the `office-addins-deploy` skill for build/deploy.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `src/client/office-addins/` only (client TS + manifests) — disjoint from BFF W7 tasks. Blocks task 074 (which adds Association Engine suggestions to the same save pane).</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Harden the Outlook add-in's auth + manifest last-mile (the `@spaarke/auth` `OfficeNaaStrategy` foundation already ships on `master`, per Owner Clarification — no external blocker):
+
+    1. **NAA migration** — migrate the add-in off the DEPRECATED `NaaAuthService` / `DialogAuthService` / `authConfig` onto the canonical `@spaarke/auth` `OfficeNaaStrategy`. Remove the deprecated services once no consumer remains. No self-bootstrapped MSAL; no `ConfidentialClientApplication`; token flows through `OfficeNaaStrategy` / `authenticatedFetch`.
+
+    2. **Unified manifest** — the add-in currently has TWO mismatched manifests (XML v1.0.19 and JSON devPreview v1.0.0). Converge on the unified JSON manifest (the Microsoft-forward format), reconciling version + capabilities so a single manifest is the source of truth.
+
+    3. **Org-URL fix** — replace the hardcoded org URL `spaarkedev1.crm.dynamics.com` with configuration (environment-tokenized), so the add-in is not pinned to the dev org.
+
+    Build + deploy via the `office-addins-deploy` skill (Azure Static Web Apps / SWA CLI) and smoke-test the save flow in dev under NAA.
+  </prompt>
+
+  <role>
+    Spaarke Office Add-ins engineer authoritative on the Outlook add-in shell, the `@spaarke/auth` `OfficeNaaStrategy` (NAA / nested app auth), unified JSON manifest authoring, and the `office-addins-deploy` (SWA) pipeline. Familiar with ADR-028 Spaarke Auth v2.
+  </role>
+
+  <goal>
+    The add-in authenticates exclusively via `@spaarke/auth` `OfficeNaaStrategy`; `NaaAuthService`/`DialogAuthService`/`authConfig` are removed. A single unified JSON manifest is the source of truth (versions reconciled). No hardcoded org URL remains (config-driven). The add-in builds and deploys via `office-addins-deploy`, and the save flow works end-to-end under NAA in dev.
+  </goal>
+
+  <context>
+    <background>
+      Per Owner Clarification, the auth foundation (`@spaarke/auth` `OfficeNaaStrategy` + BFF filter classes) is already on `master`; R4 owns the add-in's LAST-MILE wiring. The add-in still runs on deprecated auth services, carries two mismatched manifests, and pins the dev org URL. This is the client half of FR-25; task 073 applies the BFF Office endpoint filters, and task 074 surfaces engine suggestions in the save pane.
+    </background>
+    <relevant-files>
+      <file>src/client/office-addins/shared/ (deprecated `NaaAuthService`/`DialogAuthService`/`authConfig`)</file>
+      <file>src/client/office-addins/ (Outlook add-in shell + save task pane)</file>
+      <file>src/client/office-addins/**/manifest*.xml (XML v1.0.19 — reconcile/retire)</file>
+      <file>src/client/office-addins/**/manifest*.json (JSON devPreview v1.0.0 — unify onto this)</file>
+      <file>@spaarke/auth `OfficeNaaStrategy` (canonical strategy on master)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Migrate off `NaaAuthService`/`DialogAuthService`/`authConfig` onto `@spaarke/auth` `OfficeNaaStrategy`; converge on the unified JSON manifest; fix the hardcoded org URL; save flow works under NAA in dev.</constraint>
+    <constraint source="ADR-028">Client uses `@spaarke/auth` only (`OfficeNaaStrategy` for the add-in); MUST NOT `new` a credential or `ConfidentialClientApplication`; no token snapshots / `accessToken` props.</constraint>
+    <constraint source="NFR-03">No self-built credentials; central auth primitives only.</constraint>
+    <constraint source="project">Single manifest source of truth; do not leave two divergent manifests.</constraint>
+    <constraint source="project">Org URL config-driven / environment-tokenized — no `spaarkedev1.crm.dynamics.com` literal in shipped code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>office-addins/naa-auth</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>knowledge/</file>
+    </files>
+    <patterns>
+      <pattern name="OfficeNaaStrategy usage" location=".claude/patterns/auth/spaarke-sso-binding.md">
+        Add-in auth via `@spaarke/auth` `OfficeNaaStrategy` — nested app auth; no MSAL self-bootstrap.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-25, ADR-028, the sso-binding pattern, and `office-addins-deploy` skill. Confirm `OfficeNaaStrategy` is present on `master`; consult `researcher` for current unified-manifest + NAA specifics if stale.</step>
+    <step order="3" name="Audit deprecated auth">Grep the add-in for `NaaAuthService`, `DialogAuthService`, `authConfig` consumers; catalog each call site.</step>
+    <step order="4" name="Migrate to OfficeNaaStrategy">Replace each deprecated call site with `@spaarke/auth` `OfficeNaaStrategy` / `authenticatedFetch`. Remove the deprecated services once no consumer remains.</step>
+    <step order="5" name="Unify manifest">Reconcile the XML (v1.0.19) and JSON (devPreview v1.0.0) manifests onto a single unified JSON manifest; reconcile version + capabilities; retire the divergent manifest.</step>
+    <step order="6" name="Org-URL fix">Replace the hardcoded `spaarkedev1.crm.dynamics.com` with an environment-tokenized config value; grep to confirm no literal remains.</step>
+    <step order="7" name="Build + deploy">Build the add-in; deploy to dev via the `office-addins-deploy` skill (SWA CLI).</step>
+    <step order="8" name="Smoke test">Smoke-test the save flow in dev under NAA end-to-end (sign-in, save action reaches the BFF). Record the result.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the diff; invoke `adr-check` against spec.md (ADR-028; NFR-03). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 072 ✅ in `tasks/TASK-INDEX.md`; confirm task 074 dependency satisfied.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Find deprecated auth consumers + org-URL literal</tool>
+    <tool name="read">Inspect add-in shell + manifests + OfficeNaaStrategy</tool>
+    <tool name="edit">Migrate auth; unify manifest; tokenize org URL</tool>
+    <tool name="office-addins-deploy">Build + deploy to SWA dev</tool>
+    <tool name="researcher">Current unified-manifest + NAA specifics</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/ (UPDATED — `OfficeNaaStrategy` auth; deprecated services removed)</output>
+    <output type="code">src/client/office-addins/**/manifest.json (UNIFIED — single source of truth)</output>
+    <output type="code">Org-URL config (environment-tokenized; hardcoded literal removed)</output>
+    <output type="docs">Dev smoke-test result recorded in task notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `NaaAuthService`/`DialogAuthService`/`authConfig` returns zero consumers; the deprecated services are removed.</criterion>
+    <criterion testable="true">The add-in authenticates via `@spaarke/auth` `OfficeNaaStrategy`; no self-built MSAL / `ConfidentialClientApplication`.</criterion>
+    <criterion testable="true">A single unified JSON manifest is the source of truth; the divergent manifest is retired; versions reconciled.</criterion>
+    <criterion testable="true">Grep for `spaarkedev1.crm.dynamics.com` returns zero in shipped code; org URL is config-driven.</criterion>
+    <criterion testable="true">The add-in builds and deploys via `office-addins-deploy`; the save flow works under NAA in dev (recorded).</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-028.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Client-only (TS + manifest + SWA deploy) — no BFF surface, so no publish-size / CVE / conflict-check obligations. The BFF half of FR-25 is task 073 (Office endpoint filters).
+
+    If a gap is found in the shipped `@spaarke/auth`/`OfficeNaaStrategy` primitives, escalate per root §6 (do NOT silently expand scope) — per spec Assumptions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Use the `office-addins-deploy` skill for build/deploy; smoke-test under NAA before marking complete.
+    </protocol>
+  </execution>
+</task>

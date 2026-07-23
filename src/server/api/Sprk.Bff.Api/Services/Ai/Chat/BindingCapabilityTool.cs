@@ -164,11 +164,42 @@ public sealed class BindingCapabilityTool : AIFunction
         }
     }
 
+    /// <summary>
+    /// spaarkeai-compose-r2 — Model Y redirect target: the whole-document revise capability that
+    /// edits a document already open in Compose. When invoked from the TEXT/agent path its
+    /// full-document payload cannot render as an inline redline (that materialization is wired only
+    /// to the client Click-path apply-leg), so it would be narrated as a rewrite in chat (the #2
+    /// defect). Owner decision: editing lives in the EDITOR (highlight-to-edit) — the agent redirects.
+    /// Aliases the canonical <see cref="ConsumerTypes.ComposeReviseDocument"/> to avoid drift.
+    /// </summary>
+    internal const string ComposeReviseDocumentConsumerType = ConsumerTypes.ComposeReviseDocument;
+
     /// <inheritdoc />
     protected override async ValueTask<object?> InvokeCoreAsync(
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
+        // ── Model Y (spaarkeai-compose-r2 #2 defect) compose-edit redirect ──────────────────────
+        // Deterministic backstop to the SprkChatAgentFactory.ComposeEditRedirectDirective prompt
+        // rule: if the model INVOKES compose-revise-document (whole-document revise of the open
+        // document) from the agent turn anyway, do NOT dispatch — that path can't render an inline
+        // redline, so its rewritten text would be narrated in chat. Return an honest redirect to the
+        // editor's highlight-to-edit options instead. Scoped to compose-revise-document ONLY, so the
+        // DEF-08 compose-draft-document (drafts a NEW reviewable document) and the DEF-09
+        // compose-draft-alternative (a single-selection edit, workspace surface) — the desired flows —
+        // are untouched. The client Click-path named-intent revise (SessionDispatchOrchestrator via
+        // dispatchConsumer) never reaches THIS tool, so that round-5 flow is unaffected.
+        if (string.Equals(_binding.ConsumerType, ComposeReviseDocumentConsumerType, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation(
+                "[agent-turn.capability] compose-revise-document redirected to editor (Model Y) — binding={BindingId} session={SessionId}",
+                _binding.BindingId, _sessionId);
+            return "To edit the document open in Compose, ask the user to highlight the text they want " +
+                   "to change in the Compose editor and choose an editing option (for example, Draft " +
+                   "alternative or Improve clarity). Do NOT rewrite the document in chat.";
+        }
+        // ── End Model Y redirect ────────────────────────────────────────────────────────────────
+
         // Fresh scope per invocation: the orchestrator + its dependencies are Scoped,
         // and the agent-creation scope is long gone by the time the LLM calls tools.
         await using var scope = _rootServices.CreateAsyncScope();
@@ -201,12 +232,53 @@ public sealed class BindingCapabilityTool : AIFunction
                 arguments.ToDictionary(a => a.Key, a => a.Value));
         }
 
-        var request = new SessionDispatchRequest(_tenantId, _sessionId, _binding.BindingId, args);
+        // ── DEF-11 (spaarkeai-compose-r2) document-session routing ──────────────────────────────
+        // A `compose`-disposition capability invoked from the TEXT/agent path still runs inside the
+        // CHAT session's tool-call loop, but its ledger output must land where the Compose editor
+        // reads pending redlines/comments from — the DOCUMENT session (DEF-09 precedent: "a Compose
+        // edit belongs to the document session", two sessions deliberately kept separate, never
+        // unified). ChatSession.ActiveDocument.DocumentSessionId (task 113 bridge, DEF-11 additive
+        // field) is the pointer the compose-direct/upload registration writes; when it is present we
+        // dispatch into THAT session instead of the chat session. Fail-soft by construction: any
+        // missing service, missing session, or missing/blank pointer leaves dispatchSessionId at its
+        // _sessionId default — the pre-DEF-11 chat-session behavior — so a non-Compose binding (the
+        // overwhelming majority of capability tools) or a session with no registered document is
+        // completely unaffected.
+        var dispatchSessionId = _sessionId;
+        if (_binding.Disposition == BindingDisposition.Compose)
+        {
+            var sessionManager = scope.ServiceProvider.GetService<ChatSessionManager>();
+            if (sessionManager is not null)
+            {
+                var currentSession = await ResolveCurrentSessionAsync(sessionManager, cancellationToken).ConfigureAwait(false);
+                var documentSessionId = currentSession?.ActiveDocument?.DocumentSessionId;
+                if (!string.IsNullOrWhiteSpace(documentSessionId))
+                {
+                    dispatchSessionId = documentSessionId!;
+                    _logger.LogInformation(
+                        "[agent-turn.capability] compose-disposition dispatch routed to document session — " +
+                        "binding={BindingId} chatSession={ChatSessionId} documentSession={DocumentSessionId}",
+                        _binding.BindingId, _sessionId, dispatchSessionId);
+                }
+            }
+        }
+        // ── End DEF-11 routing ───────────────────────────────────────────────────────────────────
+
+        // Task 022 (FR-D2) routing-confidence producer, text/agent path: a capability tool-call that
+        // reaches here is a COMMITTED selection by the one probabilistic decider (ADR-039). Genuine
+        // capability ambiguity is resolved UPSTREAM — the agent turn asks a clarifying question (layer 1)
+        // instead of dispatching — so a dispatch reaching this seam is confident by construction:
+        // DispatchUncertain = false (its record default). This is the honest single-turn-derived signal;
+        // no second scorer/classifier exists (a firing numeric/multi-call producer is a documented
+        // follow-on that sets this flag without any dispatch-spine change).
+        var request = new SessionDispatchRequest(_tenantId, dispatchSessionId, _binding.BindingId, args);
 
         try
         {
             string? summary = null;
             string? error = null;
+            string? disposition = null;
+            JsonElement? launchPayload = null;
             await foreach (var chunk in orchestrator.DispatchAsync(request, cancellationToken).ConfigureAwait(false))
             {
                 if (!chunk.Done)
@@ -216,6 +288,11 @@ public sealed class BindingCapabilityTool : AIFunction
 
                 error = chunk.Error;
                 summary = chunk.Summary ?? chunk.Content;
+                disposition = chunk.Disposition;
+                if (chunk.Result is JsonElement resultElement)
+                {
+                    launchPayload = resultElement.Clone();
+                }
             }
 
             if (error is not null)
@@ -225,6 +302,66 @@ public sealed class BindingCapabilityTool : AIFunction
                     _binding.BindingId, _binding.ConsumerType, _sessionId);
                 return $"The '{_binding.ConsumerType}' capability failed: {error}. Tell the user honestly; do not fabricate its output.";
             }
+
+            // ── P0(b) (spaarkeai-assistant-enhancements-r1 UAT 2026-07-17) TEXT-path surface launch ──────
+            // A capability whose Binding routes to a client-owned SURFACE LAUNCH (create-matter/-event/-task,
+            // list-tasks grid, …) must open the pre-seeded surface on the CLIENT. The Click path already
+            // branches on chunk.Disposition == "surface_launch" (task 013), but on the TEXT/agent path the
+            // terminal chunk is consumed INSIDE this loop and never reaches the client. Mirror the shipped
+            // elicitation_modal escape: emit a surface_launch SSE event carrying the enriched draft payload
+            // (draftValues + resolvedLookups + fileIds, already ledger-written — ADR-040) so the SpaarkeAi
+            // chat client calls launchSurface() with the same registry the chip path uses, and return an
+            // agent message that STOPS the write-tool call — the surface owns the create; dispatching a raw
+            // create_record here was the P0 hallucinated-GUID failure this project targets. Scoped strictly
+            // to the surface_launch disposition, so every other capability keeps the generate-then-write
+            // message below.
+            if (string.Equals(
+                    disposition,
+                    DispositionRoutability.ToLedgerValue(BindingDisposition.SurfaceLaunch),
+                    StringComparison.Ordinal))
+            {
+                // Route on the Binding's sprk_consumertype (e.g. "create-matter") — the key the client
+                // launch registry (surfaceLaunchRegistry.ts) resolves. NOT the chunk's consumerType, which
+                // is sourced upstream from the ledger UcId (sprk_ucid, e.g. "UC-B-6") and would miss the
+                // registry (assistant-enhancements-r1 UAT 2026-07-17 root cause). _binding.ConsumerType is
+                // unambiguous here — this tool IS the dispatched Binding.
+                var launchConsumerType = _binding.ConsumerType;
+
+                if (_sseWriter is not null)
+                {
+                    await _sseWriter(
+                        new Api.Ai.ChatSseEvent(
+                            "surface_launch",
+                            null,
+                            new Api.Ai.ChatSseSurfaceLaunchData(
+                                BindingId: _binding.BindingId.ToString(),
+                                ConsumerType: launchConsumerType,
+                                Payload: launchPayload)),
+                        cancellationToken).ConfigureAwait(false);
+
+                    _logger.LogInformation(
+                        "[agent-turn.capability] surface_launch emitted — binding={BindingId} consumerType={ConsumerType} " +
+                        "session={SessionId} hasPayload={HasPayload}",
+                        _binding.BindingId, launchConsumerType, _sessionId, launchPayload is not null);
+
+                    return $"A pre-seeded {launchConsumerType} surface is now opening for the user to review and " +
+                           "complete. This capability produced a DRAFT only — it did NOT create, save, or modify any " +
+                           "record. Do NOT invoke any write tool (for example create_record / update_record) and do NOT " +
+                           "ask the user to confirm creation in chat: the surface that just opened owns the create/save " +
+                           $"step. Briefly tell the user their {launchConsumerType} is opening with the details pre-filled.";
+                }
+
+                // Degraded: no chat SSE surface on this invocation (e.g. a non-chat host). The surface cannot be
+                // opened client-side from here — be honest rather than falling through to the write-tool message.
+                _logger.LogWarning(
+                    "[agent-turn.capability] surface_launch but no SSE surface on this invocation — cannot launch. " +
+                    "binding={BindingId} consumerType={ConsumerType} session={SessionId}",
+                    _binding.BindingId, launchConsumerType, _sessionId);
+
+                return $"The {launchConsumerType} surface could not be opened automatically in this context. Tell the " +
+                       "user to open it from the assistant's create menu; do NOT attempt to create the record via a write tool.";
+            }
+            // ── End P0(b) surface launch ─────────────────────────────────────────────────────────────────
 
             var text = summary ?? string.Empty;
             if (text.Length > MaxResultChars)
@@ -369,6 +506,48 @@ public sealed class BindingCapabilityTool : AIFunction
             suspended.GateId, _binding.BindingId, missing.Count, _binding.CaptureMode, _sessionId);
 
         return ElicitationTurnRouter.BuildClarifyInstruction(_binding.ConsumerType, Name, missing);
+    }
+
+    /// <summary>
+    /// DEF-11: resolves the CURRENT chat session for its <see cref="ChatSession.ActiveDocument"/>
+    /// pointer, probing <see cref="_sessionId"/>'s "N"/"D" GUID-string forms the same way
+    /// <c>ComposeEndpoints.ResolveSessionAsync</c> does — a client may have registered the active
+    /// document under a different GUID spelling than the one this tool call carries. Returns null
+    /// (fail-soft) rather than throwing when no candidate resolves.
+    /// </summary>
+    private async Task<ChatSession?> ResolveCurrentSessionAsync(
+        ChatSessionManager sessionManager, CancellationToken cancellationToken)
+    {
+        foreach (var candidate in EnumerateSessionIdForms(_sessionId))
+        {
+            var session = await sessionManager.GetSessionAsync(_tenantId, candidate, cancellationToken).ConfigureAwait(false);
+            if (session is not null)
+            {
+                return session;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Yields <paramref name="sessionId"/> then its GUID "N"/"D" normalizations (when parseable).</summary>
+    private static IEnumerable<string> EnumerateSessionIdForms(string sessionId)
+    {
+        yield return sessionId;
+        if (Guid.TryParse(sessionId, out var g))
+        {
+            var n = g.ToString("N");
+            var d = g.ToString("D");
+            if (!string.Equals(n, sessionId, StringComparison.Ordinal))
+            {
+                yield return n;
+            }
+
+            if (!string.Equals(d, sessionId, StringComparison.Ordinal))
+            {
+                yield return d;
+            }
+        }
     }
 
     /// <summary>Ledger/audit vocabulary for the Binding risk posture (mirrors sprk_risk labels).</summary>

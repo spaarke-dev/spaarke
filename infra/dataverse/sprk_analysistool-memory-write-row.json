@@ -1,0 +1,95 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r2 task 057 (FR-B-08 / FR-30) — seed row for the memory.write AI-INITIATED, SILENT, provenance-tagged chat tool. Authored THROUGH the task-020 triple-twin hoisted source: this JSON's sprk_description is THE single authored source; the compiled MemoryWriteHandler.Metadata.Description + the live sprk_analysistool.sprk_description are managed mirrors kept byte-equal (CatalogToolDescriptionParityContractTests + RoutingConsumerTypeHealthCheck). memory.* is the FIRST consumer of the hoist per FR-A-01.",
+  "_comment_routing": "Runtime invocation routes to MemoryWriteHandler via sprk_handlerclass. Auto-discovered by ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) — ZERO new top-level DI line. The handler injects IMemoryItemStore (task 050) directly (ADR-013 AI-internal memory plumbing — no PublicContracts facade, mirroring ManagePinnedContextHandler's direct IPinnedContextRepository injection).",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000001 (Write) — memory.write is a SIDE-EFFECT tool. It is gate-WRAPPED at the loop boundary (PendingPlanManager.RequiresConfirmation(Write) == true → SideEffectGateAIFunction). This is DELIBERATE and is NOT a gate for the user: the deterministic Confirmation Policy v2 engine (task 044) then resolves the invocation from the declared riskProfile below (tier 1 + reversible) to GateOutcome.Execute — SILENT inline execution, NO confirmation dialog. Declaring Read/Pure to dodge the gate would be the ADR-039 gate-BYPASS the task explicitly forbids; the silent-execution decision must be the ENGINE's, read from catalog DATA. Proven by MemoryWriteCaptureRecallEvalTests through the REAL gate + engine.",
+  "_comment_riskprofile": "Confirmation Policy v2 (FR-A1-03, task 032/044) catalog-declared risk factors — DATA extending sprk_sideeffectclass. Consumed by GateRiskProfile.FromConfiguration + RiskTierResolver; NEVER a runtime model judgment. A memory item is a REVERSIBLE, user-erasable, internal (never externally visible) capture of DERIVED knowledge — it is NOT a system-of-record row (recordOfTruthImpact=false; the Context Binder reads live Dataverse fields directly per FR-B-04, so memory never mirrors them). tier=1 + reversible=true + all impact factors false ⇒ RiskTierResolver factor-floor = Tier0, so the declared Tier 1 stands ⇒ GateDecisionProjector ⇒ Execute (silent, no dialog, no Undo chip). Origin-independent: Tier 0/1 auto-execute regardless of origin, so AI-initiated capture never depends on origin classification. Overlay 1 (injection-suspect / content-safety) STILL fires first and forces a dialog — the partial residual control while the hard untrusted-origin ban is DEFERRED to a separate governance project.",
+  "_comment_deferred_governance": "DEFERRED to a separate governance project (documented boundary, NOT implemented here): the untrusted-origin ban, semantic-retrieval trust boundary, poisoning evals, and trustLevel ENFORCEMENT. The provenance envelope (source/bindingId/ledgerRef/trustLevel) is recorded at capture time as METADATA that DESCRIBES each item — it does NOT gate the write. The interim controls are: the FR-B-03 user review/delete surface (task 052), subject-partition scope isolation (task 050), and content-safety on the turn. trustLevel is carried but NOT acted on (FR-B-08).",
+  "_comment_provenance": "Every write records source='ai-derived' (memory.write is AI-initiated — the assistant captures salient facts automatically), bindingId='loop' (the reserved loop binding the gate ledger uses for loop-executed tools), sessionId (the chat session), and trustLevel (carried, inert). These are surfaced on read (GetForRecord/GetForUser return the full MemoryItem envelope) so the FR-B-03 review/delete surface can act on provenance.",
+  "_comment_scope": "Two scopes (task 050): scope='record' keys the item to a generic (subjectType, subjectId) = (entityType, entityId) — defaults to the record in the current workspace context (subjectType='matter', subjectId=host MatterId) when subjectType/subjectId are omitted; scope='user' keys to the authenticated principal's userId (Dataverse systemuserid), NEVER an LLM-supplied value — the handler sources it from the session principal.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1 (add a $RowFiles entry keyed 'MemoryWriteHandler'). Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter. LIVE Dataverse seeding is a GATE-DEPLOY step at task 069 prep (mirror-first here; seed constant+row atomically at the gate).",
+  "sprk_name": "SYS-Memory Write",
+  "sprk_toolcode": "MEMORY-WRITE",
+  "sprk_toolid": "memory.write",
+  "sprk_namespace": "memory",
+  "sprk_sideeffectclass": 100000001,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Records a durable memory item for the current user or record scope so later turns can recall it. Memory writes are AI-initiated and silent; the user review/delete surface is the control. Tag every item with provenance (source, bindingId/ledgerRef, trustLevel) at capture time.",
+  "sprk_handlerclass": "MemoryWriteHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — memory.write is a chat-surface side effect the agent invokes during the loop; playbook nodes persist to sprk_analysisoutput, not the durable memory tier.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "memory.write Request",
+    "description": "Arguments for capturing one durable memory item. The subject keying (record vs user) and provenance are derived from the session context; the LLM supplies the salient fact.",
+    "type": "object",
+    "required": ["scope", "factType", "key", "value"],
+    "properties": {
+      "scope": {
+        "type": "string",
+        "enum": ["record", "user"],
+        "description": "Closed enum. 'record' stores the fact against the current record (matter/project/invoice/etc.); 'user' stores it against the current user's general memory. Use 'record' for facts about the matter/case in context; use 'user' for the person's durable preferences or profile facts."
+      },
+      "subjectType": {
+        "type": "string",
+        "description": "Record scope only: the entity TYPE the fact is about (e.g. 'matter', 'project', 'invoice'). Omit to default to the record in the current workspace context ('matter'). Ignored for user scope."
+      },
+      "subjectId": {
+        "type": "string",
+        "description": "Record scope only: the entity ID the fact is about. Omit to default to the record in the current workspace context. Ignored for user scope. Never invent an id — omit it to use the record in context."
+      },
+      "factType": {
+        "type": "string",
+        "enum": ["party", "keyDate", "priorAnalysis", "keyFact"],
+        "description": "Closed enum categorizing the fact: 'party' (a person/organization involved), 'keyDate' (a significant date or deadline), 'priorAnalysis' (a reference to earlier analysis), or 'keyFact' (any other durable structured fact)."
+      },
+      "key": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Short human-readable label for the fact (e.g. 'Plaintiff', 'Filing deadline', 'Governing law'). A repeated capture with the SAME (factType, key) for the SAME subject UPDATES the existing fact rather than adding a duplicate."
+      },
+      "value": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The fact content (e.g. 'Acme Corp', 'July 15 2026', 'New York'). Store the derived conclusion — never a raw mirror of a live Dataverse field the record already holds."
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Optional confidence in [0,1] (default 1.0). Lower-confidence facts are truncated first when the recalled memory fragment exceeds its budget."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "memory.write Result",
+    "type": "object",
+    "required": ["tool", "status", "scope", "factType"],
+    "properties": {
+      "tool": { "const": "memory.write" },
+      "status": { "type": "string", "description": "'captured' on success." },
+      "scope": { "type": "string", "description": "The scope the item was written to ('record' | 'user')." },
+      "subjectType": { "type": ["string", "null"], "description": "Record scope: the entity type keyed." },
+      "subjectId": { "type": ["string", "null"], "description": "Record scope: the entity id keyed." },
+      "userId": { "type": ["string", "null"], "description": "User scope: the user id keyed." },
+      "factType": { "type": "string", "description": "The fact category." },
+      "key": { "type": "string", "description": "The fact key (identifier only)." },
+      "itemId": { "type": ["string", "null"], "description": "Deterministic memory-item id (upsert-by-key)." },
+      "source": { "type": "string", "description": "Provenance origin ('ai-derived')." },
+      "superseded": { "type": "boolean", "description": "True when this write UPDATED an existing fact for the same (factType, key)." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — a single LLM-facing memory.write function. The riskProfile block is the Policy v2 gate DATA (see _comment_riskprofile).",
+    "riskProfile": {
+      "tier": "1",
+      "reversible": true,
+      "externallyVisible": false,
+      "deadlineImpact": false,
+      "confidentialityImpact": false,
+      "recordOfTruthImpact": false
+    }
+  }
+}

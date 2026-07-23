@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    // Declaration-only emit (NOT `noEmit`): `@spaarke/ai-widgets` consumes
+    // this package via a cross-package `dist/index.d.ts` paths mapping (see
+    // its tsconfig.json) because its own build is a REAL `tsc` emit with an
+    // explicit `rootDir` — pointing that mapping at raw `.ts` SOURCE (this
+    // package's prior config) pulls files outside ai-widgets' rootDir into
+    // its program (TS6059). Declaration-only output is self-contained and
+    // sidesteps that. No `.js` is emitted — the two Vite consumers
+    // (LegalWorkspace/SpaarkeAi) alias this package directly to `src` and
+    // never read `dist` (messaging-communication-app-r2 task 030).
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "jsx": "react",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    "paths": {
+      // Resolve to the pre-built declaration (mirrors `@spaarke/ai-widgets`'
+      // own paths mapping) so this package's `tsc` build never pulls
+      // `@spaarke/ui-components`'s raw source (and its PCF-framework-dependent
+      // surface) into the program — `skipLibCheck` covers the rest.
+      "@spaarke/ui-components": ["../Spaarke.UI.Components/dist/index.d.ts"],
+      "@spaarke/ui-components/*": ["../Spaarke.UI.Components/dist/*"],
+      // Added task 031 (FR-14a): the widget now imports the free-function
+      // `authenticatedFetch` directly (ADR-028). Same pre-built-declaration
+      // pattern as `@spaarke/ui-components` above — no `node_modules` install
+      // required for type-checking.
+      "@spaarke/auth": ["../Spaarke.Auth/dist/index.d.ts"],
+      "@spaarke/auth/*": ["../Spaarke.Auth/dist/*"],
+      // Added task 045 (FR-22): the widget consumes the notification-spine client. Mapped to a LOCAL
+      // minimal type shim (not the sibling lib's dist, which isn't pre-built, and not an ambient
+      // `declare module`, which would collide in a host compile) — the two Vite hosts resolve the REAL
+      // `@spaarke/notifications` against their own node_modules at build/runtime.
+      "@spaarke/notifications": ["./src/types/spaarke-notifications.d.ts"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.test.tsx", "**/__tests__", "**/__mocks__"]
+}
+

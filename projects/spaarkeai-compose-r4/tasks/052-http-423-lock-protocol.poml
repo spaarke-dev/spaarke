@@ -1,0 +1,128 @@
+<task id="052" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>HTTP 423 (Office lock) → user-actionable ProblemDetails (FR-08)</title>
+    <phase>5 Concurrency + save</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF implementation on the Compose endpoint + save path modifying .cs; failure-mapping correctness (423 vs generic 5xx); tags include bff-api + spe.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped failure-mapping on an existing endpoint/save path; no architectural invention — map an SPE 423 to a user-actionable ProblemDetails without masking other 5xx.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5b</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Save path / endpoint shared with 050/051 — same `ComposeService` save path + `ComposeEndpoints`.</parallel-reason>
+    <deps>050</deps>
+    <tags>bff-api,spe</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement the HTTP 423 lock protocol (FR-08). When a save hits an SPE HTTP 423 (a Word co-authoring lock —
+    the item is open/locked in Word), MAP it to a user-actionable state: a ProblemDetails the client surfaces
+    ("the document is currently locked/open in Word — close it and retry"), NOT a 500. A non-lock 5xx must
+    STILL surface as a generic ProblemDetails without masking — do not swallow or misclassify other server
+    errors as a lock.
+
+    Modify `Api/ComposeEndpoints.cs` + the save path (`ComposeService`). Lock DETECTION (recognizing the 423
+    from the SPE hop) stays behind `SpeFileStore` (ADR-007) — no `Microsoft.Graph` type in `Services/Compose/`.
+    Builds on the version-stamped save from 050. Every save-path change carries a through-the-wire seam slice
+    (ADR-038; the seam slice is task 054).
+  </prompt>
+
+  <role>
+    Senior .NET 8 engineer on `ComposeEndpoints` + `ComposeService` + the SPE facade. Understands ProblemDetails
+    as the client contract for actionable failures and that a co-authoring lock (423) is a distinct,
+    user-recoverable condition that must not be conflated with a generic server error.
+  </role>
+
+  <goal>
+    A save path where an SPE HTTP 423 (Word co-authoring lock) surfaces a user-actionable ProblemDetails
+    (423-derived, actionable copy) rather than a 500; and a non-lock 5xx still surfaces as a generic
+    ProblemDetails without masking. Lock detection stays behind `SpeFileStore`.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 (save + concurrency): "map HTTP 423 lock to a user-actionable state." Design §4 F6: "a Word
+      co-authoring lock (HTTP 423) surfaces a user-actionable state, not a 500." Spec FR-08 acceptance: "a
+      locked item surfaces a ProblemDetails, not a 500." The lock is detected at the SPE hop (the facade sees
+      the 423); the endpoint maps it to a ProblemDetails with actionable copy. The non-lock 5xx path must be
+      preserved (generic ProblemDetails, not masked). Builds on the 050 version-stamped save path.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — map an SPE 423 (from the save path) to a user-actionable ProblemDetails; keep the non-lock 5xx path as a generic ProblemDetails</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — surface the 423 lock condition from the save path so the endpoint can map it (without leaking Graph types)</file>
+      <file role="dependency">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — lock DETECTION (recognizing the 423) stays behind this facade (ADR-007)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — task 050 version-stamped save (the path this maps a failure on)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (save + concurrency), §4 F6</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-08</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Version-stamped save path — the 423 mapping attaches to it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-08">An SPE HTTP 423 (Word co-authoring lock) MUST map to a user-actionable ProblemDetails the client surfaces — NOT a 500.</constraint>
+    <constraint source="spec / FR-08 negative">A non-lock 5xx MUST still surface as a generic ProblemDetails WITHOUT masking — MUST NOT be misclassified as a lock and MUST NOT be swallowed.</constraint>
+    <constraint source="ADR-007 / NFR-05">Lock detection (recognizing the 423) stays behind `SpeFileStore` — no `Microsoft.Graph` type surfaces in `Services/Compose/` or `ComposeEndpoints`; the save path sees a facade-level lock signal, not a Graph exception type.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire seam slice required for this save-path/endpoint change (authored as the task 054 seam slice). NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="CLAUDE.md §10 / project">State the Placement Justification (failure mapping stays in `ComposeEndpoints`/`Services/Compose/`; reuses `SpeFileStore` seams). Verify BFF publish size ≤60 MB compressed, report absolute + delta vs ~49.63 MB (incl. PDBs). No new HIGH CVE. Run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE 423 co-authoring lock; ProblemDetails mapping; facade-level lock signal (no Graph leakage); BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ProblemDetails failure mapping" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Existing Compose endpoints map failures to ProblemDetails — add a 423-derived, user-actionable case distinct from the generic 5xx path.
+      </pattern>
+      <pattern name="Facade-level failure signal (no Graph leakage)" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        The 423 is recognized at the SPE facade and surfaced as a facade-level signal — `Services/Compose/` never sees a `Microsoft.Graph` exception type.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor (bff-api + spe; high; sonnet). Load the knowledge files + bff-extensions.md + design §5/§4 F6. Read the `ComposeEndpoints` failure mapping + `SpeFileStore` hop. State the Placement Justification. Run `/conflict-check`.</step>
+    <step order="1" name="Detect 423 at the facade">Recognize the SPE HTTP 423 co-authoring lock at the `SpeFileStore` facade and surface it as a facade-level lock signal (no Graph type leaks upward).</step>
+    <step order="2" name="Map to user-actionable ProblemDetails">In `ComposeEndpoints.cs`, map the lock signal to a ProblemDetails (423-derived) with user-actionable copy (locked/open in Word — close and retry). Do NOT return a 500.</step>
+    <step order="3" name="Preserve non-lock 5xx">Ensure a non-lock 5xx still surfaces as a generic ProblemDetails without masking — no misclassification as a lock, no swallow.</step>
+    <step order="4" name="Verify + size/CVE report">`dotnet build`; run existing `Services/Compose` unit tests + Tier-1 NetArchTest. Publish; report absolute size + delta vs ~49.63 MB; `dotnet list package --vulnerable`. (The through-the-wire proof is task 054.)</step>
+    <step order="5" name="Index + deviations">Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in projects/spaarkeai-compose-r4/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (423 → user-actionable ProblemDetails; non-lock 5xx preserved)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (surfaces the facade-level lock signal)</output>
+    <output type="report">Placement Justification; publish-size absolute + delta vs ~49.63 MB; CVE scan; `/conflict-check` result for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A locked item (SPE HTTP 423 co-authoring lock) surfaces a ProblemDetails (423-derived, user-actionable copy) — NOT a 500.</criterion>
+    <criterion testable="true">NEGATIVE: a non-lock 5xx still surfaces as a generic ProblemDetails without masking — it is not misclassified as a lock and not swallowed.</criterion>
+    <criterion testable="true">Lock detection stays behind `SpeFileStore` — no `Microsoft.Graph` type surfaces in `Services/Compose/` or `ComposeEndpoints` (ADR-007); `Services/Compose/` injects no AI internals (Tier-1 NetArchTest green, ADR-013).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB, ≤60 MB; no new HIGH CVE; `dotnet build` + existing Compose tests green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The through-the-wire proof (423 surfaces a ProblemDetails, not a 500) is authored as the task 054 seam
+    slice under `tests/integration/seam/Compose/`. Save path / endpoint shared with 050/051 — sequential
+    (parallel-safe false). Run `/conflict-check` before the BFF PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

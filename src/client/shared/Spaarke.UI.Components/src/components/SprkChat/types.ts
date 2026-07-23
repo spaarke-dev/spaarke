@@ -18,6 +18,7 @@
 // "N files attached" indicator, per-file remove cascade, and ready-batch
 // inline-confirmation injection.
 import type { ChatAttachment, AttachmentChip } from './hooks/useChatFileAttachment';
+import type { INextStepChip } from './OutcomeCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chat Message Types
@@ -106,6 +107,44 @@ export interface IChatMessageMetadata {
    * Only meaningful when responseType === 'plan_preview'.
    */
   plan?: IChatMessagePlanStep[];
+
+  /**
+   * spaarkeai-compose-r2 DEF-12 — marks this Assistant message as the CONFIRMATION for an
+   * applied Compose AI edit (a pending redline in the document). When present, the message
+   * renders the per-message Accept / Reject / Try-another controls (in place of the removed
+   * in-editor `compose-redline-controls` bar) — but ONLY while this edit is still the live
+   * pending one (SprkChat gates on `activeComposeEditLedgerRef` matching `ledgerRef`). The
+   * message body stays summary-only; the reasoning lives in the Context Execution Trace, and
+   * the proposed text is the redline in the document — neither is dumped here.
+   */
+  composeEdit?: {
+    /** Addressable ledger key `{bindingId}@t{n}` of the applied compose output (the control target). */
+    ledgerRef: string;
+    /** `sprk_playbookconsumer` Binding id that produced the edit. */
+    bindingId: string;
+  };
+
+  /**
+   * spaarkeai-compose-r2 FIX #7a — marks this Assistant message as the PERSISTENT confirmation for a
+   * Compose document persisted via "Add to DMS" (create-on-save). When present (and the host provides
+   * `onOpenSavedPreview`), the message renders an "Open preview" button that opens the File Preview
+   * modal for `documentId`. Replaces the transient in-editor Saved ✓ banner's preview link.
+   */
+  savedPreview?: {
+    /** `sprk_documentid` of the persisted document (the File Preview modal target). */
+    documentId: string;
+    /** Display name for the preview modal title. */
+    fileName?: string;
+  };
+
+  /**
+   * P1-5 (assistant-enhancements-r1 UAT 2026-07-18) — short collapsed label for a
+   * `responseType: 'file-status'` message ("I have your file…" / "Classified … as …").
+   * These per-file processing entries were dominating the transcript; SprkChatMessage
+   * renders them as a compact, collapsed-by-default `<details>` row whose summary is this
+   * label and whose expanded body is the full `content`. Absent → a generic label.
+   */
+  fileStatusSummary?: string;
 }
 
 /** A single chat message, matching ChatSessionMessageInfo from the history endpoint. */
@@ -232,7 +271,15 @@ export type ChatSseEventType =
   // Engine's OutcomeCard view-projection (ChatSseActionOutcomeData) — the
   // counterpart to `action_confirmation` for the no-dialog path. The client routes
   // this to the SAME `outcome_card` render the gate-RESUME leg uses.
-  | 'action_outcome';
+  | 'action_outcome'
+  // spaarkeai-assistant-enhancements-r1 P0(b) (2026-07-17) — TEXT/agent-path
+  // surface launch. Emitted by BindingCapabilityTool.cs when a capability the
+  // agent turn selected routes to a `surface_launch`-disposition Binding: the
+  // client opens the pre-seeded create surface (matter/event/task wizard, …)
+  // via `launchSurface`. The Click path already branches on the terminal
+  // chunk's `disposition`; this is its text-path analogue (SessionOutput ledger
+  // entry precedes this event — ADR-040).
+  | 'surface_launch';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -609,6 +656,31 @@ export interface IElicitationModalPayload {
 }
 
 /**
+ * Payload for the `surface_launch` SSE event (spaarkeai-assistant-enhancements-r1
+ * P0(b), 2026-07-17): a capability the agent turn selected resolved to a Binding
+ * whose disposition is `surface_launch` — a client-owned pass-through. The server
+ * drafted + grounded a payload and ledger-wrote it (ADR-040); the CLIENT opens the
+ * pre-seeded surface.
+ *
+ * Host contract: call the ONE shared `launchSurface({ consumerType, draftValues,
+ * resolvedLookups, bffBaseUrl })` (surface-handoff task 012) — the SAME registry
+ * lookup the chip/Click path uses (`useConsumerChips`), ZERO intent detection
+ * (ADR-039: `consumerType` IS the server's routing decision). Lift `resolvedLookups`
+ * out of `payload` so the enriched closed-set ids pre-select dropdowns and never
+ * land in a free-text field.
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseSurfaceLaunchData`
+ */
+export interface ISurfaceLaunchPayload {
+  /** The dispatched Binding row GUID (audit/trace; routing is on `consumerType`). */
+  bindingId: string;
+  /** Stable consumer-type code — the registry key the host maps to a launch surface. */
+  consumerType: string;
+  /** Enriched draft payload (draft slot values + `resolvedLookups` + `fileIds`) to pre-seed the surface; null/absent when none. */
+  payload?: Record<string, unknown> | null;
+}
+
+/**
  * A single step as received in the 'plan_preview' SSE event data.
  * Maps to ChatSsePlanStep on the backend.
  */
@@ -835,6 +907,58 @@ export interface ISprkChatProps {
    * show a button that does nothing (G-P2 UAT round-1 finding 2, 2026-07-06).
    */
   enableInsertToEditor?: boolean;
+  /**
+   * DEF-08 Part B: called when the user clicks "Open in Compose" on a completed assistant message.
+   * Opt-in per host (SpaarkeAi's ConversationPane provides it): the host opens a (reused) Compose
+   * editor tab seeded with the message's text as an editable draft. Omitted → no button rendered.
+   * @param content - the assistant message text to seed the Compose draft with.
+   */
+  onOpenInCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 R4 — "Insert into document". When the host provides this, a completed
+   * Assistant message renders an "Insert into document" button that inserts the message's text into
+   * the open Compose editor as a tracked change at the user's current selection/cursor (a live
+   * selection → strike+replace; else insert at cursor). Opt-in per host (SpaarkeAi's ConversationPane
+   * passes it ONLY when a Compose editor is registered on the cross-pane bridge); omitting it renders
+   * no button. Distinct from the legacy `onInsert` (BroadcastChannel → Lexical editor) path.
+   * @param content - the Assistant message text to insert into the Compose document.
+   */
+  onInsertToCompose?: (content: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #7a — "Open preview" on a persistent "Saved to the DMS" message. When
+   * the host provides this, an Assistant message carrying `metadata.savedPreview` renders an "Open
+   * preview" button that opens the File Preview modal for the saved document. Opt-in per host
+   * (SpaarkeAi's ConversationPane); omitting it renders no button.
+   * @param documentId - the persisted `sprk_documentid` to preview.
+   * @param fileName - optional display name for the modal title.
+   */
+  onOpenSavedPreview?: (documentId: string, fileName?: string) => void;
+  /**
+   * spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls. When the host provides these,
+   * an Assistant message carrying `metadata.composeEdit` renders Accept / Reject / Try-another
+   * controls (the Assistant becomes the AI↔user interaction surface; the cramped in-editor bar is
+   * removed). Each callback receives the message's `ledgerRef` + `bindingId` so the host routes it
+   * to the EXISTING handlers: Accept → `usePendingRedline.accept` (via the compose bridge), Reject →
+   * `useEditSupersession.undo` (ledger retraction), Try-another → `useEditSupersession.tryAnother`.
+   * The controls render ONLY on the message whose `ledgerRef` equals {@link activeComposeEditLedgerRef}
+   * (the live pending edit); once accepted/rejected the host clears it and the controls disappear.
+   */
+  onComposeEditAccept?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditReject?: (ledgerRef: string, bindingId: string) => void;
+  onComposeEditTryAnother?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * spaarkeai-compose-r2 FIX #3 — "Keep redline". Dismisses the Assistant action prompt but LEAVES the
+   * pending redline marks in place so the user keeps editing (the host clears only the tracked edit;
+   * it does NOT accept, undo, or reject). Optional; omitting it renders that control disabled.
+   */
+  onComposeEditKeep?: (ledgerRef: string, bindingId: string) => void;
+  /**
+   * spaarkeai-compose-r2 DEF-12 — the `ledgerRef` of the currently-live pending Compose edit (or
+   * null when none). Only the confirmation message whose `metadata.composeEdit.ledgerRef` matches
+   * this value shows its Accept/Reject/Try-another controls; stale confirmations (superseded edits)
+   * render inert. Driven by the host's `useEditSupersession.lastEdit`.
+   */
+  activeComposeEditLedgerRef?: string | null;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */
@@ -927,6 +1051,20 @@ export interface ISprkChatProps {
   onElicitationModal?: ((payload: IElicitationModalPayload) => void) | null;
 
   /**
+   * Callback fired for `surface_launch` SSE events
+   * (spaarkeai-assistant-enhancements-r1 P0(b) — the TEXT/agent-path create-flow
+   * fix). Emitted when a capability the agent turn selected routes to a
+   * `surface_launch`-disposition Binding. The host opens the pre-seeded create
+   * surface via the shared `launchSurface({ consumerType, draftValues,
+   * resolvedLookups, bffBaseUrl })` — the SAME registry the chip/Click path uses.
+   * When omitted, the event is logged and dropped (the assistant's chat notice
+   * still tells the user the surface was intended).
+   *
+   * Synchronous callback-ref pattern (same as onElicitationModal).
+   */
+  onSurfaceLaunch?: ((payload: ISurfaceLaunchPayload) => void) | null;
+
+  /**
    * Callback fired when the user clicks a candidate playbook link button rendered
    * by `SprkChatMessageRenderer` for `responseType === 'playbook_options'`
    * (chat-routing-redesign-r1 task 117b — FR-50).
@@ -950,6 +1088,22 @@ export interface ISprkChatProps {
    * the link renders disabled.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired when the user clicks a next-step chip rendered by `OutcomeCard`
+   * for `responseType === 'outcome_card'` (spaarke-ai-architecture-redesign-r2 task 062 —
+   * FR-A1-06 / FR-B-13 workspace-intelligence precursor).
+   *
+   * The chip's `targetBindingId` (present when `actionKind === 'invoke_capability'`,
+   * sourced ONLY from the Binding's DECLARED `sprk_chiptransitions` — never model-invented)
+   * is the routing datum the ONE Click-path helper needs:
+   * `dispatchConsumer(chip.targetBindingId, args)` from `services/dispatchConsumer.ts`.
+   * SprkChat threads this straight through to `SprkChatMessage`/`SprkChatMessageRenderer`;
+   * it never calls dispatchConsumer itself (ADR-012 context-agnostic).
+   *
+   * When the prop is omitted the chips render disabled.
+   */
+  onNextStep?: (chip: INextStepChip) => void;
 
   /**
    * Callback fired when a chat attachment finishes client-side extraction and
@@ -1006,6 +1160,46 @@ export interface ISprkChatProps {
    * the shared-library boundary.
    */
   onAttachmentsChanged?: (chips: AttachmentChip[]) => void;
+
+  /**
+   * When true, the composer input + send are DISABLED because the host is running
+   * an orchestration the user's next message would race
+   * (spaarkeai-assistant-enhancements-r1 UAT: a file's upload → classify → summarize
+   * runs on the Event path AFTER the chip is `ready`, and a message typed during it
+   * was dropped). OR'd with SprkChat's own busy signals (message streaming, typing,
+   * a file still `extracting`), so the input locks for the WHOLE orchestration and
+   * re-enables when the host clears this. Omitted/false → only SprkChat's internal
+   * busy signals gate the input (prior behavior).
+   */
+  inputBusy?: boolean;
+
+  /**
+   * CHAT-6 (UAT 2026-07-19): when true, hide the toolbar-strip slash-command
+   * ("Prompt") button. Some hosts (SpaarkeAi Assistant) treat slash commands as an
+   * advanced affordance not worth surfacing by default. The slash menu is still
+   * reachable by typing `/`. Omitted/false → the button renders (prior behavior).
+   */
+  hidePromptMenu?: boolean;
+
+  /**
+   * CHAT-4 (UAT 2026-07-19): when true, suppress SprkChat's built-in
+   * "No messages yet" empty state. Hosts that render their own get-started
+   * surface (SpaarkeAi WelcomeStartCards) set this so the two don't both show.
+   * Omitted/false → the built-in empty state renders (prior behavior).
+   */
+  hideEmptyState?: boolean;
+
+  /**
+   * CHAT-5 (UAT 2026-07-19): placeholder text for the composer input. Omitted →
+   * the default 'Type a message...'.
+   */
+  inputPlaceholder?: string;
+
+  /**
+   * CHAT-5 (UAT 2026-07-19): minimum visible rows for the composer textarea (a
+   * taller default composer). Omitted → the Fluent Textarea default height.
+   */
+  inputMinRows?: number;
 
   /**
    * Callback fired when the user clicks the dismiss button on an attachment
@@ -1186,6 +1380,29 @@ export interface ISprkChatProps {
   onDecorateOutboundBody?: (
     body: Record<string, unknown>
   ) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+
+  /**
+   * Fires with the FULL citation list (`ICitation[]`, including `excerpt` +
+   * `source`) whenever the SSE `citations` event populates a non-empty set for
+   * the latest assistant answer (the SAME data SprkChat already renders as
+   * `[N]` superscript markers via `SprkChatMessage`'s `citations` prop —
+   * see `streamCitations` in `useSseStream`).
+   *
+   * This is an OBSERVATION callback (mirrors `onMessagesChange` /
+   * `onPaneEvent`) — SprkChat's own citation rendering is unaffected whether
+   * or not a host provides this prop. Added for spaarkeai-compose-r2 task 072
+   * (FR-35 Document Q&A stretch): the Compose host uses the excerpt text to
+   * drive an in-document ephemeral highlight of the cited span. Never fires
+   * for an uncited answer (empty citations array) — hosts MUST NOT treat the
+   * absence of a call as an error; it is the expected "ungrounded/no citation"
+   * case (ADR-039 grounded-output invariant).
+   *
+   * ADR-015: citation `excerpt` text is the SAME content already rendered to
+   * the user in the transcript (not a new content surface) — hosts bridging
+   * this to telemetry must still strip it per the existing citation-content
+   * privacy contract.
+   */
+  onCitations?: ((citations: ICitation[]) => void) | null;
 }
 
 /** Props for SprkChatMessage sub-component. */
@@ -1212,6 +1429,8 @@ export interface ISprkChatInputProps {
   maxCharCount?: number;
   /** Placeholder text */
   placeholder?: string;
+  /** CHAT-5 (UAT 2026-07-19): minimum visible rows for the textarea (taller composer). */
+  minRows?: number;
   /**
    * Optional dynamic slash commands appended to the static DEFAULT_SLASH_COMMANDS.
    * Use to inject playbook-capability commands resolved from the context mapping
@@ -1228,6 +1447,13 @@ export interface ISprkChatInputProps {
    * `triggerSlashMode()` via the imperative handle.
    */
   hideSlashButton?: boolean;
+  /**
+   * UAT 2026-07-21: content rendered at the LEFT of the composer's bottom
+   * toolbar tray. SprkChat passes its Attach (paperclip) button here so the
+   * paperclip sits in the tray (left) opposite the Send button (right).
+   * When omitted, the tray-left is empty and Send stays right-aligned.
+   */
+  toolbarLeadingSlot?: import('react').ReactNode;
 }
 
 /**
@@ -1808,6 +2034,15 @@ export interface IUseSseStreamResult {
    * `dispatchConsumer(bindingId, { slots })`. Pass `null` to unregister.
    */
   setOnElicitationModal: (handler: ((payload: IElicitationModalPayload) => void) | null) => void;
+
+  /**
+   * spaarkeai-assistant-enhancements-r1 P0(b) — register/unregister a synchronous
+   * callback for `surface_launch` SSE forwarding (the TEXT/agent-path create-flow
+   * launch). Same callback-ref pattern as setOnElicitationModal. SprkChat wires
+   * this to its `onSurfaceLaunch` prop; the host opens the pre-seeded surface via
+   * the shared `launchSurface`. Pass `null` to unregister.
+   */
+  setOnSurfaceLaunch: (handler: ((payload: ISurfaceLaunchPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

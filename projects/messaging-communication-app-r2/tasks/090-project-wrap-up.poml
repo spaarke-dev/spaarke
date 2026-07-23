@@ -1,0 +1,127 @@
+<task id="090" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Project wrap-up — README → Complete + graduation criteria, lessons-learned, `/test-diet` gate, `/code-review` close-out, `/devops-project-archive`, TASK-INDEX reconciliation</title>
+    <phase>Wrap</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <deps>001, 002, 003, 004, 010, 011, 020, 021, 022, 023, 030, 040, 041, 050, 051, 060, 070, 071, 080, 081</deps>
+    <blocks></blocks>
+    <tags>wrapup</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close orchestration: status flip + graduation annotation, lessons-learned, mandatory `/test-diet` reconciliation gate (root §7), final holistic `code-review`, `/devops-project-archive`, and TASK-INDEX reconciliation. Writes project-close state + invokes gates — MUST run from the main session (root §3). STANDARD rigor with an explicit test-diet gate.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only: runs the `/test-diet` gate, updates project-close state, produces the final review, and archives the project after ALL work tasks complete. Cannot be delegated to a subagent (touches project-close state + gates; §3 write boundary).</parallel-reason>
+    <fr-refs></fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Close out messaging-communication-app-r2 (Communication Workspace) from the MAIN SESSION only:
+
+    1. **README → Complete + graduation criteria** — flip the project README status to Complete; summarize what shipped (W0–W8: two schema deltas + participant junction + ADR, the `by-regarding` + filtered `query` read endpoints, the regarding-mode Timeline on all 11 forms + summary card, the rich `communications-list` widget upgrade, the standalone All-Communications page, the participant index + `participant=` facet, compose-form enrichment, the 3-tier auto-threading policy + thread naming re-derive + RegardingResolver placement, seam tests, docs) and **annotate each of the 9 spec Success Criteria** as met (or documented as owner-handoff/deferred).
+
+    2. **Lessons-learned** — author `notes/lessons-learned.md` capturing: the two shared-`Services/Communication/`-path edits (050 participant write + 070 auto-threading) + their characterization-guard outcomes; the ADR-034 path-C two-typed-lookups decision (participant junction); the ADR-046 path-C RegardingResolver-on-thread-form reuse; the T-1 VisualHost count-only boundary; the impersonation + 2-rule read model (no membership-union) and the access-parity negatives; the dual-deploy discipline (LegalWorkspace + SpaarkeAi widget); publish-size trajectory vs the ~46.99 MB baseline; the notification-spine reserve-only alignment (NFR-06) for a future poll→push increment; and deferred items (category/tags, thread-grain participant rows, permanent sitemap entry, poll→push).
+
+    3. **`/test-diet` gate (MANDATORY, root §7)** — invoke `/test-diet` to reconcile every test added/modified during R2 (esp. task 080's vertical-slice seam + access-parity + characterization tests) against the ADR-038 build-vs-maintain classifier: MAINTAIN-class tests stay at KEEP paths; SCAFFOLDING-class tests are emitted for deletion (`git rm`); AMBIGUOUS require reviewer judgment. The skill is read-only — it emits commands for the reviewer. Output: `notes/test-diet-report.md`. The wrap-up PR MUST cite this report.
+
+    4. **Final `code-review`** — run a final holistic `code-review` across the R2 close-out diff surface as a project-close quality gate (special attention: the security-sensitive access-parity/read model [no membership-union] + the two shared-path edits 050/070).
+
+    5. **`/devops-project-archive`** — archive the project (set Status + Closed Date, capture counts, close the Issue, retain the folder + `.archived` marker; worktree preserved per operator workflow).
+
+    6. **Final TASK-INDEX reconciliation** — confirm every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff, e.g. any PCF/form import or schema deploy handed to the owner); set `current-task.md` to "none — project complete".
+
+    Then confirm the project is complete and ready for `merge-to-master`.
+  </prompt>
+
+  <role>
+    Spaarke project lead running the main-session project-close protocol. Authoritative on the wrap-up sequence, the `/test-diet` gate (root §7), the final `code-review` gate, and `/devops-project-archive`. Does NOT delegate to subagents (root §3 write boundary).
+  </role>
+
+  <goal>
+    README status is Complete with the 9 Success Criteria annotated; `notes/lessons-learned.md` and `notes/test-diet-report.md` exist; the `/test-diet` gate has run and its report is cited; a final `code-review` has run with Critical findings addressed; the project is archived via `/devops-project-archive`; TASK-INDEX is fully reconciled; `current-task.md` is "none — project complete". The project is ready to merge to master.
+  </goal>
+
+  <context>
+    <background>
+      This is the project-close task. Per root §7, a `090-wrapup-*` task invokes `/test-diet` BEFORE marking the project complete — reconciling R2's test additions against the ADR-038 KEEP-path categories (task 080's seam + access-parity + characterization tests are the bulk). R2 was substantial (two schema deltas + a participant junction, new read/query endpoints on the impersonation path, a 3-tier auto-threading policy on the shared resolver, a participant-index write on the shared persist path, Surface 1 on all 11 forms, a rich widget upgrade with dual-deploy, and a standalone page). The notification-spine reserve-only alignment (NFR-06) is forward-facing — record it for the future poll→push increment.
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r2/README.md</file>
+      <file>projects/messaging-communication-app-r2/notes/lessons-learned.md (NEW)</file>
+      <file>projects/messaging-communication-app-r2/notes/test-diet-report.md (NEW — from /test-diet)</file>
+      <file>projects/messaging-communication-app-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/messaging-communication-app-r2/current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root §7">A `090-wrapup-*` task MUST invoke `/test-diet` BEFORE marking the project complete; the wrap-up PR MUST cite `notes/test-diet-report.md` (or document the skip rationale). Skipping is a HARD WARNING.</constraint>
+    <constraint source="root §3">Main-session only — this task writes project-close state + runs gates + archives; do NOT delegate to a subagent.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies per the build-vs-maintain criteria; the skill is read-only (emits `git rm`/`git mv` for the reviewer; no auto-execute).</constraint>
+    <constraint source="project">Final `code-review` is a project-close gate; address Critical findings before declaring complete (special attention: the access-parity/read model [no membership-union] + the 050/070 shared-path edits).</constraint>
+    <constraint source="project">Record the notification-spine reserve-only alignment (NFR-06 — `communication-arrived` kind + envelope) + the future poll→push increment in lessons-learned.</constraint>
+    <constraint source="project">Run `/devops-project-archive` to archive the project (Status + Closed Date + counts + close Issue + `.archived` marker; worktree preserved).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-close</topic>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/tasks/TASK-INDEX.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/devops-project-archive/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1" name="Verify all tasks complete">Read `TASK-INDEX.md`; confirm every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff). If any remain 🔲/🔄 unexpectedly, STOP and report.</step>
+    <step order="2" name="README → Complete + graduation">Update the README status to Complete; summarize shipped W0–W8 scope + annotate the 9 spec Success Criteria as met (or owner-handoff/deferred).</step>
+    <step order="3" name="Lessons-learned">Author `notes/lessons-learned.md` (shared-path 050/070 + characterization guards, ADR-034 path-C junction, ADR-046 path-C RegardingResolver reuse, T-1 VisualHost count-only, impersonation + 2-rule read model / access-parity, dual-deploy discipline, publish-size trajectory vs ~46.99 MB, notification-spine reserve-only + poll→push, deferred items).</step>
+    <step order="4" name="/test-diet gate">Invoke `/test-diet`; produce `notes/test-diet-report.md` (MAINTAIN keep / SCAFFOLDING `git rm` / AMBIGUOUS reviewer-judgment). Do NOT auto-execute the emitted commands.</step>
+    <step order="5" name="Final code-review">Run a final holistic `code-review` across the R2 close-out diff surface (special attention: access-parity/read model [no membership-union], 050/070 shared-path edits); address Critical findings.</step>
+    <step order="6" name="/devops-project-archive">Run `/devops-project-archive` — set Status + Closed Date, capture counts, close the Issue, retain folder + `.archived` marker (worktree preserved per operator workflow).</step>
+    <step order="7" name="Reconcile + reset">Mark task 090 ✅ in `TASK-INDEX.md`; confirm full reconciliation; set `current-task.md` to "none — project complete".</step>
+    <step order="8" name="Ready to merge">Confirm the project is complete and ready for `merge-to-master`; the wrap-up PR cites `notes/test-diet-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Verify task completion + gather close artifacts</tool>
+    <tool name="edit">README status + graduation; lessons-learned; TASK-INDEX; current-task</tool>
+    <tool name="test-diet">MANDATORY project-close test reconciliation gate</tool>
+    <tool name="code-review">Final project-close quality gate</tool>
+    <tool name="devops-project-archive">Archive the completed project</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/messaging-communication-app-r2/README.md (UPDATED — status Complete + 9 Success Criteria annotated)</output>
+    <output type="docs">projects/messaging-communication-app-r2/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/messaging-communication-app-r2/notes/test-diet-report.md (NEW — from /test-diet)</output>
+    <output type="docs">projects/messaging-communication-app-r2/tasks/TASK-INDEX.md + current-task.md (UPDATED — fully reconciled)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every W0–W8 task is ✅ (or explicitly documented as deferred/owner-handoff) in `TASK-INDEX.md` before wrap-up completes.</criterion>
+    <criterion testable="true">README status is Complete with a shipped-scope summary + the 9 Success Criteria annotated.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists (incl. the notification-spine reserve-only / poll→push note + the shared-path 050/070 outcomes).</criterion>
+    <criterion testable="true">`/test-diet` has run; `notes/test-diet-report.md` exists and is cited in the wrap-up PR; no emitted `git rm` auto-executed.</criterion>
+    <criterion testable="true">A final `code-review` has run with Critical findings addressed (special attention: access-parity/read model + 050/070 shared-path edits).</criterion>
+    <criterion testable="true">`/devops-project-archive` has run (Status + Closed Date + counts + closed Issue + `.archived` marker); `current-task.md` set to "none — project complete".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Main-session only (root §3). The `/test-diet` gate is mandatory per root §7 — skipping is a HARD WARNING that must be justified in the PR. After this task, run `merge-to-master`. If any schema deploy, 11-form PCF placement, or grid-config curation was handed to the owner (environment-gated), document it as a tracked owner-handoff, not an incomplete task. Surface any open findings (e.g. the notification-spine taxonomy drift-watch, spec Unresolved-Questions advisory) for follow-up.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Main-session only. Apply STANDARD rigor + the mandatory `/test-diet` gate (root §7) at Step 4. Do NOT delegate to a subagent. Cite `notes/test-diet-report.md` in the wrap-up PR. Run `/devops-project-archive` at Step 6. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

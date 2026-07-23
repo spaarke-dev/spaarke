@@ -1,0 +1,145 @@
+<task id="005" project="email-communication-solution-r4">
+  <metadata>
+    <title>Author ADR-045 — Communication ADR (client canonical send + server Association Engine + enrichment + channel seams)</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>completed</status>
+    <completed>2026-07-14</completed>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>006, 010, 016</blocks>
+    <tags>adr, docs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Authors a binding ADR (concise + full) — high-leverage governance artifact all downstream waves cite; not code implementation. STANDARD per CLAUDE.md §8, but `/adr-check` is invoked explicitly.</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/adr/` — sub-agent write boundary (main-session-only per CLAUDE.md §3). Sub-agents CANNOT write to `.claude/` paths.</parallel-reason>
+    <fr-refs>FR-05</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Author the single Communication ADR — **ADR-045** — that anchors all of R4. It codifies four things as one coherent decision:
+    1. **Client canonical send** — one `&lt;EmailComposer /&gt;` engine + three thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`) + `sendCommunication()` typed wrapper; no ad-hoc/inline send.
+    2. **Server Association Engine** — operates over a normalized message envelope (never `Microsoft.Graph.Message`); deterministic-first rung ladder (0–3), then semantic (4) + AI (5); per-attribute confidence + provenance; eight association targets.
+    3. **Direction-agnostic enrichment service** — `ICommunicationEnrichmentService` invoked by BOTH inbound and outbound paths (association → categorization → AI → RAG → Responsive Intelligence).
+    4. **Channel seams** — `ICommunicationChannelSender` / `ICommunicationArchiver` defined (not implemented beyond email); new channels = new adapters + normalizer, never engine changes.
+
+    Write BOTH forms: concise at `.claude/adr/ADR-045-communication-architecture.md` (~120–160 lines, MUST/MUST NOT) and full history at `docs/adr/ADR-045-communication-architecture.md`. Cross-reference from `.claude/adr/INDEX.md`, `docs/adr/INDEX.md`, and root `CLAUDE.md` §17.
+
+    IMPORTANT number check: the design's "ADR-033" reference is a stale R3 carryover — ADR-033 is already an unrelated accepted ADR. This ADR is **ADR-045** (038–044 occupied; owner-confirmed). Re-verify 045 is the next free slot before writing.
+  </prompt>
+
+  <role>
+    Spaarke platform architect. Authoritative on Communication architecture across R1 (early email), R2 (server foundation), R3 (send-side design, absorbed), and R4 (this project). Fluent in the project's concise ADR conventions (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) and the full-history form (`docs/adr/`).
+  </role>
+
+  <goal>
+    ADR-045 exists in both concise (`.claude/adr/`) and full (`docs/adr/`) forms, codifying the four-part Communication decision with MUST/MUST NOT rules; indexed in both ADR INDEXes + reachable from root `CLAUDE.md` §17; passes `/adr-check` against `spec.md` with no contradiction against existing ADRs.
+  </goal>
+
+  <context>
+    <background>
+      Every subsequent R4 wave's code review + `/adr-check` cites the Communication ADR. Landing it first (alongside the schema pass) enforces the discipline that the rest of the project references an authoritative anchor. R3 planned an "ADR-033" for the client-only send consolidation; R4 absorbs R3 and broadens the ADR to cover the full server intelligence layer + channel seams, hence a fresh number and fresh scope.
+
+      This ADR must correctly cite its neighbors: ADR-024 (regarding family), ADR-028 (Auth v2), ADR-018 (kill-switch, for auto-file), ADR-032 (Null-Object, for feature-gated services), ADR-013 (AI facade / PublicContracts), ADR-016/014 (AI budget/cache), ADR-015 (privilege flag-only), ADR-037 (DeliverComposite), ADR-006/026/021/022/012 (Code Page + Fluent v9), ADR-029 (publish hygiene), ADR-038 (testing).
+    </background>
+    <relevant-files>
+      <file>.claude/adr/ADR-045-communication-architecture.md (NEW)</file>
+      <file>docs/adr/ADR-045-communication-architecture.md (NEW)</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>docs/adr/INDEX.md</file>
+      <file>CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ADR number is **ADR-045** — NOT ADR-033 (taken). Re-verify 045 is free before writing; if claimed in the interim, use the next free number and update all task references + this task's notes.</constraint>
+    <constraint source="project (§3 write boundary)">MAIN-SESSION ONLY. Sub-agents cannot write to `.claude/`. This task MUST be executed from the main session, not delegated to an Agent-tool sub-agent.</constraint>
+    <constraint source="project">Author BOTH forms: concise (`.claude/adr/`, MUST/MUST NOT, ~120–160 lines) AND full (`docs/adr/`, rationale + alternatives + consequences).</constraint>
+    <constraint source="ADR-024">ADR-045 explicitly defers the regarding-family mechanism to ADR-024 (extend, never replace) — the engine keeps writing ADR-024 typed lookups.</constraint>
+    <constraint source="ADR-028">ADR-045 mandates central `TokenCredential` + `IGraphClientFactory`; MUST NOT `new` a credential/`ConfidentialClientApplication`.</constraint>
+    <constraint source="ADR-018">Auto-file is gated behind the per-tenant ADR-018 kill-switch; ADR-045 records the auto-file-ON-for-deterministic-≥0.85 owner decision (ADR Tension Path A) + AI-rungs-never-auto-file rule.</constraint>
+    <constraint source="project (NFR-04)">ADR-045 requires channel seams (`ICommunicationChannelSender`/`ICommunicationArchiver`) that new channels extend WITHOUT changing the engine/enrichment/regarding/review layers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/design.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-018-configuration-kill-switch.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Concise ADR form" location=".claude/adr/ADR-032-bff-nullobject-kill-switch.md">
+        Latest concise ADR — structural exemplar: Status / Context / Decision (MUST / MUST NOT) / Consequences / Related; ~120–160 lines.
+      </pattern>
+      <pattern name="Full ADR form" location="docs/adr/">
+        Full-history form: Status, Context, Decision, Alternatives Considered, Consequences, Related, revision log. More rationale than the concise form.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Re-verify ADR-045 is the next free slot: `ls .claude/adr/ADR-0*` + `ls docs/adr/ADR-0*`. Confirm 038–044 occupied, 045 free. If 045 is claimed, use the next free number + note it.</step>
+    <step order="2">Read `spec.md` FR-05 + §Technical Constraints (ADR list + MUST/MUST NOT) + §ADR Tensions + design.md for scope inputs.</step>
+    <step order="3">Read `reference/r3-send-side-design.md` §5–§8 for the client canonical-send detail the ADR must codify.</step>
+    <step order="4">Read `ADR-032` (concise structural exemplar) + the neighbor ADRs (024, 028, 018, 013) so the Related section cites them correctly.</step>
+    <step order="5">Author `.claude/adr/ADR-045-communication-architecture.md` (concise): Status (Accepted, 2026-07-14), Context (R1→R4 history + assessment), Decision covering the four parts with MUST / MUST NOT pulled from spec §MUST Rules / §MUST NOT Rules (envelope-only engine; both-direction enrichment; auto-file ON deterministic ≥0.85 via ADR-018 kill-switch; AI rungs never auto-file; org target `sprk_organization`; channel seams only; no `new` credential; no OOB `email`/SSS), Consequences, Related (024/028/018/032/013/016/014/015/037/006/026/021/022/012/029/038).</step>
+    <step order="6">Author `docs/adr/ADR-045-communication-architecture.md` (full): same decision + Alternatives Considered (e.g., separate client-only vs unified ADR; per-channel ADRs) + fuller rationale + the ADR Tension Path A record for auto-file.</step>
+    <step order="7">Update `.claude/adr/INDEX.md` + `docs/adr/INDEX.md` with the ADR-045 row.</step>
+    <step order="8">Update root `CLAUDE.md` §17 pointer table so ADR-045 is reachable (via the ADR INDEX row or a direct pointer). Add the required `.claude/CHANGELOG.md` entry (every CLAUDE.md-touching PR must).</step>
+    <step order="9">Run `/adr-check` against `spec.md` — confirm ADR-045 has no contradiction with existing ADRs + passes constraint validation. Confirm existing ADR cross-references still resolve.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark task 005 ✅; confirm dependents 006/010/016 unblocked.</step>
+    <step order="11">Update `current-task.md` per task-execute: status → completed; advance to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify ADR slot + cross-reference resolution</tool>
+    <tool name="edit">Author both ADR forms + update indexes + CLAUDE.md + CHANGELOG</tool>
+    <tool name="adr-check">Validate ADR-045 against spec</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-045-communication-architecture.md (NEW — concise)</output>
+    <output type="docs">docs/adr/ADR-045-communication-architecture.md (NEW — full)</output>
+    <output type="docs">.claude/adr/INDEX.md (UPDATED — ADR-045 row)</output>
+    <output type="docs">docs/adr/INDEX.md (UPDATED — ADR-045 row)</output>
+    <output type="docs">CLAUDE.md (UPDATED — §17 reachable to ADR-045) + .claude/CHANGELOG.md entry</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`.claude/adr/ADR-045-communication-architecture.md` exists, ~120–160 lines, with Status / Context / Decision (MUST + MUST NOT) / Consequences / Related.</criterion>
+    <criterion testable="true">`docs/adr/ADR-045-communication-architecture.md` exists (full form) with Alternatives Considered + the auto-file ADR Tension Path A record.</criterion>
+    <criterion testable="true">Decision codifies all four parts: client canonical send, envelope-only Association Engine, both-direction enrichment, channel seams.</criterion>
+    <criterion testable="true">MUST/MUST NOT include: normalized envelope only; auto-file ON deterministic ≥0.85 via ADR-018 kill-switch; AI rungs never auto-file; org target `sprk_organization`; no `new` credential; seams-only channels; no OOB `email`/SSS.</criterion>
+    <criterion testable="true">Related cites ADR-024, ADR-028, ADR-018, ADR-032, ADR-013, ADR-016/014, ADR-015, ADR-037, ADR-006/026/021/022/012, ADR-029, ADR-038.</criterion>
+    <criterion testable="true">Both ADR INDEXes list ADR-045; root `CLAUDE.md` §17 reaches it; `.claude/CHANGELOG.md` has the entry.</criterion>
+    <criterion testable="true">`/adr-check` passes against `spec.md` with ADR-045 included; no existing cross-reference regresses.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    MAIN-SESSION ONLY (§3): do not delegate this to an Agent-tool sub-agent — the `.claude/adr/` write would be denied. If a parallel agent reports "Edit denied on `.claude/...`" that is the boundary working correctly.
+
+    The design.md's "ADR-033" references are stale R3 carryover — ADR-033 is a different, unrelated accepted ADR. The owner confirmed **ADR-045**. Step 1 re-verifies.
+
+    This ADR supersedes the never-written R3 "ADR-033" plan and broadens it: R3's scope was client send only; R4's ADR covers the full server intelligence layer + channel seams too. Note the supersession in the full-form Context.
+
+    Blocks 006 (send-path cites the canonical contract), 010 (enrichment service contract), 016 (channel seams). Land it early.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED, but the explicit `/adr-check` in step 9 is REQUIRED. Execute from the MAIN SESSION (§3 write boundary). Model tier: opus (architectural authoring).
+    </protocol>
+  </execution>
+</task>

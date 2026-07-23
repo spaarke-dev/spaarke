@@ -5,7 +5,7 @@ techStack: [all]
 appliesTo: ["projects/*/design.md", "projects/*/design.docx", "transform spec", "design to spec"]
 alwaysApply: false
 exemplar: projects/ai-procedure-quality-r1/spec.md
-last-reviewed: 2026-05-16
+last-reviewed: 2026-07-16
 ---
 
 # design-to-spec
@@ -20,14 +20,14 @@ last-reviewed: 2026-05-16
 
 ### Claude Code Effort & Output Configuration
 
-**Updated 2026-05-17**: Invoke this skill on **Opus with effort `high` or `max`** — it ingests verbose design documents (2000-5000 words), performs preliminary ADR/resource discovery, and generates structured spec.md. The previous prescription of `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** (adaptive thinking — the model decides depth dynamically). Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing:
+**Updated 2026-05-17**: Invoke this skill on **Opus 4.8 / Fable 5 with effort `high` or `max`** (planning tier per root CLAUDE.md §8.5) — it ingests verbose design documents (2000-5000 words), performs preliminary ADR/resource discovery, and generates structured spec.md. The previous prescription of `MAX_THINKING_TOKENS=50000` is **obsolete on Opus 4.6+** (adaptive thinking — the model decides depth dynamically). Only `CLAUDE_CODE_MAX_OUTPUT_TOKENS=64000` remains load-bearing:
 
 ```bash
 # Windows PowerShell
 $env:CLAUDE_CODE_MAX_OUTPUT_TOKENS = "64000"
 ```
 
-For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md) §13 (Knowledge Repository) and the researcher subagent at `.claude/agents/researcher.md` if Microsoft platform questions arise mid-spec.
+For full context on adaptive thinking and effort tuning, see root [`CLAUDE.md`](../../../CLAUDE.md) §15 (Knowledge Repository) and the researcher subagent at `.claude/agents/researcher.md` if Microsoft platform questions arise mid-spec.
 
 ### Permission Mode: Plan Mode (RECOMMENDED)
 
@@ -435,6 +435,38 @@ FOLLOW template structure:
 - See `src/server/api/.../ExampleEndpoints.cs` for endpoint pattern
 - See `.claude/patterns/api/` for detailed patterns
 
+## Placement & New Components (per CLAUDE.md §10 / §11)
+
+{Seed the governance the downstream pipeline (project-pipeline, task-create) will enforce, so it is not
+back-filled later. Two parts:}
+
+### Hot-Path Declaration
+{REQUIRED if this project touches BFF (`src/server/api/Sprk.Bff.Api/**`) or SpaarkeAi
+(`src/solutions/SpaarkeAi/**`). project-pipeline Step 3 emits a HARD WARNING if design.md lacks it, so seed it here.}
+
+```xml
+<hot-path-declaration>
+  <bff>Y|N</bff>
+  <spaarkeai>Y|N</spaarkeai>
+  <ci-workflows>Y|N</ci-workflows>
+  <skill-directives>Y|N</skill-directives>
+  <root-claude-md>Y|N</root-claude-md>
+</hot-path-declaration>
+```
+
+{If BFF=Y: add a one-line Placement Justification per major new component citing
+`.claude/constraints/bff-extensions.md`, and note the ≤60 MB publish-size ceiling applies per task.}
+
+### New Components (§11 three-question gate)
+{For each NEW service/abstraction/endpoint/DI-registration/package/Dataverse-column this design introduces,
+answer in one sentence each — task-create Step 3.5.6 and code-review Step 6.6 will re-check these:}
+
+| New component | Existing overlap (grep) | Can extend instead? | Cost-of-doing-nothing (concrete failure) |
+|---|---|---|---|
+| {name} | {file:line or "none found"} | {Yes→extend / No + why} | {behavior/contract that fails — NOT "flexibility"} |
+
+{If this project adds NO new surface (modify-only), state: "No new components — modify-only."}
+
 ## ADR Tensions (per CLAUDE.md §6.5)
 
 {This section is MANDATORY. Surface any anticipated conflicts between this
@@ -581,7 +613,7 @@ IF user said 'done':
 
 ## spec.md Template
 
-The generated spec.md follows this structure (no template file ΓÇö generate inline):
+The generated spec.md follows this structure (no template file — generate inline):
 
 ```markdown
 # {Project Name} - AI Implementation Specification
@@ -626,6 +658,13 @@ The generated spec.md follows this structure (no template file ΓÇö generate i
 
 ### Existing Patterns
 - See `{path}` for {pattern}
+
+## Placement & New Components (per CLAUDE.md §10 / §11)
+
+*(Same section as the primary Step 4 template above — keep both in sync.)* Include the
+`<hot-path-declaration>` block if the project touches BFF/SpaarkeAi, plus the §11 three-question table for
+each new component (existing overlap / can-extend / concrete cost-of-doing-nothing). State "No new
+components — modify-only" if the project adds no new surface.
 
 ## ADR Tensions (per CLAUDE.md §6.5 — MANDATORY)
 

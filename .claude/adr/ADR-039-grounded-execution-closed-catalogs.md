@@ -80,4 +80,6 @@ the finer-grained disable) · ADR-032 (kill-switch impl) · ADR-037-as-amended
 (section streaming for composites) · ADR-038 (eval suite = integration/contract
 class).
 
+**Compose `confidence_band`** ([docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md](../../docs/architecture/COMPOSE-REDLINE-DERIVED-VIEWS.md)) — a client-side deterministic derivation over grounding evidence + live-doc resolvability; upholds "grounded, no false precision" without a model self-report and without a new dispatch path.
+
 **Full ADR**: [docs/adr/ADR-039-grounded-execution-closed-catalogs.md](../../docs/adr/ADR-039-grounded-execution-closed-catalogs.md)

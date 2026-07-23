@@ -321,6 +321,61 @@ describe("WorkspaceTabManager — Home tab exemption (FR-13)", () => {
     expect(mgr.getSnapshot().tabs).toHaveLength(0);
     expect(mgr.getSnapshot().activeTabId).toBeNull();
   });
+
+  // ── No-collateral-teardown (task 020 / FR-C2 / UC-4) ─────────────────────
+  //
+  // An orchestrated action (e.g. an exclusive playbook selection running
+  // alongside a record delete) must NOT tear down an unrelated live Compose
+  // tab. clearAllTabs({ preserveWidgetTypes: ['compose'] }) keeps work-product
+  // surfaces mounted while clearing the rest.
+
+  it("clearAllTabs preserves a Compose tab when preserveWidgetTypes includes 'compose' (UC-4)", () => {
+    const mgr = makeManager();
+    const composeId = mgr.addTab("compose", { compose: { draft: { ledgerRef: "b1@t1" } } });
+    mgr.addTab("workspace", { layoutId: "daily-briefing" });
+    mgr.addTab("document-viewer", null);
+
+    // The unrelated Compose tab is active — simulate the user working in it
+    // when the orchestrated teardown fires.
+    mgr.setActiveTab(composeId);
+
+    const removed = mgr.clearAllTabs({ preserveWidgetTypes: ["compose"] });
+
+    const { tabs, activeTabId } = mgr.getSnapshot();
+    // Only the two non-compose widget tabs were removed.
+    expect(removed).toBe(2);
+    // The Compose tab SURVIVED — no collateral teardown.
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0].id).toBe(composeId);
+    expect(tabs[0].widgetType).toBe("compose");
+    // ...and it stays active (it was active and survived).
+    expect(activeTabId).toBe(composeId);
+  });
+
+  it("clearAllTabs still removes ALL widget tabs (incl. compose) when no preserve list is given", () => {
+    const mgr = makeManager();
+    mgr.addTab("compose", { compose: {} });
+    mgr.addTab("workspace", null);
+
+    const removed = mgr.clearAllTabs();
+
+    expect(removed).toBe(2);
+    expect(mgr.getSnapshot().tabs).toHaveLength(0);
+    expect(mgr.getSnapshot().activeTabId).toBeNull();
+  });
+
+  it("clearAllTabs preserves Home AND a compose tab together", () => {
+    const mgr = makeManager();
+    const homeId = mgr.ensureHomeTab();
+    const composeId = mgr.addTab("compose", { compose: {} });
+    mgr.addTab("workspace", null);
+
+    const removed = mgr.clearAllTabs({ preserveWidgetTypes: ["compose"] });
+
+    const { tabs } = mgr.getSnapshot();
+    expect(removed).toBe(1); // only the 'workspace' tab removed
+    expect(tabs.map((t) => t.id).sort()).toEqual([composeId, homeId].sort());
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -57,16 +57,15 @@ jest.mock('@spaarke/ui-components', () => ({
 }));
 
 // ── PaneEventBus (no-op in this test) ───────────────────────────────────────
-// `virtual` because the `@spaarke/ai-widgets/events` subpath resolves to the built
-// `dist/events/` at runtime but has no top-level entry the jest resolver can find.
-jest.mock(
-  '@spaarke/ai-widgets/events',
-  () => ({
-    useDispatchPaneEvent: () => jest.fn(),
-    usePaneEvent: () => undefined,
-  }),
-  { virtual: true }
-);
+// NOT `virtual`: jest.config `moduleNameMapper` maps `@spaarke/ai-widgets/events` to the real
+// source, so a resolved (non-virtual) mock binds to the mapped path and applies deterministically.
+// A virtual mock is keyed to the raw specifier, not the resolved path, so it gets bypassed once a
+// sibling suite loads the real module in a shared --runInBand registry → the real hook runs with
+// no provider and throws "must be called inside a <PaneEventBusProvider>".
+jest.mock('@spaarke/ai-widgets/events', () => ({
+  useDispatchPaneEvent: () => jest.fn(),
+  usePaneEvent: () => undefined,
+}));
 
 // ── Heavy workspace hooks — inert doubles ───────────────────────────────────
 jest.mock('./hooks', () => ({

@@ -623,6 +623,13 @@ const ENTITY_VIEW_CONFIG_IDS = {
   invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
   workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
   communications: 'e1826c4c-9575-f111-ab0e-7ced8ddc4a05',
+  // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks (Assistant)" — opened by the
+  // `list-tasks` capability when the user asks "what are my tasks?". Sources the "My Tasks Open"
+  // saved query (12a510e4; Deadline+Task+Reminder, eventstatus=Open, NO owner filter) and scopes it
+  // to the caller via the DataGrid `behavior.membershipFilter` feature — "records I'm on" (owner +
+  // every assigned-person role), broader than `ownerid eq-userid`. Membership is resolved by the
+  // DataverseEntityViewWidget from the AI session's authenticatedFetch.
+  myTasks: 'ac05e4f1-8d85-f111-8075-7c1e5268570d',
 } as const;
 
 /**
@@ -726,10 +733,40 @@ registerWorkspaceWidget(
   tableWidgetVisibility
 );
 
+// spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks" — the user's open task-type
+// Event records they are a member of. Opened by the `list-tasks` capability's client surface-launch
+// branch (ConversationPane.handleSurfaceLaunch). Reuses the shared DataverseEntityViewWidget with the
+// "My Tasks (Assistant)" config, which sources the "My Tasks Open" saved query and applies the
+// DataGrid `behavior.membershipFilter` overlay ("records I'm on", broader than ownerid eq-userid).
+registerWorkspaceWidget(
+  'my-tasks-list',
+  {
+    displayName: 'My Tasks',
+    category: 'data',
+    icon: 'TaskListSquareLtrRegular',
+    allowMultiple: false,
+    defaultOrder: 235,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks),
+  tableWidgetVisibility
+);
+
 // ai-spaarke-ai-workspace-UI-r2 FR-10 (2026-07-01): Communications direct widget.
 // Pattern D dual-use with the `communications` section in LegalWorkspace.
 // Row-click opens Layout 1 (OOB modal via `Xrm.Navigation.navigateTo` at 85% × 85%)
 // per the Phase-1 framework unification (FR-03/FR-20).
+//
+// messaging-communication-app-r2 task 030 (FR-12, 2026-07-19): UPGRADED IN
+// PLACE from the bare `DataverseEntityViewWidget` wrapper to the rich Pattern D
+// `CommunicationsWorkspaceWidget` (filter-chip toolbar + card strip + embedded
+// DataGrid), authored in the NEW shared lib `@spaarke/communication-components`
+// (§11: neither the entity-coupled `@spaarke/events-components` nor the
+// thin-generic `@spaarke/ai-widgets` layer is the right home for rich
+// communication-widget content). The type string `communications-list` is
+// UNCHANGED (dispatch unbroken) — this is the SAME registration, upgraded,
+// not a second widget (NFR-05). The reused `sprk_gridconfiguration` GUID
+// (`ENTITY_VIEW_CONFIG_IDS.communications`) now lives as the widget's own
+// default `configId` inside `CommunicationsWorkspaceWidget.tsx`.
 registerWorkspaceWidget(
   'communications-list',
   {
@@ -739,7 +776,11 @@ registerWorkspaceWidget(
     allowMultiple: true,
     defaultOrder: 240,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.communications),
+  () =>
+    import('@spaarke/communication-components').then(m => ({
+      default:
+        m.CommunicationsWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    })),
   tableWidgetVisibility
 );
 

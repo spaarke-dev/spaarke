@@ -1,0 +1,152 @@
+<task id="113" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT-R4+R5 — session-scoped active-document identity bridge (chat↔Compose) + default Compose layout</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>16</estimated-hours>
+    <effort>xhigh</effort>
+    <dependencies>110,112</dependencies>
+    <blocks>114</blocks>
+    <tags>bff-api,api,ai,chat-session,compose,spaarke-ai,frontend,uat-remediation</tags>
+    <rigor-hint reason="Architectural change to a shared chat-tool contract + client mount plumbing; FULL; WAF+bus E2E DoD">FULL</rigor-hint>
+    <model-tier reason="Cross-cutting brownfield architecture: new session-scoped identity on a surface co-owned with redesign-r2 (SendWorkspaceArtifactHandler.cs, ChatSession.cs); high blast radius; opus">opus</model-tier>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe reason="SOLO. Touches ComposeEndpoints.cs (shared with 110), ConversationPane.tsx (shared with 112), and the co-owned SendWorkspaceArtifactHandler.cs / ChatSession.cs. Must run AFTER Wave 1 (deps 110,112) and alone.">false</parallel-safe>
+    <coordination target="spaarke-ai-architecture-redesign-r2">Edits the co-owned SendWorkspaceArtifactHandler.cs + ChatSession.cs. Per conflict-check (2026-07-10): no live overlap now, but heads-up core before editing and re-merge master before deploy (task 114). Does NOT touch OutputRouter.cs / Binding.cs (frozen until core E-20).</coordination>
+  </metadata>
+
+  <prompt>
+    UAT defects #4, #5, #6, #7 are four faces of ONE structural gap: there is no shared notion of "the document
+    the user is acting on." A document lives in four disjoint identity spaces (chat-uploaded ChatSessionFile;
+    stored sprk_document; Compose client-only Browse bytes; Compose transient upload-mount), and the only
+    connective tissue is the LLM guessing between `documentId`, `sessionFileId`, and `layoutName` on the
+    `send_workspace_artifact` tool. Owner-approved fix (2026-07-10): introduce a SESSION-SCOPED "active document"
+    identity that both surfaces read/write deterministically. (a) Compose→chat: when Compose mounts a
+    transient/direct upload, register it with the active chat session so chat can see it (defect 4). (b)
+    chat→Compose: resolve the mount target server-side from the active-document identity instead of trusting the
+    LLM's pointer choice, so "edit in Compose" mounts the just-uploaded file (defect 5). (c) R5: default
+    `layoutName="Compose"` server-side so "open/edit in compose" never requires the model to synthesize a layout
+    id (defects 6, 7).
+  </prompt>
+
+  <role>
+    Senior full-stack engineer fluent in the BFF ChatSession model, the `send_workspace_artifact` /
+    open-workspace-tab handler, the Compose transient/upload mount plumbing, and the SpaarkeAi
+    SSE→PaneEventBus→ComposeLaunchContext chain. You add a small, additive session-scoped identity and make both
+    directions resolve from it deterministically, on a surface co-owned with redesign-r2.
+  </role>
+
+  <goal>
+    A session-scoped ACTIVE-DOCUMENT identity exists on the ChatSession (e.g. `{ sprkDocumentId? , sessionFileId? ,
+    speDriveItemId? , source }`). (a) Mounting a transient/direct upload in Compose registers it as the active
+    document for the current session (bytes reach the server as a ChatSessionFile so RAG/summarize can resolve it).
+    (b) The open-workspace-tab / send_workspace_artifact handler resolves the Compose mount target from the active
+    document when the LLM does not supply an explicit, current pointer — so "edit in Compose" mounts the
+    just-uploaded file, not a stale stored one. (c) `layoutName` defaults to `"Compose"` when Compose intent is
+    detected, so zero layout-id prompting occurs. Existing chat-launched and stored-document flows are preserved.
+  </goal>
+
+  <context>
+    <background>
+      Four identity spaces + the LLM-guess seam: `SendWorkspaceArtifactHandler.cs:144` (documentId vs
+      sessionFileId; layout prose), `:248-261` + `:443-451` (require layoutName OR layoutId, no "Compose"
+      default), `:459-461` (resolves layout correctly WHEN supplied), `:488-518`/`:685-732` (documentId →
+      ResolveComposeSeedAsync → SPE seed), `:519-534` (sessionFileId → upload seed), `:678-684` (handler's own note
+      that session files carry no SPE pointer). Chat→Compose plumbing (intact, do not rebuild):
+      `useContextEventBridge.ts:96-122` → `WorkspacePane.tsx:761-778` addTab → `WorkspaceLayoutWidget.tsx:283`
+      launchData → `main.tsx:247-304` ComposeLaunchContext → `composeEditor.registration.ts:186-202`. Compose
+      client-only upload: `ComposeWorkspace.tsx:1170-1197` (Browse → FileReader → mountTransient, never hits BFF);
+      transient upload-mount from cache: `:1207-1280` (POST /api/compose/upload keyed (chatSessionId,
+      sessionFileId)). Chat session file model + text source: `ChatSession.cs:343` (doc-upload-binary cache),
+      `:352-371` (ExtractedText/RAG). Chat-uploaded file creation: `ChatDocumentEndpoints` +
+      `ComposeEndpoints.cs:990-999`.
+    </background>
+    <relevant-files>
+      <file purpose="active-document-identity" edit="true">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs (add the session-scoped active-document identity + getter/setter; keep additive)</file>
+      <file purpose="resolve-mount-and-layout-default" edit="true">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs (default layoutName='Compose'; resolve mount target from active-document when no explicit current pointer)</file>
+      <file purpose="register-compose-upload" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (endpoint/path to register a Compose-mounted upload as active document + ChatSessionFile)</file>
+      <file purpose="compose-registers-on-mount" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (on transient/direct mount, register with the active chat session)</file>
+      <file purpose="chat-surface-active-doc" edit="true">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (surface/propagate the active-document to the chat session; provide current-attachment binding)</file>
+      <file purpose="launch-translation" edit="false">src/solutions/SpaarkeAi/src/main.tsx ~247-304 · .../conversation/useContextEventBridge.ts ~96-122 · .../workspace/WorkspacePane.tsx ~761-778 · src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts ~186-202 (plumbing is intact; read for the seed shape)</file>
+    </relevant-files>
+    <notes>
+      Keep the identity ADDITIVE on ChatSession (new nullable field + accessor) — do not restructure the session.
+      Prefer resolving the mount target server-side from the active document; the LLM may still pass an explicit
+      pointer to override (stored-document "open this specific doc" case). For Compose-direct Browse bytes (defect
+      4), the registration must land bytes server-side as a ChatSessionFile (reuse the doc-upload-binary cache +
+      the ChatDocumentEndpoints/ComposeEndpoints upload path) — a client-only mount cannot be made chat-visible
+      any other way. R5 layout default is small: when the tool call targets Compose (or the active document is a
+      Compose doc) and no layout is supplied, default to 'Compose' rather than erroring. FROZEN: do not edit
+      OutputRouter.cs or Binding.cs (core E-20 merge hazard).
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="project (E2E DoD, binding)">NOT ✅ until through-the-wire tests prove BOTH directions: (1) a WebApplicationFactory + PaneEventBus test where a Compose-mounted upload is registered → a chat "summarize"/RAG resolves THAT document (defect 4); (2) a WAF test of open-workspace-tab where, given a just-registered active document and NO explicit pointer, the resolved Compose seed points at the just-uploaded file, not a stale stored one (defect 5); (3) a WAF test that an open-tab call with NO layout arg defaults to 'Compose' (defects 6/7). Service-only / Mock&lt;HttpMessageHandler&gt; tests do NOT satisfy this.</constraint>
+    <constraint source="coordination">SendWorkspaceArtifactHandler.cs + ChatSession.cs are co-owned with redesign-r2 — additive changes only; heads-up core before editing; re-merge master before the 114 deploy.</constraint>
+    <constraint source="frozen">Do NOT edit OutputRouter.cs or Binding.cs (core E-20 hazard). Do NOT add a new AI dispatch endpoint (ADR-039).</constraint>
+    <constraint source="ADR-013">No AI-internal injections into Compose services; chat-tool changes stay within the existing handler contract.</constraint>
+    <constraint source="ADR-007">Compose-upload bytes reach SPE/cache only through the existing facade/upload path — no Microsoft.Graph above the facade.</constraint>
+    <constraint source="ADR-028">Client registration uses `@spaarke/auth` authenticatedFetch; no raw Bearer.</constraint>
+    <constraint source="ADR-015 / ADR-009">Active-document + session-file state follows the established session/cache tiering (doc-upload-binary cache; Redis-first for cross-request session state).</constraint>
+    <constraint source="bff-hygiene">BFF-touching — Placement Justification, publish-size delta vs 49.63 MB, CVE scan, tests per §10.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>chat-session, active-document-identity, send-workspace-artifact, compose-mount, session-files, paneeventbus</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>projects/spaarkeai-compose-r2/tasks/012-entry-upload-transient-mount.poml</file>
+      <file>projects/spaarkeai-compose-r2/tasks/010-entry-browse-mount.poml</file>
+      <file>projects/spaarkeai-compose-r2/tasks/070-coordinate-six-flows.poml</file>
+      <file>.claude/adr/ADR-030-paneeventbus.md</file>
+      <file>.claude/adr/ADR-039-ai-dispatch.md</file>
+      <file>.claude/adr/ADR-015-memory-tiers.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Session-scoped active-document identity (additive to ChatSession)">
+    <existing>ChatSession, ChatSessionFile, the doc-upload-binary cache, ResolveComposeSeedAsync, and the SSE→ComposeLaunchContext plumbing all exist; what is missing is a shared "which document is active" fact.</existing>
+    <extension>Add one additive nullable identity on ChatSession + make the existing handler resolve from it and default the layout; register Compose uploads through the existing upload/cache path. No new dispatch endpoint, no new session model, no parallel document store (per CLAUDE.md §11 — extend, don't duplicate).</extension>
+    <cost-of-doing-nothing>Without it: chat cannot see Compose-uploaded documents (defect 4), "edit in Compose" mounts the wrong/stale file (defect 5), and "open in compose" dead-ends asking for a layout id (defects 6/7) — the entire Assistant↔Compose collaboration the owner tested is broken.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load the triage note + tasks 010/012/070 + ADR-030/039 + bff-extensions.md. State Placement Justification. Heads-up core (coordination note) before editing the co-owned files. Read the handler seam + the mount plumbing + ChatSession file model.</step>
+    <step order="1">Add the additive session-scoped active-document identity to ChatSession (nullable field + accessor). Define its source discriminant (stored / session-upload / compose-direct).</step>
+    <step order="2">R5 (small): in SendWorkspaceArtifactHandler, default `layoutName='Compose'` when Compose intent is present and no layout is supplied; remove the requirement that forces the model to synthesize a layout id.</step>
+    <step order="3">chat→Compose (defect 5): resolve the Compose mount seed from the active document when the LLM supplies no explicit current pointer; keep explicit-pointer override for stored-document "open this specific doc".</step>
+    <step order="4">Compose→chat (defect 4): on a transient/direct Compose mount, register the document as active AND land its bytes server-side as a ChatSessionFile (reuse the doc-upload-binary cache + existing upload path) so summarize/RAG resolves it. Wire ConversationPane to propagate the current-attachment binding.</step>
+    <step order="5">Add the three through-the-wire tests (WAF + PaneEventBus) named in the E2E DoD constraint (defect-4 resolve, defect-5 correct mount, defect-6/7 layout default). Build BFF + affected client packages; measure publish-size delta; CVE scan; NetArchTest facade green.</step>
+    <step order="6">code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md. Confirm no edits to OutputRouter.cs/Binding.cs.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">tests/integration/seam/ — active-document bridge (defect-4 resolve, defect-5 mount, defect-6/7 layout-default) WAF + bus tests</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">(E2E defect 4, non-waivable) A Compose-mounted upload is registered with the session; a chat summarize/RAG resolves THAT document (proven WAF + bus).</criterion>
+    <criterion testable="true">(E2E defect 5, non-waivable) open-workspace-tab with a just-registered active document and no explicit pointer resolves the Compose seed to the just-uploaded file, not a stale stored document (proven WAF).</criterion>
+    <criterion testable="true">(E2E defect 6/7, non-waivable) An open-tab call targeting Compose with NO layout arg defaults to 'Compose' and mounts (proven WAF) — no layout-id prompt.</criterion>
+    <criterion testable="true">(preserved) Chat-launched flows and explicit stored-document "open this specific doc" (explicit documentId) still work.</criterion>
+    <criterion testable="true">The active-document identity is additive on ChatSession; no new dispatch endpoint, no parallel document store; OutputRouter.cs/Binding.cs untouched.</criterion>
+    <criterion testable="true">BFF publish-size delta reported vs 49.63 MB; no new HIGH CVE; NetArchTest facade green; unit + seam tests pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If making the identity additive would force a breaking change on the co-owned ChatSession / handler contract that affects redesign-r2, OR if resolving the mount server-side conflicts with a core-owned seam, STOP and escalate per CLAUDE.md §6.5 (coordinate path A/B with core) rather than editing unilaterally.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

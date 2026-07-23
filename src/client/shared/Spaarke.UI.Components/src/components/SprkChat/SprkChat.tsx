@@ -26,7 +26,7 @@ import {
   ArrowSyncRegular,
   StopRegular,
   AttachRegular,
-  DismissRegular,
+  DismissCircle16Filled,
   PromptRegular,
   WarningRegular,
 } from '@fluentui/react-icons';
@@ -190,19 +190,20 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
   },
-  // Chip strip — visible only when files.length > 0. Horizontal wrap to handle
-  // up to MAX_ATTACHMENTS (5) chips across narrow panes.
+  // Chip strip — visible only when files.length > 0. R5-4: now an INLINE group inside the
+  // controls row (no own padding/full-width), wrapping across up to MAX_ATTACHMENTS (5) chips.
   chipStrip: {
-    display: 'flex',
+    display: 'inline-flex',
     flexWrap: 'wrap',
-    ...shorthands.gap(tokens.spacingHorizontalS),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM, '0', tokens.spacingHorizontalM),
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
   },
-  // FR-09: single horizontal row containing [ Prompt ▾ ] [ + Attach ] above the
-  // input box. `spacingHorizontalS` gap between items per FR-09 acceptance.
+  // FR-09 + R5-4: one wrapping row holding [ Prompt ▾ ] [ + Attach ] AND the attached-file pills,
+  // above the input box. `flexWrap` lets the pills flow onto additional lines on narrow panes.
   controlsStrip: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     ...shorthands.gap(tokens.spacingHorizontalS),
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalM),
     ...shorthands.borderTop('1px', 'solid', tokens.colorNeutralStroke2),
@@ -236,8 +237,19 @@ const useStyles = makeStyles({
     display: 'inline-flex',
     alignItems: 'center',
   },
+  // UAT 2026-07-21: compact dismiss (×) as a brand-blue filled circle glyph —
+  // matches the workspace-tab close affordance. Small footprint so the pill
+  // reads tight.
   attachmentChipDismiss: {
-    minWidth: 'auto',
+    minWidth: '16px',
+    maxWidth: '16px',
+    height: '16px',
+    ...shorthands.padding('0'),
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground1,
+    ':hover': {
+      color: tokens.colorBrandForeground1,
+    },
   },
 });
 
@@ -336,6 +348,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // G-P2 round-1 finding 2 (2026-07-06) — Insert affordance is opt-in per host;
   // only hosts with an insert target (AnalysisWorkspace editor) enable it.
   enableInsertToEditor = false,
+  onOpenInCompose,
+  // spaarkeai-compose-r2 R4 — "Insert into document" (Assistant suggestion → tracked change).
+  onInsertToCompose,
+  // spaarkeai-compose-r2 FIX #7a — "Open preview" on a persistent "Saved to the DMS" message.
+  onOpenSavedPreview,
+  // spaarkeai-compose-r2 DEF-12 — per-message Compose-edit controls + the live-edit gate.
+  onComposeEditAccept,
+  onComposeEditReject,
+  onComposeEditTryAnother,
+  onComposeEditKeep,
+  activeComposeEditLedgerRef,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -350,6 +373,12 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // R5 task 020 / D2-11 chat-pane orchestration UX props (all optional;
   // existing consumers ignore — generic shared-lib hooks per ADR-012).
   onAttachmentsChanged,
+  inputBusy,
+  // CHAT-4/5/6 (UAT 2026-07-19) — host-tunable composer + empty-state chrome.
+  hidePromptMenu,
+  hideEmptyState,
+  inputPlaceholder,
+  inputMinRows,
   onAttachmentRemoved,
   injectLocalMessage,
   onLocalMessageInjected,
@@ -357,6 +386,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
   onMessagesChange,
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fires with the full
+  // ICitation[] (incl. excerpt) whenever a non-empty citations set arrives.
+  // Optional observation callback; ADR-012 context-agnostic.
+  onCitations,
   // R6 Pillar 8 (tasks 080+) outbound-body decoration hook (optional; ADR-012
   // context-agnostic). Existing consumers ignore.
   onDecorateOutboundBody,
@@ -365,14 +398,33 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onPlaybookOptions: onPlaybookOptionsProp,
   onSelectPlaybook,
   onOpenLibraryModal,
+  // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — outcome_card
+  // next-step chip click forwarding to host. Optional; ADR-012 generic seam (same
+  // pattern as onSelectPlaybook/onOpenLibraryModal above).
+  onNextStep,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
   // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
   onElicitationModal: onElicitationModalProp,
+  // spaarkeai-assistant-enhancements-r1 P0(b) — TEXT-path surface_launch forwarding to host.
+  onSurfaceLaunch: onSurfaceLaunchProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
   const highlightContainerRef = externalContentRef || messageListRef;
+
+  // P1-4 (UAT 2026-07-18): Copilot-style sticky-bottom auto-scroll. The viewport
+  // pins to the newest entry, BUT only while the user is already at (near) the
+  // bottom — if they scroll up to read history, new messages/streaming no longer
+  // yank them back down. `isPinnedToBottomRef` tracks that intent; the onScroll
+  // handler recomputes it on every user scroll; the auto-scroll effect honors it.
+  const isPinnedToBottomRef = React.useRef(true);
+  const handleMessageListScroll = React.useCallback(() => {
+    const el = messageListRef.current;
+    if (!el) return;
+    // Pinned when within 80px of the bottom (tolerant of sub-pixel + fast streams).
+    isPinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
 
   // Ref to the root container — passed to QuickActionChips for width-based visibility (NFR-04)
   const rootContainerRef = React.useRef<HTMLDivElement>(null);
@@ -460,6 +512,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnPlaybookOptions,
     setOnContextEvent,
     setOnElicitationModal,
+    setOnSurfaceLaunch,
   } = sseStream;
 
   // Track current streaming state
@@ -1172,6 +1225,32 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [onElicitationModalProp, setOnElicitationModal]);
 
+  // ── spaarkeai-assistant-enhancements-r1 P0(b): register surface_launch callback ──
+  //
+  // Forwards the SSE `surface_launch` payload (TEXT/agent-path create-flow launch)
+  // to the host. The host opens the pre-seeded create surface via the shared
+  // `launchSurface({ consumerType, draftValues, resolvedLookups, bffBaseUrl })` —
+  // the SAME registry the chip/Click path uses. Synchronous callback-ref pattern —
+  // mirrors setOnElicitationModal.
+  React.useEffect(() => {
+    if (!onSurfaceLaunchProp) {
+      setOnSurfaceLaunch(null);
+      return;
+    }
+
+    setOnSurfaceLaunch(payload => {
+      try {
+        onSurfaceLaunchProp(payload);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward surface_launch SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnSurfaceLaunch(null);
+    };
+  }, [onSurfaceLaunchProp, setOnSurfaceLaunch]);
+
   // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
   // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect
   // above. The host (typically ConversationPane) forwards each context_event
@@ -1205,7 +1284,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // the scroll must re-anchor when the slot's node changes for the chips to land
   // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
-    if (messageListRef.current) {
+    // P1-4: only re-anchor when the user is pinned to the bottom (Copilot-style).
+    // If they've scrolled up to read history, don't fight them.
+    if (messageListRef.current && isPinnedToBottomRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
   }, [messages, streamedContent, transcriptFooterSlot]);
@@ -1220,6 +1301,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       onMessagesChange(messages);
     }
   }, [messages, onMessagesChange]);
+
+  // spaarkeai-compose-r2 task 072 (FR-35 Doc Q&A stretch) — fire onCitations
+  // whenever the SSE `citations` event populates a non-empty set (the SAME
+  // `streamCitations` state already attached to the last assistant message's
+  // render props above). Never fires on an empty array — an uncited answer
+  // must not trigger any downstream "grounded answer" reaction (ADR-039).
+  React.useEffect(() => {
+    if (onCitations && streamCitations.length > 0) {
+      onCitations(streamCitations);
+    }
+  }, [streamCitations, onCitations]);
 
   // Send a message and start streaming the response
   const handleSend = React.useCallback(
@@ -2311,6 +2403,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       <div
         className={styles.messageList}
         ref={messageListRef}
+        onScroll={handleMessageListScroll}
         role="list"
         aria-label="Chat messages"
         data-testid="chat-message-list"
@@ -2348,7 +2441,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           />
         )}
 
-        {!isSessionLoading && messages.length === 0 && !showPredefinedPrompts && (
+        {!isSessionLoading && messages.length === 0 && !showPredefinedPrompts && !hideEmptyState && (
           <div className={styles.emptyState}>
             <Text size={300}>No messages yet</Text>
             <Text size={200}>Send a message to start the conversation</Text>
@@ -2371,6 +2464,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           // onOpenLibraryModal callbacks down so the inline link buttons in
           // the playbook_options card can dispatch the right actions (FR-50 / 51).
           const isPlaybookOptions = msg.metadata?.responseType === 'playbook_options';
+          // spaarke-ai-architecture-redesign-r2 task 062 (FR-A1-06 / FR-B-13) — thread
+          // onNextStep down so the outcome_card's next-step chips can dispatch.
+          const isOutcomeCard = msg.metadata?.responseType === 'outcome_card';
 
           // ── FR-14: Merge persistence state into document_status messages ────
           // The persistence state is tracked locally in documentPersistenceState map
@@ -2409,6 +2505,26 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               msg.role === 'Assistant' && {
                 onInsert: handleInsert,
               }),
+            // DEF-08 Part B: "Open in Compose" on completed assistant messages — prop-gated the
+            // same way as onInsert. Only hosts that provide onOpenInCompose (SpaarkeAi's
+            // ConversationPane) render the affordance; others don't.
+            ...(onOpenInCompose &&
+              msg.role === 'Assistant' && {
+                onOpenInCompose,
+              }),
+            // R4 — "Insert into document": prop-gated the same way. Only hosts that register a live
+            // Compose editor on the bridge (SpaarkeAi's ConversationPane) pass onInsertToCompose, so
+            // the button renders exclusively on Assistant messages when the insert can land.
+            ...(onInsertToCompose &&
+              msg.role === 'Assistant' && {
+                onInsertToCompose,
+              }),
+            // FIX #7a — "Open preview" on a persistent "Saved to the DMS" message. Prop-gated the same
+            // way; the button renders only on an Assistant message carrying `metadata.savedPreview`.
+            ...(onOpenSavedPreview &&
+              msg.role === 'Assistant' && {
+                onOpenSavedPreview,
+              }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),
               onCancel: () => handlePlanCancel(index),
@@ -2430,6 +2546,25 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               onSelectPlaybook,
               onOpenLibraryModal,
             }),
+            // spaarke-ai-architecture-redesign-r2 task 062 — wire the next-step chip
+            // click handler for the outcome_card card. When a host doesn't supply
+            // onNextStep, SprkChatMessageRenderer/OutcomeCard render the chips
+            // disabled (defensive UX, same pattern as playbook_options above).
+            ...(isOutcomeCard && {
+              onNextStep,
+            }),
+            // DEF-12: wire the per-message Compose-edit controls when this Assistant message carries
+            // composeEdit metadata. `composeEditActive` gates the render to the LIVE pending edit only
+            // (matching the host's `activeComposeEditLedgerRef`), so a superseded/accepted edit's old
+            // confirmation shows no dead buttons. Handlers are opt-in per host (SpaarkeAi provides them).
+            ...(msg.role === 'Assistant' &&
+              msg.metadata?.composeEdit && {
+                onComposeEditAccept,
+                onComposeEditReject,
+                onComposeEditTryAnother,
+                onComposeEditKeep,
+                composeEditActive: msg.metadata.composeEdit.ledgerRef === activeComposeEditLedgerRef,
+              }),
           };
 
           return <SprkChatMessage key={`msg-${index}`} {...msgProps} />;
@@ -2533,108 +2668,140 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         FR-06: Input remains editable on cold load (handleSend guards `!session`).
       */}
       <div className={styles.inputZone} data-testid="chat-input-zone">
-        {/* Region 1: chip strip — visible only when files have been attached */}
-        {attachmentFiles.length > 0 && (
-          <div className={styles.chipStrip} role="list" aria-label="Attached files" data-testid="attachment-chip-strip">
-            {attachmentFiles.map((file, index) => {
-              const isError = file.status === 'error';
-              const chipClassName = isError
-                ? `${styles.attachmentChip} ${styles.attachmentChipError}`
-                : styles.attachmentChip;
-              const statusNode =
-                file.status === 'extracting' ? (
-                  <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
-                ) : file.status === 'ready' ? (
-                  <CheckmarkCircleRegular aria-label="Ready" data-testid={`attachment-chip-status-ready-${index}`} />
-                ) : (
-                  <WarningRegular
-                    aria-label="Extraction failed"
-                    data-testid={`attachment-chip-status-error-${index}`}
-                  />
-                );
+        {/* R5-4 (UAT 2026-07-20): the attached-file pills share ONE wrapping row with the
+            controls (paperclip / prompt) instead of taking a separate full-width strip above —
+            "this row can be used by the uploaded file(s)". Controls first, then the pills. */}
+        {/* UAT 2026-07-21: this strip now holds only the optional Prompt button
+            + the attached-file pills. The Attach (paperclip) button MOVED to the
+            composer bottom tray (SprkChatInput toolbarLeadingSlot). The strip is
+            hidden entirely when it would be empty (no Prompt button, no pills). */}
+        {(!hidePromptMenu || attachmentFiles.length > 0) && (
+          <div
+            className={styles.controlsStrip}
+            role="toolbar"
+            aria-label="Chat input actions"
+            data-testid="chat-input-controls-strip"
+          >
+            {/* CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is
+              suppressible per host — the slash menu is still reachable via `/`. */}
+            {!hidePromptMenu && (
+              <Button
+                appearance="subtle"
+                icon={<PromptRegular />}
+                onClick={handlePromptMenuButtonClick}
+                disabled={isStreaming}
+                aria-label="Open slash commands"
+                title="Open slash commands (/)"
+                data-testid="strip-prompt-menu-button"
+              />
+            )}
 
-              const chipBody = (
-                <div key={file.id} className={chipClassName} role="listitem" data-testid={`attachment-chip-${index}`}>
-                  <span className={styles.attachmentChipStatus} aria-hidden={file.status === 'ready'}>
-                    {statusNode}
-                  </span>
-                  <span className={styles.attachmentChipFilename} title={file.filename}>
-                    {file.filename}
-                  </span>
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<DismissRegular />}
-                    onClick={() => {
-                      // R5 task 020 / D2-11: notify host BEFORE local splice so
-                      // it can capture the chip metadata for the manifest +
-                      // session-files index cleanup cascade. Host failures do
-                      // NOT block the local removal — orphaned manifest/index
-                      // entries are bounded by the session-end cleanup
-                      // HostedService (R5 task 007).
-                      if (onAttachmentRemoved) {
-                        try {
-                          onAttachmentRemoved(file, index);
-                        } catch {
-                          // Host failures must not block the local chip removal.
-                        }
-                      }
-                      removeAttachmentFile(index);
-                    }}
-                    aria-label={`Remove ${file.filename}`}
-                    title={`Remove ${file.filename}`}
-                    className={styles.attachmentChipDismiss}
-                    data-testid={`attachment-chip-dismiss-${index}`}
-                  />
-                </div>
-              );
+            {attachmentFiles.length > 0 && (
+              <span
+                className={styles.chipStrip}
+                role="list"
+                aria-label="Attached files"
+                data-testid="attachment-chip-strip"
+              >
+                {attachmentFiles.map((file, index) => {
+                  const isError = file.status === 'error';
+                  const chipClassName = isError
+                    ? `${styles.attachmentChip} ${styles.attachmentChipError}`
+                    : styles.attachmentChip;
+                  // UAT 2026-07-21: the leading "ready" checkmark was removed —
+                  // a ready pill shows just its filename (the pill's presence IS
+                  // the "ready" signal). The in-progress spinner and error warning
+                  // remain, since those states are not otherwise conveyed.
+                  const statusNode =
+                    file.status === 'extracting' ? (
+                      <Spinner size="extra-tiny" data-testid={`attachment-chip-status-extracting-${index}`} />
+                    ) : file.status === 'error' ? (
+                      <WarningRegular
+                        aria-label="Extraction failed"
+                        data-testid={`attachment-chip-status-error-${index}`}
+                      />
+                    ) : null;
 
-              // For error chips, wrap in a Tooltip exposing the parse error.
-              return isError && file.error ? (
-                <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
-                  {chipBody}
-                </Tooltip>
-              ) : (
-                chipBody
-              );
-            })}
+                  const chipBody = (
+                    <div
+                      key={file.id}
+                      className={chipClassName}
+                      role="listitem"
+                      data-testid={`attachment-chip-${index}`}
+                    >
+                      {statusNode !== null && <span className={styles.attachmentChipStatus}>{statusNode}</span>}
+                      <span className={styles.attachmentChipFilename} title={file.filename}>
+                        {file.filename}
+                      </span>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissCircle16Filled />}
+                        onClick={() => {
+                          // R5 task 020 / D2-11: notify host BEFORE local splice so
+                          // it can capture the chip metadata for the manifest +
+                          // session-files index cleanup cascade. Host failures do
+                          // NOT block the local removal — orphaned manifest/index
+                          // entries are bounded by the session-end cleanup
+                          // HostedService (R5 task 007).
+                          if (onAttachmentRemoved) {
+                            try {
+                              onAttachmentRemoved(file, index);
+                            } catch {
+                              // Host failures must not block the local chip removal.
+                            }
+                          }
+                          removeAttachmentFile(index);
+                        }}
+                        aria-label={`Remove ${file.filename}`}
+                        title={`Remove ${file.filename}`}
+                        className={styles.attachmentChipDismiss}
+                        data-testid={`attachment-chip-dismiss-${index}`}
+                      />
+                    </div>
+                  );
+
+                  // For error chips, wrap in a Tooltip exposing the parse error.
+                  return isError && file.error ? (
+                    <Tooltip key={file.id} content={file.error} relationship="description" withArrow>
+                      {chipBody}
+                    </Tooltip>
+                  ) : (
+                    chipBody
+                  );
+                })}
+              </span>
+            )}
           </div>
         )}
 
-        {/* Region 2: controls strip — [ Prompt ▾ ] [ + Attach ] (FR-09) */}
-        <div
-          className={styles.controlsStrip}
-          role="toolbar"
-          aria-label="Chat input actions"
-          data-testid="chat-input-controls-strip"
-        >
-          <Button
-            appearance="subtle"
-            icon={<PromptRegular />}
-            onClick={handlePromptMenuButtonClick}
-            disabled={isStreaming}
-            aria-label="Open slash commands"
-            title="Open slash commands (/)"
-            data-testid="strip-prompt-menu-button"
-          />
-          <Button
-            appearance="subtle"
-            icon={<AttachRegular />}
-            onClick={handleAttachButtonClick}
-            disabled={isStreaming || attachmentFiles.length >= 5}
-            aria-label="Attach files"
-            title="Attach files (text, markdown, PDF, DOCX)"
-            data-testid="strip-attach-button"
-          />
-        </div>
-
         {/* Region 3: input box. `hideSlashButton` removes the in-input [/]
-            button to avoid duplicating the strip-mounted Prompt button. */}
+            button to avoid duplicating the strip-mounted Prompt button.
+            UAT 2026-07-21: the Attach (paperclip) button is passed as the
+            composer tray's leading slot so it sits bottom-left, opposite Send. */}
         <SprkChatInput
           ref={inputHandleRef}
           onSend={handleSend}
-          disabled={isStreaming}
+          toolbarLeadingSlot={
+            <Button
+              appearance="subtle"
+              icon={<AttachRegular />}
+              onClick={handleAttachButtonClick}
+              disabled={isStreaming || attachmentFiles.length >= 5}
+              aria-label="Attach files"
+              title="Attach files (text, markdown, PDF, DOCX)"
+              data-testid="strip-attach-button"
+            />
+          }
+          // Lock the composer for the WHOLE orchestration, not just the message
+          // stream (UAT: a message typed while a file was uploading/classifying was
+          // dropped). Busy = message streaming OR assistant typing OR a file still
+          // `extracting` OR the host signalling `inputBusy` (its Event-path
+          // classify/summarize). Re-enables when all clear.
+          disabled={isStreaming || isTyping || !!inputBusy || attachmentFiles.some(f => f.status === 'extracting')}
           maxCharCount={maxCharCount}
+          placeholder={inputPlaceholder}
+          minRows={inputMinRows}
           dynamicSlashCommands={dynamicSlashCommands}
           hideSlashButton
         />

@@ -1,0 +1,40 @@
+<task id="VHVU-090" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Project wrap-up</title>
+    <status>not-started</status>
+    <phase>wrap-up</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>wrapup, docs, cleanup</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-070,VHVU-061</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Close the project: update status, capture lessons, reconcile tests, and record the deferred adoption items so they aren't lost.</prompt>
+  <role>Project steward</role>
+  <goal>Project marked complete, lessons-learned captured, tests reconciled, repo clean, deferred-adoption items recorded.</goal>
+  <constraints>
+    <constraint source="CLAUDE.md-7">Reset current-task.md; update README status to Complete.</constraint>
+    <constraint source="CLAUDE.md-project-close">Run /test-diet if tests were added/modified during the project (Phase B likely touched tests).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/visual-host-version-update/README.md</file>
+      <file>projects/visual-host-version-update/tasks/TASK-INDEX.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update README status → Complete; reset current-task.md.</step>
+    <step id="2">Write notes/lessons-learned.md (the raw-src-consumption root cause, the navigateTo decoupling, the @spaarke/visuals extraction).</step>
+    <step id="3">Run /test-diet to reconcile any added/modified tests.</step>
+    <step id="4">Record the deferred adoption items (5 duplicate MetricCards / Daily Briefing / WorkspaceShell / MetricsDashboardWidget → @spaarke/visuals) to the owner's tracking list.</step>
+    <step id="5">Run /repo-cleanup.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>README Complete; current-task.md reset.</criterion>
+    <criterion>lessons-learned.md written.</criterion>
+    <criterion>/test-diet run; deferred items recorded; repo clean.</criterion>
+  </acceptance-criteria>
+</task>

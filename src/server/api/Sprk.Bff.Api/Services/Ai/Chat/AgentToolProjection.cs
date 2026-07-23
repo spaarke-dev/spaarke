@@ -18,11 +18,20 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <param name="HasSessionFiles">Whether the session carries uploaded files.</param>
 /// <param name="HasActiveDocument">Whether an active document is bound to the session.</param>
 /// <param name="HasAnalysisBinding">Whether the session is bound to a <c>sprk_analysisoutput</c> record.</param>
+/// <param name="HasAttachedRecord">
+/// FR-H1 grounding fact (task 044): whether the chat session is hosted on a valid attached/regarding
+/// record (<c>ChatHostContext.IsValid()</c> — a genuine host entity, threaded from
+/// <c>SprkChatAgentFactory</c>). Fed to the PreFilter's <c>requires-no-attached-record</c> predicate to
+/// remove capabilities that only make sense with no record in context (e.g. "Create matter" inside a
+/// matter). A structural session FACT — never derived from utterance content (ADR-039). Optional with a
+/// <c>false</c> default so existing construction sites (no host record) are unchanged.
+/// </param>
 public sealed record AgentToolFilterContext(
     string Surface,
     bool HasSessionFiles,
     bool HasActiveDocument,
-    bool HasAnalysisBinding)
+    bool HasAnalysisBinding,
+    bool HasAttachedRecord = false)
 {
     /// <summary>The assistant (chat) surface token.</summary>
     public const string AssistantSurface = "assistant";
@@ -117,6 +126,19 @@ public static class AgentToolProjection
                 {
                     continue;
                 }
+            }
+
+            // FR-H1 grounding predicate (task 044): a capability whose Binding declares
+            // requires-no-attached-record is REMOVED when the session is hosted on an attached record
+            // (e.g. hide "Create matter" when already inside a matter). A pure predicate over the
+            // threaded HasAttachedRecord fact — no model call, no tool-name list (ADR-039 §3.2
+            // removes-the-impossible). Scoped to BindingCapabilityTool: the RefusalCapabilityTool
+            // (no-match handler) is NEVER grounding-filtered — it must survive to enforce honest refusal.
+            if (tool is BindingCapabilityTool capabilityTool
+                && capabilityTool.Binding.RequiresNoAttachedRecord
+                && context.HasAttachedRecord)
+            {
+                continue;
             }
 
             yield return tool;

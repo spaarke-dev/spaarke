@@ -5,7 +5,7 @@
  * Composes the shared WizardShell with FileUploadZone and UploadedFileList
  * components, backed by BFF API adapters for authentication and file upload.
  *
- * Route: #/upload?entityType={entityType}&entityId={entityId}&containerId={containerId}
+ * Route: /upload?entityType={entityType}&entityId={entityId}&containerId={containerId}
  *
  * Query Parameters:
  *   - entityType  (required): Dataverse entity logical name (e.g., "sprk_project")
@@ -25,17 +25,8 @@
  */
 import * as React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  MessageBar,
-  MessageBarBody,
-  Spinner,
-  Badge,
-  Button,
-} from '@fluentui/react-components';
-import { CheckmarkCircleRegular, DocumentRegular, ArrowUploadRegular } from '@fluentui/react-icons';
+import { makeStyles, tokens, Text, MessageBar, MessageBarBody, Button } from '@fluentui/react-components';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 
 import { WizardShell } from '@spaarke/ui-components/components/Wizard';
 import type {
@@ -182,7 +173,7 @@ export const DocumentUploadPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Parse query params from the hash route's search string
+  // Parse query params from the route's search string (BrowserRouter clean URL)
   const pageParams = React.useMemo(() => parseQueryParams(location.search), [location.search]);
 
   // ── File state ──────────────────────────────────────────────────────────
@@ -275,7 +266,7 @@ export const DocumentUploadPage: React.FC = () => {
   if (!pageParams) {
     return (
       <PageContainer>
-        <NavigationBar items={[{ label: 'My Projects', href: '#/' }, { label: 'Upload Documents' }]} />
+        <NavigationBar items={[{ label: 'My Projects', href: '/' }, { label: 'Upload Documents' }]} />
         <div className={styles.errorContainer}>
           <MessageBar intent="error">
             <MessageBarBody>
@@ -371,8 +362,8 @@ export const DocumentUploadPage: React.FC = () => {
     <PageContainer>
       <NavigationBar
         items={[
-          { label: 'My Projects', href: '#/' },
-          ...(pageParams.entityId ? [{ label: 'Project', href: `#/project/${pageParams.entityId}` }] : []),
+          { label: 'My Projects', href: '/' },
+          ...(pageParams.entityId ? [{ label: 'Project', href: `/project/${pageParams.entityId}` }] : []),
           { label: 'Upload Documents' },
         ]}
       />

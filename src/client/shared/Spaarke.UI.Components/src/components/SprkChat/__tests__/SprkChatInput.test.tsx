@@ -45,15 +45,22 @@ describe('SprkChatInput', () => {
       expect(screen.getByPlaceholderText('Ask a question...')).toBeInTheDocument();
     });
 
-    it('should display Ctrl+Enter hint', () => {
+    it('CHAT-5: applies minRows to the textarea for a taller composer', () => {
+      renderWithProviders(<SprkChatInput onSend={mockOnSend} minRows={3} />);
+      expect(screen.getByTestId('chat-input-textarea')).toHaveAttribute('rows', '3');
+    });
+
+    it('CHAT-5: omits the rows attribute when minRows is not provided', () => {
+      renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
+      expect(screen.getByTestId('chat-input-textarea')).not.toHaveAttribute('rows');
+    });
+
+    it('should display the Enter-to-send hint', () => {
       const { container } = renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
 
-      // Task 071: SprkChatInput.tsx:283 now renders
-      //   "Ctrl+Enter to send · / for commands"
-      // as a single Fluent <Text>. Earlier function matcher matched too many
-      // ancestor nodes ("Found multiple elements"). Use a direct textContent
-      // check against the container instead.
-      expect(container.textContent).toContain('Ctrl+Enter to send');
+      // UAT 2026-07-21: Enter sends; Ctrl+Enter inserts a newline. The hint now
+      // reads "Enter to send · Ctrl+Enter for new line · / for commands".
+      expect(container.textContent).toContain('Enter to send');
     });
 
     it('should display character count as 0/2000 initially', () => {
@@ -101,16 +108,30 @@ describe('SprkChatInput', () => {
       });
     });
 
-    it('should send message on Ctrl+Enter', async () => {
+    it('should send message on Enter', async () => {
       const user = userEvent.setup();
       renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
 
       const textarea = screen.getByTestId('chat-input-textarea');
       const nativeTextarea = textarea.querySelector('textarea') || textarea;
       await user.type(nativeTextarea, 'Hello');
-      await user.keyboard('{Control>}{Enter}{/Control}');
+      // UAT 2026-07-21: plain Enter now sends.
+      await user.keyboard('{Enter}');
 
       expect(mockOnSend).toHaveBeenCalledWith('Hello');
+    });
+
+    it('should NOT send on Ctrl+Enter (inserts a newline instead)', async () => {
+      const user = userEvent.setup();
+      renderWithProviders(<SprkChatInput onSend={mockOnSend} />);
+
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      await user.type(nativeTextarea, 'Hello');
+      // UAT 2026-07-21: Ctrl+Enter is now the newline shortcut — it must NOT send.
+      await user.keyboard('{Control>}{Enter}{/Control}');
+
+      expect(mockOnSend).not.toHaveBeenCalled();
     });
 
     it('should not send empty messages', async () => {
@@ -167,11 +188,12 @@ describe('SprkChatInput', () => {
       expect(screen.getByTestId('chat-send-button')).toBeDisabled();
     });
 
-    it('should not send on Ctrl+Enter when disabled', async () => {
+    it('should not send on Enter when disabled', async () => {
       const user = userEvent.setup();
       renderWithProviders(<SprkChatInput onSend={mockOnSend} disabled={true} />);
 
-      await user.keyboard('{Control>}{Enter}{/Control}');
+      // UAT 2026-07-21: Enter is the send shortcut now; disabled must suppress it.
+      await user.keyboard('{Enter}');
       expect(mockOnSend).not.toHaveBeenCalled();
     });
   });

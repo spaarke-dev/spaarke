@@ -9,6 +9,10 @@
       "ManagedIdentity": {
         "Enabled": false
       }
+    },
+    "PromptShield": {
+      "_ChatPipelineEnabled_comment": "F-8: set true locally to exercise the pre-LLM injection perimeter + per-turn fail-open signal on the chat pipeline. DEFAULT false = byte-identical (no scan, no block). With true, you also need the ContentSafety auth above (ApiKey or 'az login' with Cognitive Services User) or every scan fails open (writes all confirm).",
+      "ChatPipelineEnabled": false
     }
   },
 

@@ -12,8 +12,8 @@ namespace Sprk.Bff.Api.Models.Workspace;
 /// <list type="bullet">
 ///   <item><b>Redis hot tier</b> — 24h TTL on key <c>workspace:{tenantId}:{sessionId}</c>;
 ///   every active-session tab.</item>
-///   <item><b>Cosmos durable tier</b> — written through when <see cref="IsPinned"/> becomes
-///   true (or matter-attach via <see cref="IWorkspaceStateService.PinTabAsync"/>); container
+///   <item><b>Cosmos durable tier</b> — written through when <see cref="IsPinned"/> is
+///   true (matter-attach / pin promotion); container
 ///   <c>memory</c>, partition key <c>/tenantId</c>, document discriminator
 ///   <c>"workspace-tab"</c>.</item>
 /// </list>
@@ -90,23 +90,19 @@ public sealed class WorkspaceTab
 
     /// <summary>
     /// True when the tab is pinned. Flips persistence from Redis-only (hot) to Cosmos
-    /// durable tier (Q4 hybrid). Mutate via
-    /// <see cref="IWorkspaceStateService.PinTabAsync"/>.
+    /// durable tier (Q4 hybrid).
     /// </summary>
     [JsonPropertyName("isPinned")]
     public required bool IsPinned { get; init; }
 
     /// <summary>
-    /// True when the tab has user-editing affordances enabled. Pillar 6b's
-    /// <c>update_workspace_tab</c> tool MUST refuse mutation when this is false.
+    /// True when the tab has user-editing affordances enabled.
     /// </summary>
     [JsonPropertyName("canEdit")]
     public required bool CanEdit { get; init; }
 
     /// <summary>
-    /// ISO-8601 timestamp of the most recent USER edit (not agent edit). Central to Q8
-    /// user-wins conflict resolution — Pillar 6b's <c>update_workspace_tab</c> tool
-    /// MUST refuse on stale write when this is later than the tool's read timestamp.
+    /// ISO-8601 timestamp of the most recent USER edit (not agent edit).
     /// Undefined for brand-new tabs.
     /// </summary>
     [JsonPropertyName("lastUserEditAt")]

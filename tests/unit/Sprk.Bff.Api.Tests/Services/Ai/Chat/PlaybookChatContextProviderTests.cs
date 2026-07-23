@@ -332,8 +332,9 @@ public class PlaybookChatContextProviderTests
     // These tests pin two contracts the per-turn composition seam MUST never lose:
     //
     //   FR-45: PlaybookChatContextProvider.GetContextAsync MUST call
-    //          IMatterMemoryService.ToSystemPromptFragmentAsync (cross-session matter
-    //          memory activation). Architecture §11.1.
+    //          IMemoryItemStore.ToRecordPromptFragmentAsync (cross-session record
+    //          memory activation — generalized from matter-only by AIR2-050 / FR-B-01).
+    //          Architecture §11.1.
     //
     //   FR-27: there is exactly ONE per-turn composition seam — this method. There MUST
     //          NOT be a parallel composer in SprkChatAgentFactory that bypasses
@@ -345,17 +346,17 @@ public class PlaybookChatContextProviderTests
     // regression test scoped to the binding pair.
 
     [Fact]
-    public void GetContextAsync_PreservesMatterMemoryServiceInvocation_FR45()
+    public void GetContextAsync_PreservesRecordMemoryInvocation_FR45()
     {
-        // FR-45 BINDING: PlaybookChatContextProvider MUST invoke
-        // IMatterMemoryService.ToSystemPromptFragmentAsync to activate cross-session
-        // matter memory (architecture §11.1). Source-text check pins the invocation
+        // FR-45 BINDING (generalized by AIR2-050 / FR-B-01): PlaybookChatContextProvider MUST
+        // invoke IMemoryItemStore.ToRecordPromptFragmentAsync to activate cross-session
+        // record memory (architecture §11.1). Source-text check pins the invocation
         // so future refactors that accidentally drop the wiring fail this test loudly.
         var source = File.ReadAllText(LocatePlaybookChatContextProviderSource());
-        source.Should().Contain("_matterMemoryService.ToSystemPromptFragmentAsync(",
-            "FR-45 BINDING — chat-routing-redesign-r1 task 078: the per-turn composition " +
-            "seam MUST call IMatterMemoryService.ToSystemPromptFragmentAsync to activate " +
-            "cross-session matter memory. Architecture §11.1. Do NOT regress.");
+        source.Should().Contain("_memoryItemStore.ToRecordPromptFragmentAsync(",
+            "FR-45 BINDING — chat-routing-redesign-r1 task 078 (retargeted by AIR2-050): the " +
+            "per-turn composition seam MUST call IMemoryItemStore.ToRecordPromptFragmentAsync " +
+            "to activate cross-session record memory. Architecture §11.1. Do NOT regress.");
     }
 
     [Fact]
@@ -420,11 +421,11 @@ public class PlaybookChatContextProviderTests
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object,
             _loggerMock.Object,
-            // R6 task 069 follow-up housekeeping: task 068 made IMatterMemoryService a
+            // R6 task 069 follow-up housekeeping: task 068 made IMemoryItemStore a
             // required ctor param without migrating this fixture. Pass a default mock so
             // the matter-memory append path is a no-op for these tests (no matter context
             // is set up in the test fixtures below).
-            new Mock<IMatterMemoryService>().Object);
+            new Mock<IMemoryItemStore>().Object);
 
     private void SetupPlaybook(Guid[]? actionIds = null)
     {

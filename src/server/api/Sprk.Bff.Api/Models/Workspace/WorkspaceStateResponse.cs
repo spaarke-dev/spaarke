@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Models.Workspace;
 /// Carries the full set of workspace tabs the (tenant, session) tuple owns plus
 /// two extension-point fields (<see cref="ActiveTabId"/> + <see cref="UserSelection"/>)
 /// reserved for Phase C-G2 (chat tools surface "active tab" via Pillar 6b
-/// <c>send_workspace_artifact</c> / <c>update_workspace_tab</c>) and Phase C-G6
+/// <c>send_workspace_artifact</c>) and Phase C-G6
 /// (user-selection events on the workspace channel — Pillar 6c trace + FR-38).
 /// </para>
 ///

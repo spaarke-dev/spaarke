@@ -1,0 +1,149 @@
+<task id="030" project="email-communication-solution-r4">
+  <metadata>
+    <title>Rung 4 — `RecordSearchService` semantic match over `spaarke-records-index`</title>
+    <phase>Wave 3 — Server: semantic + AI rungs</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>012, 013, 015</dependencies>
+    <blocks>032</blocks>
+    <tags>bff-api, ai, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Adds a new AI/search rung to the BFF Association Engine; modifies `.cs` in `Sprk.Bff.Api/Services/Communication`; hybrid-search dependency + confidence/provenance semantics; BFF Hygiene (§10) obligations apply (publish-size, CVE, placement justification, /conflict-check); ADR-013 (AI facade), ADR-024 (regarding), ADR-016/014 (budget/cache) bind. FULL.</rigor-reason>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds rung 4 as a new file in `Services/Communication/**` (engine rung interface established in W1 task 011); disjoint from rung 5 (task 031, `Services/Ai` consumer). Both feed task 032. Runs alongside 031 within W3.</parallel-reason>
+    <fr-refs>FR-14</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Implement **Rung 4** of the Association Engine: a semantic-match rung that, when deterministic rungs 0–3 do not produce a high-confidence match, runs the extracted terms from the normalized envelope through hybrid search over `RecordSearchService` / the `spaarke-records-index` to find fuzzy candidates for the eight target entities (with FR-14 emphasis on matter / project / invoice / organization). Each candidate carries a `confidenceScore` + `matchReasons[]`.
+
+    Rung 4 emits **`Suggested`-tier results only** — it NEVER auto-files (per FR-11 + owner override: only deterministic rungs 0–3 at ≥0.85 auto-file; AI/semantic rungs always land as `Suggested`/`Ambiguous`). Match reasons are recorded in the per-attribute provenance (`sprk_associationprovenance` JSON) so the W4 review surface (task 042) can show the reviewer why a record was suggested.
+
+    Requirements (FR-14):
+    - Implement the rung against the engine's rung interface + normalized envelope (established in W1 task 011) — the rung receives the envelope (`{ from, to[], subject, bodyText, ... }`), never `Microsoft.Graph.Message`.
+    - Extract query terms from subject + bodyText (and known structured tokens); run hybrid (vector + keyword) search via `RecordSearchService` over `spaarke-records-index`.
+    - Map hits → `confidenceScore` (normalized to the engine's 0–1 confidence scale) + `matchReasons[]` (e.g. "subject term 'Acme v. Smith' matched matter name", "sender org domain matched").
+    - Emit results as `Suggested` (never `Resolved`); write provenance per match; respect ADR-024 regarding targets (`sprk_organization` for org — never `account`).
+    - Cost containment (NFR-05): rung 4 fires ONLY when deterministic rungs miss / are ambiguous; cache per ADR-014; stay within the ADR-016 budget. Per-rung telemetry is added in task 032 — expose the hooks (timing, hit-count, fired/skipped) it will consume.
+    - Reuse existing search infrastructure — do NOT build a new index or a second search client. Answer the Component Justification §11 three-question template in the PR (Existing / Extension / Cost-of-doing-nothing).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `Services/Communication/` and the Association Engine; familiar with `RecordSearchService` / Azure AI Search hybrid query, ADR-013 (AI PublicContracts facade), ADR-024 (regarding family), ADR-016/014 (AI budget/cache), and the binding `.claude/constraints/bff-extensions.md` governance checklist.
+  </role>
+
+  <goal>
+    A rung-4 semantic-match component plugs into the Association Engine, fires only on deterministic miss/ambiguity, returns fuzzy candidates with `confidenceScore` + `matchReasons[]` for the eight targets, emits `Suggested`-tier only (never auto-files), and writes match reasons into `sprk_associationprovenance`. Uses the existing `RecordSearchService`/`spaarke-records-index` (no new index). Build + tests green; publish-size delta + CVE reported; Placement Justification stated; `/conflict-check` clean.
+  </goal>
+
+  <context>
+    <background>
+      W1 refactored `IncomingAssociationResolver` into the Association Engine over a normalized envelope with a rung interface + per-attribute confidence + provenance (task 011), and shipped deterministic rungs 0–3 (tasks 012–014) + confidence→status mapping with auto-file for deterministic ≥0.85 (task 015, ADR-018 kill-switch). Rung 4 is the first non-deterministic rung; it and rung 5 (task 031) are the only rungs allowed to fire on ambiguity/miss, and neither may auto-file.
+
+      FR-11 ladder: deterministic ≥0.85 → `Resolved` (auto-file); 0.50–0.85 OR any AI/semantic rung → `Suggested`; &lt;0.50/none → `Pending Review`; conflicting high-confidence → `Ambiguous`. Rung 4 always lands in the `Suggested`/`Ambiguous` bucket regardless of score.
+
+      Existing infra to reuse (Component Justification §11): `RecordSearchService`, `spaarke-records-index`, `SearchIndexNameResolver` (index-name resolution; W7 task 075 tokenizes names). Do NOT introduce a new index or search client.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (Association Engine + rung interface from W1 task 011)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (READ — pre-refactor context)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ (RecordSearchService / search client — consume via PublicContracts where AI-internal)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (DI registration)</file>
+      <file>projects/email-communication-solution-r4/spec.md (FR-14, FR-11)</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-14 is binding: hybrid semantic match → `confidenceScore` + `matchReasons[]` for fuzzy matter/project/invoice/org.</constraint>
+    <constraint source="project">FR-11 / owner override: rung 4 emits `Suggested`/`Ambiguous` ONLY — NEVER auto-files (auto-file is deterministic rungs 0–3 ≥0.85 only).</constraint>
+    <constraint source="NFR-04">Engine/rung interface MUST NOT change to add a future channel — rung consumes the normalized envelope, never `Microsoft.Graph.Message`.</constraint>
+    <constraint source="NFR-05">Rung 4 fires ONLY on deterministic miss/ambiguity; ADR-014 cache + ADR-016 budget enforced; expose telemetry hooks for task 032.</constraint>
+    <constraint source="ADR-024">Regarding targets per the catalog; org → `sprk_organization` (never `account`/OOB `organization`).</constraint>
+    <constraint source="ADR-013">Consume AI/search capability via the `Services/Ai/PublicContracts/` facade — do NOT inject AI-internal types directly into Communication code.</constraint>
+    <constraint source="ADR-010">Register any new rung service via `CommunicationModule` only.</constraint>
+    <constraint source="ADR-032">If the rung is feature-gated, the unconditional engine consumes it via a Null-Object per ADR-032.</constraint>
+    <constraint source="§11 Component Justification">Reuse `RecordSearchService`/`spaarke-records-index` — no new index/search client; answer the three-question template in the PR.</constraint>
+    <constraint source="root §10 BFF Hygiene">Load `bff-extensions.md`; state Placement Justification; report publish-size delta (baseline ~49.63 MB incl. PDBs) + CVE scan; run `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md (authored in task 005)</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-016-ai-budget.md</file>
+      <file>.claude/adr/ADR-014-ai-cache.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Rung interface over normalized envelope" location="src/server/api/Sprk.Bff.Api/Services/Communication/ (W1 task 011)">
+        Each rung implements the engine rung interface; receives the normalized envelope + returns per-attribute matches with confidence + provenance. Rung 4 mirrors rungs 0–3's shape but sources candidates from search.
+      </pattern>
+      <pattern name="AI PublicContracts facade" location=".claude/constraints/bff-extensions.md">
+        CRUD/Communication code consuming AI/search capability goes through `Services/Ai/PublicContracts/` — no direct AI-internal type injection (ADR-013).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `/conflict-check` (BFF hot-path). Load `bff-extensions.md`. Read the W1 rung interface + engine (task 011 output) + the confidence→status mapping (task 015) to confirm the contract rung 4 must satisfy.</step>
+    <step order="2">Read `RecordSearchService` + `spaarke-records-index` usage (hybrid query shape, `SearchIndexNameResolver`) and the `Services/Ai/PublicContracts/` facade surface for search capability. Confirm the reuse boundary (no new index).</step>
+    <step order="3">Design the rung: term-extraction from the envelope (subject + bodyText + structured tokens) → hybrid search → candidate mapping to the eight target entities with `confidenceScore` (normalized 0–1) + `matchReasons[]`. Document the Component Justification §11 answers.</step>
+    <step order="4">Implement the rung 4 component in `Services/Communication/` implementing the engine rung interface; fire ONLY when rungs 0–3 miss/are ambiguous. Emit `Suggested`-tier results; write `matchReasons` into `sprk_associationprovenance`. Enforce ADR-024 org→`sprk_organization`.</step>
+    <step order="5">Wire ADR-014 cache + ADR-016 budget on the search call; expose telemetry hooks (fired/skipped, latency, hit-count, per-target) for task 032. Register via `CommunicationModule` (ADR-010); if feature-gated, provide an ADR-032 Null-Object.</step>
+    <step order="6">Add/adjust engine wiring so rung 4 runs after deterministic rungs and its `Suggested` results never flip to `Resolved`/auto-file.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` (clean) + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` (existing green; rung-4 unit tests land in task 032).</step>
+    <step order="8">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline. Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against ADR-045, ADR-024, ADR-013, ADR-016, ADR-014, ADR-032 + `spec.md`. Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md`: mark 030 ✅; confirm 032 dependency satisfied.</step>
+    <step order="11">Update `current-task.md` per task-execute protocol: status → completed; record decisions (term-extraction strategy, score normalization, fire-gate).</step>
+  </steps>
+
+  <tools>
+    <tool name="conflict-check">BFF hot-path pre-PR</tool>
+    <tool name="read">W1 engine/rung interface + RecordSearchService + PublicContracts facade</tool>
+    <tool name="write">rung 4 component + DI registration</tool>
+    <tool name="bash">dotnet build / test / publish (size) / CVE scan</tool>
+    <tool name="code-review">Step 9.5</tool>
+    <tool name="adr-check">Step 9.5</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (NEW rung 4 semantic-match component)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — rung 4 registration)</output>
+    <output type="docs">PR description — Placement Justification + §11 three-question answers + publish-size delta + CVE result + /conflict-check outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Rung 4 implements the engine rung interface and consumes the normalized envelope (never `Microsoft.Graph.Message`).</criterion>
+    <criterion testable="true">Rung 4 fires ONLY when deterministic rungs 0–3 miss/are ambiguous (verified by test in task 032).</criterion>
+    <criterion testable="true">Candidates carry `confidenceScore` (0–1) + `matchReasons[]`; reasons written to `sprk_associationprovenance`.</criterion>
+    <criterion testable="true">Rung 4 emits `Suggested`/`Ambiguous` only — never `Resolved`, never auto-file.</criterion>
+    <criterion testable="true">Org candidates target `sprk_organization` (never `account`).</criterion>
+    <criterion testable="true">Uses existing `RecordSearchService`/`spaarke-records-index` — no new index/search client (grep + §11 answers).</criterion>
+    <criterion testable="true">Consumes search capability via `Services/Ai/PublicContracts/` (no AI-internal type injection).</criterion>
+    <criterion testable="true">Build + existing Communication tests green; publish-size delta + CVE reported; `/conflict-check` clean; Placement Justification in PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Per-rung telemetry + rung-4 unit tests land in task 032 — expose the hooks here. The `spaarke-records-index` name resolves via `SearchIndexNameResolver`; W7 task 075 tokenizes index names — coordinate so rung 4 does not hardcode an index name. `Services/Ai` internals are sole-owned by `spaarke-ai-architecture-redesign-r2` — consume PublicContracts only; if a needed search seam is missing from the facade, escalate via `/conflict-check` rather than reaching into internals.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Per root §10: publish-size delta + CVE scan + Placement Justification + `/conflict-check` ALL required. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

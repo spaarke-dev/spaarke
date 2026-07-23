@@ -205,18 +205,30 @@ public class SprkChatAgentFactory
         "yourself.";
 
     /// <summary>
-    /// Builds the current-date context line (G-P3 UAT round-5 R5-A, 2026-07-07): the model
-    /// receives no clock and hallucinated "tomorrow" as a 2024 date. Appended at the END of
-    /// the system prompt (stable position; rotates once per UTC day — the accepted daily
-    /// prompt-cache rotation). Exposed internal for the directive-presence tests.
+    /// spaarkeai-compose-r2 — Model Y redirect for the #2 defect (a free-text edit instruction typed
+    /// in the Assistant while a document is open in Compose was narrated as a full-document rewrite in
+    /// chat). Editing lives in the EDITOR (highlight-to-edit), not the chat loop. This directive stops
+    /// the model from free-forming a rewrite as plain chat text — the failure mode the deterministic
+    /// <see cref="BindingCapabilityTool"/> compose-revise-document guard cannot catch (that guard only
+    /// fires when the model INVOKES the tool; this covers the model composing the rewrite as prose
+    /// instead). Deterministic constant text (NFR-04 prompt-cache stability). Its own wording is
+    /// self-gating ("When a document is open in the Compose editor…") so it is a no-op for non-Compose
+    /// sessions. Exposed internal for the directive-presence tests.
     /// </summary>
-    internal static string BuildCurrentDateDirective(DateTimeOffset utcNow) =>
-        "\n\n## Current Date\n" +
-        $"Today's date is {utcNow:yyyy-MM-dd} ({utcNow:dddd}, UTC). Resolve EVERY relative date the user " +
-        "gives ('today', 'tomorrow', 'next Friday', 'in two weeks') against THIS date before composing any " +
-        "field value — never guess the year. The user's local date may differ by one day near midnight UTC; " +
-        "when you propose an action containing a resolved date, state the absolute date in your proposal " +
-        "text so the user can correct it before confirming.";
+    internal const string ComposeEditRedirectDirective =
+        "\n\n## Editing a document open in Compose (Spaarke platform contract)\n" +
+        "When a document is open in the Compose editor and the user asks you to EDIT, rewrite, expand, " +
+        "shorten, tighten, or otherwise revise part or all of it through chat, DO NOT produce a " +
+        "rewritten version of the document — in whole or in part — in your chat reply, and do NOT " +
+        "invoke a whole-document revise capability to do it. Editing happens IN the Compose editor, " +
+        "not in chat. Instead, tell the user to highlight the text they want to change in the Compose " +
+        "editor and choose an editing option (for example, Draft alternative or Improve clarity). Keep " +
+        "the reply to a single short sentence pointing them to the editor's highlight-to-edit options; " +
+        "never restate or regenerate the document's contents in chat.";
+
+    // Task 053 (FR-B-04): BuildCurrentDateDirective moved to the shared
+    // ContextSliceProducers.EnvironmentFactsProducer (the ONE source for this primitive — the interactive
+    // append site above + the Context Binder's Workspace slice both call it). Byte-identical output.
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
@@ -303,6 +315,13 @@ public class SprkChatAgentFactory
     /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
     /// omit the parameter behave exactly as before.
     /// </param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the active document's
+    /// <see cref="ChatSessionFile.FileId"/> (<c>session.ActiveDocument?.SessionFileId</c>), or null.
+    /// Forwarded to <see cref="BuildSessionFilesManifestSuffix"/> so the Session Files manifest marks
+    /// the active file and tells the LLM it is the default target when no fileIds are passed. Prompt-only;
+    /// the deterministic scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -321,6 +340,8 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
+        IReadOnlyList<SessionOutput>? ledgerOutputs = null,
+        string? activeSessionFileId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -336,6 +357,9 @@ public class SprkChatAgentFactory
         // Load playbook context (system prompt, document summary, metadata).
         // R5 task 033: forward uploadedFiles so the provider surfaces them on the
         // returned ChatContext.UploadedFiles for the manifest-suffix step below.
+        // F-1/F-2/F-7 envelope-convergence (D1): forward the session id + ledger outputs so the provider
+        // performs the ONE per-turn ContextEnvelope bind (fingerprint write) and consumes the bound envelope
+        // for host-identity / user-memory / record-memory. The endpoint's separate bind is retired.
         var context = await contextProvider.GetContextAsync(
             documentId,
             tenantId,
@@ -343,6 +367,8 @@ public class SprkChatAgentFactory
             hostContext,
             additionalDocumentIds,
             uploadedFiles,
+            sessionId,
+            ledgerOutputs,
             cancellationToken);
 
         // === Document context injection (R2-011, R2-012) ===
@@ -423,7 +449,7 @@ public class SprkChatAgentFactory
         {
             try
             {
-                var manifestSuffix = BuildSessionFilesManifestSuffix(files);
+                var manifestSuffix = BuildSessionFilesManifestSuffix(files, activeSessionFileId);
                 if (!string.IsNullOrEmpty(manifestSuffix))
                 {
                     // R6 task 068 — session-files manifest participates in the shared 8K
@@ -672,23 +698,49 @@ public class SprkChatAgentFactory
         // === FR-P2-02 — the ONE confirmation gate at the loop's tool-invocation boundary =
         // Every projected typed-handler tool whose catalog row DECLARES a side-effecting
         // class (write / communicate per PendingPlanManager.RequiresConfirmation — ADR-039:
-        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction:
-        // when the LLM invokes it, the invocation SUSPENDS into the unified pending store
-        // (ledger Gate marker BEFORE any render, ADR-040) instead of executing. This is the
-        // NFR-03 last line — adversarial instructions in uploaded-document text or tool
-        // results can at worst produce a suspended, user-visible confirmation, never an
-        // executed side effect. Landed by task 037 (FR-P2-08) after the eval suite's
-        // injection family exposed that the interim pre-pass gate deleted in task 034 had
-        // no loop-native replacement for typed-handler tools. NFR-04: the wrapper preserves
-        // name/description/schema verbatim, so the projected block is byte-identical.
+        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction.
+        // When the LLM invokes a wrapped tool, the wrapper does NOT unconditionally suspend
+        // (that was the pre-task-044 semantics). Instead it consults the ConfirmationPolicyEngine
+        // via SideEffectGateAIFunction.EvaluatePolicy → the deterministic ConfirmationPolicyEngine
+        // (the single live decider) — which, from the catalog/Binding risk data, returns one
+        // GateOutcome: Execute / ExecuteWithUndo (auto-execute a tier-1/reversible side effect,
+        // e.g. memory.write), Elicit (ask for missing args), ConfirmDialog (suspend into the
+        // unified pending store — ledger Gate marker BEFORE any render, ADR-040 — for a
+        // user-visible confirmation), or HonestBlock (fail-closed). This is the NFR-03 last line —
+        // adversarial instructions in uploaded-document text or tool results can at worst be
+        // routed to a suspended, user-visible confirmation or blocked, never silently executing
+        // a high-risk side effect the policy would gate. Gate landed by task 037
+        // (FR-P2-08); the always-suspend outcome was replaced by the policy-engine decision in
+        // task 044. NFR-04: the wrapper preserves name/description/schema verbatim, so the
+        // projected block is byte-identical.
+        // === F-8 — safety-perimeter producer activation (audit finding F-8 follow-up) ==========
+        // The PromptShield fail-open verdict is the gate's overlay-2 (SafetyPerimeterDegraded) signal.
+        // Its PRODUCER — PromptShieldChatMiddleware — is wired onto the live pipeline (below, outermost)
+        // ONLY when AiSafety:PromptShield:ChatPipelineEnabled=true (default false = byte-identical to
+        // pre-F-8). When enabled we create ONE per-turn signal holder shared between the gate wrap-sites
+        // (readers, via the overlay-2 probe) and the shield middleware (the writer). When disabled the
+        // holder stays null and the gate probe stays null exactly as before this task — no scan, no
+        // block, unfed overlay.
+        var promptShieldChatEnabled =
+            PromptShieldChatMiddleware.IsChatPipelineEnabled(_serviceProvider.GetService<IConfiguration>());
+        var safetyPerimeterSignal = promptShieldChatEnabled ? new SafetyPerimeterSignal() : null;
+
         for (var i = 0; i < tools.Count; i++)
         {
             if (tools[i] is ToolHandlerToAIFunctionAdapter adapter
                 && adapter.Tool.SideEffectClass is { } declaredClass
                 && PendingPlanManager.RequiresConfirmation(declaredClass))
             {
+                // dispatchUncertaintyProbe stays null (no live routing-confidence producer reaches this
+                // gate; ambiguity is covered by layer 1 — the agent asking). safetyPerimeterDegradedProbe
+                // now reads THIS turn's PromptShield fail-open verdict from the shared signal when the
+                // shield is enabled; otherwise it stays null (unfed overlay, byte-identical to pre-F-8).
+                // The value flows from the probe — never hardcoded (the anti-shim gate tests fail if it were).
                 tools[i] = new SideEffectGateAIFunction(
-                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter);
+                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter,
+                    safetyPerimeterDegradedProbe: safetyPerimeterSignal is null
+                        ? null
+                        : () => safetyPerimeterSignal.Degraded);
             }
         }
 
@@ -788,7 +840,12 @@ public class SprkChatAgentFactory
             Surface: AgentToolFilterContext.AssistantSurface,
             HasSessionFiles: context.UploadedFiles is { Count: > 0 },
             HasActiveDocument: !string.IsNullOrWhiteSpace(documentId),
-            HasAnalysisBinding: !string.IsNullOrWhiteSpace(analysisId));
+            HasAnalysisBinding: !string.IsNullOrWhiteSpace(analysisId),
+            // FR-H1 grounding fact (task 044): the session is hosted on a valid attached/regarding record
+            // when ChatHostContext.IsValid() (a genuine host entity — EntityType + EntityId present +
+            // known type). Feeds the requires-no-attached-record PreFilter predicate (e.g. hides
+            // "Create matter" when already inside a matter). Threaded here, never fetched inside PreFilter.
+            HasAttachedRecord: hostContext?.IsValid() == true);
         var finalTools = AgentToolProjection.Finalize(
             tools, filterContext, turnContract, citationContext, _logger);
 
@@ -868,6 +925,22 @@ public class SprkChatAgentFactory
         }
         // === End D-F0 doctrine ==========================================================
 
+        // === spaarkeai-compose-r2 — Model Y compose-edit redirect (#2 defect) ============
+        // Steer free-text "edit this document" requests to the EDITOR (highlight-to-edit)
+        // instead of a narrated full-document rewrite in chat. Pairs with the deterministic
+        // BindingCapabilityTool compose-revise-document guard (which covers the model
+        // INVOKING the tool); this covers the model composing the rewrite as plain prose.
+        // Self-gating wording (no-op outside Compose); appended whenever tools project so a
+        // Compose-hosted session always carries it. Deterministic constant text (NFR-04).
+        if (finalTools.Count > 0)
+        {
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt + ComposeEditRedirectDirective,
+            };
+        }
+        // === End compose-edit redirect ==================================================
+
         // === G-P3 UAT round-5 R5-A — current-date context (2026-07-07) ==================
         // Incident: "due date tomorrow" produced 6/13/2024 — the model had NO current-date
         // context and hallucinated a date (wrong YEAR). Deterministic date line at a STABLE
@@ -876,9 +949,18 @@ public class SprkChatAgentFactory
         // available server-side (JWT claims carry no tz), so the line is UTC + an explicit
         // near-midnight ambiguity instruction.
         var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        // F-1 envelope-convergence (D1): when the provider bound a per-turn envelope, RENDER the
+        // environment (current-date) SUFFIX from that envelope's Workspace slice via the renderer — the
+        // interactive prompt now CONSUMES the envelope for the date instead of calling the producer here.
+        // Byte-identical: RenderEnvironmentSuffix returns the Workspace fragment, itself produced by the
+        // SAME EnvironmentFactsProducer at bind time (day-granular, so stable across the sub-second gap).
+        // Falls back to the direct producer call on the no-binder path (compound-OFF / legacy tests).
+        var dateSuffix = context.BoundEnvelope is not null
+            ? Context.ContextEnvelopeRenderer.RenderEnvironmentSuffix(context.BoundEnvelope)
+            : Context.EnvironmentFactsProducer.BuildCurrentDateDirective(timeProvider.GetUtcNow());
         context = context with
         {
-            SystemPrompt = context.SystemPrompt + BuildCurrentDateDirective(timeProvider.GetUtcNow()),
+            SystemPrompt = context.SystemPrompt + dateSuffix,
         };
         // === End R5-A date context =======================================================
 
@@ -907,11 +989,10 @@ public class SprkChatAgentFactory
             agentLogger,
             turnContract);
 
-        // === Middleware pipeline (AIPL-057, AIPU-072) ===
-        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing (outermost).
-        // The outermost middleware (Routing) executes first on each call and decides which backend
-        // handles the request before the inner pipeline ever sees the message.
-        agent = WrapWithMiddleware(agent, tenantId);
+        // === Middleware pipeline (AIPL-057, AIPU-072; F-8 shield outermost) ===
+        // Wrap order: ContentSafety (innermost) -> CostControl -> Telemetry -> Routing -> PromptShield
+        // (outermost, F-8, only when enabled). The outermost middleware executes first on each call.
+        agent = WrapWithMiddleware(agent, tenantId, sessionId, safetyPerimeterSignal);
 
         return agent;
     }
@@ -934,7 +1015,15 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <param name="agent">The inner agent to wrap.</param>
     /// <param name="tenantId">Tenant ID for Agent Service thread scoping (ADR-014).</param>
-    private ISprkChatAgent WrapWithMiddleware(ISprkChatAgent agent, string tenantId)
+    /// <param name="sessionId">Chat session id (F-8 shield logging correlation).</param>
+    /// <param name="safetyPerimeterSignal">
+    /// F-8: the shared per-turn safety-perimeter holder written by <see cref="PromptShieldChatMiddleware"/>
+    /// and read by the gate's overlay-2 probe. Non-null ONLY when the shield is enabled by config
+    /// (<see cref="PromptShieldChatMiddleware.ChatPipelineEnabledConfigKey"/>). When null the shield is
+    /// NOT added — the pipeline is byte-identical to pre-F-8.
+    /// </param>
+    private ISprkChatAgent WrapWithMiddleware(
+        ISprkChatAgent agent, string tenantId, string sessionId, SafetyPerimeterSignal? safetyPerimeterSignal)
     {
         // 1. Content safety (innermost — filters before other middleware processes tokens)
         agent = new AgentContentSafetyMiddleware(
@@ -966,6 +1055,22 @@ public class SprkChatAgentFactory
                 agentServiceOptions,
                 _logger,
                 tenantId);
+        }
+
+        // 5. PromptShield (OUTERMOST, F-8) — pre-LLM injection perimeter + per-turn fail-open signal.
+        // Added ONLY when the shield is enabled by config (safetyPerimeterSignal non-null). Placed
+        // outermost so the user turn is scanned (and the overlay-2 signal is set) BEFORE routing chooses
+        // a backend and before the inner tool loop runs. Captive-dependency-safe: the middleware captures
+        // the ROOT provider and resolves the Scoped IPromptShieldService from a fresh per-turn scope.
+        // ADR-010: factory-instantiated, no additional DI registration.
+        if (safetyPerimeterSignal is not null)
+        {
+            agent = new PromptShieldChatMiddleware(
+                agent,
+                _serviceProvider,
+                safetyPerimeterSignal,
+                sessionId,
+                _logger);
         }
 
         return agent;
@@ -1023,8 +1128,19 @@ public class SprkChatAgentFactory
     /// </para>
     /// </remarks>
     /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
+    /// <param name="activeSessionFileId">
+    /// spaarkeai-compose-r2 "summarize this document" reinforcement: the <see cref="ChatSessionFile.FileId"/>
+    /// of the session's ACTIVE document (<c>session.ActiveDocument?.SessionFileId</c>), or null when none is
+    /// registered. When it matches a usable manifest entry, that entry is marked " (active)" and a single
+    /// instruction line tells the LLM the active file is the default target for "this/the document"; to
+    /// target other or ALL files the LLM must pass their fileIds explicitly. Prompt-only reinforcement — the
+    /// DETERMINISTIC scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>. ADR-015 preserved
+    /// (fileId + fileName only; never file content).
+    /// </param>
     /// <returns>The suffix beginning with two newlines, ready to concatenate onto a system prompt. Empty string when the manifest yields no usable entries (defensive — should not happen for Count &gt; 0).</returns>
-    internal static string BuildSessionFilesManifestSuffix(IReadOnlyList<ChatSessionFile> uploadedFiles)
+    internal static string BuildSessionFilesManifestSuffix(
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        string? activeSessionFileId = null)
     {
         if (uploadedFiles is null || uploadedFiles.Count == 0)
         {
@@ -1042,7 +1158,15 @@ public class SprkChatAgentFactory
             return string.Empty;
         }
 
-        var fileNames = string.Join(", ", usable.Select(f => f.FileName));
+        // The active file (when its id is present in the usable manifest) gets a " (active)"
+        // marker on its name so the LLM can see WHICH file "this document" refers to (ADR-015:
+        // still just fileName — no content leaks).
+        var activeFile = string.IsNullOrEmpty(activeSessionFileId)
+            ? null
+            : usable.FirstOrDefault(f => string.Equals(f.FileId, activeSessionFileId, StringComparison.Ordinal));
+
+        var fileNames = string.Join(", ", usable.Select(f =>
+            ReferenceEquals(f, activeFile) ? $"{f.FileName} (active)" : f.FileName));
         var fileIds = string.Join(", ", usable.Select(f => f.FileId));
         var pluralSuffix = usable.Count == 1 ? string.Empty : "s";
 
@@ -1050,9 +1174,23 @@ public class SprkChatAgentFactory
         // not blend it into the preceding "### Active Capabilities" or entity enrichment.
         // Task 044: tool-agnostic wording — the deleted generic playbook dispatcher is no
         // longer named; capability tools accept the session file IDs via their declared
-        // fileIds argument (FR-08 default-all applies when omitted).
-        return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
+        // fileIds argument.
+        var suffix = $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
                $"When a capability needs these files (e.g. summarize), pass their file IDs in the tool call's fileIds argument: {fileIds}.";
+
+        // spaarkeai-compose-r2: when an active document is set, tell the LLM it is the default
+        // target for "this/the document" (omitting fileIds), and that targeting other or ALL
+        // files requires passing their fileIds explicitly. Mirrors the deterministic default in
+        // SessionDispatchOrchestrator.ResolveTargetFiles.
+        if (activeFile is not null)
+        {
+            suffix +=
+                $" When the user says \"this document\"/\"the document\" or omits a file, the ACTIVE file " +
+                $"({activeFile.FileName}, fileId {activeFile.FileId}) is the default target; to summarize other " +
+                $"files or ALL files, pass their fileIds explicitly.";
+        }
+
+        return suffix;
     }
 
 
@@ -1377,8 +1515,40 @@ public class SprkChatAgentFactory
     /// </remarks>
     internal const int SelectionTextMaxChars = 200;
 
+    /// <summary>
+    /// Registry widget-type discriminator for the first-class Compose DIRECT widget
+    /// (spaarkeai-compose-r2 — "the flip"). MUST match <c>registerComposeWidget.ts</c>
+    /// (<c>widgetType: 'compose'</c>) and <c>SendWorkspaceArtifactHandler.ClientComposeWidgetKey</c>.
+    /// A Compose tab HOLDS A DOCUMENT, so it is projected onto the DocumentViewer
+    /// visible-state (mirrors the client <c>composeWidgetVisibility</c>) rather than the
+    /// Dashboard variant — otherwise the agent only learns "there is a Compose dashboard",
+    /// never WHICH document is open.
+    /// </summary>
+    internal const string ComposeWidgetType = "compose";
+
+    /// <summary>
+    /// Graceful default filename for a Compose tab whose server-readable
+    /// <see cref="WorkspaceTabWidgetData"/> carries no document filename (e.g. a Dashboard-
+    /// shaped payload). Keeps the agent-visible identity as "a document in Compose" rather
+    /// than a mislabeled layout name. See the contract note on <see cref="DeriveComposeVisibleState"/>.
+    /// </summary>
+    internal const string ComposeDefaultFilename = "Compose document";
+
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
+        // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
+        // (widgetType "compose") HOLDS A DOCUMENT. Mirror the client
+        // composeWidgetVisibility (registerComposeWidget.ts) — project the active-document
+        // identity onto the DocumentViewer variant so the agent learns the FILENAME of the
+        // document open in Compose, not merely that a "Compose" dashboard exists. This is
+        // checked BEFORE the closed-union switch because a compose tab's typed widgetData
+        // may be either a DocumentViewer payload (carries the real filename) or a Dashboard
+        // payload (no filename — the contract gap noted on DeriveComposeVisibleState).
+        if (string.Equals(tab.WidgetType, ComposeWidgetType, StringComparison.OrdinalIgnoreCase))
+        {
+            return DeriveComposeVisibleState(tab.WidgetData);
+        }
+
         // Closed-union switch over the polymorphic widget-data types. A new widget kind
         // cannot accidentally leak more than the FR-57 contract permits because the
         // compiler requires explicit handling here.
@@ -1409,6 +1579,58 @@ public class SprkChatAgentFactory
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Derive the agent-visible state for a Compose tab (widgetType "compose"). A Compose
+    /// tab always HOLDS A DOCUMENT, so it maps to <see cref="WorkspaceTabVisibleState.DocumentViewer"/>
+    /// carrying the filename — never the Dashboard variant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Preferred path</b>: the persisted widgetData is a <see cref="DocumentViewerTabWidgetData"/>
+    /// (kind "DocumentViewer") carrying the real <c>filename</c> — mirrors the client
+    /// <c>composeWidgetVisibility</c> projection in <c>registerComposeWidget.ts</c>. The real
+    /// filename flows straight through, including any selection state.
+    /// </para>
+    /// <para>
+    /// <b>CONTRACT GAP (reported to the client-owning agent)</b>: the flipped Compose tab
+    /// persists its identity under <c>widgetData.compose.fileName</c> (see
+    /// <c>composeWidgetData.ts</c> — also <c>compose.upload.fileName</c> /
+    /// <c>compose.draft.fileName</c>). That shape has NO <c>kind</c> discriminator, so the
+    /// strict 4-variant <see cref="WorkspaceTabWidgetData"/> union cannot deserialize it into
+    /// a filename-bearing typed payload — a Compose tab currently deserializes as a
+    /// <see cref="DashboardTabWidgetData"/> (name only, e.g. "Compose"), which carries NO
+    /// document filename. When that is the case we still emit a DocumentViewer (so the agent
+    /// learns a document is open in Compose, not a "Compose dashboard") but with a graceful
+    /// default filename. The durable fix is client-owned: persist the Compose tab's widgetData
+    /// as a DocumentViewer payload (<c>{ kind: "DocumentViewer", filename, ... }</c>, which the
+    /// client already computes) so the real filename reaches this derivation. Server reuses the
+    /// existing DocumentViewer types only — no new widget kind, no schema change.
+    /// </para>
+    /// </remarks>
+    private static WorkspaceTabVisibleState DeriveComposeVisibleState(WorkspaceTabWidgetData? widgetData)
+    {
+        // Preferred: a DocumentViewer-shaped payload carries the real active-document filename.
+        if (widgetData is DocumentViewerTabWidgetData d && !string.IsNullOrWhiteSpace(d.Filename))
+        {
+            return new WorkspaceTabVisibleState.DocumentViewer(
+                Filename: d.Filename,
+                MimeType: d.MimeType,
+                SizeBytes: d.SizeBytes,
+                HasSelection: d.HasSelection ?? false,
+                SelectionText: TruncateSelection(d.SelectionText, d.HasSelection ?? false));
+        }
+
+        // Fallback (contract gap): no server-readable filename — emit DocumentViewer with a
+        // graceful default so the agent still learns a document is open in Compose. The
+        // Dashboard layout label ("Compose") is deliberately NOT masqueraded as a filename.
+        return new WorkspaceTabVisibleState.DocumentViewer(
+            Filename: ComposeDefaultFilename,
+            MimeType: string.Empty,
+            SizeBytes: 0,
+            HasSelection: false,
+            SelectionText: null);
     }
 
     /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>

@@ -31,6 +31,14 @@ module.exports = {
     '^@shared/(.*)$': '<rootDir>/shared/$1',
     '^@outlook/(.*)$': '<rootDir>/outlook/$1',
     '^@word/(.*)$': '<rootDir>/word/$1',
+    // `@spaarke/auth` (task 072 / FR-25) resolves via `file:` to a sibling
+    // package whose `dist/` is compiled ESM (`export {...}` — tsconfig
+    // `module: ESNext`) with no CJS entry point; Jest's CommonJS runtime can't
+    // `require()` that directly (`SyntaxError: Unexpected token 'export'`).
+    // Map straight to the TypeScript source instead — ts-jest already
+    // transforms `.ts` (see `transform` below), so this sidesteps the ESM/CJS
+    // mismatch without widening the transform to arbitrary `.js` in node_modules.
+    '^@spaarke/auth$': '<rootDir>/../shared/Spaarke.Auth/src/index.ts',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   // Ignore transforming node_modules except for specific packages

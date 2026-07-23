@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
@@ -135,7 +136,11 @@ public static class EndpointMappingExtensions
         // ComposeModule.AddComposeModule (called from Program.cs). R1 has no feature gates.
         app.MapComposeEndpoints();
 
-        app.MapEmailEndpoints();
+        // MapEmailEndpoints removed (email-communication-solution-r4 task 007, DEC-2/FR-07):
+        // the legacy OOB-`email`-activity subsystem (`/api/v1/emails/*`, the Dataverse
+        // `PrimaryEntityName=="email"` webhook, and the self-built ConfidentialClientApplication
+        // in EmailAssociationService) is retired. Inbound email is 100% Graph via
+        // Services/Communication/IncomingCommunicationProcessor. See ADR-045.
         app.MapOfficeEndpoints();
         // smart-todo-decoupling-r3 task 070a — Office-scoped sprk_communication lookups
         // for Outlook taskpane (Create To Do ribbon + linked-todos banner).
@@ -249,11 +254,27 @@ public static class EndpointMappingExtensions
         // enforced at handler level (UserId match between caller's oid and pin's UserId).
         Sprk.Bff.Api.Api.Memory.PinnedMemoryEndpoints.MapPinnedMemoryEndpoints(app);
 
+        // AIR2-052 — /api/memory/{user,records} minimal governance surface (FR-B-03): user review/delete,
+        // GDPR erase, and record-authorization-aligned record-memory read over IMemoryItemStore (task 050).
+        // Unconditional registration (bff-extensions §F); consumes memory plumbing + existing authorization.
+        Sprk.Bff.Api.Api.Memory.MemoryGovernanceEndpoints.MapMemoryGovernanceEndpoints(app);
+
         app.MapDailyBriefingEndpoints();
 
         app.MapFinanceEndpoints();
         app.MapFinanceRollupEndpoints();
         app.MapCommunicationEndpoints();
+
+        // Notification spine Layer-C negotiate endpoint (spaarke-notification-spine-r1 task 020 /
+        // FR-04). Mapped UNCONDITIONALLY — its handler resolves SignalRDeliveryService, which is
+        // registered unconditionally (real or Null-Object) by AddNotificationsModule, so metadata
+        // generation succeeds at startup with SignalR OFF (ADR-032 — no asymmetric registration).
+        app.MapNotificationsEndpoints();
+
+        // ACS Event Grid inbound ingress (messaging-communication-app-r1 task 030 / FR-02). Public webhook
+        // (AllowAnonymous — Event Grid presents no OAuth token); authenticity enforced inside the ingress
+        // service (subscription-validation handshake + fail-closed topic allow-list + optional ?sig= secret).
+        app.MapAcsEventGridEndpoints();
 
         // Insights Engine admin endpoints (/api/insights/admin/*) — manual SME authoring
         // of Precedents (D-P3 Phase 1 mode of D-61). Zone B per SPEC §3.5 — consumes

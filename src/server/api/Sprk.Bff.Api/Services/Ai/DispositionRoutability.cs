@@ -49,7 +49,7 @@ public static class DispositionRoutability
 
         /// <summary>
         /// The ledger wire vocabulary member written to <c>SessionOutput.Disposition</c>
-        /// (<c>informational | work_product | overlay | email | record | notification | compose</c>
+        /// (<c>informational | work_product | overlay | email | record | notification | compose | surface_launch</c>
         /// — canonical §6.2 / ADR-040). Present for EVERY disposition (store precedes routing).
         /// </summary>
         public required string LedgerValue { get; init; }
@@ -76,6 +76,20 @@ public static class DispositionRoutability
         new Entry { Disposition = BindingDisposition.WorkProduct,   LedgerValue = "work_product",  Routable = true },
         new Entry { Disposition = BindingDisposition.Email,         LedgerValue = "email",         Routable = true },
         new Entry { Disposition = BindingDisposition.Compose,       LedgerValue = ComposeDisposition.DispositionValue, Routable = true },
+        // SurfaceLaunch (assistant-enhancements-r1 — the create-flow fix): a routable PASS-THROUGH like
+        // Compose. The dispatch stores the capability's drafted launch payload; the client re-materializes
+        // it into a pre-seeded wizard/OOB-form/workspace-tab launch (no server side-effect). Routable ⇒
+        // admissible on the dispatch path (ADR-043 §3), so the admit-gate follows automatically.
+        new Entry { Disposition = BindingDisposition.SurfaceLaunch, LedgerValue = "surface_launch", Routable = true },
+
+        // Notification (spaarke-notification-spine-r1 task 033 / FR-14 — ADR-043 Path C): realized as a
+        // routable side-effecting leg. OutputRouter's Notification case calls the Layer-A seam
+        // (IActionSeam.CreateNotificationAsync, task 031) to create the durable appnotification record —
+        // the same code path CreateNotificationNodeExecutor uses, now reachable from the dispatch/router
+        // surface. Routable ⇒ admissible on the dispatch path (ADR-043 §3), so the admit-gate follows
+        // automatically. The 032 "what lights up" audit (notes/what-lights-up-audit.md) confirmed zero
+        // shipped Bindings resolve to this disposition, so the flip is a no-op for existing capabilities.
+        new Entry { Disposition = BindingDisposition.Notification, LedgerValue = "notification", Routable = true },
 
         // Not-yet-routable legs (routable=false ⇒ LOUD rejection, never a silent drop). Realizing any
         // of these requires a NEW side-effect mechanism (out of E-20 scope per the ADR-043 escalation
@@ -89,11 +103,6 @@ public static class DispositionRoutability
         {
             Disposition = BindingDisposition.Record, LedgerValue = "record", Routable = false,
             NotRoutableReason = "a generic Dataverse record-write side-effect leg (distinct from the work_product host-record persistence) is not yet built — lands in a later wave",
-        },
-        new Entry
-        {
-            Disposition = BindingDisposition.Notification, LedgerValue = "notification", Routable = false,
-            NotRoutableReason = "the notification-delivery side-effect leg is not yet built — lands in a later wave",
         },
     }.ToDictionary(e => e.Disposition);
 

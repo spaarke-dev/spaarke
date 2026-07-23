@@ -584,6 +584,51 @@ describe('dispatchConsumer result + chips capture (G-P1 Defect 1)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Surface-launch routing decision (spaarkeai-assistant-enhancements-r1 task 013a):
+// the terminal `complete` chunk carries the SERVER's create-flow routing decision
+// (`disposition` + `consumerType`, additive). The helper surfaces them verbatim so
+// the host can branch `surface_launch` → the pre-seeded surface launch (ADR-039 —
+// the client re-derives nothing).
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer disposition + consumerType surfacing (task 013a)', () => {
+  it('surfaces disposition + consumerType from the terminal complete chunk', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({
+          type: 'complete',
+          done: true,
+          disposition: 'surface_launch',
+          consumerType: 'create-matter',
+          result: { matter_name: 'Acme v. Beta', matter_description: 'Contract dispute.' },
+        }),
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.disposition).toBe('surface_launch');
+    expect(result.consumerType).toBe('create-matter');
+    expect(result.result).toEqual({ matter_name: 'Acme v. Beta', matter_description: 'Contract dispute.' });
+  });
+
+  it('leaves disposition + consumerType undefined on a non-create dispatch (absent by default)', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"complete","done":true,"result":{"tldr":"T."}}']));
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.disposition).toBeUndefined();
+    expect(result.consumerType).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Progressive section reveal pacing (task 039 / D-F5, FR-A1-10)
 //
 // D-F5 wants long dispatched outputs to render progressively (≥2 visible
@@ -655,5 +700,107 @@ describe('dispatchConsumer progressive section reveal pacing (task 039 / D-F5)',
 
     expect(events.map(e => e.event.type)).toEqual(['streaming_started', 'streaming_complete']);
     expect(events.some(e => e.event.type === 'section_started' || e.event.type === 'section_completed')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// suppressWorkspaceSectionBridge (spaarkeai-compose-r2 task 112, UAT-R3 defect
+// #3c): the Compose surface has no `workspace`-channel section-renderer
+// subscriber — publishing section events there was dead output, and awaiting
+// the paced reveal needlessly delayed the dispatch Promise for a renderer
+// nobody mounts. Additive + default-false: unset behaves exactly like every
+// pre-existing test above (their dispatchers never set the flag).
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer suppressWorkspaceSectionBridge (task 112, Compose-surface scoping)', () => {
+  it('publishes ZERO workspace events for an object-shaped complete result when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 0,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({
+          type: 'complete',
+          done: true,
+          result: { explanation: 'This clause caps liability.', keyConcepts: ['liability', 'cap'] },
+        }),
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID, { streamId: 'compose-1' });
+
+    // The dispatch still resolves with the terminal result (the injection seam
+    // depends on this) — only the workspace-channel side effects are suppressed.
+    expect(result.status).toBe('complete');
+    expect(result.result).toEqual({ explanation: 'This clause caps liability.', keyConcepts: ['liability', 'cap'] });
+    expect(events).toHaveLength(0);
+  });
+
+  it('does NOT publish widget_load / streaming_started for a workspaceTarget dispatch when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"complete","done":true}']));
+
+    await dispatchConsumer(BINDING_ID, {
+      streamId: 'compose-2',
+      workspaceTarget: { widgetType: 'structured-output-stream' },
+    });
+
+    expect(events).toHaveLength(0);
+  });
+
+  it('publishes ZERO workspace events on an error/declined terminal when suppressed', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      suppressWorkspaceSectionBridge: true,
+    });
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"error","error":"boom","done":true}']));
+
+    await expect(dispatchConsumer(BINDING_ID, { streamId: 'compose-3' })).rejects.toThrow(/stream reported an error/);
+    expect(events).toHaveLength(0);
+  });
+
+  it('regression: leaving the flag unset preserves the pre-task-112 section-bridge behavior', async () => {
+    const { publish, events } = makePublishSpy();
+    const dispatchConsumer = createConsumerDispatcher({
+      bffBaseUrl: BFF_BASE,
+      getSessionId: () => SESSION_ID,
+      getAccessToken: async () => 'test-token',
+      publishPaneEvent: publish,
+      sectionRevealDelayMs: 0,
+      // suppressWorkspaceSectionBridge intentionally omitted — default false.
+    });
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        JSON.stringify({ type: 'complete', done: true, result: { tldr: 'Short version', keywords: ['a'] } }),
+      ])
+    );
+
+    await dispatchConsumer(BINDING_ID, { streamId: 'chip-1' });
+
+    expect(events.map(e => e.event.type)).toEqual([
+      'streaming_started',
+      'section_started',
+      'section_completed',
+      'section_started',
+      'section_completed',
+      'streaming_complete',
+    ]);
   });
 });

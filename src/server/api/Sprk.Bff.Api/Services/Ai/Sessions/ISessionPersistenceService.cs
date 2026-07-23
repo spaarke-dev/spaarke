@@ -131,4 +131,33 @@ public interface ISessionPersistenceService
         string tenantId,
         IReadOnlyList<ChatSessionFile> enrichedFiles,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists the most-recently-active sessions for a tenant (History dropdown; R4-8).
+    ///
+    /// Queries the Cosmos <c>sessions</c> container within the <paramref name="tenantId"/> partition,
+    /// ordered by <see cref="StoredSession.LastActivity"/> descending, projecting only the fields the
+    /// History list needs (never the full message history). Failures are logged at Warning and yield an
+    /// empty list — the History surface degrades gracefully (ADR-015 D-06).
+    /// </summary>
+    /// <param name="tenantId">Tenant identifier (partition key).</param>
+    /// <param name="limit">Maximum number of sessions to return (clamped to 1..50).</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<RecentSessionInfo>> ListRecentSessionsAsync(
+        string tenantId,
+        int limit,
+        CancellationToken ct = default);
 }
+
+/// <summary>
+/// Lightweight projection of a session for the History list (R4-8). Never carries the message body —
+/// only what the dropdown renders (a display title + last-activity timestamp + optional entity/playbook
+/// labels). Maps 1:1 to the client's history row contract.
+/// </summary>
+public record RecentSessionInfo(
+    string SessionId,
+    string Title,
+    string? EntityType,
+    string? EntityName,
+    string? PlaybookName,
+    DateTimeOffset UpdatedAt);

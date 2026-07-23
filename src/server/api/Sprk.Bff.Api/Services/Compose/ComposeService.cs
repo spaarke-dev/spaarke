@@ -1,9 +1,14 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -42,6 +47,16 @@ public class ComposeService : IComposeService
     private const string GraphItemIdAttribute = "sprk_graphitemid";
     private const string DisplayNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
+    // SPE-pointer + file-metadata columns — logical names mirrored from the canonical
+    // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write (Services/Office),
+    // which maps through Spaarke.Dataverse UpdateDocumentRequest → DataverseWebApiService.
+    // WITHOUT these, every downstream reader (open-links, preview) validates the SPE pointer,
+    // finds drive-id empty + sprk_hasfile false, and 409s "No file is attached to this document".
+    private const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    private const string HasFileAttribute = "sprk_hasfile";
+    private const string FileSizeAttribute = "sprk_filesize";
+    private const string MimeTypeAttribute = "sprk_mimetype";
+    private const string FilePathAttribute = "sprk_filepath";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -51,7 +66,16 @@ public class ComposeService : IComposeService
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
+    // FR-28 push/save pipeline (task 055) — the consumer-declared step set for the
+    // push-annotations orchestration: push (native OOXML render) → save (SPE write) →
+    // version (new version id confirmed). Mirrors the FR-05 step-naming convention above
+    // (stable string keys a future JobAwareCompletionState OutcomeCard renders).
+    internal const string StepPush = "push";
+    internal const string StepSave = "save";
+    internal const string StepVersion = "version";
+
     private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
+    private const string ComposePushSaveJobType = "compose-push-save";
     private const string DocxContentType =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -61,6 +85,78 @@ public class ComposeService : IComposeService
     private readonly DocxAnnotationWriter _annotationWriter;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+    private readonly ComposePushSaveStatusStore? _pushSaveStatusStore;
+    // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
+    // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
+    // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
+    // (ADR013_ComposeFacadeTests). The facade downloads the user-OBO-written SPE file UNDER OBO
+    // (the same identity + SPE call the RAG indexing step already uses — MI 403s on it) and reuses
+    // the existing extract → classify → summarize → field-map → UpdateDocumentAsync pipeline
+    // unchanged. It REPLACES the round-6 AppOnlyDocumentAnalysis Service-Bus enqueue, which silently
+    // 403'd on the user-written file (the bug UAT #7b reported).
+    //
+    // FIRE-AND-FORGET / BACKGROUND (owner-approved, compose-r2): the profile leg is NO LONGER awaited
+    // in the create-on-save response path. The full extract → classify → summarize → field-map LLM
+    // pipeline runs ~15-40 s; awaiting it blocked the HTTP response for that entire time. SaveAsync now
+    // DISPATCHES the profile onto a detached DI scope (IServiceScopeFactory) and returns immediately;
+    // the 7 sprk_document profile fields populate shortly AFTER the save returns. OBO is preserved by
+    // capturing the caller's bearer token + claims BEFORE returning and threading them into a synthetic
+    // HttpContext resolved against the fresh scope (the profile path reads ONLY the Authorization header
+    // + User claims from HttpContext — see TokenHelper.ExtractBearerToken / GraphClientFactory.ForUserAsync;
+    // the user access token stays valid long enough to exchange after the response). Best-effort: the
+    // background task swallows + logs every failure, so a profile miss can never crash the process or
+    // affect the already-returned save. Optional + defaults null (same rationale as _pushSaveStatusStore
+    // below) so existing 6-arg test constructors keep compiling; the field is now the availability GATE
+    // (null → nothing to dispatch), while the actual run resolves a FRESH facade from the detached scope.
+    private readonly IDocumentProfileAi? _documentProfileAi;
+    // compose-r2 FR-30 (#629): durable Record-scope memory-capture facade (ADR-013). Optional + defaults
+    // null so existing test constructors keep compiling; DI resolves the real ComposeMemoryCapture in every
+    // non-test host. Null → the STEP 5 capture below is a clean no-op (best-effort availability gate).
+    private readonly IComposeMemoryCapture? _memoryCapture;
+    // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
+    // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
+    // null so existing test constructors compile; DI always resolves it in every non-test host.
+    private readonly IServiceScopeFactory? _scopeFactory;
+    // App-shutdown token for the detached profile task — NEVER the request CancellationToken (which
+    // cancels when the response completes). Optional; null → CancellationToken.None.
+    private readonly IHostApplicationLifetime? _appLifetime;
+    // FR-08 (task 010, E2): load-time w14:paraId pre-parse. Optional + defaults to a fresh instance so
+    // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
+    // Stateless + thread-safe — a default construction is functionally identical to the DI singleton.
+    private readonly ParaIdPreParser _paraIdPreParser;
+    // FR-01/FR-03/FR-07 (task 022, E1 — Option C, design §4.2): the retained-original REDLINE SYNTHESIZER.
+    // On a dirty save it rewrites ONLY the client's edited paragraphs (paraId-keyed) in the resolved
+    // baseline as native w:ins/w:del, preserving every untouched paragraph + all structure — the "delta
+    // onto the retained original" that replaces the R2 whole-document reconstruction. Optional + defaults
+    // to a fresh instance (stateless, thread-safe) so existing test constructors compile unchanged; DI
+    // resolves the registered singleton (ComposeModule) in every host.
+    private readonly ComposeParagraphRedlineSynthesizer _redlineSynthesizer;
+    // FR-01a (task 026, E1 born-in-editor): the from-scratch high-fidelity OOXML AUTHORING engine. On a
+    // born-in-editor save (request.ContentModel present — an AI-drafted/blank/browse-local doc with no
+    // retained original), it renders the .docx server-side (real styles + style-linked multi-level numbering
+    // + tables + minted paraId) — the deterministic replacement for the removed client docx.js exporter.
+    // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors compile
+    // unchanged; DI resolves the registered singleton (ComposeModule) in every host.
+    private readonly ComposeDocumentRenderer _documentRenderer;
+    // FR-24 (task 050, import round-trip): the EXISTING read-direction OOXML annotation parser, REUSED
+    // VERBATIM. On Load it recovers every native w:ins/w:del (any authorship) so the client can render them
+    // as first-class tracked changes instead of the mammoth-flattened prose (design §7). Pure byte[]-in /
+    // record-out — no Microsoft.Graph type (ADR-007), no AI-internal type (ADR-013); the SPE download stays
+    // behind the SpeFileStore facade. Optional + defaults to a fresh instance (stateless, thread-safe) so
+    // existing test constructors compile unchanged; DI resolves the registered singleton in every host.
+    private readonly DocxAnnotationReader _annotationReader;
+    // C2 fix (UAT 2026-07-20): stamps the client's minted paraIds physically onto the resolved baseline's
+    // id-less paragraphs BEFORE the synthesizer resolves — completing the "apply physically" step
+    // ParaIdPreParser mints but never wrote into the bytes. Pure/stateless; optional + defaults to a
+    // fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeBaselineParaIdStamper _baselineParaIdStamper;
+    // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+    // server-side DOCX→editor projection. On Load it emits paraId-tagged HTML AND the ordered paraId map
+    // from ONE traversal (the client no longer runs mammoth or position-stamps ids) — eliminating the
+    // two-engine drift that produced the recurring save-abort bug class. The map it returns is the load
+    // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
+    // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
+    private readonly ComposeDocxProjectionBuilder _projectionBuilder;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -68,7 +164,18 @@ public class ComposeService : IComposeService
         IGenericEntityService dataverse,
         DocxAnnotationWriter annotationWriter,
         IPostUploadIndexingEnqueuer indexing,
-        ILogger<ComposeService> logger)
+        ILogger<ComposeService> logger,
+        IDistributedCache? cache = null,
+        IDocumentProfileAi? documentProfileAi = null,
+        IServiceScopeFactory? scopeFactory = null,
+        IHostApplicationLifetime? appLifetime = null,
+        IComposeMemoryCapture? memoryCapture = null,
+        ParaIdPreParser? paraIdPreParser = null,
+        ComposeParagraphRedlineSynthesizer? redlineSynthesizer = null,
+        ComposeDocumentRenderer? documentRenderer = null,
+        DocxAnnotationReader? annotationReader = null,
+        ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
+        ComposeDocxProjectionBuilder? projectionBuilder = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -76,6 +183,24 @@ public class ComposeService : IComposeService
         _annotationWriter = annotationWriter;
         _indexing = indexing;
         _logger = logger;
+        _documentProfileAi = documentProfileAi;
+        _scopeFactory = scopeFactory;
+        _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
+        _redlineSynthesizer = redlineSynthesizer ?? new ComposeParagraphRedlineSynthesizer();
+        _documentRenderer = documentRenderer ?? new ComposeDocumentRenderer();
+        // FR-24 (task 050): reuse the existing reader verbatim — stateless singleton-shaped, so a fresh
+        // instance is functionally identical to the DI-registered one (mirrors _paraIdPreParser above).
+        _annotationReader = annotationReader ?? new DocxAnnotationReader();
+        _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
+        _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
+        _appLifetime = appLifetime;
+        _memoryCapture = memoryCapture;
+        // ADR-009: cross-request push/save job state lives in Redis, never IMemoryCache.
+        // Optional + defaults null so existing 6-arg test constructors (sibling task suites
+        // 013/050/060/062/102) keep compiling unchanged; DI (AddScoped<IComposeService,
+        // ComposeService>) resolves the real IDistributedCache registered via
+        // AddStackExchangeRedisCache in every non-test host, so production always persists.
+        _pushSaveStatusStore = cache is not null ? new ComposePushSaveStatusStore(cache) : null;
     }
 
     /// <inheritdoc />
@@ -134,30 +259,133 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
+        // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the single-walk
+        // projection builder produces BOTH the paraId-tagged editor HTML AND the ordered w14:paraId map from
+        // ONE traversal — replacing the client-side mammoth convert + position-based paraId stamping (the
+        // two-engine drift that caused the "matches no paragraph in the retained original" save failures).
+        // The builder's map is the load path's single paraId authority; it is produced in
+        // Descendants<Paragraph>() order (reader-aligned) so the imported-revision/comment ParagraphHint
+        // resolution below keeps working. Fail-closed + best-effort: an unreadable source yields
+        // Status=Failed/empty map (NEVER throws) and Load still returns the source bytes (§3.3). The builder
+        // supersedes the ParaIdPreParser single-pass on the Load path (one paragraph-enumeration authority).
+        var projection = _projectionBuilder.Build(content, cancellationToken);
+        IReadOnlyList<ParaIdMapEntry> paraIdMap = projection.ParaIdMap;
+        if (projection.Status == ComposeProjectionStatus.Failed)
+        {
+            _logger.LogWarning(
+                "Compose load: DOCX projection failed for drive={DriveId} item={DocumentSpeId} (code={Code}); client will fail closed (read-only / Open in Word)",
+                request.DriveId, request.DocumentSpeId, projection.Warnings.FirstOrDefault()?.Code);
+        }
+        else if (projection.Warnings.Count > 0)
+        {
+            // Counts-only (privacy — no document content). Surfaces fidelity gaps to engineering (F-03).
+            _logger.LogInformation(
+                "Compose load: DOCX projection partial for drive={DriveId} item={DocumentSpeId}; warnings={Warnings}",
+                request.DriveId, request.DocumentSpeId,
+                string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+        }
+
+        // FR-24/FR-25 (task 050 + task 051, import round-trip): run the EXISTING DocxAnnotationReader ONCE
+        // on the SAME load-time bytes, alongside the paraId pre-parse + the (client-side) mammoth convert —
+        // which FLATTENS w:ins/w:del to prose AND drops comment anchors before the editor sees them
+        // (docxBridge.ts). A single Read() call (NFR-08 — same single-pass rationale as the paraId pre-parse
+        // above) projects BOTH RecoveredRevision (FR-24) and RecoveredComment (FR-25) onto the Load response,
+        // each WITH the E2 w14:paraId of its containing paragraph (resolved from the paraIdMap above by the
+        // reader's document-order ParagraphHint — both walk body.Descendants<Paragraph>() so the indices
+        // align). Revisions render as first-class accept/reject-able insertion/deletion marks; comments group
+        // by shared anchorText into FR-23 comment threads (design §7). REUSE ONLY — the reader is unmodified.
+        // Best-effort + empty (NOT null): a malformed/unreadable source degrades to no imported
+        // revisions/comments and NEVER fails Load, matching the paraId pre-parse contract above (the client
+        // still edits the doc).
+        IReadOnlyList<ImportedRevision> importedRevisions;
+        IReadOnlyList<ImportedComment> importedComments;
+        try
+        {
+            var recovered = _annotationReader.Read(content.ToArray());
+
+            importedRevisions = recovered.Revisions.Count == 0
+                ? Array.Empty<ImportedRevision>()
+                : recovered.Revisions
+                    .Select(r => new ImportedRevision(
+                        Kind: r.Kind,
+                        Id: r.Id,
+                        Author: r.Author,
+                        Date: r.Date,
+                        Text: r.Text,
+                        AnchorText: r.AnchorText,
+                        ParagraphHint: r.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, r.ParagraphHint)))
+                    .ToList();
+
+            importedComments = recovered.Comments.Count == 0
+                ? Array.Empty<ImportedComment>()
+                : recovered.Comments
+                    .Select(c => new ImportedComment(
+                        Id: c.Id,
+                        Author: c.Author,
+                        Date: c.Date,
+                        CommentText: c.CommentText,
+                        AnchorText: c.AnchorText,
+                        ParagraphHint: c.ParagraphHint,
+                        ParaId: ResolveParaIdForHint(paraIdMap, c.ParagraphHint)))
+                    .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: existing-annotation read failed for drive={DriveId} item={DocumentSpeId}; returning no imported revisions/comments",
+                request.DriveId, request.DocumentSpeId);
+            importedRevisions = Array.Empty<ImportedRevision>();
+            importedComments = Array.Empty<ImportedComment>();
+        }
+
+        // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
+        // holds the client bytes (e.g. after a page refresh) can re-fetch THIS baseline by versionId
+        // (DownloadFileVersionAsUserAsync). Best-effort behind the SpeFileStore facade (ADR-007) — a null
+        // (no version history / lookup unavailable) never fails Load; the client then relies on the
+        // retained-bytes Content fast-path.
+        string? versionId = null;
+        try
+        {
+            versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
+                request.DriveId, request.DocumentSpeId);
+        }
+
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
         //    bind to sprk_documentid; for Path B continuation, bind to the SPE drive-item id.
         var bindingId = request.DocumentRecordId.HasValue
             ? request.DocumentRecordId.Value.ToString()
             : request.DocumentSpeId;
 
-        // FR-29 (R2, design.md §8): if the caller supplies a known prior SessionId bound to
-        // THIS SAME document identity, RESUME it instead of minting a new one — this is what
-        // carries AnchoredAnnotations/DefinedTermsTracking forward across a document re-open
-        // (the annotations are keyed to document identity, not to a DOCX version — design.md
-        // §8 "Cross-version persistence"). A mismatched or missing session falls back to the
-        // R1 mint-new behavior unchanged (purely additive).
+        // FR-29 (R2, design.md §8) + FR-33 (task 062): if the caller supplies a known prior
+        // SessionId bound to THIS SAME cross-version key — DocumentId (bindingId, already
+        // version-independent: sprk_documentid or the SPE drive-item id, NEVER a DOCX version
+        // identifier) AND, when supplied, MatterId — RESUME it instead of minting a new one.
+        // This is what carries AnchoredAnnotations/DefinedTermsTracking/action-history forward
+        // across a document re-open (design.md §8 "Cross-version persistence": bound to
+        // `DocumentId + MatterId`, NOT to a specific DOCX version — a Word save that produces a
+        // new version never changes this key). A mismatched or missing session falls back to
+        // the R1 mint-new behavior unchanged (purely additive; see
+        // <see cref="IsSameCrossVersionBinding"/>).
         ChatSession? session = null;
         if (!string.IsNullOrWhiteSpace(request.SessionId))
         {
             var candidate = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
                 .ConfigureAwait(false);
-            if (candidate is not null && string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+            if (candidate is not null && IsSameCrossVersionBinding(candidate, bindingId, request.MatterId))
             {
                 session = candidate;
                 _logger.LogDebug(
-                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s)",
-                    session.SessionId, bindingId, request.TenantId,
-                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0);
+                    "Compose load: resumed existing session {SessionId} bound to document={BindingId} matter={MatterId} (tenant={TenantId}) — restoring {AnnotationCount} annotation(s), {DefinedTermCount} defined term(s), {OutputCount} ledger output(s)",
+                    session.SessionId, bindingId, request.MatterId, request.TenantId,
+                    session.AnchoredAnnotations?.Count ?? 0, session.DefinedTermsTracking?.Count ?? 0,
+                    session.Outputs?.Count ?? 0);
             }
         }
 
@@ -165,9 +393,15 @@ public class ComposeService : IComposeService
                 tenantId: request.TenantId,
                 documentId: bindingId,
                 playbookId: null,
-                hostContext: null,
+                hostContext: BuildMatterHostContext(request.MatterId),
                 ct: cancellationToken)
             .ConfigureAwait(false);
+
+        // FR-33 (task 062, design.md §8): restore prior decisions from the ledger alongside the
+        // FR-29 annotations — task 061's read-only GetActionHistory query over the resumed
+        // session's Outputs/ToolChains. No new stored structure (ADR-040); a freshly-minted
+        // session naturally has an empty ledger.
+        var actionHistory = GetActionHistory(session);
 
         return new LoadComposeDocumentResult
         {
@@ -177,12 +411,86 @@ public class ComposeService : IComposeService
             DocumentRecordId = request.DocumentRecordId,
             Content = content,
             ETag = metadata.ETag,
+            VersionId = versionId,
             FileName = metadata.Name,
             Size = metadata.Size,
             AnchoredAnnotations = session.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
             DefinedTermsTracking = session.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
+            ActionHistory = actionHistory,
+            ParaIdMap = paraIdMap,
+            Projection = projection,
+            ImportedRevisions = importedRevisions,
+            ImportedComments = importedComments,
         };
     }
+
+    /// <summary>
+    /// FR-24 (task 050): resolves the E2 <c>w14:paraId</c> for a recovered revision's document-order
+    /// paragraph index (<see cref="RecoveredRevision.ParagraphHint"/>) from the Load-time
+    /// <paramref name="paraIdMap"/>. Both the reader and <see cref="ParaIdPreParser"/> enumerate
+    /// <c>body.Descendants&lt;Paragraph&gt;()</c> (recursive, document-ordered, incl. table-cell +
+    /// nested-table paragraphs), so the hint index maps directly to <see cref="ParaIdMapEntry.Index"/>.
+    /// Returns <c>null</c> when the hint is out of range (e.g. <c>-1</c> for a revision whose paragraph
+    /// could not be located) — the client then falls back to fuzzy anchoring (anchorText + hint).
+    /// </summary>
+    private static string? ResolveParaIdForHint(IReadOnlyList<ParaIdMapEntry> paraIdMap, int paragraphHint)
+    {
+        if (paragraphHint < 0)
+        {
+            return null;
+        }
+
+        foreach (var entry in paraIdMap)
+        {
+            if (entry.Index == paragraphHint)
+            {
+                return entry.ParaId;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// FR-33 (design.md §8) cross-version session-binding predicate: a resumed session must
+    /// match the SAME <c>DocumentId</c> binding (<paramref name="bindingId"/> — version
+    /// independent by construction; see <see cref="LoadAsync"/> remarks) AND, when the caller
+    /// supplies a <paramref name="matterId"/>, the SAME Matter — read from the candidate
+    /// session's <see cref="ChatHostContext"/> (canonical <c>EntityType == "matter"</c> per
+    /// <see cref="Models.Ai.Chat.EntityTypeNormalizer"/>, <c>EntityId == matterId</c>). A
+    /// <c>null</c>/whitespace <paramref name="matterId"/> preserves the FR-29 DocumentId-only
+    /// match (backward compatible with callers that predate FR-33). This augments the EXISTING
+    /// caller-supplied-SessionId resume path — no new lookup index, no parallel session cache
+    /// (ADR-040).
+    /// </summary>
+    private static bool IsSameCrossVersionBinding(ChatSession candidate, string bindingId, string? matterId)
+    {
+        if (!string.Equals(candidate.DocumentId, bindingId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(matterId))
+        {
+            return true;
+        }
+
+        return candidate.HostContext is { } hostContext
+            && string.Equals(hostContext.EntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.Ordinal)
+            && string.Equals(hostContext.EntityId, matterId, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// FR-33 (design.md §8): seeds a new Compose session's <see cref="ChatHostContext"/> with
+    /// the Matter binding when the caller supplies one, so the NEXT <see cref="LoadAsync"/>
+    /// call for the same document + matter can resume via
+    /// <see cref="IsSameCrossVersionBinding"/>. Returns <c>null</c> (R1 behavior, unchanged)
+    /// when no <paramref name="matterId"/> is supplied.
+    /// </summary>
+    private static ChatHostContext? BuildMatterHostContext(string? matterId) =>
+        string.IsNullOrWhiteSpace(matterId)
+            ? null
+            : new ChatHostContext(EntityType: ParentEntityContext.EntityTypes.Matter, EntityId: matterId);
 
     /// <inheritdoc />
     public async Task<SaveComposeDocumentResult> SaveAsync(
@@ -190,15 +498,94 @@ public class ComposeService : IComposeService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for first-Save promotion rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the Browse/local-file first Save legitimately has no
+        // chat session. The FR-07 rebind this would drive is skipped below when SessionId is
+        // absent (empty/whitespace). TenantId remains a hard precondition; the baseline must be
+        // RESOLVABLE (see ResolveSaveBaselineAsync) — it need not arrive as Content bytes.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-        if (request.Content.IsEmpty)
-            throw new ArgumentException("Content is required and must be non-empty.", nameof(request));
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // E1 KEYSTONE (FR-01/FR-06, task 022, Option C — design §4.2, §8): the persisted document is a
+        // DELTA onto the retained LOAD-TIME ORIGINAL OOXML, never a TipTap reconstruction (docx.js is
+        // dropped from the client export path). Three-part derivation, in order:
+        //
+        //   1. Resolve the BASELINE = the retained original bytes (FR-06):
+        //        (a) request.Content — the same-session fast-path (the client still holds the pristine
+        //            mount payload state.docxBytes; it is the ORIGINAL, not a reconstruction), else
+        //        (b) re-fetch the load-time SPE version by request.BaselineVersionId (task 002 —
+        //            DownloadFileVersionAsUserAsync, behind the SpeFileStore facade; ADR-007). A save
+        //            after a page refresh (client bytes gone) still lands the delta on the correct version.
+        //      A create-on-save (no DocumentSpeId) always supplies Content as the document bytes.
+        //
+        //   2. Synthesize the USER's paragraph text-edits (request.EditedParagraphs, paraId-keyed) as a
+        //      word-level w:ins/w:del delta ONTO the baseline via ComposeParagraphRedlineSynthesizer —
+        //      rewriting ONLY the edited paragraphs, preserving every untouched paragraph + all structure
+        //      by construction (Option C; replaces the retired R2 whole-document reconstruction). An empty
+        //      edit list is a structural round-trip (no revisions) → a clean Save stays byte-identical.
+        //
+        //   3. Apply AI redlines/comments (request.Annotations) as NATIVE OOXML (w:ins/w:del/w:comment)
+        //      via the SAME DocxAnnotationWriter the push path uses (PushAnnotationsAsync) — UNCHANGED
+        //      (UAT-R7 #2/#3/#4; task 023 verifies the AI-redline-onto-Option-C-baseline composition).
+        //
+        // All three transforms are pure/in-memory BEFORE any SPE write, so a bad edit (unmatched paraId →
+        // ComposeRedlineException) or bad annotation batch (DocxAnnotationException) throws before the
+        // write — no partial SPE version can land. A no-edit, no-annotation Save persists the baseline
+        // byte-identical (FR-06a byte-identity preserved — see ComposeServiceUploadFidelityTests.cs).
+        // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+        byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
+            .ConfigureAwait(false);
+
+        // C2 fix (UAT 2026-07-20): stamp the client's minted paraIds physically onto the baseline's
+        // id-less paragraphs BEFORE the synthesizer/annotation writer resolve against it. This completes
+        // the "apply minted ids physically" step ParaIdPreParser mints but never wrote into the source
+        // bytes (its own remark) — without it, editing/accepting a redline on an originally-id-less
+        // paragraph (or any paragraph of an uploaded doc, whose ids are all client-minted) fails with
+        // "w14:paraId matches no paragraph in the retained original". Text-verified + fill-gaps-only +
+        // count-gated + fail-open (see ComposeBaselineParaIdStamper) — a no-op when the map is absent
+        // (older client) or nothing qualifies, so a doc whose paragraphs already carry ids is unchanged.
+        // Gated on an EditedParagraphs delta being present: the stamp only matters for the synthesizer's
+        // paraId resolution, and running it on a clean/annotation-only save would needlessly rewrite the
+        // bytes and break the FR-06a byte-identical clean-save invariant (ComposeServiceUploadFidelityTests).
+        // Skipped on the born-in-editor path (ContentModel present → the renderer already mints ids into
+        // the bytes it authors; the client sends no map there).
+        if (request.ContentModel is null
+            && request.EditedParagraphs is { Count: > 0 }
+            && request.ParaIdMap is { Count: > 0 })
+        {
+            contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
+        }
+
+        if (request.EditedParagraphs is { Count: > 0 })
+        {
+            _logger.LogInformation(
+                "Compose save: synthesizing a paraId-keyed redline for {EditCount} edited paragraph(s) onto the retained original baseline (session={SessionId}).",
+                request.EditedParagraphs.Count, request.SessionId);
+            contentToPersist = _redlineSynthesizer.SynthesizeRedline(
+                contentToPersist, request.EditedParagraphs, ResolveRevisionAuthor(httpContext), observedAt,
+                out var unresolvedParaIds);
+            // UAT round-4 graceful degradation: the save SUCCEEDS with the paragraphs that resolved; any
+            // that did not (a mammoth-dropped/structural paragraph shifted the client's paraId mapping) are
+            // logged here, non-silently, instead of aborting the whole save. Not an error-level event — the
+            // document persisted; these paragraphs simply were not redlined onto the retained original.
+            if (unresolvedParaIds.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Compose save: {UnresolvedCount} of {EditCount} edited paragraph(s) had a w14:paraId that matched no paragraph in the retained original and were NOT redlined (session={SessionId}): {UnresolvedParaIds}. The save still persisted the resolved paragraphs.",
+                    unresolvedParaIds.Count, request.EditedParagraphs.Count, request.SessionId, string.Join(", ", unresolvedParaIds));
+            }
+        }
+
+        if (request.Annotations is { Count: > 0 })
+        {
+            _logger.LogInformation(
+                "Compose save: applying {AnnotationCount} redline/comment annotation(s) to the baseline before persist (session={SessionId}).",
+                request.Annotations.Count, request.SessionId);
+            contentToPersist = _annotationWriter.Annotate(contentToPersist, request.Annotations);
+        }
 
         _logger.LogInformation(
             "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
@@ -233,7 +620,7 @@ public class ComposeService : IComposeService
             // once created, the client re-Saves with the returned id → the replace path below, so
             // the drive-item is never double-created.
             var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
-            using var createStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            using var createStream = new MemoryStream(contentToPersist, writable: false);
             var created = await _spe.UploadSmallAsUserAsync(
                     httpContext, driveId, fileName, createStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -256,7 +643,7 @@ public class ComposeService : IComposeService
             if (string.IsNullOrWhiteSpace(request.DriveId))
                 throw new ArgumentException("DriveId is required for SPE drive-item access when DocumentSpeId is supplied.", nameof(request));
 
-            using var contentStream = new MemoryStream(request.Content.ToArray(), writable: false);
+            using var contentStream = new MemoryStream(contentToPersist, writable: false);
             var replaced = await _spe.ReplaceFileContentAsUserAsync(
                     httpContext, request.DriveId, request.DocumentSpeId!, contentStream, cancellationToken)
                 .ConfigureAwait(false);
@@ -282,6 +669,15 @@ public class ComposeService : IComposeService
             SessionId = request.SessionId,
             TenantId = request.TenantId,
             DisplayName = request.DisplayName,
+            // Thread the already-computed SPE pointer + file metadata into the record write so
+            // the created sprk_document is COMPLETE (drive-id + has-file + size/mime/filepath),
+            // mirroring OfficeDocumentPersistence. The SPE upload above already produced these;
+            // this only carries them forward — no new upload logic.
+            GraphDriveId = effectiveDriveId,
+            FileName = fileName,
+            FileSize = saved.Size ?? contentToPersist.Length,
+            MimeType = DocxContentType,
+            FilePath = saved.WebUrl,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -300,7 +696,7 @@ public class ComposeService : IComposeService
                     DriveId: effectiveDriveId ?? string.Empty,
                     ItemId: effectiveSpeId,
                     FileName: fileName,
-                    FileSizeBytes: saved.Size ?? request.Content.Length,
+                    FileSizeBytes: saved.Size ?? contentToPersist.Length,
                     ContentType: DocxContentType,
                     DocumentId: promotion.DocumentRecordId?.ToString(),
                     ParentEntity: null,          // parent association is task 014 — standalone Document is valid
@@ -312,15 +708,54 @@ public class ComposeService : IComposeService
             .ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
-        // Project per-step states (container → record → profile-analysis[deferred] → indexing)
+        // STEP 3 — profile-analysis (FR-05 Fork C, compose-r2, UAT #7b — now FIRE-AND-FORGET).
+        // The Compose user wrote the file, so profiling MUST run UNDER OBO (Pattern 4) — a background
+        // AppOnlyDocumentAnalysis (MI) job would 403 on the download (that was the round-6 bug: profile
+        // fields silently never populated). But awaiting the full extract → classify → summarize →
+        // field-map LLM pipeline (~15-40 s) INLINE blocked this HTTP response for that entire time.
+        //
+        // So the profile is now DISPATCHED to a detached DI scope and NOT awaited: SaveAsync returns
+        // immediately, and the OBO-capable IDocumentProfileAi facade runs the SAME pipeline in the
+        // background, writing the 7 sprk_document profile fields shortly AFTER this save returns. OBO is
+        // preserved by capturing the caller's bearer token + claims before returning (see
+        // DispatchBackgroundProfile). Best-effort: the background task swallows + logs every failure, so
+        // it can never fail or block the save. Because the outcome is not known synchronously, the
+        // returned profile step is a non-terminal "dispatched" (Running) signal — the record is a valid
+        // interim success (container + record + indexing) with the profile still in flight.
+        // ────────────────────────────────────────────────────────────────────────────
+        var profileSignal = promotion.DocumentRecordId.HasValue
+            ? DispatchBackgroundProfile(promotion.DocumentRecordId.Value, httpContext)
+            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // STEP 5 — durable memory capture (FR-30, compose-r2, deferral #629). Best-effort: distil the
+        // session's durable insights (defined terms today) into Record-scope MemoryItems keyed by the
+        // newly-saved sprk_document, via the ADR-013 IComposeMemoryCapture facade (shared IMemoryItemStore,
+        // no forked store). Runs ONLY when a sprk_document id was resolved. The untrusted-origin gate is
+        // DEFERRED to the memory-governance project (#629); TrustLevel is carried inert. This NEVER affects
+        // the returned Save result or the completion-state projection — a capture miss is silently logged.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (promotion.DocumentRecordId.HasValue)
+        {
+            await CaptureDocumentMemoryAsync(
+                    promotion.DocumentRecordId.Value, request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // Project per-step states (container → record → profile-analysis → indexing)
         // through the shared JobAwareCompletionStateProjector. A fileless/unindexed record can
-        // never be a success (aggregate Failed/Partial); profile is deferred to core (Fork C).
+        // never be a success (aggregate Failed/Partial). The profile step is DISPATCHED to the
+        // background above (fire-and-forget, not awaited): in the returned response it is a non-terminal
+        // "dispatched"/Running signal, so the synchronous aggregate reads Partial (record + index exist,
+        // profile pending) and never demotes to Failed on a best-effort profile (Fork C, compose-r2).
         // ────────────────────────────────────────────────────────────────────────────
         var completion = ProjectCreateOnSaveState(
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
             containerSignal: CompletedSignal(StepContainer),
             recordSignal: CompletedSignal(StepRecord),
+            profileSignal: profileSignal,
             indexingSignal: IndexingSignal(indexingResult),
             observedAt: observedAt);
 
@@ -338,6 +773,197 @@ public class ComposeService : IComposeService
         };
     }
 
+    /// <summary>
+    /// E1 baseline resolution (FR-06, task 022, Option C — design §4.3): returns the retained LOAD-TIME
+    /// ORIGINAL bytes the save delta applies onto. Resolution order:
+    /// <list type="number">
+    /// <item><b>Same-session fast-path</b> — <see cref="SaveComposeDocumentRequest.Content"/> when present:
+    /// the client still holds the pristine mount payload (<c>state.docxBytes</c>, the ORIGINAL — never a
+    /// reconstruction). Also the create-on-save document bytes.</item>
+    /// <item><b>FR-06 primary</b> — re-fetch the load-time SPE version by
+    /// <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> via
+    /// <c>ISpeFileOperations.DownloadFileVersionAsUserAsync</c> (task 002; behind the <c>SpeFileStore</c>
+    /// facade — ADR-007). Covers a save after the client lost its in-memory bytes (page refresh); the
+    /// load-time version stays addressable even after later dirty saves advance the CURRENT version.</item>
+    /// </list>
+    /// A dirty save NEVER falls back to a client reconstruction (FR-01) — an unresolvable baseline is a
+    /// clear error, not a lossy rebuild.
+    /// <para>
+    /// <b>Tier-3 Redis fallback (design §4.3, deferred — §6.5 Path-A scoping)</b>: the size-capped Redis
+    /// cache of the load-time original is an OPTIMIZATION to avoid the SPE re-fetch, not a correctness
+    /// requirement — the <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> fetch already
+    /// discharges FR-06 baseline retrieval. Populating it requires a Load-path write (out of task-022's
+    /// file scope; Load is task 010/024). Deferred to keep this cutover to the SaveAsync inversion; the
+    /// fast-path + versionId cover every real save case.
+    /// </para>
+    /// </summary>
+    private async Task<byte[]> ResolveSaveBaselineAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // (a0) BORN-IN-EDITOR (FR-01a, task 026): a document authored IN the editor (AI-drafted / blank /
+        //      browse-local) has NO retained original — its client CONTENT MODEL is the authoring source.
+        //      Render the high-fidelity .docx server-side (real styles + style-linked multi-level numbering +
+        //      native tables + minted w14:paraId) — the deterministic replacement for the removed client
+        //      docx.js exporter (task 027). This is NOT an AI dispatch (ADR-039 complied — design §11). No
+        //      EditedParagraphs/Annotations layer onto it (the whole document is authored here); the rendered
+        //      bytes ARE contentToPersist. Checked FIRST: ContentModel is mutually exclusive with Content /
+        //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
+        if (request.ContentModel is not null)
+        {
+            return _documentRenderer.SynthesizeDocument(request.ContentModel, ResolveRevisionAuthor(httpContext));
+        }
+
+        // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
+        if (!request.Content.IsEmpty)
+        {
+            return request.Content.ToArray();
+        }
+
+        // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
+        //     SpeFileStore facade (ADR-007 — no Microsoft.Graph type crosses into Services/Compose).
+        if (!string.IsNullOrWhiteSpace(request.BaselineVersionId)
+            && !string.IsNullOrWhiteSpace(request.DriveId)
+            && !string.IsNullOrWhiteSpace(request.DocumentSpeId))
+        {
+            var stream = await _spe.DownloadFileVersionAsUserAsync(
+                    httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (stream is not null)
+            {
+                await using (stream.ConfigureAwait(false))
+                {
+                    using var buffer = new MemoryStream();
+                    await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    return buffer.ToArray();
+                }
+            }
+
+            throw new InvalidOperationException(
+                $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
+                $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
+                "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
+        }
+
+        // No baseline resolvable. A dirty save NEVER falls back to a client reconstruction (FR-01).
+        throw new ArgumentException(
+            "Compose save: no baseline could be resolved — supply the retained original bytes (Content) for " +
+            "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
+            "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
+            nameof(request));
+    }
+
+    /// <summary>
+    /// Resolves the tracked-change revision AUTHOR for a synthesized redline (task 022) from the caller's
+    /// OBO identity — the acting user's display name (<c>name</c> / <see cref="ClaimTypes.Name"/> /
+    /// <c>preferred_username</c>), so Word attributes the user's own direct-typing edits to the user.
+    /// Falls back to a stable product label when no name claim is present (never empty — the synthesizer
+    /// requires a non-whitespace author).
+    /// </summary>
+    private static string ResolveRevisionAuthor(HttpContext httpContext)
+    {
+        var user = httpContext.User;
+        var name = user?.FindFirst("name")?.Value
+            ?? user?.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? user?.FindFirst("preferred_username")?.Value
+            ?? user?.Identity?.Name;
+
+        return string.IsNullOrWhiteSpace(name) ? "Spaarke Compose" : name!.Trim();
+    }
+
+    /// <summary>
+    /// STEP 5 (FR-30, compose-r2, #629) — best-effort durable memory CAPTURE. Distils the bound session's
+    /// durable insights (defined terms today) into Record-scope memory keyed by the saved
+    /// <c>sprk_document</c>, via the ADR-013 <see cref="IComposeMemoryCapture"/> facade. The whole body is
+    /// guarded so a memory-capture failure NEVER throws — a Save must never be blocked or failed by it. A
+    /// no-op when the facade is unregistered (null gate) or no session is bound.
+    /// </summary>
+    private async Task CaptureDocumentMemoryAsync(
+        Guid documentId,
+        string tenantId,
+        string? sessionId,
+        CancellationToken ct)
+    {
+        // Availability gate + precondition: no facade (AI/persistence off in this host) or no bound
+        // session → nothing to capture. Both are clean no-ops, not failures.
+        if (_memoryCapture is null || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return;
+        }
+
+        try
+        {
+            var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+            var definedTerms = session?.DefinedTermsTracking;
+            if (definedTerms is null || definedTerms.Count == 0)
+            {
+                return;
+            }
+
+            // DISTILL: a defined term is durable knowledge only when it carries BOTH a non-empty label
+            // (the fact Key) AND a definition (the fact Value). Guarding Term too avoids persisting an
+            // empty-key fact (two of which would collide on the store's hashed empty key).
+            var insights = new List<ComposeInsight>(definedTerms.Count);
+            foreach (var term in definedTerms)
+            {
+                if (string.IsNullOrWhiteSpace(term.Term) || string.IsNullOrWhiteSpace(term.Definition))
+                {
+                    continue;
+                }
+
+                insights.Add(new ComposeInsight(
+                    FactType: "defined-term",
+                    Key: term.Term,
+                    Value: term.Definition!,
+                    Origin: string.Equals(term.Source, "ai", StringComparison.OrdinalIgnoreCase)
+                        ? MemoryOrigin.AiDerived
+                        : MemoryOrigin.User,
+                    // Confidence null → the store default (1.0), which keeps AI-extracted terms above the
+                    // recall confidence gate so they DO surface in later sessions (the FR-30 point).
+                    // ConfirmedByUser=false (set in the facade) is the honest "unverified" marker; DefinedTerm
+                    // carries no per-term confidence signal to thread here.
+                    Confidence: null,
+                    BindingId: term.Provenance?.BindingId,
+                    LedgerRef: term.Provenance?.LedgerRef));
+            }
+
+            if (insights.Count == 0)
+            {
+                return;
+            }
+
+            var outcome = await _memoryCapture.CaptureRecordInsightsAsync(
+                    subjectType: "sprk_document",
+                    subjectId: documentId.ToString(),
+                    insights: insights,
+                    provenance: new ComposeMemoryProvenance
+                    {
+                        TenantId = tenantId,
+                        SessionId = sessionId,
+                        CreatedBy = null,   // caller identity not threaded here; envelope stays honest (null)
+                    },
+                    ct)
+                .ConfigureAwait(false);
+
+            _logger.LogDebug(
+                "Compose memory-capture (FR-30): document {DocumentId} — {Status} {Count} insight(s) (session={SessionId}).",
+                documentId, outcome.Status, outcome.Count, sessionId);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Honour cancellation quietly — the Save has already returned its result on its own terms.
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: a memory-capture failure must never fail or block a Save (swallow + log).
+            _logger.LogWarning(ex,
+                "Compose memory-capture (FR-30): threw while capturing memory for document {DocumentId} — best-effort, Save unaffected.",
+                documentId);
+        }
+    }
+
     /// <inheritdoc />
     public async Task<PromoteComposeDocumentResult> PromoteIfEphemeralAsync(
         PromoteComposeDocumentRequest request,
@@ -346,8 +972,8 @@ public class ComposeService : IComposeService
     {
         if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
             throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required for the ephemeral→promoted rebind.", nameof(request));
+        // SessionId is OPTIONAL (task 110): the ephemeral→promoted rebind is skipped when no
+        // session is bound (transient Browse/local-file first Save). See the conditional rebinds below.
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
 
@@ -361,13 +987,19 @@ public class ComposeService : IComposeService
                 "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
                 existingId.Value, request.DocumentSpeId);
 
-            await RebindSessionDocumentIdAsync(
-                    tenantId: request.TenantId,
-                    sessionId: request.SessionId,
-                    currentDocumentId: request.DocumentSpeId,
-                    newDocumentId: existingId.Value.ToString(),
-                    cancellationToken)
-                .ConfigureAwait(false);
+            // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
+            // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
+            // null-tolerant, but skipping avoids an empty-session lookup + a misleading warn.
+            if (!string.IsNullOrWhiteSpace(request.SessionId))
+            {
+                await RebindSessionDocumentIdAsync(
+                        tenantId: request.TenantId,
+                        sessionId: request.SessionId,
+                        currentDocumentId: request.DocumentSpeId,
+                        newDocumentId: existingId.Value.ToString(),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
 
             return new PromoteComposeDocumentResult
             {
@@ -379,15 +1011,51 @@ public class ComposeService : IComposeService
         }
 
         // 2) Create the sprk_document row.
+        //    The record MUST carry the full SPE pointer + file metadata (drive-id + has-file +
+        //    size/mime/filepath), NOT just the item-id — otherwise downstream readers (open-links,
+        //    preview) validate the pointer, find drive-id empty + sprk_hasfile false, and 409
+        //    "No file is attached to this document yet." Field set mirrors the canonical
+        //    OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write.
         var entity = new Entity(DocumentLogicalName);
         entity[GraphItemIdAttribute] = request.DocumentSpeId;
         var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
             ? request.DisplayName!
             : $"Compose document ({request.DocumentSpeId})";
         entity[DisplayNameAttribute] = effectiveDisplayName;
-        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+
+        // Prefer the resolved file name (carries the .docx extension); fall back to the display
+        // name for standalone promote callers that supply neither.
+        var effectiveFileName = !string.IsNullOrWhiteSpace(request.FileName)
+            ? request.FileName!
+            : request.DisplayName;
+        if (!string.IsNullOrWhiteSpace(effectiveFileName))
         {
-            entity[FileNameAttribute] = request.DisplayName!;
+            entity[FileNameAttribute] = effectiveFileName!;
+        }
+
+        // SPE drive pointer — the field whose absence is the root cause of the 409s.
+        if (!string.IsNullOrWhiteSpace(request.GraphDriveId))
+        {
+            entity[GraphDriveIdAttribute] = request.GraphDriveId!;
+        }
+
+        // A promoted Compose document always has an SPE file behind it (the drive-item id is a
+        // hard precondition of this method). Mark it so downstream readers stop rejecting it.
+        entity[HasFileAttribute] = true;
+
+        if (request.FileSize.HasValue)
+        {
+            // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
+            // strict about CLR type, so cast (same as OfficeDocumentPersistence / DataverseServiceClientImpl).
+            entity[FileSizeAttribute] = (int)request.FileSize.Value;
+        }
+        if (!string.IsNullOrWhiteSpace(request.MimeType))
+        {
+            entity[MimeTypeAttribute] = request.MimeType!;
+        }
+        if (!string.IsNullOrWhiteSpace(request.FilePath))
+        {
+            entity[FilePathAttribute] = request.FilePath!;
         }
 
         Guid newId;
@@ -418,13 +1086,18 @@ public class ComposeService : IComposeService
         }
 
         // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
-        await RebindSessionDocumentIdAsync(
-                tenantId: request.TenantId,
-                sessionId: request.SessionId,
-                currentDocumentId: request.DocumentSpeId,
-                newDocumentId: newId.ToString(),
-                cancellationToken)
-            .ConfigureAwait(false);
+        //    OPTIONAL (task 110): skip when no session is bound (transient Browse/local-file
+        //    first Save). The sprk_document create above already completed without a session.
+        if (!string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await RebindSessionDocumentIdAsync(
+                    tenantId: request.TenantId,
+                    sessionId: request.SessionId,
+                    currentDocumentId: request.DocumentSpeId,
+                    newDocumentId: newId.ToString(),
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         return new PromoteComposeDocumentResult
         {
@@ -440,20 +1113,23 @@ public class ComposeService : IComposeService
     //
     // The four steps container → record → profile-analysis → indexing are projected through the
     // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
-    // DEFERRED: the only profile seam (IAppOnlyAnalysisService) trips the ADR-013 NetArchTest
-    // facade rule AND runs under MI (which 403s on the OBO-written file). Core owns the
-    // Services/Ai/PublicContracts/IDocumentProfileAi facade (redesign-r2, notes/HANDOFF-…). Until
-    // it ships, profile emits a non-terminal deferred state and the aggregate stays Partial on the
-    // happy path — record exists + indexed, downstream profile pending (the ingestion-parity signal).
+    // DISPATCHED FIRE-AND-FORGET under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2) —
+    // captured OBO token + fresh DI scope, because a background MI job 403s on the user-OBO-written file.
+    // In the synchronous response the profile step is a non-terminal "dispatched" (Running) signal, so
+    // the aggregate reads Partial (record + index exist, profile pending) and never reads Failed on a
+    // best-effort profile miss (which happens off-thread and is only logged).
     // =========================================================================
 
     /// <summary>
     /// The interim R5-E success bar for FR-05 create-on-save (documented exception, 2026-07-09):
-    /// a record is interim-successful ONLY when the <c>container</c>, <c>record</c>, AND
-    /// <c>indexing</c> steps all reached terminal success — a record with no SPE file OR no index
-    /// is NEVER a success. <c>profile-analysis</c> is excluded (deferred to core's
-    /// <c>IDocumentProfileAi</c>); the FULL R5-E bar (aggregate == <see cref="JobAwareState.Completed"/>,
-    /// which requires profile too) is restored when core ships the facade.
+    /// a record is interim-successful when the <c>container</c>, <c>record</c>, AND <c>indexing</c>
+    /// steps all reached terminal success — a record with no SPE file OR no index is NEVER a success.
+    /// <c>profile-analysis</c> is intentionally EXCLUDED from this bar so a best-effort profile miss
+    /// never demotes an otherwise-good save. Since the profile now runs FIRE-AND-FORGET in the
+    /// background (<see cref="DispatchBackgroundProfile"/>), the synchronous create-on-save response
+    /// carries a non-terminal "dispatched" profile step — so the interim bar (container + record +
+    /// indexing) is the operative success bar for the returned aggregate; the profile fields land
+    /// shortly after, off the response path.
     /// </summary>
     public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
     {
@@ -484,17 +1160,170 @@ public class ComposeService : IComposeService
     };
 
     /// <summary>
-    /// The DEFERRED profile-analysis signal (Fork C, core-owned). No stored outcome, not started —
-    /// projects to <see cref="JobAwareState.Queued"/> (the honest "nothing persisted yet" state,
-    /// since the contract has no dedicated Deferred member) with a <c>deferred</c> diagnostic so
-    /// the OutcomeCard and a future re-profile pass can distinguish it from a genuinely-queued step.
+    /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI
+    /// scope (fire-and-forget) for a newly-created (or idempotently-resolved) <c>sprk_document</c>, and
+    /// returns the non-terminal "dispatched" profile-analysis step signal WITHOUT awaiting the profile.
+    /// The background task (<see cref="RunBackgroundProfileAsync"/>) downloads the user-OBO-written SPE
+    /// file as the user (a background MI job would 403 — the round-6 bug) and reuses the existing
+    /// extract → classify → summarize → field-map → UpdateDocumentAsync pipeline; its 7 profile fields
+    /// land shortly AFTER the save returns.
     /// </summary>
-    private static StoredStepSignal DeferredProfileSignal() => new()
+    /// <remarks>
+    /// <para>
+    /// <b>Why a detached scope (constraint #1):</b> the request DI scope disposes when the HTTP
+    /// response returns, so the background profile MUST resolve the facade from a FRESH
+    /// <see cref="IServiceScopeFactory.CreateScope"/> — never a service captured from the request scope.
+    /// </para>
+    /// <para>
+    /// <b>How OBO survives (constraint #2):</b> the profile path reads ONLY the <c>Authorization</c>
+    /// header (the OBO user assertion) + <c>User</c> claims + <c>TraceIdentifier</c> from
+    /// <see cref="HttpContext"/> (see <c>TokenHelper.ExtractBearerToken</c> /
+    /// <c>GraphClientFactory.ForUserAsync</c>). Those three are captured HERE, before the request scope
+    /// disposes, and threaded into a synthetic <see cref="DefaultHttpContext"/> in the background task —
+    /// the user access token stays valid long enough to exchange after the response. If the save request
+    /// carried no bearer token, a background OBO download would 401, so we DO NOT dispatch a doomed task:
+    /// we skip cleanly with a non-terminal not-attempted signal instead.
+    /// </para>
+    /// <para>
+    /// Best-effort by design: a null facade / scope factory (test host, AI-gate off) or a missing bearer
+    /// token returns a NON-terminal signal, and any background failure is swallowed + logged
+    /// (<see cref="RunBackgroundProfileAsync"/>) — the synchronous save is never blocked, and its
+    /// aggregate is never demoted to Failed by a profile miss. ADR-013: injects NO AI-internal type.
+    /// </para>
+    /// </remarks>
+    private StoredStepSignal DispatchBackgroundProfile(Guid documentId, HttpContext httpContext)
+    {
+        // Availability gate: no scope factory (unit-test host) or no facade registered (compound AI gate
+        // off) → nothing to dispatch. Report non-terminal not-attempted synchronously.
+        if (_scopeFactory is null || _documentProfileAi is null)
+        {
+            return ProfileNotAttemptedSignal(
+                "profile facade unavailable (no IDocumentProfileAi / IServiceScopeFactory) — profile not dispatched");
+        }
+
+        // Capture the OBO user assertion (raw Authorization header) BEFORE the request scope disposes.
+        // Non-throwing (unlike TokenHelper.ExtractBearerToken) so a token-less save degrades cleanly.
+        var authorizationHeader = httpContext.Request?.Headers.Authorization.ToString();
+        if (string.IsNullOrWhiteSpace(authorizationHeader)
+            || !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            // No user token to detach — a background OBO download would 401. Never ship a broken detach.
+            _logger.LogWarning(
+                "Compose create-on-save: no bearer Authorization header on the save request for document {DocumentId} — background OBO profile not dispatched (best-effort skip).",
+                documentId);
+            return ProfileNotAttemptedSignal(
+                "no bearer Authorization header on the save request — background OBO profile not dispatched");
+        }
+
+        // Capture the remaining request-scoped context the profile facade reads. A ClaimsPrincipal is a
+        // plain object with no request-tied lifetime, so retaining the reference across the response is safe.
+        var user = httpContext.User;
+        var correlationId = httpContext.TraceIdentifier;
+
+        // Fire-and-forget: detach from the request scope AND the request CancellationToken (constraint #3).
+        // The task is unobserved by design; RunBackgroundProfileAsync owns its own try/catch so nothing
+        // faults the finalizer thread. The discard makes the intent explicit to reviewers + analyzers.
+        _ = Task.Run(() => RunBackgroundProfileAsync(documentId, authorizationHeader, user, correlationId));
+
+        return ProfileDispatchedSignal();
+    }
+
+    /// <summary>
+    /// The detached (fire-and-forget) body of the best-effort OBO document-profile. Creates a NEW DI
+    /// scope, rebuilds a minimal <see cref="HttpContext"/> from the captured OBO token + claims, resolves
+    /// the <see cref="IDocumentProfileAi"/> facade FROM THAT SCOPE, and runs the profile. NEVER throws —
+    /// a background profiling failure must not crash the process (unobserved-exception safe, constraint #4).
+    /// </summary>
+    private async Task RunBackgroundProfileAsync(
+        Guid documentId,
+        string authorizationHeader,
+        ClaimsPrincipal? user,
+        string correlationId)
+    {
+        // Constraint #3: use the app-shutdown token, NOT the (already-completed) request token. A profile
+        // in flight when the host stops is cut off cleanly; otherwise it runs to completion.
+        var ct = _appLifetime?.ApplicationStopping ?? CancellationToken.None;
+
+        try
+        {
+            await using var scope = _scopeFactory!.CreateAsyncScope();
+
+            // Rebuild a minimal HttpContext carrying ONLY what the profile path reads: the OBO user
+            // assertion (Authorization header), the User claims (runContext.TenantId + tenant-cache
+            // scoping), and the correlation id. Backed by the fresh scope's provider so any
+            // RequestServices lookup resolves against the detached (non-disposed) scope.
+            var detachedContext = new DefaultHttpContext
+            {
+                RequestServices = scope.ServiceProvider,
+                TraceIdentifier = correlationId,
+            };
+            detachedContext.Request.Headers.Authorization = authorizationHeader;
+            if (user is not null)
+            {
+                detachedContext.User = user;
+            }
+
+            // Keep AnalysisDocumentLoader's IHttpContextAccessor-based tenant-cache scoping coherent
+            // (else it degrades to the documented "system" sentinel — acceptable, but this is tidier).
+            var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
+            if (accessor is not null)
+            {
+                accessor.HttpContext = detachedContext;
+            }
+
+            // Constraint #1: resolve the facade from the NEW scope — never the request-scope service.
+            var facade = scope.ServiceProvider.GetService<IDocumentProfileAi>();
+            if (facade is null)
+            {
+                _logger.LogWarning(
+                    "Compose background profile: IDocumentProfileAi did not resolve from the detached scope for document {DocumentId} (correlation={CorrelationId}) — skipped.",
+                    documentId, correlationId);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Compose background profile: starting best-effort OBO profile for document {DocumentId} (correlation={CorrelationId}).",
+                documentId, correlationId);
+
+            var result = await facade.ProfileDocumentAsUserAsync(documentId, detachedContext, ct)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose background profile: document {DocumentId} — success={Success} (failure={Failure} skip={Skip}) (correlation={CorrelationId}). Profile fields populate on the record now.",
+                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)", correlationId);
+        }
+        catch (Exception ex)
+        {
+            // Constraint #4: unobserved-exception safe. The save already returned on its own terms; a
+            // best-effort background profile failure is logged and swallowed, never rethrown.
+            _logger.LogError(ex,
+                "Compose background profile: threw while profiling document {DocumentId} (correlation={CorrelationId}) — best-effort, the save is unaffected.",
+                documentId, correlationId);
+        }
+    }
+
+    /// <summary>Non-terminal (Running) profile-analysis signal for the fire-and-forget path: the profile
+    /// was DISPATCHED to a background scope and runs best-effort AFTER the save returns (the 7
+    /// sprk_document profile fields populate shortly after). <c>Started=true</c> + no stored status →
+    /// projects to <see cref="JobAwareState.Running"/>, so the returned aggregate reads Partial (record +
+    /// index exist, profile pending), never Completed-on-claim and never Failed.</summary>
+    private static StoredStepSignal ProfileDispatchedSignal() => new()
+    {
+        StepName = StepProfileAnalysis,
+        StoredStatus = null,
+        Started = true,
+        Detail = "profile-analysis dispatched to background (best-effort); the profile fields populate shortly after the save returns",
+    };
+
+    /// <summary>A non-terminal profile-analysis signal for when the profile was NOT attempted
+    /// (container/record step never produced a record, or no facade injected). Non-terminal so it
+    /// never poisons the create-on-save aggregate.</summary>
+    private static StoredStepSignal ProfileNotAttemptedSignal(string detail) => new()
     {
         StepName = StepProfileAnalysis,
         StoredStatus = null,
         Started = false,
-        Detail = "deferred: core-owned Services/Ai/PublicContracts/IDocumentProfileAi (Fork C) — not implemented in this task",
+        Detail = detail,
     };
 
     /// <summary>Maps the indexing enqueue outcome to a stored step signal: submitted (sync-OBO ran)
@@ -538,6 +1367,7 @@ public class ComposeService : IComposeService
         string correlationId,
         StoredStepSignal containerSignal,
         StoredStepSignal recordSignal,
+        StoredStepSignal profileSignal,
         StoredStepSignal indexingSignal,
         DateTimeOffset observedAt)
     {
@@ -553,7 +1383,7 @@ public class ComposeService : IComposeService
         {
             containerSignal,
             recordSignal,
-            DeferredProfileSignal(),
+            profileSignal,
             indexingSignal,
         };
 
@@ -582,6 +1412,9 @@ public class ComposeService : IComposeService
             correlationId: request.SessionId,
             containerSignal: containerFailed,
             recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
+            // Container failed → no record → nothing to profile. Non-terminal so the aggregate stays
+            // Failed (driven by the container step), not double-counted.
+            profileSignal: ProfileNotAttemptedSignal("profile not attempted: container step failed"),
             indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
             observedAt: observedAt);
 
@@ -621,6 +1454,8 @@ public class ComposeService : IComposeService
             "Compose push-annotations: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} annotations={AnnotationCount}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.Annotations.Count);
 
+        var observedAt = DateTimeOffset.UtcNow;
+
         // 1) Download the CURRENT bytes via the facade (ADR-007 — no Graph type here).
         var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
@@ -638,26 +1473,95 @@ public class ComposeService : IComposeService
             sourceBytes = buffer.ToArray();
         }
 
+        // ────────────────────────────────────────────────────────────────────────────
+        // FR-28 (task 055) — push/save pipeline with per-step JobAwareCompletionState
+        // projection (push → save → version). A failure at either step aborts the pipeline
+        // with NO partial write: the SPE write only happens after the pure Annotate render
+        // fully succeeds (an in-memory transform — nothing is sent to SPE until step 3), and
+        // ReplaceFileContentAsUserAsync's If-Match is atomic at the Graph boundary (the whole
+        // new version lands or the whole call is rejected — never a half-applied version).
+        // Every branch below persists the resulting per-step state to Redis (ADR-009) before
+        // propagating/returning, so a future job-aware OutcomeCard has real state to read
+        // regardless of outcome.
+        // ────────────────────────────────────────────────────────────────────────────
+
         // 2) Render annotations into native OOXML markup. Pure — no I/O, no AI (ADR-013).
         //    DocxAnnotationException (malformed / target-not-found) propagates to the endpoint,
         //    which maps it to 400 / 422 ProblemDetails. This runs BEFORE the write, so a bad
         //    annotation batch never leaves a partial SPE version.
-        var annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        byte[] annotatedBytes;
+        try
+        {
+            annotatedBytes = _annotationWriter.Annotate(sourceBytes, request.Annotations);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    FailedSignal(StepPush, $"push failed: {ex.Message}"),
+                    NotStartedSignal(StepSave),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         // 3) Persist with optimistic concurrency (If-Match). A drive-item that moved under the
         //    caller (Word autosave) surfaces as EtagPreconditionFailedException (412); an open
         //    Word co-authoring session surfaces as DocumentLockedByWordException (423). Both
         //    propagate to the endpoint. Nothing partially writes.
         using var annotatedStream = new MemoryStream(annotatedBytes, writable: false);
-        var saved = await _spe.ReplaceFileContentAsUserAsync(
-                httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
-            .ConfigureAwait(false);
+        FileHandleDto? saved;
+        try
+        {
+            saved = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, request.DriveId, request.DocumentSpeId, annotatedStream, request.IfMatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, $"save failed: {ex.Message}"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         if (saved is null || string.IsNullOrEmpty(saved.Id))
         {
+            await PersistPushSaveStatusAsync(
+                    request.DocumentSpeId,
+                    CompletedSignal(StepPush),
+                    FailedSignal(StepSave, "SPE annotated-write returned no version id"),
+                    NotStartedSignal(StepVersion),
+                    observedAt,
+                    cancellationToken)
+                .ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"SPE annotated-write failed: drive-item not found or version not returned. drive={request.DriveId} item={request.DocumentSpeId}");
         }
+
+        // 4) All three steps landed — persist the terminal-success state.
+        var completion = await PersistPushSaveStatusAsync(
+                request.DocumentSpeId,
+                CompletedSignal(StepPush),
+                CompletedSignal(StepSave),
+                CompletedSignal(StepVersion),
+                observedAt,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+        // 5) Tier-2c preview echo (design.md §2.4 / HANDOFF §4): comment/track-change counts +
+        //    the Word-vs-Compose split, attached as post-write completion evidence. The SAME
+        //    calculator backs the pre-confirm PreviewPushAnnotationsAsync path below.
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        var preview = ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
 
         return new PushAnnotationsResult
         {
@@ -667,8 +1571,120 @@ public class ComposeService : IComposeService
             ETag = saved.ETag,
             Size = saved.Size,
             AnnotationCount = request.Annotations.Count,
+            Preview = preview,
+            CompletionState = completion,
         };
     }
+
+    /// <inheritdoc />
+    public async Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
+        PreviewPushAnnotationsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.TenantId))
+            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
+        if (request.Annotations is null || request.Annotations.Count == 0)
+            throw new ArgumentException("At least one annotation is required.", nameof(request));
+
+        var composeOnlyCount = await ResolveComposeOnlyCountAsync(request.TenantId, request.SessionId, cancellationToken)
+            .ConfigureAwait(false);
+        return ComposePushSavePreviewCalculator.Compute(request.Annotations, composeOnlyCount);
+    }
+
+    // =========================================================================
+    // FR-28 push/save pipeline — helpers (per-step job-aware projection + Redis persistence).
+    // Mirrors the FR-05 create-on-save helpers above (CompletedSignal / ProjectCreateOnSaveState)
+    // — same JobAwareCompletionStateProjector, a different consumer-declared step set.
+    // =========================================================================
+
+    /// <summary>
+    /// FR-28: resolves the "stays in Compose only" count for the Tier-2c preview from the
+    /// session's <c>DefinedTermsTracking</c> (FR-29) — the one Compose-domain collection with no
+    /// Word-native OOXML representation (contrast anchored annotations, which map onto the
+    /// <c>DocxAnnotation</c> push payload). Returns 0 (graceful degrade, not a failure) when no
+    /// session id is supplied — callers that predate this optional field still get a valid
+    /// preview, just with <c>ComposeOnlyCount</c> = 0.
+    /// </summary>
+    private async Task<int> ResolveComposeOnlyCountAsync(string tenantId, string? sessionId, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return 0;
+        }
+
+        var state = await GetComposeAnnotationsAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        return state.DefinedTermsTracking.Count;
+    }
+
+    /// <summary>
+    /// FR-28: projects the push/save per-step signals through the shared
+    /// <see cref="JobAwareCompletionStateProjector"/> and persists the result to Redis (ADR-009)
+    /// via <see cref="ComposePushSaveStatusStore"/> — best-effort: a Redis outage is logged and
+    /// swallowed here so it never masks or rolls back a document write/failure that has already
+    /// happened on its own terms (see <see cref="ComposePushSaveStatusStore"/> remarks). The
+    /// projected state is always returned/used for the in-flight HTTP response regardless of
+    /// whether the Redis write succeeded.
+    /// </summary>
+    private async Task<JobAwareCompletionState> PersistPushSaveStatusAsync(
+        string documentSpeId,
+        StoredStepSignal pushSignal,
+        StoredStepSignal saveSignal,
+        StoredStepSignal versionSignal,
+        DateTimeOffset observedAt,
+        CancellationToken ct)
+    {
+        var job = new JobContract
+        {
+            JobType = ComposePushSaveJobType,
+            SubjectId = documentSpeId,
+            CorrelationId = documentSpeId,
+            IdempotencyKey = $"compose-push-save-{documentSpeId}-{observedAt.Ticks}",
+        };
+
+        var completion = JobAwareCompletionStateProjector.Project(
+            job,
+            new List<StoredStepSignal> { pushSignal, saveSignal, versionSignal },
+            observedAt);
+
+        if (_pushSaveStatusStore is not null)
+        {
+            try
+            {
+                await _pushSaveStatusStore.SaveAsync(documentSpeId, completion, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose push-save: failed to persist cross-request completion state to Redis for driveItem={DocumentSpeId} — the in-flight response is unaffected.",
+                    documentSpeId);
+            }
+        }
+
+        return completion;
+    }
+
+    /// <summary>A stored terminal-failure signal for a step (single attempt, so never
+    /// RetryPending — the push/save pipeline does not auto-retry within one HTTP call).</summary>
+    private static StoredStepSignal FailedSignal(string stepName, string detail) => new()
+    {
+        StepName = stepName,
+        StoredStatus = JobStatus.Failed,
+        Started = true,
+        Attempt = 1,
+        MaxAttempts = 1,
+        Detail = detail,
+    };
+
+    /// <summary>A stored non-terminal "never started" signal for a step that never ran because an
+    /// earlier step in the SAME pipeline invocation failed first (pipeline-abort semantics — no
+    /// partial write, no partial step).</summary>
+    private static StoredStepSignal NotStartedSignal(string stepName) => new()
+    {
+        StepName = stepName,
+        StoredStatus = null,
+        Started = false,
+    };
 
     // =========================================================================
     // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs

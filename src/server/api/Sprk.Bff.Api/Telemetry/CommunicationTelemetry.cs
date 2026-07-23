@@ -1,14 +1,11 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
-using Sprk.Bff.Api.Services.Email;
 
 namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
 /// Metrics and tracing for communication processing (OpenTelemetry-compatible).
 /// Tracks: conversion requests, webhook triggers, filter evaluations, job processing.
-///
-/// Also delegates to EmailProcessingStatsService for in-memory stats readable via API.
 ///
 /// Usage:
 /// - Meter name: "Sprk.Bff.Api.Communication" for OpenTelemetry configuration
@@ -23,7 +20,6 @@ namespace Sprk.Bff.Api.Telemetry;
 public class CommunicationTelemetry : IDisposable
 {
     private readonly Meter _meter;
-    private readonly EmailProcessingStatsService? _statsService;
 
     // Conversion metrics
     private readonly Counter<long> _conversionRequests;
@@ -79,9 +75,8 @@ public class CommunicationTelemetry : IDisposable
     // Static ActivitySource for distributed tracing
     public static readonly ActivitySource ActivitySource = new(MeterName, "1.0.0");
 
-    public CommunicationTelemetry(EmailProcessingStatsService? statsService = null)
+    public CommunicationTelemetry()
     {
-        _statsService = statsService;
         _meter = new Meter(MeterName, "1.0.0");
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -272,7 +267,6 @@ public class CommunicationTelemetry : IDisposable
     public Stopwatch RecordConversionStart(string trigger = "manual")
     {
         _conversionRequests.Add(1, new KeyValuePair<string, object?>("communication.trigger", trigger));
-        _statsService?.RecordConversionRequest();
         return Stopwatch.StartNew();
     }
 
@@ -296,18 +290,15 @@ public class CommunicationTelemetry : IDisposable
 
         _conversionSuccesses.Add(1, tags);
         _conversionDuration.Record(durationMs, tags);
-        _statsService?.RecordConversionSuccess(durationMs);
 
         if (emlSizeBytes.HasValue)
         {
             _emlFileSize.Record(emlSizeBytes.Value, tags);
-            _statsService?.RecordEmlFileSize(emlSizeBytes.Value);
         }
 
         if (attachmentCount > 0)
         {
             _attachmentsProcessed.Add(attachmentCount, tags);
-            _statsService?.RecordAttachmentsProcessed(attachmentCount);
         }
     }
 
@@ -328,7 +319,6 @@ public class CommunicationTelemetry : IDisposable
 
         _conversionFailures.Add(1, tags);
         _conversionDuration.Record(durationMs, tags);
-        _statsService?.RecordConversionFailure(durationMs);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -341,7 +331,6 @@ public class CommunicationTelemetry : IDisposable
     public Stopwatch RecordWebhookReceived()
     {
         _webhookReceived.Add(1);
-        _statsService?.RecordWebhookReceived();
         return Stopwatch.StartNew();
     }
 
@@ -355,7 +344,6 @@ public class CommunicationTelemetry : IDisposable
         _webhookEnqueued.Add(1);
         _webhookDuration.Record(durationMs,
             new KeyValuePair<string, object?>("communication.status", "enqueued"));
-        _statsService?.RecordWebhookEnqueued(durationMs);
     }
 
     /// <summary>
@@ -369,7 +357,6 @@ public class CommunicationTelemetry : IDisposable
         _webhookDuration.Record(durationMs,
             new KeyValuePair<string, object?>("communication.status", "rejected"),
             new KeyValuePair<string, object?>("communication.rejection_reason", reason));
-        _statsService?.RecordWebhookRejected(durationMs);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -384,7 +371,6 @@ public class CommunicationTelemetry : IDisposable
         _pollingRuns.Add(1);
         _pollingEmailsFound.Add(emailsFound);
         _pollingEmailsEnqueued.Add(emailsEnqueued);
-        _statsService?.RecordPollingRun(emailsFound, emailsEnqueued);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -409,8 +395,6 @@ public class CommunicationTelemetry : IDisposable
             _filterDefaultAction.Add(1,
                 new KeyValuePair<string, object?>("communication.filter.action", action));
         }
-
-        _statsService?.RecordFilterEvaluation(ruleMatched);
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -423,7 +407,6 @@ public class CommunicationTelemetry : IDisposable
     public Stopwatch RecordJobStart()
     {
         _jobsProcessed.Add(1);
-        _statsService?.RecordJobProcessed();
         return Stopwatch.StartNew();
     }
 
@@ -437,18 +420,15 @@ public class CommunicationTelemetry : IDisposable
         _jobsSucceeded.Add(1);
         _jobDuration.Record(durationMs,
             new KeyValuePair<string, object?>("communication.status", "success"));
-        _statsService?.RecordJobSuccess(durationMs);
 
         if (emlSizeBytes.HasValue)
         {
             _emlFileSize.Record(emlSizeBytes.Value);
-            _statsService?.RecordEmlFileSize(emlSizeBytes.Value);
         }
 
         if (attachmentCount > 0)
         {
             _attachmentsProcessed.Add(attachmentCount);
-            _statsService?.RecordAttachmentsProcessed(attachmentCount);
         }
     }
 
@@ -463,7 +443,6 @@ public class CommunicationTelemetry : IDisposable
         _jobDuration.Record(durationMs,
             new KeyValuePair<string, object?>("communication.status", "failed"),
             new KeyValuePair<string, object?>("communication.error_code", errorCode));
-        _statsService?.RecordJobFailure(durationMs);
     }
 
     /// <summary>
@@ -472,7 +451,6 @@ public class CommunicationTelemetry : IDisposable
     public void RecordJobSkippedDuplicate()
     {
         _jobsSkippedDuplicate.Add(1);
-        _statsService?.RecordJobSkippedDuplicate();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -545,7 +523,6 @@ public class CommunicationTelemetry : IDisposable
         {
             _attachmentsProcessed.Add(uploadedCount,
                 new KeyValuePair<string, object?>("communication.attachment.operation", "uploaded"));
-            _statsService?.RecordAttachmentsProcessed(uploadedCount);
         }
 
         if (failedCount > 0)

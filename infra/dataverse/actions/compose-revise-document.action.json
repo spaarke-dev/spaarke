@@ -1,0 +1,100 @@
+{
+  "$comment": "spaarkeai-compose-r2 DEF-11 — compose-revise-document Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row, and the Compose R2 engine is frozen (NO new sprk_analysisplaybook records). This file is the mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=compose-revise-document) carrying the JPS systemPrompt + Azure-OpenAI-Structured-Outputs output schema. Deploy via scripts/Deploy-AnalysisAction.ps1 (action-only; upsert by sprk_actioncode). The Binding that routes to it is in sprk_playbookconsumer-rows.json and DECLARES the core `compose` disposition (BindingDisposition.Compose = 100000006). The input/output schema mirrors under infra/dataverse/inputschemas|outputschemas are the CI-validated projections of this row. Owner hygiene: actionCode carries NO version suffix (compose-revise-document, not @v1).",
+  "$comment-vs-draft-alternative-and-draft-document": "§11 Component Justification — this is a NEW Action, NOT a reuse of compose-draft-alternative or compose-draft-document. compose-draft-alternative is SELECTION-scoped (a single highlighted clause, one target_text/new_text pair, Click-path toolbar only) — it cannot revise a WHOLE document or emit anchored review comments alongside edits. compose-draft-document DRAFTS a brand-new document body_html from scratch — it has no concept of an EXISTING document to revise against, and cannot emit a mixed edits+comments payload over caller-supplied documentText. Reusing either would force this capability's whole-document, multi-edit, dual-channel (edit + comment) revision shape into a selection-scoped or from-scratch-drafting mold. One flexible revision Action — closed revisionIntent enum (align-clauses / flag-risks / improve-clarity / custom) selecting edits vs comments vs both — is preferred over a family of near-duplicate single-intent Actions.",
+  "$comment-disposition": "Declares the core `compose` disposition (sprk_disposition = 100000006, BindingDisposition.Compose) on the Binding row (sprk_playbookconsumer-rows.json), NOT here — the Action stays disposition-agnostic (same convention as compose-draft-alternative / compose-draft-document). The emitted payload — { edits[], comments[], rationale, sources } — is written to the session ledger as a SessionOutput BEFORE any render (ADR-040 storage-precedes-rendering); the Workspace materializes pending track-changes (edits[]) and anchored review flags (comments[]) from the stored entry. Each edits[i] is exactly the compose-draft-alternative ComposeDraftPayload shape ({target_text, new_text, match_mode}) so the client's usePendingRedline materializer is reused verbatim per-edit (ledgerRef = {bindingId}@t{n}#{i} for i>0). Each comments[i] materializes as an anchored AnchoredAnnotation type:'comment' (DEF-13 path) via DocxAnnotationWriter on Save.",
+  "actionCode": "compose-revise-document",
+  "name": "Compose — Revise Document",
+  "description": "Revise the WHOLE open document against a chosen revision intent — align its clauses to the matter/firm playbook, flag risks with anchored review comments (no rewrite), improve clarity, or apply a custom instruction — for the Compose editor's pending-redline + review-comment surfaces (DEF-11). Unlike compose-draft-alternative (a single selected clause, one edit) or compose-draft-document (drafts a brand-new document from scratch), this capability revises an EXISTING document's full text and can emit BOTH structured edits (pending track-changes) and anchored comments (review flags) in one pass. Use when the user asks to revise, review, align, or flag risks across the whole document they have open in Compose.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer). No new executor (ADR-039 reuse).",
+  "temperature": 0.3,
+  "$comment-temperature": "Low-moderate temperature — matches the sibling edit-producing compose-draft-alternative Action: faithful legal substance with modest latitude for cleaner phrasing, grounded in the supplied document text and playbook/precedent context.",
+  "systemPrompt": "ROLE: You are the Spaarke Compose document revision assistant. The user has an EXISTING document open in the Compose editor and asked you to revise it according to a chosen revision intent. You produce a STRUCTURED payload — a set of edits (pending track-changes) and/or comments (anchored review flags) — that the Compose editor materializes. You never emit free-form markup, diff text, or prose containing the revision.\n\nINPUT: revisionIntent (one of align-clauses, flag-risks, improve-clarity, custom), an optional instruction (free-text refinement, required context for custom), and documentText (the whole loaded document's current text). Optional matter/firm playbook and precedent context may be supplied by the retrieval layer.\n\nINSTRUCTIONS BY INTENT:\n  - align-clauses: identify clauses that deviate from the supplied matter/firm playbook or precedent standard and propose EDITS (target_text/new_text pairs) that bring them into alignment. Ground each edit in the playbook/precedent context when available; when no grounding context is supplied, align toward general well-drafted contract norms and say so in rationale. Emit edits only (comments MAY be empty).\n  - improve-clarity: identify passages that are ambiguous, redundant, or poorly organized and propose EDITS that improve clarity and enforceability WITHOUT changing the drafter's evident intent. Emit edits only (comments MAY be empty).\n  - flag-risks: identify clauses that carry legal or business risk (e.g. unlimited liability, missing termination rights, one-sided indemnification) and propose COMMENTS ONLY — anchored review flags describing the risk and why it matters. Do NOT propose a rewrite for a flag-risks request: emit an EMPTY edits array and put every finding in comments.\n  - custom: follow the user's instruction field precisely. Use edits when the instruction calls for a rewrite, comments when it calls for review/flagging, or both when it calls for a mix. If instruction is empty or unclear, treat the request conservatively as improve-clarity.\n\nOUTPUT CONTRACT:\n  1. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  2. edits: an array of { target_text, new_text, match_mode }. target_text MUST be an EXACT, VERBATIM substring of documentText (character-for-character, including punctuation and casing) — a mismatch means the edit cannot be applied. new_text is the self-contained, drafting-ready replacement (no placeholders, no commentary, no markup). match_mode is 'strict' (replace this exact occurrence — DEFAULT), 'first' (first occurrence of a shorter repeated fragment), or 'all' (every occurrence, e.g. a defined-term or party-name change across the document).\n  3. comments: an array of { target_text, comment }. target_text MUST likewise be an EXACT, VERBATIM substring of documentText the comment anchors to. comment is the review-flag text (concise, names the concrete risk or issue, ≤1500 chars).\n  4. rationale: a concise plain-language explanation of the revision pass as a whole (≤1 short paragraph, ≤1500 chars) — name the intent applied and the concrete improvement, not a generic justification.\n  5. sources: the grounding for the revision — each entry is { type, id, snippet } (type e.g. 'playbook', 'precedent', 'clause'; id is the retrieval-layer identifier, never fabricated; snippet is a short supporting excerpt). Empty array when the retrieval layer supplied no grounding — do NOT invent sources.\n\nCONSTRAINTS:\n  - Do NOT fabricate facts, parties, dates, or legal effect the document text does not support.\n  - Every target_text in edits AND comments MUST be a verbatim substring of documentText — never paraphrase it, or the item will fail to locate and apply.\n  - flag-risks NEVER proposes edits — comments only. align-clauses and improve-clarity primarily propose edits; use comments there only for findings that need a flag rather than a rewrite (e.g. a risk the playbook does not resolve).\n  - If documentText is too short or garbled to revise faithfully, return empty edits and comments arrays, state why in rationale, and return an empty sources array — never invent legal effect the text does not support.\n  - Do NOT echo secrets, tokens, or content outside the supplied document text and context."
+  ,
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["edits", "comments", "rationale", "sources"],
+    "$comment-required": "Object-level required array (ALL four fields required — edits/comments MAY be empty arrays per intent, but the arrays themselves are always present). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword, NOT a boolean required.",
+    "properties": {
+      "edits": {
+        "type": "array",
+        "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item is exactly the compose-draft-alternative ComposeDraftPayload shape.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_text", "new_text", "match_mode"],
+          "properties": {
+            "target_text": {
+              "type": "string",
+              "description": "The exact substring of documentText this edit replaces — copied VERBATIM so the editor can locate it.",
+              "maxLength": 16000
+            },
+            "new_text": {
+              "type": "string",
+              "description": "The proposed replacement language — self-contained, drafting-ready prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+              "maxLength": 16000
+            },
+            "match_mode": {
+              "type": "string",
+              "description": "How the editor locates target_text: 'strict' (this exact occurrence — default), 'first' (first occurrence of a shorter repeated fragment), or 'all' (every occurrence, e.g. a defined-term change).",
+              "enum": ["strict", "first", "all"]
+            }
+          }
+        }
+      },
+      "comments": {
+        "type": "array",
+        "description": "Anchored review-flag comments this revision pass proposes. The ONLY output for a flag-risks request (no rewrite). Each item anchors a comment to a verbatim span of documentText.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["target_text", "comment"],
+          "properties": {
+            "target_text": {
+              "type": "string",
+              "description": "The exact substring of documentText this comment anchors to — copied VERBATIM so the editor can locate it.",
+              "maxLength": 16000
+            },
+            "comment": {
+              "type": "string",
+              "description": "The review-flag text — concise, names the concrete risk or issue.",
+              "maxLength": 1500
+            }
+          }
+        }
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Concise plain-language explanation of the revision pass as a whole (≤1 short paragraph, ≤1500 chars) — names the intent applied and the concrete improvement, not a generic justification.",
+        "maxLength": 1500
+      },
+      "sources": {
+        "type": "array",
+        "description": "Grounding for the revision. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "snippet"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "The source kind (e.g. 'playbook', 'precedent', 'clause').",
+              "maxLength": 80
+            },
+            "id": {
+              "type": "string",
+              "description": "The retrieval-layer identifier for the source — never fabricated."
+            },
+            "snippet": {
+              "type": "string",
+              "description": "A SHORT supporting excerpt from the source.",
+              "maxLength": 1000
+            }
+          }
+        }
+      }
+    }
+  }
+}

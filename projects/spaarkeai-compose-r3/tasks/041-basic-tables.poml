@@ -1,0 +1,151 @@
+<task id="041" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-18 basic tables (`@tiptap/extension-table`, MIT); table-cell paragraphs carry paraIds</title>
+    <phase>4 Toolset</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Toolset</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>frontend,tiptap</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-18: insert and edit basic tables in the Compose editor using the MIT
+    `@tiptap/extension-table` family (`@tiptap/extension-table`, `@tiptap/extension-table-row`,
+    `@tiptap/extension-table-cell`, `@tiptap/extension-table-header`). Table-cell paragraphs MUST carry
+    `paraId` node attributes exactly like body paragraphs (per FR-08 server minting + FR-10 UniqueID
+    split-minting configured in task 011), so a table edit round-trips fidelity — the S1b spike already
+    validated that nested-table content survives the retained-original delta save. This is a client-only
+    task on the MIT base; it depends on task 011 (the `@tiptap/extension-unique-id` paraId carry) so that
+    cell paragraphs participate in the same paraId substrate.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 table extensions and ProseMirror schema/node
+    attributes. Understands how the `UniqueID` extension applies `paraId` to `paragraph` nodes and how to
+    ensure paragraphs nested inside table cells participate in the same identity scheme.
+  </role>
+
+  <goal>
+    Basic table support in `ComposeEditor.tsx`: a toolbar affordance to insert a table and edit it (add/
+    remove row/column, basic cell editing) using the MIT `@tiptap/extension-table` family; and confirmation
+    that paragraphs inside table cells carry `paraId` node attributes consistent with FR-08/FR-10 so they
+    splice correctly on save. Matching component tests assert table insertion/edit, cell-paragraph paraId
+    presence + uniqueness, and a fidelity round-trip aligned with the S1b nested-table result, plus an
+    ADR-021 dark-mode render check of the table UI affordances.
+  </goal>
+
+  <context>
+    <background>
+      Design §7.5 lists "Tables (basic)" via `@tiptap/extension-table` (MIT) as table-stakes for a credible
+      2026 editor. R3's fidelity core keys the save-time splice on `w14:paraId` (E2); the S1b spike proved
+      nested tables survive the Docxodus retained-original delta save. For a table edit to round-trip, cell
+      paragraphs must carry paraIds just like body paragraphs — hence the dependency on task 011 (which
+      configures `@tiptap/extension-unique-id` for `paragraph` with `attributeName: 'paraId'`). This is a
+      client-only task; no BFF change.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — register the `@tiptap/extension-table` family in the editor extension list; ensure the UniqueID paraId scheme (task 011) covers cell paragraphs</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — add an insert-table affordance + basic table edit controls (add/remove row/column)</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/InsertionMark.ts — tracked-change marks must remain compatible inside table cells</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — paraId carry / editor-doc bridge; table-cell paraIds must flow through the same path</file>
+      <file role="export">src/client/shared/Spaarke.Compose.Components/src/index.ts — export any new table control component if part of the public surface</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7.5 (Tables basic = @tiptap/extension-table MIT), §8 (paraId splice); spec.md FR-18; notes/spikes/ (S1b nested-table result)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">FR-09/FR-10 load-time paraId carry + `@tiptap/extension-unique-id` split-minting for `paragraph`. Table-cell paragraphs must participate in the same paraId scheme; do not configure a parallel identity mechanism.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / owner rule 2026-07-14">NO TipTap product feature (paid or unpaid). Only the MIT `@tiptap/extension-table` family.</constraint>
+    <constraint source="NFR-03 / project">Verify EVERY table package resolves to `@tiptap/extension-table*` (MIT) — NEVER `@tiptap-pro/*`. Confirm the license before adding (`@tiptap/extension-table`, `-table-row`, `-table-cell`, `-table-header`).</constraint>
+    <constraint source="FR-18 / FR-08 / FR-10">Table-cell paragraphs MUST carry `paraId` node attributes consistent with the FR-08 server minting + FR-10 UniqueID scheme (task 011). Do NOT introduce a separate cell-identity mechanism.</constraint>
+    <constraint source="ADR-021 / NFR-10">Table UI affordances are Fluent UI v9 and MUST render correctly in dark mode (theme tokens; no hard-coded colors).</constraint>
+    <constraint source="ADR-028 / NFR-10">No new network calls expected; any client fetch uses `@spaarke/auth`.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests only; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Tests exercise real editor state (table insert/edit, cell paraId presence).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap 3 table extensions (MIT); ProseMirror node attributes for table-cell paragraphs; Fluent v9 + dark mode</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Editor extension registration" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">
+        The existing editor extension list is where the MIT table family registers alongside StarterKit + the tracked-change marks + the UniqueID paraId extension (task 011).
+      </pattern>
+      <pattern name="Fluent v9 toolbar affordance" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">
+        Add the insert-table / table-edit buttons here using the existing Fluent v9 token conventions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dep check">Declare FULL rigor. Confirm task 011 (UniqueID paraId carry) is landed so cell paragraphs inherit the scheme. Load the knowledge files + design §7.5/§8 + the S1b spike note.</step>
+    <step order="1" name="Verify + add MIT table packages">Confirm each `@tiptap/extension-table*` package resolves to the MIT extension (not `@tiptap-pro/*`), then add and register the family in `ComposeEditor.tsx`.</step>
+    <step order="2" name="Cell-paragraph paraId">Ensure the FR-10 UniqueID configuration applies `paraId` to paragraphs nested in table cells (not just body paragraphs). Adjust the extension config if cell paragraphs are excluded by default.</step>
+    <step order="3" name="Toolbar affordances">Add insert-table + basic edit controls (add/remove row/column) to `ComposeFormatToolbar.tsx`, Fluent v9, dark-mode-safe.</step>
+    <step order="4" name="Fidelity alignment">Confirm table-cell paraIds flow through `docxBridge.ts` so the save-time splice keys on them (aligns with the S1b nested-table round-trip result). No BFF change in this task.</step>
+    <step order="5" name="Tests">Author component tests: insert a table, edit rows/columns, assert each cell paragraph has a unique `paraId`; assert tracked-change marks work inside cells; include an ADR-021 dark-mode render check.</step>
+    <step order="6" name="Verify">`npm run build` the shared lib; run the new tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (MIT table family registered; cell paraId coverage)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx (insert/edit table affordances)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeTable.test.tsx</output>
+    <output type="report">Package license confirmation (each `@tiptap/extension-table*` = MIT, not pro)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A user can insert a basic table and edit it (add/remove row and column, edit cell text) using the MIT `@tiptap/extension-table` family.</criterion>
+    <criterion testable="true">Every paragraph inside a table cell carries a unique `paraId` node attribute consistent with the FR-08/FR-10 scheme — a unit test asserts presence + uniqueness across cells.</criterion>
+    <criterion testable="true">A table edit round-trips fidelity consistent with the S1b nested-table result: cell paraIds are preserved through the editor-doc bridge (`docxBridge.ts`) used by the save-time splice.</criterion>
+    <criterion testable="true">Tracked-changes marks (`InsertionMark`/`DeletionMark`) function correctly inside table cells (do not break table structure).</criterion>
+    <criterion testable="true">Every table package added resolves to `@tiptap/extension-table*` (MIT); no `@tiptap-pro/*` and no TipTap product feature is introduced.</criterion>
+    <criterion testable="true">Table UI affordances render correctly in Fluent v9 dark mode (ADR-021).</criterion>
+    <criterion testable="true">Matching component tests exist and pass; shared-lib `npm run build` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Insert a basic table">
+      <steps>Place the cursor in the editor, click the insert-table affordance, choose a 2x2 table.</steps>
+      <expected>A 2x2 table is inserted; each cell is editable.</expected>
+    </ui-test>
+    <ui-test name="Edit rows and columns">
+      <steps>With a table present, add a row and add a column via the toolbar controls.</steps>
+      <expected>The table gains the row and column; existing cell content is preserved.</expected>
+    </ui-test>
+    <ui-test name="Cell paragraphs carry paraIds">
+      <steps>Insert a table with text in each cell; inspect the editor doc nodes.</steps>
+      <expected>Each cell paragraph node has a distinct `paraId` attribute; no two cells share an id.</expected>
+    </ui-test>
+    <ui-test name="Tracked change inside a cell">
+      <steps>Apply an insertion mark to text inside a table cell.</steps>
+      <expected>The insertion renders as a tracked change; the table structure remains intact.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the table controls under the Fluent v9 dark theme provider.</steps>
+      <expected>Insert/edit controls use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

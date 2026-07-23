@@ -1,0 +1,26 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-revise-document (spaarkeai-compose-r2 DEF-11). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). documentText is the whole loaded document's current text (Wave-2 session doc text) — the agent loop / Compose surface supplies it from the open document, not from Dataverse. Matter/firm playbook + precedent grounding is supplied by the retrieval layer (not a maker-provided input field). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "compose-revise-document",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["revisionIntent"],
+    "properties": {
+      "revisionIntent": {
+        "type": "string",
+        "description": "The chosen revision intent for this pass: align-clauses (rewrite deviations from the matter/firm playbook), flag-risks (anchored review comments only, no rewrite), improve-clarity (rewrite ambiguous/redundant passages), or custom (follow the instruction field).",
+        "enum": ["align-clauses", "flag-risks", "improve-clarity", "custom"]
+      },
+      "instruction": {
+        "type": "string",
+        "description": "Optional free-text refinement of the revision request. Required context when revisionIntent is 'custom'; optional guidance for the other intents (e.g. 'focus on the indemnification section').",
+        "maxLength": 2000
+      },
+      "documentText": {
+        "type": "string",
+        "description": "The whole loaded document's current text (the Compose editor's open document, Wave-2 session doc text) this revision pass operates over. Every emitted target_text must be a verbatim substring of this field.",
+        "maxLength": 60000
+      }
+    }
+  }
+}

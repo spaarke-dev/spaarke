@@ -1,0 +1,1607 @@
+﻿{
+  "$schema": "https://spaarke.com/schemas/scope-model-index/v1",
+  "$generated": "2026-07-10T10:30:51Z",
+  "actions": [
+    {
+      "code": "INS-OBS",
+      "id": "8aac449b-955b-f111-a825-3833c5d9bcb1",
+      "name": "Insights Observation Mirror",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Read-only Dataverse projection of an emitted Insights Observation. Created as a side-effect of the universal ingest playbook (D-P7). Powers the Phase 1 D-P11 model-driven review surface. Do not edit.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-FACT@v1",
+      "id": "5137365a-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Live Fact Resolver",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Deterministic Live Fact resolver per D-P12 — emits FactArtifact (confidence=1.0) from Dataverse queries via ILiveFactResolver. Dispatch ActionType=80 via sprk_playbooknode.sprk_configjson.__actionType (sprk_actiontype field absent per D-01 Q1 confirmation 2026-06-02).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-IDXR@v1",
+      "id": "23939266-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Index Retrieve",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Deterministic AI Search retrieval node per D-P12 — composes OData filter + optional hybrid vector search against spaarke-insights-index; emits ranked artifact docs. Dispatch ActionType=90 via sprk_playbooknode.sprk_configjson.__actionType.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-EVID@v1",
+      "id": "6139aa6c-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Evidence Sufficiency",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Deterministic evidence-sufficiency gate per D-P12 + D-49 — emits verdict + gap analysis; drives synthesis-vs-decline branch routing. Dispatch ActionType=100 via sprk_playbooknode.sprk_configjson.__actionType.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-GRND@v1",
+      "id": "32eafa72-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Grounding Verify",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Mechanical citation verifier per D-P9 / LAVERN ADR 10.6 — strips citations whose snippets don't appear verbatim in source chunks. Dispatch ActionType=70 via sprk_playbooknode.sprk_configjson.__actionType.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-DECL@v1",
+      "id": "d1121079-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Decline to Find",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Deterministic decline emitter per D-49 / D-P12 — composes structured DeclineResponse from template + gap analysis; pairs with EvidenceSufficiencyNode. Dispatch ActionType=110 via sprk_playbooknode.sprk_configjson.__actionType.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-RART@v1",
+      "id": "96d52e7f-825e-f111-a825-6045bdebafa9",
+      "name": "Insights — Return Insight Artifact",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Final node of synthesis playbooks per D-P12 / D-P14 — composes InsightArtifact envelope from upstream synthesis output with EvidenceGuard validation. Dispatch ActionType=120 via sprk_playbooknode.sprk_configjson.__actionType.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-FETCH-KPI",
+      "id": "8ed3e378-4965-f111-ab0c-70a8a590c51c",
+      "name": "Insights — KPI Assessment Fetch (QueryDataverse)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Fetches all sprk_kpiassessment rows for a given Matter across all 3 Performance Areas (Guideline Compliance, Budget Compliance, Outcomes Achievement). Seeded by Insights Engine Widgets r1 task 023 for the matter-health-single playbook. Executor type 51 (QueryDataverse) � QueryDataverseNodeExecutor reads entityLogicalName + fetchXml from node sprk_configjson; no JPS payload on this action row. Bare action code per project Q-U1 owner ban on @v suffix vernacular for new identifiers.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-SANI@v1",
+      "id": "d5835ff5-cb5e-f111-a825-70a8a59455f4",
+      "name": "Insights — Sanitization",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L1C@v1",
+      "id": "4a3c9d07-cc5e-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 1 Classify",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X@v1",
+      "id": "a0e7ac19-cc5e-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Outcome Extract",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-OBSE@v1",
+      "id": "b588d92b-cc5e-f111-a825-70a8a59455f4",
+      "name": "Insights — Observation Emit",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X-CTRNS-CLOSING@v1",
+      "id": "84967adf-8c5f-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Extract — CTRNS × Closing Statement",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X-CTRNS-APA@v1",
+      "id": "0752f2f1-8c5f-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Extract — CTRNS × Asset Purchase Agreement",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X-IPPAT-PATAPP@v1",
+      "id": "9d6b3b0a-8d5f-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Extract — IPPAT × Patent Application",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X-IPPAT-OA@v1",
+      "id": "5dea3e22-8d5f-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Extract — IPPAT × Office Action",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L2X-BNKF-LOAN@v1",
+      "id": "25362a41-8d5f-f111-a825-70a8a59455f4",
+      "name": "Insights — Layer 2 Extract — BNKF × Loan Agreement",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "SUM-CHAT@v1",
+      "id": "eeb05bfd-1260-f111-ab0b-70a8a59455f4",
+      "name": "Summarize Document for Chat",
+      "kind": "Prompted",
+      "modelTier": "Fast",
+      "workflowClass": null,
+      "description": "SUM-CHAT@v1 — catalog-driven chat-session file summarization (UC-A-1, FR-P1-01). Prompted Action (kind=Prompted) executed via ActionRunner + PromptSchemaRenderer; strict Structured Outputs against sprk_outputschemajson (declaration order tldr → summary → keywords → entities preserves the TL;DR-first UX). JPS artifact: projects/spaarke-ai-architecture-redesign-r1/notes/jps/SUM-CHAT-v1.jps.json",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-001",
+      "id": "41e3beef-cb10-f111-8342-7c1e520aa4df",
+      "name": "Contract Review",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Comprehensive review of commercial contracts to extract obligations, parties, key dates, payment terms, and risk factors.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-003",
+      "id": "fb19c1f5-cb10-f111-8342-7c1e520aa4df",
+      "name": "Lease Agreement Review",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analysis of commercial and residential lease agreements to extract rent obligations, lease term, renewal options, permitted use, and termination rights.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-005",
+      "id": "fe19c1f5-cb10-f111-8342-7c1e520aa4df",
+      "name": "SLA Analysis",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analysis of Service Level Agreements to identify service level objectives, performance metrics, measurement methodology, penalties and remedies, exclusions, and escalation procedures.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-023",
+      "id": "89cc641a-df18-f111-8343-7c1e520aa4df",
+      "name": "New Matter Field Extraction",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extracts Matter record fields from uploaded legal documents to pre-fill the Create New Matter wizard. Returns display names for lookup fields; frontend resolves to Dataverse GUIDs via fuzzy matching.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-025",
+      "id": "ddaa441e-9f19-f111-8343-7c1e520aa4df",
+      "name": "File Summary",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Summarizes uploaded documents into structured sections for review and action.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-009",
+      "id": "0b03b351-70d9-f011-8406-7c1e520aa4df",
+      "name": "Prepare Response",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Draft a professional response letter or email based on the source document.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-010",
+      "id": "58c91c65-ebe9-f011-8406-7c1e520aa4df",
+      "name": "Extract Entities",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extract named entities from document including parties, dates, monetary amounts, addresses, and key terms.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-013",
+      "id": "5ac91c65-ebe9-f011-8406-7c1e520aa4df",
+      "name": "Compare Clauses",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Compare document clauses against standard terms and industry benchmarks to identify deviations.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-014",
+      "id": "5bc91c65-ebe9-f011-8406-7c1e520aa4df",
+      "name": "Extract Dates",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extract and normalize all date references including effective dates, deadlines, and renewal dates.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-015",
+      "id": "5dc91c65-ebe9-f011-8406-7c1e520aa4df",
+      "name": "Calculate Values",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Calculate and validate all monetary amounts, payment schedules, and financial terms.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-AGNT@v1",
+      "id": "7d051780-945e-f111-ab0c-7c1e521b425f",
+      "name": "Insights — Agent Service Synthesis",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Wraps Azure AI Foundry Agent Service for LLM-driven synthesis in Insights playbooks (D-P14 predict-matter-cost synthesis node). Composes prior-node outputs into a synthesis prompt; emits structured synthesis result. Dispatch ActionType=60 via sprk_actiontypeid lookup target's sprk_executoractiontype. Phase 1.5 synthesis prompts inlined via $ref:Services/Ai/Insights/Prompts/predict-matter-cost-synthesis.v1.txt; Wave C2 migrates to sprk_systemprompt.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L1C-CTRNS@v1",
+      "id": "ac3aad8c-4a5f-f111-ab0c-7c1e521b425f",
+      "name": "Insights — Layer 1 Classify (CTRNS)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Per-practice-area Layer 1 classifier for Commercial Transactions (sprk_practicearea_ref code = CTRNS). Refines the generic INS-L1C@v1 by replacing the 8-category litigation enum with the CTRNS-scoped sprk_documenttype_ref codes seeded by Wave D-G1 (task 030). Wave D2 / task 031 author. Dispatch ActionType=0 (AiAnalysis, gpt-4o-mini per D-59) via sprk_playbooknode.sprk_configjson.__actionType (sprk_executoractiontype field absent per D-01 Q1).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L1C-IPPAT@v1",
+      "id": "2b8061a0-4a5f-f111-ab0c-7c1e521b425f",
+      "name": "Insights — Layer 1 Classify (IPPAT)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Per-practice-area Layer 1 classifier for Intellectual Property Patents (sprk_practicearea_ref code = IPPAT). Refines the generic INS-L1C@v1 by replacing the 8-category litigation enum with the IPPAT-scoped sprk_documenttype_ref codes seeded by Wave D-G1 (task 030). Wave D2 / task 031 author. Dispatch ActionType=0 (AiAnalysis, gpt-4o-mini per D-59) via sprk_playbooknode.sprk_configjson.__actionType (sprk_executoractiontype field absent per D-01 Q1).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-L1C-BNKF@v1",
+      "id": "72e564ad-4a5f-f111-ab0c-7c1e521b425f",
+      "name": "Insights — Layer 1 Classify (BNKF)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Per-practice-area Layer 1 classifier for Banking & Finance (sprk_practicearea_ref code = BNKF). Refines the generic INS-L1C@v1 by replacing the 8-category litigation enum with the BNKF-scoped sprk_documenttype_ref codes seeded by Wave D-G1 (task 030). Wave D2 / task 031 author. Dispatch ActionType=0 (AiAnalysis, gpt-4o-mini per D-59) via sprk_playbooknode.sprk_configjson.__actionType (sprk_executoractiontype field absent per D-01 Q1).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-016",
+      "id": "10d09452-70d9-f011-8406-7c1e525abd8b",
+      "name": "Extract Data",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extract structured data from the document including entities, dates, amounts, and references.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-002",
+      "id": "34c9ecf2-cb10-f111-8342-7ced8d1dc988",
+      "name": "NDA Analysis",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analysis of non-disclosure agreements to identify key restrictions, permitted disclosures, exclusions, effective dates, and mutual vs. unilateral obligations.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-004",
+      "id": "38c9ecf2-cb10-f111-8342-7ced8d1dc988",
+      "name": "Invoice Processing",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extraction and validation of invoice data including vendor details, invoice number, line items, amounts, taxes, payment terms, and due dates for accounts payable processing.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-006",
+      "id": "3cc9ecf2-cb10-f111-8342-7ced8d1dc988",
+      "name": "Employment Agreement Review",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analysis of employment agreements to extract compensation, benefits, equity, IP assignment, non-compete and non-solicitation restrictions, termination provisions, and severance terms.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-007",
+      "id": "3fc9ecf2-cb10-f111-8342-7ced8d1dc988",
+      "name": "Statement of Work Analysis",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analysis of Statements of Work to extract deliverables, milestones, acceptance criteria, payment schedules, change order procedures, and key dependencies or assumptions.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-008",
+      "id": "41c9ecf2-cb10-f111-8342-7ced8d1dc988",
+      "name": "General Legal Document Review",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Catch-all legal document analysis for unclassified legal instruments. Identifies document type, parties, key obligations, critical dates, financial commitments, and risk factors for any legal document not covered by a more specific action.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-017",
+      "id": "3c03edf0-8a17-f111-8343-7ced8d1dc988",
+      "name": "SprkChat Document Assistant",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Conversational AI assistant for document Q&A, search, and collaboration in SprkChat side pane",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-012",
+      "id": "e6d9bec9-5118-f111-8343-7ced8d1dc988",
+      "name": "Semantic Search",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-024",
+      "id": "1e838114-7919-f111-8343-7ced8d1dc988",
+      "name": "New Project Field Extraction",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Extracts Project record fields from uploaded legal documents to pre-fill the Create New Project wizard. Returns display names for lookup fields; frontend resolves to Dataverse GUIDs via fuzzy matching.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-018",
+      "id": "5e51b74e-70d9-f011-8406-7ced8d1dc988",
+      "name": "Review Agreement",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Analyze a legal agreement for key terms, obligations, risks, and notable clauses.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-019",
+      "id": "386cc554-70d9-f011-8406-7ced8d1dc988",
+      "name": "Compare Documents",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Compare the document against reference materials or previous versions to identify differences.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-020",
+      "id": "b9356968-ebe9-f011-8406-7ced8d1dc988",
+      "name": "Analyze Clauses",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Identify and analyze contract clauses by category, extracting key obligations, rights, and conditions.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-021",
+      "id": "ba356968-ebe9-f011-8406-7ced8d1dc988",
+      "name": "Classify Document",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Classify the document into the appropriate document type and subtype based on content analysis.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-011",
+      "id": "bb356968-ebe9-f011-8406-7ced8d1dc988",
+      "name": "Document Profiler",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Generate a concise summary of the document focusing on key points, parties, and essential terms.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "ACT-022",
+      "id": "bc356968-ebe9-f011-8406-7ced8d1dc988",
+      "name": "Detect Risks",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Identify potential risks including legal, financial, operational, and compliance risks in the document.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "INS-UPDR",
+      "id": "62a1687d-4965-f111-ab0c-7ced8ddc4a05",
+      "name": "Insights — Update Record (Persist Envelope)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Persists an AI synthesis envelope to a Dataverse record via UpdateRecord. Seeded by Insights Engine Widgets r1 task 023 for the matter-health-single playbook persistEnvelope node (writes the FR-14 envelope to sprk_matter.sprk_performancesummary). Executor type 22 (UpdateRecord) � UpdateRecordNodeExecutor reads entityLogicalName + recordId + fieldMappings from node sprk_configjson; no JPS payload on this action row. Bare action code per project Q-U1 owner ban on @v suffix vernacular for new identifiers.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "matter-health-synthesis",
+      "id": "5981632e-4165-f111-ab0c-7ced8ddc4cc6",
+      "name": "Matter Health Synthesis (Single Mode)",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Matter Health Single-mode diagnostic synthesis prompt (r1 task 020). Produces a 7-dimension diagnostic narrative explaining a matter's composite letter grade with citations to anchor assessments and (optional) document observations. Used by the matter-health-single playbook synthesis node (action_type=60 AgentService). Output envelope is persisted to sprk_matter.sprk_performancesummary per FR-14. Action code is BARE (no @v suffix) per Q-U1.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "SYS-QUERY-DV",
+      "id": "ef7747ca-2b6f-f111-ab0e-7ced8ddc4cc6",
+      "name": "System: Query Dataverse",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "System-managed Action for QueryDataverse executor (ActionType=51). Use on playbook nodes that run a fetchXml against Dataverse and emit structured items[] for downstream iteration. No skills/knowledge/tools/persona. ConfigJson holds entityLogicalName + fetchXml + parameters.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "SYS-CREATE-NOTIF",
+      "id": "f97747ca-2b6f-f111-ab0e-7ced8ddc4cc6",
+      "name": "System: Create Notification",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "System-managed Action for CreateNotificationNodeExecutor (ActionType=50). Creates appnotification records from playbook results. Supports iterate-items mode reading upstream Query node items[]. No skills/knowledge/tools/persona. ConfigJson holds title/body/category/recipientId/iterateItems/itemNotification.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "SYS-LOOKUP-MEMBERSHIP",
+      "id": "ca44b7aa-fc70-f111-ab0e-7ced8ddc4cc6",
+      "name": "Lookup User Membership",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "System primitive that resolves the executing user's record memberships for a given Dataverse entity type via MembershipResolverService (in-process, per ADR-034). Binds resolved ID set to the node's OutputVariable for downstream consumption by QueryDataverseNodeExecutor or similar filters. Used by notification-* playbooks to scope queries to 'records the user is involved with' (owner / assignedAttorney / assignedParalegal / custom roles).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "BRIEF-NARRATE-TLDR",
+      "id": "ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6",
+      "name": "Brief Narrate TLDR",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Generates a grounded TL;DR summary of a user's daily notification briefing. Used by the DAILY-BRIEFING-NARRATE playbook (R4). Grounded: model uses ONLY entity names present in the input payload — no fabricated firm/case names.",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "BRIEF-VALIDATE-ENTITY-NAMES",
+      "id": "290e786c-ff70-f111-ab0e-7ced8ddc4cc6",
+      "name": "Brief Validate Entity Names",
+      "kind": null,
+      "modelTier": null,
+      "workflowClass": null,
+      "description": "Post-LLM defense-in-depth scrubber that removes sentences mentioning entity names NOT present in an explicit allow-list. Used by DAILY-BRIEFING-NARRATE playbook (R4 FR-3) to guard against LLM hallucination of firm/case/matter names. Per-removal emits a structured 'hallucination_detected' warning log event for App Insights monitoring. Backed by EntityNameValidatorNodeExecutor (ActionType 141).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "CLS-CHAT@v1",
+      "id": "186fd4cf-db78-f111-ab0e-7ced8ddc4cc6",
+      "name": "Classify Document for Chat",
+      "kind": "Prompted",
+      "modelTier": "Fast",
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "REF-CHAT@v1",
+      "id": "8d337be2-3d79-f111-ab0e-7ced8ddc4cc6",
+      "name": "Honest Refusal for Chat",
+      "kind": "Prompted",
+      "modelTier": "Fast",
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "DRAFT-CORR@v1",
+      "id": "4b8b50f4-6a79-f111-ab0e-7ced8ddc4cc6",
+      "name": "Draft Correspondence for Chat",
+      "kind": "Prompted",
+      "modelTier": "Standard",
+      "workflowClass": null,
+      "description": "",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "DAILY-BRIEFING@v1",
+      "id": "2fa8ab19-7879-f111-ab0e-7ced8ddc4cc6",
+      "name": "Daily Briefing (Coded Composite)",
+      "kind": "Coded",
+      "modelTier": null,
+      "workflowClass": "DailyBriefingNarrator",
+      "description": "FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): the platform's FIRST full coded composite Action. Executes the registered ICodedWorkflow class DailyBriefingNarrator (collect via DailyBriefingCollector feeder -> TL;DR + per-channel narration reading prompts hot-editable from the BRIEF-NARRATE-TLDR / BRIEF-NARRATE-CHANNEL Action rows -> entity-name scrub -> section-keyed output). Dispatched exclusively via its daily-briefing-narrate Binding rows (default=render/informational, email=email disposition). Control flow is code; behavior is data (ADR-039).",
+      "documentTypes": null,
+      "tags": null
+    },
+    {
+      "code": "CREATE-TASK@v1",
+      "id": "b66c8dda-8279-f111-ab0e-7ced8ddc4cc6",
+      "name": "Create Task for Chat",
+      "kind": "Prompted",
+      "modelTier": "Standard",
+      "workflowClass": null,
+      "description": "FR-P3-03 (spaarke-ai-architecture-redesign-r1 task 042): create-task capability (UC-H-1, walkthrough steps 10-14). Prompted Action drafting a well-formed follow-up task proposal grounded in session file text; the write leg is the EXISTING dataverse.create_record typed handler (confirmation-gated) creating sprk_event with sprk_eventtype_ref=Task carrying provenance refs (source document + source analysis {bindingId}@t{n}). Input schema declares due_date + assign_to REQUIRED for FR-P2-03 loop-native elicitation.",
+      "documentTypes": null,
+      "tags": null
+    }
+  ],
+  "skills": [
+    {
+      "code": "SKL-003",
+      "id": "62518925-d310-f111-8342-7c1e520aa4df",
+      "name": "Summary Generation",
+      "description": "Generate an executive summary of 3-5 key bullet points at the start of the response",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-005",
+      "id": "63518925-d310-f111-8342-7c1e520aa4df",
+      "name": "Party Identification",
+      "description": "Identify all parties with full legal names, roles, shortened forms, and any stated contact details",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-006",
+      "id": "64518925-d310-f111-8342-7c1e520aa4df",
+      "name": "Obligation Mapping",
+      "description": "Map all mutual obligations into a structured table showing party, obligation, condition, and deadline",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-008",
+      "id": "65518925-d310-f111-8342-7c1e520aa4df",
+      "name": "Financial Terms",
+      "description": "Extract all monetary amounts, payment schedules, rates, and financial obligations",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-010",
+      "id": "66518925-d310-f111-8342-7c1e520aa4df",
+      "name": "Jurisdiction and Governing Law",
+      "description": "Identify applicable law, jurisdiction, dispute resolution mechanism, and arbitration body",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-025",
+      "id": "2c96aea9-70d9-f011-8406-7c1e520aa4df",
+      "name": "Friendly Tone",
+      "description": "Write in a warm, approachable tone.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-011",
+      "id": "3096aea9-70d9-f011-8406-7c1e520aa4df",
+      "name": "Action-Oriented",
+      "description": "Focus on actionable recommendations.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-029",
+      "id": "3196aea9-70d9-f011-8406-7c1e520aa4df",
+      "name": "Legal Expertise",
+      "description": "Apply legal analysis framework and terminology.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-023",
+      "id": "3296aea9-70d9-f011-8406-7c1e520aa4df",
+      "name": "Financial Expertise",
+      "description": "Apply financial analysis framework.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-031",
+      "id": "d8783810-eee9-f011-8406-7c1e520aa4df",
+      "name": "NDA Review",
+      "description": "Specialized skill for analyzing Non-Disclosure Agreements, focusing on scope, term, exclusions, and enforceability.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-020",
+      "id": "df783810-eee9-f011-8406-7c1e520aa4df",
+      "name": "Employment Contract",
+      "description": "Analyze employment agreements including compensation, benefits, restrictions, and termination provisions.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-021",
+      "id": "80f63e16-eee9-f011-8406-7c1e520aa4df",
+      "name": "Executive Summary",
+      "description": "Generate a concise, high-level overview of the document suitable for executive review.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-030",
+      "id": "cdfd91a2-190e-f111-8341-7c1e525abd8b",
+      "name": "Matter Entity Extraction",
+      "description": "Extracts matter type, practice area, matter name, and summary from document text for pre-filling matter creation forms.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-014",
+      "id": "3e5984a8-70d9-f011-8406-7c1e525abd8b",
+      "name": "Concise Writing",
+      "description": "Write with brevity and clarity.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-018",
+      "id": "3f5984a8-70d9-f011-8406-7c1e525abd8b",
+      "name": "Detailed Explanation",
+      "description": "Provide comprehensive explanations with context.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-022",
+      "id": "405984a8-70d9-f011-8406-7c1e525abd8b",
+      "name": "Executive Summary Format",
+      "description": "Structure output as an executive summary.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-046",
+      "id": "93b588ae-70d9-f011-8406-7c1e525abd8b",
+      "name": "Technical Expertise",
+      "description": "Apply technical analysis for specifications.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-001",
+      "id": "1a434c23-d310-f111-8342-7ced8d1dc988",
+      "name": "Citation Extraction",
+      "description": "Inject citation instructions — every claim is followed by [Section: X, Page Y] references",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-002",
+      "id": "1c434c23-d310-f111-8342-7ced8d1dc988",
+      "name": "Risk Flagging",
+      "description": "Highlight clauses requiring legal review with [RISK: HIGH/MEDIUM/LOW] prefixes",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-004",
+      "id": "1e434c23-d310-f111-8342-7ced8d1dc988",
+      "name": "Date Extraction",
+      "description": "Extract and normalize all dates to ISO 8601 format in a structured Key Dates table",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-007",
+      "id": "1f434c23-d310-f111-8342-7ced8d1dc988",
+      "name": "Defined Terms",
+      "description": "Extract all defined terms and their definitions into an alphabetical glossary",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-009",
+      "id": "20434c23-d310-f111-8342-7ced8d1dc988",
+      "name": "Termination Analysis",
+      "description": "Analyze all termination triggers, notice periods, cure periods, and post-termination consequences",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-035",
+      "id": "052ce5ab-70d9-f011-8406-7ced8d1dc988",
+      "name": "Professional Tone",
+      "description": "Write in a formal, professional business tone.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-044",
+      "id": "0e2ce5ab-70d9-f011-8406-7ced8d1dc988",
+      "name": "Structured with Headers",
+      "description": "Organize content with clear section headers.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-015",
+      "id": "6e012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Contract Analysis",
+      "description": "Comprehensive contract analysis skill that examines all aspects of a contract including parties, terms, obligations, and key provisions.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-026",
+      "id": "71012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Invoice Processing",
+      "description": "Extract and validate invoice data including line items, amounts, taxes, and payment terms.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-028",
+      "id": "74012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Lease Review",
+      "description": "Analyze lease agreements for rent terms, tenant obligations, landlord responsibilities, and key conditions.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-043",
+      "id": "75012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "SLA Analysis",
+      "description": "Extract and evaluate Service Level Agreement metrics, commitments, and remedies.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-013",
+      "id": "76012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Compliance Check",
+      "description": "Verify document compliance with regulatory requirements and internal policies.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-037",
+      "id": "78012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Risk Assessment",
+      "description": "Identify and categorize risks including legal, financial, operational, and reputational risks.",
+      "compatibleActions": null,
+      "tags": null
+    },
+    {
+      "code": "SKL-012",
+      "id": "79012515-eee9-f011-8406-7ced8d1dc988",
+      "name": "Clause Comparison",
+      "description": "Compare document clauses against standard terms, templates, or industry benchmarks.",
+      "compatibleActions": null,
+      "tags": null
+    }
+  ],
+  "knowledge": [
+    {
+      "code": "KM-017",
+      "id": "67a89c92-5218-f111-8343-7c1e520aa4df",
+      "name": "invoice-validation-rules",
+      "deliveryType": "Inline",
+      "description": "Invoice validation and compliance rules for accounts payable analysis. Covers required invoice fields, tax calculation verification, payment term compliance, purchase order matching rules, approval threshold matrices, and regulatory requirements for invoice documentation.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-018",
+      "id": "6aa89c92-5218-f111-8343-7c1e520aa4df",
+      "name": "employment-law",
+      "deliveryType": "Inline",
+      "description": "Employment law compliance reference for agreement review. Covers FLSA wage and hour requirements, FMLA leave provisions, ADA accommodation obligations, Title VII protections, at-will employment doctrine, non-compete enforceability by jurisdiction, and WARN Act notification requirements.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-001",
+      "id": "331cd212-ca18-f111-8343-7c1e520aa4df",
+      "name": "Common Contract Terms Glossary",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: definitions for 50+ standard contract terms including acceptance, amendment, arbitration, assignment, breach, cap on liability, confidentiality, force majeure, governing law, indemnification, IP, limitation of liability, representations and warranties, severability, termination, and waiver.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-003",
+      "id": "e98a8f2e-cb18-f111-8343-7c1e520aa4df",
+      "name": "Lease Agreement Standards",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: commercial lease standards covering base rent and escalation, operating expense structures, controllable vs. uncontrollable expense caps, permitted use, exclusive use rights, renewal/expansion/termination options, tenant improvement allowance, and holdover provisions.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-004",
+      "id": "d6e23099-cb18-f111-8343-7c1e520aa4df",
+      "name": "Invoice Processing Guide",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: AP invoice processing guide covering invoice types, required fields, three-way and two-way matching, matching tolerances, duplicate detection, vendor master file validation, PO validation, contract compliance, tax validation, exception handling, and approval workflow.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-007",
+      "id": "611194ee-cc18-f111-8343-7c1e520aa4df",
+      "name": "IP Assignment Clause Library",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: annotated IP assignment clauses including broad work product assignment, independent contractor work-for-hire, background IP definition and license-back, prior inventions exclusion, AI/ML model and training data assignment, open source compliance, moral rights waiver, and future patents assignment.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-008",
+      "id": "d75310ae-cd18-f111-8343-7c1e520aa4df",
+      "name": "Termination And Remedy Provisions",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: comprehensive termination and remedy reference covering termination for cause triggers, notice and cure periods, termination for convenience, termination fees, post-termination transition, return/destruction of data, survival provisions, damages types, liquidated damages, injunctive relief, and set-off rights.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-009",
+      "id": "ba2e22b5-cd18-f111-8343-7c1e520aa4df",
+      "name": "Governing Law And Jurisdiction Guide",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: governing law and dispute resolution reference covering common US/international law choices, conflict-of-law exclusions, exclusive vs. non-exclusive jurisdiction, arbitration institutions, tiered dispute resolution, interim relief, and New York Convention enforcement.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-002",
+      "id": "737c3e5e-ede9-f011-8406-7c1e520aa4df",
+      "name": "Defined Terms",
+      "deliveryType": "Inline",
+      "description": "Standard legal definitions and defined terms commonly used in commercial agreements. Provides canonical definitions for terms like Affiliate, Change of Control, Confidential Information, Force Majeure, Intellectual Property, Material Adverse Effect, and other frequently used legal concepts.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-010",
+      "id": "907c3e5e-ede9-f011-8406-7c1e520aa4df",
+      "name": "SLA Benchmarks",
+      "deliveryType": "Inline",
+      "description": "Industry-standard Service Level Agreement benchmarks and metrics. Covers uptime guarantees (99.9%, 99.95%, 99.99%), response time thresholds, resolution time targets, service credit structures, measurement methodologies, and exclusion categories.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-015",
+      "id": "b86eef90-5218-f111-8342-7c1e525abd8b",
+      "name": "commercial-lease-benchmarks",
+      "deliveryType": "Inline",
+      "description": "Market benchmarks for evaluating commercial lease terms. Provides reference data for market rent ranges by class (A/B/C), typical CAM cost ratios, standard TI allowance ranges, common escalation structures, and lease term norms by property type and market.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-016",
+      "id": "bb6eef90-5218-f111-8342-7c1e525abd8b",
+      "name": "ap-fraud-indicators",
+      "deliveryType": "Inline",
+      "description": "Accounts payable fraud red flags and indicators for invoice and payment analysis. Covers duplicate invoice detection patterns, vendor master manipulation indicators, round-number anomalies, split-payment schemes, ghost vendor characteristics, and Benford law deviation thresholds.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-013",
+      "id": "f958948e-5218-f111-8343-7ced8d1dc988",
+      "name": "commercial-risk-factors",
+      "deliveryType": "Inline",
+      "description": "Risk factor definitions for commercial contract risk assessment. Identifies high-risk provisions (unlimited liability, unilateral termination, auto-renewal with price escalation), medium-risk items (broad indemnification, IP assignment), and common red flags across contract types.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-014",
+      "id": "fb58948e-5218-f111-8343-7ced8d1dc988",
+      "name": "confidentiality-best-practices",
+      "deliveryType": "Inline",
+      "description": "Best practices for confidentiality provisions in commercial agreements. Covers scope of confidential information, carve-outs for publicly available information, permitted disclosure scenarios, handling of derivatives and compilations, return/destruction obligations, and survival periods.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-002",
+      "id": "20cbffb7-ca18-f111-8343-7ced8d1dc988",
+      "name": "NDA Review Checklist",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: 20-item checklist for NDA review covering party identification, purpose, confidential information definition and scope, standard exclusions, standard of care, permitted use, permitted disclosure, agreement term, survival of obligations, return/destruction, injunctive relief, and governing law.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-005",
+      "id": "78703a10-cc18-f111-8343-7ced8d1dc988",
+      "name": "SLA Metrics Reference",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: SLA/SLO/SLI definitions, availability tiers, response time/latency metrics, throughput, error rate targets, incident severity levels with response time and resolution SLAs, tiered service credit schedules, and measurement methodology.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-006",
+      "id": "a0ed587c-cc18-f111-8343-7ced8d1dc988",
+      "name": "Employment Law Quick Reference",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: US employment law fundamentals covering at-will employment, employee vs. independent contractor classification, FLSA wage and overtime, non-compete enforceability by state, DTSA immunity notice, work made for hire, invention assignment, FMLA, ADA, USERRA, WARN Act, and OWBPA requirements.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KNW-010",
+      "id": "22b035b6-cd18-f111-8343-7ced8d1dc988",
+      "name": "Legal Document Red Flags Catalog",
+      "deliveryType": "RAG Index",
+      "description": "Vectorized reference document: 32 red flags across 10 categories with severity ratings covering liability/indemnification, payment/financial, termination, data/privacy, IP, contract structure, dispute resolution, confidentiality, employment/personnel, and miscellaneous flags.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-005",
+      "id": "400c7059-ede9-f011-8406-7ced8d1dc988",
+      "name": "Best Practices",
+      "deliveryType": "Inline",
+      "description": "Document review best practices and guidelines for thorough contract analysis. Covers systematic review methodology, clause-by-clause analysis approach, cross-reference validation, defined term tracking, and quality checkpoints for comprehensive legal document review.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-003",
+      "id": "43b4825f-ede9-f011-8406-7ced8d1dc988",
+      "name": "Risk Categories",
+      "deliveryType": "Inline",
+      "description": "Taxonomy of risk categories used for document risk assessment and classification. Defines risk levels (Critical, High, Medium, Low) with scoring criteria across categories: financial exposure, regulatory compliance, operational impact, reputational risk, and legal liability.",
+      "contentType": "Reference",
+      "tags": null
+    },
+    {
+      "code": "KM-006",
+      "id": "46b4825f-ede9-f011-8406-7ced8d1dc988",
+      "name": "DD Checklist",
+      "deliveryType": "Inline",
+      "description": "Due diligence checklist categories for comprehensive contract and document review. Organized by workstream: corporate governance, financial, tax, employment, intellectual property, real estate, environmental, litigation, regulatory, and commercial contracts.",
+      "contentType": "Reference",
+      "tags": null
+    }
+  ],
+  "tools": [
+    {
+      "code": "TEXT-REFINE",
+      "id": "d3fab651-3d63-f111-ab0c-000d3a4d8152",
+      "toolId": "text.refine",
+      "name": "SYS-Text Refinement",
+      "handler": "TextRefinementHandler",
+      "sideEffectClass": "Pure",
+      "description": "Reformat or improve the clarity of a text passage per a given instruction. Use when the user wants to rewrite, simplify, expand, reformat, or restyle content. Output is plain refined text — no preamble or commentary.",
+      "tags": null
+    },
+    {
+      "code": "CITATION-VERIFY",
+      "id": "0250f350-4863-f111-ab0c-000d3a4d8152",
+      "toolId": null,
+      "name": "SYS-Citation Verification",
+      "handler": "VerifyCitationsHandler",
+      "sideEffectClass": null,
+      "description": "Verifies legal citations found in the provided text against authoritative sources. Returns verification status, confidence, and source URLs for each citation. Use when the user asks to verify references, check case validity, or confirm regulatory citations.",
+      "tags": null
+    },
+    {
+      "code": "DOCUMENT-SEARCH",
+      "id": "a26cc9d2-5263-f111-ab0c-000d3a4d8152",
+      "toolId": null,
+      "name": "SYS-Document Search",
+      "handler": "DocumentSearchHandler",
+      "sideEffectClass": null,
+      "description": "Search the knowledge index for document content relevant to the user's query. Use this when the user asks about specific topics, clauses, or information within documents. Results are scoped to the playbook's knowledge sources when a playbook is bound, or across all tenant documents otherwise. Returns ranked excerpts with relevance scores and citation markers; the UI receives a SearchResults output-pane widget alongside the text response.",
+      "tags": null
+    },
+    {
+      "code": "KNOWLEDGE-SOURCE-GET",
+      "id": "cd6cc9d2-5263-f111-ab0c-000d3a4d8152",
+      "toolId": null,
+      "name": "SYS-Knowledge Source Retrieval",
+      "handler": "KnowledgeRetrievalHandler",
+      "sideEffectClass": null,
+      "description": "Retrieve all indexed content for a specific knowledge source by its ID. Use when the user wants to see what is in a particular knowledge base or reference material. The knowledgeSourceId argument should be the GUID of a sprk_content record. Returns all chunks for the source and emits a source-pane DocumentViewer widget so the user can browse the knowledge source alongside the chat response.",
+      "tags": null
+    },
+    {
+      "code": "DOCUMENT-DISCOVERY",
+      "id": "d46cc9d2-5263-f111-ab0c-000d3a4d8152",
+      "toolId": null,
+      "name": "SYS-Document Discovery",
+      "handler": "DocumentSearchHandler",
+      "sideEffectClass": null,
+      "description": "Performs a broad discovery search across all indexed documents for the tenant. Use this when exploring what documents are available or finding related content across the entire document corpus — not limited to a specific knowledge source. When the chat session has a host-context parent entity (e.g., matter, project), discovery is automatically constrained to that entity's boundary. Returns ranked excerpts with preview snippets and citation markers; the UI receives a SearchResults output-pane widget (with isDiscovery=true) alongside the text response.",
+      "tags": null
+    },
+    {
+      "code": "LEGAL-CASE-LOOKUP",
+      "id": "f2cf50d4-5263-f111-ab0c-000d3a582930",
+      "toolId": null,
+      "name": "SYS-Legal Case Lookup",
+      "handler": "LegalResearchHandler",
+      "sideEffectClass": null,
+      "description": "Look up a specific legal case by its standard citation (e.g., 123 F.3d 456 (9th Cir. 2020)). Returns the case holding and a source URL from an authoritative legal database.",
+      "tags": null
+    },
+    {
+      "code": "FINANCIAL-CALCULATION",
+      "id": "4738efd9-3763-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Financial Calculation (formula)",
+      "handler": "FinancialCalculationToolHandler",
+      "sideEffectClass": null,
+      "description": "Pure-deterministic, currency-aware financial formulas: simple/compound interest, present/future value, loan payment (amortization), ROI. All monetary math uses decimal. No LLM call.",
+      "tags": null
+    },
+    {
+      "code": "INVOICE-EXTRACTOR",
+      "id": "c636f1df-3763-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Invoice Extractor",
+      "handler": "InvoiceExtractionToolHandler",
+      "sideEffectClass": null,
+      "description": "LLM-assisted invoice extraction with deterministic decimal line-item arithmetic. Extracts invoice header (number, dates, vendor, customer) and line items (description, quantity, unit price, tax rate, tax amount, line total) from invoice document text. Code-side decimal math verifies line totals, subtotal, tax total, discount total, and grand total per configured tax method (inclusive/exclusive) and discount order (pre-tax/post-tax). Arithmetic mismatches surface in arithmeticErrors[] (NOT auto-corrected — FR-19 binding).",
+      "tags": null
+    },
+    {
+      "code": "TEXT-KEYPOINTS",
+      "id": "de8f5a76-3d63-f111-ab0c-70a8a53ec687",
+      "toolId": "text.keypoints",
+      "name": "SYS-Text Key Points",
+      "handler": "TextRefinementHandler",
+      "sideEffectClass": "Pure",
+      "description": "Extract the most important key points from a text passage as a bullet list. Use when the user wants to identify main takeaways, action items, or critical information from a document section or analysis output.",
+      "tags": null
+    },
+    {
+      "code": "TEXT-SUMMARY",
+      "id": "05b20190-3d63-f111-ab0c-70a8a53ec687",
+      "toolId": "text.summary",
+      "name": "SYS-Text Summary",
+      "handler": "TextRefinementHandler",
+      "sideEffectClass": "Pure",
+      "description": "Generate a concise summary of a text passage in the requested format (bullet | paragraph | tldr). Use when the user needs a quick overview of lengthy content — a paragraph summary, a TL;DR, or a structured bullet-point summary.",
+      "tags": null
+    },
+    {
+      "code": "CODE-ANALYZE",
+      "id": "5b77f6cc-5263-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Code Analyze Data",
+      "handler": "CodeInterpreterHandler",
+      "sideEffectClass": null,
+      "description": "Analyze tabular or CSV data to answer a specific question. Use this when the user wants statistics, trends, or comparisons derived from structured data. Supply only the relevant data excerpt — never full documents or PII.",
+      "tags": null
+    },
+    {
+      "code": "CODE-CHART",
+      "id": "5c77f6cc-5263-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Code Generate Chart",
+      "handler": "CodeInterpreterHandler",
+      "sideEffectClass": null,
+      "description": "Generate a chart image (bar, line, or pie) from a JSON data series. Use this when the user wants a visual chart from structured data. dataSeries must be a JSON array of objects with 'label' and 'value' fields.",
+      "tags": null
+    },
+    {
+      "code": "KNOWLEDGE-BASE-SEARCH",
+      "id": "eeb3f2d2-5263-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Knowledge Base Search",
+      "handler": "KnowledgeRetrievalHandler",
+      "sideEffectClass": null,
+      "description": "Search the knowledge base for reference information relevant to the query. Use this to find policies, procedures, standards, or reference materials that apply to the user's question. Results are scoped to the playbook's knowledge sources when a playbook is bound, or across all tenant sources otherwise. Returns ranked results with citation markers.",
+      "tags": null
+    },
+    {
+      "code": "LEGAL-RESEARCH",
+      "id": "efb3f2d2-5263-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Legal Research",
+      "handler": "LegalResearchHandler",
+      "sideEffectClass": null,
+      "description": "Research a broad legal topic, doctrine, statute, or regulatory requirement using authoritative public legal sources. Do not include client names or matter references.",
+      "tags": null
+    },
+    {
+      "code": "WEB-SEARCH",
+      "id": "f6b3f2d2-5263-f111-ab0c-70a8a53ec687",
+      "toolId": null,
+      "name": "SYS-Web Search",
+      "handler": "WebSearchHandler",
+      "sideEffectClass": null,
+      "description": "Search the web for information relevant to the user's query. Use when the question cannot be answered from internal documents alone.",
+      "tags": null
+    },
+    {
+      "code": "CLAUSE-COMPARISON",
+      "id": "67518925-d310-f111-8342-7c1e520aa4df",
+      "toolId": null,
+      "name": "SYS-Clause Comparison",
+      "handler": "ClauseComparisonHandler",
+      "sideEffectClass": null,
+      "description": "Pure-deterministic structural text-diff between two clauses (clauseA + clauseB) at configurable granularity (word / sentence / paragraph). Emits ordered segments (added / removed / unchanged / modified) plus a normalized similarity score [0.0, 1.0]. Case- + punctuation- + whitespace-normalization configurable. NO LLM call.",
+      "tags": null
+    },
+    {
+      "code": "TL-004",
+      "id": "68518925-d310-f111-8342-7c1e520aa4df",
+      "toolId": null,
+      "name": "Document Classifier",
+      "handler": "DocumentClassifierHandler",
+      "sideEffectClass": null,
+      "description": "Classify documents into categories/taxonomies",
+      "tags": null
+    },
+    {
+      "code": "TL-006",
+      "id": "69518925-d310-f111-8342-7c1e520aa4df",
+      "toolId": null,
+      "name": "Summary Generator",
+      "handler": "SummaryHandler",
+      "sideEffectClass": null,
+      "description": "Generate structured summaries of document sections or complete documents",
+      "tags": null
+    },
+    {
+      "code": "TL-010",
+      "id": "c01ef382-7c16-f111-8343-7c1e520aa4df",
+      "toolId": null,
+      "name": "General Analysis",
+      "handler": "GenericAnalysisHandler",
+      "sideEffectClass": null,
+      "description": "Reads prompts from Dataverse config, supports extract/classify/validate/generate/transform/analyze operations. No code changes needed for new tools",
+      "tags": null
+    },
+    {
+      "code": "CLAUSE-ANALYZER",
+      "id": "23434c23-d310-f111-8342-7ced8d1dc988",
+      "toolId": null,
+      "name": "SYS-Clause Analyzer",
+      "handler": "ClauseAnalyzerHandler",
+      "sideEffectClass": null,
+      "description": "LLM-assisted contract clause structuring. Identifies typed clauses (indemnity, liability, termination, payment, ip-assignment, confidentiality, governing-law, warranty, force-majeure, assignment) and returns per-clause structured fields plus non-overlapping span boundaries. Configurable clauseTypes filter and optional obligation / party extraction. Distinct from ClauseComparisonHandler (which DIFFS two clauses deterministically).",
+      "tags": null
+    },
+    {
+      "code": "DATE-EXTRACTOR",
+      "id": "0e956329-d310-f111-8342-7ced8d1dc988",
+      "toolId": null,
+      "name": "SYS-Date Extractor",
+      "handler": "DateExtractorHandler",
+      "sideEffectClass": null,
+      "description": "Pure deterministic date normalization + relative-date resolution. Parses ISO 8601, US/EU short formats, named months, quarter notation, and relative phrases ('next quarter', 'tomorrow', 'in 30 days') into canonical ISO 8601 dates. NO LLM call.",
+      "tags": null
+    },
+    {
+      "code": "ENTITY-EXTRACTOR",
+      "id": "10956329-d310-f111-8342-7ced8d1dc988",
+      "toolId": null,
+      "name": "SYS-Entity Extractor",
+      "handler": "EntityExtractorHandler",
+      "sideEffectClass": null,
+      "description": "LLM-assisted Named Entity Recognition (NER) with code-based validation + normalization. Extracts organizations, persons, locations, dates, money, emails, phone numbers, and URLs from free text. Configurable type filter (entityTypes) and confidence threshold (confidenceThreshold). Output entities are deterministically validated + normalized (ISO 8601 dates, lowercased emails, sanitized phones, uppercase currency codes).",
+      "tags": null
+    },
+    {
+      "code": "FINANCIAL-CALCULATOR",
+      "id": "15956329-d310-f111-8342-7ced8d1dc988",
+      "toolId": null,
+      "name": "SYS-Financial Calculator",
+      "handler": "FinancialCalculatorHandler",
+      "sideEffectClass": null,
+      "description": "Pure deterministic financial math: sum, tax, discount, FX conversion (configured rate table), weighted average, and aggregation by category. All money math uses decimal; mixed-currency operations are rejected. NO LLM call.",
+      "tags": null
+    },
+    {
+      "code": "TL-008",
+      "id": "16956329-d310-f111-8342-7ced8d1dc988",
+      "toolId": null,
+      "name": "Search Documents",
+      "handler": "SemanticSearchHandler",
+      "sideEffectClass": null,
+      "description": "Search knowledge bases using semantic similarity",
+      "tags": null
+    },
+    {
+      "code": "RISK-DETECTOR",
+      "id": "c1809840-f718-f111-8343-7ced8d1dc988",
+      "toolId": null,
+      "name": "SYS-Risk Detector",
+      "handler": "RiskDetectorHandler",
+      "sideEffectClass": null,
+      "description": "LLM-assisted risk identification with deterministic code-based severity scoring. The LLM identifies risks across legal, financial, operational, reputational, compliance, data-privacy, and contract categories with raw confidence values; the handler then assigns a final severity bucket (low / medium / high / critical) using a configurable per-category-weight × confidence formula. Severity is deterministic — identical LLM output + identical configuration produces byte-identical severity output across runs (FR-15 binding for legal-review reproducibility).",
+      "tags": null
+    },
+    {
+      "code": "GET-WORKSPACE-TAB-CONTENT",
+      "id": "cb930271-0e71-f111-ab0e-7ced8ddc4a05",
+      "toolId": null,
+      "name": "SYS-Get Workspace Tab Content",
+      "handler": "GetWorkspaceTabContentHandler",
+      "sideEffectClass": null,
+      "description": "Read the composed widget state of an existing workspace tab. Use this when the user refers to content they can see in a workspace tab (e.g., 'make the summary shorter', 'change the tldr') and you need the CURRENT state to reason about what to modify. Returns the composed sections + values from the tab's widget data — NOT raw streaming chunks. Inputs: tabId (required); sectionName (optional, scope read to one section). Outputs: status discriminator (ok | not_found | section_missing), widgetType, sections map (section name → value), sectionCount, message. Read-only — this tool NEVER mutates tab state; for edits use update_workspace_tab. When the tab is not in the current workspace state OR the sectionName is missing, the response is a structured re-readable status — never an error. Architecture §6.5 / §11.1.",
+      "tags": null
+    },
+    {
+      "code": "CLOSE-WORKSPACE-TAB",
+      "id": "cc930271-0e71-f111-ab0e-7ced8ddc4a05",
+      "toolId": null,
+      "name": "SYS-Close Workspace Tab",
+      "handler": "CloseWorkspaceTabHandler",
+      "sideEffectClass": null,
+      "description": "Closes an open workspace tab in the user's current chat-session workspace. Use this when the user asks to close a tab, dismiss a panel, or clear something from their workspace. Pass the stable 'tabId' of the tab. Pinned tabs cannot be closed through this tool — the response will indicate the tab is pinned and the user must explicitly unpin it first. Closing a non-existent or already-closed tab returns success (idempotent). Cosmos durable rows for previously-pinned data are preserved when a tab is closed.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-READ-QUERY",
+      "id": "8631a3cd-b678-f111-ab0e-7ced8ddc4a05",
+      "toolId": "dataverse.read_query",
+      "name": "SYS-Dataverse Read Query",
+      "handler": "DataverseReadQueryHandler",
+      "sideEffectClass": "Read",
+      "description": "Executes a read-only SQL SELECT against Dataverse under the calling user's permissions and returns rows with record-id citations. Use dataverse.describe FIRST to get the table's column logical names and types, then construct a query that strictly follows the supported dialect: SELECT [TOP n] explicit column list FROM one table [WHERE simple column-to-literal predicates combined with AND/OR] [ORDER BY column ASC|DESC]. NOT supported: SELECT *, JOIN, GROUP BY, aggregates (COUNT/SUM/AVG/MIN/MAX), subqueries, DISTINCT, HAVING, UNION, OFFSET, GETDATE(). For distributions/aggregations (counts by category), SELECT the category column across rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns (e.g. sprk_practicearea on sprk_matter) ARE selectable and return the referenced record's GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to display names. Choice columns return numeric option values — map them to labels via dataverse.describe. Default row cap 50 (TOP max 200). Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea to sprk_practicearea_ref, sprk_mattertype to sprk_mattertype_ref, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-CREATE-RECORD",
+      "id": "18b3531f-ba78-f111-ab0e-7ced8ddc4a05",
+      "toolId": "dataverse.create_record",
+      "name": "SYS-Dataverse Create Record",
+      "handler": "DataverseCreateRecordHandler",
+      "sideEffectClass": "Write",
+      "description": "Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-UPDATE-RECORD",
+      "id": "19b3531f-ba78-f111-ab0e-7ced8ddc4a05",
+      "toolId": "dataverse.update_record",
+      "name": "SYS-Dataverse Update Record",
+      "handler": "DataverseUpdateRecordHandler",
+      "sideEffectClass": "Write",
+      "description": "Updates columns on one existing Dataverse record under the calling user's permissions. Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Only the columns present in 'item' are changed. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns; comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"}. Update-only: a record that does not exist or is not visible to the user fails with not-found — it is never created. WRITE tool: executes with the user's own privileges. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-DELETE-RECORD",
+      "id": "da739125-ba78-f111-ab0e-7ced8ddc4a05",
+      "toolId": "dataverse.delete_record",
+      "name": "SYS-Dataverse Delete Record",
+      "handler": "DataverseDeleteRecordHandler",
+      "sideEffectClass": "Write",
+      "description": "Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely on explicit user consent: set hasUserApproved to true only after the user has affirmatively confirmed the deletion. The delete is permanent and executes with the user's own privileges; if the user cannot delete the record, the call fails with their access error. WRITE tool. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
+      "tags": null
+    },
+    {
+      "code": "MEMORY-WRITE",
+      "id": "2172b721-637c-f111-ab0e-7ced8ddc4a05",
+      "toolId": "memory.write",
+      "name": "SYS-Memory Write",
+      "handler": "MemoryWriteHandler",
+      "sideEffectClass": "Write",
+      "description": "Records a durable memory item for the current user or record scope so later turns can recall it. Memory writes are AI-initiated and silent; the user review/delete surface is the control. Tag every item with provenance (source, bindingId/ledgerRef, trustLevel) at capture time.",
+      "tags": null
+    },
+    {
+      "code": "MANAGE-PINNED-CONTEXT",
+      "id": "9625a354-906b-f111-ab0d-7ced8ddc4cc6",
+      "toolId": null,
+      "name": "SYS-Manage Pinned Context",
+      "handler": "ManagePinnedContextHandler",
+      "sideEffectClass": null,
+      "description": "Manage the user's persistent 'pinned memory' — the small set of always-in-context facts and preferences the assistant keeps across sessions. Use this when the user says 'remember X' (action=create, pinType=user-preference), 'always X' (action=create, pinType=system-rule), or 'forget X' (action=delete, pinType matches the existing pin; matched case-insensitively against the user's pins by title). Pinned items are user-curated memory; titles and content are user-authored and persisted verbatim. The 'matter-fact' pinType exists for completeness but is normally written through the Pinned Memory UI rather than via voice. Title is a short identifying label (≤200 chars); content carries the body (≤1000 chars; defaults to the title when omitted on create). On delete, only pinType + title are needed; content is ignored.",
+      "tags": null
+    },
+    {
+      "code": "SEND-WORKSPACE-ARTIFACT",
+      "id": "a2c9589d-ec6d-f111-ab0e-7ced8ddc4cc6",
+      "toolId": null,
+      "name": "SYS-Send Workspace Artifact",
+      "handler": "SendWorkspaceArtifactHandler",
+      "sideEffectClass": null,
+      "description": "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace LAYOUT as a live tab: widgetType 'Workspace' with widgetData {\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"}. Use layoutName 'Compose' when the user asks to open the Compose editor or to start composing/drafting a document in the workspace; other layouts (e.g. 'Daily Briefing', 'Documents') open the same way. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add widgetData.documentId (the sprk_document GUID, e.g. from a search result path tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted text, not stored documents) — omit documentId for them; the tab opens empty and the tool result says so — relay it honestly. If the requested layout does not exist, the tool result lists the available layout names — relay them honestly. The tab opens immediately in the workspace pane and the tool result confirms it; only claim a tab was opened when this tool result says so. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record an artifact to workspace state but are NOT visible in the current workspace UI — avoid them unless explicitly instructed. Agent-created tabs default to visible-to-assistant.",
+      "tags": null
+    },
+    {
+      "code": "UPDATE-WORKSPACE-TAB",
+      "id": "806162a3-ec6d-f111-ab0e-7ced8ddc4cc6",
+      "toolId": null,
+      "name": "SYS-Update Workspace Tab",
+      "handler": "UpdateWorkspaceTabHandler",
+      "sideEffectClass": null,
+      "description": "Update an existing workspace tab's widget data. Use this when you have refined a previously dispatched artifact and the user should see the updated state on the same tab (instead of a new one). Conflict resolution: pass the 'expectedLastUserEditAt' timestamp you observed when you last read the tab from your system-prompt snapshot. If the user has edited the tab since then, this tool will REFUSE with a 'stale_read' status — you must re-read the workspace state in your next turn and re-attempt with the refreshed timestamp. User edits always win. Omit expectedLastUserEditAt only when the tab has never been user-edited (e.g., you just created it via send_workspace_artifact).",
+      "tags": null
+    },
+    {
+      "code": "RECALL-SESSION-FILE",
+      "id": "d2bf8a49-416f-f111-ab0e-7ced8ddc4cc6",
+      "toolId": null,
+      "name": "SYS-Recall Session File",
+      "handler": "RecallSessionFileHandler",
+      "sideEffectClass": null,
+      "description": "Recall content from a session-uploaded file by scope + purpose; returns citation-bearing content. Use this tool for ANY legally-precise question (specific clauses, exact wording, dates, parties, dollar amounts). The file's precomputed summary is NOT authoritative — DO NOT quote it as if it were the source. Call this tool with requireCitations=true (the default) for any answer that uses recalled content, and cite the returned citations explicitly. Scope choices: 'summary' for high-level framing only (NEVER cite); 'relevant_sections' for targeted semantic search (default); 'full_text' for the whole document (auto-truncates at 8K tokens to summary + first 2K chars); 'tables' for tabular data; 'citations' for already-cited material. Purpose biases retrieval semantics: 'answer_question' (default semantic), 'quote' (exact-phrase substring filter), 'compare' (multi-file), 'summarize' (broader top-K), 'extract_dates' (date-token post-processing), 'verify' (broader top-K with citation markers). Architecture §8.1.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-DESCRIBE",
+      "id": "2255b2cb-b678-f111-ab0e-7ced8ddc4cc6",
+      "toolId": "dataverse.describe",
+      "name": "SYS-Dataverse Describe",
+      "handler": "DataverseDescribeHandler",
+      "sideEffectClass": "Read",
+      "description": "Describes Dataverse structure and records under the calling user's permissions (read-only). Path forms: 'tables/' lists all tables; 'tables/{logicalName}' returns the table schema with column logical names and types; 'tables/{logicalName}/records/{guid}' returns one full record. Use this FIRST to discover table and column logical names before calling dataverse.read_query, and to read full record details for paths returned by dataverse.search_data. Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+      "tags": null
+    },
+    {
+      "code": "DATAVERSE-SEARCH-DATA",
+      "id": "b62540d3-b678-f111-ab0e-7ced8ddc4cc6",
+      "toolId": "dataverse.search_data",
+      "name": "SYS-Dataverse Search Data",
+      "handler": "DataverseSearchDataHandler",
+      "sideEffectClass": "Read",
+      "description": "Searches Dataverse records for keywords under the calling user's permissions and returns matching records as citable paths (tables/{table}/records/{guid}) with relevance scores. Use this when the user asks to find records by name, keyword, or phrase and the exact table or column is unknown. For structured filtering on known columns use dataverse.read_query instead. Use dataverse.describe on a returned path to read the full record. Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+      "tags": null
+    },
+    {
+      "code": "ANALYSIS-RERUN",
+      "id": "2b09dfb5-5679-f111-ab0e-7ced8ddc4cc6",
+      "toolId": "analysis.rerun",
+      "name": "SYS-Analysis Rerun",
+      "handler": "AnalysisExecutionHandler",
+      "sideEffectClass": "Read",
+      "description": "Re-run the session's analysis playbook from scratch against the active document, optionally with additional instructions or focus areas. Use when the user asks to re-run, redo, or re-execute the analysis (e.g. 'rerun the analysis with more focus on financial risks'). Streams per-stage progress and replaces the document pane content with the new analysis on completion; the previous version is preserved in the client undo stack. Requires a session bound to a playbook and an active document.",
+      "tags": null
+    },
+    {
+      "code": "ANALYSIS-REFINE",
+      "id": "55521abc-5679-f111-ab0e-7ced8ddc4cc6",
+      "toolId": "analysis.refine",
+      "name": "SYS-Analysis Refine",
+      "handler": "AnalysisExecutionHandler",
+      "sideEffectClass": "Read",
+      "description": "Refine the current analysis output based on a conversational follow-up instruction — adjust, expand, or narrow the existing analysis without re-running it (e.g. 'focus more on the risk factors', 'make the recommendations more actionable'). Fetches the session's current analysis output and applies the instruction with a focused single-turn transform, returning the complete refined analysis text. Requires an active analysis in the session.",
+      "tags": null
+    },
+    {
+      "code": "EMAIL-DRAFT",
+      "id": "bc11e90d-6b79-f111-ab0e-7ced8ddc4cc6",
+      "toolId": "email.draft",
+      "name": "SYS-Email Draft",
+      "handler": "EmailDraftToolHandler",
+      "sideEffectClass": "Communicate",
+      "description": "Creates a DRAFT email record in Spaarke's Communication service for the user to review and send. NEVER sends email - sending is always user-initiated from the Communication service. Compose the subject and body from grounded session outputs (summaries, records created this session) and cite their ledger keys in source_refs. The draft CANNOT carry attachments — never write body text that references an attached or enclosed document ('please find attached', 'enclosed is'). When the user asks to email content already produced in this conversation (a summary, findings, a comparison), include that content INLINE in the body; if their request implies attaching a file, say the email is sent without attachments and inline the material instead. Optionally associate the draft to a record via 'regarding' (e.g. the matter it concerns). COMMUNICATE tool: invocation is confirmation-gated; the record is created with the user's own privileges.",
+      "tags": null
+    }
+  ],
+  "models": [
+    {
+      "avoidFor": [
+        "classification",
+        "triage",
+        "simple-summary"
+      ],
+      "provider": "AzureOpenAI",
+      "name": "gpt-4o",
+      "contextWindow": 128000,
+      "speedTier": "medium",
+      "recommendedFor": [
+        "deep-analysis",
+        "extraction",
+        "legal-reasoning",
+        "financial-calculation"
+      ],
+      "costTier": "high"
+    },
+    {
+      "avoidFor": [
+        "complex-reasoning",
+        "detailed-extraction",
+        "legal-reasoning"
+      ],
+      "provider": "AzureOpenAI",
+      "name": "gpt-4o-mini",
+      "contextWindow": 128000,
+      "speedTier": "fast",
+      "recommendedFor": [
+        "classification",
+        "triage",
+        "simple-summary",
+        "condition-routing"
+      ],
+      "costTier": "low"
+    },
+    {
+      "avoidFor": [
+        "new-playbooks"
+      ],
+      "provider": "AzureOpenAI",
+      "name": "gpt-4-turbo",
+      "contextWindow": 128000,
+      "speedTier": "slow",
+      "recommendedFor": [
+        "legacy-compatibility"
+      ],
+      "costTier": "high"
+    }
+  ],
+  "modelSelectionRules": [
+    {
+      "model": "gpt-4o-mini",
+      "taskType": "classification",
+      "reason": "Bounded decision; speed over depth"
+    },
+    {
+      "model": "gpt-4o-mini",
+      "taskType": "triage",
+      "reason": "Binary/categorical; speed matters"
+    },
+    {
+      "model": "gpt-4o",
+      "taskType": "deep-analysis",
+      "reason": "Multi-faceted reasoning requires full model"
+    },
+    {
+      "model": "gpt-4o",
+      "taskType": "extraction",
+      "reason": "Accuracy critical for structured output"
+    },
+    {
+      "model": "gpt-4o-mini",
+      "taskType": "summarization-simple",
+      "reason": "TL;DR and bullets well-handled by mini"
+    },
+    {
+      "model": "gpt-4o",
+      "taskType": "summarization-detailed",
+      "reason": "Citations and cross-references need full model"
+    },
+    {
+      "model": "gpt-4o",
+      "taskType": "legal-reasoning",
+      "reason": "Nuanced interpretation and risk assessment"
+    },
+    {
+      "model": "gpt-4o",
+      "taskType": "financial-calculation",
+      "reason": "Multi-step computation needs accuracy"
+    },
+    {
+      "model": "gpt-4o-mini",
+      "taskType": "condition-routing",
+      "reason": "Simple boolean/categorical checks"
+    }
+  ],
+  "compositions": {}
+}

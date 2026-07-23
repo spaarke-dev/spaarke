@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/teams-manifest/MicrosoftTeams.schema.json",
   "manifestVersion": "devPreview",
   "id": "c1258e2d-1688-49d2-ac99-a7485ebd9995",
-  "version": "1.0.0",
+  "version": "1.0.20",
   "name": {
     "short": "Spaarke",
     "full": "Spaarke Document Management for Outlook"

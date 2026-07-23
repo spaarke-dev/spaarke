@@ -1,19 +1,27 @@
 /**
- * WorkspacePane — compose-launch relaunch activation tests (issue #572 Defect 1d).
+ * WorkspacePane — compose-launch unification tests (spaarkeai-compose-r2).
  *
- * Defect: when SpaarkeAi is launched with `composeMode=editor` (ribbon
- * Open-in-Compose modal) and the NFR-09 tab restore brings back a session
- * where the Compose layout tab is ALREADY OPEN but NOT ACTIVE, the
- * auto-install-default effect saw `alreadyOpen === true` and returned WITHOUT
- * activating it — violating its own "we always want the Compose layout on
- * top" rule. Because the tab strip is hidden in compose-launch mode, the user
- * was stranded on whatever tab the persisted `activeTabId` pointed at (the
- * normal three-pane workspace) with no way to reach the editor.
+ * UNIFY (completes the R1 flip): the ribbon `composeMode=editor` launch
+ * (Open-in-Compose modal) now opens a first-class DIRECT `'compose'` widget tab
+ * (widgetType 'compose'), NOT the "Compose" workspace LAYOUT tab
+ * (widgetType 'workspace' + layoutName 'Compose'). Every Compose mount is
+ * therefore protected by the keep-mounted-hidden keep-alive
+ * (WorkspaceTabManagerComponent) — opening another tab (e.g. Email) no longer
+ * unmounts the loaded document.
  *
- * Fix under test: the auto-install effect now calls
- * `manager.setActiveTab(existingTab.id)` (+ state sync + tab_change dispatch)
- * for the already-open Compose tab in compose-launch mode instead of
- * returning early.
+ * Contracts asserted:
+ *   1. A FRESH compose-launch (no restore) opens a widgetType 'compose' tab,
+ *      makes it active, and maps the ribbon stored-document launch context
+ *      (composeLaunch.document + .driveId) onto the compose SEED
+ *      (widgetData.compose.{speDriveItemId,sprkDocumentId,speDriveId,fileName})
+ *      with the filename hoisted to the top-level server-readable `filename`.
+ *      The BFF default layout (Daily Briefing) is NOT installed behind it.
+ *   2. RELAUNCH where a compose tab was restored (issue #572 Defect 1d): the
+ *      restored 'compose' tab is REUSED + ACTIVATED (not stranded on the
+ *      persisted active tab), with NO duplicate compose tab.
+ *
+ * A regression that mounts Compose as a 'workspace' layout tab fails contract
+ * (1)'s widgetType assertion.
  *
  * Harness copied from WorkspacePane.tab-restore-race.test.tsx (same restore
  * GET delay to reproduce the production effect ordering).
@@ -28,12 +36,13 @@ import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 
 // ---------------------------------------------------------------------------
 // Controllable fetch mock — GET /tabs resolves on a real macrotask delay
-// (mirrors the tab-restore-race harness). PATCH bodies are recorded so we can
-// assert the activation write-through carries the Compose tab as active.
+// (mirrors the tab-restore-race harness). PATCH bodies are recorded (incl.
+// per-tab widgetData) so we can assert the compose tab is created/activated
+// with the correct seed.
 // ---------------------------------------------------------------------------
 
 interface RecordedPatch {
-  tabs: Array<{ id: string; widgetType: string }>;
+  tabs: Array<{ id: string; widgetType: string; widgetData: unknown }>;
   activeTabId: string | null;
 }
 
@@ -80,12 +89,11 @@ jest.mock('@spaarke/ai-widgets', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const actual = jest.requireActual('@spaarke/ai-widgets') as any;
 
-  // Stub renders the layoutName from widgetData so the test can tell WHICH
-  // workspace tab's widget is currently active (only the active tab renders).
+  // Stub renders the widgetType so the test can tell WHICH tab's widget is
+  // currently rendered (the compose keep-alive keeps the compose stub mounted).
   const makeStub = (widgetType: string): React.FC<{ data?: unknown }> => {
-    return function StubWidget({ data }: { data?: unknown }): React.JSX.Element {
-      const layoutName = (data as { layoutName?: string } | null)?.layoutName ?? widgetType;
-      return <div data-testid="active-widget-stub">{layoutName}</div>;
+    return function StubWidget(): React.JSX.Element {
+      return <div data-testid={`active-widget-${widgetType}`}>{widgetType}</div>;
     };
   };
 
@@ -97,7 +105,7 @@ jest.mock('@spaarke/ai-widgets', () => {
       getAccessToken: jest.fn().mockResolvedValue('test-token'),
       bffBaseUrl: 'https://test-bff.example.com',
       tenantId: 'test-tenant',
-      chatSessionId: 'session-compose-relaunch',
+      chatSessionId: 'session-compose-unify',
       setChatSessionId: jest.fn(),
       playbookId: undefined,
       setPlaybookId: jest.fn(),
@@ -119,14 +127,19 @@ jest.mock('@spaarke/ai-widgets', () => {
   };
 });
 
-// Compose-launch mode: `useComposeLaunch` reports the editor launch, and the
-// pane-collapse context is absent (modal host).
+// Compose-launch mode: `useComposeLaunch` reports the editor launch carrying a
+// stored-document ref (the ribbon Open-in-Compose contract). Pane-collapse
+// context is absent (modal host).
 jest.mock('../../shell/ThreePaneShell', () => ({
   usePaneCollapseContext: () => null,
   useComposeLaunch: () => ({
     composeMode: 'editor',
-    document: null,
-    driveId: undefined,
+    document: {
+      speDriveItemId: 'drive-item-1',
+      sprkDocumentId: 'doc-1',
+      fileName: 'Brief.docx',
+    },
+    driveId: 'drive-1',
   }),
 }));
 
@@ -186,6 +199,9 @@ function renderPane(): { bus: PaneEventBus } {
   return { bus };
 }
 
+const composeTabsIn = (patch: RecordedPatch) =>
+  patch.tabs.filter(t => t.widgetType === 'compose');
+
 beforeEach(() => {
   recordedPatches.length = 0;
   authenticatedFetchMock.mockClear();
@@ -197,13 +213,58 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Issue #572 Defect 1d — compose relaunch activates the restored Compose tab
+// Contract 1 — fresh compose-launch opens a DIRECT 'compose' tab with the seed
 // ---------------------------------------------------------------------------
 
-describe('WorkspacePane — compose-launch relaunch activation (#572 Defect 1d)', () => {
-  it('activates the ALREADY-OPEN Compose tab when relaunched in composeMode=editor (does not strand the user on the restored active tab)', async () => {
-    // Persisted session: Compose tab open but Daily Briefing is the
-    // persisted active tab — the NFR-09 restore honors that activeTabId.
+describe('WorkspacePane — compose-launch UNIFY (widgetType compose)', () => {
+  it('a fresh composeMode=editor launch opens a widgetType:compose tab carrying the ribbon stored-doc seed (not a workspace layout tab)', async () => {
+    renderPane();
+
+    // The Compose DIRECT widget mounts (kept-alive host renders it).
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('active-widget-compose')).toBeInTheDocument();
+      },
+      { timeout: 3000 },
+    );
+
+    // The BFF default (Daily Briefing) must NOT be installed behind Compose.
+    expect(screen.queryByTestId('active-widget-workspace')).not.toBeInTheDocument();
+    // Compose-launch mode hides the tab strip.
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+
+    // The persisted state has exactly ONE compose tab, active, with the seed
+    // mapped from the launch context (+ filename hoisted to the top level).
+    await waitFor(
+      () => {
+        const last = recordedPatches[recordedPatches.length - 1];
+        expect(last).toBeDefined();
+        expect(composeTabsIn(last)).toHaveLength(1);
+      },
+      { timeout: 3000 },
+    );
+    const last = recordedPatches[recordedPatches.length - 1];
+    const composeTab = composeTabsIn(last)[0];
+    expect(last.activeTabId).toBe(composeTab.id);
+
+    const seed = (composeTab.widgetData as { compose?: Record<string, unknown>; filename?: string });
+    expect(seed.compose).toMatchObject({
+      speDriveItemId: 'drive-item-1',
+      sprkDocumentId: 'doc-1',
+      speDriveId: 'drive-1',
+      fileName: 'Brief.docx',
+    });
+    // R3 server-readable filename contract — hoisted to the top level.
+    expect(seed.filename).toBe('Brief.docx');
+  });
+
+  // -------------------------------------------------------------------------
+  // Contract 2 — relaunch reuses + activates the restored compose tab (#572 1d)
+  // -------------------------------------------------------------------------
+
+  it('activates the ALREADY-OPEN compose tab on relaunch (does not strand the user; no duplicate)', async () => {
+    // Persisted session: a compose tab is open but Daily Briefing is the
+    // persisted active tab — NFR-09 restore honors that activeTabId.
     restoreSnapshot = {
       tabs: [
         {
@@ -213,9 +274,9 @@ describe('WorkspacePane — compose-launch relaunch activation (#572 Defect 1d)'
           displayName: 'Daily Briefing',
         },
         {
-          id: 'wstab-2-workspace',
-          widgetType: 'workspace',
-          widgetData: { layoutId: 'layout-compose', layoutName: 'Compose' },
+          id: 'wstab-2-compose',
+          widgetType: 'compose',
+          widgetData: { compose: { speDriveItemId: 'drive-item-1', fileName: 'Brief.docx' } },
           displayName: 'Compose',
         },
       ],
@@ -224,72 +285,25 @@ describe('WorkspacePane — compose-launch relaunch activation (#572 Defect 1d)'
 
     renderPane();
 
-    // The active widget must end up being the COMPOSE layout — pre-fix the
-    // auto-install effect early-returned on alreadyOpen and the user was left
-    // on Daily Briefing with the tab strip hidden (no way to switch).
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('active-widget-stub')).toHaveTextContent('Compose');
-      },
-      { timeout: 3000 },
-    );
-
-    // Compose-launch mode hides the tab strip — no tabs are rendered, which
-    // is exactly why the activation (not just install-skip) matters.
-    expect(screen.queryAllByRole('tab')).toHaveLength(0);
-
-    // The activation is persisted: the last write-through PATCH carries the
-    // Compose tab as the active tab.
+    // The restored compose tab ends up ACTIVE — pre-fix (issue #572 Defect 1d)
+    // the user was stranded on Daily Briefing with the tab strip hidden.
     await waitFor(
       () => {
         expect(recordedPatches.length).toBeGreaterThan(0);
         expect(recordedPatches[recordedPatches.length - 1]?.activeTabId).toBe(
-          'wstab-2-workspace',
+          'wstab-2-compose',
         );
       },
       { timeout: 3000 },
     );
-  });
 
-  it('does not duplicate the Compose tab on relaunch (activation replaces the install)', async () => {
-    restoreSnapshot = {
-      tabs: [
-        {
-          id: 'wstab-1-workspace',
-          widgetType: 'workspace',
-          widgetData: { layoutId: 'layout-default', layoutName: 'Daily Briefing' },
-          displayName: 'Daily Briefing',
-        },
-        {
-          id: 'wstab-2-workspace',
-          widgetType: 'workspace',
-          widgetData: { layoutId: 'layout-compose', layoutName: 'Compose' },
-          displayName: 'Compose',
-        },
-      ],
-      activeTabId: 'wstab-1-workspace',
-    };
+    // Compose-launch mode hides the tab strip.
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
 
-    renderPane();
-
-    await waitFor(
-      () => {
-        expect(screen.getByTestId('active-widget-stub')).toHaveTextContent('Compose');
-      },
-      { timeout: 3000 },
-    );
-
-    // Every write-through PATCH keeps exactly ONE Compose tab (no re-install
-    // stacked a duplicate).
-    await waitFor(
-      () => {
-        expect(recordedPatches.length).toBeGreaterThan(0);
-      },
-      { timeout: 3000 },
-    );
+    // Every write-through keeps exactly ONE compose tab and TWO tabs total
+    // (no re-install stacked a duplicate).
     for (const patch of recordedPatches) {
-      const composeTabs = patch.tabs.filter(t => t.id === 'wstab-2-workspace');
-      expect(composeTabs).toHaveLength(1);
+      expect(composeTabsIn(patch)).toHaveLength(1);
       expect(patch.tabs).toHaveLength(2);
     }
   });

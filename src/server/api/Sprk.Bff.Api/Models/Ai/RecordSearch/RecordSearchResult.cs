@@ -62,6 +62,13 @@ public sealed record RecordSearchResult
     public IReadOnlyList<string>? Keywords { get; init; }
 
     /// <summary>
+    /// Reference numbers on the record (matter number, invoice number, PO number, etc.). Used by the
+    /// Association Engine's deterministic record-name/number match rung to verify an exact number appearance.
+    /// </summary>
+    [JsonPropertyName("referenceNumbers")]
+    public IReadOnlyList<string>? ReferenceNumbers { get; init; }
+
+    /// <summary>
     /// Record creation timestamp.
     /// </summary>
     [JsonPropertyName("createdAt")]

@@ -10,7 +10,7 @@
  */
 
 import * as React from 'react';
-import { SendEmailDialog, type ISendEmailPayload } from '@spaarke/ui-components';
+import { SendEmailDialog } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
 import { navigateToEntity } from '../../utils/navigation';
@@ -56,11 +56,6 @@ function buildEmailBody(documentName: string, fileSummary?: string): string {
     `────\n\n` +
     `Kind regards`
   );
-}
-
-function extractEmailFromUserName(name: string): string {
-  const match = name.match(/\(([^)]+@[^)]+)\)/);
-  return match ? match[1] : name;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,30 +143,6 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
     return searchUsersAsLookup(xrm.WebApi, query);
   }, []);
 
-  const handleSendEmail = React.useCallback(
-    async (payload: ISendEmailPayload) => {
-      const emailAddress = extractEmailFromUserName(payload.to.name);
-      const response = await authenticatedFetch(
-        `${getBffBaseUrl()}/api/communications/send`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: [emailAddress],
-            subject: payload.subject,
-            body: payload.body,
-            bodyFormat: 'PlainText',
-            associations: [{ entityType: 'sprk_document', entityId: documentId }],
-          }),
-        }
-      );
-      if (!response.ok) {
-        throw new Error(`Send failed (${response.status})`);
-      }
-    },
-    [documentId]
-  );
-
   return (
     <>
       <RichFilePreviewDialog
@@ -190,10 +161,14 @@ export const FilePreviewDialog: React.FC<IFilePreviewDialogProps> = ({
       <SendEmailDialog
         open={emailDialogOpen}
         onClose={() => setEmailDialogOpen(false)}
-        defaultSubject={buildEmailSubject(documentName)}
-        defaultBody={buildEmailBody(documentName, fileSummary)}
-        onSearchUsers={handleSearchUsers}
-        onSend={handleSendEmail}
+        initialSubject={buildEmailSubject(documentName)}
+        initialBody={buildEmailBody(documentName, fileSummary)}
+        initialBodyFormat="PlainText"
+        associations={[{ entityType: 'sprk_document', entityId: documentId }]}
+        onSearchRecipients={handleSearchUsers}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={getBffBaseUrl()}
+        onError={err => console.error('[FilePreviewDialog] Send failed:', err.detail)}
       />
     </>
   );

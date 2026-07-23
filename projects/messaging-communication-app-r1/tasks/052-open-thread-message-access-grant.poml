@@ -1,0 +1,104 @@
+<task id="052" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Open-thread message access grant — impersonated-read completion (FR-11 / NFR-06)</title>
+    <phase>W5 — BFF Endpoints (gap closure)</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>040,041,043,050</dependencies>
+    <blocks>060</blocks>
+    <tags>bff-api, communication, security</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Closes a security-sensitive read-model gap surfaced by task 043: sprk_communication rows are app-owned + Read=User-level, so task-050's impersonated read returns EMPTY for Open/record-anchored threads (the primary R1 topology). Touches the shared send/ingest persist paths; FULL protocol + Step 9.5 gates.</rigor-reason>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>FR-11, NFR-06</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Close the Open-thread message-access gap (surfaced by task 043, recorded in notes/access-model-decision.md "OPEN ARCHITECTURAL FINDING"). `sprk_communication` rows are created OWNED BY THE APP IDENTITY and Read is User-level, so task-050's impersonated timeline read returns NOTHING to matter-team members for Open / record-anchored threads — the primary R1 topology. Task 043 already fixed this for DIRECT threads (grants each message to the two participants). This task adds the analogous grant for OPEN threads: at message persist, grant the message ReadAccess to the ADR-034-derived membership set that task 041 already computes.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication subsystem. Authority on the message persist paths (task 051 `CommunicationService`, task 021/031 `MessagingIngestor`), the membership derivation (task 041 `IThreadMembershipDerivationService`), the Direct-thread grant (task 043 `IDirectThreadAccessService` / `IDataverseAccessGrantService`), and the impersonated read (task 050). Keep this a thin generalization of the EXISTING 043 grant hook — not a parallel path.
+  </role>
+
+  <goal>
+    At message persist, an OPEN (record-anchored) thread's `sprk_communication` is granted ReadAccess to the ADR-034-derived membership set (task 041 `DeriveAuthorizedSetAsync`), so task-050's impersonated read returns matter-thread messages to authorized matter-team members. Direct threads keep their existing two-party grant (task 043). Best-effort / non-fatal (NFR-02); no-op when a thread has no derivable membership. Build clean; Communication tests pass; publish-size + CVE + Placement Justification reported; Step 9.5 gates run; `/conflict-check` clean.
+  </goal>
+
+  <context>
+    <background>
+      The R1 access model (notes/access-model-decision.md) enforces record-level read access via Dataverse IMPERSONATION (task 050: `MSCRMCallerID` = caller systemuserid). That returns exactly the rows the caller may READ. But `sprk_communication` rows are persisted owned by the app-only identity (`CommunicationService.CreateMessageDataverseRecordAsync` / `MessagingIngestor.PersistAsync` never set `ownerid`), and the owner set Read=User-level. So an impersonated matter-team member is neither the owner nor shared → the message is not returned. Task 043 discovered this and fixed DIRECT threads via `IDirectThreadAccessService.GrantMessageAccessAsync` (granting each Direct message to the two participants, called on both persist paths). OPEN threads were left with no grant — this task closes that.
+
+      **Component Justification (§11):** (1) Existing — the grant hook (`GrantMessageAccessAsync`, task 043) is ALREADY called on both persist paths and ALREADY grants for Direct threads; task 041's `IThreadMembershipDerivationService.DeriveAuthorizedSetAsync(threadId)` ALREADY computes the Open-thread authorized set (reverse-ADR-034). (2) Extension — extend the existing grant hook to ALSO handle the Open branch by granting to the derived set; reuse 041's derivation + 043's `IDataverseAccessGrantService.GrantAccessAsync`. No new service, no new derivation. (3) Cost-of-doing-nothing (concrete) — without it, task-050's read returns EMPTY for every Open/record-anchored thread, so the task-060 timeline renders blank for matter conversations (FR-11 acceptance fails); a concrete contract failure, not "future flexibility."
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs (task 043 — the grant hook to generalize; GrantMessageAccessAsync)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Access/IDirectThreadAccessService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Membership/ThreadMembershipDerivationService.cs (task 041 — DeriveAuthorizedSetAsync computes the Open set)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Membership/IThreadMembershipDerivationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs (send persist path — hook already wired)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingIngestor.cs (ingest persist path — hook already wired)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-11 / NFR-06">Open-thread messages must be readable by exactly the ADR-034-derived membership set under the impersonated read (task 050) — no more, no less. Do NOT over-grant (e.g. org-wide). A non-member's impersonated read still returns nothing.</constraint>
+    <constraint source="NFR-02">Best-effort / non-fatal: a grant (or derivation) failure MUST NOT fail the send or ingest. Log + swallow, per the existing 043 hook.</constraint>
+    <constraint source="project">Reuse task 041's `DeriveAuthorizedSetAsync` (do NOT re-derive membership) and task 043's `IDataverseAccessGrantService.GrantAccessAsync` (do NOT add a second grant mechanism). Direct threads keep the existing two-party grant — do not regress it.</constraint>
+    <constraint source="R1-scope">Grant to systemuser participants; contact (external) participants are R2 — skip them (internal-only R1). Coarse identity types are already excluded by 041's derivation.</constraint>
+    <constraint source="ADR-010 / ADR-032">Any new registration via CommunicationModule, unconditional. Prefer extending the existing service over a new one.</constraint>
+    <constraint source="root-§10">bff-extensions Placement Justification in the PR; publish-size delta vs ~46.99 MB (043 baseline); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/notes/access-model-decision.md</file>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+    </files>
+    <patterns>
+      <pattern name="Generalized message-access grant" location="src/server/api/Sprk.Bff.Api/Services/Communication/Access/DirectThreadAccessService.cs">
+        The persist-path hook grants a message to its thread's authorized principals: Direct → owner ∪ POA-grantees (existing); Open → task-041 DeriveAuthorizedSetAsync systemuser participants (this task). Same GrantAccessAsync call; topology decides the principal source.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 043's `DirectThreadAccessService.GrantMessageAccessAsync` + `GetParticipantSystemUserIdsAsync` (the topology gate), task 041's `IThreadMembershipDerivationService.DeriveAuthorizedSetAsync` + its result model (`ThreadAuthorizedSet` / `AuthorizedParticipant` / `ParticipantReference`), and the two persist-path call sites (CommunicationService, MessagingIngestor) to confirm the hook is already invoked for all resolved threads.</step>
+    <step order="2">Extend the grant hook so that for a NON-Direct (Open/record-anchored) thread it grants the message ReadAccess to the task-041 derived set's systemuser participants (skip contacts — R2). Direct threads keep the existing owner ∪ POA two-party grant unchanged. Inject `IThreadMembershipDerivationService` into the service (it is a singleton — safe).</step>
+    <step order="3">Keep it best-effort / non-fatal (mirror the existing try/catch); de-duplicate principals; no-op when the derived set is empty. Do NOT change the call sites if the hook signature is unchanged (preferred — generalize inside the hook).</step>
+    <step order="4">Register any new dependency via CommunicationModule (unconditional). Confirm no captive-dependency (all singletons).</step>
+    <step order="5">Tests (closed set, mirror 043's style — real collaborators where cheap, mock only module boundaries; NO Mock&lt;HttpMessageHandler&gt;): an OPEN thread message is granted to EXACTLY the 041-derived systemuser set (assert the grant principals); a NON-member is NOT granted (negative); a DIRECT thread still grants only the two participants (no regression); a contact participant is skipped (R2); derivation/grant failure is swallowed (best-effort).</step>
+    <step order="6">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm all pass.</step>
+    <step order="7.1">Publish + measure compressed size; report delta vs ~46.99 MB. Expected ≈ 0 (no new packages).</step>
+    <step order="7.2">`dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.</step>
+    <step order="9.5">FULL-rigor gates: code-review (focus: exactly-derived-set grant, no over-grant, Direct not regressed, best-effort) + adr-check. Cite Placement Justification.</step>
+    <step order="9.6">Run `/conflict-check` (shared Services/Communication/ hot-path).</step>
+    <step order="10">Update TASK-INDEX.md (052 ✅) + current-task.md; record the decision (grant-to-derived-set at persist; scale note for R2).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">At persist, an OPEN/record-anchored thread's message is granted ReadAccess to exactly the task-041 `DeriveAuthorizedSetAsync` systemuser participants.</criterion>
+    <criterion testable="true">A user NOT in the derived set is not granted the message (negative) — their impersonated read (task 050) still returns nothing.</criterion>
+    <criterion testable="true">DIRECT threads still grant only the two participants (no regression to task 043).</criterion>
+    <criterion testable="true">Contact (external) participants are skipped (R2); grant/derivation failures are swallowed (best-effort, NFR-02).</criterion>
+    <criterion testable="true">Reuses task 041 derivation + task 043 `IDataverseAccessGrantService` — no second derivation or grant mechanism (diff-verifiable).</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication tests pass; publish-size delta ≈ 0; no new HIGH CVE; Step 9.5 gates run; `/conflict-check` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Scale note (for R2, not R1): granting each Open-thread message to the full derived set is N grants/message. For R1 matter-team sizes this is acceptable + best-effort. A more scalable R2 option is to assign the message to the matter's owning TEAM (one AssignRequest → team members inherit read) — record but do NOT build in R1. Depends on 041 (derivation), 043 (grant service + hook), 050 (the read this unblocks). parallel-safe=false: shares Services/Communication/Access with 043's just-landed code.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load knowledge/files before starting. FULL rigor — Step 9.5 gates REQUIRED (security-sensitive read-model completion). Publish-size delta + CVE + Placement Justification in the PR. Run `/conflict-check` before the PR. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

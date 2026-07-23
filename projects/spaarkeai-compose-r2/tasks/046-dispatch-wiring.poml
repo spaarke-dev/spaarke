@@ -1,8 +1,8 @@
 <task id="046" project="spaarkeai-compose-r2">
   <metadata>
-    <title>FR-13 dispatch wiring (PaneEventBus compose_action_request → ConversationPane → dispatchConsumer)</title>
+    <title>FR-13 dispatch wiring (offer→dispatchConsumer hand-off + compose_assistant_insert apply leg — real compose-contracts.ts flows, ZERO new discriminants)</title>
     <phase>4 Catalog</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>016, 030</dependencies>
     <blocks>082</blocks>
@@ -17,7 +17,24 @@
   </metadata>
 
   <prompt>
-    Wire the client dispatch path for all five R2 catalog actions: the Compose BubbleMenu toolbar (and doc-level overflow) emits a PaneEventBus `compose_action_request` on the `conversation` channel with `{bindingId, selection, args, correlationId}`; `ConversationPane` subscribes, calls `dispatchConsumer(bindingId, args)` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → `GetBindingByIdAsync` → prompted executor. For the compose-draft-alternative leg, on the `compose`-disposition SSE frame the pane emits `compose_edit_apply_request` on the `workspace` channel REFERENCING the ledger entry (never carrying the payload). ADD ZERO new BFF routes; NO string-key resolution outside the Binding table (ADR-039 §7.2). Add the typed PaneEventBus discriminants (ADR-030).
+    RE-SCOPED 2026-07-09 (Path C, CLAUDE.md §6.5) — the original prompt named two RETRACTED "invented"
+    PaneEventBus discriminants (`compose_action_request` / `compose_edit_apply_request`) that Spike 0 +
+    design.md §7.2 + ComposeEditor.tsx JSDoc + useSerialActionQueue.ts explicitly forbid. The real,
+    published contract is `compose-contracts.ts`. Wire the client dispatch path for the five R2 catalog
+    actions using the SHIPPED flows, adding ZERO new PaneEventBus discriminants:
+    (1) The dispatch TRIGGER is the DIRECT Click-path seam — `dispatchConsumer(bindingId, {slots})` →
+        `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → `GetBindingByIdAsync`
+        → prompted executor. Already wired: ComposeEditor mounts `ComposeAiToolbar` (task 030) with
+        `enqueueComposeAction`; ConversationPane exposes `dispatchComposeAction` via `useSerialActionQueue`
+        → `createConsumerDispatcher`. VERIFY/COMPLETE the offer→dispatch hand-off (ComposeWorkspace threading
+        `ConversationPane.dispatchComposeAction` → `ComposeEditor.enqueueComposeAction`).
+    (2) Flow 2 is the EXISTING `conversation.compose_selection_offer` (ComposeEditor already emits it via
+        `useSelectionEventDispatch`) — pane choreography, not the trigger; confirm it is consumed.
+    (3) The draft-alternative apply leg emits the EXISTING `workspace.compose_assistant_insert` discriminant
+        (task 016 added its `ledgerRef?` field) REFERENCING the ledger entry `{bindingId}@t{n}` on the
+        `compose`-disposition SSE frame — NEVER carrying the payload as source of truth.
+    ADD ZERO new BFF routes and ZERO new PaneEventBus discriminants; NO string-key resolution outside the
+    Binding table (ADR-039 §7.2). Add the §7.2 code-review checklist item.
   </prompt>
 
   <role>
@@ -25,7 +42,14 @@
   </role>
 
   <goal>
-    A wired dispatch path where selecting text (or the doc-level overflow) in Compose dispatches any of the five catalog Bindings through the shipped seam with zero new routes: `compose_action_request` (conversation channel) consumed by `ConversationPane`, resolved via `dispatchConsumer`, streamed back as an assistant message; the draft-alternative leg emits `compose_edit_apply_request` (workspace channel) referencing the ledger entry after the `compose`-disposition SSE frame. Typed PaneEventBus discriminants added; a code-review checklist item enforces §7.2 (no new endpoint, no string-key routing).
+    A wired dispatch path where selecting text (or the doc-level overflow) in Compose dispatches any of the
+    five catalog Bindings through the shipped Click-path seam with ZERO new routes and ZERO new PaneEventBus
+    discriminants: the toolbar's `enqueueComposeAction` reaches `ConversationPane.dispatchComposeAction`
+    (via `useSerialActionQueue` → `createConsumerDispatcher` → `dispatchConsumer(bindingId, {slots})`),
+    streamed back as an assistant message; the existing `conversation.compose_selection_offer` choreography
+    is consumed; and the draft-alternative apply leg emits the EXISTING `workspace.compose_assistant_insert`
+    discriminant referencing the ledger entry `{bindingId}@t{n}` after the `compose`-disposition SSE frame.
+    A code-review checklist item enforces §7.2 (no new endpoint, no string-key routing, NO new discriminant).
   </goal>
 
   <context>
@@ -33,13 +57,14 @@
       Spec FR-13 + design §3 (Workspace→Assistant + Assistant→Workspace flows) + §7.2 (the full dispatch sequence + the permanent "zero new endpoints" ruling). The seam already exists (shipped in redesign-r1): this task adds only the client choreography — the two PaneEventBus discriminants and the ConversationPane subscription/dispatch — never a server route. Depends on FR-04 draft-into-editor (016) for the `compose`-disposition SSE-frame consumption and FR-14 inline toolbar (030) for the event emitter.
     </background>
     <relevant-files>
-      <file purpose="event-bus">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts — ADD typed discriminants `compose_action_request` (conversation channel) + `compose_edit_apply_request` (workspace channel); no `any` payloads (ADR-030)</file>
-      <file purpose="assistant-consumer">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — subscribe to `compose_action_request`, call dispatchConsumer, render streamed response; on the `compose` SSE frame emit `compose_edit_apply_request` referencing the ledger entry</file>
-      <file purpose="dispatch-seam-REUSE">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — REUSE: dispatchConsumer(bindingId, args) → POST /api/ai/chat/sessions/{id}/dispatch. NO new endpoint; NO string-key routing</file>
-      <file purpose="toolbar-emitter">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the BubbleMenu toolbar + doc-level overflow that emits `compose_action_request` with {bindingId, selection, args, correlationId}</file>
-      <file purpose="server-seam-REUSE">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the shipped orchestrator (GetBindingByIdAsync → prompted executor); REUSE, do not modify to add a route</file>
-      <file purpose="dispatch-endpoint-REUSE">src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs — the existing POST /dispatch endpoint; the ONLY dispatch surface (no new endpoint)</file>
-      <file purpose="disposition-leg">projects/spaarkeai-compose-r2/tasks/016-*.poml (FR-04) — the `compose`-disposition + SSE-frame consumption path this wiring emits the apply-request against</file>
+      <file purpose="contract-REUSE" edit="false">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts — the PUBLISHED contract (the real discriminants: `compose_selection_offer`, `compose_assistant_insert` w/ `ledgerRef?`). Do NOT add a new discriminant.</file>
+      <file purpose="offer-dispatch-handoff" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — thread `ConversationPane.dispatchComposeAction` → `ComposeEditor.enqueueComposeAction` so the toolbar's enqueue reaches the serial dispatch queue.</file>
+      <file purpose="assistant-consumer" edit="true">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — confirm `dispatchComposeAction` (via useSerialActionQueue → createConsumerDispatcher → dispatchConsumer) is exposed/threaded; on the `compose`-disposition SSE frame emit the EXISTING `workspace.compose_assistant_insert` referencing the ledger entry (ledgerRef, not payload).</file>
+      <file purpose="toolbar-emitter" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — ComposeAiToolbar (task 030) + doc-level overflow; calls `enqueueComposeAction` (dispatchConsumer directly) + emits existing `compose_selection_offer` via useSelectionEventDispatch. NO `compose_action_request` (JSDoc: "do not add one").</file>
+      <file purpose="serial-queue-REUSE" edit="false">src/solutions/SpaarkeAi/src/components/conversation/useSerialActionQueue.ts — the shipped queue; toolbar calls dispatchConsumer directly, no discriminant introduced (ADR-030 closed union untouched).</file>
+      <file purpose="dispatch-seam-REUSE" edit="false">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — REUSE: dispatchConsumer(bindingId, args) → POST /api/ai/chat/sessions/{id}/dispatch. NO new endpoint; NO string-key routing.</file>
+      <file purpose="server-seam-REUSE" edit="false">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the shipped orchestrator (GetBindingByIdAsync → prompted executor); REUSE, do NOT modify. The other parallel agent (062) owns Sprk.Bff.Api — do not touch any .cs.</file>
+      <file purpose="disposition-leg" edit="false">projects/spaarkeai-compose-r2/tasks/016-draft-into-editor.poml (FR-04, DONE) — the `compose`-disposition + SSE-frame consumption path this wiring emits the apply-request against.</file>
     </relevant-files>
     <dependencies>
       <dependency task="016" status="blocked">Requires FR-04 draft-into-editor — the `compose`-disposition + SSE-frame consumption path.</dependency>
@@ -49,8 +74,8 @@
 
   <constraints>
     <constraint source="ADR-039">All five actions dispatch via PaneEventBus → ConversationPane → dispatchConsumer → POST /api/ai/chat/sessions/{id}/dispatch → SessionDispatchOrchestrator → GetBindingByIdAsync → prompted executor. Dispatch code adds ZERO new routes; NO string-key resolution outside the Binding table. §7.2 is the binding reviewer guard — a code-review checklist item enforces it.</constraint>
-    <constraint source="ADR-040">The `compose_edit_apply_request` references the ledger entry; it NEVER carries the edit payload as the source of truth. Storage precedes rendering; the Workspace materializes from the ledger.</constraint>
-    <constraint source="ADR-030">PaneEventBus discriminants are typed (no `any` payloads); the two new events ride the existing four channels (conversation / workspace).</constraint>
+    <constraint source="ADR-040">The `workspace.compose_assistant_insert` apply event references the ledger entry (its `ledgerRef` field); it NEVER carries the edit payload as the source of truth. Storage precedes rendering; the Workspace materializes from the ledger.</constraint>
+    <constraint source="ADR-030">The PaneEventBus discriminant union is CLOSED and stays untouched — add ZERO new discriminants. Use only the EXISTING `compose_selection_offer` (conversation) + `compose_assistant_insert` (workspace) from compose-contracts.ts. The dispatch trigger is a direct `dispatchConsumer` call, NOT a bus event.</constraint>
     <constraint source="ADR-028">Client fetches use @spaarke/auth, never raw Bearer.</constraint>
     <constraint source="ADR-021">Any UI touched (toolbar, streamed message) is Fluent v9 + dark mode.</constraint>
   </constraints>
@@ -66,25 +91,26 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc (§1 ComposeDisposition), design §3 + §7.2, knowledge files. CONFIRM core Phase A0 published ComposeDisposition v1 (+ SSE frame) and the dispatch/invoke seam before wiring.</step>
-    <step order="1" name="Add PaneEventBus discriminants">Add typed `compose_action_request` (conversation channel) and `compose_edit_apply_request` (workspace channel) discriminants to PaneEventBus.ts; no `any` payloads.</step>
-    <step order="2" name="Wire ConversationPane subscription">Subscribe to `compose_action_request`; call dispatchConsumer(bindingId, args); render the streamed assistant response. Serial-queue integration honored (FR-18).</step>
-    <step order="3" name="Wire draft-alternative apply leg">On the `compose`-disposition SSE frame, emit `compose_edit_apply_request` referencing the ledger entry (not the payload); the Workspace materializes the pending track-change with `{bindingId}@t{n}` provenance.</step>
-    <step order="4" name="Verify zero new routes">Route audit: confirm dispatch adds no new BFF route and no string-key resolution exists outside the Binding table; add the §7.2 code-review checklist item.</step>
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, compose-contracts.ts (the published discriminants), Spike 0 notes §4.1/§5, design §3 + §7.2. CONFIRM the shipped Click-path seam + the existing `compose_selection_offer`/`compose_assistant_insert` discriminants. The E-20/ComposeDisposition gate is SATISFIED — do NOT stop on it. (The invented-name divergence is already reconciled: this re-scoped POML IS the reconciliation.)</step>
+    <step order="1" name="Verify/complete offer→dispatch hand-off">Trace ComposeAiToolbar `enqueueComposeAction` → `ConversationPane.dispatchComposeAction` (via useSerialActionQueue → createConsumerDispatcher → dispatchConsumer). If ComposeWorkspace does not already thread `dispatchComposeAction` into ComposeEditor, complete that wiring. Add ZERO new discriminants.</step>
+    <step order="2" name="Confirm Flow 2 choreography">Confirm ComposeEditor emits the EXISTING `conversation.compose_selection_offer` (via useSelectionEventDispatch) and ConversationPane consumes it. Serial-queue (FR-18) honored.</step>
+    <step order="3" name="Wire draft-alternative apply leg">On the `compose`-disposition SSE frame, emit the EXISTING `workspace.compose_assistant_insert` referencing the ledger entry (its `ledgerRef` = `{bindingId}@t{n}`, not the payload); the Workspace materializes the pending track-change (usePendingRedline) with that provenance.</step>
+    <step order="4" name="Verify zero new routes + zero new discriminants">Route audit: confirm dispatch adds no new BFF route, no string-key resolution outside the Binding table, and NO new PaneEventBus discriminant. Add the §7.2 code-review checklist item. Add/adjust jest tests for the offer→dispatch hand-off + the compose_assistant_insert apply leg.</step>
   </steps>
 
   <outputs>
-    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts (two typed discriminants)</output>
-    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (subscription + dispatch + apply-request emit)</output>
-    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (toolbar/overflow emitter)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (offer→dispatch hand-off threading, if not already present)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (dispatchComposeAction threading + compose_assistant_insert apply-leg emit referencing ledgerRef)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (toolbar/overflow enqueueComposeAction + existing compose_selection_offer emit)</output>
+    <output type="test">jest coverage for the offer→dispatch hand-off + compose_assistant_insert apply leg</output>
   </outputs>
 
   <acceptance-criteria testable="true">
-    <criterion testable="true">Selecting text (or the doc-level overflow) emits `compose_action_request` on the conversation channel with {bindingId, selection, args, correlationId}; ConversationPane consumes it and dispatches via dispatchConsumer.</criterion>
+    <criterion testable="true">Selecting text (or the doc-level overflow) and invoking a catalog action calls `enqueueComposeAction`, which reaches `ConversationPane.dispatchComposeAction` (useSerialActionQueue → createConsumerDispatcher → `dispatchConsumer(bindingId, {slots})`) — a DIRECT call, NOT a PaneEventBus event.</criterion>
     <criterion testable="true">Dispatch resolves through the shipped seam (POST /api/ai/chat/sessions/{id}/dispatch → SessionDispatchOrchestrator → GetBindingByIdAsync → executor) and adds ZERO new BFF routes.</criterion>
-    <criterion testable="true">The compose-draft-alternative leg emits `compose_edit_apply_request` on the workspace channel REFERENCING the ledger entry (never the payload) after the `compose`-disposition SSE frame.</criterion>
-    <criterion testable="true">Both PaneEventBus discriminants are typed with no `any` payloads (ADR-030); client fetches use @spaarke/auth.</criterion>
-    <criterion testable="true">A route audit confirms no string-key resolution outside the Binding table; the §7.2 code-review checklist item is present.</criterion>
+    <criterion testable="true">The compose-draft-alternative leg emits the EXISTING `workspace.compose_assistant_insert` discriminant REFERENCING the ledger entry (`ledgerRef`, never the payload) after the `compose`-disposition SSE frame.</criterion>
+    <criterion testable="true">ZERO new PaneEventBus discriminants are added — the ADR-030 closed union (compose_selection_offer + compose_assistant_insert) is untouched; `compose_action_request`/`compose_edit_apply_request` are NOT introduced. Client fetches use @spaarke/auth.</criterion>
+    <criterion testable="true">A route audit confirms no new BFF route, no string-key resolution outside the Binding table, and no new discriminant; the §7.2 code-review checklist item is present.</criterion>
   </acceptance-criteria>
 
   <escalation>
@@ -94,4 +120,96 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <!-- COMPLETED 2026-07-09 — task-execute FULL rigor (opus). Implemented under the Path-C
+         re-scoped contract (real compose-contracts.ts flows; ZERO new discriminants; ZERO new
+         BFF routes; ZERO .cs touched — the parallel 062 agent owns Sprk.Bff.Api).
+
+         WHAT WAS BUILT (2 real gaps closed; the rest was VERIFIED already-shipped):
+         - Gap 1 (AC1 cross-pane hand-off): NEW ComposeActionBridge — a plain React context
+           (NOT a PaneEventBus discriminant) that lets the workspace-pane inline AI toolbar
+           reach the Assistant pane's FR-18 serial queue via a DIRECT dispatchConsumer call.
+             * NEW src/client/shared/Spaarke.Compose.Components/src/context/composeActionBridge.ts
+               (+ barrel export in .../src/index.ts).
+             * ThreePaneShell.tsx wraps both panes in <ComposeActionBridgeProvider>.
+             * ConversationPane.tsx registers dispatchComposeAction via useRegisterComposeActionDispatcher.
+             * LegalWorkspace composeEditor.registration.ts consumes the bridge and threads
+               enqueueComposeAction into ComposeWorkspace (only when hasDispatcher → else the
+               toolbar's own dispatcher fallback, standalone).
+         - Gap 2 (AC3 apply leg): design §7.2 "the Assistant emits workspace.compose_assistant_insert
+           REFERENCING the ledger entry". After a compose dispatch, ConversationPane reads the
+           EXISTING GET .../compose-outputs, resolves the current {bindingId}@t{n} for the dispatched
+           binding (present only for draft-alternative), and emits the EXISTING compose_assistant_insert
+           with that ledgerRef (never the payload — contentHtml:''). ComposeWorkspace's shipped
+           receiver materializes from the ledger.
+             * NEW src/solutions/SpaarkeAi/src/components/conversation/composeApplyLeg.ts (pure helpers).
+             * ConversationPane.tsx dispatchComposeAction fire-and-forget emit.
+         - VERIFIED already-shipped (left unchanged): ComposeEditor forwards enqueueComposeAction +
+           emits compose_selection_offer (Flow 2); ComposeWorkspace forwards enqueue + subscribes to
+           compose_assistant_insert(ledgerRef)→materialize.
+
+         TESTS: NEW composeActionBridge.test.tsx (5) + composeApplyLeg.test.ts (6) — 11/11 green.
+         Regression: ConversationPane suites 61/61 green; full compose-components suite 69/69 green.
+         Typecheck: compose-components tsc clean; SpaarkeAi surface-gate 0 surface-owned errors.
+         §7.2 route audit: 0 new BFF routes, 0 string-key routing, 0 new PaneEventBus discriminants.
+         Step 9.5 gates: code-review CLEAN (0 critical/0 warning); adr-check 0 violations
+         (ADR-030/039/040/028/021/010 all compliant).
+         Acceptance criteria: all 5 met. -->
+    <!-- 2026-07-09 — task-execute FULL rigor (opus). STOPPED at Step 0 (Context + gate)
+         on a REAL contract divergence per the escalation trigger + CLAUDE.md §6/§6.5.
+         NOT the already-satisfied E-20/ComposeDisposition gate — a genuine event-shape
+         divergence between this POML and the project's published contract. -->
+    <!-- RESOLVED 2026-07-09 via Path C (pivot to comply) — orchestrator confirmed. The POML title/prompt/
+         goal/relevant-files/constraints/steps/outputs/acceptance-criteria above were rewritten to the real
+         published compose-contracts.ts flows (zero new discriminants). No ADR change; no new surface. The
+         POML was simply stale (authored before the Spike 0 correction). Implementation resumed. -->
+    <escalation-raised date="2026-07-09" resolved="true" resolution="Path C — POML re-scoped to compose-contracts.ts real flows; zero new discriminants">
+      DIVERGENCE: this POML's goal + all 5 acceptance criteria + steps 1/3/4 are authored
+      against two PaneEventBus discriminants — `compose_action_request` (conversation channel)
+      and `compose_edit_apply_request` (workspace channel). Those names are RETRACTED
+      "invented names" per four binding, code-grounded sources:
+        1. Spike 0 (task 000) notes/spikes/spike-0-dispatch-path.md §4.1 + §5-crit-2:
+           "`compose_action_request` does not exist and must not be created … Impacted
+           tasks: 030, 016, 046 (dispatch wiring — wire the offer→dispatch path, NOT an
+           `compose_action_request` handler)." Spike 0 names THIS task explicitly.
+        2. design.md §7.2 (line 465), the POML's own cited authority: "(Spike 0 correction,
+           2026-07-08: there is no `compose_action_request` / `compose_edit_apply_request`
+           event in the code; those were invented names. The real contract is
+           compose-contracts.ts.)"
+        3. ComposeEditor.tsx file JSDoc (lines 40-45): "NOT a `compose_action_request`
+           PaneEventBus event (never existed; do not add one)."
+        4. useSerialActionQueue.ts JSDoc (Contract-naming note): the discriminant name was
+           retracted; the toolbar calls dispatchConsumer DIRECTLY; "no PaneEventBus
+           discriminant is introduced or required (ADR-030's closed union is untouched)."
+
+      REAL (published) contract per compose-contracts.ts:
+        - Dispatch TRIGGER = direct `dispatchConsumer(bindingId, {slots})` (the shipped
+          Click-path seam), NOT a bus event. Already wired: ComposeEditor mounts
+          ComposeAiToolbar (task 030) with `enqueueComposeAction`; ConversationPane exposes
+          `dispatchComposeAction` via useSerialActionQueue → createConsumerDispatcher.
+        - Flow 2 = `conversation.compose_selection_offer` (EXISTING; ComposeEditor already
+          emits it via useSelectionEventDispatch) — pane choreography, not the trigger.
+        - Flow 5 apply leg = `workspace.compose_assistant_insert` (EXISTING; task 016 added
+          its `ledgerRef?` field) REFERENCING the ledger entry after the compose SSE frame —
+          this is the POML's "compose_edit_apply_request" leg under its real name.
+
+      Following the POML literally would: (a) add two dead discriminants to the ADR-030
+      closed union that design.md says must stay untouched; (b) re-introduce a parallel
+      dispatch-trigger mechanism Spike 0 + ADR-039 forbid; (c) directly violate ComposeEditor's
+      own "do not add one" binding comment. It would also duplicate already-shipped wiring
+      (016/030/032).
+
+      RECOMMENDED RESOLUTION: Path C (pivot to comply — CLAUDE.md §6.5). Re-scope 046 to:
+        (i) verify/complete the offer→dispatch hand-off (ComposeWorkspace threading
+            ConversationPane.dispatchComposeAction → ComposeEditor.enqueueComposeAction);
+        (ii) emit `workspace.compose_assistant_insert` (Flow 5) referencing the ledger
+            entry (ledgerRef `{bindingId}@t{n}`) on the compose-disposition SSE frame;
+        (iii) add the §7.2 code-review checklist item (zero new routes / no string-key
+            routing / NO new PaneEventBus discriminant).
+      Add ZERO new PaneEventBus discriminants. Requires human/parent confirmation of the
+      re-scope + updated acceptance criteria before implementation resumes (a silent pivot
+      would itself violate the "do not adapt silently" instruction).
+    </escalation-raised>
+  </notes>
 </task>

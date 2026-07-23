@@ -23,8 +23,8 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
-    "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components/spaarke-ui-components-2.0.0.tgz"
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
+    "@spaarke/visuals": "file:../../shared/Spaarke.Visuals"
   },
   "devDependencies": {
     "@azure/msal-browser": "^3.30.0",
@@ -43,6 +43,7 @@
     "@storybook/blocks": "^8.6.14",
     "@storybook/react": "^8.6.14",
     "@storybook/react-vite": "^8.6.14",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@types/jest": "^30.0.0",
@@ -59,6 +60,7 @@
     "pcf-start": "^1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "scheduler": "^0.27.0",
     "storybook": "^8.6.14",
     "ts-jest": "^29.4.6",
     "typescript": "^5.8.3",

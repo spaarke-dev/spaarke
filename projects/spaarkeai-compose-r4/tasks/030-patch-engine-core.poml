@@ -1,0 +1,163 @@
+<task id="030" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>ComposeShadowPatchEngine core — resolve-by-paraId + split-run + native `w:ins`/`w:del`/`w:comment` (FR-04)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New load-bearing `.cs` byte-author on the BFF hot path; implements the surgical patch surface; modifies OOXML; deps on 3 tasks. FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The single byte-author (D5); the load-bearing surgical patch surface — offset→run splitting over formatted/split runs + existing tracked changes is the hardest bridge piece (design §5.0).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>New core file, foundational, sequential within the Patch Engine phase (031/033 extend or depend on it).</parallel-reason>
+    <deps>003,005,006</deps>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>4-5 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Author the single unified byte-author (D5). Create a NEW file
+    `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs` implementing
+    `(retained bytes, operation log) -&gt; patched bytes`: for each operation, resolve the target node
+    by its `w14:paraId` (O(1), via `ParaIdPreParser`/`ExtractParaIds`), split the run at the
+    run-local-offset PRESERVING `RunProperties`, and emit native `w:ins`/`w:del`/`w:comment`. Package
+    parts never opened are copied verbatim; untouched subtrees within `document.xml` stay
+    byte-identical. You MUST mutate the OpenXml DOM — NEVER string-edit `document.xml`. Migrate the
+    EDGE-1…4 wisdom out of `DocxAnnotationWriter.cs` (comment-before-trackchange ordering; `w:delText`
+    not `w:t` on deletes; monotonic revision-id seeding) into this engine BEFORE task 032 retires that
+    class. Use the patch engine chosen by the task 005 A/B (Docxodus OR build-on-OpenXML-SDK) — read the
+    task 005 decision record and follow it; do NOT re-litigate the A/B here. The engine is a STATELESS
+    concrete singleton (ADR-010), `byte[]`-in/`byte[]`-out (ADR-007), and injects NO AI internals
+    (ADR-013 Tier-1 NetArchTest). This task is GATED on task 006 (Phase 0 gate) being green.
+    Do NOT implement the structural paragraph ops here — those are task 031, sequenced last.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Open XML SDK (WordprocessingDocument, run/RunProperties
+    cloning, InsertedRun/DeletedRun, CommentRangeStart/End) and OOXML tracked-change semantics. Owns
+    the one place in R4 that writes `.docx` bytes and understands that correctness here (offset→run
+    split over formatted/split runs and pre-existing tracked changes) is what makes the whole shadow
+    architecture succeed.
+  </role>
+
+  <goal>
+    A new `ComposeShadowPatchEngine` that applies an ID-anchored operation log surgically onto retained
+    OOXML: every text edit / redline / comment lands at the intended `w14:paraId` + run-local-offset
+    with ZERO write-path text-search; untouched package parts are verbatim and untouched `document.xml`
+    subtrees are byte-identical; the EDGE-1…4 native-OOXML wisdom is carried over from
+    `DocxAnnotationWriter`; an operation whose `paraId` cannot be resolved is refused, never applied to
+    the wrong node.
+  </goal>
+
+  <context>
+    <background>
+      Design §5.0 (the bridge = the real work; offset→run mapping is the hard piece), §5 Patch (backend)
+      diagram, §3 invariants I-1/I-3/I-4/I-5/I-7, D5 (one byte-author). Spec FR-04, NFR-01, NFR-02,
+      NFR-05. The current save uses two independent writers — `DocxAnnotationWriter` (text-search, the
+      422 root cause) and `ComposeParagraphRedlineSynthesizer` (paragraph-diff). R4 consolidates both
+      into this one operational engine. The operation schema (task 003) is the contract this engine
+      consumes; the applier spike (task 005) proved the split-run + `w:ins`/`w:del` recipe on the CIPO
+      doc and chose the underlying engine. Prior art (`notes/bridge-prior-art.md` finding #6): match
+      `w:p` by `w14:paraId` → walk runs accumulating text length until the offset lands in run R →
+      `Run.Clone()` split R preserving `RunProperties` → wrap inserts in `InsertedRun` / deletes in
+      `DeletedRun` with Author/Date/Id → mutate the DOM, never string-edit.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — the unified byte-author: resolve-by-paraId, split-run-at-offset, emit native w:ins/w:del/w:comment; stateless concrete singleton</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — EDGE-1…4 native-OOXML wisdom to MIGRATE (comment-before-trackchange ordering; w:delText not w:t; monotonic revision-id seeding); LocateTarget (:316-369) is NOT migrated (text-search, killed)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeParagraphRedlineSynthesizer.cs — the paragraph-diff redline shape being consolidated into operational apply</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs — document-order paraId extraction (incl. table cells/nested tables) reused to resolve nodes O(1)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ — task 003 operation-schema contract (the op log this engine consumes) + task 005 applier-spike decision record (which engine won the A/B)</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5.0, §5 (Patch backend), §3, D5</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-04, NFR-01, NFR-02, NFR-05</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Operation schema — the shared versioned contract this engine consumes (op types + `{paraId, runIndex, offset|range}` anchor).</dependency>
+      <dependency task="005" status="pending">Applier spike on the CIPO doc + patch-engine A/B — proves the split-run recipe and SELECTS the underlying engine (Docxodus vs OpenXML-SDK). This task follows that decision.</dependency>
+      <dependency task="006" status="pending">Phase 0 GATE — HARD prerequisite; must be green before this engine is built into the write path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-04">The engine MUST resolve each node by `w14:paraId` (O(1)) and split runs at the run-local-offset preserving `RunProperties`; MUST emit native `w:ins`/`w:del`/`w:comment`; MUST NOT text-search anywhere in the write path (invariant I-7).</constraint>
+    <constraint source="spec / NFR-01">Untouched package parts MUST be copied verbatim; untouched `document.xml` subtrees MUST be structurally faithful (byte-identical on untouched parts, XML-splice hardening option deferred to corpus results). MUST mutate the OpenXml DOM, NEVER string-edit `document.xml`.</constraint>
+    <constraint source="ADR-007">`byte[]`-in / `byte[]`-out. No `Microsoft.Graph` type in the engine; the SPE hop stays in the endpoint/facade layer above `SpeFileStore`.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals (`IOpenAiClient`/executor/routing types); consume `Services/Ai/PublicContracts/` only if AI capability is needed; Tier-1 NetArchTest MUST stay green.</constraint>
+    <constraint source="ADR-010">The engine is a STATELESS concrete singleton — no per-request state, no interface-for-one-impl ceremony.</constraint>
+    <constraint source="project / EDGE-migration">Migrate the EDGE-1…4 wisdom (comment-before-trackchange ordering; `w:delText` not `w:t`; monotonic revision-id seeding) from `DocxAnnotationWriter.cs` into this engine BEFORE task 032 deletes that class. Do NOT migrate `LocateTarget` (text-search — killed).</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification in the PR (patch/byte authoring stays in `Services/Compose/`; reuses `ParaIdPreParser`/SPE seams) and cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the PR — `Services/Compose/` overlaps r1/r2/r3 + ai-architecture-redesign-r2.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Measure BFF publish size; report absolute + delta vs ~49.63 MB baseline (incl. PDBs), ≤60 MB ceiling. If Docxodus was adopted by task 005, verify its size delta here. Verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Through-the-wire seam proof is required for this write-path surface (authored in task 034); unit-green ≠ done. NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML SDK surgical patch (split-run preserving RunProperties, InsertedRun/DeletedRun, comment ranges); resolve-by-paraId O(1); EDGE-1…4 tracked-change ordering; DI minimalism; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/bridge-prior-art.md</file>
+      <file>projects/spaarkeai-compose-r4/notes/as-built-inventory.md</file>
+    </files>
+    <patterns>
+      <pattern name="Match-paraId → split-run-at-offset → wrap w:ins/w:del" location="projects/spaarkeai-compose-r4/notes/bridge-prior-art.md finding #6">
+        Match `w:p` by `w14:paraId` → walk runs accumulating text length until the offset lands in run R → `Run.Clone()` split R preserving `RunProperties` → wrap inserts in `InsertedRun`(w:ins) / deletes in `DeletedRun`(w:del) with Author/Date/Id → mutate the DOM, never string-edit.
+      </pattern>
+      <pattern name="EDGE-1…4 native-OOXML wisdom" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs">
+        Comment-before-trackchange element ordering; `w:delText` (not `w:t`) inside a deleted run; monotonic revision-id seeding across a save. Migrate these; leave text-search behind.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR / 📋 REASON / 📖 PROTOCOL STEPS). Confirm task 006 (Phase 0 gate) is GREEN — this task is gated. Read the task 003 op-schema contract + the task 005 A/B decision record (which underlying engine won). Load knowledge files + `bff-extensions.md`; state the Placement Justification for the PR.</step>
+    <step order="1" name="Node resolution by paraId">Build the O(1) resolve-by-`w14:paraId` path reusing `ParaIdPreParser`/`ExtractParaIds` (incl. table cells / nested tables). An operation whose paraId does not resolve is REFUSED (surface a clear failure), never applied to a neighbouring node.</step>
+    <step order="2" name="Split-run-at-offset (the hard piece)">Implement offset→run mapping: walk the target paragraph's runs accumulating text length until the run-local-offset lands in run R; `Run.Clone()`-split R preserving `RunProperties`; handle formatted/split runs and pre-existing tracked changes. This is the escalation-boundary edge (see &lt;escalation&gt;).</step>
+    <step order="3" name="Emit native w:ins/w:del/w:comment + migrate EDGE-1…4">Wrap inserts in `InsertedRun`(w:ins), deletes in `DeletedRun`(w:del) with Author/Date/Id and `w:delText`; emit `w:comment` + comment ranges. Migrate the EDGE-1…4 wisdom (comment-before-trackchange ordering; `w:delText` not `w:t`; monotonic revision-id seeding) from `DocxAnnotationWriter`. Mutate the DOM — never string-edit `document.xml`.</step>
+    <step order="4" name="Register + build">Register the engine as a stateless concrete singleton (ADR-010). Build the BFF; run the Tier-1 NetArchTest facade check; run existing `Services/Compose` unit tests (no regression). Add focused unit tests under `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` (the through-the-wire seam proof is task 034).</step>
+    <step order="5" name="Size/CVE + index + deviations">Publish; report absolute size + delta vs ~49.63 MB (incl. PDBs), ≤60 MB; `dotnet list package --vulnerable --include-transitive` (no new HIGH CVE). Update TASK-INDEX.md: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <justification>
+    <existing>`DocxAnnotationWriter` (text-search write path) + `ComposeParagraphRedlineSynthesizer` (paragraph-diff) — both slated for retirement (task 032).</existing>
+    <extension>No — this REPLACES both and consolidates them into one byte-author (D5); the two-path split is exactly the defect being removed, so an "extend one of them" answer would keep the drift alive.</extension>
+    <cost-of-doing-nothing>The text-search 422 class (interior-location edits fail with "a tracked change could not be located") and the two-independent-writer drift persist; structural edits remain impossible.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (new — resolve-by-paraId, split-run, native w:ins/w:del/w:comment; EDGE-1…4 migrated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (DI registration of the engine as a stateless concrete singleton)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (focused unit tests for split-run + emit; seam proof is task 034)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan; Placement Justification; /conflict-check result for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">An interior text edit / redline / comment lands at the intended `w14:paraId` + run-local-offset with ZERO write-path text-search (code audit + unit tests confirm no text-search).</criterion>
+    <criterion testable="true">A corpus no-op save is byte-identical on untouched parts (package parts never opened are verbatim; untouched `document.xml` subtrees structurally faithful).</criterion>
+    <criterion testable="true">The run split preserves `RunProperties` across formatted/split runs and pre-existing tracked changes; native `w:ins`/`w:del` (with `w:delText`) and `w:comment` are emitted per EDGE-1…4 ordering.</criterion>
+    <criterion testable="true">NEGATIVE: an operation with an unknown/unresolvable `paraId` is REFUSED (clear failure), never applied to the wrong node.</criterion>
+    <criterion testable="true">The engine is a stateless concrete singleton (ADR-010), `byte[]`-in/`byte[]`-out (ADR-007); `Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green).</criterion>
+    <criterion testable="true">The EDGE-1…4 wisdom is verifiably migrated (present in this engine) BEFORE task 032 deletes `DocxAnnotationWriter`.</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE; BFF build + NetArchTest green; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The offset→run split over formatted/split runs AND pre-existing tracked changes cannot be made deterministic for a corpus case (e.g. an offset that falls inside an existing `w:ins`/`w:del` region, or a run boundary that Word will re-normalize). STOP and surface per root §6 / §6.5 rather than guessing a split that could mis-place bytes.</trigger>
+  </escalation>
+
+  <notes>
+    Front-loaded hard surface (design §6). Structural paragraph ops are NOT in this task — they are 031, sequenced last in the applier. The underlying engine (Docxodus vs OpenXML-SDK) is fixed by the task 005 A/B — follow that decision record, do not re-run the A/B here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -91,11 +91,22 @@ public sealed class AnnotationReanchorService
     /// (see <see cref="ExtractParagraphTexts"/>).</param>
     /// <param name="documentSpeId">Optional SPE drive-item id, echoed into the summary for the UI.</param>
     /// <param name="computedAtUtc">Timestamp stamped onto the summary (injected for test determinism).</param>
+    /// <param name="currentParaIds">FR-11 (task 012) — the reloaded document's <c>w14:paraId</c>s, in
+    /// the SAME document order as <paramref name="currentParagraphs"/> (index-aligned; see
+    /// <see cref="ExtractParaIds"/>). When supplied, paraId is the PRIMARY anchor: an anchor whose
+    /// <see cref="PriorAnchor.ParaId"/> exact-matches a current paragraph's id re-anchors definitively
+    /// (AUTO, confidence 1.0) WITHOUT fuzzy scoring — within our own load→edit→save round-trip Word
+    /// preserves paraId (S1/S1b). Only when the anchor carries no paraId, or its paraId is absent here
+    /// (an external Word edit regenerated ids — Open-XML-SDK #925), does the retained
+    /// textPattern+Levenshtein+paragraphHint scorer run. <c>null</c> (the default) disables the
+    /// paraId path entirely — every anchor falls to the fuzzy scorer, preserving the pre-FR-11 behavior
+    /// for callers that have not extracted the id map.</param>
     public static ReanchorSummary Reanchor(
         IReadOnlyList<PriorAnchor> priorAnchors,
         IReadOnlyList<string> currentParagraphs,
         string? documentSpeId,
-        DateTimeOffset computedAtUtc)
+        DateTimeOffset computedAtUtc,
+        IReadOnlyList<string?>? currentParaIds = null)
     {
         ArgumentNullException.ThrowIfNull(priorAnchors);
         ArgumentNullException.ThrowIfNull(currentParagraphs);
@@ -107,6 +118,33 @@ public sealed class AnnotationReanchorService
 
         foreach (var anchor in priorAnchors)
         {
+            // FR-11 (task 012) — paraId is the PRIMARY anchor. A paragraph's w14:paraId is stable
+            // across our own load→edit→save round-trip: the E1 save synthesizes the redline in place
+            // (ComposeParagraphRedlineSynthesizer, Option C), rewriting only run content — the w:p
+            // paraId attribute survives by construction. (This is why the retired Docxodus WmlComparer
+            // path was rejected: task 003 proved it STRIPS paraId on real docs.) So an exact id hit is a
+            // DEFINITIVE re-anchor — the paragraph may have been edited (content drift) yet still be the
+            // same paragraph. Resolve by id first; the fuzzy scorer below runs ONLY when the id is
+            // absent (design §5.2 — e.g. Word regenerated the ids across an EXTERNAL edit session).
+            var paraIdIdx = ResolveByParaId(anchor.ParaId, currentParaIds);
+            if (paraIdIdx >= 0)
+            {
+                auto++;
+                var idPreview = paraIdIdx < currentParagraphs.Count ? Preview(currentParagraphs[paraIdIdx]) : null;
+                results.Add(new ReanchoredAnnotation(
+                    Id: anchor.Id,
+                    Type: anchor.Type,
+                    Preview: anchor.Preview,
+                    Band: ReanchorBand.Auto,
+                    Confidence: 1.0,
+                    MatchedParagraphIndex: paraIdIdx,
+                    ContentSimilarity: 1.0,
+                    StructuralProximity: 1.0,
+                    Ambiguous: false,
+                    MatchedParagraphPreview: idPreview));
+                continue;
+            }
+
             var (bestIdx, bestContent, secondBestContent) =
                 FindBestParagraphMatch(anchor.TextPattern, currentParagraphs);
 
@@ -174,7 +212,29 @@ public sealed class AnnotationReanchorService
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="docx"/> is null or empty.</exception>
     /// <exception cref="DocxAnnotationException"><paramref name="docx"/> is not a readable DOCX.</exception>
-    public static IReadOnlyList<string> ExtractParagraphTexts(byte[] docx)
+    public static IReadOnlyList<string> ExtractParagraphTexts(byte[] docx) => ReadParagraphs(docx).Texts;
+
+    /// <summary>
+    /// FR-11 (task 012) — extracts each paragraph's <c>w14:paraId</c> from <paramref name="docx"/>, in
+    /// the SAME document order (and thus index-aligned) as <see cref="ExtractParagraphTexts"/>; the
+    /// entry is <c>null</c> for a paragraph that carries no id. This is the CURRENT-document id list
+    /// that <see cref="Reanchor(IReadOnlyList{PriorAnchor}, IReadOnlyList{string}, string?, DateTimeOffset, IReadOnlyList{string?})"/>
+    /// resolves an anchor's <see cref="PriorAnchor.ParaId"/> against. The same recursive
+    /// <c>Descendants&lt;Paragraph&gt;()</c> walk as the text extraction guarantees the alignment
+    /// (mirrors <see cref="ParaIdPreParser"/>, incl. table-cell + nested-table paragraphs). Ids are
+    /// upper-cased so a Word-lowercased id still matches an anchor's canonical (uppercase) id.
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="docx"/> is null or empty.</exception>
+    /// <exception cref="DocxAnnotationException"><paramref name="docx"/> is not a readable DOCX.</exception>
+    public static IReadOnlyList<string?> ExtractParaIds(byte[] docx) => ReadParagraphs(docx).ParaIds;
+
+    /// <summary>
+    /// Single Open XML pass returning BOTH the per-paragraph settled text and the per-paragraph
+    /// <c>w14:paraId</c> (null where absent), index-aligned in document order. The two public
+    /// extraction methods and <see cref="ComputeAndPersistAsync"/> share this one walk so the text
+    /// corpus and the id list can never drift out of alignment.
+    /// </summary>
+    private static (IReadOnlyList<string> Texts, IReadOnlyList<string?> ParaIds) ReadParagraphs(byte[] docx)
     {
         if (docx is null || docx.Length == 0)
         {
@@ -203,17 +263,45 @@ public sealed class AnnotationReanchorService
             var body = doc.MainDocumentPart?.Document?.Body;
             if (body is null)
             {
-                return Array.Empty<string>();
+                return (Array.Empty<string>(), Array.Empty<string?>());
             }
 
-            var paragraphs = new List<string>();
+            var texts = new List<string>();
+            var paraIds = new List<string?>();
             foreach (var paragraph in body.Descendants<Paragraph>())
             {
-                paragraphs.Add(GetParagraphText(paragraph));
+                texts.Add(GetParagraphText(paragraph));
+                var id = paragraph.ParagraphId?.Value;
+                paraIds.Add(string.IsNullOrEmpty(id) ? null : id.ToUpperInvariant());
             }
 
-            return paragraphs;
+            return (texts, paraIds);
         }
+    }
+
+    /// <summary>
+    /// FR-11 (task 012) — resolves an anchor's <paramref name="anchorParaId"/> to the 0-based index of
+    /// the current paragraph bearing the same <c>w14:paraId</c> (case-insensitive), or <c>-1</c> when
+    /// the anchor carries no id, <paramref name="currentParaIds"/> is null, or the id is not present
+    /// (an external Word edit regenerated ids). paraIds are unique within a document (task 010
+    /// guarantees), so the first match is the only match.
+    /// </summary>
+    private static int ResolveByParaId(string? anchorParaId, IReadOnlyList<string?>? currentParaIds)
+    {
+        if (string.IsNullOrEmpty(anchorParaId) || currentParaIds is null)
+        {
+            return -1;
+        }
+
+        for (var i = 0; i < currentParaIds.Count; i++)
+        {
+            if (string.Equals(currentParaIds[i], anchorParaId, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     // -- Redis persistence (ADR-009 — cross-request re-anchor summary) ---------------------------
@@ -232,8 +320,11 @@ public sealed class AnnotationReanchorService
     {
         ArgumentException.ThrowIfNullOrEmpty(documentSpeId);
 
-        var paragraphs = ExtractParagraphTexts(docx);
-        var summary = Reanchor(priorAnchors, paragraphs, documentSpeId, _timeProvider.GetUtcNow());
+        // FR-11 (task 012): extract the paragraph text corpus AND the index-aligned w14:paraId list in
+        // ONE Open XML pass, so Reanchor can resolve by paraId first (primary anchor) and fall back to
+        // the fuzzy scorer only where the id is absent (external Word edit regenerated ids).
+        var (paragraphs, paraIds) = ReadParagraphs(docx);
+        var summary = Reanchor(priorAnchors, paragraphs, documentSpeId, _timeProvider.GetUtcNow(), paraIds);
         await SaveSummaryAsync(documentSpeId, summary, ct).ConfigureAwait(false);
         return summary;
     }
@@ -453,7 +544,12 @@ public sealed record PriorAnchor(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("textPattern")] string TextPattern,
     [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
-    [property: JsonPropertyName("preview")] string? Preview = null);
+    [property: JsonPropertyName("preview")] string? Preview = null,
+    // R3 FR-11 (task 012): PRIMARY anchor — the paragraph's w14:paraId. Resolution tries this
+    // FIRST; the TextPattern+Levenshtein+ParagraphHint scorer below is the retained fallback for
+    // when it is absent (Word regenerated paraIds on an external save — Open-XML-SDK #925). Optional
+    // + trailing so existing PriorAnchor construction/deserialization is unaffected (additive).
+    [property: JsonPropertyName("paraId")] string? ParaId = null);
 
 /// <summary>One prior anchor's re-anchor outcome — the band, the score components, whether a
 /// near-tie made it ambiguous, and (for AUTO/REVIEW) the matched paragraph so the UI can show

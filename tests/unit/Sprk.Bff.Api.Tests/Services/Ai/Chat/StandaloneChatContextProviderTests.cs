@@ -350,6 +350,55 @@ public class StandaloneChatContextProviderTests
     }
 
     // =========================================================================
+    // sprk_document — supported-but-unmapped (spaarkeai-compose-r2 Wave 4 / FIX F)
+    //
+    // A document-hosted Compose tab requests a standalone context mapping for its
+    // sprk_document host entity. sprk_document is now in the allowlist so the
+    // endpoint returns a valid 200 (killing the prior client 400 console noise),
+    // but it has NO field catalog entry — the provider returns an EMPTY
+    // ContextFields list (graceful default, not a fabricated mapping).
+    // =========================================================================
+
+    [Fact]
+    public void SupportedEntityTypes_ContainsSprkDocument()
+    {
+        // Assert — sprk_document is an accepted entity type (FIX F).
+        StandaloneChatContextProvider.SupportedEntityTypes.Should().Contain("sprk_document");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_SprkDocument_ReturnsNonNull_WithEmptyContextFields()
+    {
+        // Arrange — cache miss; sprk_document is supported but unmapped.
+        var entityId = Guid.NewGuid().ToString();
+
+        // Act
+        var result = await _sut.ResolveAsync("sprk_document", entityId, TenantId);
+
+        // Assert — supported → non-null 200-mappable response, but no context fields
+        // (intentionally unmapped; graceful empty default, not a 400 → null).
+        result.Should().NotBeNull("sprk_document is supported and must not return null (which maps to 400)");
+        result!.EntityType.Should().Be("sprk_document");
+        result.EntityId.Should().Be(entityId);
+        result.ContextFields.Should().BeEmpty(
+            "sprk_document is supported-but-unmapped — an empty context mapping, not a fabricated one");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_SprkDocument_HasDocumentDisplayName()
+    {
+        // Arrange
+        var entityId = Guid.NewGuid().ToString();
+
+        // Act
+        var result = await _sut.ResolveAsync("sprk_document", entityId, TenantId);
+
+        // Assert — human-readable display label, not the raw logical name.
+        result.Should().NotBeNull();
+        result!.DisplayName.Should().Be("Document");
+    }
+
+    // =========================================================================
     // ContextCacheTtl Tests
     // =========================================================================
 

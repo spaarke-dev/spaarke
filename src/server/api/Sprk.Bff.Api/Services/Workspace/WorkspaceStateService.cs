@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// Partition key <c>/tenantId</c>. Document discriminator <c>"workspace-tab"</c> co-exists
 /// with the existing matter-memory documents on the same partition without conflict (id
 /// prefix <c>workspace-tab_</c> guarantees no id collision with
-/// <see cref="Sprk.Bff.Api.Services.Ai.Memory.MatterMemoryService"/>'s <c>{tenantId}_{matterId}</c>
+/// the retired <c>MatterMemoryService</c>'s <c>{tenantId}_{matterId}</c>
 /// format).
 /// </para>
 ///
@@ -136,130 +136,6 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
         return merged.Values.ToList();
     }
 
-    /// <inheritdoc/>
-    public async Task UpsertTabAsync(
-        string tenantId,
-        string sessionId,
-        WorkspaceTab tab,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentNullException.ThrowIfNull(tab);
-
-        if (!string.Equals(tab.TenantId, tenantId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Tenant mismatch: tab.TenantId='{tab.TenantId}' does not match arg tenantId='{tenantId}' (NFR-16 isolation).");
-        }
-        if (!string.Equals(tab.SessionId, sessionId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Session mismatch: tab.SessionId='{tab.SessionId}' does not match arg sessionId='{sessionId}'.");
-        }
-
-        var hot = await LoadHotAsync(tenantId, sessionId, ct);
-        hot[tab.Id] = tab;
-        await WriteHotAsync(tenantId, sessionId, hot, ct);
-
-        _logger.LogDebug(
-            "WorkspaceStateService: UpsertTab id={TabId} session={SessionId} tenant={TenantId} pinned={IsPinned}",
-            tab.Id, sessionId, tenantId, tab.IsPinned);
-    }
-
-    /// <inheritdoc/>
-    public async Task PinTabAsync(
-        string tenantId,
-        string sessionId,
-        string tabId,
-        string matterId,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(matterId);
-
-        var hot = await LoadHotAsync(tenantId, sessionId, ct);
-        if (!hot.TryGetValue(tabId, out var existing))
-        {
-            throw new KeyNotFoundException(
-                $"Tab '{tabId}' not found in session '{sessionId}' (tenant '{tenantId}'). Pin requires an existing hot-tier row.");
-        }
-
-        // Promote: flip isPinned + attach matterId (preserve matterName if matterId matches).
-        var matterName = string.Equals(existing.MatterContext.MatterId, matterId, StringComparison.Ordinal)
-            ? existing.MatterContext.MatterName
-            : matterId; // Fallback when matter changes — endpoint layer enriches name lookup.
-
-        var promoted = new WorkspaceTab
-        {
-            Id = existing.Id,
-            WidgetType = existing.WidgetType,
-            WidgetData = existing.WidgetData,
-            SessionId = existing.SessionId,
-            TenantId = existing.TenantId,
-            VisibleToAssistant = existing.VisibleToAssistant,
-            SourceProvenance = existing.SourceProvenance,
-            MatterContext = new WorkspaceTabMatterContext
-            {
-                MatterId = matterId,
-                MatterName = matterName,
-            },
-            IsPinned = true,
-            CanEdit = existing.CanEdit,
-            LastUserEditAt = existing.LastUserEditAt,
-            CreatedAt = existing.CreatedAt,
-            UpdatedAt = DateTimeOffset.UtcNow.ToString("o"),
-        };
-
-        // Refresh Redis hot tier.
-        hot[tabId] = promoted;
-        await WriteHotAsync(tenantId, sessionId, hot, ct);
-
-        // Write-through to Cosmos durable.
-        await WriteDurableAsync(promoted, ct);
-
-        _logger.LogInformation(
-            "WorkspaceStateService: PinTab id={TabId} session={SessionId} tenant={TenantId} matterId={MatterId}",
-            tabId, sessionId, tenantId, matterId);
-    }
-
-    /// <inheritdoc/>
-    public async Task CloseTabAsync(
-        string tenantId,
-        string sessionId,
-        string tabId,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tabId);
-
-        var hot = await LoadHotAsync(tenantId, sessionId, ct);
-        if (!hot.Remove(tabId))
-        {
-            // Idempotent — tab not present is OK.
-            _logger.LogDebug(
-                "WorkspaceStateService: CloseTab no-op (id={TabId} not in session={SessionId} tenant={TenantId})",
-                tabId, sessionId, tenantId);
-            return;
-        }
-
-        if (hot.Count == 0)
-        {
-            await RemoveHotKeyAsync(tenantId, sessionId, ct);
-        }
-        else
-        {
-            await WriteHotAsync(tenantId, sessionId, hot, ct);
-        }
-
-        _logger.LogDebug(
-            "WorkspaceStateService: CloseTab id={TabId} session={SessionId} tenant={TenantId}",
-            tabId, sessionId, tenantId);
-    }
-
     // =========================================================================
     // Redis helpers (via ITenantCache wrapper — FR-05 tenant-scoped keys)
     // =========================================================================
@@ -293,84 +169,12 @@ public sealed class WorkspaceStateService : IWorkspaceStateService
         }
     }
 
-    private async Task WriteHotAsync(
-        string tenantId,
-        string sessionId,
-        Dictionary<string, WorkspaceTab> tabs,
-        CancellationToken ct)
-    {
-        try
-        {
-            // 24h absolute TTL per FR-32. NOTE: original implementation used SlidingExpiration;
-            // ITenantCache wrapper exposes AbsoluteExpirationRelativeToNow only. Acceptable
-            // trade-off — most workspace sessions are touched well within 24h; abandoned
-            // sessions decay at the same horizon.
-            await _cache.SetAsync(
-                tenantId, CacheResource, sessionId, CacheVersion, tabs, RedisTtl, ct: ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "WorkspaceStateService: Redis write failed for session {SessionId} (tenant={TenantId})",
-                sessionId, tenantId);
-        }
-    }
-
-    private async Task RemoveHotKeyAsync(string tenantId, string sessionId, CancellationToken ct)
-    {
-        try
-        {
-            await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "WorkspaceStateService: Redis remove failed for session {SessionId} (tenant={TenantId})",
-                sessionId, tenantId);
-        }
-    }
-
     // =========================================================================
-    // Cosmos helpers (durable tier)
+    // Cosmos helpers (durable tier — read only)
     // =========================================================================
-
-    /// <summary>
-    /// Cosmos document id for a durable workspace-tab row:
-    /// <c>workspace-tab_{tenantId}_{tabId}</c>. The prefix disambiguates from
-    /// <c>MatterMemoryService</c>'s <c>{tenantId}_{matterId}</c> docs on the same container.
-    /// </summary>
-    internal static string BuildCosmosId(string tenantId, string tabId)
-        => $"{CosmosIdPrefix}_{tenantId}_{tabId}";
 
     private Container GetContainer()
         => _cosmosClient.GetContainer(_databaseName, CosmosContainerName);
-
-    private async Task WriteDurableAsync(WorkspaceTab tab, CancellationToken ct)
-    {
-        try
-        {
-            var doc = new WorkspaceTabDurableDocument
-            {
-                Id = BuildCosmosId(tab.TenantId, tab.Id),
-                DocumentType = CosmosDocumentTypeValue,
-                TenantId = tab.TenantId,
-                SessionId = tab.SessionId,
-                MatterId = tab.MatterContext.MatterId,
-                Tab = tab,
-            };
-
-            await GetContainer().UpsertItemAsync(
-                item: doc,
-                partitionKey: new PartitionKey(tab.TenantId),
-                cancellationToken: ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "WorkspaceStateService: Cosmos durable write failed for tab {TabId} (session={SessionId}, tenant={TenantId})",
-                tab.Id, tab.SessionId, tab.TenantId);
-        }
-    }
 
     private async Task<IReadOnlyList<WorkspaceTab>> LoadDurableForSessionAsync(
         string tenantId,

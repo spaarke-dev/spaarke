@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/compose-revise-document.schema.json",
+  "title": "Compose — Revise Document — Output Schema (compose-revise-document)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='compose-revise-document' (spaarkeai-compose-r2 DEF-11). MIRRORS VERBATIM the outputSchema baked into infra/dataverse/actions/compose-revise-document.action.json (the systemPrompt/schema author surface). The dual-channel payload — edits[] (structured, ledger-backed pending track-changes, same shape as compose-draft-alternative's ComposeDraftPayload) and comments[] (anchored review-flag comments, DEF-13 path) — becomes the opaque SessionOutput.Payload written under the `compose` disposition before render (ADR-040). Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required array, no anyOf/oneOf/discriminator; match_mode is a closed set via the `enum` keyword (NOT a property-level boolean required, which is FORBIDDEN).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["edits", "comments", "rationale", "sources"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN (OpenAiFunctionSchemaValidator). edits/comments MAY be empty arrays (e.g. flag-risks emits empty edits; align-clauses/improve-clarity MAY emit empty comments) but both arrays are always present. match_mode's closed set is expressed via the `enum` keyword.",
+  "properties": {
+    "edits": {
+      "type": "array",
+      "description": "Structured edits (pending track-changes) this revision pass proposes. Empty for a flag-risks request (comments-only). Each item is exactly the compose-draft-alternative ComposeDraftPayload shape ({target_text, new_text, match_mode}).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_text", "new_text", "match_mode"],
+        "properties": {
+          "target_text": {
+            "type": "string",
+            "description": "The exact substring of documentText this edit replaces — copied VERBATIM so the editor can locate it.",
+            "maxLength": 16000
+          },
+          "new_text": {
+            "type": "string",
+            "description": "The proposed replacement language — self-contained, drafting-ready prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+            "maxLength": 16000
+          },
+          "match_mode": {
+            "type": "string",
+            "description": "How the editor locates target_text: 'strict' (this exact occurrence — default), 'first' (first occurrence of a shorter repeated fragment), or 'all' (every occurrence, e.g. a defined-term change).",
+            "enum": ["strict", "first", "all"]
+          }
+        }
+      }
+    },
+    "comments": {
+      "type": "array",
+      "description": "Anchored review-flag comments this revision pass proposes. The ONLY output for a flag-risks request (no rewrite). Each item anchors a comment to a verbatim span of documentText — materializes as an AnchoredAnnotation type:'comment' (DEF-13 path).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_text", "comment"],
+        "properties": {
+          "target_text": {
+            "type": "string",
+            "description": "The exact substring of documentText this comment anchors to — copied VERBATIM so the editor can locate it.",
+            "maxLength": 16000
+          },
+          "comment": {
+            "type": "string",
+            "description": "The review-flag text — concise, names the concrete risk or issue.",
+            "maxLength": 1500
+          }
+        }
+      }
+    },
+    "rationale": {
+      "type": "string",
+      "description": "Concise plain-language explanation of the revision pass as a whole (≤1 short paragraph, ≤1500 chars) — names the intent applied and the concrete improvement, not a generic justification.",
+      "maxLength": 1500
+    },
+    "sources": {
+      "type": "array",
+      "description": "Grounding for the revision — each entry is { type, id, snippet }. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "id", "snippet"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "The source kind (e.g. 'playbook', 'precedent', 'clause').",
+            "maxLength": 80
+          },
+          "id": {
+            "type": "string",
+            "description": "The retrieval-layer identifier for the source — never fabricated."
+          },
+          "snippet": {
+            "type": "string",
+            "description": "A SHORT supporting excerpt from the source.",
+            "maxLength": 1000
+          }
+        }
+      }
+    }
+  }
+}

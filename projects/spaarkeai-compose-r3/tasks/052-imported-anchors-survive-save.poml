@@ -1,0 +1,135 @@
+<task id="052" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-26 imported anchors survive save (paraId + retained-original) + seam slice test</title>
+    <phase>5 Import</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>022,050,051</deps>
+    <tags>testing,bff-api,docx</tags>
+    <estimated-effort>2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-26 (imported anchors survive save). Prove — through the wire — that imported revisions
+    (task 050) and imported comments (task 051) anchor by `w14:paraId` (E2) and are PRESERVED across the
+    retained-original delta save (E1, task 022): open a `.docx` that already has Word revisions/comments →
+    save → reopen, and the imported revisions/comments are still present, still anchored to the correct
+    paragraphs by paraId. The load-bearing deliverable is a **through-the-wire `WebApplicationFactory` seam
+    slice test** in `tests/integration/seam/**` (per NFR-06 E2E Definition-of-Done + ADR-038) that drives
+    Load → (edit elsewhere) → Save → Load and asserts the imported marks survive with correct paraId anchors.
+    Any small production glue needed to make imported marks ride the E1 retained-original splice cleanly is in
+    scope, but the primary work is the seam test. This is TEST-MODIFYING (modifies `tests/**`) → code-review +
+    adr-check run at Step 9.5 UNCONDITIONALLY.
+  </prompt>
+
+  <role>
+    Senior test engineer fluent in `WebApplicationFactory` through-the-wire slice tests (ADR-038 KEEP
+    categories, the `tests/integration/seam/**` vertical-slice-seam category), the Spaarke Compose
+    Load/Save round-trip, Open XML revision/comment assertion, and the E1 retained-original delta save +
+    E2 paraId substrate. Comfortable asserting a persisted OOXML side-effect (imported marks survive with
+    correct paraId anchors) rather than a service-level unit.
+  </role>
+
+  <goal>
+    A `tests/integration/seam/**` `WebApplicationFactory` seam slice test that: (1) Loads a fixture `.docx`
+    carrying pre-existing Word `w:ins`/`w:del` + `w:comment`; (2) makes a dirty edit to an UNRELATED
+    paragraph; (3) Saves through the real route (E1 retained-original delta); (4) reopens via Load; and
+    asserts the imported revisions AND comments are still present, still anchored to their original
+    paragraphs by `w14:paraId`, and NOT dropped or re-flattened. Plus any minimal production glue so
+    imported marks ride the E1 splice cleanly. code-review + adr-check pass at Step 9.5 (TEST-MODIFYING
+    override). The BFF build + the new seam test are green.
+  </goal>
+
+  <context>
+    <background>
+      FR-26 is the import round-trip's survival guarantee: imported revisions/comments anchor by paraId
+      (E2) and must be preserved across the retained-original save (E1). Design §7 attaches imported marks
+      "by paraId so they survive the retained-original save — the same substrate the fidelity core builds."
+      Tasks 050/051 wire the reader into Load and render the marks; this task proves they survive the
+      round-trip and adds the through-the-wire seam test. Per the R3 CLAUDE.md E2E Definition-of-Done
+      (NFR-06): every save/load/dispatch change carries a `WebApplicationFactory` seam slice test in
+      `tests/integration/seam/**`; unit-green ≠ done; `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null
+      tests do NOT satisfy (ADR-038).
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/ — NEW `WebApplicationFactory` seam slice test: Load(redlined+commented docx) → edit unrelated para → Save (E1 delta) → Load → assert imported revisions + comments survive with correct paraId anchors (NFR-06, ADR-038 seam category)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — `LoadAsync` (`:168`, imported-mark projection from tasks 050/051) + `SaveAsync` (E1 retained-original delta, task 022) — the round-trip under test</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — `Read(byte[])` (`:68`) used to assert imported marks are present after reopen</file>
+      <file role="reference">projects/spaarkeai-compose-r3/tasks/024-*.poml — the FR-07/NFR-06 fidelity seam slice test (task 024) is the reference shape for a through-the-wire compose seam test; mirror its `WebApplicationFactory` harness</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7 (imported marks anchor by paraId, survive save), §8 (SAVE dirty pipeline), §12 (test obligation — through-the-wire slice)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">FR-01 E1 cutover (retained-original baseline in `SaveAsync`) — the save path the imported marks must survive.</dependency>
+      <dependency task="050" status="pending">FR-24 import existing revisions — the imported revisions under test.</dependency>
+      <dependency task="051" status="pending">FR-25 import existing comments — the imported comments under test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038 / NFR-06">The DoD deliverable MUST be a through-the-wire `WebApplicationFactory` seam slice test in `tests/integration/seam/**` that POSTs through the REAL Save route and asserts the persisted OOXML side-effect (imported marks survive with correct paraId). `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, and ctor-null tests are BANNED and do NOT satisfy this. Unit-green ≠ done.</constraint>
+    <constraint source="project / MUST anchor by paraId">The test MUST assert imported marks resolve by `w14:paraId` after the round-trip; the fuzzy `AnnotationReanchorService` fallback is a secondary path, not the primary assertion.</constraint>
+    <constraint source="project / FR-01 MUST">The save under test MUST derive from the retained load-time original (E1); the test asserts untouched content (incl. the imported marks on untouched paragraphs) is preserved and the dirty edit lands on exactly its paragraph.</constraint>
+    <constraint source="ADR-007">The seam test exercises the real facade path; no `Microsoft.Graph` type is asserted above `SpeFileStore`. Fixtures + assertions operate on `byte[]`/OOXML.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` stays AI-facade-clean; any production glue added here injects no AI internals (Tier-1 NetArchTest green).</constraint>
+    <constraint source="TEST-MODIFYING override / CLAUDE.md §8">This task modifies `tests/**` → code-review + adr-check run at Step 9.5 UNCONDITIONALLY (overrides any default skip).</constraint>
+    <constraint source="NFR-01 / §10 BFF hygiene">Report publish-size delta vs ~49.63 MB (test-only + minor glue → ≈0; state it); verify no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WebApplicationFactory seam slice tests; ADR-038 KEEP categories; Compose Load/Save round-trip; paraId anchoring; Open XML revision/comment assertion</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compose seam slice test shape" location="projects/spaarkeai-compose-r3/tasks/024-*.poml">
+        Task 024 (FR-07/NFR-06 fidelity seam test) is the reference `WebApplicationFactory` harness — Load a formatted fixture, edit, Save through the real route, assert persisted OOXML. Mirror its structure for the imported-marks-survival assertion.
+      </pattern>
+      <pattern name="Assert imported marks after reopen" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs">
+        Use `DocxAnnotationReader.Read` on the reopened bytes to assert the imported `w:ins`/`w:del`/`w:comment` are present with the expected paraId anchors.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Declare rigor (FULL, TEST-MODIFYING). Confirm deps 022 (E1 cutover), 050 (import revisions), 051 (import comments) are ✅. Load ADR-038 + TEST-ARCHITECTURE + the seam-category KEEP rule. Read task 024's seam-test shape as the reference harness.</step>
+    <step order="1" name="Build the fixture">Create/obtain a `.docx` fixture that already carries Word `w:ins`/`w:del` + a `w:comment` thread on known paragraphs (with paraIds). Keep it small and deterministic.</step>
+    <step order="2" name="Author the seam slice test">In `tests/integration/seam/**`, author a `WebApplicationFactory` test: Load the fixture → assert imported marks present on load (from tasks 050/051) → make a dirty edit to an UNRELATED paragraph → Save through the REAL Save route (E1 delta) → reopen via Load.</step>
+    <step order="3" name="Assert survival + paraId anchoring">Assert the imported revisions AND comments are still present after reopen, anchored to their original paragraphs by `w14:paraId`, NOT dropped or re-flattened; assert the unrelated dirty edit landed on exactly its paragraph and untouched content (incl. imported marks) is preserved (FR-26 + FR-01).</step>
+    <step order="4" name="Minimal production glue (if needed)">If the round-trip reveals imported marks do not ride the E1 splice cleanly, add the minimal `Services/Compose/` glue to fix it (no AI internals; paraId-anchored). Keep the change bounded; the primary deliverable is the seam test.</step>
+    <step order="5" name="Verify + gates">Build BFF; run the seam test (green). Run the NetArchTest facade check. Run code-review + adr-check at Step 9.5 (unconditional — TEST-MODIFYING). Report publish-size delta (~0) + CVE. Update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ — imported-marks-survive-save WebApplicationFactory seam slice test</output>
+    <output type="test">tests/integration/seam/fixtures/ — a redlined+commented `.docx` fixture</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (minimal glue only if the round-trip requires it)</output>
+    <output type="report">Seam-test evidence (imported marks survive with paraId anchors); publish-size delta; CVE; code-review + adr-check result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `WebApplicationFactory` seam slice test in `tests/integration/seam/**` drives Load(redlined+commented docx) → dirty edit to an unrelated paragraph → Save through the REAL route (E1 delta) → Load, and asserts the imported revisions AND comments survive (FR-26 acceptance: open→save→reopen preserves them).</criterion>
+    <criterion testable="true">The test asserts imported marks resolve by `w14:paraId` to their original paragraphs after the round-trip (E2), not by fuzzy fallback as the primary path.</criterion>
+    <criterion testable="true">The test asserts untouched content (incl. imported marks on untouched paragraphs) is preserved and the dirty edit landed on exactly its paragraph (FR-01/E1).</criterion>
+    <criterion testable="true">The test crosses the HTTP boundary through the real Save route; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null test is used (ADR-038); it lives at the `tests/integration/seam/**` KEEP path.</criterion>
+    <criterion testable="true">Any production glue added injects no AI internals (NetArchTest green) and no `Microsoft.Graph` type in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">code-review + adr-check run at Step 9.5 UNCONDITIONALLY (TEST-MODIFYING) and are clean or carry documented Path-A/B resolutions.</criterion>
+    <criterion testable="true">Publish-size reported delta vs ~49.63 MB (≈0; test-only + minor glue); no new HIGH CVE; BFF build + seam test green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

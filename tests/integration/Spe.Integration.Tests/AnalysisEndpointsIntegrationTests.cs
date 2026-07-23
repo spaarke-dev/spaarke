@@ -173,54 +173,19 @@ public class AnalysisEndpointsIntegrationTests : IClassFixture<AnalysisTestFixtu
         chunks.Should().Contain(c => c.Type == "done" && c.Done);
     }
 
-    [Fact]
-    public async Task ExecuteAnalysis_WithSoftFailure_ReturnsPartialStorageTrue()
-    {
-        // Arrange
-        var client = _fixture.CreateAuthorizedClientWithSoftFailure();
-        var documentId = Guid.NewGuid();
-        var playbookId = Guid.NewGuid();
-        var actionId = Guid.NewGuid();
-
-        var request = new AnalysisExecuteRequest
-        {
-            DocumentIds = [documentId],
-            PlaybookId = playbookId,
-            ActionId = actionId
-        };
-
-        // Act
-        var response = await client.PostAsJsonAsync("/api/ai/analysis/execute", request);
-        var stream = await response.Content.ReadAsStreamAsync();
-        var reader = new StreamReader(stream);
-
-        AnalysisStreamChunk? doneChunk = null;
-        while (!reader.EndOfStream)
-        {
-            var line = await reader.ReadLineAsync();
-            if (line?.StartsWith("data: ") == true)
-            {
-                var json = line["data: ".Length..];
-                var chunk = JsonSerializer.Deserialize<AnalysisStreamChunk>(json, new JsonSerializerOptions
-                {
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                });
-
-                if (chunk?.Type == "done")
-                {
-                    doneChunk = chunk;
-                    break;
-                }
-            }
-        }
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        doneChunk.Should().NotBeNull();
-        doneChunk!.PartialStorage.Should().BeTrue("soft failure should set partialStorage=true");
-        doneChunk.StorageMessage.Should().NotBeNullOrEmpty("soft failure should include storage message");
-        doneChunk.StorageMessage.Should().Contain("outputs saved", "storage message should explain what succeeded");
-    }
+    // NOTE (2026-07-10, pre-existing-test-failure remediation):
+    // The former ExecuteAnalysis_WithSoftFailure_ReturnsPartialStorageTrue test was DELETED here.
+    // It asserted doneChunk.PartialStorage == true on a soft storage failure — a surface that
+    // belonged to the legacy direct-invocation analysis path removed by R7 FR-11 (task 042).
+    // The canonical PlaybookStreamEvent contract the endpoint now dispatches carries NO
+    // PartialStorage/StorageMessage fields, so no production path can set PartialStorage=true:
+    //   • engine path — BridgePlaybookEventToAnalysisChunk maps RunCompleted → Completed(runId,
+    //     tokenUsage) with partialStorage=null (AnalysisEndpoints.cs:522-527);
+    //   • Document Profile pipeline — hard-errors (FromError) on an UpdateDocumentFields failure
+    //     rather than emitting a partial-storage done chunk (AnalysisEndpoints.cs:1037-1041).
+    // The scenario mock already documented this as a no-op (SoftFailure ≡ Success). This was a
+    // test of a retired contract; per ADR-038 test-diet it is deleted, not repaired. Full-success
+    // PartialStorage-null behavior remains covered by the test immediately below.
 
     [Fact]
     public async Task ExecuteAnalysis_WithFullStorageSuccess_ReturnsPartialStorageNull()
@@ -558,18 +523,6 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
         return client;
     }
 
-    public HttpClient CreateAuthorizedClientWithSoftFailure()
-    {
-        _scenario = TestScenario.SoftFailure;
-        _authorizedDocumentIds.Clear();
-        _authorizationTracker.FilterCalled = false;
-
-        var client = CreateClient();
-        var token = GenerateMockJwt("test-user-soft-failure");
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return client;
-    }
-
     public HttpClient CreateUnauthorizedClient()
     {
         _scenario = TestScenario.Unauthorized;
@@ -750,9 +703,14 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
 
             // Mock IAiAuthorizationService - the analysis execute endpoint filter
             // calls this to authorize document access before reaching the handler.
+            // The AuthorizationTracker is passed here (not to the orchestration mock) because
+            // IAiAuthorizationService.AuthorizeAsync is invoked ONLY by AnalysisAuthorizationFilter —
+            // it is the one live signal that the filter actually ran. (The legacy tracking point
+            // inside MockAnalysisOrchestrationService was removed with the direct-invocation path
+            // in R7 FR-11 task 042.)
             services.RemoveAll<IAiAuthorizationService>();
             services.AddScoped<IAiAuthorizationService>(sp =>
-                new MockAiAuthorizationService(_scenario, _authorizedDocumentIds));
+                new MockAiAuthorizationService(_scenario, _authorizedDocumentIds, _authorizationTracker));
 
             services.RemoveAll<IOpenAiClient>();
             services.AddSingleton(_ => new Mock<IOpenAiClient>(MockBehavior.Loose).Object);
@@ -832,7 +790,6 @@ internal enum TestScenario
 {
     Success,
     DocumentProfilePlaybook,
-    SoftFailure,
     Unauthorized,
     PlaybookNotFound,
     DocumentNotFound,
@@ -960,22 +917,7 @@ internal class MockPlaybookOrchestrationService : IPlaybookOrchestrationService
             Duration = TimeSpan.FromMilliseconds(30)
         };
 
-        if (_scenario == TestScenario.SoftFailure)
-        {
-            // R7 task 041/042 limitation: PlaybookStreamEvent does not carry the legacy
-            // PartialStorage/StorageMessage fields. The soft-failure scenario surface is
-            // preserved at the PlaybookRunMetrics layer; the SoftFailure integration test
-            // assertion on doneChunk.PartialStorage will require either (a) extending
-            // PlaybookStreamEvent.RunCompleted with optional partial-storage metadata, or
-            // (b) relocating the soft-failure surface into a dedicated PlaybookEventType.
-            // Both are out of scope for FR-11 (audit R-040 does not call this out); follow-on
-            // work if PartialStorage assertion becomes load-bearing again.
-            yield return PlaybookStreamEvent.RunCompleted(runId, request.PlaybookId, metrics);
-        }
-        else
-        {
-            yield return PlaybookStreamEvent.RunCompleted(runId, request.PlaybookId, metrics);
-        }
+        yield return PlaybookStreamEvent.RunCompleted(runId, request.PlaybookId, metrics);
     }
 
     // Other interface methods not used by /api/ai/analysis/execute integration tests
@@ -1020,11 +962,16 @@ internal class MockAiAuthorizationService : IAiAuthorizationService
 {
     private readonly TestScenario _scenario;
     private readonly List<Guid> _authorizedDocumentIds;
+    private readonly AuthorizationTracker _authorizationTracker;
 
-    public MockAiAuthorizationService(TestScenario scenario, List<Guid> authorizedDocumentIds)
+    public MockAiAuthorizationService(
+        TestScenario scenario,
+        List<Guid> authorizedDocumentIds,
+        AuthorizationTracker authorizationTracker)
     {
         _scenario = scenario;
         _authorizedDocumentIds = authorizedDocumentIds;
+        _authorizationTracker = authorizationTracker;
     }
 
     public Task<Sprk.Bff.Api.Services.Ai.AuthorizationResult> AuthorizeAsync(
@@ -1033,6 +980,10 @@ internal class MockAiAuthorizationService : IAiAuthorizationService
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        // AuthorizeAsync is reached ONLY through AnalysisAuthorizationFilter, so this is the
+        // authoritative "the FullUAC authorization filter executed" signal for the fixture.
+        _authorizationTracker.FilterCalled = true;
+
         // Track authorized document IDs for test verification
         foreach (var docId in documentIds)
         {

@@ -1,0 +1,121 @@
+<task id="001" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Phase-0: audit live `sprk_communication` schema + confirm `Message=100000004` choice integer (MCP read)</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>004, 005, 006</blocks>
+    <tags>dataverse, spike</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only Dataverse MCP spike — no code, no build. Produces a delta report that unblocks the schema/enum tasks (004/005/006). STANDARD per CLAUDE.md §8 (inventory/verification); no Step 9.5 gates.</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>—</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Phase-0 lean delta validation (design §12.1). Before any schema work is authored, establish the GROUND TRUTH of the live `sprk_communication` entity in Dataverse: which columns already exist versus which the spec needs added. Use the Dataverse MCP in **read-only** mode only — `describe` (metadata) + `read_query` (data). Author NO code, run NO build, create NO tables.
+
+    Two concrete questions to answer with evidence:
+
+    1. **Column delta** — enumerate the current `sprk_communication` attribute set and compare it against the columns the spec requires (task 005 will add these): message-level **privacy** flag, **internal-only** flag, **privilege** classification, ACS **`messageId`** correlation key, ACS **`chatThreadId`** correlation key; plus the **`sprk_thread`** lookup (task 004) and **`communicationUserId`** on the *user* and *contact* entities. For each, record: EXISTS (with logical name + type) or MUST-ADD. Note any near-miss columns R4 may have already anticipated (design §6.1 mentions R4 anticipated a `sprk_conversationid` field — confirm whether it exists).
+
+    2. **Choice integer confirmation** — CONFIRM the `sprk_communicationtype` global/local option set already contains a **`Message`** choice whose integer value is exactly **`100000004`** (spec FR-16 + design §14.6 assert the Dataverse choice already exists; task 006 extends the C# enum to match). Report the full option-set member list (label → integer) so 006 has a verified source of truth.
+
+    Output a delta report to `notes/spikes/001-schema-audit.md`. This is a verification spike: its value is the evidence, not code.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema analyst. Fluent in the Dataverse MCP read tools (`describe`, `read_query`), the `sprk_communication` data model, option-set integer conventions (100000000-base), and the ADR-024 regarding family. Read-only posture — you inspect and report, you do not mutate.
+  </role>
+
+  <goal>
+    A written delta report at `notes/spikes/001-schema-audit.md` that (a) lists every column the spec needs on `sprk_communication` / user / contact as EXISTS or MUST-ADD with logical name + data type, and (b) confirms (or refutes, with evidence) that `sprk_communicationtype` has a `Message` member at integer `100000004`, with the full member list. Tasks 004/005/006 can be authored directly against this report with zero further Dataverse guessing.
+  </goal>
+
+  <context>
+    <background>
+      This is not greenfield (design §2). `sprk_communication` is a mature R2+R4 entity; the messaging project ADDS a small number of columns rather than a new entity. Authoring schema tasks (004/005) against assumed column state risks either duplicate-column creation or missed columns — the concrete cost-of-doing-nothing is a schema task that adds a column that already exists (breaking deploy) or asserts a `Message` integer that disagrees with Dataverse (breaking the enum↔choice contract in FR-16). This spike is the cheap read that removes both failure modes.
+
+      No new component is introduced by this task (§11 N/A — it is a read-only audit). The columns it audits ARE justified in tasks 004/005 (thread grouping, privacy enforcement, ACS correlation) — this task only verifies their current presence/absence.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs (current enum — Email/TeamsMessage/SMS/Notification; Message NOT yet present)</file>
+      <file>projects/messaging-communication-app-r1/design.md (§2 current-state truth, §6.1 thread model, §14.6 Message=100000004)</file>
+      <file>projects/messaging-communication-app-r1/spec.md (FR-05, FR-08, FR-16 — the columns + choice this audit targets)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">READ-ONLY Dataverse MCP only: `describe` + `read_query`. MUST NOT call any create/update/delete MCP tool. No `create_table`, `update_table`, `create_record`, etc.</constraint>
+    <constraint source="project">No code, no `dotnet build`, no schema deploy. Output is a markdown report only.</constraint>
+    <constraint source="spec FR-16">Confirm the `Message` choice integer is exactly `100000004`; if Dataverse disagrees, flag it as a HARD blocker for task 006 (do not silently assume).</constraint>
+    <constraint source="ADR-024">When auditing the thread anchor, note that thread anchoring reuses the ADR-024 regarding family — do NOT recommend a second regarding mechanism.</constraint>
+    <constraint source="project (Phase 0)">If the Dataverse environment/MCP connection is unavailable, record that explicitly in the report and enumerate the delta from the code + design as a fallback, flagging each item as UNVERIFIED so downstream tasks know to re-check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationType.cs</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse MCP read-only usage" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Use `describe` for entity/attribute metadata and `read_query` for option-set members / sample rows. Never a write tool in a spike.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `spec.md` (FR-05, FR-08, FR-16), `design.md` (§2, §6.1, §14.6), and `CommunicationType.cs` to build the target column + choice checklist.</step>
+    <step order="2">Run Dataverse MCP `describe` on `sprk_communication` — capture the full attribute list (logical name + type). Repeat `describe` on the `systemuser` and `contact` entities for the intended `communicationUserId` mapping column.</step>
+    <step order="3">For each spec-required column (privacy, internal-only, privilege, ACS `messageId`, ACS `chatThreadId`, `sprk_thread` lookup, `communicationUserId` on user + contact), mark EXISTS (logical name + type) or MUST-ADD. Explicitly check whether R4's anticipated `sprk_conversationid` field exists (design §6.1 fallback option C).</step>
+    <step order="4">Query the `sprk_communicationtype` option set (`describe` the attribute or `read_query` the option-set metadata). Record the full member list (label → integer). Confirm a `Message` member exists at `100000004`; flag any disagreement as a HARD blocker for 006.</step>
+    <step order="5">Confirm the thread anchor path: verify the ADR-024 regarding family columns already present on `sprk_communication` (so task 004's thread anchor reuses them, not a new mechanism).</step>
+    <step order="6">Write `notes/spikes/001-schema-audit.md`: a delta table (column → EXISTS/MUST-ADD → type → note), the `sprk_communicationtype` member list with the `100000004` confirmation, and a short "downstream impact" section telling 004/005/006 exactly what to add.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md` (001 ✅) + `current-task.md`; note whether 004/005/006 are cleanly unblocked or carry a flagged discrepancy.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Read spec/design/enum to build the target checklist</tool>
+    <tool name="mcp-dataverse-describe">Enumerate `sprk_communication` / user / contact attribute metadata + option set</tool>
+    <tool name="mcp-dataverse-read_query">Read option-set members / confirm choice integers</tool>
+    <tool name="write">Author the delta report</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/messaging-communication-app-r1/notes/spikes/001-schema-audit.md (delta report — column EXISTS/MUST-ADD table + choice-integer confirmation)</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 001 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/spikes/001-schema-audit.md` exists and lists every spec-required column (privacy, internal-only, privilege, ACS `messageId`, ACS `chatThreadId`, `sprk_thread`, `communicationUserId` on user + contact) as EXISTS or MUST-ADD with logical name + data type.</criterion>
+    <criterion testable="true">The report states, with evidence from Dataverse (or a clearly-labelled UNVERIFIED fallback), whether `sprk_communicationtype` has a `Message` member at integer `100000004`, and includes the full member list.</criterion>
+    <criterion testable="true">The report confirms whether R4's anticipated `sprk_conversationid` field exists (design §6.1 option C).</criterion>
+    <criterion testable="true">A "downstream impact" section tells tasks 004/005/006 exactly what to add and flags any HARD blocker (e.g., a `Message`-integer mismatch).</criterion>
+    <criterion testable="true">No Dataverse write tool was invoked; no code was authored; no build was run.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Blocks 004 (thread entity + `sprk_thread` lookup), 005 (new columns + `communicationUserId`), 006 (enum must match the confirmed `Message` integer). Land it before W0-B.
+
+    If MCP is unavailable, the report is still valuable as a code+design-derived delta — but every unverified item MUST be labelled so 004/005/006 re-check before creating. Do NOT block the project on an environment gap; deliver the fallback delta.
+
+    Design §14.6 and spec FR-16 both assert the `Message` Dataverse choice ALREADY exists — the point of step 4 is to prove it, because 006's whole contract (enum = Dataverse) rests on it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED (read-only spike, no code). Dataverse MCP is READ-ONLY here. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

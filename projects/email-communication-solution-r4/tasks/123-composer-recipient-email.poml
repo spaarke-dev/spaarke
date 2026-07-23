@@ -1,0 +1,61 @@
+<task id="123" project="email-communication-solution-r4">
+  <metadata>
+    <title>EmailComposer — contact suggestion must resolve to the email address, not the display name (UAT R4 C, W10-103 bug)</title>
+    <phase>Wave 12 — UAT round 4 refinements</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>103</dependencies>
+    <blocks>—</blocks>
+    <tags>frontend, communication, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Fixes a shipped send-blocking bug in the shared EmailComposer recipient flow (.tsx). Code-review + adr-check.</rigor-reason>
+    <parallel-group>W12</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    UAT round 4 (`notes/UAT-ROUND4-FEEDBACK.md` section C): BUG in the W10 task-103 recipient autocomplete. In the New
+    Email modal, typing a name and SELECTING a contact suggestion inserts the NAME (e.g. "ralph") as the recipient,
+    which fails validation ("Invalid email address: ralph"). Selecting a suggestion MUST insert the contact's EMAIL
+    ADDRESS (`emailaddress1`) as the recipient value (optionally displayed as "Name <email>" but the resolved value
+    must be the email so it validates + sends).
+
+    ROOT-CAUSE the selection path: read the `onSearchRecipients` return shape (`ILookupItem`?) + how `RecipientField`
+    (in `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/`) maps a chosen suggestion into a
+    recipient. Determine whether the bug is (a) the search result carries the email but the selection uses the display
+    label as the value, or (b) `searchUsersAndContacts` returns items whose value/email field is the name. Fix so the
+    recipient resolves to the email. Contacts with NO email should be handled gracefully (not offered, or clearly
+    non-selectable) rather than producing an invalid recipient.
+  </prompt>
+
+  <goal>
+    Selecting a contact/user suggestion in To/Cc/Bcc adds a recipient whose value is the contact's email address (so
+    it passes validation and sends); free-typed valid emails still work; a contact with no email does not produce an
+    invalid recipient.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">Selecting a suggestion adds a recipient whose resolved value is the contact's `emailaddress1` (the "Invalid email address: {name}" case is gone).</criterion>
+    <criterion testable="true">The chip/validation treats the selected recipient as valid; the email can be sent (payload carries the email address).</criterion>
+    <criterion testable="true">Free-typed valid email addresses still work; a suggestion for a contact with no email is not selectable-into-an-invalid-recipient (skipped or blocked with a clear signal).</criterion>
+    <criterion testable="true">Unit test: mock a search returning a contact with name + email; select it; assert the recipient value is the email, not the name. (Mirror existing EmailComposer recipient tests.)</criterion>
+    <criterion testable="true">`npm run build`/`build:prod` clean for touched package(s)/PCF(s); if a PCF host changed, version bump + repack; shared-lib build clean.</criterion>
+    <criterion testable="true">ADR-028 auth unchanged; ADR-021 Fluent v9; §11 (fix the existing seam/handler — no new prop contract).</criterion>
+  </acceptance-criteria>
+
+  <constraints>
+    <constraint>Fix within the existing recipient/onSearchRecipients flow — do NOT add a new composer prop contract (§11).</constraint>
+    <constraint>The fix is likely in the shared `@spaarke/ui-components` EmailComposer (RecipientField selection) and/or the host's `searchUsersAndContacts` result mapping — touch ONLY the EmailComposer recipient path + the contact-search mapping. Do NOT touch the FilePreview components (a parallel W12 task may). If only the shared lib changes, no PCF repack is needed beyond a consuming host you actually modify.</constraint>
+    <constraint>Fluent v9 only; theme-correct.</constraint>
+  </constraints>
+
+  <notes>
+    Start at `EmailComposer/subcomponents/RecipientField.tsx` (or equivalent) + the `onSearchRecipients` type
+    (`ILookupItem`) + `searchUsersAndContacts` (shared services). W10 task 103 wired the search; the display vs value
+    mapping is the suspect. Leave changes UNCOMMITTED; do NOT touch TASK-INDEX/current-task/project CLAUDE.md. If a
+    PCF host bundle changes, note it for the main session to repack.
+  </notes>
+</task>

@@ -369,7 +369,7 @@ Authenticated browser calls from `*.crm.dynamics.com` to the BFF (`api://{BFF-Ap
 - [ADR-009](../../.claude/adr/ADR-009-redis-caching.md) — Redis-first caching
 - [auth-azure-resources.md](auth-azure-resources.md) — App registration GUIDs and Azure config
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF patterns that use these auth patterns
-- [email-processing-architecture.md](email-processing-architecture.md) — Pattern 6 (app-only) in detail
+- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — app-only inbound auth (Pattern 6) in the canonical R4 flow
 
 ---
 

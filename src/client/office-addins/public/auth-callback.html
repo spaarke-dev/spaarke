@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Spaarke Authentication</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f3f2f1;
+        }
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 4px solid #e1e1e1;
+            border-top: 4px solid #0078d4;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!--
+      Fallback MSAL popup redirect TARGET for `@spaarke/auth`'s `OfficeNaaStrategy`
+      (email-communication-solution-r4 task 072 / FR-25). Only reached on Office
+      hosts that do NOT support Nested App Authentication (pre-NAA legacy clients —
+      `OfficeNaaStrategy.detectNaaSupport()` returns false); NAA-capable hosts (the
+      overwhelming majority — Office on the web, Windows 16.0.13530+, Mac 16.44+,
+      New Outlook) never navigate here.
+
+      Deliberately contains NO MSAL / auth logic of its own. MSAL.js's
+      `acquireTokenPopup()` protocol runs entirely from the OPENER window (the
+      `PublicClientApplication` instance owned by `OfficeNaaStrategy`): the opener
+      polls the popup's `location.href` once the popup navigates to this
+      same-origin redirect URI, extracts the authorization response from the URL,
+      and closes the popup itself. This page's only job is to BE a valid,
+      same-origin, always-resolvable landing target so that navigation succeeds
+      and `location.href` is readable by the opener — no script of its own needs
+      to run here.
+
+      Replaces the deprecated `auth-dialog.html`, which self-bootstrapped a second,
+      independent MSAL instance directly in this static page (ADR-028 violation —
+      "MUST NOT instantiate PublicClientApplication directly outside @spaarke/auth").
+      An earlier draft of this file repeated that mistake (a redundant
+      `new msal.PublicClientApplication(...)` call) before this task's own
+      code-review self-check caught it; do NOT reintroduce a second MSAL instance
+      here — all token/account state lives in the ONE `PublicClientApplication`
+      `OfficeNaaStrategy` constructs internally.
+    -->
+    <div class="spinner"></div>
+</body>
+</html>

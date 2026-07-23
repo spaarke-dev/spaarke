@@ -4,6 +4,9 @@
   "description": "Spaarke shared UI component library - Fluent UI v9 (selective imports)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
@@ -86,6 +89,7 @@
   },
   "dependencies": {
     "@microsoft/applicationinsights-web": "^3.3.0",
+    "@spaarke/auth": "file:../Spaarke.Auth",
     "@spaarke/sdap-client": "file:../Spaarke.SdapClient",
     "d3-force": "^3.0.0",
     "diff": "^8.0.3",

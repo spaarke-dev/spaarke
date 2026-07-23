@@ -30,8 +30,10 @@ import {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
   __resetComposeAiToolbarActionsForTests,
+  extractCleanDraftText,
   type ComposeAiToolbarAction,
 } from './ComposeAiToolbar';
+import type { TipTapNode } from '../utils/docxBridge';
 import type { DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import type { DispatchConsumer } from '@spaarke/ui-components';
 
@@ -82,6 +84,7 @@ function renderToolbar(
     editor: Editor | null;
     actions?: ReadonlyArray<ComposeAiToolbarAction>;
     dispatchConsumerOverride?: DispatchConsumer;
+    forceVisible?: boolean;
   },
   theme: typeof webLightTheme = webLightTheme
 ) {
@@ -95,6 +98,7 @@ function renderToolbar(
         dispatch={noopDispatch()}
         actions={ui.actions}
         dispatchConsumerOverride={ui.dispatchConsumerOverride}
+        forceVisible={ui.forceVisible}
       />
     </FluentProvider>
   );
@@ -162,6 +166,119 @@ describe('ComposeAiToolbar — render on selection', () => {
     expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Task 111 (UAT-R2 layout fix) — ONE Toolbar, single tightly-spaced row,
+//     and `forceVisible` (right-click / point-insertion trigger).
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spaced row + no overflow)', () => {
+  it('renders exactly ONE Toolbar (no second toolbar, no orphaned sibling) with no large-gap dividers', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+
+    const toolbars = screen.getAllByRole('toolbar');
+    expect(toolbars).toHaveLength(1);
+    const toolbar = toolbars[0];
+    expect(toolbar).toBe(screen.getByTestId('compose-ai-toolbar'));
+
+    // GAP FIX (UAT 2026-07-15): the ToolbarDividers were removed so every action
+    // sits in ONE tightly-spaced row at the single columnGap token — no large gap
+    // between the primary AI icons and the Email / overflow affordances.
+    expect(toolbar.querySelector('[role="separator"]')).toBeNull();
+  });
+
+  it('DEF-17: the Toolbar renders on a SINGLE line (flex-wrap: nowrap) — overflow goes to the ⋯ menu, not a second row', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+    // Real Griffel-injected CSS (not a class-name guess): the AI bubble must be
+    // one row. Actions that do not fit belong in the overflow menu.
+    expect(getComputedStyle(toolbar).flexWrap).toBe('nowrap');
+    // The single-row container also holds the ⋯ overflow trigger — the
+    // structural seam for spilling extra (incl. future DEF-18) actions off-row.
+    expect(within(toolbar).getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
+  });
+
+  it('forceVisible renders the toolbar even on a COLLAPSED selection (task 111 right-click / point-insertion trigger)', () => {
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    renderToolbar({ editor, forceVisible: true });
+
+    expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
+  });
+
+  it('forceVisible does NOT change the dispatch guard — clicking an action on a collapsed selection still no-ops', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    const dispatchConsumerOverride = jest.fn();
+    renderToolbar({ editor, actions: WIRED_TEST_ACTIONS, forceVisible: true, dispatchConsumerOverride });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
+
+    expect(dispatchConsumerOverride).not.toHaveBeenCalled();
+  });
+
+  it('without forceVisible (the selection-triggered BubbleMenu mount path), a collapsed selection still renders nothing — unchanged default behavior', () => {
+    const editor = createMockEditor({ from: 5, to: 5, text: '' });
+    renderToolbar({ editor }); // forceVisible omitted (defaults to false/undefined)
+    expect(screen.queryByTestId('compose-ai-toolbar')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1c. FIX #9 (UAT) — bubble restyle: icons-only, elevated grey surface,
+//     vertical overflow, tooltip names.
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
+  it('primary action buttons + Email + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+
+    // No visible label text on the primary buttons (icon-only). The names live in
+    // the hover Tooltip + aria-label, not as button text.
+    expect(within(toolbar).queryByText('Explain')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Compare to playbook')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Draft alternative')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByText('Email')).not.toBeInTheDocument();
+
+    // Each still renders its icon (an svg) and keeps its accessible name.
+    const explain = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
+    expect(explain.querySelector('svg')).not.toBeNull();
+    expect(explain.textContent).toBe('');
+    expect(screen.getByLabelText('Explain')).toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    // Overflow trigger renders an icon (vertical three-dots) with no text.
+    const more = screen.getByTestId('compose-ai-toolbar-more');
+    expect(more.querySelector('svg')).not.toBeNull();
+    expect(more.textContent).toBe('');
+  });
+
+  it('the bubble Toolbar carries a full-width elevated surface (background + shadow) so it spans all items', () => {
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+    const toolbar = screen.getByTestId('compose-ai-toolbar');
+    const style = getComputedStyle(toolbar);
+    // Griffel-injected (real CSS, not a class-name guess): the elevated surface now
+    // lives on the Toolbar itself (FIX #9) — a background + a shadow are present.
+    expect(style.backgroundColor).not.toBe('');
+    expect(style.boxShadow).not.toBe('');
+  });
+
+  it('hovering a primary button surfaces a Tooltip naming the tool', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    renderToolbar({ editor });
+
+    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Explain');
   });
 });
 
@@ -259,6 +376,27 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     );
   });
 
+  it('FIX #5: the defined-terms whole-document action is in the overflow; summarize-word-changes is NOT (removed from the selection toolbar)', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+
+    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS. FIX #5 removed
+    // `compose-summarize-word-changes` (a RETURN-FROM-WORD action that has no
+    // tracked-change data on the selection toolbar and made the LLM fabricate a
+    // phantom "[Insertion]"). Only `defined-terms` remains as an overflow action.
+    renderToolbar({ editor });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-more'));
+
+    const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
+    expect(definedTerms).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
+
+    // Phase-4 stub: disabled until the seeded Binding GUID is registered
+    // (button ENABLEMENT is E2E-pending on task 047).
+    expect(definedTerms).toHaveAttribute('aria-disabled', 'true');
+  });
+
   it('the overflow menu shows a placeholder when no overflow actions are registered', async () => {
     const user = userEvent.setup();
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
@@ -266,5 +404,55 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
 
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
     expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
+  });
+});
+
+describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
+  it('drops struck (deletion-marked) originals and keeps AI insertions as accepted text', () => {
+    // A strike+replace pending redline: "old clause" struck, "new clause" inserted.
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Keep this. ' },
+            { type: 'text', text: 'old clause', marks: [{ type: 'deletion' }] },
+            { type: 'text', text: 'new clause', marks: [{ type: 'insertion' }] },
+            { type: 'text', text: '.' },
+          ],
+        },
+      ],
+    };
+    // Garbled (what textBetween produced): "Keep this. old clausenew clause."
+    // Clean accepted view:
+    expect(extractCleanDraftText(doc)).toBe('Keep this. new clause.');
+  });
+
+  it('joins block paragraphs with newlines and trims', () => {
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', content: [{ type: 'text', text: 'First paragraph.' }] },
+        { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'A Heading' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second paragraph.' }] },
+      ],
+    };
+    expect(extractCleanDraftText(doc)).toBe('First paragraph.\nA Heading\nSecond paragraph.');
+  });
+
+  it('renders a fully chat-drafted (all-insertion) body as its accepted text (not empty)', () => {
+    // Every span is a pending insertion — the reject baseline would strip this to empty; the
+    // accept view (what an email of the draft must carry) keeps it.
+    const doc: TipTapNode = {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'A drafted sentence.', marks: [{ type: 'insertion' }] }],
+        },
+      ],
+    };
+    expect(extractCleanDraftText(doc)).toBe('A drafted sentence.');
   });
 });

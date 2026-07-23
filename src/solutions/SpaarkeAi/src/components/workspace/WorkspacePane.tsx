@@ -38,7 +38,11 @@ import {
   getWorkspaceWidgetMetadata,
   useAiSession,
 } from "@spaarke/ai-widgets";
-import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widgets";
+import type {
+  WorkspacePaneEvent,
+  ConversationPaneEvent,
+  WorkspaceWidgetComponent,
+} from "@spaarke/ai-widgets";
 // R6 Hotfix Wave B-G9c2 (2026-06-10): the previously-eager Summary tab
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
@@ -48,6 +52,10 @@ import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widg
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
 import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
+// R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
+// `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
+// TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
+import { useComposeVisibility } from "@spaarke/compose-components/context/composeActionBridge";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type {
   ActiveTabSnapshot,
@@ -56,6 +64,15 @@ import type {
 } from "./WorkspaceTabManager";
 import { WorkspaceTabManagerComponent } from "./WorkspaceTabManagerComponent";
 import { WorkspacePaneMenu } from "./WorkspacePaneMenu";
+// FIX #10b — STUB email widget rendered when the Compose "Email" affordance
+// (or the chat "email" chip) dispatches a `widget_load` with widgetType 'email'.
+// Statically imported so the email branch resolves the component synchronously
+// (no WorkspaceWidgetRegistry round-trip).
+import { EmailStubWidget } from "./EmailStubWidget";
+// spaarkeai-compose-r2 UNIFY — the DIRECT 'compose' widget's seed shape. Used to
+// build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
+// workspace handler's 'compose' branch consumes.
+import type { ComposeWidgetSeed } from "./composeWidgetData";
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
@@ -100,6 +117,70 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
+// Compose instance-key derivation (spaarkeai-compose-r2 — multi-Compose-tab)
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a STABLE per-document instance key from a compose open's `widgetData`.
+ *
+ * Compose is no longer a hard singleton: a DIFFERENT document opens a NEW tab, while the SAME
+ * document reuses its existing tab. This key is the identity used to decide reuse-vs-new. It
+ * prefers a durable id over a filename per source door:
+ *   - draft   → `draft:<bindingId>` — the ledgerRef's `@t<turn>` suffix is STRIPPED so successive
+ *               turns of the SAME drafting binding (e.g. `b1@t1`, `b1@t2`) map to ONE tab
+ *               (DEF-08 single-tab reuse across re-drafts).
+ *   - upload  → `upload:<sessionFileId>`
+ *   - stored  → `stored:<speDriveItemId>` (or `<sprkDocumentId>` fallback)
+ *   - name    → `name:<fileName>` — only when no stable id exists.
+ *
+ * Returns `undefined` when there is no `compose` seed at all (a source-only re-activation), OR the
+ * seed carries no identifiable document (a Part-B inline-html draft, or an empty `{ upload: {} }`
+ * / blank open) — the caller distinguishes those cases (source-only reuse vs blank new tab).
+ *
+ * The key is RE-DERIVED from the existing tab's persisted `compose` seed on every reuse decision
+ * (see {@link composeTabInstanceKey}) rather than stored on `widgetData` — that keeps the seed
+ * clean (its shape is asserted verbatim by tests + consumed by `buildLaunchFromSeed`) and Just
+ * Works for tabs restored from persistence, which never carried a stored key.
+ */
+export function deriveComposeInstanceKey(widgetData: unknown): string | undefined {
+  if (widgetData === null || typeof widgetData !== "object") return undefined;
+  const compose = (widgetData as { compose?: unknown }).compose;
+  if (compose === null || typeof compose !== "object") return undefined;
+  const c = compose as {
+    draft?: { ledgerRef?: string; fileName?: string; html?: string };
+    upload?: { sessionFileId?: string; fileName?: string };
+    speDriveItemId?: string;
+    sprkDocumentId?: string;
+    fileName?: string;
+  };
+
+  if (typeof c.draft?.ledgerRef === "string" && c.draft.ledgerRef.length > 0) {
+    // `<bindingId>@t<turn>` → strip the per-turn suffix so re-drafts of the SAME binding reuse.
+    return `draft:${c.draft.ledgerRef.replace(/@t\d+$/i, "")}`;
+  }
+  if (typeof c.upload?.sessionFileId === "string" && c.upload.sessionFileId.length > 0) {
+    return `upload:${c.upload.sessionFileId}`;
+  }
+  if (typeof c.speDriveItemId === "string" && c.speDriveItemId.length > 0) {
+    return `stored:${c.speDriveItemId}`;
+  }
+  if (typeof c.sprkDocumentId === "string" && c.sprkDocumentId.length > 0) {
+    return `stored:${c.sprkDocumentId}`;
+  }
+  const fn = c.upload?.fileName ?? c.draft?.fileName ?? c.fileName;
+  if (typeof fn === "string" && fn.length > 0) {
+    return `name:${fn}`;
+  }
+  // A compose object with no durable identity (Part-B inline html, or an empty seed) → no key.
+  return undefined;
+}
+
+/** The document instance key of an existing compose tab, re-derived from its persisted seed. */
+function composeTabInstanceKey(tab: { widgetData?: unknown }): string | undefined {
+  return deriveComposeInstanceKey(tab.widgetData);
+}
+
+// ---------------------------------------------------------------------------
 // WorkspacePane
 // ---------------------------------------------------------------------------
 
@@ -113,6 +194,12 @@ const useStyles = makeStyles({
 export function WorkspacePane(): React.JSX.Element {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
+
+  // FIX #6 (spaarkeai-compose-r2) — the cross-pane conduit into the Compose editor's active-document
+  // register/withdraw. Null when no Compose editor is registered (no Compose tab open / standalone).
+  // Driven from the tab-activation effect below (visible=true when the Compose tab is active,
+  // visible=false when a non-compose tab is active) — replacing the removed manual toggle.
+  const composeVisibility = useComposeVisibility();
 
   // ---------------------------------------------------------------------------
   // Auth surface — NFR-09 tab persistence (task 065)
@@ -270,6 +357,25 @@ export function WorkspacePane(): React.JSX.Element {
     },
     [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
   );
+
+  // ---------------------------------------------------------------------------
+  // FR-34 D-F3 honest CONTENT-render ack — deferral map (task 071)
+  //
+  // The base D-F3 loop (above) acks a server `workspace_open_tab` frame the moment
+  // the TAB SHELL is materialized (manager.addTab). That is correct for a plain
+  // layout open, but WRONG for a CONTENT-bearing open — a chat "open as a document"
+  // frame that carries a full-document draft SEED
+  // (widgetData.compose.draft.{ledgerRef,sessionId}, DEF-08). For those, the tab
+  // opening is NOT the draft rendering: a seed that fails to materialize would still
+  // ack tab-open (false "the draft is in the editor" — the exact R2-D fabrication).
+  //
+  // So for a draft-seeded frame we DEFER: stash the server frame id keyed by the
+  // draft's ledgerRef here (instead of acking on tab-open), and fire the ack only
+  // when ComposeWorkspace emits `workspace.compose_content_rendered` for that
+  // ledgerRef (the editor actually rendered the seeded body). If it never renders,
+  // we never ack → the server's WaitForAckAsync times out → honest failure. Plain
+  // (non-seeded) opens are UNCHANGED: they still ack on tab-open below.
+  const pendingRenderAcksRef = React.useRef<Map<string, string>>(new Map());
 
   // ---------------------------------------------------------------------------
   // Active-tab signal — Round 4 Fix 4 (2026-05-21)
@@ -456,25 +562,50 @@ export function WorkspacePane(): React.JSX.Element {
     isAuthenticated,
   });
 
-  // spaarkeai-compose-r1 task 092: when App.tsx was launched with
-  // `composeMode=editor` (ribbon Open-in-Compose modal path), override the
-  // BFF-default active layout with the "Compose" workspace layout (system
-  // row `sprk_workspacelayoutid=c09d26be-e173-f111-ab0e-7ced8ddc4a05` created
-  // by W1a-010). Resolved by NAME here so no client-side GUID pinning is
-  // required. Falls back to the BFF default when the Compose row is missing
-  // from the returned layouts (defensive — should never happen post-deploy).
+  // spaarkeai-compose-r2 UNIFY (completes the R1 flip): when App.tsx was
+  // launched with `composeMode=editor` (ribbon Open-in-Compose modal path), we
+  // NO LONGER install the "Compose" workspace LAYOUT tab (widgetType
+  // 'workspace'). Instead the compose-launch auto-install effect below opens a
+  // DIRECT 'compose' widget tab (widgetType 'compose'), so EVERY Compose mount
+  // is protected by the keep-mounted-hidden keep-alive
+  // (WorkspaceTabManagerComponent) and never unmounts on a tab switch (the
+  // transient/Browse doc survives). Non-compose default layouts (Daily
+  // Briefing, dashboards, …) still flow through the 'workspace' LAYOUT door.
   const composeLaunch = useComposeLaunch();
-  const layoutForAutoInstall = React.useMemo(() => {
-    if (composeLaunch?.composeMode === "editor") {
-      const composeRow = layouts.find((l) => l.name === "Compose");
-      if (composeRow) return composeRow;
-    }
-    return activeLayout;
-  }, [composeLaunch, layouts, activeLayout]);
+  const isComposeLaunch = composeLaunch?.composeMode === "editor";
+
+  // Build the DIRECT-widget seed from the launch context's stored document.
+  // main.tsx parses the ribbon URL params (sprkDocumentId / speDriveItemId /
+  // speDriveId / speFileName) into `composeLaunch.document` + `.driveId`; we map
+  // them onto the stored-document door of the compose seed. An empty seed (no
+  // document — should not happen for the ribbon path, which always carries a
+  // stored doc) opens the Compose empty state.
+  const composeLaunchSeed = React.useMemo<ComposeWidgetSeed>(() => {
+    if (!isComposeLaunch) return {};
+    const doc = composeLaunch?.document ?? null;
+    const driveId = composeLaunch?.driveId ?? "";
+    const seed: ComposeWidgetSeed = {};
+    if (doc?.speDriveItemId) seed.speDriveItemId = doc.speDriveItemId;
+    if (doc?.sprkDocumentId) seed.sprkDocumentId = doc.sprkDocumentId;
+    if (driveId) seed.speDriveId = driveId;
+    if (doc?.fileName) seed.fileName = doc.fileName;
+    return seed;
+  }, [isComposeLaunch, composeLaunch]);
+
+  // The NON-compose default layout still auto-installs through the 'workspace'
+  // LAYOUT door (unchanged). In compose-launch mode the layout auto-install
+  // effect early-returns so we don't open the BFF default BEHIND the Compose
+  // tab — the compose-Direct effect owns the mount.
+  const layoutForAutoInstall = activeLayout;
 
   const autoInstalledDefaultRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
+    // spaarkeai-compose-r2 UNIFY: in compose-launch mode the DIRECT 'compose'
+    // tab is installed by the dedicated effect below — skip the layout
+    // auto-install entirely so we don't ALSO open the BFF default layout behind
+    // the Compose tab (the ribbon user must land ONLY on the editor).
+    if (isComposeLaunch) return;
     // R3-3 (2026-07-07): wait for the NFR-09 tab restore to settle so the
     // `alreadyOpen` check below sees the RESTORED tabs. Without this gate the
     // default-tab addTab raced restore, no-op'd it (hasNonHomeTab guard) and
@@ -499,47 +630,14 @@ export function WorkspacePane(): React.JSX.Element {
         const data = t.widgetData as { layoutId?: string } | null;
         return data?.layoutId === layoutForAutoInstall.id;
       });
-    if (existingTab) {
-      // Issue #572 Defect 1d: in compose-launch mode we must ACTIVATE the
-      // restored Compose tab, not just skip the install. NFR-09 restore
-      // honors the persisted activeTabId and never force-activates — so on
-      // a compose relaunch the restored session could land on a different
-      // tab, and with the tab strip hidden in compose-launch mode the user
-      // had no way to reach the Compose surface (relaunch showed the normal
-      // three-pane workspace instead of the editor). This mirrors the
-      // "always want the Compose layout on top" rule the pin-skip guard
-      // below already documents.
-      if (composeLaunch?.composeMode === "editor") {
-        manager.setActiveTab(existingTab.id);
-        syncState();
-        // Same macrotask deferral as the widget_load dispatch below — the
-        // tab_change subscribers (ContextPaneController) register in effects
-        // that may not have run yet on a fresh mount.
-        const activateTimerId = window.setTimeout(() => {
-          dispatch("workspace", {
-            type: "tab_change",
-            tabId: existingTab.id,
-            widgetType: existingTab.widgetType,
-            widgetData: existingTab.widgetData,
-          });
-        }, 0);
-        return () => {
-          window.clearTimeout(activateTimerId);
-        };
-      }
-      return;
-    }
+    if (existingTab) return;
 
     // Skip if the default is in the pinned list — the pin auto-open effect
-    // below will open it; we don't want to double-dispatch. This check does
-    // NOT apply in compose-launch mode: we always want the Compose layout on
-    // top so the user lands in the editor regardless of their pin list.
-    if (composeLaunch?.composeMode !== "editor") {
-      const isPinned = getPinnedWorkspaces().some(
-        (p) => p.layoutId === layoutForAutoInstall.id,
-      );
-      if (isPinned) return;
-    }
+    // below will open it; we don't want to double-dispatch.
+    const isPinned = getPinnedWorkspaces().some(
+      (p) => p.layoutId === layoutForAutoInstall.id,
+    );
+    if (isPinned) return;
 
     // Defer to a macrotask so usePaneEvent's subscription effect (declared
     // later in this component) has registered. Identical pattern to the pin
@@ -548,9 +646,7 @@ export function WorkspacePane(): React.JSX.Element {
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
       console.info(
-        `[WorkspacePane] Auto-installing ${
-          composeLaunch?.composeMode === "editor" ? "compose" : "default"
-        } workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
+        `[WorkspacePane] Auto-installing default workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
       );
       dispatch("workspace", {
         type: "widget_load",
@@ -570,7 +666,50 @@ export function WorkspacePane(): React.JSX.Element {
     // ready; the ref guard prevents re-runs on subsequent dependency changes
     // (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, tabRestoreSettled, layoutForAutoInstall]);
+  }, [isAuthenticated, isComposeLaunch, tabRestoreSettled, layoutForAutoInstall]);
+
+  // ---------------------------------------------------------------------------
+  // spaarkeai-compose-r2 UNIFY — compose-launch auto-install (DIRECT 'compose')
+  //
+  // The ribbon composeMode=editor launch now opens a widgetType:'compose' tab
+  // (not the "Compose" workspace LAYOUT tab). We dispatch a single 'compose'
+  // widget_load carrying the stored-document seed (composeLaunchSeed). The
+  // workspace handler's 'compose' branch REUSES the single existing compose tab
+  // (activating it — this covers the relaunch/restore case, issue #572 Defect
+  // 1d, since a restored compose tab is reused-and-activated) or creates one.
+  // Because every Compose mount is now widgetType 'compose', it is covered by
+  // the keep-mounted-hidden keep-alive and survives switching to the Email (or
+  // any) tab.
+  //
+  // Same macrotask deferral + tabRestoreSettled gate + run-once ref guard as
+  // the layout auto-install effect above.
+  // ---------------------------------------------------------------------------
+  const autoInstalledComposeRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    if (!isComposeLaunch) return;
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (autoInstalledComposeRef.current) return; // run once per mount
+    autoInstalledComposeRef.current = true;
+
+    const timerId = window.setTimeout(() => {
+      // eslint-disable-next-line no-console
+      console.info("[WorkspacePane] Auto-installing compose (direct widget)");
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "compose",
+        widgetData: { compose: composeLaunchSeed },
+        displayName: "Compose",
+      });
+    }, 0);
+
+    return () => {
+      window.clearTimeout(timerId);
+    };
+    // composeLaunchSeed is intentionally omitted from deps — the ref guard runs
+    // this once per mount; the seed is stable for the life of a compose launch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isComposeLaunch, isAuthenticated, tabRestoreSettled]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -720,36 +859,18 @@ export function WorkspacePane(): React.JSX.Element {
   // initial effect picks up the early events via its own subscription.
   // ---------------------------------------------------------------------------
 
-  // Retained as a no-op ref so `handleTabChange` (manual override semantics)
-  // can continue to compare against the current Summary tab id when one is
-  // present. With the deferred-install model, this is `null` until a
-  // summarize run dispatches a `widget_load` AND we narrow the dispatched
-  // tab into this ref. For the current B-G9c2 implementation we no longer
-  // need the manual-override behavior to be Summary-specific (each run gets
-  // its own tab; the user can freely click between tabs without affecting
-  // future runs), so this ref stays `null` permanently. Removing the ref
-  // entirely would force a wider refactor of `handleTabChange` — keeping
-  // the variable as a benign null sentinel keeps the diff small.
-  const summaryTabIdRef = React.useRef<string | null>(null);
-
   // ---------------------------------------------------------------------------
   // R6 Hotfix Wave B-G9c2 — auto-focus is now NATURAL via `addTab`
   //
-  // The R5 task 038 streaming-started auto-focus block (removed here) is
-  // unnecessary in the deferred-install model: each summarize run dispatches
-  // a `workspace.widget_load`, the existing `widget_load` handler below
-  // calls `manager.addTab(...)` which AUTO-ACTIVATES the new tab (see
-  // WorkspaceTabManager.addTab line 378), so the new Summary tab is focused
-  // as soon as the run starts — no separate `streaming_started` focus
-  // handler required.
-  //
-  // The `streamFocusOverrideRef` is retained as a no-op sentinel so the
-  // existing manual-override checks in `handleTabChange` don't have to
-  // change. With each run owning its own tab, the override semantic is now
-  // mostly vestigial — kept for compatibility with downstream consumers.
+  // Each summarize run dispatches a `workspace.widget_load`; the existing
+  // `widget_load` handler below calls `manager.addTab(...)` which
+  // AUTO-ACTIVATES the new tab (see WorkspaceTabManager.addTab), so the new
+  // Summary tab is focused as soon as the run starts — no separate
+  // `streaming_started` focus handler required. (The R5 task 038 manual
+  // Summary-override refs were removed here: each run owns its own tab, so the
+  // override semantic was vestigial and its `handleTabChange` block was
+  // unreachable — `summaryTabIdRef` was permanently null.)
   // ---------------------------------------------------------------------------
-
-  const streamFocusOverrideRef = React.useRef<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // PaneEventBus subscription — 'workspace' channel
@@ -758,11 +879,65 @@ export function WorkspacePane(): React.JSX.Element {
   usePaneEvent("workspace", (event: WorkspacePaneEvent): void => {
     const manager = managerRef.current;
 
+    // FR-34 D-F3 (task 071): the deferred CONTENT-render ack. ComposeWorkspace emits
+    // `compose_content_rendered` once a seeded draft actually renders in the editor.
+    // If we deferred an ack for this ledgerRef on the originating `workspace_open_tab`
+    // frame, fire it NOW (the genuine "content is on screen" confirmation) — mirroring
+    // the tab-open ack, only later + honest. No pending entry ⇒ no-op (a client-
+    // originated open, or a render we never gated on).
+    if (event.type === "compose_content_rendered") {
+      const ledgerRef = event.ledgerRef;
+      if (ledgerRef) {
+        const frameId = pendingRenderAcksRef.current.get(ledgerRef);
+        if (frameId) {
+          pendingRenderAcksRef.current.delete(ledgerRef);
+          sendUiActionAck(frameId);
+        }
+      }
+      return;
+    }
+
     if (event.type === "widget_load" && !event.tabId) {
       // Guard: ignore our own re-dispatched widget_load confirmations (which carry tabId).
       // Only the server-initiated events (no tabId) should open a new tab.
       const widgetType = event.widgetType ?? "unknown";
       const widgetData = event.widgetData ?? null;
+
+      // ── FIX #10b — STUB email tab ──────────────────────────────────────────
+      // The Compose "Email" affordance (ComposeAiToolbar → handleEmailAction) and
+      // the chat "email" chip dispatch widgetType 'email' (layoutName 'Email').
+      // Resolve EmailStubWidget SYNCHRONOUSLY (statically imported — no registry
+      // round-trip) and open a tab. Same addTab → confirm-dispatch pattern as the
+      // generic path below; auto-activates via addTab.
+      const emailData = widgetData as { layoutName?: string } | null;
+      if (widgetType === "email" || emailData?.layoutName === "Email") {
+        const emailDisplayName = event.displayName ?? "Email";
+        const emailTabId = manager.addTab("email", widgetData, emailDisplayName);
+        // Cast to the registry's WorkspaceWidgetComponent (matches the 'compose'
+        // registry path) — EmailStubWidget takes WorkspaceWidgetProps<EmailWidgetData>.
+        manager.resolveTabComponent(
+          emailTabId,
+          EmailStubWidget as unknown as WorkspaceWidgetComponent,
+          emailDisplayName,
+        );
+        syncState();
+        const emailSnapshot = manager.getSnapshot();
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "email",
+          tabId: emailTabId,
+          ...(emailSnapshot.tabs.length > 0 ? { tabCount: emailSnapshot.tabs.length } : {}),
+        });
+        dispatch("workspace", {
+          type: "tab_count_change",
+          tabCount: emailSnapshot.tabs.length,
+        });
+        // D-F3 truthfulness parity with the generic path — ack a server frame if present.
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
+        return;
+      }
 
       // Resolve the tab display name with this precedence:
       //   1. Event payload `displayName` (Round 4 Fix 4: lets the menu set the
@@ -774,18 +949,209 @@ export function WorkspacePane(): React.JSX.Element {
       const displayName =
         event.displayName ?? meta?.displayName ?? widgetType;
 
+      // ── spaarkeai-compose-r2 UNIFY — "Compose" layout → Direct 'compose' ────
+      // A "Compose" workspace-LAYOUT load — the WorkspacePaneMenu "Compose"
+      // menu selection (WorkspacePaneMenu.handleLayoutSelect dispatches
+      // widgetType:'workspace' + layoutName:'Compose'), or any legacy
+      // Compose-layout dispatch — is RE-ROUTED here to the DIRECT 'compose'
+      // widget so it mounts as widgetType 'compose' and is protected by the
+      // keep-mounted-hidden keep-alive. Detected by the layout NAME "Compose";
+      // ALL other layouts (Daily Briefing, dashboards, …) keep the 'workspace'
+      // LAYOUT door and flow through the generic addTab path below, unchanged.
+      // The menu selection carries no document → empty Compose editor.
+      const isComposeLayoutLoad =
+        widgetType === "workspace" &&
+        ((widgetData as { layoutName?: string } | null)?.layoutName ===
+          "Compose" ||
+          event.displayName === "Compose");
+      const effectiveWidgetType = isComposeLayoutLoad ? "compose" : widgetType;
+
+      // ── Compose DIRECT widget — single-tab reuse (spaarkeai-compose-r2) ─────
+      // Compose is a first-class DIRECT workspace widget (widgetType 'compose' →
+      // ComposeDirectWidget → ComposeWorkspace), NOT a LegalWorkspace LAYOUT tab.
+      // Every Compose open (a chat "open as a document" draft, an "Open in
+      // Compose" upload, a stored open, or an empty open) mounts through THIS
+      // branch, so ComposeWorkspace renders UNCONDITIONALLY — never
+      // LegalWorkspaceApp/dashboard, and with NO layout-row lookup or race. It
+      // REUSES the single existing 'compose' tab (allowMultiple:false) instead
+      // of stacking duplicates. Other layouts (Daily Briefing, Documents, …)
+      // keep the 'workspace' LAYOUT door and flow through the generic addTab
+      // path below, unchanged.
+      if (effectiveWidgetType === "compose") {
+        // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
+        // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
+        // present, the ack is DEFERRED until ComposeWorkspace signals the draft
+        // actually rendered (compose_content_rendered), keyed by this ledgerRef.
+        // Absent for upload/stored/empty opens, which ack on tab-open as before.
+        const composeData = widgetData as
+          | { compose?: { draft?: { ledgerRef?: string } } }
+          | null;
+        const composeDraftLedgerRef =
+          composeData?.compose && typeof composeData.compose === "object"
+            ? composeData.compose.draft?.ledgerRef
+            : undefined;
+
+        // R3 filename contract — hoist the loaded document's filename to a TOP-LEVEL `filename` on
+        // the compose tab's widgetData so it is readable server-side (a sibling server agent maps it
+        // to a DocumentViewer visible-state). Sourced from the seed's known locations (upload /
+        // draft) or an already-hoisted top-level value. When a re-seed carries none (e.g. an
+        // add-to-DMS re-activation with only a `source` marker), the existing tab's filename is
+        // preserved rather than clobbered with undefined.
+        const composeSeed = widgetData as
+          | {
+              filename?: string;
+              compose?: {
+                fileName?: string;
+                upload?: { fileName?: string };
+                draft?: { fileName?: string };
+              };
+            }
+          | null;
+        const seedFilename =
+          composeSeed?.compose?.upload?.fileName ??
+          composeSeed?.compose?.draft?.fileName ??
+          // spaarkeai-compose-r2 UNIFY: the ribbon stored-doc seed carries its
+          // name at `compose.fileName` (speFileName) — hoist it too so the
+          // R3 server-readable top-level `filename` contract covers the ribbon
+          // Open-in-Compose path, not just upload/draft opens.
+          composeSeed?.compose?.fileName ??
+          composeSeed?.filename;
+
+        const ackComposeFrame = (): void => {
+          if (!event.frameId) return;
+          if (composeDraftLedgerRef) {
+            pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
+          } else {
+            sendUiActionAck(event.frameId);
+          }
+        };
+
+        // ── Instance-keyed reuse (spaarkeai-compose-r2 — multi-Compose-tab) ────
+        // Compose is no longer a hard singleton. Decide reuse-vs-new by DOCUMENT
+        // IDENTITY, not by widgetType:
+        //   • the open carries an identity key AND an existing compose tab has the
+        //     SAME key → REUSE that tab (relaunch/restore of the same doc; a
+        //     re-draft of the same binding across turns);
+        //   • a source-only / seedless re-activation (no new `compose` seed, no
+        //     identity — e.g. the add-to-DMS `{source}` marker, issue #572 1d) →
+        //     REUSE the ACTIVE compose tab (else any existing one) so add-to-DMS
+        //     keeps working without minting a blank tab;
+        //   • an identity key with NO match, OR an explicit blank open (the
+        //     Workspaces-menu "Compose" layout load) → fall through to a NEW tab.
+        const instanceKey = deriveComposeInstanceKey(widgetData);
+        const hasComposeSeed =
+          widgetData != null &&
+          typeof widgetData === "object" &&
+          typeof (widgetData as { compose?: unknown }).compose === "object" &&
+          (widgetData as { compose?: unknown }).compose !== null;
+
+        const snapshot0 = manager.getSnapshot();
+        const composeTabs = snapshot0.tabs.filter((t) => t.widgetType === "compose");
+        let reuseTab: (typeof composeTabs)[number] | undefined;
+        if (instanceKey) {
+          reuseTab = composeTabs.find((t) => composeTabInstanceKey(t) === instanceKey);
+        } else if (!hasComposeSeed && !isComposeLayoutLoad) {
+          // Seedless source-only re-activation — reuse the ACTIVE compose tab, else the first open
+          // one. Never mints a duplicate (source-only opens carry no new document). A blank menu
+          // "Compose" open (isComposeLayoutLoad) is EXCLUDED here so it mints a new tab below.
+          reuseTab =
+            composeTabs.find((t) => t.id === snapshot0.activeTabId) ?? composeTabs[0];
+        }
+
+        if (reuseTab) {
+          const existingComposeTab = reuseTab;
+          const existingData = (existingComposeTab.widgetData ?? {}) as {
+            filename?: string;
+            compose?: Record<string, unknown>;
+          };
+          const newData = (widgetData ?? {}) as { compose?: Record<string, unknown> };
+          const existingFilename = existingData.filename;
+          const mergedFilename = seedFilename ?? existingFilename;
+          // UAT round-7 #1 seed-merge: a seedless re-activation (e.g. an
+          // add-to-DMS `source`-only marker) carries NO new `compose` seed.
+          // The prior implementation spread ONLY the new event's widgetData,
+          // OVERWRITING the tab's reloadable `compose` seed with nothing — so a
+          // later remount had nothing to reload. Preserve the existing seed when
+          // the re-activation brings none (merge, don't overwrite); a genuine
+          // new seed (fresh draft/upload) still wins. The tab's stable identity
+          // is re-derived from this seed on the next reuse decision, so nothing
+          // extra is stamped onto it (keeps the seed shape clean).
+          const mergedCompose = newData.compose ?? existingData.compose;
+          const reuseWidgetData: Record<string, unknown> = {
+            ...(widgetData ?? {}),
+            ...(mergedCompose !== undefined ? { compose: mergedCompose } : {}),
+            ...(mergedFilename ? { filename: mergedFilename } : {}),
+          };
+          manager.updateTab(existingComposeTab.id, reuseWidgetData);
+          manager.setActiveTab(existingComposeTab.id);
+          syncState();
+          ackComposeFrame();
+          window.setTimeout(() => {
+            dispatch("workspace", {
+              type: "tab_change",
+              tabId: existingComposeTab.id,
+              widgetType: existingComposeTab.widgetType,
+              widgetData: reuseWidgetData,
+            });
+          }, 0);
+          return;
+        }
+
+        // No matching Compose tab — add a NEW one and lazily resolve the DIRECT
+        // 'compose' widget (ComposeDirectWidget) from the registry. Hoist the
+        // seed's filename to a top-level `filename` (R3 server-readable contract).
+        // The tab's stable identity is re-derived from its seed on later reuse
+        // decisions, so nothing extra is stamped onto widgetData.
+        const composeWidgetData = seedFilename
+          ? { ...(widgetData ?? {}), filename: seedFilename }
+          : widgetData;
+        const composeTabId = manager.addTab("compose", composeWidgetData, displayName);
+        syncState();
+        // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
+        // NOT resolved yet — only the empty shell exists. Acking here would
+        // claim "opened the draft in Compose" before anything materialized (the
+        // R2-D fabrication). Register a DRAFT's deferred render-ack now
+        // (stashing a pending id is not itself a claim); a NON-draft open's ack
+        // is withheld until the compose widget actually resolves + attaches, in
+        // the .then() below. Never ack at bare shell creation.
+        if (event.frameId && composeDraftLedgerRef) {
+          pendingRenderAcksRef.current.set(composeDraftLedgerRef, event.frameId);
+        }
+        resolveWorkspaceWidget("compose").then((Component) => {
+          const resolvedMeta = getWorkspaceWidgetMetadata("compose");
+          manager.resolveTabComponent(
+            composeTabId,
+            Component,
+            event.displayName ? undefined : resolvedMeta?.displayName,
+          );
+          syncState();
+          // UC-5 (task 020): the compose widget has now resolved + attached — a
+          // NON-draft open (upload/stored/empty) is genuinely materialized, so
+          // ack it here. Draft opens still defer to compose_content_rendered
+          // (registered above); if that render never fires, no ack is sent and
+          // the server's WaitForAckAsync times out into an honest failure.
+          if (event.frameId && !composeDraftLedgerRef) {
+            sendUiActionAck(event.frameId);
+          }
+          const snapshot = manager.getSnapshot();
+          const currentTabCount = snapshot.tabs.length;
+          dispatch("workspace", {
+            type: "widget_load",
+            widgetType: "compose",
+            tabId: composeTabId,
+            ...(currentTabCount > 0 ? { tabCount: currentTabCount } : {}),
+          });
+          dispatch("workspace", {
+            type: "tab_count_change",
+            tabCount: currentTabCount,
+          });
+        });
+        return;
+      }
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, widgetData, displayName);
       syncState();
-
-      // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): the tab is NOW
-      // actually materialized in this client's tab state — if the server frame
-      // carried a frameId (an ack-gated tool call is waiting), ack it referencing
-      // that EXACT frame id. Client-originated widget_load events (menu-opened
-      // tabs) never carry a frameId, so this is a no-op for them.
-      if (event.frameId) {
-        sendUiActionAck(event.frameId);
-      }
 
       // Lazy-resolve the widget component; update the tab once resolved.
       resolveWorkspaceWidget(widgetType).then((Component) => {
@@ -800,6 +1166,21 @@ export function WorkspacePane(): React.JSX.Element {
           event.displayName ? undefined : resolvedMeta?.displayName,
         );
         syncState();
+
+        // UC-5 truthfulness (task 020 / FR-C1) — MOVED here from tab-shell
+        // creation (was AIR2-037 acking at addTab). The tab's widget component
+        // has now genuinely resolved + attached; only NOW is "opened X" a true
+        // claim. If the server frame carried a frameId (an ack-gated tool call
+        // is waiting), ack it referencing that EXACT frame id. Client-originated
+        // widget_load events (menu-opened tabs) never carry a frameId, so this
+        // is a no-op for them. If resolution never completes, no ack is sent →
+        // the server's WaitForAckAsync times out into an honest failure, never a
+        // fabricated success. (This is the LAYOUT/other-widget path — Daily
+        // Briefing, Documents, …; a content-bearing Compose draft open defers
+        // its ack to compose_content_rendered in the 'compose' branch above.)
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
 
         // Snapshot the current tab count after resolution so ShellStageManager
         // can advance stage (Stage 2 → Stage 3 / Stage 4).
@@ -856,9 +1237,15 @@ export function WorkspacePane(): React.JSX.Element {
     const defaultWidgets = event.defaultWidgets ?? [];
     const isExclusive = event.isExclusive ?? false;
 
-    // Clear all existing tabs when the playbook is exclusive (guardrail mode).
+    // Clear existing tabs when the playbook is exclusive (guardrail mode).
+    //
+    // No-collateral-teardown (task 020 / FR-C2 / UC-4): this teardown is an
+    // ORCHESTRATED action's side-effect. It must stay scoped to the workspace
+    // "stage" it owns and MUST NOT tear down an unrelated live Compose tab
+    // (the editor holds an unsaved draft/document — losing it was the UC-4
+    // regression). Preserve 'compose' work-product tabs across the clear.
     if (isExclusive && manager.getSnapshot().tabs.length > 0) {
-      manager.clearAllTabs();
+      manager.clearAllTabs({ preserveWidgetTypes: ["compose"] });
       syncState();
       // Emit tabs_clear so subscribers (e.g. ContextPaneController) can reset.
       dispatch("workspace", { type: "tabs_clear" });
@@ -897,24 +1284,6 @@ export function WorkspacePane(): React.JSX.Element {
       manager.setActiveTab(tabId);
       syncState();
 
-      // R5 task 038 — Manual override for the Summary tab auto-focus.
-      //
-      // When the user manually clicks a tab OTHER THAN Summary, set the
-      // override flag so subsequent `section_*` / `streaming_complete`
-      // events in the current stream cycle do NOT pull focus back to
-      // Summary. The override is reset on the NEXT `streaming_started`
-      // event (so the next stream can again auto-focus) AND on
-      // `streaming_complete` (defensive double-reset — see the auto-focus
-      // subscription above).
-      const summaryTabId = summaryTabIdRef.current;
-      if (summaryTabId && tabId !== summaryTabId) {
-        streamFocusOverrideRef.current = true;
-      } else if (tabId === summaryTabId) {
-        // User clicked back to Summary themselves — clear the override
-        // (no longer in "I want to be elsewhere" mode).
-        streamFocusOverrideRef.current = false;
-      }
-
       // Find the newly active tab to include widget info in the event.
       const activeTab = manager.getActiveTab();
 
@@ -933,51 +1302,38 @@ export function WorkspacePane(): React.JSX.Element {
   // Tab close handler — called by WorkspaceTabManagerComponent
   // ---------------------------------------------------------------------------
 
-  // R6 Pillar 9 / task 098 — per-tab visibility toggle handler.
-  // Updates the local tab record so the next system-prompt snapshot reflects
-  // the new flag, then PATCHes the BFF persistence layer. We don't roll back
-  // on PATCH failure (the local view stays in sync with the user's intent);
-  // background reconciliation on next workspace-state fetch corrects any
-  // drift if the server rejects.
-  const handleToggleVisibility = React.useCallback(
-    (tabId: string, visibleToAssistant: boolean): void => {
-      const manager = managerRef.current;
-      manager.setTabVisibility(tabId, visibleToAssistant);
-      syncState();
-
-      // Best-effort BFF persistence. Server projection already wired per R6
-      // Pillar 6a/9 — the endpoint accepts a partial PATCH on the tab record
-      // with the visibleToAssistant field.
-      if (chatSessionId && bffBaseUrl && isAuthenticated) {
-        // Issue #572 aggravator: this URL was previously built raw as
-        // `${bffBaseUrl}/ai/chat/...` — missing the `/api` prefix — so the
-        // per-tab request 404'd in production (App Insights). buildBffApiUrl
-        // adds the `/api` prefix idempotently, matching every other BFF call
-        // in this file.
-        void authenticatedFetch(
-          buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs/${encodeURIComponent(tabId)}`,
-          ),
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ visibleToAssistant }),
-          },
-        ).catch((err) => {
-          // Best-effort persistence — local view stays in sync with user
-          // intent. Background reconciliation on next workspace-state fetch
-          // corrects any drift if the server rejects.
-          // eslint-disable-next-line no-console
-          console.warn(
-            `[task-098] workspace visibility PATCH failed (tabId=${tabId}, sessionId=${chatSessionId}):`,
-            err,
-          );
-        });
-      }
-    },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch, syncState],
-  );
+  // ---------------------------------------------------------------------------
+  // FIX #6 (spaarkeai-compose-r2) — the Assistant's active document FOLLOWS the
+  // active workspace tab. The manual "Visible to assistant" toggle + its
+  // handleToggleVisibility handler were REMOVED: the SELECTED Compose tab IS
+  // what the Assistant works with (implicit visibility).
+  //
+  // When the Compose tab is the active tab, register its document (identity +
+  // extracted text) as the session's active document by driving the editor's
+  // visibility conduit with visible=true (→ ComposeWorkspace.handleComposeVisibilityChange
+  // → registerActiveDocument → ChatSessionFile RAG + ActiveDocument, so the
+  // Assistant can answer "what file is loaded"). When ANY non-Compose tab is
+  // active (Daily Briefing / dashboard / other), withdraw it with visible=false
+  // so exactly one active doc = the selected Compose tab, and NONE when a
+  // non-document tab is active. Switching between compose docs re-seeds the
+  // single Compose tab, whose activation re-registers the new doc here.
+  //
+  // Reuses the SAME cross-pane conduit the removed toggle drove
+  // (useComposeVisibility) — no new bus/service (§11). `composeVisibility` is
+  // null until a Compose editor registers its handler (no Compose tab open /
+  // standalone mount) → no-op then. Because the single Compose tab is kept
+  // mounted-hidden across switches, the handler stays registered, so switching
+  // AWAY reliably withdraws and switching BACK re-registers. Re-fires if the
+  // handler registers while the Compose tab is already active (composeVisibility
+  // null→non-null) so the doc still registers on first mount.
+  // ---------------------------------------------------------------------------
+  React.useEffect(() => {
+    const activeTab = managerRef.current.getActiveTab();
+    composeVisibility?.(activeTab?.widgetType === "compose");
+    // tabState.activeTabId drives every activation path (click, compose reuse,
+    // close-restore, restore-from-persistence, auto-install); composeVisibility
+    // re-runs the sync when the editor's handler registers/unregisters.
+  }, [tabState.activeTabId, composeVisibility]);
 
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
@@ -1061,7 +1417,7 @@ export function WorkspacePane(): React.JSX.Element {
   // can still be dispatched via `widget_load` PaneEventBus events; they
   // will render normally (the tab manager still creates tabs; only the tab
   // strip UI is hidden). See `hideTabBar` prop on WorkspaceTabManagerComponent.
-  const isComposeLaunchMode = composeLaunch?.composeMode === "editor";
+  const isComposeLaunchMode = isComposeLaunch;
 
   const header = (
     <PaneHeader
@@ -1083,9 +1439,10 @@ export function WorkspacePane(): React.JSX.Element {
   );
 
   if (tabs.length === 0) {
-    // First-paint placeholder. With the Home tab installed in the mount
-    // effect, this branch is reachable only for the single render before the
-    // effect commits.
+    // First-paint placeholder (the Home tab was removed, so `tabs.length === 0`
+    // is genuinely reachable): rendered before any auto-install / restore /
+    // dispatched `widget_load` has committed a tab, and whenever the user closes
+    // every tab. Shows a spinner behind the header until a tab lands.
     return (
       <div className={styles.root} data-testid="workspace-first-paint">
         {header}
@@ -1104,9 +1461,6 @@ export function WorkspacePane(): React.JSX.Element {
         activeTabId={activeTabId}
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
-        // R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
-        chatSessionId={chatSessionId}
-        onToggleVisibility={handleToggleVisibility}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.

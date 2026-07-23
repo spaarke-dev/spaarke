@@ -24,19 +24,52 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// <param name="Content">The text content of this chunk (partial summary text, for type="text").</param>
 /// <param name="Done">Whether this is the final chunk.</param>
 /// <param name="Summary">The complete summary text (only set when Done=true, for backward compatibility).</param>
-/// <param name="Result">The structured analysis result (only set when type="complete").</param>
+/// <param name="Result">
+/// The structured analysis result (only set when type="complete"). Declared as
+/// <see cref="object"/> so the terminal chunk can carry EITHER a coerced
+/// <see cref="DocumentAnalysisResult"/> (the summarize / document-analysis consumers —
+/// see <see cref="Completed(DocumentAnalysisResult)"/>) OR an arbitrary capability output
+/// passed through VERBATIM as a <see cref="System.Text.Json.JsonElement"/> (compose and
+/// other non-DAR dispositions — see <see cref="CompletedRaw"/>). Widened from
+/// <c>DocumentAnalysisResult?</c> by spaarkeai-compose-r2 (UAT wire-loss fix): coercing
+/// EVERY payload to DAR silently dropped the compose fields (<c>explanation</c>,
+/// <c>keyConcepts</c>, ...) on the wire because System.Text.Json discards unknown
+/// properties, so the client received an empty DAR blob instead of prose. System.Text.Json
+/// serializes an <c>object</c>-typed property by its RUNTIME type, so a DAR value still
+/// serializes to the identical wire shape (byte-for-byte, incl. its defaults) — the
+/// summarize contract is unchanged — while a <c>JsonElement</c> serializes as its raw JSON.
+/// (Same object-typed-serialization pattern already used by <see cref="AnalysisChunkChip.Args"/>.)
+/// </param>
 /// <param name="Error">Error message if analysis failed.</param>
 /// <param name="Chips">Next-step consumer chips (only set when type="chips"). Additive ai-architecture-redesign-r1 G-P1 UAT-fix variant (2026-07-05); null/omitted for all other event types. Existing consumers ignore the unknown discriminant.</param>
+/// <param name="Disposition">
+/// The dispatched Binding's disposition ledger value (<c>surface_launch</c> / <c>compose</c> / <c>informational</c> / …)
+/// on the terminal <c>complete</c> chunk. Additive (spaarkeai-assistant-enhancements-r1 task 013); JsonIgnore-when-null
+/// so existing consumers (email-r4 / daily-update-r5) are unaffected. Lets the client branch a
+/// <c>surface_launch</c> dispatch to the pre-seeded surface launch (task 012 <c>launchSurface</c>) WITHOUT a second
+/// intent mechanism — the disposition IS the server's routing decision (ADR-039 / ADR-040).
+/// </param>
+/// <param name="ConsumerType">
+/// The dispatched Binding's <c>sprk_consumertype</c> (== the ledger <c>UcId = Ucid ?? ConsumerType</c>) on the terminal
+/// <c>complete</c> chunk. Additive (task 013); JsonIgnore-when-null. The client maps it to a concrete launch surface via
+/// its static registry (surface-launch-mechanism §3) — deployment-specific web-resource names stay client-side (§10).
+/// </param>
 public record AnalysisChunk(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("content")] string Content,
     [property: JsonPropertyName("done")] bool Done,
     [property: JsonPropertyName("summary")] string? Summary = null,
-    [property: JsonPropertyName("result")] DocumentAnalysisResult? Result = null,
+    [property: JsonPropertyName("result")] object? Result = null,
     [property: JsonPropertyName("error")] string? Error = null,
     [property: JsonPropertyName("chips")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    IReadOnlyList<AnalysisChunkChip>? Chips = null)
+    IReadOnlyList<AnalysisChunkChip>? Chips = null,
+    [property: JsonPropertyName("disposition")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? Disposition = null,
+    [property: JsonPropertyName("consumerType")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ConsumerType = null)
 {
     /// <summary>
     /// Create a content chunk (streaming partial result).
@@ -57,6 +90,21 @@ public record AnalysisChunk(
     /// </summary>
     public static AnalysisChunk Completed(DocumentAnalysisResult result) =>
         new(Type: "complete", Content: string.Empty, Done: true, Summary: result.Summary, Result: result);
+
+    /// <summary>
+    /// Create the final chunk carrying an arbitrary structured capability output VERBATIM
+    /// (spaarkeai-compose-r2 wire-loss fix). Unlike <see cref="Completed(DocumentAnalysisResult)"/>,
+    /// the payload is NOT coerced to the <see cref="DocumentAnalysisResult"/> shape — the raw
+    /// <see cref="System.Text.Json.JsonElement"/> is carried on <see cref="Result"/> and serializes
+    /// to the wire's <c>result</c> field as-is, so a compose action's fields
+    /// (<c>explanation</c>, <c>keyConcepts</c>, <c>changes</c>, ...) SURVIVE for the client's
+    /// shape-detecting formatter. Used by <c>SessionDispatchOrchestrator.DeserializeResultChunk</c>
+    /// for any terminal ledger payload that is a JSON object WITHOUT the DocumentAnalysisResult
+    /// signature. No top-level <see cref="Summary"/> is synthesized — the client reads the
+    /// structured <c>result</c> object directly (<c>chunk.result ?? chunk.summary</c>).
+    /// </summary>
+    public static AnalysisChunk CompletedRaw(System.Text.Json.JsonElement payload) =>
+        new(Type: "complete", Content: string.Empty, Done: true, Result: payload);
 
     /// <summary>
     /// Create an error chunk.

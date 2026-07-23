@@ -363,13 +363,22 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     /// <param name="fileStream">The file content stream.</param>
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="graphDriveId">
+    /// Optional SPE drive id, forwarded into the node-based execution's <c>DocumentContext.Metadata</c>
+    /// so DeliverToIndex-style nodes have the same pointers the app-only
+    /// <see cref="AnalyzeDocumentAsync"/> path supplies. Without it a pointer-dependent node fails and
+    /// aborts the whole run (GitHub #233), skipping the profile field-write.
+    /// </param>
+    /// <param name="graphItemId">Optional SPE drive-item id (see <paramref name="graphDriveId"/>).</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
     public async Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
         Guid documentId,
         string fileName,
         Stream fileStream,
         string? playbookName = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? graphDriveId = null,
+        string? graphItemId = null)
     {
         var effectivePlaybookName = playbookName ?? DefaultPlaybookName;
         _logger.LogInformation(
@@ -404,7 +413,12 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 "Extracted {CharCount} characters from document {DocumentId}",
                 extractionResult.Text.Length, documentId);
 
-            // Execute playbook-based analysis (no Analysis record for stream-based analysis)
+            // Execute playbook-based analysis (no Analysis record for stream-based analysis).
+            // Forward the SPE pointers so a node-based profile playbook (e.g. one with a
+            // DeliverToIndex node) has the SAME DocumentContext.Metadata the proven app-only
+            // AnalyzeDocumentAsync path supplies. Without them a pointer-dependent node fails and
+            // aborts the entire run (no ContinueOnError — GitHub #233), which would skip the
+            // profile field-write below and leave the profile blank.
             var analysisResult = await ExecutePlaybookAnalysisAsync(
                 documentId,
                 fileName,
@@ -412,7 +426,9 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                 extractionResult.Text,
                 effectivePlaybookName,
                 dataverseAnalysisId: null,
-                cancellationToken);
+                cancellationToken,
+                graphDriveId: graphDriveId,
+                graphItemId: graphItemId);
 
             if (!analysisResult.IsSuccess)
             {

@@ -86,11 +86,26 @@ import type { PaneId } from "../../hooks/usePaneCollapse";
 // (e.g. WorkspacePane) so the local import path stays stable.
 import {
   ComposeLaunchContext,
+  ComposeActionBridgeProvider,
   type ComposeLaunchContextValue,
   type ComposeDocumentRef,
 } from "@spaarke/compose-components";
 export { useComposeLaunch } from "@spaarke/compose-components";
 export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
+// FR-05 create-on-save (task 100, gap 1.8): ThreePaneShell is the only compose-mounting surface
+// that can host the SpaarkeAi-owned association hook (LegalWorkspace's compose section factory
+// cannot import from `src/solutions/SpaarkeAi/*`). It provides `onCreateOnSaveComplete` on the
+// launch context so a chosen parent association is written when a transient draft is first saved.
+//
+// FR-05 picker (task 014-split): the persist WIRE landed at task 100 (onCreateOnSaveComplete →
+// associate), but the SELECTION SURFACE was missing — nothing ever called `setAssociation`, so
+// `associate()` always ran with a null selection (a graceful no-op). `useCreateOnSaveAssociationGate`
+// closes that gap: it opens the Tier-2c gate dialog (`CreateOnSaveAssociationGateDialog`) hosting the
+// FR-05 picker when a create-on-save completes, wires the chosen parent into `setAssociation`, and —
+// on confirm — fires the already-landed `associate(newDocumentId)` write. Save is never blocked on a
+// parent (the document is persisted before the gate opens).
+import { useCreateOnSaveAssociationGate } from "../compose/useCreateOnSaveAssociationGate";
+import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssociationGateDialog";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -619,6 +634,15 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   // downstream panes can respond to modal-launch mode. `null` when the app is
   // not in Compose mode — consumers use `useComposeLaunch()` and fall through
   // to default behaviour when the value is null.
+  // FR-05 create-on-save (task 100 + 014-split): owns the optional parent-association selection +
+  // write AND the Tier-2c gate dialog that surfaces the picker. `onCreateOnSaveComplete` opens the
+  // gate (it does NOT block Save — the document is already persisted); the user optionally picks a
+  // parent (→ setAssociation), and confirming fires `associate(newDocumentId)` (a graceful no-op
+  // when "none" is chosen, spec FR-05). Provided to the compose section factory via the launch
+  // context so it fires from the transient draft's first Save completion.
+  const { onCreateOnSaveComplete: onCreateOnSaveAssociationComplete, dialogProps: associationGateDialogProps } =
+    useCreateOnSaveAssociationGate();
+
   const composeLaunch = React.useMemo<ComposeLaunchContextValue | null>(
     () =>
       composeMode === "editor"
@@ -626,9 +650,15 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
             composeMode: "editor",
             document: composeDocument,
             driveId: composeDriveId,
+            onCreateOnSaveComplete: (newDocumentId: string): void => {
+              // Opens the Tier-2c gate dialog so the user can optionally pick a parent. Non-blocking
+              // (void) — the document already exists; a chosen association is written on confirm and a
+              // failed/absent association is non-fatal (surfaced via the gate's own `error` state).
+              onCreateOnSaveAssociationComplete(newDocumentId);
+            },
           }
         : null,
-    [composeMode, composeDocument, composeDriveId],
+    [composeMode, composeDocument, composeDriveId, onCreateOnSaveAssociationComplete],
   );
 
   // Build the entity context for AiSessionProvider from URL params.
@@ -672,6 +702,16 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
 
   return (
     <ComposeLaunchContext.Provider value={composeLaunch}>
+    {/*
+     * FR-13 (task 046): the Compose action bridge spans both panes so the inline
+     * AI toolbar (workspace pane) can route its dispatch into the Assistant
+     * pane's FIFO serial queue (ConversationPane.dispatchComposeAction, FR-18)
+     * via a DIRECT dispatchConsumer call — NOT a PaneEventBus event (Spike 0 /
+     * design §7.2). Placed above both panes; ConversationPane registers its
+     * dispatcher, the workspace section factory consumes it. Zero new
+     * PaneEventBus discriminants (ADR-030 closed union untouched).
+     */}
+    <ComposeActionBridgeProvider>
     <PaneEventBusProvider>
       <AiSessionProvider
         bffBaseUrl={bffBaseUrl}
@@ -749,11 +789,20 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
                   onToggleRight={toggleRight}
                 />
               </div>
+              {/*
+               * FR-05 (task 014-split): the Tier-2c gate dialog hosting the optional
+               * parent-association picker. Renders inert (open=false) until a create-on-save
+               * completes and `onCreateOnSaveComplete` opens it. Mounted here (inside the host
+               * FluentProvider owned by App.tsx) so it overlays the whole shell; Save is never
+               * blocked on it (the document is persisted before the gate opens).
+               */}
+              <CreateOnSaveAssociationGateDialog {...associationGateDialogProps} />
             </PaneCollapseContext.Provider>
           </SessionRestoreManager>
         </ShellStageManager>
       </AiSessionProvider>
     </PaneEventBusProvider>
+    </ComposeActionBridgeProvider>
     </ComposeLaunchContext.Provider>
   );
 }

@@ -315,8 +315,16 @@ public static class AnalysisServicesModule
         // B1 — NotificationService (deps: IGenericEntityService, ILogger — both unconditional).
         services.AddSingleton<Sprk.Bff.Api.Services.NotificationService>();
 
+        // spaarke-notification-spine-r1 task 012 — OutboxService (deps: IGenericEntityService,
+        // ILogger, TimeProvider — all unconditional). Layer B durable-store CRUD over
+        // sprk_notificationoutbox (task 011); no kill switch — every notification producer needs a
+        // durable place to write before any delivery mechanism (SignalR, task 020) is attempted.
+        // Registered here (not a new module) per CLAUDE.md §11 — mirrors the NotificationService B1
+        // promotion above (same "CRUD-only deps happen to live near AI/chat consumers" shape).
+        services.AddSingleton<Sprk.Bff.Api.Services.Notifications.OutboxService>();
+
         // B4 — IChatDataverseRepository + ChatDataverseRepository
-        // (deps: IGenericEntityService, IFieldMappingDataverseService, ILogger — all unconditional).
+        // (deps: IGenericEntityService, ILogger — all unconditional).
         services.AddScoped<IChatDataverseRepository, ChatDataverseRepository>();
 
         // B4 — ChatSessionManager (deps: IDistributedCache, IChatDataverseRepository,
@@ -375,6 +383,25 @@ public static class AnalysisServicesModule
 
         // L5 — StandaloneChatContextProvider (deps: IDistributedCache + ILogger).
         services.AddScoped<StandaloneChatContextProvider>();
+
+        // spaarkeai-assistant-enhancements-r1 task 010 (FR-B1) — IConstrainedFieldResolver.
+        // Deterministic constrained-field resolver (field-value analogue of ADR-039 grounding). Registered
+        // UNCONDITIONALLY (typed HttpClient) because it is consumed on the chat/dispatch path by the smart
+        // pre-seed (task 013) + constrained-field exclusion (task 011), which run inside
+        // ChatEndpoints.SendMessageAsync — the same hard-[FromServices] path that forced IWorkingDocumentService
+        // unconditional above. All deps are unconditional (MetadataService via AddDataverseMetadataServices,
+        // IDistributedCache, TokenCredential, IConfiguration), so symmetric registration holds (§10 F.1 —
+        // no ADR-032 kill-switch needed). No LLM dependency injected.
+        services.AddHttpClient<IConstrainedFieldResolver, ConstrainedFieldResolver>();
+
+        // spaarkeai-assistant-enhancements-r1 task 013 part 3 (FR-B2 / D-013-01) — ISurfaceLaunchEnricher.
+        // Smart pre-seed: resolves a create capability's drafted closed-set LABELS → record ids (via the
+        // resolver above) and merges `resolvedLookups` into the surface_launch payload BEFORE the ledger
+        // write in SessionDispatchOrchestrator. Registered UNCONDITIONALLY (§10 F.1 — the orchestrator takes
+        // it as an OPTIONAL ctor dependency, so production always injects the real enricher while hand-built
+        // test constructions omit it; deps IConstrainedFieldResolver + ILogger are both unconditional, so
+        // symmetric registration holds — no ADR-032 kill-switch needed). No LLM dependency.
+        services.AddScoped<ISurfaceLaunchEnricher, SurfaceLaunchEnricher>();
     }
 
     /// <summary>
@@ -425,6 +452,14 @@ public static class AnalysisServicesModule
         // No CRUD-external consumers yet (per Phase 4 FR-C6 CI guard); pre-registered so the
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
+
+        // L1 — ICommunicationClassificationAi (email-r4 task 031 / FR-15). Real impl registered in
+        // AddPublicContractsFacade. Consumed by the Association Engine's rung 5 (AiClassificationRung),
+        // which resolves the facade from a per-evaluation scope. NOTE: unlike the fail-fast peers above,
+        // the Null peer here RETURNS NULL rather than throwing — rung 5 is a best-effort AI escalation
+        // whose contract is "null ⇒ no signal" (NFR-06: association never fails the capture path), so
+        // graceful degradation (ADR-032 P2) is correct, not P3 fail-fast.
+        services.AddScoped<ICommunicationClassificationAi, NullCommunicationClassificationAi>();
 
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
@@ -636,6 +671,21 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
+        // spaarkeai-compose-r2 (UAT #7b): OBO-capable document-profile facade. ComposeService
+        // (CRUD) injects ONLY this PublicContracts facade (ADR-013). The impl invokes the
+        // "Document Profiler" Action (ACT-011) directly on the ADR-043 completion-engine spine —
+        // IActionResolver (document-profile Binding) → IDocumentTextSource (OBO download) →
+        // IActionRunner (ActionRunner) → DocumentProfileOutputMapper → UpdateDocumentFieldsAsync —
+        // NOT the retired playbook/node engine. Registered here inside the compound AI gate
+        // alongside AddLinearConsumers, so its (optional) AI execution seams resolve to real impls;
+        // the seams are nullable ctor params (ADR-032 optional-via-null-tolerance) so a compound-OFF
+        // host resolves ComposeService's optional IDocumentProfileAi to null and skips profiling
+        // cleanly. Scoped: runs in the OBO request scope. CANONICAL facade (not a stand-in) —
+        // resolved 2026-07-15 (#615 / PE-D4); redesign-r2 adopts this as-is if it resumes. See ADR
+        // Tensions in projects/spaarkeai-compose-r2/design.md.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IDocumentProfileAi,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentProfileAi>();
+
         // DailyBriefingNarrator — the platform's first `coded` composite workflow
         // (FR-P3-04, ai-architecture-redesign-r1 task 043; ICodedWorkflow retrofit in
         // task 007). Dispatched exclusively by class reference from its Action row
@@ -655,6 +705,21 @@ public static class AnalysisServicesModule
         // backs the new POST /api/ai/daily-briefing/render endpoint. Bypasses appnotification
         // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
+
+        // Daily-Briefing proactive kind=suggestion producer (spaarke-notification-spine-r1 task 050 / FR-15 /
+        // NFR-03). Runs as a SIBLING of narration in DailyBriefingCompositeService.RenderAsync (injected as the
+        // composite's optional trailing ctor param) — reads the collected high-priority items, applies ADR-039
+        // grounding + the ADR-041 proactive gate (declared-metadata admit decision via SuggestionGateOptions —
+        // reuses the gate discipline, NOT PendingPlanManager's chat/Redis machinery; owner decision 2026-07-22),
+        // and writes a kind=suggestion outbox row (task 012) + best-effort ping (task 020) ONLY on a grounded+
+        // gated pass. Deny-by-default (SuggestionGateOptions.Enabled=false) so the spine carries no proactive
+        // suggestion until explicitly enabled (NFR-03). Scoped — matches the Scoped composite; its OutboxService +
+        // SignalRDeliveryService deps are singletons (safe into a Scoped consumer). Placement Justification
+        // (root §10/§11): new grounded+gated write producer, distinct from the narration-only narrator + the
+        // dispatch-boundary composite; ZERO AI-internal injection (reads already-collected view models).
+        services.Configure<Sprk.Bff.Api.Configuration.SuggestionGateOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Configuration.SuggestionGateOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingSuggestionProducer>();
 
         // DailyBriefingCompositeService — the briefing's coded-composite dispatch boundary
         // (FR-P3-04, task 043). Resolves the Binding (ADR-039 single routing surface),
@@ -742,6 +807,42 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerContactResolver,
                            Sprk.Bff.Api.Services.Ai.Context.CallerContactResolver>();
         Console.WriteLine("✓ ICallerContactResolver registered (task 055 FR-B-06; claims→contact, feeds ContextEnvelope User slice)");
+
+        // ICallerSystemUserResolver — deterministic claims→Dataverse-systemuser resolver (F-2 user-memory
+        // recall). Keys the User slice's user-memory RECALL fragment (systemuserid, operator ruling
+        // 2026-07-09 (c)). Mirrors ICallerContactResolver exactly (same IDataverseService facade, same
+        // one-hop oid cross-reference) and is consumed ONLY by ContextBinder in THIS compound-ON block —
+        // same transitively-conditional rationale as ICallerContactResolver; ContextBinder also
+        // self-defaults to NullCallerSystemUserResolver internally, so omitting it stays safe.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver,
+                           Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
+        Console.WriteLine("✓ ICallerSystemUserResolver registered (F-2 user-memory recall; claims→systemuser, keys the User slice recall fragment)");
+
+        // IStatedProfileReader — User-scope STATED-profile reader (task 030, FR-E2). Reads the caller's typed
+        // sprk_userprofile row (keyed by the resolved systemuserid) + its N:N sprk_practicearea_ref names;
+        // ContextBinder renders it and folds the block into the User slice's userFragment AHEAD of the
+        // memory-recall block. Mirrors ICallerSystemUserResolver exactly (same IDataverseService facade, same
+        // one-hop read, same soft-fail posture) and is consumed ONLY by ContextBinder in THIS compound-ON
+        // block — same transitively-conditional rationale as ICallerSystemUserResolver; ContextBinder also
+        // self-defaults to NullStatedProfileReader internally (ADR-032 P2 quiet no-op), so omitting it stays
+        // safe. ADR-042: STATED typed profile, NOT a memory store. ADR-039: preference-only, never grounding.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IStatedProfileReader,
+                           Sprk.Bff.Api.Services.Ai.Context.StatedProfileReader>();
+        Console.WriteLine("✓ IStatedProfileReader registered (task 030 FR-E2; stated sprk_userprofile → User slice userFragment, ahead of memory recall)");
+
+        // IUserOrgContextReader — User-scope ORG (business-unit + team NAME) reader (FR-E5 BU/team half,
+        // un-defer D-032-01). A further SIBLING of IStatedProfileReader / ICallerSystemUserResolver: reuses
+        // IIdentityNormalizationService (Singleton, MembershipModule) for the caller's Redis-cached BU/team
+        // IDs — keyed off the SAME resolved systemuserid, no second identity mechanism — resolves their NAMES,
+        // and Redis-caches them (ITenantCache, per-systemuserid, 10-min TTL, NFR-03). ContextBinder renders
+        // it and folds the block into the User slice's userFragment AFTER the stated-profile block and BEFORE
+        // memory recall. Consumed ONLY by ContextBinder in THIS compound-ON block — same transitively-
+        // conditional rationale as IStatedProfileReader; ContextBinder also self-defaults to
+        // NullUserOrgContextReader internally (ADR-032 P2 quiet no-op), so omitting it stays safe. ADR-039:
+        // preference-only — the org block biases the one turn's prompt, never grounding/dispatch.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IUserOrgContextReader,
+                           Sprk.Bff.Api.Services.Ai.Context.UserOrgContextReader>();
+        Console.WriteLine("✓ IUserOrgContextReader registered (FR-E5 BU/team; systemuser BU/team names → User slice userFragment, after stated profile, before memory recall)");
 
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
@@ -1105,6 +1206,13 @@ public static class AnalysisServicesModule
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
 
+        // ICommunicationClassificationAi → CommunicationClassificationAi (email-r4 task 031 / FR-15):
+        // the ADR-013 PublicContracts seam for communication extract+classify. Thin wrapper over
+        // IOpenAiClient.GetStructuredCompletionAsync<T> (reuses the guaranteed-valid-JSON primitive the
+        // Finance classification path uses; no new LLM runner). Null peer (NullCommunicationClassificationAi)
+        // is registered in AddNullObjectsForCompoundOff. Scoped to match IOpenAiClient's transitive lifetime.
+        services.AddScoped<ICommunicationClassificationAi, CommunicationClassificationAi>();
+
         // FR-P3-05 (spaarke-ai-architecture-redesign-r1 task 044): the generic playbook-
         // invocation facade triangle and the engine shell that backed the loop's playbook
         // dispatch were DELETED with their sole consumer (the app-only legacy tool-handler
@@ -1147,6 +1255,14 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.AiAnalysisNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
+
+        // IActionSeam (task 031 / FR-07, ADR-013) — session-agnostic Layer-A record actions
+        // (CreateNotification / CreateTask / UpdateRecord) that share the SAME extracted cores the
+        // three node executors call. Registered UNCONDITIONALLY: record creation is not AI-model-gated,
+        // so — unlike IBriefingAi — it needs no Null-Object fallback. Singleton matches the executors'
+        // profile (its deps IGenericEntityService/IFieldMappingDataverseService/IServiceScopeFactory
+        // are all Singleton). Consumed by Phase 4/5 producers via this facade only (never the executors).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam, Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>();
 
         // AgentServiceNodeExecutor — ExecutorType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.

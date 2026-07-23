@@ -1,0 +1,132 @@
+<task id="073" project="email-communication-solution-r4">
+  <metadata>
+    <title>Apply the stubbed BFF Office auth filters in `OfficeEndpoints.cs` (real security gap)</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <dependencies></dependencies>
+    <blocks></blocks>
+    <tags>bff-api, auth</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Closes a REAL security gap — Office endpoints currently ship with authorization filters stubbed (`// TODO: Task 033`). Applying `.AddOfficeAuthFilter()`/`.AddJobOwnershipFilter()`/`.AddEntityAccessFilter()` gates the endpoints. Security-sensitive auth change on the BFF; `bff-api` + `auth` tags trigger FULL rigor; must respect ADR-003/008 (endpoint-filter authorization) and BFF §10 governance.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `Api/Office/OfficeEndpoints.cs` + filter wiring only — disjoint from other W7 tasks (add-in client, subscription manager, index config). The filter CLASSES already exist; this is wiring, not new filter logic. Runs anytime after W0.</parallel-reason>
+    <fr-refs>FR-25</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Apply the already-authored BFF Office authorization filters to close the stubbed-auth security gap. Per spec FR-25 (and Owner Clarification: the filter CLASSES already ship on `master`), `OfficeEndpoints.cs` currently has authorization stubbed at lines ~172, ~471, ~490, ~761 (`// TODO: Task 033`). Replace each stub with the appropriate filter registration:
+    - `.AddOfficeAuthFilter()` — baseline Office-caller authentication
+    - `.AddJobOwnershipFilter()` — job-scoped endpoints (caller owns the job)
+    - `.AddEntityAccessFilter()` — entity-scoped endpoints (caller has access to the target record)
+
+    Choose the correct filter per endpoint based on what it does (baseline vs job-scoped vs entity-scoped). Do NOT author new filter logic — the classes exist; this task WIRES them. Any endpoint mapped unconditionally must have its filter/service registered unconditionally (per RB-T028 asymmetric-registration rule; ADR-032 Null-Object if a dependency is feature-gated).
+
+    After wiring, add/adjust tests proving each protected endpoint rejects unauthorized callers (401/403) and admits authorized ones.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer authoritative on `Api/Office/OfficeEndpoints.cs`, the endpoint-filter authorization pattern (ADR-008), the existing Office filter classes, and the binding `.claude/constraints/bff-extensions.md` governance (including the asymmetric-registration sub-mechanisms).
+  </role>
+
+  <goal>
+    All four stubbed authorization sites in `OfficeEndpoints.cs` apply the correct filter (`.AddOfficeAuthFilter()`/`.AddJobOwnershipFilter()`/`.AddEntityAccessFilter()`); no `// TODO: Task 033` remains. Tests prove protected endpoints reject unauthorized callers and admit authorized ones. Build + tests green; publish-size + CVE reported; placement justification stated.
+  </goal>
+
+  <context>
+    <background>
+      The Outlook add-in calls BFF Office endpoints, but their authorization was left stubbed pending the auth-v2 foundation. That foundation (filter classes) now ships on `master`. This is a REAL security gap — the endpoints are currently under-protected. This task is the BFF half of FR-25 (task 072 migrates the add-in client; task 074 adds engine suggestions to the save pane).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (PRIMARY — stubs at ~172/471/490/761)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Office/ (existing filter classes `AddOfficeAuthFilter`/`AddJobOwnershipFilter`/`AddEntityAccessFilter`)</file>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs (endpoint + DI registration)</file>
+      <file>.claude/constraints/bff-extensions.md (asymmetric-registration rule)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (endpoint auth tests)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Apply the stubbed Office auth filters at `OfficeEndpoints.cs` lines ~172/471/490/761 (filter classes already exist); Office endpoints protected.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filters, not middleware.</constraint>
+    <constraint source="ADR-003">Auth seams — respect the central authorization primitives.</constraint>
+    <constraint source="project">Do NOT author new filter logic — the classes exist; wire them. Pick the correct filter per endpoint's scope (baseline/job/entity).</constraint>
+    <constraint source="project (§10 asymmetric registration)">Unconditionally-mapped endpoints have unconditional filter/service registration (RB-T028); ADR-032 Null-Object if a dependency is feature-gated.</constraint>
+    <constraint source="NFR-08">Add/update tests in `tests/unit/Sprk.Bff.Api.Tests/` proving each protected endpoint's authorization.</constraint>
+    <constraint source="project (§10)">Load `.claude/constraints/bff-extensions.md`; state Placement Justification; run `/conflict-check` before PR; report publish-size (baseline ~49.63 MB, ceiling 60 MB) + CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/endpoint-filter-authorization</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters-authorization.md</file>
+      <file>.claude/adr/ADR-003-auth-seams.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="Endpoint-filter authorization" location=".claude/patterns/api/endpoint-filters.md">
+        Attach `.AddXFilter()` per endpoint; filter short-circuits with 401/403 before the handler.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-25, ADR-008/003/032, bff-extensions.md (asymmetric-registration), endpoint-filters pattern.</step>
+    <step order="3" name="Conflict check">Run `/conflict-check` for `Api/Office/**` before editing.</step>
+    <step order="4" name="Inspect stubs + filters">Read `OfficeEndpoints.cs` at each stub (~172/471/490/761); understand each endpoint's scope. Read the existing filter classes to confirm their contracts.</step>
+    <step order="5" name="Wire filters">Replace each `// TODO: Task 033` with the correct filter: baseline → `.AddOfficeAuthFilter()`; job-scoped → `.AddJobOwnershipFilter()`; entity-scoped → `.AddEntityAccessFilter()`. Ensure any required service is registered unconditionally (ADR-032 Null-Object if feature-gated).</step>
+    <step order="6" name="Tests">Add/adjust tests: each protected endpoint rejects an unauthorized caller (401/403) and admits an authorized one. Verify unconditional registration for unconditionally-mapped endpoints (RB-T028).</step>
+    <step order="7" name="Build + test">`dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Office`. Fix failures.</step>
+    <step order="8" name="Publish-size + CVE">`dotnet publish -c Release ... -o deploy/api-publish/`; report absolute + delta vs ~49.63 MB (ceiling 60 MB). `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` (auth focus); invoke `adr-check` against spec.md (ADR-008/003/032; NFR-08). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 073 ✅ in `tasks/TASK-INDEX.md`. PR carries Placement Justification + publish-size delta + CVE.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect stubs + filter classes + registration</tool>
+    <tool name="edit">Wire filters at each stub</tool>
+    <tool name="bash">Build, test, publish-size, CVE scan</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs (UPDATED — filters applied; no `// TODO: Task 033`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (UPDATED if registration needed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (endpoint authorization tests)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `// TODO: Task 033` remains in `OfficeEndpoints.cs`; each of the four sites applies the correct filter.</criterion>
+    <criterion testable="true">Filter selection matches endpoint scope (baseline/job/entity) — justified per endpoint.</criterion>
+    <criterion testable="true">Tests prove each protected endpoint rejects unauthorized callers (401/403) and admits authorized ones.</criterion>
+    <criterion testable="true">Unconditionally-mapped endpoints have unconditional filter/service registration (RB-T028; ADR-032 if feature-gated).</criterion>
+    <criterion testable="true">`dotnet build` + `dotnet test` green; publish-size delta + CVE reported; ceiling ≤60 MB respected.</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-008 / ADR-003 / ADR-032.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Real security gap — not cosmetic. The filter classes exist; this task wires them. Coordinate with task 072 (add-in migration) so the client sends NAA tokens the filters expect.
+
+    BFF-touching: full §10 obligations apply.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. Per root §10: bff-extensions checklist + Placement Justification + `/conflict-check` + publish-size + CVE all required in the PR.
+    </protocol>
+  </execution>
+</task>

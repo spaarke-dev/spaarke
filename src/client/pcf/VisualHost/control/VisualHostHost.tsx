@@ -16,7 +16,7 @@ import { useEffect, useState } from 'react';
 import { FluentProvider } from '@fluentui/react-components';
 import { IInputs } from './generated/ManifestTypes';
 import { VisualHostRoot } from './components/VisualHostRoot';
-import { ErrorBoundary } from './components/ErrorBoundary';
+import { ErrorBoundary } from '../../../shared/Spaarke.Visuals/src/components/ErrorBoundary';
 import { resolveTheme, setupThemeListener } from './providers/ThemeProvider';
 
 export interface IVisualHostHostProps {

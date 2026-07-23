@@ -1,7 +1,7 @@
 <task id="AIR2-076" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Orphan verification — DAILY-BRIEFING-NARRATE + spaarke-playbook-embeddings closed by r1 P4 (contingent on 001)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>0.25 day</estimated-effort>

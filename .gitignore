@@ -157,3 +157,7 @@ infra/**/modules/*.json
 # Backfill checkpoint files (runtime artifacts; never commit)
 backfill-parent-records-progress.json
 backfill-documents-progress.json
+.claude/worktrees/
+
+# Exported/unpacked Dataverse solutions, PCF bundles, deploy logs (regenerable build output; ~380MB — never commit)
+exports/

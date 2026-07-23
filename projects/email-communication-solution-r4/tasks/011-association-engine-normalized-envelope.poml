@@ -1,0 +1,153 @@
+<task id="011" project="email-communication-solution-r4">
+  <metadata>
+    <title>Refactor `IncomingAssociationResolver` → Association Engine over a NORMALIZED ENVELOPE (rung interface + confidence + provenance)</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>012, 013, 014</blocks>
+    <tags>bff-api, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Brownfield refactor of a shared, live server resolver consumed by the inbound pipeline; changes the core association contract (envelope + rung interface) that tasks 012–015 build on; must preserve existing inbound match behavior under test BEFORE extending (R-7); respects ADR-024 / ADR-028 / ADR-045 and bff-extensions governance.</rigor-reason>
+    <parallel-group>W1-serial-spine</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>FR-09</fr-refs>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+  </metadata>
+
+  <prompt>
+    Refactor the existing `IncomingAssociationResolver` into the **Association Engine**: a rung-based resolver that operates ONLY over a normalized message envelope — NEVER `Microsoft.Graph.Message`. Finalize the `NormalizedMessage` envelope introduced in task 010 to its full shape: `{ direction, from, to[], cc[], subject, bodyText, bodyHtml, internetMessageId, inReplyTo, references[], conversationId, sentAt, attachments[] }`. Introduce a rung interface (e.g. `IAssociationRung` with an ordered `RungOrder`/`RungKind`) so rungs 0–3 (tasks 012–014) and later rungs 4–5 (W3) plug in uniformly, each emitting per-attribute confidence + provenance.
+
+    This is the serial spine of Wave 1: it is `parallel-safe: false` because it refactors the shared resolver that 012/013/014/015 extend. Because it is brownfield, the binding order is: FIRST characterize and preserve the current rungs 0–2 behavior under regression tests, THEN extract the envelope + rung interface, THEN confirm behavior is byte-for-byte unchanged for existing inbound matches (R-7). Do NOT add new rung logic in this task — 012–014 own the rung content. Task 011 delivers the envelope, the rung abstraction, the provenance/confidence model, and a Graph→envelope normalizer, with existing behavior preserved.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer specializing in careful brownfield refactors of live pipelines. Authority on `src/server/api/Sprk.Bff.Api/Services/Communication/`. Fluent in ADR-024 (polymorphic regarding family — engine keeps writing typed regarding lookups + denormalized fields), ADR-028 (central auth; never `new` a credential), ADR-045 (Communication ADR), and the binding `.claude/constraints/bff-extensions.md` governance checklist.
+  </role>
+
+  <goal>
+    `IncomingAssociationResolver` is refactored into an Association Engine that consumes only `NormalizedMessage`. A Graph→envelope normalizer maps `Microsoft.Graph.Message` into `NormalizedMessage` at the pipeline boundary. A rung interface + per-attribute confidence + provenance model exists and is documented. Existing inbound matches (rungs 0–2 behavior) are unchanged — proven by regression tests written BEFORE the extraction. Engine emits ADR-024 typed regarding lookups + denormalized fields exactly as before. Build clean; tests green; publish-size + CVE + bff-extensions Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Today `IncomingAssociationResolver` is coupled to `Microsoft.Graph.Message` and mixes rung logic inline. R4 needs one engine that works for BOTH directions (inbound + outbound) and future channels, which is only possible if it operates over a channel-neutral envelope (NFR-04 channel extensibility). The spec (FR-09) mandates: envelope-only input, rung interface, per-attribute confidence + provenance, and — critically — rungs 0–2 preserved under test before any extension (risk R-7: silent regression of live inbound matching).
+
+      Task 010 already introduced a `NormalizedMessage` skeleton and swapped enrichment to delegate association to the resolver seam. Task 011 finalizes the envelope, refactors the resolver behind the seam, and adds the normalizer — so 010's delegation now targets the Engine. Tasks 012 (rungs 0–1), 013 (rung 2), 014 (rung 3) implement rung content against the rung interface this task defines.
+
+      ADR-024 constraint: the engine MUST keep writing typed regarding lookups + denormalized fields via the existing `RegardingFieldPriority`/`PopulateResolverFieldsAsync` / `RegardingLookupMap` machinery — this is a refactor of HOW matches are computed, not a change to WHAT gets written.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationDirection.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAssociation.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-09: the Engine MUST operate over the normalized envelope only; it MUST NOT reference `Microsoft.Graph.Message` in rung logic. Graph→envelope mapping happens once, at the boundary.</constraint>
+    <constraint source="project">R-7 (binding order): characterize + preserve rungs 0–2 behavior under regression tests BEFORE extracting the envelope/rung interface. Existing inbound matches MUST be unchanged.</constraint>
+    <constraint source="project">Rung interface + per-attribute confidence + provenance are introduced here; rung CONTENT (0–3) is owned by tasks 012/013/014 — do NOT add new match logic in 011.</constraint>
+    <constraint source="ADR-024">Engine MUST keep writing typed regarding lookups + denormalized fields (reuse `RegardingFieldPriority`/`PopulateResolverFieldsAsync`/`RegardingLookupMap`); no new regarding mechanism.</constraint>
+    <constraint source="ADR-028">Inject central `TokenCredential`/`IGraphClientFactory`/canonical Dataverse interfaces; never `new` a credential.</constraint>
+    <constraint source="ADR-045">Association Engine shape is codified in ADR-045 (task 005); confirm alignment.</constraint>
+    <constraint source="NFR-06">Association remains best-effort/non-fatal within enrichment; the refactor MUST NOT change that invariant.</constraint>
+    <constraint source="project">Register any renamed/added services via `CommunicationModule` only (ADR-010); keep DI unconditional (endpoints/processor consume unconditionally, ADR-032).</constraint>
+    <constraint source="project">bff-extensions Placement Justification REQUIRED in the PR; publish-size delta reported (baseline ~49.63 MB incl. PDBs); no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Characterization-tests-before-refactor" location=".claude/adr/ADR-038-testing-strategy.md">
+        Lock existing behavior with tests first (KEEP-path categories), then refactor, then re-run to prove no regression (R-7).
+      </pattern>
+      <pattern name="ADR-024 regarding write path" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs">
+        `RegardingFieldPriority` + `PopulateResolverFieldsAsync` + `RegardingLookupMap` write typed lookups + denormalized fields. Preserve these outputs verbatim.
+      </pattern>
+      <pattern name="Boundary normalization" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">
+        Map the channel-specific message (`Microsoft.Graph.Message`) into `NormalizedMessage` exactly once, at the pipeline boundary; rungs never see Graph types.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `IncomingAssociationResolver.cs` in full; inventory every current rung/match path (explicit ref, thread, participant) and every ADR-024 field it writes. Record the current behavior contract in `notes/011-resolver-behavior-contract.md`.</step>
+    <step order="2">Write/extend regression (characterization) tests in `tests/unit/Sprk.Bff.Api.Tests/` that lock the CURRENT rungs 0–2 outputs (matched entity, regarding fields written, denormalized values) for representative inbound fixtures. These MUST pass against the pre-refactor code (R-7 baseline).</step>
+    <step order="3">Read `.claude/constraints/bff-extensions.md` (§F test obligation, §F.1 asymmetric registration, §G hot-path) and ADR-024 to confirm the regarding write contract before touching it.</step>
+    <step order="4">Finalize `NormalizedMessage` (all FR-09 fields: `direction, from, to[], cc[], subject, bodyText, bodyHtml, internetMessageId, inReplyTo, references[], conversationId, sentAt, attachments[]`) with an attachment sub-model.</step>
+    <step order="5">Introduce the rung abstraction: `IAssociationRung` (ordered `RungKind`/`RungOrder`, `Task&lt;IReadOnlyList&lt;RungMatch&gt;&gt; EvaluateAsync(NormalizedMessage, context, ct)`) and the `RungMatch` model carrying target entity ref, per-attribute confidence, and provenance fragments. Do NOT implement rung content — provide the abstraction + a thin adapter that wraps the CURRENT inline logic so behavior is preserved (tasks 012–014 replace these with real rungs).</step>
+    <step order="6">Add a Graph→envelope normalizer (`GraphMessageNormalizer` or equivalent) mapping `Microsoft.Graph.Message` → `NormalizedMessage`, invoked once at the boundary in `IncomingCommunicationProcessor`. Rung logic references only `NormalizedMessage`.</step>
+    <step order="7">Refactor `IncomingAssociationResolver` into the Association Engine: it iterates rungs in order over the envelope, aggregates `RungMatch` results, and writes ADR-024 typed regarding lookups + denormalized fields exactly as before via the existing `PopulateResolverFieldsAsync`/`RegardingLookupMap` machinery. Keep the enrichment seam (task 010) pointing at the Engine.</step>
+    <step order="8">Update `CommunicationModule` DI (rename/add registrations; unconditional). Confirm `IncomingCommunicationProcessor` and enrichment (010) compile against the new engine surface.</step>
+    <step order="9">Re-run the Step 2 characterization tests — they MUST pass UNCHANGED, proving rungs 0–2 behavior preserved (R-7). Run `dotnet build src/server/api/Sprk.Bff.Api/` + full `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o c:/tmp/r4-011-publish/`; report compressed size + delta vs ~49.63 MB baseline (state PDB convention). Expected ≈ 0.</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: invoke `code-review` on the diff; invoke `adr-check` against `spec.md` (focus ADR-024 regarding-write preservation + FR-09 envelope-only + R-7). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; serial-spine — confirm no other active worktree is mid-edit in `Services/Communication/`).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (011 ✅) and `current-task.md`; unblock 012/013/014; record decisions (envelope shape, rung interface signature, normalizer placement).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect resolver, processor, DI, models</tool>
+    <tool name="edit">Introduce envelope + rung interface + normalizer; refactor resolver</tool>
+    <tool name="bash">Build, characterization + regression tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Models/NormalizedMessage.cs (FINALIZED — full envelope + attachment sub-model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/IAssociationRung.cs + RungMatch.cs (NEW — rung abstraction + confidence/provenance model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/GraphMessageNormalizer.cs (NEW — Graph→envelope boundary mapper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs (REFACTORED — engine over envelope; ADR-024 writes preserved)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (UPDATED — normalize at boundary)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (UPDATED — DI)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (characterization/regression tests locking rungs 0–2 behavior)</output>
+    <output type="notes" ephemeral="true">projects/email-communication-solution-r4/notes/011-resolver-behavior-contract.md</output>
+    <output type="docs">PR description with bff-extensions Placement Justification + publish-size delta + CVE + R-7 preservation evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`NormalizedMessage` carries all FR-09 fields (`direction, from, to[], cc[], subject, bodyText, bodyHtml, internetMessageId, inReplyTo, references[], conversationId, sentAt, attachments[]`).</criterion>
+    <criterion testable="true">Association Engine rung logic references `NormalizedMessage` only — zero references to `Microsoft.Graph.Message` in rung/match code (grep-verifiable).</criterion>
+    <criterion testable="true">A Graph→envelope normalizer maps `Microsoft.Graph.Message` → `NormalizedMessage` once at the pipeline boundary.</criterion>
+    <criterion testable="true">An `IAssociationRung` abstraction with ordered rungs + a `RungMatch` model (target ref + per-attribute confidence + provenance) exists.</criterion>
+    <criterion testable="true">Characterization tests written BEFORE the refactor pass UNCHANGED after it — rungs 0–2 inbound matches produce identical entity + regarding-field outputs (R-7).</criterion>
+    <criterion testable="true">Engine still writes ADR-024 typed regarding lookups + denormalized fields via existing `PopulateResolverFieldsAsync`/`RegardingLookupMap` (no new regarding mechanism).</criterion>
+    <criterion testable="true">No `new` credential/`ConfidentialClientApplication`; central auth injected (ADR-028).</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication tests green; publish-size delta ≈ 0; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the serial spine of Wave 1 — it MUST land before 012/013/014 and MUST NOT run concurrently with them. The rung ADAPTER in Step 5 is a temporary wrapper around current inline logic so behavior is preserved; 012–014 replace those adapters with real rungs.
+
+    Do NOT add new match/rung behavior here. If a temptation arises to "just fix" a rung while refactoring, defer it to 012/013/014 to keep R-7's before/after diff clean.
+
+    The behavior-contract note (`notes/011-resolver-behavior-contract.md`) is the reference the rung tasks and task 017 use to write direction-symmetry + per-rung tests.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `knowledge`/`files` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED. Brownfield: characterization-tests-FIRST (R-7) is non-negotiable. Per CLAUDE.md §10: publish-size delta + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR (serial-spine, BFF hot-path). Model tier `sonnet` @ effort `xhigh` (brownfield root-cause refactor).
+    </protocol>
+  </execution>
+</task>

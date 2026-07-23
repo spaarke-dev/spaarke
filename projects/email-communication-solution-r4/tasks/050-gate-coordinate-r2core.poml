@@ -1,0 +1,118 @@
+<task id="050" project="email-communication-solution-r4">
+  <metadata>
+    <title>⚠️ COORDINATION GATE — align W5 with `spaarke-ai-architecture-redesign-r2` on Services/Ai ownership + PublicContracts seams</title>
+    <phase>Wave 5 — Responsive Intelligence</phase>
+    <status>blocked</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>051, 052, 053, 054</blocks>
+    <tags>coordination, bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>No code change — a coordination + boundary-documentation gate. STANDARD rigor; the deliverable is an agreed boundary recorded in project notes, not a diff.</rigor-reason>
+    <parallel-group>W5-GATE</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>FR-18, FR-19, FR-20</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    This is a **coordination gate**, not an implementation task. W5 (tasks 051–054) edits `Services/Ai/` internals (OutputRouter dispositions, EventRules fan-out, a new JPS Action, DeliverComposite) that per [`projects/INDEX.md`](../../INDEX.md) are **SOLE-OWNED by `spaarke-ai-architecture-redesign-r2` (r2-core)**, which publishes seams under `Services/Ai/PublicContracts/`. W5 MUST NOT fork those internals.
+
+    Before ANY W5 implementation begins, you MUST: (1) run `/conflict-check` to detect active-PR overlap on `Services/Ai/`; (2) confirm with r2-core who owns the OutputRouter `record` + `notification` disposition legs and how R4 should complete them (extend via seam vs r2-core lands it vs coordinated hand-off); (3) confirm which `Services/Ai/PublicContracts/` seams W5 consumes for record/notification routing, EventRules firing, and DeliverComposite; (4) document the agreed boundary in project notes. Tasks 051–054 are `&lt;blocked-by&gt;050&lt;/blocked-by&gt;` and MUST NOT start until this gate clears.
+
+    If ownership is contested or the seams do not yet exist, this is a **real stop** — surface it per root CLAUDE.md §6 / §6.5, do NOT improvise by forking internals.
+  </prompt>
+
+  <role>
+    Spaarke BFF coordination lead. Understands the `Services/Ai/` ownership model, the PublicContracts facade pattern (refined ADR-013), and the hot-path coordination registry (`projects/INDEX.md`). Authorized to open the escalation per CLAUDE.md §6.5 if a boundary conflict surfaces.
+  </role>
+
+  <goal>
+    A written, agreed **W5 boundary** in `projects/email-communication-solution-r4/notes/w5-ai-coordination.md` that states: (a) `/conflict-check` result for `Services/Ai/`; (b) who lands OutputRouter `record`/`notification` disposition completion and how (seam vs fork-forbidden); (c) the exact `PublicContracts` seams tasks 051–054 will consume; (d) any escalation raised + its resolution path (A/B/C per §6.5). Once recorded and confirmed clear, tasks 051–054 are unblocked (status flips 🔲) and `TASK-INDEX.md` reflects the gate cleared.
+  </goal>
+
+  <context>
+    <background>
+      Per R4 CLAUDE.md "Hot-Path Coordination": r2-core is sole owner of `Services/Ai/` internals; also touching that surface: `spaarke-daily-update-service-r5`, `spaarkeai-compose-r2`, `chat-routing-redesign-r1`, `spaarke-ai-platform-unification-r6`. W1/W3 touch `Services/Communication/**` + new files (low overlap); W5 is the high-overlap wave. This gate exists to prevent a merge collision + duplicated OutputRouter work.
+
+      FR-18 removes `NotSupportedException` in `DispositionRoutability.cs` (an r2-core-owned file) — the single most likely conflict point. Resolve ownership here before 051 touches it.
+    </background>
+    <relevant-files>
+      <file>projects/INDEX.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter/DispositionRoutability.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">GATE: tasks 051–054 MUST NOT start until this gate clears. This is `parallel-safe: false` and runs from the main session.</constraint>
+    <constraint source="project">MUST run `/conflict-check` against `Services/Ai/` before any W5 code.</constraint>
+    <constraint source="ADR-013">W5 consumes `Services/Ai/PublicContracts/` seams; do NOT inject AI-internal types (`IOpenAiClient`, `IPlaybookService`) directly; do NOT fork `Services/Ai/` internals.</constraint>
+    <constraint source="root §6/§6.5">If ownership/seams are contested or missing, STOP and escalate (Human Input Required / ADR Conflict Resolution). Silent forking is forbidden.</constraint>
+    <constraint source="project">`projects/INDEX.md` is the authoritative ownership registry — consult it, and update the R4 hot-path entry if the boundary shifts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/INDEX.md</file>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Conflict check before hot-path work" location="conflict-check skill">
+        Auto-triggers on hot-path-watchlist matches; run against `Services/Ai/` and read the active-PR overlap report.
+      </pattern>
+      <pattern name="PublicContracts facade consumption" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">
+        Consume the published seam; never reach into internals.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `projects/INDEX.md` hot-path entries for `Services/Ai/` — confirm r2-core sole ownership + the other touching projects.</step>
+    <step order="2">Run `/conflict-check` (conflict-check skill) scoped to `Services/Ai/`; capture the active-PR overlap report.</step>
+    <step order="3">Inventory the existing `Services/Ai/PublicContracts/` seams; identify which cover: OutputRouter record/notification routing, `EventRulesService.FireAsync`, and `DeliverComposite`. Note gaps.</step>
+    <step order="4">Read `DispositionRoutability.cs` to see the current `NotSupportedException` legs FR-18 must complete; determine whether completion is a seam extension or an internal edit (the latter requires r2-core agreement).</step>
+    <step order="5">Coordinate with r2-core (record the exchange): confirm (a) who lands OutputRouter `record`/`notification` completion, (b) the seams 051–054 consume, (c) whether any r2-core change must merge first.</step>
+    <step order="6">Write `projects/email-communication-solution-r4/notes/w5-ai-coordination.md` capturing the agreed boundary (a–d from `&lt;goal&gt;`), including any escalation + resolution path.</step>
+    <step order="7">If a boundary conflict is unresolved, STOP and surface per §6/§6.5 (Human Input Required / ADR Conflict) — do NOT unblock 051–054.</step>
+    <step order="8">If clear: flip tasks 051–054 status 🔲 in `TASK-INDEX.md`, mark 050 ✅ (gate cleared), and note the cleared boundary in `current-task.md`. Advance to task 051.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect INDEX.md, PublicContracts, DispositionRoutability.cs</tool>
+    <tool name="conflict-check">Detect active-PR overlap on Services/Ai/</tool>
+    <tool name="write">Record the agreed boundary in notes</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs" ephemeral="false">projects/email-communication-solution-r4/notes/w5-ai-coordination.md (agreed boundary + conflict-check result + seams + escalation)</output>
+    <output type="docs">TASK-INDEX.md gate-cleared update; 051–054 unblocked (or STOP recorded)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/conflict-check` was run against `Services/Ai/` and its result is recorded in the coordination note.</criterion>
+    <criterion testable="true">The note states who lands OutputRouter `record`/`notification` completion and how (no internal fork by W5).</criterion>
+    <criterion testable="true">The note enumerates the exact `PublicContracts` seams tasks 051–054 will consume (or records missing-seam escalation).</criterion>
+    <criterion testable="true">Either 051–054 are unblocked (gate cleared) OR an escalation is raised per §6/§6.5 and 051–054 remain blocked.</criterion>
+    <criterion testable="true">No `Services/Ai/` internal code was forked or edited in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This gate is the single biggest schedule risk in W5 (per plan High-Risk / Watch Items). Treat "boundary unclear" as a legitimate stop — the cost of a merge collision on OutputRouter is far higher than the cost of waiting for r2-core.
+
+    Also touching `Services/Ai/`: `spaarke-daily-update-service-r5`, `spaarkeai-compose-r2`, `chat-routing-redesign-r1`, `spaarke-ai-platform-unification-r6` — include them in the conflict scan if `/conflict-check` surfaces their PRs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Main-session only (`parallel-safe: false`). No code change. Deliverable is the recorded boundary + gate-clear decision. Escalate per §6/§6.5 rather than improvising if ownership is contested.
+    </protocol>
+  </execution>
+</task>

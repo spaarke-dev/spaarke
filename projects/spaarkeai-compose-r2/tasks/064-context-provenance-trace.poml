@@ -3,7 +3,7 @@
     <title>FR-32 Context-pane provenance + D-F4 trace hosting</title>
     <phase>6 Memory</phase>
     <gate>blocked-on-core-A0</gate>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <model-tier>sonnet</model-tier>
     <effort>high</effort>
@@ -105,4 +105,46 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-07-10 (FULL rigor). Core dep SATISFIED on master: core task 038 shipped the
+    D-F4 host-embeddable surface — `ExecutionTraceWidget` (host-embeddable via `sessionId` +
+    `restoreTrace`), `executionTraceBuffer`, the `execution-trace` registry entry, `TraceEventDto`
+    (TraceEvent v1 client type), and the BFF read surface `GET /api/ai/chat/sessions/{id}/trace`
+    (`ISessionTraceReader`). No local variant authored — the core widget is consumed AS-IS
+    (charter §3.4).
+
+    Gap found + closed: the `execution-trace` context tool was already mounted in
+    `ContextPaneController.tsx` but wired with `data={{}}` (no session scope, no server rehydration —
+    a stale comment still called the BFF bridge an "R7 backlog item"). FR-32 = properly HOST the
+    D-F4 view. Implementation:
+      - NEW `src/solutions/SpaarkeAi/src/components/context/ComposeTraceHost.tsx` — thin host that
+        binds the core `ExecutionTraceWidget` with the two host-embeddable inputs: `sessionId`
+        (active chat session from `useAiSession`) + `restoreTrace` (GET /trace via `@spaarke/auth`
+        `authenticatedFetch`, soft-fail → `[]`). Isolated as a child so `useAiSession()` (which
+        throws outside `AiSessionProvider`) only runs when the trace tool is selected — protects the
+        pane's provider-less unit tests.
+      - EDIT `ContextPaneController.tsx` — execution-trace branch renders `<ComposeTraceHost/>`;
+        removed the now-unused direct `ExecutionTraceWidget` import; replaced the stale comment.
+      - NEW `__tests__/ComposeTraceHost.reachable.test.tsx` — real-render E2E-DoD test: renders the
+        REAL `ContextPaneController`, selects the real `execution-trace` tool, asserts (1) the core
+        widget mounts + is reachable in the host, (2) `restoreTrace` hits
+        `GET .../sessions/{id}/trace` via `authenticatedFetch` on mount (D-F4 wiring), (3) audit-only
+        — no textbox/searchbox/spinbutton.
+
+    Audit-only invariant held: read-only surface, no input affordance added.
+    Verification: SpaarkeAi tsc surface-gate 0 surface-owned errors; `npm run build` clean;
+    `npm test` 40 suites / 457 tests green (incl. 3 new). code-review + adr-check both clean
+    (0 critical / 0 warning / 0 violation). Did NOT touch `Spaarke.AI.Widgets` or
+    `Spaarke.LegalWorkspace` (core widget consumed as-is), nor ComposeEditor/ComposeWorkspace/
+    PaneEventBus/useSseStream/BFF orchestrator (parallel-agent-owned).
+
+    Scope boundary noted: the broader FR-32 goal language ("clickable golden-reference / precedent /
+    prior-decision provenance entries, drag-as-citation") lives in surfaces this task does not own —
+    citation click-through is `FindingsWidget` (already shipped), drag-as-citation is a
+    ComposeEditor concern (off-limits here), and no core-published "provenance sources" component
+    exists to host. Building a new local sources-list would overlap `FindingsWidget`/
+    `ExecutionTraceWidget` (CLAUDE.md §11 scope creep). The in-ownership, testable criteria — host
+    the D-F4 trace over TraceEvent v1, audit-only, Fluent v9 + `@spaarke/auth` — are fully satisfied.
+  </notes>
 </task>

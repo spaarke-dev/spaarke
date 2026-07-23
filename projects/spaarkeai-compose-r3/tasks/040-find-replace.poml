@@ -1,0 +1,162 @@
+<task id="040" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-17 in-editor find/replace (case-sensitivity + replace-all; tracked-changes-mark-safe)</title>
+    <phase>4 Toolset</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Toolset</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,tiptap,fluent-ui</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-17: in-editor find and replace for the Compose editor. The find field highlights all
+    matches; a case-sensitivity toggle scopes matching; replace and replace-all mutate the document. The
+    load-bearing constraint is that find/replace MUST interoperate with the existing tracked-changes marks
+    (`InsertionMark`/`DeletionMark`/`CommentAnchorMark`) WITHOUT corrupting them — a replace that lands on a
+    marked range must preserve or correctly re-apply those marks, never strip or orphan them. Build this
+    small and self-contained on the MIT TipTap base — NO `@tiptap-pro/*`, no TipTap product "Search &amp;
+    Replace Pro" module, no MIT-Pro dependency (design §7.5 lists this as "Build (small; no MIT-Pro
+    dependency)"). A ProseMirror decoration-based highlight pass plus a replace transaction that respects
+    stored marks is the pattern.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript engineer fluent in TipTap 3 / ProseMirror (decorations, transactions, mark
+    handling) and Fluent UI v9. Comfortable reasoning about how a text-replacement transaction interacts
+    with inline marks so that tracked-changes annotations survive edits intact.
+  </role>
+
+  <goal>
+    A find/replace UI surface wired into `ComposeEditor.tsx` (via a new dedicated component + a small
+    hook) that: highlights all matches with an optional case-sensitivity toggle; supports replace (current
+    match) and replace-all; and drives replacement through a ProseMirror transaction that leaves the
+    Compose tracked-changes marks uncorrupted. Matching unit/component tests assert the highlight, the
+    case-sensitivity scoping, replace-all correctness, and mark-integrity after a replace over a marked
+    range, plus an ADR-021 dark-mode render check.
+  </goal>
+
+  <context>
+    <background>
+      Design §7.5 "The Editing Surface" lists find/replace as a table-stakes credibility tool to BUILD
+      (small; no MIT-Pro dependency) — "a common credibility gap today." The editor already owns the
+      hard part: native `w:ins`/`w:del`/`w:comment` marks. Find/replace is an everyday tool layered on
+      the MIT base. This is a client-only task (no BFF surface, no save-path change) and is independent of
+      the E1/E2 fidelity core, so it runs in the W4 parallel toolset wave.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — mount the find/replace surface + register any editor extension/decoration plugin for match highlighting</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFindReplace.tsx — NEW Fluent v9 find/replace panel (find field, replace field, case-sensitivity toggle, prev/next, replace, replace-all)</file>
+      <file role="new">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeFindReplace.ts — NEW hook: match search over editor doc, decoration highlight, replace + replace-all transactions that preserve marks</file>
+      <file role="canonical-reuse">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/InsertionMark.ts — tracked-change insertion mark; a replace must not corrupt it</file>
+      <file role="canonical-reuse">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/DeletionMark.ts — tracked-change deletion mark; must survive replace</file>
+      <file role="canonical-reuse">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/CommentAnchorMark.ts — comment anchor mark; must survive replace</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/marks/QaHighlightExtension.ts — existing ProseMirror decoration-based highlight extension; mirror this pattern for match highlighting</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — existing Fluent v9 editor toolbar; mirror its component conventions + theming</file>
+      <file role="export">src/client/shared/Spaarke.Compose.Components/src/index.ts — export the new component if it is part of the public surface</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §7.5 (The Editing Surface — find/replace = Build, small); spec.md FR-17</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent — no task dependency. Runs in the W4 toolset parallel wave alongside 042/043/044.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / owner rule 2026-07-14">NO TipTap product feature (paid or unpaid) — no "Search &amp; Replace Pro" or any `@tiptap-pro/*` module. Build on the MIT TipTap base / ProseMirror primitives / our own code only.</constraint>
+    <constraint source="NFR-03 / project">If any npm extension is added, verify it resolves to `@tiptap/extension-*` (MIT), NEVER `@tiptap-pro/*`. Prefer zero new dependency (decoration + transaction primitives already available).</constraint>
+    <constraint source="FR-17 / project">Find/replace MUST interoperate with the tracked-changes marks (`InsertionMark`/`DeletionMark`/`CommentAnchorMark`) WITHOUT corrupting them. A replace over a marked range must preserve or correctly re-apply the marks — never strip, split incorrectly, or orphan them.</constraint>
+    <constraint source="ADR-021 / NFR-10">All new UI is Fluent UI v9 and MUST render correctly in dark mode (theme tokens, no hard-coded colors).</constraint>
+    <constraint source="ADR-028 / NFR-10">Any client fetch (none expected here) uses `@spaarke/auth`; do not hand-roll auth headers. This task is editor-local and should add no network calls.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component/unit tests only (no BFF); no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Tests must exercise real editor state (highlight, replace-all, mark integrity).</constraint>
+    <constraint source="CLAUDE.md §11">New component — provide the `&lt;justification&gt;` (Existing / Extension / Cost-of-doing-nothing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TipTap 3 / ProseMirror decorations + mark-preserving replace transactions; Fluent v9 editor UI + dark mode</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Decoration-based highlight" location="src/client/shared/Spaarke.Compose.Components/src/widgets/marks/QaHighlightExtension.ts">
+        Existing ProseMirror decoration extension that highlights ranges without mutating the doc — mirror this for find-match highlighting so matches are visual-only until replace.
+      </pattern>
+      <pattern name="Fluent v9 editor toolbar surface" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">
+        Existing Fluent v9 toolbar; copy its component structure, token usage, and dark-mode-safe styling for the find/replace panel.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor. Load the knowledge files + design §7.5. Read the three mark files and `QaHighlightExtension.ts` to understand how marks and decorations coexist.</step>
+    <step order="1" name="Match search + highlight">Implement the search pass in `useComposeFindReplace.ts`: iterate the editor doc text, honor the case-sensitivity toggle, and render matches as ProseMirror decorations (mirroring `QaHighlightExtension`). No doc mutation on find.</step>
+    <step order="2" name="Replace + replace-all transactions">Implement replace (current match) and replace-all as ProseMirror transactions. When a match range carries `InsertionMark`/`DeletionMark`/`CommentAnchorMark`, preserve/re-apply the marks on the replacement text so tracked changes are not corrupted or orphaned.</step>
+    <step order="3" name="Fluent v9 panel">Build `ComposeFindReplace.tsx`: find field, replace field, case-sensitivity toggle, prev/next navigation, replace, replace-all. Use Fluent v9 tokens; verify dark mode. Mirror `ComposeFormatToolbar` conventions.</step>
+    <step order="4" name="Wire into editor">Mount the panel in `ComposeEditor.tsx` (toggleable), register the highlight decoration plugin, and export from `index.ts` if public.</step>
+    <step order="5" name="Tests">Author component/unit tests: highlight count, case-sensitivity scoping, replace-all correctness, and the mark-integrity assertion (replace over a `InsertionMark` range keeps the mark intact). Include an ADR-021 dark-mode render check.</step>
+    <step order="6" name="Verify">`npm run build` the shared lib; run the new tests. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFindReplace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useComposeFindReplace.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (find/replace mounted + highlight plugin registered)</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFindReplace.test.tsx</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing find/replace surface. `QaHighlightExtension.ts` highlights QA ranges only (read-only, single-purpose); `ComposeFormatToolbar.tsx` is formatting buttons. Neither searches text or replaces.</existing>
+    <extension>Cannot fold into `ComposeFormatToolbar` (that is inline formatting, a distinct concern) nor into `QaHighlightExtension` (a QA-specific read-only decoration). Find/replace is a cohesive interactive tool with its own search/replace state that warrants a dedicated component + hook.</extension>
+    <cost-of-doing-nothing>Without it, the editor lacks a table-stakes 2026 credibility tool (design §7.5) — a maker cannot do a bulk term change (e.g. rename a defined party across a contract) without leaving Compose. Concrete failing contract: FR-17 acceptance "find highlights matches; replace-all updates all; interoperates with tracked-changes marks without corrupting them" cannot be met.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Entering a term in the find field highlights all matches in the editor; clearing the term removes the highlights (decoration-only, no doc mutation).</criterion>
+    <criterion testable="true">The case-sensitivity toggle scopes matching: with it on, only exact-case matches highlight; with it off, matches are case-insensitive.</criterion>
+    <criterion testable="true">Replace-all replaces every match with the replacement text in a single logical operation; a unit test asserts the resulting document text.</criterion>
+    <criterion testable="true">A replace that lands on a range carrying `InsertionMark`/`DeletionMark`/`CommentAnchorMark` preserves those marks on the replacement text — a unit test asserts the marks remain intact and are not orphaned or stripped.</criterion>
+    <criterion testable="true">No `@tiptap-pro/*` dependency and no TipTap product feature is added; any npm extension used resolves to `@tiptap/extension-*` (MIT). Ideally zero new dependency.</criterion>
+    <criterion testable="true">The find/replace panel renders correctly in Fluent v9 dark mode (theme tokens; no hard-coded colors) — ADR-021.</criterion>
+    <criterion testable="true">Matching component tests exist and pass; shared-lib `npm run build` is green.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <ui-test name="Find highlights matches">
+      <steps>Open a doc with repeated term "Agreement". Type "Agreement" in the find field.</steps>
+      <expected>All occurrences highlight; a match count reflects the number found; no document text changes.</expected>
+    </ui-test>
+    <ui-test name="Case-sensitivity scopes matching">
+      <steps>With a doc containing "Party" and "party", toggle case-sensitivity ON and search "Party".</steps>
+      <expected>Only the capital-P "Party" occurrences highlight; toggling OFF highlights both casings.</expected>
+    </ui-test>
+    <ui-test name="Replace-all updates all matches">
+      <steps>Search "Acme" (3 occurrences), enter replacement "Globex", click Replace All.</steps>
+      <expected>All three occurrences become "Globex"; editor text reflects the change.</expected>
+    </ui-test>
+    <ui-test name="Replace over tracked-change mark preserves it">
+      <steps>Place an `InsertionMark` over a phrase, then replace that phrase via find/replace.</steps>
+      <expected>The replacement text still carries the insertion mark; the tracked change is not corrupted or removed.</expected>
+    </ui-test>
+    <ui-test name="Dark-mode render (ADR-021)">
+      <steps>Render the find/replace panel under the Fluent v9 dark theme provider.</steps>
+      <expected>Panel, fields, toggle, and buttons use theme tokens and are legible in dark mode; no hard-coded light colors.</expected>
+    </ui-test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

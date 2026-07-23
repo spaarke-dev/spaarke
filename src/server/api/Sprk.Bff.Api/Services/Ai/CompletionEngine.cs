@@ -19,8 +19,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// <b>Component Justification (CLAUDE.md §11)</b>:
 /// (1) <i>Existing</i> — overlaps nothing that already yields a per-outcome disposition card;
-/// R1 emitted the primitives ONLY inline on the gated resume path (ChatEndpoints
-/// <c>BuildGateOutcomeMessage</c> markdown) and never on the auto-executed or event paths.
+/// R1 emitted the primitives ONLY inline on the gated resume path
+/// (<c>GateOutcomeProducer.BuildGateOutcomeMessage</c> markdown) and never on the auto-executed or event paths.
 /// (2) <i>Extension</i> — it does NOT fork <see cref="OutcomeCard"/>: it is a thin composer OVER
 /// the task-011 guard factory (<see cref="OutcomeCard.ForStoredOutcome"/>) and the task-036
 /// <see cref="JobAwareOutcomeProjection"/>; it invents no card shape and changes nothing about how
@@ -48,12 +48,40 @@ namespace Sprk.Bff.Api.Services.Ai;
 public static class CompletionEngine
 {
     /// <summary>
-    /// Composes an <see cref="OutcomeCard"/> for a single-shot side-effect that has been STORED
-    /// as <paramref name="entry"/> (the auto-executed + event + refusal-capability paths, all of
-    /// which route through <see cref="OutputRouter"/>). The user-facing sentence is derived from
-    /// the STORED payload (audience split); next-step chips come from the Binding's declared
-    /// transitions; the trace ref defaults to the ledger key.
+    /// The reserved routed-payload field a capability embeds its serialized
+    /// <see cref="JobAwareCompletionState"/> (task 014 v1) into to request a JOB-AWARE OutcomeCard
+    /// on the auto-executed / event path (spaarke-ai-architecture-redesign-r2 task 036 live-wiring;
+    /// e2e-completion-audit F-3). When a routed output carries this field,
+    /// <see cref="ComposeForRoutedOutput(SessionOutput, Binding, OutcomeCardLink?, string?)"/> derives
+    /// the operation-level <see cref="OutcomeStatus"/> from the job aggregate (NFR-12 ingestion parity)
+    /// via <see cref="ComposeJobAware"/> instead of the single-shot hardcoded
+    /// <see cref="OutcomeStatus.Succeeded"/>. A payload WITHOUT this field is a single-shot side effect
+    /// and composes byte-identically to the legacy path (regression pin).
     /// </summary>
+    public const string JobAwareCompletionStateField = "completionState";
+
+    private static readonly JsonSerializerOptions JobAwareStateJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>
+    /// Composes an <see cref="OutcomeCard"/> for a side-effect that has been STORED as
+    /// <paramref name="entry"/> (the auto-executed + event + refusal-capability paths, all of which
+    /// route through <see cref="OutputRouter"/>). The user-facing sentence is derived from the STORED
+    /// payload (audience split); next-step chips come from the Binding's declared transitions; the
+    /// trace ref defaults to the ledger key.
+    /// </summary>
+    /// <remarks>
+    /// <b>Job-backed detection (task 036 live-wiring; audit F-3)</b>: when the STORED payload embeds a
+    /// <see cref="JobAwareCompletionState"/> under the reserved
+    /// <see cref="JobAwareCompletionStateField"/>, the card is composed JOB-AWARE via
+    /// <see cref="ComposeJobAware"/> — the operation-level <see cref="OutcomeStatus"/> is DERIVED from
+    /// the job aggregate (a record whose downstream indexing/analysis is still pending renders
+    /// <see cref="OutcomeStatus.Partial"/>, never <see cref="OutcomeStatus.Succeeded"/>: NFR-12). A
+    /// malformed embedded state fails LOUDLY (never a silent fall-back to Succeeded). A payload with
+    /// no embedded state is a single-shot side effect and composes exactly as before (Succeeded).
+    /// </remarks>
     /// <param name="entry">The stored ledger output (store-before-render — supplies the key + payload).</param>
     /// <param name="binding">The Binding that produced the output (supplies declared chip transitions).</param>
     /// <param name="link">Optional server-composed record/deep link. MUST be server-composed (task-011 guard).</param>
@@ -67,6 +95,15 @@ public static class CompletionEngine
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(binding);
 
+        // Job-backed detection (audit F-3 live-wiring): a routed output whose STORED payload carries
+        // an embedded JobAwareCompletionState (task 014 v1) composes a JOB-AWARE card whose status is
+        // DERIVED from the job aggregate (NFR-12) — never the hardcoded Succeeded below.
+        var jobState = TryReadJobAwareState(entry.Payload);
+        if (jobState is not null)
+        {
+            return ComposeJobAware(entry, binding, jobState, link, stepLabels: null, traceRef);
+        }
+
         var userFacing = DeriveUserFacingSummary(entry.Payload, entry.Disposition);
 
         return OutcomeCard.ForStoredOutcome(
@@ -77,6 +114,38 @@ public static class CompletionEngine
             nextSteps: MapNextStepChips(binding),
             completion: OutcomeCompletion.SingleShot(),
             traceRef: traceRef ?? entry.Key);
+    }
+
+    /// <summary>
+    /// Extracts an embedded <see cref="JobAwareCompletionState"/> (task 014 v1) from a routed payload,
+    /// or <c>null</c> when the payload is not job-backed. The state rides the payload under the reserved
+    /// <see cref="JobAwareCompletionStateField"/> — the only carrier available at the
+    /// <see cref="OutputRouter.RouteAsync"/> choke-point (whose sole structured input is the payload).
+    /// A present-but-malformed state fails LOUDLY: a job-backed result MUST NOT silently degrade to a
+    /// single-shot Succeeded card (NFR-12).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The reserved field is present but not a valid v1 state.</exception>
+    internal static JobAwareCompletionState? TryReadJobAwareState(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object
+            || !payload.TryGetProperty(JobAwareCompletionStateField, out var stateElement)
+            || stateElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        try
+        {
+            return stateElement.Deserialize<JobAwareCompletionState>(JobAwareStateJsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException(
+                $"CompletionEngine: a routed output embeds a '{JobAwareCompletionStateField}' field but " +
+                "it is not a valid JobAwareCompletionState v1 (task 014). A job-backed result MUST carry a " +
+                "well-formed state so the OutcomeCard status is DERIVED from the job aggregate (NFR-12) — " +
+                "never a silent fall-back to Succeeded.", ex);
+        }
     }
 
     /// <summary>
@@ -188,9 +257,15 @@ public static class CompletionEngine
     /// data — never model invention, per FR-A1-06 constraint) onto the task-011
     /// <see cref="NextStepChip"/> vocabulary. Transitions with no label are dropped (a chip with
     /// no caption is not renderable). A transition that names a target Binding is an
-    /// <c>invoke_capability</c> chip; a bare label is a <c>navigate</c> placeholder. The concrete
-    /// server-composed navigation target is resolved by the Click path / task 062 — the chip here
-    /// is a declared placeholder (NFR-07: no target URL is invented at completion time).
+    /// <c>invoke_capability</c> chip carrying that Binding's GUID as
+    /// <see cref="NextStepChip.TargetBindingId"/> — the resolution datum the Click path's
+    /// <c>dispatchConsumer(bindingId, args)</c> helper needs (task 062 gap close: the OutcomeCard
+    /// chip previously carried no dispatchable target, unlike the parallel
+    /// <c>AnalysisChunkChip</c>/<c>EventChip</c> next-step wire shapes). A bare label with no
+    /// declared target Binding is a <c>navigate</c> placeholder with a null
+    /// <see cref="NextStepChip.TargetBindingId"/> (NFR-07: no target is invented at completion
+    /// time — the ONLY source is <see cref="Binding.ChipTransitions"/>, so a chip can never carry
+    /// a target the Binding did not declare).
     /// </summary>
     public static IReadOnlyList<NextStepChip> MapNextStepChips(Binding binding)
     {
@@ -210,11 +285,13 @@ public static class CompletionEngine
                 continue;
             }
 
-            var actionKind = string.IsNullOrWhiteSpace(transition.TargetBindingId)
-                ? "navigate"
-                : "invoke_capability";
+            var targetBindingId = string.IsNullOrWhiteSpace(transition.TargetBindingId)
+                ? null
+                : transition.TargetBindingId!.Trim();
 
-            chips.Add(new NextStepChip(label!.Trim(), actionKind));
+            var actionKind = targetBindingId is null ? "navigate" : "invoke_capability";
+
+            chips.Add(new NextStepChip(label!.Trim(), actionKind, TargetBindingId: targetBindingId));
         }
 
         return chips.Count > 0 ? chips : Array.Empty<NextStepChip>();

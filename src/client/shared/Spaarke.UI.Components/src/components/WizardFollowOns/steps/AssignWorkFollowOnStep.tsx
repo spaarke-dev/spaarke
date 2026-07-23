@@ -23,7 +23,8 @@
  * (ADR-012).
  */
 import * as React from 'react';
-import { Text, Input, Textarea, Select, Field, makeStyles, tokens } from '@fluentui/react-components';
+import { Text, Input, Textarea, Select, Field, Button, Spinner, makeStyles, tokens } from '@fluentui/react-components';
+import { PersonRegular } from '@fluentui/react-icons';
 import { LookupField } from '../../LookupField/LookupField';
 import type { ILookupItem } from '../../../types/LookupTypes';
 
@@ -78,6 +79,14 @@ export interface IAssignWorkFollowOnStepProps {
   attorneyValue: ILookupItem | null;
   onAttorneyChange: (item: ILookupItem | null) => void;
   onSearchAttorneys: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Optional "Assign to me" resolver for Assigned Attorney
+   * (spaarkeai-assistant-enhancements-r1 task 014 / FR-A4). When supplied,
+   * renders an "Assign to me" button beside the field; the resolved item
+   * (or `null` on failure) is applied via `onAttorneyChange`. Omitting this
+   * prop hides the button entirely (fully backward compatible).
+   */
+  onAssignAttorneyToMe?: () => Promise<ILookupItem | null>;
 
   /** Assigned Paralegal (contact lookup). */
   paralegalValue: ILookupItem | null;
@@ -137,6 +146,14 @@ const useStyles = makeStyles({
   fullWidth: {
     width: '100%',
   },
+  assigneeRow: {
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+  },
+  assigneeLookup: {
+    flexGrow: 1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -161,6 +178,7 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
   attorneyValue,
   onAttorneyChange,
   onSearchAttorneys,
+  onAssignAttorneyToMe,
   paralegalValue,
   onParalegalChange,
   onSearchParalegals,
@@ -169,6 +187,20 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
   onSearchOutsideCounsel,
 }) => {
   const styles = useStyles();
+  const [isAssigningToMe, setIsAssigningToMe] = React.useState(false);
+
+  const handleAssignToMe = React.useCallback(async () => {
+    if (!onAssignAttorneyToMe) return;
+    setIsAssigningToMe(true);
+    try {
+      const assignee = await onAssignAttorneyToMe();
+      if (assignee) {
+        onAttorneyChange(assignee);
+      }
+    } finally {
+      setIsAssigningToMe(false);
+    }
+  }, [onAssignAttorneyToMe, onAttorneyChange]);
 
   return (
     <div className={styles.root}>
@@ -270,14 +302,29 @@ export const AssignWorkFollowOnStep: React.FC<IAssignWorkFollowOnStepProps> = ({
           Resources
         </Text>
         <div className={styles.sectionFields}>
-          <LookupField
-            label="Assigned Attorney"
-            placeholder="Search contacts..."
-            value={attorneyValue}
-            onChange={onAttorneyChange}
-            onSearch={onSearchAttorneys}
-            minSearchLength={2}
-          />
+          <div className={styles.assigneeRow}>
+            <div className={styles.assigneeLookup}>
+              <LookupField
+                label="Assigned Attorney"
+                placeholder="Search contacts..."
+                value={attorneyValue}
+                onChange={onAttorneyChange}
+                onSearch={onSearchAttorneys}
+                minSearchLength={2}
+              />
+            </div>
+            {onAssignAttorneyToMe && (
+              <Button
+                appearance="secondary"
+                icon={isAssigningToMe ? <Spinner size="tiny" /> : <PersonRegular />}
+                onClick={handleAssignToMe}
+                disabled={isAssigningToMe}
+                aria-label="Assign attorney to me"
+              >
+                Assign to me
+              </Button>
+            )}
+          </div>
           <LookupField
             label="Assigned Paralegal"
             placeholder="Search contacts..."

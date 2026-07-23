@@ -72,6 +72,8 @@ function makeForm(overrides?: Partial<ICreateEventFormState>): ICreateEventFormS
     description: '',
     regardingRecordId: MATTER_ID,
     regardingRecordName: 'Smith v. Jones',
+    assignedToId: '',
+    assignedToName: '',
     ...overrides,
   };
 }

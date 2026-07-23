@@ -18,9 +18,12 @@ using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Tools;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Email;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Tests.Services.Communication;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -109,6 +112,33 @@ public class CommunicationIntegrationTests
         DefaultMailbox = "noreply@contoso.com"
     };
 
+    /// <summary>
+    /// Builds a no-op <see cref="MailboxDeltaReconciliationService"/> for GraphSubscriptionManager
+    /// construction in tests that only exercise subscription create/renew (not lifecycle/reconcile).
+    /// </summary>
+    private static MailboxDeltaReconciliationService CreateNoopReconciliation(CommunicationAccountService accountService)
+    {
+        var sbOptions = new Mock<IOptions<Sprk.Bff.Api.Configuration.ServiceBusOptions>>();
+        sbOptions.Setup(o => o.Value).Returns(new Sprk.Bff.Api.Configuration.ServiceBusOptions());
+        var jobSubmission = new Mock<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>(
+            MockBehavior.Loose,
+            sbOptions.Object,
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Jobs.JobSubmissionService>>(),
+            new Mock<Azure.Messaging.ServiceBus.ServiceBusClient>().Object).Object;
+
+        var deltaReader = new Mock<Sprk.Bff.Api.Services.Communication.GraphMailFolderDeltaReader>(
+            MockBehavior.Loose,
+            Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>(),
+            Mock.Of<ILogger<Sprk.Bff.Api.Services.Communication.GraphMailFolderDeltaReader>>()).Object;
+
+        return new MailboxDeltaReconciliationService(
+            deltaReader,
+            accountService,
+            jobSubmission,
+            Mock.Of<Microsoft.Extensions.Caching.Distributed.IDistributedCache>(),
+            Mock.Of<ILogger<MailboxDeltaReconciliationService>>());
+    }
+
     private static SendCommunicationRequest CreateValidRequest(
         string[]? to = null,
         string subject = "Test Subject",
@@ -160,15 +190,15 @@ public class CommunicationIntegrationTests
         var resolvedEntityService = entityServiceMock?.Object ?? Mock.Of<IGenericEntityService>();
 
         return new CommunicationService(
-            graphFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(graphFactoryMock.Object),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // EmlGenerationService - not used when ArchiveToSpe=false
             null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             Mock.Of<ILogger<CommunicationService>>());
     }
@@ -1216,17 +1246,27 @@ public class CommunicationIntegrationTests
             dataverseMock.Object,
             accountService,
             new IncomingAssociationResolver(
+                new IAssociationRung[]
+                {
+                    new ExplicitReferenceRung(dataverseMock.Object),
+                    new ThreadContinuityRung(dataverseMock.Object),
+                    new ParticipantCorrelationRung(dataverseMock.Object),
+                },
                 dataverseMock.Object,
                 dataverseMock.Object,
-                graphFactoryMock.Object,
+                Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
+            new GraphMessageNormalizer(),
             Mock.Of<IEmailAttachmentProcessor>(),
             new GraphMessageToEmlConverter(),
             null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
             jobSubmissionService,
             Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
+            Mock.Of<ITextExtractor>(),
+            Options.Create(new AttachmentMatchOptions { Enabled = false }),
             config,
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }
@@ -1552,6 +1592,7 @@ public class CommunicationIntegrationTests
             accountService,
             graphFactoryMock.Object,
             dataverseMock.Object,
+            CreateNoopReconciliation(accountService),
             commOpts,
             Mock.Of<ILogger<GraphSubscriptionManager>>());
 
@@ -1657,6 +1698,7 @@ public class CommunicationIntegrationTests
             accountService,
             graphFactoryMock.Object,
             dataverseMock.Object,
+            CreateNoopReconciliation(accountService),
             commOpts,
             Mock.Of<ILogger<GraphSubscriptionManager>>());
 

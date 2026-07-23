@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Welcome to the Spaarke Portal</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f8; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f4f6f8;">
+        <tr>
+            <td style="padding: 40px 20px;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);">
+                    <!-- Header: Logo only, left-aligned, forced white background for dark mode -->
+                    <tr>
+                        <td style="padding: 24px 40px 16px; border-bottom: 1px solid #e8e8e8; background-color: #ffffff !important;">
+                            <img src="https://www.spaarke.com/images/email/logo-color.png" alt="Spaarke" width="140" style="display: block; height: auto;" />
+                        </td>
+                    </tr>
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 32px 40px 40px;">
+                            <p style="margin: 0 0 16px; color: #242424; font-size: 16px; line-height: 1.6;">
+                                Hi {{FirstName}},
+                            </p>
+                            <p style="margin: 0 0 24px; color: #242424; font-size: 16px; line-height: 1.6;">
+                                An account has been created for you on the Spaarke portal so you can securely access the documents and information that have been shared with you. Follow the steps below to set your password and sign in.
+                            </p>
+
+                            <!-- Portal Access Box -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 0 0 28px; border: 1px solid #e0e0e0; border-radius: 6px; overflow: hidden;">
+                                <tr>
+                                    <td style="background-color: #f0f4f8; padding: 12px 16px; font-size: 13px; font-weight: 600; color: #616161; text-transform: uppercase; letter-spacing: 0.5px;">
+                                        Your Portal Access
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding: 0;">
+                                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                                            <tr>
+                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #616161; width: 140px;">Sign-in Email</td>
+                                                <td style="padding: 12px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; color: #242424; font-weight: 600; font-family: 'Cascadia Code', 'Consolas', monospace;">{{Email}}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 12px 16px; font-size: 14px; color: #616161; width: 140px;">Portal URL</td>
+                                                <td style="padding: 12px 16px; font-size: 14px;"><a href="{{PortalUrl}}" style="color: #0f6cbd; text-decoration: none; font-weight: 600;">{{PortalUrl}}</a></td>
+                                            </tr>
+                                        </table>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Set Your Password (SSPR) -->
+                            <p style="margin: 0 0 12px; color: #242424; font-size: 16px; line-height: 1.6; font-weight: 600;">
+                                Set your password to get started
+                            </p>
+                            <p style="margin: 0 0 12px; color: #242424; font-size: 14px; line-height: 1.6;">
+                                For your security, we don't send passwords by email. Set your own password the first time you sign in:
+                            </p>
+                            <ol style="margin: 0 0 24px; padding-left: 24px; color: #242424; font-size: 14px; line-height: 1.8;">
+                                <li>Go to the <a href="{{PortalUrl}}" style="color: #0f6cbd; text-decoration: none; font-weight: 600;">Spaarke portal</a>.</li>
+                                <li>On the sign-in screen, click <strong>"Forgot password?"</strong>.</li>
+                                <li>Enter your sign-in email (<strong>{{Email}}</strong>) and follow the prompts to verify your identity by email.</li>
+                                <li>Choose a new password, then sign in with it.</li>
+                            </ol>
+
+                            <!-- CTA Button -->
+                            <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin: 0 0 28px;">
+                                <tr>
+                                    <td style="border-radius: 6px; background-color: #0f6cbd;">
+                                        <a href="{{PortalUrl}}" style="display: inline-block; padding: 12px 28px; color: #ffffff; font-size: 15px; font-weight: 600; text-decoration: none; border-radius: 6px;">Go to the Spaarke Portal</a>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Support -->
+                            <p style="margin: 0; color: #616161; font-size: 14px; line-height: 1.6;">
+                                Need help signing in? Reach out to us at
+                                <a href="mailto:{{SupportEmail}}" style="color: #0f6cbd; text-decoration: none;">{{SupportEmail}}</a>.
+                            </p>
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td style="background-color: #fafafa; padding: 20px 40px; border-top: 1px solid #e8e8e8; text-align: center;">
+                            <p style="margin: 0; color: #a0a0a0; font-size: 12px;">
+                                &copy; {{Year}} Spaarke. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

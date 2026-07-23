@@ -34,6 +34,7 @@ import {
   type IAssociateToStepConfig,
   type AssociationResult,
 } from '../CreateRecordWizard';
+import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/useHandoffFileLeg';
 import { EVENT_REGARDING_TARGETS } from '../AssociateToStep/types';
 
 import type { IWizardSuccessConfig } from '../Wizard/wizardShellTypes';
@@ -52,6 +53,7 @@ import {
   searchMatterTypes,
   searchPracticeAreas,
 } from '../CreateWorkAssignmentWizard/workAssignmentService';
+import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
@@ -73,14 +75,26 @@ import {
  * signal (`initialAssociation` supplied OR `lockAssociation === true`)
  * preserves that surface's existing behavior (no Associate-To step at all)
  * while enabling the Visual Host locked-launch path this task targets.
+ *
+ * `showAssociateToStep` (spaarkeai-assistant-enhancements-r1 task 014 /
+ * FR-A5) adds a THIRD, purely additive gate: a caller that wants the
+ * unlocked association picker WITHOUT pre-seeding a value (e.g. the
+ * Assistant's create-task launch, before task 013's smart pre-seed wires an
+ * `initialAssociation`) can opt in explicitly. Defaults to `false`/undefined,
+ * so every existing caller (Visual Host locked launch, standalone Code Page)
+ * is unaffected — this is an extension of the existing gate, not a fork.
+ * `entityTypes` is `EVENT_REGARDING_TARGETS`, which already covers
+ * matter/project/invoice (plus account/contact/work-assignment/analysis/
+ * budget/organization) — no new entity-type catalog is introduced.
  */
 export function resolveEventAssociateToStepConfig(
   navigationService: INavigationService | undefined,
   initialAssociation: AssociationResult | undefined,
-  lockAssociation: boolean | undefined
+  lockAssociation: boolean | undefined,
+  showAssociateToStep?: boolean
 ): IAssociateToStepConfig | undefined {
   if (!navigationService) return undefined;
-  if (initialAssociation === undefined && !lockAssociation) return undefined;
+  if (initialAssociation === undefined && !lockAssociation && !showAssociateToStep) return undefined;
 
   return {
     entityTypes: EVENT_REGARDING_TARGETS.slice(),
@@ -165,6 +179,50 @@ export interface ICreateEventWizardProps {
    * passes `navigationService` but neither of these two props) unchanged.
    */
   lockAssociation?: boolean;
+  /**
+   * When `true`, surfaces the unlocked Associate-To step (matter/project/
+   * invoice/… per `EVENT_REGARDING_TARGETS`, or none) even when no
+   * `initialAssociation`/`lockAssociation` is supplied. Added
+   * spaarkeai-assistant-enhancements-r1 task 014 / FR-A5 for the Assistant's
+   * create-task launch — see `resolveEventAssociateToStepConfig` doc comment
+   * for the full gating rule. Defaults to `false`; every existing caller is
+   * unaffected.
+   */
+  showAssociateToStep?: boolean;
+  /**
+   * Assistant hand-off pre-seed (spaarkeai-assistant-enhancements-r1 task 013).
+   * When launched from the Assistant's `create-task` `surface_launch` flow (task
+   * 012 `launchSurface`), the solution `main.tsx` maps the hand-off seed
+   * (`useWizardPageBootstrap.handoffSeed` -> `mapEventHandoffSeed`) into these initial
+   * form values so the wizard opens PRE-FILLED with the drafted event name /
+   * description (and any high-confidence resolved event-type). Merged over
+   * {@link EMPTY_EVENT_FORM}; omitted keys keep their empty default. `undefined` when
+   * opened directly — the wizard then opens empty exactly as before.
+   */
+  initialFormValues?: Partial<ICreateEventFormState>;
+  /**
+   * Optional success callback (spaarkeai-assistant-enhancements-r1 D-013-04).
+   * Invoked with the created event's record id when the wizard reaches its
+   * success screen and the user closes/views it — INSTEAD of {@link onClose}.
+   * The Assistant surface-launch host (`useWizardPageBootstrap.completeHandoff`)
+   * wires this to write the committed `SurfaceHandoffResult` so a launched
+   * `create-task` reads back as committed (P5 honest-ack) rather than
+   * "cancelled" (which the orchestrator infers from the absence of a result).
+   *
+   * When omitted, the success screen falls back to {@link onClose} — behavior
+   * is unchanged for every non-launch caller. The CANCEL path always uses
+   * {@link onClose} (no result write → cancellation is inferred).
+   */
+  onComplete?: (recordId: string) => void;
+  /**
+   * Assistant hand-off FILE references (UAT R5-7 — the create-flow file leg for events).
+   * When launched from the Assistant "create an event from this file" flow, the solution
+   * `main.tsx` passes the hand-off seed's `{ sessionId, fileIds, fileNames }` here. The wizard
+   * fetches each file's binary from the BFF and pre-seeds the "Upload documents" step so the
+   * drafted-from document rides the wizard's existing upload+link+index pipeline onto the new
+   * event. `undefined`/no sessionId → nothing fetched; the files step opens empty as before.
+   */
+  initialFileRefs?: HandoffFileRefs;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,20 +260,32 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   tenantId,
   initialAssociation,
   lockAssociation,
+  showAssociateToStep,
+  initialFormValues,
+  onComplete,
+  initialFileRefs,
 }) => {
+  // Assistant hand-off pre-seed (task 013): merge drafted values over the empty
+  // defaults so the wizard opens PRE-FILLED. Stable per `initialFormValues` identity.
+  const seededFormState = React.useMemo<ICreateEventFormState>(
+    () => ({ ...EMPTY_EVENT_FORM, ...(initialFormValues ?? {}) }),
+    [initialFormValues]
+  );
+
   // -- Entity-specific form state --------------------------------------------
   const [formValid, setFormValid] = React.useState(false);
-  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(EMPTY_EVENT_FORM);
+  const [formValues, setFormValues] = React.useState<ICreateEventFormState>(seededFormState);
   const formValuesRef = React.useRef(formValues);
   formValuesRef.current = formValues;
 
-  // Reset form state on open
+  // Reset form state on open (to the seeded values, not bare empties, so a
+  // hand-off-launched wizard re-opens pre-filled).
   React.useEffect(() => {
     if (open) {
       setFormValid(false);
-      setFormValues(EMPTY_EVENT_FORM);
+      setFormValues(seededFormState);
     }
-  }, [open]);
+  }, [open, seededFormState]);
 
   // -- Search callbacks ------------------------------------------------------
   const handleSearchContacts = React.useCallback(
@@ -242,6 +312,11 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
   // -- WebApi adapter for CreateRecordWizard ---------------------------------
   const webApiAdapter = React.useMemo(() => buildWebApiAdapter(dataService), [dataService]);
 
+  // -- Assistant hand-off file leg (R5-7) ------------------------------------
+  // Fetch the drafted-from session document(s) and pre-seed them into the Upload step so they
+  // attach to the new event (parity with CreateMatterWizard). Empty for direct opens.
+  const handoffFiles = useHandoffFileLeg(open, initialFileRefs, authFetch ?? fetch, bffBaseUrl ?? '');
+
   // -- Wizard config ---------------------------------------------------------
   const config: ICreateRecordWizardConfig = React.useMemo(
     () => ({
@@ -249,11 +324,19 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       entityLabel: 'event',
       filesStepSubtitle: 'Upload documents to associate with this event, or click Next to skip.',
       finishingLabel: 'Creating event\u2026',
+      // R5-7: files the Assistant create-flow drafted from, fetched above and pre-seeded into
+      // the Upload step so they attach to the new event.
+      initialFiles: handoffFiles,
 
       // visual-host-create-button-r1 task 015 -- see resolveEventAssociateToStepConfig
       // doc comment for the gating rationale (precise gate vs. TodoWizardDialog's
       // navigationService-only gate, to avoid a Code Page regression).
-      associateToStep: resolveEventAssociateToStepConfig(navigationService, initialAssociation, lockAssociation),
+      associateToStep: resolveEventAssociateToStepConfig(
+        navigationService,
+        initialAssociation,
+        lockAssociation,
+        showAssociateToStep
+      ),
 
       infoStep: {
         id: 'create-record',
@@ -382,11 +465,17 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
 
         const hasWarnings = warnings.length > 0;
 
+        // D-013-04: on the SUCCESS path a real record exists, so route the close
+        // through `onComplete(eventId)` (honest-ack) when the host supplied it;
+        // otherwise fall back to the plain `onClose` (unchanged for non-launch
+        // callers). The CANCEL path elsewhere still uses bare `onClose`.
+        const finishSuccess = () => completeOrClose(eventId, onClose, onComplete);
+
         const viewEvent = () => {
           if (navigationService) {
             navigationService.openRecord('sprk_event', eventId);
           }
-          onClose();
+          finishSuccess();
         };
 
         return {
@@ -406,7 +495,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
               <Button appearance="primary" onClick={viewEvent} aria-label={`View event: ${eventName}`}>
                 View Event
               </Button>
-              <Button appearance="secondary" onClick={onClose}>
+              <Button appearance="secondary" onClick={finishSuccess}>
                 Close
               </Button>
             </>
@@ -425,6 +514,7 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       handleSearchMatterTypes,
       handleSearchPracticeAreas,
       onClose,
+      onComplete,
       authFetch,
       bffBaseUrl,
       navigationService,
@@ -432,6 +522,8 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
       webApiAdapter,
       initialAssociation,
       lockAssociation,
+      showAssociateToStep,
+      handoffFiles,
     ]
   );
 

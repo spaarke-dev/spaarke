@@ -1,0 +1,112 @@
+<task id="048" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>AI-action toolbar activation — capability-discovery → registerComposeAiToolbarAction (closes 101 gap 2.2)</title>
+    <phase>4 Catalog</phase>
+    <status>in-progress</status>
+    <effort>high</effort>
+    <dependencies>046, 101</dependencies>
+    <blocks>082</blocks>
+    <tags>frontend, spaarke-ai, dispatch, e2e-remediation</tags>
+    <rigor-hint reason="Closes the last false-green: the compose AI toolbar is inert in the running app because nothing registers the deployed bindingIds. Cross-boundary (client fetch → real capability endpoint → toolbar enablement → dispatch). FULL, unconditional Step 9.5.">FULL</rigor-hint>
+    <model-tier reason="Frontend host wiring on the flagship AI-activation path; the capability-discovery → toolbar-registration contract; moderate blast radius but it is THE gate that makes Compose AI usable">opus</model-tier>
+    <parallel-safe reason="Touches SpaarkeAi host + Spaarke.Compose.Components toolbar — run SOLO">false</parallel-safe>
+    <source>Owner escalation 2026-07-10 ("Compose doesn't actually surface AI") + the capability-discovery/toolbar contract investigation. Closes task 101 gap 2.2 (toolbar activation), which 101 correctly left ✅◐ E2E-pending.</source>
+  </metadata>
+
+  <prompt>
+    Make the 5 compose AI toolbar actions ACTUALLY WORK for a user. Today every AI button
+    (Explain / Compare / Draft / Summarize Word changes / Defined terms) renders DISABLED because
+    `registerComposeAiToolbarAction()` — the only thing that swaps a stub's empty bindingId for a real
+    deployed GUID — is called nowhere in the running app (only in a unit test). Wire the host so that on
+    Compose mount it calls the EXISTING capability-discovery endpoint (`GET /api/ai/capabilities?surface=compose`),
+    and for each returned capability registers the real bindingId onto the matching toolbar action. The
+    dispatch plumbing already works (task 046 seam + 084 proves a compose action dispatches through the real
+    `/dispatch` route) — this is the missing user-facing trigger. This is a CLIENT-ONLY task; the catalog
+    surfaces were already corrected (the 5 bindings now declare `surface=compose`) and the deploy is task 047
+    (owner/live-env, handled separately).
+  </prompt>
+
+  <role>
+    Frontend developer fluent in the SpaarkeAi Compose mount host, `@spaarke/auth` (`useAuth`/`authenticatedFetch`),
+    the ComposeAiToolbar registration seam (`registerComposeAiToolbarAction` / `getComposeAiToolbarActions`), and
+    the capability-discovery response contract.
+  </role>
+
+  <goal>
+    On Compose mount, the host fetches `GET /api/ai/capabilities?surface=compose` and registers each returned
+    capability's real `bindingId` onto the toolbar action whose id equals the capability's `consumerType`
+    (exact match — the 5 DEFAULT_ACTIONS ids are `compose-explain-clause` / `compose-compare-to-playbook` /
+    `compose-draft-alternative` / `compose-summarize-word-changes` / `compose-defined-terms`, and each binding's
+    `consumerType` is identical). The buttons enable; clicking one dispatches via the existing 046 seam. The
+    toolbar re-renders after registration (registration must complete before or trigger a re-read). Graceful
+    when the fetch returns 0 (pre-047) — buttons stay disabled, no error UI.
+  </goal>
+
+  <context>
+    <background>
+      Investigation (2026-07-10) established: (1) `CapabilityDiscoveryEndpoints` (`GET /api/ai/capabilities?surface={s}`,
+      LIVE on the deployed BFF — returns 401 unauth, not 404) returns `CapabilityDto[]` = { BindingId (Guid),
+      ConsumerType (string), ConsumerCode, DisplayLabel, Surfaces[], LaunchArgsSchemaJson }. (2) The 5 compose
+      binding rows' `consumerType` equals the toolbar action id verbatim. (3) The mirror was corrected so the 5
+      bindings declare `surface=compose` (additive: assistant,compose / context,compose / workspace,compose) so
+      `?surface=compose` returns exactly them once 047 deploys. (4) `registerComposeAiToolbarAction({ ...action, bindingId })`
+      replaces-by-id and `getComposeAiToolbarActions()` merges DEFAULT_ACTIONS with registrations.
+    </background>
+    <relevant-files>
+      <file purpose="toolbar-seam-REUSE" edit="false">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx — registerComposeAiToolbarAction / getComposeAiToolbarActions / DEFAULT_ACTIONS (the 5 ids). Reuse the seam; the toolbar may need a re-render signal after registration (a state bump / event) — add the minimum needed for the enabled buttons to appear without a full remount. Do NOT hardcode any bindingId.</file>
+      <file purpose="host-activation" edit="true">the SpaarkeAi Compose mount host (where ComposeWorkspace/ComposeAiToolbar is mounted — likely a ThreePaneShell/compose bootstrap path; LOCATE it, do not assume) — add the capability-discovery fetch + per-capability registration on mount.</file>
+      <file purpose="auth-REUSE" edit="false">@spaarke/auth — use useAuth()/authenticatedFetch for the GET (ADR-028). Do NOT add accessToken props or custom headers.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="reuse-capability-discovery">Use the EXISTING GET /api/ai/capabilities?surface=compose. Do NOT add a new BFF endpoint or a client-side consumer→GUID resolver (§11). No BFF/server changes at all.</constraint>
+    <constraint source="no-hardcoded-guid">NEVER hardcode a bindingId GUID (per-env cruft). The bindingId comes ONLY from the capability-discovery response.</constraint>
+    <constraint source="exact-map">Register onto the toolbar action whose id === capability.consumerType. Skip capabilities with no matching DEFAULT action (e.g. the whole-document `compose-summarize` binding is not a toolbar action). Preserve each DEFAULT action's label/tooltip/placement; only fill in bindingId (and optionally use DisplayLabel as a tooltip fallback).</constraint>
+    <constraint source="graceful">If the fetch fails or returns 0 capabilities (pre-047), buttons stay disabled — no error banner, no throw. Log at debug only.</constraint>
+    <constraint source="ADR-028">useAuth/authenticatedFetch for the GET. ADR-030: if any re-render signal uses the bus, typed discriminant only (prefer local React state — no bus needed).</constraint>
+    <constraint source="no-defer">Close the activation E2E in this pass. After this + 047 deploy, a user can click Explain and it dispatches.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>capability-discovery, compose toolbar activation, authenticatedFetch, dispatch seam</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/CapabilityDiscoveryEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Locate the actual SpaarkeAi Compose mount host (where ComposeAiToolbar renders). Read the toolbar seam (register/get/DEFAULT_ACTIONS) + the CapabilityDto contract.</step>
+    <step order="1">On Compose mount, fetch GET /api/ai/capabilities?surface=compose via authenticatedFetch. Parse CapabilityDto[].</step>
+    <step order="2">For each capability, if a DEFAULT_ACTIONS entry has id === capability.consumerType, call registerComposeAiToolbarAction({ ...that default, bindingId: capability.bindingId }). Skip non-matching capabilities.</step>
+    <step order="3">Ensure the toolbar re-reads after registration (a minimal re-render signal — local state bump / a lightweight event the toolbar subscribes to). Buttons with a non-empty bindingId enable.</step>
+    <step order="4">FORCING TEST: a real-render test (jest + the real registration seam, not a mocked toolbar) that (a) stubs the capability fetch to return 2-3 compose capabilities, (b) mounts the host/toolbar, (c) asserts the matching buttons become ENABLED with the right bindingId and a non-matching capability is ignored, and (d) asserts the 0-capabilities case leaves buttons disabled with no error. This proves activation is mounted+reachable (project E2E DoD row 3).</step>
+    <step order="5">Verify: Compose.Components + SpaarkeAi tsc clean; jest (new + regression). Step 9.5 (code-review + adr-check) UNCONDITIONALLY — confirm no hardcoded GUID, no new endpoint, no bus abuse. Client-only — state no BFF/publish-size. Do NOT edit TASK-INDEX/current-task (main session reconciles).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">SpaarkeAi Compose mount host — capability-discovery fetch + per-capability registration on mount</output>
+    <output type="code">ComposeAiToolbar re-render signal (minimal) if needed for registered actions to appear</output>
+    <output type="test">real-render activation test (capabilities → enabled buttons; 0 → disabled, no error)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">On Compose mount the host calls GET /api/ai/capabilities?surface=compose via authenticatedFetch and registers each returned capability's bindingId onto the toolbar action with id === consumerType.</criterion>
+    <criterion testable="true">After registration the matching buttons are ENABLED (non-empty bindingId) and clicking dispatches via the existing 046 seam (dispatchConsumer(bindingId)); no new route/discriminant; no hardcoded GUID.</criterion>
+    <criterion testable="true">A capability with no matching DEFAULT action (e.g. whole-doc compose-summarize) is ignored; the 0-capabilities / fetch-failure case leaves buttons disabled with no error UI.</criterion>
+    <criterion testable="true">A real-render test proves buttons enable from a stubbed capability response and stay disabled on empty — activation is mounted + reachable (E2E DoD row 3).</criterion>
+    <criterion testable="true">Client-only (no BFF change). tsc + jest green; Step 9.5 clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the toolbar cannot re-render after module-level registration without a larger refactor (e.g. getComposeAiToolbarActions is read once at import), STOP and report the minimal architecture change needed rather than forcing a remount hack. If capability-discovery genuinely does not return the compose bindings even with surface=compose (contract mismatch), STOP and report.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>(to be filled by the executing agent)</notes>
+</task>

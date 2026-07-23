@@ -37,7 +37,7 @@ import {
   formatEventOutputMarkdown,
   formatNoticeMessage,
 } from "./DocumentUploadedEventStream";
-import { makeLocalAssistantMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 
 const EVENT_BATCH_FALLBACK_MS = 30_000;
 
@@ -74,10 +74,29 @@ export interface EventBatchMachine {
   markEventFilePromotionFailed: (chipId: string) => void;
   /** A `/documents` promotion 202 landed — settle the chip with its documentId. */
   queueDocumentUploadedEvent: (chipId: string, documentId: string) => void;
+  /**
+   * spaarkeai-compose-r2 (manual Browse ingest ceremony): fire the Event path
+   * for a file that was promoted OUTSIDE the SprkChat attachment strip — a file
+   * mounted into Compose via Browse and context-uploaded through
+   * `registerComposeActiveDocument`'s `/documents` POST. There is no chip, so we
+   * settle a synthetic single-file batch immediately: the file already lives in
+   * `session.UploadedFiles` (the `/documents` call added it), so the server's
+   * classify rule resolves it and streams `event_classification` → the
+   * "Classified …" message, identical to an Assistant-uploaded file. Idempotency
+   * (once-per-file) is the CALLER's responsibility (the upload-dedup gate).
+   */
+  fireForPromotedFile: (sessionFileId: string) => void;
   /** Track the most recent outbound message (typed-command + playbook-options input). */
   noteOutboundMessage: (text: string) => void;
   /** Most recent outbound message text (ADR-015: never rendered, never logged). */
   getLastSentMessage: () => string;
+  /**
+   * True while a fired Event batch's `runDocumentUploadedEvent` SSE stream (the
+   * classify → output → confirmation stream) is in flight. The host locks the
+   * composer on this (#2b, UAT 2026-07-18) so a typed instruction can't be sent
+   * during the classify window and silently dropped.
+   */
+  isEventInFlight: boolean;
   /**
    * Session-created reset: promoted ids are session-scoped so the pending
    * queue + failed set + fallback timer clear; membership + batch-open
@@ -89,6 +108,11 @@ export interface EventBatchMachine {
 
 export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
   const { bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips } = deps;
+
+  // #2b (UAT 2026-07-18): count of in-flight Event SSE streams so the host can
+  // lock the composer during the classify window. A counter (not a bool) because
+  // a late/duplicate promotion can open a second batch while the first streams.
+  const [inFlightEvents, setInFlightEvents] = React.useState(0);
 
   const pendingEventFilesRef = React.useRef<Array<{ chipId: string; documentId: string }>>([]);
   const expectedRef = React.useRef<Set<string>>(new Set());
@@ -174,6 +198,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       typedCommand !== null
     );
 
+    setInFlightEvents((n) => n + 1);
     void runDocumentUploadedEvent({
       bffBaseUrl,
       sessionId,
@@ -182,7 +207,8 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       getAccessToken,
       handlers: {
         onClassification: (data) => {
-          enqueueAssistantMessage(makeLocalAssistantMessage(formatClassificationMessage(data)));
+          // P1-5: compact, collapsed-by-default classification entry (was a full chat bubble).
+          enqueueAssistantMessage(makeFileStatusMessage(formatClassificationMessage(data), "File classified"));
         },
         onOutput: (data) => {
           enqueueAssistantMessage(
@@ -203,9 +229,13 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
           enqueueAssistantMessage(makeLocalAssistantMessage(message || EVENT_FAILURE_MESSAGE));
         },
       },
-    }).catch(() => {
-      enqueueAssistantMessage(makeLocalAssistantMessage(EVENT_FAILURE_MESSAGE));
-    });
+    })
+      .catch(() => {
+        enqueueAssistantMessage(makeLocalAssistantMessage(EVENT_FAILURE_MESSAGE));
+      })
+      .finally(() => {
+        setInFlightEvents((n) => Math.max(0, n - 1));
+      });
   }, [bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips]);
   fireRef.current = fire;
 
@@ -306,6 +336,44 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
     [maybeFire]
   );
 
+  const fireForPromotedFile = React.useCallback(
+    (sessionFileId: string): void => {
+      // Synthetic single-file batch: no chip strip involvement. A stable synthetic
+      // id (never collides with a real chip id) admits the promoted file to a fresh
+      // batch and settles it in the same call so `maybeFire` runs the canonical
+      // `runDocumentUploadedEvent` immediately (server resolves the file from
+      // session.UploadedFiles). Mirrors `queueDocumentUploadedEvent`'s settle path.
+      const chipId = `compose-promoted:${sessionFileId}`;
+      pendingEventFilesRef.current.push({ chipId, documentId: sessionFileId });
+      accountedChipIdsRef.current.delete(chipId);
+      expectedRef.current.add(chipId);
+      if (openedAtRef.current === null) {
+        openedAtRef.current = Date.now();
+      }
+      // spaarkeai-compose-r2 (compose-ingest strand fix): `expectedRef` is SHARED with the chat
+      // attachment strip. If a concurrent chat gesture has a chip still 'extracting' (in `expectedRef`
+      // but not yet settled), `maybeFire` will keep WAITING and the compose promoted-file batch never
+      // fires. Arm the same fallback timer `queueDocumentUploadedEvent` uses so the promoted file is
+      // guaranteed to settle even when a stuck chat chip strands the shared expected set. (A fallback
+      // fire that accounts a still-extracting chat chip is safe — its later promotion re-opens a fresh
+      // batch, matching the existing chip-path fallback semantics.)
+      if (timerRef.current === null) {
+        timerRef.current = setTimeout(() => {
+          timerRef.current = null;
+          // ADR-015: structural signal only.
+          console.warn(
+            "[ConversationPane] event batch fallback fired (promoted file) — settled:%d expected:%d",
+            pendingEventFilesRef.current.length,
+            expectedRef.current.size
+          );
+          fireRef.current();
+        }, EVENT_BATCH_FALLBACK_MS);
+      }
+      maybeFire();
+    },
+    [maybeFire]
+  );
+
   const noteOutboundMessage = React.useCallback((text: string): void => {
     lastSentMessageRef.current = text;
     lastSentAtRef.current = Date.now();
@@ -319,6 +387,9 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
     // (cold-start gesture semantics — see interface JSDoc).
     pendingEventFilesRef.current = [];
     failedChipIdsRef.current = new Set();
+    // A prior session's in-flight stream (if any) decrements via its own .finally
+    // (Math.max-clamped), so a hard reset to 0 here is safe and unlocks the fresh session.
+    setInFlightEvents(0);
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -343,8 +414,10 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       noteChipRemoved,
       markEventFilePromotionFailed,
       queueDocumentUploadedEvent,
+      fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
+      isEventInFlight: inFlightEvents > 0,
       resetForSession,
     }),
     [
@@ -352,8 +425,10 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       noteChipRemoved,
       markEventFilePromotionFailed,
       queueDocumentUploadedEvent,
+      fireForPromotedFile,
       noteOutboundMessage,
       getLastSentMessage,
+      inFlightEvents,
       resetForSession,
     ]
   );

@@ -1,0 +1,37 @@
+<task id="VHVU-031" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Deploy VisualHost + wizard pages to dev; UAT "+" via navigateTo</title>
+    <status>not-started</status>
+    <phase>A3</phase>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>deploy, uat, pcf, code-page</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-030,VHVU-021</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Deploy the decoupled VisualHost plus the three wizard code pages to dev and verify the full "+" flow end-to-end via navigateTo, including theme inheritance.</prompt>
+  <role>Deployment engineer</role>
+  <goal>VisualHost (navigateTo "+") + Event/Invoice/Report Card wizard pages deployed to dev; "+" create works for all three in both light and dark, with host record pinned and drill-through unaffected.</goal>
+  <constraints>
+    <constraint source="project">Dev only; owner confirmation before import (outward-facing).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Deploy the Invoice + Report Card code pages (code-page-deploy) and the updated VisualHost solution (pcf-deploy).</step>
+    <step id="2">UAT "+" for Event/Invoice/Report Card via navigateTo — host record pinned, create succeeds.</step>
+    <step id="3">Verify theme inherits in both light and dark (explicit + auto).</step>
+    <step id="4">Regression-check drill-through/expand on a configured chart.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All three "+" flows work via navigateTo in dev.</criterion>
+    <criterion>Theme inherits correctly (light + dark).</criterion>
+    <criterion>Drill-through/expand unchanged.</criterion>
+  </acceptance-criteria>
+</task>

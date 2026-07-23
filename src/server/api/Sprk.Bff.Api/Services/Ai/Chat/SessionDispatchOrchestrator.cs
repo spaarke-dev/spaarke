@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -87,6 +88,12 @@ public class SessionDispatchOrchestrator
     private readonly EventRulesOptions _manifestProbeOptions;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
+    private readonly TimeProvider _timeProvider;
+    // Task 013 part 3 (D-013-01): smart pre-seed. OPTIONAL — the real enricher is registered
+    // unconditionally in DI (production always has it), but hand-built test constructions of this
+    // orchestrator omit it and get null → enrichment is skipped (the launch payload is stored
+    // unchanged, exactly the pre-013p3 behavior). Never fails the dispatch (ADR-032).
+    private readonly ISurfaceLaunchEnricher? _surfaceLaunchEnricher;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -100,7 +107,9 @@ public class SessionDispatchOrchestrator
         PendingPlanManager pendingPlanManager,
         IOptions<EventRulesOptions> manifestProbeOptions,
         Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
-        ILogger<SessionDispatchOrchestrator> logger)
+        ILogger<SessionDispatchOrchestrator> logger,
+        TimeProvider? timeProvider = null,
+        ISurfaceLaunchEnricher? surfaceLaunchEnricher = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -118,6 +127,13 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = manifestProbeOptions?.Value ?? throw new ArgumentNullException(nameof(manifestProbeOptions));
         _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Track-B hygiene sweep (R9, task 073): clock for the manifest readiness probe's
+        // Task.Delay — optional, defaults to TimeProvider.System (production/DI); tests
+        // inject a FakeTimeProvider for deterministic probe-delay assertions instead of
+        // relying on a real (or zeroed) wall-clock wait.
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        // Optional (may be null in hand-built test constructions); see field doc.
+        _surfaceLaunchEnricher = surfaceLaunchEnricher;
     }
 
     /// <summary>
@@ -142,6 +158,7 @@ public class SessionDispatchOrchestrator
         _manifestProbeOptions = null!;
         _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = null!;
     }
 
     /// <summary>
@@ -266,6 +283,79 @@ public class SessionDispatchOrchestrator
             binding.BindingId, binding.Ucid, binding.ConsumerType, action.Id, action.Name,
             binding.Disposition, request.TenantId, request.SessionId, requestedFileIds?.Count ?? 0);
 
+        // ── Task 021 (FR-D1) — sprk_risk confirmation gate ══════════════════════════════════════
+        // The resolved Binding's DECLARED risk posture (sprk_risk) feeds the ONE metadata-driven gate
+        // decision (PendingPlanManager.RequiresConfirmation — ADR-041 tier × risk × origin, the
+        // Binding-risk axis). Before executing the Action:
+        //   • AlwaysConfirm → SUSPEND: write the pending Gate marker BEFORE any render (ADR-040
+        //     store-precedes-presentation) and emit a "suggestion-that-launches" confirmation chip
+        //     INSTEAD of executing — the Action never runs, so there is NO LLM spend and NO side effect
+        //     until the user explicitly confirms. The confirm chip re-dispatches THIS binding carrying
+        //     the gate token (+ the original args verbatim); that re-dispatch consumes the pending gate
+        //     (writes the CONFIRMED marker) and executes. This is NOT a second gate — it reuses the ONE
+        //     PendingPlanManager suspend/resume mechanism (ADR-039).
+        //   • None → no gate (the shipped behavior; every R1 create binding is None).
+        // Task 022 (FR-D2): the ConfirmWhenUncertain tier reads the routing-confidence signal
+        // (request.DispatchUncertain) DERIVED FROM THE SINGLE AGENT TURN — never a second scorer
+        // (ADR-039). Both R1 entry paths pass false (Click = explicit selection; text-path tool-call =
+        // committed selection — ambiguity is resolved upstream by a layer-1 clarifying question), so
+        // ConfirmWhenUncertain does not fire in R1 but is architecturally live + seam-tested.
+        var confirmGateId = TryReadConfirmGateId(request.Args);
+        var gateAlreadyConfirmed = false;
+        if (confirmGateId is not null)
+        {
+            // A confirm-click re-dispatch: consume the pending gate (get-then-delete + CONFIRMED marker,
+            // ADR-040). A valid, still-pending token FOR THIS binding lets execution proceed this pass;
+            // an expired / already-consumed / foreign token resolves to null and falls through to re-gate
+            // (fail-closed — a stale confirm can never execute a gated capability).
+            var resumed = await _pendingPlanManager
+                .ResumeInvocationAsync(request.TenantId, request.SessionId, confirmGateId, cancellationToken)
+                .ConfigureAwait(false);
+            gateAlreadyConfirmed = resumed is not null
+                && string.Equals(resumed.BindingId, binding.BindingId.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!gateAlreadyConfirmed
+            && PendingPlanManager.RequiresConfirmation(sideEffectClass: null, risk: binding.Risk, dispatchUncertain: request.DispatchUncertain))
+        {
+            var gateId = $"dispatch-confirm-{Guid.NewGuid():N}";
+
+            // LEDGER FIRST (ADR-040): the pending marker must exist before the confirmation renders. A
+            // session that vanished mid-turn throws here (pre-first-chunk) → mapped to a clean error by
+            // the endpoint; the Action is NEVER executed on a failed suspend (fail-closed, NFR-03).
+            await _pendingPlanManager
+                .SuspendInvocationAsync(
+                    new PendingInvocation
+                    {
+                        GateId = gateId,
+                        Kind = PendingPlanManager.GateKindConfirmation,
+                        SessionId = request.SessionId,
+                        TenantId = request.TenantId,
+                        ToolId = binding.Ucid ?? binding.ConsumerType,
+                        BindingId = binding.BindingId.ToString(),
+                        // Gate fired on Binding risk alone (no tool side-effect class on the dispatch path).
+                        SideEffectClass = null,
+                        Risk = RiskToLedgerValue(binding.Risk),
+                        // Preserve the original args so the confirmed re-dispatch reproduces the request.
+                        ArgsJson = request.Args is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null } a
+                            ? a.GetRawText()
+                            : "{}",
+                        Title = binding.Ucid ?? binding.ConsumerType,
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "FR-D1: dispatch suspended for confirmation (sprk_risk={Risk}) — gateId={GateId} bindingId={BindingId} " +
+                "consumerType={ConsumerType} tenant={TenantId} session={SessionId}. Action NOT executed.",
+                binding.Risk, gateId, binding.BindingId, binding.ConsumerType, request.TenantId, request.SessionId);
+
+            // Present the suggestion-that-launches: a chip that re-dispatches THIS binding carrying the
+            // original args verbatim + the confirm token. The user's explicit click IS the confirmation.
+            yield return AnalysisChunk.FromChips(new[] { BuildConfirmChip(binding, gateId, request.Args) });
+            yield break;
+        }
+
         // Both executor legs (prompted / coded) produce the output JsonElement + its grounding source
         // refs, then join the SAME store-before-render tail (OutputRouter.RouteAsync) below — one ledger
         // write, one render boundary, regardless of ActionKind (ADR-039 / ADR-040).
@@ -365,7 +455,7 @@ public class SessionDispatchOrchestrator
             // so the "context selected" leg is anchored to the turn it grounds (OutputRouter allocates the
             // SAME ordinal for the SessionOutput below — no output is appended between).
             var contextTurn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
-            var conversationTail = BuildConversationTail(session);
+            var conversationTail = ConversationContextProducer.BuildConversationTail(session);
 
             BoundInputs boundInputs;
 
@@ -386,6 +476,13 @@ public class SessionDispatchOrchestrator
                                 Args = request.Args,
                                 LedgerOutputs = session.Outputs,
                                 ConversationTail = conversationTail,
+                                // Task 053 (FR-B-04): the host record makes the envelope feature-complete
+                                // (Business host-identity + Record memory refs). Id-only shape — no lazy
+                                // name fetch here; deterministic + pinned. Prompts are UNCHANGED (the
+                                // executor renders the operand only; the envelope feeds fingerprint/counts).
+                                HostEntityType = session.HostContext?.EntityType,
+                                HostEntityId = session.HostContext?.EntityId,
+                                HostEntityName = session.HostContext?.EntityName,
                                 TenantId = request.TenantId,
                                 SessionId = request.SessionId,
                                 Turn = contextTurn,
@@ -479,6 +576,20 @@ public class SessionDispatchOrchestrator
             }
         }
 
+        // ── Task 013 part 3 (D-013-01): smart pre-seed. When the resolved Binding routes to a client-owned
+        // surface launch, resolve the drafted closed-set LABELS (practice_area / matter_type) to record ids
+        // via the deterministic resolver (010) and merge them into the payload as `resolvedLookups` BEFORE
+        // the ledger write — the router stores an opaque payload it never parses (ADR-040), and the launched
+        // wizard pre-selects dropdowns from the enriched slot (ADR-039: the LLM never authored the closed-set
+        // value; the resolver did). Optional dependency + quiet no-op (ADR-032): null enricher, a non-launch
+        // disposition, an unmapped consumer-type, or any resolve failure leaves `output` unchanged.
+        if (_surfaceLaunchEnricher is not null && binding.Disposition == BindingDisposition.SurfaceLaunch)
+        {
+            output = await _surfaceLaunchEnricher
+                .EnrichAsync(binding, output, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // ── ADR-040 SEAM (FR-P1-02): the universal ledger write BEFORE render. The OutputRouter writes
         // the addressable SessionOutput ({bindingId}@t{n}) through the session store FIRST, then routes
         // by disposition; the terminal chunk below renders FROM the stored entry's payload (render
@@ -504,7 +615,20 @@ public class SessionDispatchOrchestrator
         // EXCLUSIVELY from the entry ProgressiveRenderGuard confirms was actually written to the ledger
         // (ADR-040 storage-precedes-rendering), never from the pre-store `output` local above.
         var storedEntry = ProgressiveRenderGuard.EnsureStored(routed.Entry);
-        yield return DeserializeResultChunk(storedEntry.Payload.GetRawText());
+        // Task 013: surface the dispatch metadata (disposition + consumertype) on the terminal chunk so a
+        // surface_launch dispatch is actionable client-side. The disposition is the ledger value; the
+        // consumertype MUST be the Binding's sprk_consumertype (e.g. "create-matter") — the key the CLIENT
+        // launch registry (surfaceLaunchRegistry.ts, keyed by sprk_consumertype) resolves to a surface.
+        // BUGFIX (assistant-enhancements-r1 UAT 2026-07-17): this previously emitted storedEntry.UcId
+        // (= sprk_ucid ?? sprk_consumertype). The original comment assumed UcId == ConsumerType, but a
+        // Binding with a distinct sprk_ucid (e.g. create-matter's "UC-B-6") made the client receive
+        // "UC-B-6", which has no registry entry → resolveSurfaceLaunch() returned undefined → the wizard
+        // never opened (silent launched:false). Emit binding.ConsumerType so BOTH the text/agent path
+        // (BindingCapabilityTool → surface_launch SSE) and the chip/Click path (dispatchConsumer) route.
+        yield return DeserializeResultChunk(
+            storedEntry.Payload.GetRawText(),
+            disposition: storedEntry.Disposition,
+            consumerType: binding.ConsumerType);
 
         // ── Next-step chips: the dispatched Binding's curated sprk_chiptransitions follow the terminal
         // complete chunk so the conversation surface always shows the CURRENT next steps.
@@ -544,7 +668,9 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Resolve the FILE-operand path (the shipped summarize behavior): the FR-08 file subset, the G-P2
+    /// Resolve the FILE-operand path (the shipped summarize behavior): the target-file resolution
+    /// (explicit fileIds subset → else the session's ACTIVE document → else all files per FR-08;
+    /// see <see cref="ResolveTargetFiles"/>), the G-P2
     /// manifest readiness probe, the session-file text fetch, then a <see cref="ContextBinder"/> bind of
     /// the resolved <see cref="DocumentText"/> as a <see cref="OperandChannel.Document"/> operand (writing
     /// the context fingerprint). Extracted from the iterator so it can use try/catch + early returns; the
@@ -559,9 +685,15 @@ public class SessionDispatchOrchestrator
         int contextTurn,
         CancellationToken cancellationToken)
     {
-        // ── FR-08 file resolution: explicit args subset, else the full session manifest.
+        // ── File resolution (spaarkeai-compose-r2 "summarize this document" scoping fix):
+        // explicit args subset always wins; else scope to the session's ACTIVE document when
+        // one is registered; else the full session manifest (FR-08 default-all). Every Compose
+        // open-path registers session.ActiveDocument (most-recent-wins), so "summarize this
+        // document" with no explicit fileIds targets the tab the user is looking at, not every
+        // file in the session.
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
-        var targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+        var activeSessionFileId = session.ActiveDocument?.SessionFileId;
+        var targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles, activeSessionFileId);
 
         // ── G-P2 UAT round-1 finding 4 (2026-07-06): manifest readiness probe at the
         // ONE dispatch seam (covers the loop's BindingCapabilityTool, chip clicks, and
@@ -572,13 +704,19 @@ public class SessionDispatchOrchestrator
         // Wait-briefly-or-degrade, IDENTICAL policy + bounds to the Event path's G-P1
         // Defect 3 probe (EventRulesOptions.ReadinessProbe*, ~5s default): re-read the
         // session until requested ids all resolve (explicit subset) or the manifest is
-        // non-empty (default-all), then degrade to whatever resolved. Task.Delay matches
-        // the Event-path precedent; the TimeProvider refactor is on the /defer list.
+        // non-empty (default-all), then degrade to whatever resolved. Track-B hygiene
+        // sweep (R9, task 073): the probe now delays via TimeProvider (per ADR-038 §5 /
+        // docs/standards/TEST-ARCHITECTURE.md §4) instead of raw Task.Delay, so tests can
+        // deterministically drive the probe with a FakeTimeProvider instead of relying on
+        // a zeroed real-world delay.
         if (IsResolutionIncomplete(requestedFileIds, targetFiles))
         {
             for (var attempt = 1; attempt <= _manifestProbeOptions.ReadinessProbeAttempts; attempt++)
             {
-                await Task.Delay(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs), cancellationToken)
+                await Task.Delay(
+                        TimeSpan.FromMilliseconds(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs)),
+                        _timeProvider,
+                        cancellationToken)
                     .ConfigureAwait(false);
                 var refreshed = await _sessionManager
                     .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
@@ -589,7 +727,10 @@ public class SessionDispatchOrchestrator
                 }
                 session = refreshed;
                 uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
-                targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+                // Re-read the active-document pointer off the refreshed session — a compose open
+                // registration can land in the same window the manifest write does.
+                activeSessionFileId = session.ActiveDocument?.SessionFileId;
+                targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles, activeSessionFileId);
                 if (!IsResolutionIncomplete(requestedFileIds, targetFiles))
                 {
                     break;
@@ -662,6 +803,12 @@ public class SessionDispatchOrchestrator
                 {
                     FileDocument = documentText,
                     ConversationTail = conversationTail,
+                    // Task 053 (FR-B-04): feature-complete envelope on the file-operand path too — Business
+                    // host-identity + Record memory refs from the host record. Prompts UNCHANGED (the
+                    // executor renders the `## Document` operand only).
+                    HostEntityType = session.HostContext?.EntityType,
+                    HostEntityId = session.HostContext?.EntityId,
+                    HostEntityName = session.HostContext?.EntityName,
                     TenantId = request.TenantId,
                     SessionId = request.SessionId,
                     Turn = contextTurn,
@@ -677,28 +824,9 @@ public class SessionDispatchOrchestrator
         };
     }
 
-    /// <summary>
-    /// The session's prior <see cref="SessionOutput"/>s projected as ADR-040 ledger REFERENCES for the
-    /// ContextEnvelope <c>Memory.Conversation</c> tail (identifiers only — the payloads live in the ledger,
-    /// never copied into the envelope). Empty on a first turn.
-    /// </summary>
-    private static IReadOnlyList<LedgerEntryReference> BuildConversationTail(ChatSession session)
-    {
-        var outputs = session.Outputs;
-        if (outputs is not { Count: > 0 })
-        {
-            return Array.Empty<LedgerEntryReference>();
-        }
-
-        return outputs
-            .Select(o => new LedgerEntryReference
-            {
-                Key = o.Key,
-                UcId = o.UcId,
-                Disposition = o.Disposition,
-            })
-            .ToList();
-    }
+    // Task 053 (FR-B-04): the conversation-tail reference projection moved to
+    // ContextSliceProducers.ConversationContextProducer.BuildConversationTail so tail production is
+    // single-home (this orchestrator + the interactive ChatEndpoints path both call it).
 
     /// <summary>Outcome of <see cref="ResolveFileOperandAsync"/>: either resolved <see cref="Inputs"/> or an <see cref="Error"/> to stream.</summary>
     private sealed record FileOperandResult
@@ -744,23 +872,69 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Deserialize the STORED ledger payload into the terminal chunk. Payloads matching
-    /// the <see cref="DocumentAnalysisResult"/> shape surface as the structured
-    /// <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> (the client
-    /// synthesizes per-field workspace deltas from <c>result</c>); anything else
-    /// degrades to a text completion — the client always sees a terminal
-    /// <c>complete</c> chunk, never a silent EOF. Same wire semantics as
-    /// the pre-044 summarize shell so there is ONE AnalysisChunk vocabulary.
+    /// Deserialize the STORED ledger payload into the terminal chunk. The discriminator is
+    /// summarize-preserving AND compose-lossless (spaarkeai-compose-r2 UAT wire-loss fix):
+    /// <list type="bullet">
+    ///   <item>A JSON object carrying the <see cref="DocumentAnalysisResult"/> SIGNATURE
+    ///     (<c>tldr</c> / <c>entities</c> / <c>keywords</c> — fields present in NO compose
+    ///     output schema) is the summarize / document-analysis case: it is coerced to the
+    ///     typed <see cref="DocumentAnalysisResult"/> via
+    ///     <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> so the wire shape is
+    ///     BYTE-IDENTICAL to the shipped summarize contract (DAR defaults + top-level
+    ///     <c>summary</c>). The section-keyed client bridge (dispatchConsumer.ts) is unchanged.</item>
+    ///   <item>ANY OTHER JSON object (compose actions — <c>explanation</c>/<c>keyConcepts</c>,
+    ///     <c>matches</c>/<c>overallRisk</c>, <c>changes</c>, ... — or any future non-DAR
+    ///     disposition) is passed THROUGH verbatim via <see cref="AnalysisChunk.CompletedRaw"/>,
+    ///     so its fields survive on the wire at <c>result</c> for the client's shape-detecting
+    ///     formatter (composeResultFormat.ts). BEFORE this fix every such payload was coerced to
+    ///     DocumentAnalysisResult, and System.Text.Json silently dropped its unknown properties →
+    ///     the client received an EMPTY DAR blob instead of prose.</item>
+    ///   <item>A non-object payload (array/scalar) or unparseable content degrades to a text
+    ///     completion — the client always sees a terminal <c>complete</c> chunk, never a silent EOF.</item>
+    /// </list>
     /// </summary>
-    private static AnalysisChunk DeserializeResultChunk(string jsonContent)
+    private static AnalysisChunk DeserializeResultChunk(
+        string jsonContent,
+        string? disposition = null,
+        string? consumerType = null)
+    {
+        var chunk = BuildResultChunk(jsonContent);
+
+        // ── Task 013: attach the dispatch metadata to the terminal `complete` chunk. Additive +
+        // JsonIgnore-when-null (email-r4 / daily-update-r5 unaffected). The disposition IS the server's
+        // routing decision (ADR-039); the client branches `surface_launch` → the pre-seeded launch
+        // (task 012 launchSurface) with NO second intent mechanism — it only reads what the server decided.
+        return (disposition is null && consumerType is null)
+            ? chunk
+            : chunk with { Disposition = disposition, ConsumerType = consumerType };
+    }
+
+    /// <summary>Builds the terminal chunk from the stored payload (disposition metadata is applied by the caller).</summary>
+    private static AnalysisChunk BuildResultChunk(string jsonContent)
     {
         try
         {
-            var doc = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
-            if (doc is not null)
+            using var doc = JsonDocument.Parse(jsonContent);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Object)
             {
-                doc.ParsedSuccessfully = true;
-                return AnalysisChunk.Completed(doc);
+                if (IsDocumentAnalysisShape(root))
+                {
+                    // Summarize / document-analysis consumer: coerce to the typed DAR so the wire
+                    // shape (incl. DAR defaults + the top-level `summary`) is unchanged. The payload
+                    // already IS the DAR shape, so this round-trips losslessly (non-regression).
+                    var dar = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
+                    if (dar is not null)
+                    {
+                        dar.ParsedSuccessfully = true;
+                        return AnalysisChunk.Completed(dar);
+                    }
+                }
+
+                // Compose / other capability output: pass the payload THROUGH verbatim (clone so it
+                // outlives this JsonDocument's using-scope). The compose fields reach the client at
+                // `result` intact — the coercion that stripped them is gone.
+                return AnalysisChunk.CompletedRaw(root.Clone());
             }
         }
         catch (JsonException)
@@ -769,6 +943,79 @@ public class SessionDispatchOrchestrator
             // to a text completion rather than a dead stream.
         }
         return AnalysisChunk.Completed(jsonContent);
+    }
+
+    /// <summary>
+    /// Whether a terminal ledger payload object carries the <see cref="DocumentAnalysisResult"/>
+    /// SIGNATURE — i.e. at least one of <c>tldr</c> / <c>entities</c> / <c>keywords</c>. These three
+    /// fields are unique to the summarize / document-analysis output schema and appear in NONE of the
+    /// five compose output schemas (compose-explain-clause, compose-compare-to-playbook,
+    /// compose-draft-alternative, compose-summarize-word-changes, compose-defined-terms), so this is
+    /// an unambiguous discriminator. Deliberately does NOT key on <c>summary</c> alone: the
+    /// compose-summarize-word-changes schema also has a <c>summary</c> field, and treating that as DAR
+    /// would strip its <c>changes[]</c> — the very wire-loss this fix removes.
+    /// </summary>
+    private static bool IsDocumentAnalysisShape(JsonElement root) =>
+        root.TryGetProperty("tldr", out _)
+        || root.TryGetProperty("entities", out _)
+        || root.TryGetProperty("keywords", out _);
+
+    /// <summary>
+    /// The dispatch-args member carrying the sprk_risk confirmation-gate token on a confirm-click
+    /// re-dispatch (task 021). Kept as a constant so the suspend-side chip author and the resume-side
+    /// reader cannot drift. THIS boundary owns the parse; the client forwards it verbatim (ADR-039).
+    /// </summary>
+    internal const string ConfirmGateArgKey = "confirmGateId";
+
+    /// <summary>
+    /// Tolerant extraction of the task-021 confirmation-gate token (<c>confirmGateId</c> string) from
+    /// the dispatch args. Absent / null / non-string degrades to null (no confirm in flight) — arg
+    /// parsing never throws for shape drift.
+    /// </summary>
+    internal static string? TryReadConfirmGateId(JsonElement? args)
+    {
+        if (args is not { ValueKind: JsonValueKind.Object } obj)
+        {
+            return null;
+        }
+        if (!obj.TryGetProperty(ConfirmGateArgKey, out var el) || el.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        var value = el.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Maps the Binding's <see cref="BindingRisk"/> to the ledger/audit wire vocabulary
+    /// (<c>none | confirm-when-uncertain | always-confirm</c>) recorded on the suspended
+    /// <see cref="PendingInvocation.Risk"/> + its <c>SessionGate</c> marker (NFR-07 identifiers only).
+    /// </summary>
+    private static string RiskToLedgerValue(BindingRisk risk) => risk switch
+    {
+        BindingRisk.AlwaysConfirm => "always-confirm",
+        BindingRisk.ConfirmWhenUncertain => "confirm-when-uncertain",
+        _ => "none",
+    };
+
+    /// <summary>
+    /// Builds the task-021 "suggestion-that-launches" confirmation chip: it re-dispatches THIS Binding
+    /// carrying the ORIGINAL args verbatim PLUS the confirm token (<see cref="ConfirmGateArgKey"/>). The
+    /// client forwards chip args verbatim as the next dispatch's args (ADR-039 — it never interprets
+    /// them); THIS boundary reads the token back on the re-dispatch to consume the pending gate.
+    /// </summary>
+    private static AnalysisChunkChip BuildConfirmChip(Binding binding, string gateId, JsonElement? originalArgs)
+    {
+        var chipArgs = originalArgs is { ValueKind: JsonValueKind.Object } obj
+            ? JsonNode.Parse(obj.GetRawText())!.AsObject()
+            : new JsonObject();
+        chipArgs[ConfirmGateArgKey] = gateId;
+
+        return new AnalysisChunkChip(
+            TargetBindingId: binding.BindingId.ToString(),
+            Label: $"Confirm: {binding.ConsumerType}",
+            Args: chipArgs,
+            RequiresAttachments: false);
     }
 
     /// <summary>
@@ -816,21 +1063,47 @@ public class SessionDispatchOrchestrator
             : targetFiles.Count == 0;
 
     /// <summary>
-    /// Resolve the effective target files: the explicit args subset filtered against the
-    /// session manifest (unknown ids ignored), else the full manifest (FR-08).
+    /// Resolve the effective target files. The default targets the session's ACTIVE document
+    /// when one is set; it falls back to all files only when no active document is registered
+    /// (FR-08); explicit fileIds are always honored. Three-way rule:
+    /// <list type="number">
+    ///   <item>Explicit <paramref name="requestedFileIds"/> (Count &gt; 0) → the subset filtered
+    ///     against the session manifest (unknown ids ignored). UNCHANGED.</item>
+    ///   <item>No explicit ids AND <paramref name="activeSessionFileId"/> non-empty → scope to
+    ///     THAT single file: the manifest entry whose <see cref="ChatSessionFile.FileId"/> equals
+    ///     it (a 1-element list), or an EMPTY list when it is not in the manifest yet (so the
+    ///     G-P2 readiness probe <see cref="IsResolutionIncomplete"/> waits for the manifest write).
+    ///     This is the "summarize this document" scoping fix — the default no longer summarizes
+    ///     every file in the session.</item>
+    ///   <item>No explicit ids AND no active document → the full manifest (FR-08 default-all).
+    ///     UNCHANGED.</item>
+    /// </list>
     /// </summary>
     private static IReadOnlyList<ChatSessionFile> ResolveTargetFiles(
         IReadOnlyList<string>? requestedFileIds,
-        IReadOnlyList<ChatSessionFile> uploadedFiles)
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        string? activeSessionFileId)
     {
-        if (requestedFileIds is not { Count: > 0 })
+        // (1) Explicit subset — filter against the manifest (unknown ids ignored). UNCHANGED.
+        if (requestedFileIds is { Count: > 0 })
         {
-            return uploadedFiles;
+            return uploadedFiles
+                .Where(f => requestedFileIds.Contains(f.FileId, StringComparer.Ordinal))
+                .ToList();
         }
 
-        return uploadedFiles
-            .Where(f => requestedFileIds.Contains(f.FileId, StringComparer.Ordinal))
-            .ToList();
+        // (2) No explicit subset but an ACTIVE document is set — scope to that single file.
+        //     A one-element list when it is already in the manifest, else an empty list (the
+        //     probe treats empty as incomplete for the default case and waits for the write).
+        if (!string.IsNullOrEmpty(activeSessionFileId))
+        {
+            return uploadedFiles
+                .Where(f => string.Equals(f.FileId, activeSessionFileId, StringComparison.Ordinal))
+                .ToList();
+        }
+
+        // (3) No explicit subset AND no active document — full manifest (FR-08 default-all).
+        return uploadedFiles;
     }
 }
 
@@ -855,13 +1128,26 @@ public class SessionDispatchOrchestrator
 /// NOTIFICATION email to the user server-side (never a client-supplied recipient). Null for the
 /// prompted path and for callers that do not resolve it (backward-compatible default).
 /// </param>
+/// <param name="DispatchUncertain">
+/// Task 022 (FR-D2) — the routing-confidence signal for the <c>sprk_risk = Confirm When Uncertain</c>
+/// tier, DERIVED FROM THE SINGLE AGENT TURN (never a second scorer/classifier — ADR-039). The CALLER
+/// sets it from structural turn context; the gate reads it (a <c>ConfirmWhenUncertain</c> Binding gates
+/// ONLY when this is true — see <see cref="PendingPlanManager.RequiresConfirmation"/>). Both R1 entry
+/// paths set it <c>false</c> honestly: the Click path is an EXPLICIT user selection of a binding id
+/// (maximally confident), and a text-path capability tool-call is a COMMITTED selection by the one
+/// decider (genuine ambiguity is resolved UPSTREAM by the agent asking a clarifying question — layer 1,
+/// ADR-039's sanctioned decider — and never reaches this dispatch). This is the accurate, shipped
+/// uncertainty handling; a firing numeric/multi-call producer is a documented follow-on that drops in
+/// behind this seam without a spine change. Default <c>false</c> = confident (backward-compatible).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
     Guid BindingId,
     JsonElement? Args,
     string? CorrelationId = null,
-    string? ActingUserEmail = null);
+    string? ActingUserEmail = null,
+    bool DispatchUncertain = false);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:

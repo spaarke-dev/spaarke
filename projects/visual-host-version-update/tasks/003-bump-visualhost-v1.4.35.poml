@@ -1,0 +1,44 @@
+<task id="VHVU-003" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Bump VisualHost to v1.4.35 (5 locations) + rebuild + confirm cleanGuid</title>
+    <status>complete</status>
+    <phase>A0</phase>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>pcf, version, build</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-001</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>Cut the v1.4.35 release that carries the cleanGuid fix to VisualHost's "+" wizards. Bump the version in all required locations and produce a clean production bundle.</prompt>
+  <role>PCF control developer</role>
+  <goal>VisualHost at v1.4.35 across all manifests + footer, production bundle built with cleanGuid present.</goal>
+  <constraints>
+    <constraint source="pcf">Use `npm run build:prod` (NOT build) per AP-1.</constraint>
+    <constraint source="pcf">Version MUST match across all 5 locations.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/pcf/VisualHost/control/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx</file>
+      <file>src/client/pcf/VisualHost/Solution/solution.xml</file>
+      <file>src/client/pcf/VisualHost/Solution/Controls/sprk_Spaarke.Visuals.VisualHost/ControlManifest.xml</file>
+      <file>src/client/pcf/VisualHost/Solution/pack.ps1</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Update version to 1.4.35 in: ControlManifest.Input.xml (version + description), VisualHostRoot.tsx footer (with build date), Solution/solution.xml Version, Solution/Controls/.../ControlManifest.xml, Solution/pack.ps1.</step>
+    <step id="2">Run `npm run build:prod`; confirm `[build] Succeeded` and bundle size ≈1.27 MiB (per NFR-01).</step>
+    <step id="3">Confirm the cleanGuid fix is in the shipped bundle using the normalizer BODY, not the identifier: `grep -oc 'trim().toLowerCase()' out/controls/control/bundle.js` (expect >=1). Do NOT grep for the literal `cleanGuid` — it is minification-mangled and false-negatives (this is how the 5 code-page deploys were confirmed, per the PR #603/#609 author).</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>All 5 version locations read 1.4.35.</criterion>
+    <criterion>`build:prod` green; bundle within tolerance of 1.27 MiB.</criterion>
+    <criterion>Normalizer body `trim().toLowerCase()` present in shipped bundle (reliable cleanGuid signal).</criterion>
+    <criterion>cleanGuid consumed via the @spaarke/ui-components dependency (barrel, PR #609) — NOT re-implemented in VisualHost.</criterion>
+    <criterion>Footer renders `v1.4.35`.</criterion>
+  </acceptance-criteria>
+  <notes>Completed 2026-07-10. Bumped 1.4.34→1.4.35 in all 5 locations (ControlManifest.Input.xml version + description, VisualHostRoot footer `v1.4.35 • 2026-07-10`, Solution/solution.xml, Solution/Controls/.../ControlManifest.xml, pack.ps1). build:prod green; bundle contains `v1.4.35` and the `trim().toLowerCase()` normalizer (reliable cleanGuid signal). cleanGuid consumed transitively via wizard services (barrel) — not re-implemented in VisualHost.</notes>
+</task>

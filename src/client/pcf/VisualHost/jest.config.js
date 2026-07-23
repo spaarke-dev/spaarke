@@ -8,6 +8,17 @@ module.exports = {
   moduleNameMapper: {
     // Handle module aliases (if any)
     '^@/(.*)$': '<rootDir>/control/$1',
+    // VHVU-060: the pure visuals now live in the sibling @spaarke/visuals
+    // package, which ships its OWN node_modules copy of React + @fluentui.
+    // Force a single copy of the shared runtime libs (resolved from this PCF's
+    // node_modules) so cross-package component imports don't load two Reacts
+    // (→ "Invalid hook call") or two @fluentui token contexts under jest.
+    '^react$': '<rootDir>/node_modules/react',
+    '^react-dom$': '<rootDir>/node_modules/react-dom',
+    '^react/(.*)$': '<rootDir>/node_modules/react/$1',
+    '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
+    '^scheduler$': '<rootDir>/node_modules/scheduler',
+    '^scheduler/(.*)$': '<rootDir>/node_modules/scheduler/$1',
   },
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {

@@ -1,0 +1,123 @@
+<task id="090" project="email-communication-solution-r4">
+  <metadata>
+    <title>Project wrap-up — README → Complete, lessons-learned, `/test-diet` gate, archive, final code-review</title>
+    <phase>Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>060, 061, 062, 070, 071, 072, 073, 074, 075, 076, 080, 081, 082</dependencies>
+    <blocks></blocks>
+    <tags>wrapup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Project-close orchestration: status flip, lessons-learned, mandatory `/test-diet` reconciliation gate (root §7), artifact archive, and a final holistic `code-review`. Writes to `.claude/`-adjacent project state + invokes gates — MUST run from the main session. STANDARD rigor with an explicit test-diet gate.</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Main-session-only: runs the `/test-diet` gate, updates project state, and produces the final review after ALL work tasks complete. Cannot be delegated to a subagent (touches project-close state + gates).</parallel-reason>
+    <fr-refs></fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Close out email-communication-solution-r4 from the MAIN SESSION only:
+
+    1. **README → Complete** — flip the project README status to Complete; summarize what shipped (W0–W8) and the graduation criteria met.
+
+    2. **Lessons-learned** — create `notes/lessons-learned.md` capturing what went well / poorly, the R3-absorption experience, the Services/Ai gate coordination, the two Microsoft deadlines, and any deferred items.
+
+    3. **`/test-diet` gate (MANDATORY, root §7)** — invoke `/test-diet` to reconcile every test added/modified during R4 against the ADR-038 build-vs-maintain classifier: MAINTAIN-class tests stay at KEEP paths; SCAFFOLDING-class tests are emitted for deletion (`git rm`); AMBIGUOUS require reviewer judgment. The skill is read-only — it emits commands for the reviewer. Output: `notes/test-diet-report.md`. The wrap-up PR MUST cite this report.
+
+    4. **Archive artifacts** — move ephemeral working files to the archive per `/repo-cleanup` conventions; keep permanent artifacts (spec, plan, tasks, arch docs).
+
+    5. **Final `code-review`** — run a final holistic `code-review` across the R4 diff surface as a project-close quality gate.
+
+    Then confirm the project is complete and ready for `merge-to-master`.
+  </prompt>
+
+  <role>
+    Spaarke project lead running the main-session project-close protocol. Authoritative on the wrap-up sequence, the `/test-diet` gate (root §7), `/repo-cleanup`, and the final `code-review` gate. Does NOT delegate to subagents.
+  </role>
+
+  <goal>
+    README status is Complete; `notes/lessons-learned.md` and `notes/test-diet-report.md` exist; the `/test-diet` gate has run and its report is cited; ephemeral artifacts are archived; a final `code-review` has run with Critical findings addressed. The project is ready to merge to master.
+  </goal>
+
+  <context>
+    <background>
+      This is the project-close task. Per root §7, a `090-wrapup-*` task invokes `/test-diet` before marking the project complete — reconciling R4's test additions against the ADR-038 KEEP-path categories. R4 was large (W0–W8, absorbed R3, BFF + client + Dataverse + AI + add-in + docs), so the lessons-learned and final review are substantive.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-solution-r4/README.md</file>
+      <file>projects/email-communication-solution-r4/notes/lessons-learned.md (NEW)</file>
+      <file>projects/email-communication-solution-r4/notes/test-diet-report.md (NEW — from /test-diet)</file>
+      <file>projects/email-communication-solution-r4/tasks/TASK-INDEX.md</file>
+      <file>projects/email-communication-solution-r4/current-task.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="root §7">A `090-wrapup-*` task MUST invoke `/test-diet` BEFORE marking the project complete; the wrap-up PR MUST cite `notes/test-diet-report.md` (or document the skip rationale). Skipping is a HARD WARNING.</constraint>
+    <constraint source="root §3">Main-session only — this task writes project-close state + runs gates; do NOT delegate to a subagent.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies per the build-vs-maintain criteria; the skill is read-only (emits `git rm`/`git mv` for the reviewer; no auto-execute).</constraint>
+    <constraint source="project">Final `code-review` is a project-close gate; address Critical findings before declaring complete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-close</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/tasks/TASK-INDEX.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify all tasks complete">Read `TASK-INDEX.md`; confirm every W0–W8 task is ✅. If any remain 🔲/🔄, STOP and report.</step>
+    <step order="2" name="README → Complete">Update the README status to Complete; summarize shipped W0–W8 scope + graduation criteria met.</step>
+    <step order="3" name="Lessons-learned">Author `notes/lessons-learned.md` (R3 absorption, Services/Ai gate, Microsoft deadlines, deferred items, what went well/poorly).</step>
+    <step order="4" name="/test-diet gate">Invoke `/test-diet`; produce `notes/test-diet-report.md` (MAINTAIN keep / SCAFFOLDING `git rm` / AMBIGUOUS reviewer-judgment). Do not auto-execute the emitted commands.</step>
+    <step order="5" name="Archive">Run `/repo-cleanup` conventions: move ephemeral working/notes files to archive; retain permanent artifacts.</step>
+    <step order="6" name="Final code-review">Run a final holistic `code-review` across the R4 diff surface; address Critical findings.</step>
+    <step order="7" name="Update tracking">Mark task 090 ✅ in `TASK-INDEX.md`; set `current-task.md` to "none — project complete".</step>
+    <step order="8" name="Ready to merge">Confirm the project is complete and ready for `merge-to-master`; the wrap-up PR cites `notes/test-diet-report.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Verify task completion + gather close artifacts</tool>
+    <tool name="edit">README status; lessons-learned; tracking</tool>
+    <tool name="test-diet">MANDATORY project-close test reconciliation gate</tool>
+    <tool name="repo-cleanup">Archive ephemeral artifacts</tool>
+    <tool name="code-review">Final project-close quality gate</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-solution-r4/README.md (UPDATED — status Complete)</output>
+    <output type="docs">projects/email-communication-solution-r4/notes/lessons-learned.md (NEW)</output>
+    <output type="docs">projects/email-communication-solution-r4/notes/test-diet-report.md (NEW — from /test-diet)</output>
+    <output type="docs">projects/email-communication-solution-r4/tasks/TASK-INDEX.md + current-task.md (UPDATED)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every W0–W8 task is ✅ in `TASK-INDEX.md` before wrap-up completes.</criterion>
+    <criterion testable="true">README status is Complete with a shipped-scope summary.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists.</criterion>
+    <criterion testable="true">`/test-diet` has run; `notes/test-diet-report.md` exists and is cited in the wrap-up PR; no emitted `git rm` auto-executed.</criterion>
+    <criterion testable="true">Ephemeral artifacts archived per `/repo-cleanup`; permanent artifacts retained.</criterion>
+    <criterion testable="true">A final `code-review` has run with Critical findings addressed; `current-task.md` set to "none — project complete".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Main-session only (root §3). The `/test-diet` gate is mandatory per root §7 — skipping is a HARD WARNING that must be justified in the PR. After this task, run `merge-to-master`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Main-session only. Apply STANDARD rigor + the mandatory `/test-diet` gate (root §7) at Step 4. Do NOT delegate to a subagent. Cite `notes/test-diet-report.md` in the wrap-up PR.
+    </protocol>
+  </execution>
+</task>

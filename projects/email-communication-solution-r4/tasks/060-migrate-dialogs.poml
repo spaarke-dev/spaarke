@@ -1,0 +1,147 @@
+<task id="060" project="email-communication-solution-r4">
+  <metadata>
+    <title>Migrate SummarizeFilesDialog, FilePreviewDialog, DocumentEmailWizard to the canonical `&lt;EmailComposer /&gt;`</title>
+    <phase>Wave 6 — Client caller migration + retirements</phase>
+    <status>not-started</status>
+    <estimated-hours>7</estimated-hours>
+    <dependencies>021, 022, 043</dependencies>
+    <blocks>062</blocks>
+    <tags>frontend, refactoring, communication</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Removes an inline `fetch` to `/api/communications/send` from a production-shipped shared-lib component (SummarizeFilesDialog ~line 436), migrates a LegalWorkspace dialog fork (FilePreviewDialog), and fixes a latent attachment-ID payload bug (DocumentEmailWizard ~line 494). Modifies `.tsx` in `@spaarke/ui-components` consumed by multiple solutions; must respect ADR-045 (canonical send), ADR-019 (typed error), ADR-021 (Fluent v9), ADR-028 (no direct `@spaarke/auth` import in shared lib).</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only the three dialog files (SummarizeFilesDialog, FilePreviewDialog, DocumentEmailWizard) — disjoint from task 061 (wizards + CreateMatter fork). Both may run concurrently after W2 wrappers (021/022) and W4 Code Page (043) land.</parallel-reason>
+    <fr-refs>FR-21</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Migrate three ad-hoc/inline email-send surfaces to the canonical `&lt;EmailComposer /&gt;` engine (via its `SendEmailStep`/`SendEmailDialog` wrappers from W2 task 021) and the typed `sendCommunication()` wrapper (W2 task 022):
+
+    1. **SummarizeFilesDialog** — `src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx`. Remove the inline `fetch` to `/api/communications/send` at ~line 436 (empirically confirmed per R4 CLAUDE.md finding #6 / R3 pre-flight). Replace with the canonical inline-mount `&lt;SendEmailStep /&gt;`; the wizard's Finish action invokes `composerRef.current.send()`. Preserve ALL non-send behavior (file selection, summary generation, wizard navigation).
+
+    2. **FilePreviewDialog** — the LegalWorkspace dialog that sends email from the preview surface. Migrate to the canonical `&lt;SendEmailDialog /&gt;` wrapper; move legacy success/error side effects into `onSent`/`onError` handlers that consume the typed `SendCommunicationError`.
+
+    3. **DocumentEmailWizard** — `src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx`. Fix the latent attachment-ID bug at ~line 494 (empirically confirmed): it currently maps `d.documentId` (`sprk_document` GUIDs) into the attachment field, causing attachments to silently fail. Send the canonical **`attachmentDriveItemIds`** sourced from `wizardContext.uploadedFiles[].driveItemId` (SPE driveItem IDs). Remove `attachmentDocumentIds` from this caller entirely.
+
+    After this task, none of the three files call `fetch` to `/api/communications/send` and DocumentEmailWizard ships the correct driveItem IDs. Smoke tests run in task 062's flow / W4 UI tests.
+  </prompt>
+
+  <role>
+    Spaarke frontend engineer authoritative on `@spaarke/ui-components` dialog/wizard surfaces, the canonical `&lt;EmailComposer /&gt;` wrapper API (W2 task 021), the typed `sendCommunication()` + `SendCommunicationError` contract (W2 task 022), and the attachment-ID confusion failure mode (FAILURE-MODES AP-4).
+  </role>
+
+  <goal>
+    All three dialogs consume the canonical composer: `SummarizeFilesDialog` and `FilePreviewDialog` have zero `fetch.*communications/send` references and route sends through the wrapper's internal `sendCommunication()`; `DocumentEmailWizard` sends `attachmentDriveItemIds` from `driveItemId` (grep for `attachmentDocumentIds` in that file returns zero). `@spaarke/ui-components` `npm run build:prod` + `npm run lint` are clean; no shared-lib component imports `@spaarke/auth` directly (`authenticatedFetch` flows via props).
+  </goal>
+
+  <context>
+    <background>
+      This is the R4 consolidation of R3's Wave 3/4/5 caller-migration tasks (R3 tasks 051, 060, 075) into a single dialog-migration task. The canonical engine + wrappers now exist (W2), and the Communication Code Page is deployed (W4), so these ad-hoc send paths can be retired. SummarizeFilesDialog's inline `fetch` and DocumentEmailWizard's `documentId`-vs-`driveItemId` bug are the two highest-leverage latent defects this closes. FilePreviewDialog is a LegalWorkspace fork that must route through the shared canonical wrapper (no LegalWorkspace email-component forks per ADR-045).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (PRIMARY — inline fetch ~line 436)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx (PRIMARY — attachment-ID bug ~line 494)</file>
+      <file>src/solutions/LegalWorkspace/src/components/**/FilePreviewDialog.tsx (LegalWorkspace preview-send dialog)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailStep.tsx (canonical inline wrapper — W2 task 021)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx (canonical dialog wrapper — W2 task 021)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/communicationApi.ts (`sendCommunication()` + `SendCommunicationError` + `attachmentDriveItemIds` — W2 task 022)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-045">MUST NOT call `fetch` to `/api/communications/send` directly. All UX sends go through a canonical wrapper; programmatic sends through `sendCommunication()`.</constraint>
+    <constraint source="ADR-019">Error paths consume the typed `SendCommunicationError` parsed from ProblemDetails.</constraint>
+    <constraint source="ADR-021">Composer chrome is Fluent UI v9; inherited via the canonical wrapper.</constraint>
+    <constraint source="ADR-028">Shared-lib components MUST NOT import `@spaarke/auth` directly; `authenticatedFetch` is injected via props.</constraint>
+    <constraint source="spec FR-13/FR-21">DocumentEmailWizard uses canonical `attachmentDriveItemIds` (SPE driveItem IDs), never `sprk_document` GUIDs; `attachmentDocumentIds` removed from the caller.</constraint>
+    <constraint source="project">Preserve all non-send behavior in each dialog (summary generation, preview rendering, file selection, wizard navigation).</constraint>
+    <constraint source="repo">`npm run build:prod` + `npm run lint` in `@spaarke/ui-components` remain green (use `build:prod`, not `build`, per root CLAUDE.md §12).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>frontend/canonical-send-migration</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>projects/email-communication-solution-r4/reference/r3-send-side-design.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-019-problemdetails-error-responses.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>projects/x-email-communication-solution-r3/tasks/060-shared-summarizefilesdialog-migration.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/051-filepreviewdialog-migration.poml</file>
+      <file>projects/x-email-communication-solution-r3/tasks/075-documentemailwizard-migration-driveitemids.poml</file>
+    </files>
+    <patterns>
+      <pattern name="Consumer migration (inline fetch → canonical wrapper)" location="projects/x-email-communication-solution-r3/tasks/060-shared-summarizefilesdialog-migration.poml">
+        Replace inline fetch + handler with a wrapper mount; move side effects into `onSent`/`onError`; wizard Finish calls `composerRef.current.send()`.
+      </pattern>
+      <pattern name="Attachment driveItemId fix" location="projects/x-email-communication-solution-r3/tasks/075-documentemailwizard-migration-driveitemids.poml">
+        Source attachments from `wizardContext.uploadedFiles[].driveItemId`, not `d.documentId`; use canonical `attachmentDriveItemIds`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; if &gt; 70% create a handoff and stop.</step>
+    <step order="2" name="Load knowledge">Read spec FR-13/FR-21, CLAUDE.md empirical findings, ADR-045/019/021/028, and the three absorbed R3 POMLs listed in knowledge.</step>
+    <step order="3" name="SummarizeFilesDialog — locate">Read `SummarizeFilesDialog.tsx` in full; grep `fetch.*communications/send` to relocate the inline send (~line 436). Catalog its handler, request-body construction, and success/error side effects.</step>
+    <step order="4" name="SummarizeFilesDialog — migrate">Mount `&lt;SendEmailStep /&gt;` (inline) with `composerRef`, `initialBody` = generated summary, appropriate `attachmentSources`, and wizard context. Wizard Finish → `composerRef.current.send()`. Move side effects into `onSent`/`onError`. Delete the inline fetch + dead imports.</step>
+    <step order="5" name="FilePreviewDialog — migrate">Locate the LegalWorkspace `FilePreviewDialog.tsx` (grep under `src/solutions/LegalWorkspace/`). Replace its send path with `&lt;SendEmailDialog /&gt;`; wire `onSent`/`onError` (typed `SendCommunicationError`); preserve preview rendering.</step>
+    <step order="6" name="DocumentEmailWizard — fix bug">Grep to relocate the attachment mapping (~line 494). Trace `wizardContext.uploadedFiles` to confirm items carry both `documentId` and `driveItemId`. Replace with `attachmentDriveItemIds: currentAttach ? currentKept.map(d =&gt; d.driveItemId) : undefined`. Remove every `attachmentDocumentIds` reference in the file.</step>
+    <step order="7" name="Verify removal">Grep each file: `fetch.*communications/send` returns zero in SummarizeFilesDialog + FilePreviewDialog; `attachmentDocumentIds` returns zero in DocumentEmailWizard.</step>
+    <step order="8" name="Build + lint">Run `npm run build:prod` and `npm run lint` in `src/client/shared/Spaarke.UI.Components/`; rebuild LegalWorkspace for FilePreviewDialog. Fix any failures.</step>
+    <step order="9" name="Unit tests">Run shared-lib unit tests; update assertions that targeted removed internals or the old `attachmentDocumentIds` payload.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the diff; invoke `adr-check` against spec.md (verify ADR-045/019/021/028 compliance). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 060 ✅ in `tasks/TASK-INDEX.md`; confirm task 062 dependency satisfied.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance to next pending task; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the three dialogs + canonical wrappers</tool>
+    <tool name="grep">Relocate inline fetch / attachment mapping; verify removal</tool>
+    <tool name="edit">Apply migrations</tool>
+    <tool name="bash">`npm run build:prod`, `npm run lint`, `npm test`</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (UPDATED — canonical wrapper; inline fetch removed)</output>
+    <output type="code">src/solutions/LegalWorkspace/.../FilePreviewDialog.tsx (UPDATED — canonical `SendEmailDialog`)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DocumentEmailWizard/DocumentEmailWizard.tsx (UPDATED — `attachmentDriveItemIds` bug fix)</output>
+    <output type="test">Shared-lib unit test updates where assertions targeted removed internals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero `fetch.*communications/send` references in `SummarizeFilesDialog.tsx` (grep verified).</criterion>
+    <criterion testable="true">Zero `fetch.*communications/send` references in the LegalWorkspace `FilePreviewDialog.tsx` (grep verified).</criterion>
+    <criterion testable="true">`DocumentEmailWizard.tsx` maps `d.driveItemId` into `attachmentDriveItemIds`; grep `attachmentDocumentIds` in that file returns zero matches.</criterion>
+    <criterion testable="true">All three dialogs render via the canonical `&lt;SendEmailStep /&gt;` / `&lt;SendEmailDialog /&gt;` wrappers.</criterion>
+    <criterion testable="true">Error handlers use the typed `SendCommunicationError`.</criterion>
+    <criterion testable="true">No shared-lib component imports `@spaarke/auth` directly.</criterion>
+    <criterion testable="true">`npm run build:prod` and `npm run lint` exit 0 in `@spaarke/ui-components`; LegalWorkspace builds clean.</criterion>
+    <criterion testable="true">`adr-check` returns no violations against ADR-045 / ADR-019 / ADR-021 / ADR-028.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Absorbed from R3 tasks 060 (SummarizeFilesDialog), 051 (FilePreviewDialog), 075 (DocumentEmailWizard). Line numbers (~436, ~494) may have drifted — always grep to relocate.
+
+    DocumentEmailWizard is the highest-value fix: the attachment bug silently drops attachments in production legal-ops flows. FAILURE-MODES AP-4 documents the broader attachment-ID confusion; task 081/W8 docs note the canonical rename closes the class.
+
+    This task is client-only (TS) and does NOT touch the BFF — no publish-size / CVE / conflict-check obligations apply here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor per `&lt;rigor-hint&gt;` — Step 9.5 quality gates (code-review + adr-check) are REQUIRED. Verify all three migrations statically (grep) before build.
+    </protocol>
+  </execution>
+</task>

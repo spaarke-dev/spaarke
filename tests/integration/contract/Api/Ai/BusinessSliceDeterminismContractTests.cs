@@ -263,7 +263,7 @@ public class BusinessSliceDeterminismContractTests
             mocks.Playbook.Object,
             mocks.Dataverse.Object,
             mocks.Logger.Object,
-            new Mock<IMatterMemoryService>().Object,
+            new Mock<IMemoryItemStore>().Object,
             promptBudgetTracker: null,
             // IGenericEntityService satisfied by the same IDataverseService composite mock
             // (IDataverseService inherits IGenericEntityService — Spaarke.Dataverse.IDataverseService.cs).

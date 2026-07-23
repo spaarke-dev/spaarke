@@ -54,6 +54,7 @@ import type {
   ICitationSseItem,
   IPlaybookOptionsPayload,
   IElicitationModalPayload,
+  ISurfaceLaunchPayload,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -403,6 +404,12 @@ interface SseEventHandlers {
    * completion.
    */
   onElicitationModal: (payload: IElicitationModalPayload) => void;
+  /**
+   * spaarkeai-assistant-enhancements-r1 P0(b) — receives the `surface_launch`
+   * payload (TEXT/agent-path create-flow launch). Verbatim forward; the host
+   * opens the pre-seeded surface via the shared `launchSurface`.
+   */
+  onSurfaceLaunch: (payload: ISurfaceLaunchPayload) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -508,6 +515,19 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
         providedArgs: data.providedArgs ?? null,
       });
     }
+  } else if (event.type === 'surface_launch') {
+    // spaarkeai-assistant-enhancements-r1 P0(b) — TEXT/agent-path surface launch.
+    // Payload shape locked by ChatSseSurfaceLaunchData (camelCase): { bindingId,
+    // consumerType, payload? }. Tolerant parse: an event without a consumerType is
+    // dropped (the host can't route without it; never throws).
+    const data = (event.data ?? {}) as unknown as Partial<ISurfaceLaunchPayload>;
+    if (typeof data.consumerType === 'string' && data.consumerType.length > 0) {
+      handlers.onSurfaceLaunch({
+        bindingId: typeof data.bindingId === 'string' ? data.bindingId : '',
+        consumerType: data.consumerType,
+        payload: data.payload && typeof data.payload === 'object' ? (data.payload as Record<string, unknown>) : null,
+      });
+    }
   } else if (event.type === 'context_event') {
     // R6 task 095 — trace bridge. Forward the raw payload to the host so it
     // can dispatch on the `context` PaneEventBus channel. Tier-1 safe by BFF
@@ -601,6 +621,10 @@ export function useSseStream(): IUseSseStreamResult {
   // (capture_mode: modal wizard escape). Same callback-ref pattern.
   const onElicitationModalRef = useRef<((payload: IElicitationModalPayload) => void) | null>(null);
 
+  // spaarkeai-assistant-enhancements-r1 P0(b) — callback ref for `surface_launch`
+  // SSE events (TEXT/agent-path create-flow launch). Same callback-ref pattern.
+  const onSurfaceLaunchRef = useRef<((payload: ISurfaceLaunchPayload) => void) | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelStream = useCallback(() => {
@@ -652,6 +676,11 @@ export function useSseStream(): IUseSseStreamResult {
   // FR-P2-03 task 032 — register/unregister the elicitation_modal callback.
   const setOnElicitationModal = useCallback((handler: ((payload: IElicitationModalPayload) => void) | null) => {
     onElicitationModalRef.current = handler;
+  }, []);
+
+  // spaarkeai-assistant-enhancements-r1 P0(b) — register/unregister the surface_launch callback.
+  const setOnSurfaceLaunch = useCallback((handler: ((payload: ISurfaceLaunchPayload) => void) | null) => {
+    onSurfaceLaunchRef.current = handler;
   }, []);
 
   const startStream = useCallback(
@@ -737,6 +766,20 @@ export function useSseStream(): IUseSseStreamResult {
                 );
               }
             },
+            onSurfaceLaunch: (payload: ISurfaceLaunchPayload) => {
+              // spaarkeai-assistant-enhancements-r1 P0(b) — forward to host via the
+              // registered callback ref. No host handler = drop with a warning (the
+              // assistant's chat notice still told the user the surface was intended).
+              const handler = onSurfaceLaunchRef.current;
+              if (handler) {
+                handler(payload);
+              } else {
+                console.warn(
+                  '[useSseStream] surface_launch received but no onSurfaceLaunch handler registered — consumerType:',
+                  payload.consumerType
+                );
+              }
+            },
             onDone: () => {
               setIsDone(true);
               setIsStreaming(false);
@@ -819,5 +862,6 @@ export function useSseStream(): IUseSseStreamResult {
     setOnPlaybookOptions,
     setOnContextEvent,
     setOnElicitationModal,
+    setOnSurfaceLaunch,
   };
 }

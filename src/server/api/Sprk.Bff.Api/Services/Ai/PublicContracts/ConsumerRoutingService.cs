@@ -98,6 +98,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         "sprk_oneventbindings",
         "sprk_surfaces",
         "sprk_modeltieroverride",
+        // FR-H1 grounding predicate (task 003/044): host-context precondition read by the PreFilter.
+        "sprk_requiresnoattachedrecord",
     };
 
     /// <summary>
@@ -875,6 +877,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             Surfaces = ParseSurfaces(entity.GetAttributeValue<string>("sprk_surfaces")),
             ModelTierOverride = MapNullableChoice<AiModelTier>(
                 entity.GetAttributeValue<OptionSetValue>("sprk_modeltieroverride")),
+            // FR-H1 grounding predicate (task 044): BIT column; null/unset → false (offered regardless).
+            RequiresNoAttachedRecord = entity.GetAttributeValue<bool>("sprk_requiresnoattachedrecord"),
 
             // Action-side execution fields (§6.1, aliased via the left-outer link)
             ActionKind = MapChoice(

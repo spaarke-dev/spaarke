@@ -11,6 +11,7 @@ import {
   detectThemeFromHost,
   getClientUrl,
   getCurrentUserId,
+  getCurrentUserName,
 } from '../xrmContext';
 
 describe('xrmContext', () => {
@@ -270,6 +271,36 @@ describe('xrmContext', () => {
 
     it('should return undefined when Xrm is not available', () => {
       const result = getCurrentUserId();
+
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe('getCurrentUserName', () => {
+    it('should return user display name from Xrm context', () => {
+      (window as any).Xrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn() },
+        Utility: {
+          getGlobalContext: () => ({
+            userSettings: {
+              userId: '12345678-1234-1234-1234-123456789012',
+              userName: 'Jane Attorney',
+              languageId: 1033,
+            },
+            getClientUrl: () => 'https://test.crm.dynamics.com',
+            getCurrentAppUrl: () => 'https://test.crm.dynamics.com',
+            getVersion: () => '9.2.0',
+          }),
+        },
+      };
+
+      const result = getCurrentUserName();
+
+      expect(result).toBe('Jane Attorney');
+    });
+
+    it('should return undefined when Xrm is not available', () => {
+      const result = getCurrentUserName();
 
       expect(result).toBeUndefined();
     });

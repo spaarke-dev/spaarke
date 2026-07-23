@@ -5,6 +5,8 @@
 > **Applies To**: Dev environment and higher (`spaarkedev1.crm.dynamics.com`, `spe-api-dev-67e2xz.azurewebsites.net`)
 > **Release**: R2 — Full Graph-based infrastructure (replaces Server-Side Sync)
 
+> **⚠️ R4 UPDATE (2026-07-16)**: The **canonical R4 deployment checklist** is [`projects/email-communication-solution-r4/notes/DEPLOYMENT-CHECKLIST.md`](../../projects/email-communication-solution-r4/notes/DEPLOYMENT-CHECKLIST.md) — use it for R4 deploys. The **ribbon send path is RETIRED**: the ribbon web resource `sprk_communication_send.js` (Step 4 "Deploy Web Resource" + Step 5 "Deploy Ribbon Configuration") has been replaced by two PCFs on the OOB `sprk_communication` form — the **Communication Actions PCF** (Reply/Forward/Send/Save Draft) and the **Connections PCF** (association review). Those two step-sections below are marked **⚠ RETIRED** and MUST be skipped for R4; deploy the PCFs per the R4 checklist instead. The rest of this guide (SSS retirement, BFF/Graph/Dataverse solution, mailbox accounts, subscriptions) remains accurate. See [communication-intelligence-architecture.md](../architecture/communication-intelligence-architecture.md) §9.
+
 ---
 
 ## Table of Contents
@@ -292,6 +294,8 @@ pac solution import \
 
 ### Deploy Web Resource to Dataverse
 
+> **⚠ RETIRED (R4)** — This sub-section deploys the ribbon send web resource `sprk_communication_send.js`, which is **retired** (email-r4 tasks 044c/062). Its send functionality now ships in the **Communication Actions PCF** on the OOB form. **Skip this sub-section for R4 deploys** and deploy the PCFs per [`DEPLOYMENT-CHECKLIST.md`](../../projects/email-communication-solution-r4/notes/DEPLOYMENT-CHECKLIST.md). The solution import above (`CommunicationSolution`) is still required. Retained below for historical R2 reference only.
+
 ### Option A: PAC CLI (Recommended)
 
 ```bash
@@ -339,6 +343,8 @@ pac webresource list | Select-String "sprk_communication_send"
 ---
 
 ## Step 5: Deploy Ribbon Configuration
+
+> **⚠ RETIRED (R4)** — The entire ribbon-based Send button (the `CommunicationRibbons` solution + `sprk_communication_send` web resource wired below) is **retired** (email-r4 tasks 044c/062) and replaced by the **Communication Actions PCF** on the OOB `sprk_communication` form. **Skip this entire step for R4 deploys.** Deploy the Communication Actions + Connections PCFs per [`DEPLOYMENT-CHECKLIST.md`](../../projects/email-communication-solution-r4/notes/DEPLOYMENT-CHECKLIST.md). The following (checklist items about the Send *button*, ribbon rollback, and ribbon troubleshooting rows later in this guide) applies to the retired ribbon path only — retained for historical R2 reference.
 
 The Send button on the `sprk_communication` entity form is defined in the `CommunicationRibbons` solution.
 

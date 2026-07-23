@@ -31,7 +31,7 @@ import type {
   IUserBuCascadeDefaults,
 } from '../../services/EntityCreationService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
-import { cleanGuid } from '../../services/PolymorphicResolverService';
+import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -91,57 +91,14 @@ export interface IFollowOnActions {
 // ---------------------------------------------------------------------------
 // Metadata discovery -- find correct OData navigation property names
 // ---------------------------------------------------------------------------
-
-/**
- * Query the Dataverse entity metadata API to discover the actual
- * single-valued navigation property names for lookup columns on an entity.
- *
- * Dataverse uses PascalCase navigation property names (e.g. "sprk_MatterType")
- * which differ from the lowercase column logical names ("sprk_mattertype").
- * The @odata.bind syntax requires the nav-prop name, not the column name.
- *
- * Results are cached per entity to avoid repeated metadata calls.
- *
- * @param entityLogicalName - e.g. 'sprk_matter', 'sprk_document'
- * @returns Map: { columnLogicalName -> navigationPropertyName }
- */
-const _navPropCache: Record<string, Record<string, string>> = {};
-
-async function _discoverNavProps(entityLogicalName: string): Promise<Record<string, string>> {
-  if (_navPropCache[entityLogicalName]) {
-    return _navPropCache[entityLogicalName];
-  }
-
-  try {
-    const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${entityLogicalName}')/ManyToOneRelationships` +
-      `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName`;
-
-    const resp = await fetch(url, { credentials: 'include' });
-    if (!resp.ok) {
-      console.warn(`[MatterService] Nav-prop discovery failed for ${entityLogicalName}:`, resp.status);
-      return {};
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const json: any = await resp.json();
-    const rels: Array<{ ReferencingAttribute: string; ReferencingEntityNavigationPropertyName: string }> =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (json as any).value ?? [];
-
-    const map: Record<string, string> = {};
-    for (const r of rels) {
-      map[r.ReferencingAttribute] = r.ReferencingEntityNavigationPropertyName;
-    }
-
-    console.info(`[MatterService] Nav-props for ${entityLogicalName}:`, map);
-    _navPropCache[entityLogicalName] = map;
-    return map;
-  } catch (err) {
-    console.warn(`[MatterService] Nav-prop discovery error for ${entityLogicalName}:`, err);
-    return {};
-  }
-}
+//
+// Nav-prop DISCOVERY is the shared `discoverNavProps` in PolymorphicResolverService
+// (task 016 convergence — one implementation across all 7 wizard services).
+// matterService resolves lookups BY COLUMN NAME, so it derives a
+// `Record<columnName, navProp>` map from the shared array result via
+// `toNavPropMap(await discoverNavProps(entity))`. The derived map is
+// byte-identical to matter's former private map-form discovery, so the emitted
+// @odata.bind keys/values are unchanged. See notes/task-011-BLOCKED.md.
 
 /**
  * Resolve a navigation property name for a lookup column.
@@ -254,7 +211,8 @@ export class MatterService {
     let matterId: string;
 
     // Discover correct OData navigation property names from entity metadata
-    const navPropMap = await _discoverNavProps('sprk_matter');
+    // (shared discovery + column-keyed adapter — task 016).
+    const navPropMap = toNavPropMap(await discoverNavProps('sprk_matter'));
 
     // Build full entity payload with scalar fields + lookup bindings
     const entity: Record<string, unknown> = {
@@ -391,7 +349,7 @@ export class MatterService {
         );
       } else if (uploadResult.uploadedFiles.length > 0) {
         // Discover nav-prop for sprk_document -> sprk_matter lookup
-        const docNavProps = await _discoverNavProps('sprk_document');
+        const docNavProps = toNavPropMap(await discoverNavProps('sprk_document'));
         const docMatterNavProp = _resolveNavProp(docNavProps, 'sprk_matter');
 
         // Create sprk_document records linking uploaded files to the matter

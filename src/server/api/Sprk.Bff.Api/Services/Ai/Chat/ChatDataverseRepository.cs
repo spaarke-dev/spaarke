@@ -21,16 +21,13 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     private const string MessageEntityName = "sprk_aichatmessage";
 
     private readonly IGenericEntityService _genericEntityService;
-    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<ChatDataverseRepository> _logger;
 
     public ChatDataverseRepository(
         IGenericEntityService genericEntityService,
-        IFieldMappingDataverseService fieldMappingService,
         ILogger<ChatDataverseRepository> logger)
     {
         _genericEntityService = genericEntityService;
-        _fieldMappingService = fieldMappingService;
         _logger = logger;
     }
 
@@ -145,7 +142,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(
+    public Task<IReadOnlyList<ChatMessage>> GetMessagesAsync(
         string sessionId,
         int maxMessages,
         CancellationToken ct = default)
@@ -154,23 +151,24 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             "Loading up to {MaxMessages} messages for session {SessionId} from Dataverse",
             maxMessages, sessionId);
 
-        // Query via IDataverseService.QueryChildRecordIdsAsync to get message IDs,
-        // then retrieve each. This is less efficient than FetchXML but works with the
-        // existing IDataverseService API surface.
-        // Phase D will add a proper GetMessagesAsync to IDataverseService for efficiency.
-        var messageIds = await _fieldMappingService.QueryChildRecordIdsAsync(
-            MessageEntityName,
-            "sprk_sessionid",
-            Guid.Empty, // sprk_sessionid is a text field, not a lookup GUID — workaround pending
-            ct);
-
-        // Note: The above call uses QueryChildRecordIdsAsync which expects a Guid parent lookup.
-        // sprk_sessionid on sprk_aichatmessage is a text field, not a lookup.
-        // For Phase 1 (AIPL-052), we return an empty list until the query API is extended.
-        // The Redis hot path is the primary path; Dataverse cold path will be used only after
-        // AIPL-054 extends IDataverseService with a text-field query method.
-        // All test coverage is against the IChatDataverseRepository mock, not this implementation.
-        return Array.Empty<ChatMessage>();
+        // The Dataverse cold read path has never reconstructed real messages: a text-field
+        // (sprk_sessionid) query API was deferred (AIPL-054). The Redis hot path + Cosmos warm
+        // path are the authoritative session stores; this cold path only reports "no messages"
+        // (which resolves to a null session in GetSessionAsync → the endpoint returns 404).
+        //
+        // BUGFIX (spaarkeai-compose-r2): the prior implementation still called
+        // IFieldMappingDataverseService.QueryChildRecordIdsAsync purely to DISCARD its result
+        // (the method already returned an empty list unconditionally). Because
+        // IFieldMappingDataverseService resolves to DataverseWebApiService (GraphModule DI), that
+        // dead call reached the unimplemented metadata helper GetEntitySetNameAsync and threw
+        // NotImplementedException — surfacing as an HTTP 500 on
+        // GET /api/ai/chat/sessions/{id}/compose-outputs for any client-minted document session
+        // that misses Redis + Cosmos and falls through to this cold path (the two-session model:
+        // the document session is never server-persisted). A not-found session MUST resolve to
+        // null (→ clean 404), never throw. The dead call is removed so the cold path returns
+        // "no messages" cleanly. Genuine errors are not masked — there is no swallowed exception;
+        // the path simply no longer invokes an unimplemented stub it never needed.
+        return Task.FromResult<IReadOnlyList<ChatMessage>>(Array.Empty<ChatMessage>());
     }
 
     /// <inheritdoc />

@@ -1,0 +1,143 @@
+<task id="010" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Persist w14:paraId into the retained package on ingest (FR-01)</title>
+    <phase>1 Backend ingest</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF `.cs` (tags include bff-api), touches the ingest write path (retained package bytes), carries a seam DoD (ADR-038) — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded extension of a single existing KEEP asset (`ComposeBaselineParaIdStamper`) with a clear reference impl to reuse (`ParaIdPreParser`/`AnnotationReanchorService.ExtractParaIds`); no cross-cutting architecture change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>bff-api,docx</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Extend `ComposeBaselineParaIdStamper` so that on ingest every editable `w:p` that lacks a
+    `w14:paraId` gets one MINTED and WRITTEN INTO the retained shadow package bytes — not merely
+    carried in the projection. Today the stamper mints ids for the projection/snapshot; R4 requires the
+    id to be DURABLE across round-trips (load → save → reload), so it MUST be persisted into the OOXML
+    of the retained package that becomes the source of truth (invariant I-1, I-3). Mint deterministically
+    and write into the DOM (never string-edit `document.xml`); reuse `ParaIdPreParser` /
+    `AnnotationReanchorService.ExtractParaIds` for the document-order paragraph walk (including table
+    cells and nested tables) so the id set is complete. This MUST be idempotent: a paragraph that already
+    carries a `w14:paraId` is left untouched (never re-minted). The Patch Engine (Phase 3) later resolves
+    nodes O(1) by these ids, so a missing or duplicated id is a correctness defect, not a cosmetic one.
+    Be literal: mint-if-absent, write-into-retained-bytes, leave-existing-alone.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in `DocumentFormat.OpenXml` DOM mutation (the `w14:paraId` attribute
+    on `w:p`, the `w14` namespace, `WordprocessingDocument` open/save round-trips) and the existing
+    Compose ingest pipeline (`ComposeBaselineParaIdStamper`, `ParaIdPreParser`, `AnnotationReanchorService`).
+    Understands the byte[]-in/byte[]-out facade discipline (ADR-007) and that the retained package — not
+    the projection — is the source of truth (I-1).
+  </role>
+
+  <goal>
+    On ingest, every editable `w:p` in the retained package carries a persisted, unique `w14:paraId`
+    written into the retained bytes; ids survive a load → save → reload round-trip; a document that
+    already has paraIds is not re-minted (idempotent). The paragraph walk covers table cells and nested
+    tables via the reused extraction helper, so no editable paragraph is missed.
+  </goal>
+
+  <context>
+    <background>
+      Design §5 "Ingest (backend)": "ensure every editable `w:p` has a `w14:paraId` (mint + **persist**
+      if missing)". As-built inventory KEEP list: `ComposeBaselineParaIdStamper` "Mints + stamps paraIds
+      onto id-less paragraphs. **Extend** to persist ids into the shadow package on ingest." Today the
+      stamper produces the projection-carried id map but the id is not guaranteed durable in the retained
+      bytes; R4 makes the retained package the authoritative model (I-1), so the id MUST live in those
+      bytes. `ParaIdPreParser` / `AnnotationReanchorService.ExtractParaIds` already do the document-order
+      walk incl. table cells — reuse them, do not re-implement. Word regenerates paraIds on external
+      tracked-change saves; that cross-session case is `AnnotationReanchorService`'s job (fuzzy fallback),
+      not this task's — see escalation.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs — extend to mint-if-absent AND write the `w14:paraId` into the retained package DOM; keep idempotent for pre-existing ids</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs — document-order paraId extraction to reuse for the paragraph walk</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — `ExtractParaIds` document-order walk incl. table cells / nested tables (reuse; do not re-implement)</file>
+      <file role="dependency-output">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — consumes the stamped package; keep the projection paraId map consistent with the persisted ids</file>
+      <file role="design">projects/spaarkeai-compose-r4/design.md §5 (Ingest), §3 (I-1/I-3)</file>
+      <file role="spec">projects/spaarkeai-compose-r4/spec.md FR-01, NFR-05</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Shadow-Document ADR — establishes the retained-package-as-source-of-truth model this task persists ids into.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-01">On load, every editable `w:p` MUST carry a persisted `w14:paraId` (minted + written into the retained package if absent). Scope: the persistence is into the RETAINED PACKAGE BYTES, not just the projection map. MUST NOT re-mint a paragraph that already has a paraId (idempotent).</constraint>
+    <constraint source="project / I-1,I-3">The retained OOXML package is the authoritative model; addressing is by stable `w14:paraId`. Scope: mint deterministically; write into the DOM; the id set must be unique across the whole document (incl. table cells / nested tables).</constraint>
+    <constraint source="ADR-007">Patch/ingest stays `byte[]`-in/`byte[]`-out; no `Microsoft.Graph` type in `Services/Compose/`; the SPE hop stays behind `SpeFileStore`. Scope: this task operates on package bytes only.</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects NO AI internals; Tier-1 NetArchTest stays green. Scope: no `IOpenAiClient`/executor/routing type introduced.</constraint>
+    <constraint source="project / §10 Placement Justification">Extends an existing KEEP asset in `Services/Compose/` (no new service/DI). State the Placement Justification (mint/persist stays in `Services/Compose/`, reuses the stamper + extraction seams) in the PR; cite `.claude/constraints/bff-extensions.md`. Run `/conflict-check` before the BFF PR (`Services/Compose/` overlaps r1/r2/r3 + ai-architecture-redesign-r2).</constraint>
+    <constraint source="ADR-038 / NFR-06">Mutate the OpenXml DOM — never string-edit `document.xml`. Through-the-wire proof is task 013's seam slice; NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project / §10 publish-size">Report BFF publish size absolute + delta vs ~49.63 MB baseline (incl. PDBs), ≤60 MB; no new runtime package expected; verify no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Persisting w14:paraId into retained OOXML on ingest; DOM mutation via DocumentFormat.OpenXml; document-order paragraph walk incl. table cells; BFF facade discipline + hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Document-order paraId extraction (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs">
+        `ExtractParaIds` walks `w:p` in document order including table cells / nested tables — reuse this walk to enumerate the paragraphs that need minting rather than re-implementing the traversal.
+      </pattern>
+      <pattern name="Mint-if-absent stamper (extend)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs">
+        The stamper already mints ids for id-less paragraphs; extend it to WRITE the minted `w14:paraId` into the retained package DOM and keep existing ids untouched (idempotent).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL + reason + protocol steps). Load knowledge files + `.claude/constraints/bff-extensions.md`. State the Placement Justification (extends `ComposeBaselineParaIdStamper` in `Services/Compose/`; reuses the extraction seam; no new surface). Run `/conflict-check` before touching `Services/Compose/`.</step>
+    <step order="1" name="Trace the current stamp path">Read `ComposeBaselineParaIdStamper`, `ParaIdPreParser`, and `AnnotationReanchorService.ExtractParaIds`. Confirm where the minted id is (or is not) written back into the package bytes today vs only carried in the projection map.</step>
+    <step order="2" name="Persist minted ids into retained bytes">Extend the stamper to, for each editable `w:p` lacking a `w14:paraId`, mint a unique id and write it into the DOM (`w14:paraId` attribute, `w14` namespace) of the retained package, then save so the id lives in the retained bytes. Leave paragraphs that already carry an id untouched.</step>
+    <step order="3" name="Cover table cells / nested tables">Reuse `ExtractParaIds`' document-order walk so table-cell and nested-table paragraphs are included; verify uniqueness of the id set across the whole document.</step>
+    <step order="4" name="Idempotency + round-trip check">Verify a doc with pre-existing paraIds is not re-minted; verify a mint → save → reload preserves the ids. Keep the projection paraId map consistent with the persisted ids.</step>
+    <step order="5" name="Build + facade + size/CVE">Build BFF; run existing `Services/Compose` unit tests; run the Tier-1 NetArchTest facade check. Publish; report size absolute + delta vs ~49.63 MB; `dotnet list package --vulnerable --include-transitive`.</step>
+    <step order="6" name="Close out">Update `tasks/TASK-INDEX.md`: set this task's status to ✅. Document any deviation in `projects/spaarkeai-compose-r4/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Word-regenerated paraIds collide (Word remints ids on external tracked-change saves) so that persisting on ingest cannot guarantee stable ids across cross-Word-session saves, STOP and note the boundary: this task owns same-session durable minting; the cross-session regen case is `AnnotationReanchorService`'s fuzzy fallback (I-7 last resort), not a fix in this task. Surface the boundary rather than expanding scope into re-anchoring.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs (mints + persists `w14:paraId` into the retained package on ingest; idempotent)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan; Placement Justification; NetArch facade result</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Every editable paragraph in the corpus docs resolves to a unique `w14:paraId` that is PRESENT IN THE RETAINED PACKAGE BYTES (not only in the projection map), including paragraphs inside table cells and nested tables.</criterion>
+    <criterion testable="true">Ids survive a load → save → reload round-trip (the same paragraph resolves to the same paraId after reload).</criterion>
+    <criterion testable="true">Negative: a document that already carries `w14:paraId` values on its paragraphs is NOT re-minted — existing ids are left byte-identical (idempotent).</criterion>
+    <criterion testable="true">Ids are written via OpenXml DOM mutation, never by string-editing `document.xml`.</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">BFF builds green; publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Extends a KEEP-list asset — no `&lt;justification&gt;` block (modify-only, not new surface). The through-the-wire
+    proof that persisted ids survive ingest lives in task 013's seam slice. Coordinate the `Services/Compose/`
+    cutover with `spaarkeai-compose-r3` (deployed base).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

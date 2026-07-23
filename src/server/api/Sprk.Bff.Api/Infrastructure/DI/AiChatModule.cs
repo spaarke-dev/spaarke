@@ -15,12 +15,13 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// UNCONDITIONAL registrations:
 ///   1. AddSingleton&lt;AiLatencyTelemetry&gt;            — AIPU2-066: AI latency telemetry meter
 ///   2. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
-///   3. AddSingleton&lt;OrchestratorPromptBuilder&gt; (and as IOrchestratorPromptBuilder)
-///      — chat-routing-redesign-r1 task 141 / FR-22: orchestrator-side prompt builder.
-///   4. AddSingleton&lt;IUiActionAckCoordinator&gt; — D-F3 UI-action truthfulness (FR-A1-08 /
+///   3. AddSingleton&lt;IUiActionAckCoordinator&gt; — D-F3 UI-action truthfulness (FR-A1-08 /
 ///      task AIR2-037): client-ack coordination for UI-affecting tool results. Singleton so a
 ///      pending wait registered by the tool-call's scoped request survives to be resolved by
 ///      the ack endpoint's LATER, separate scoped request.
+///
+/// (The OrchestratorPromptBuilder registration was REMOVED by AIR2-053 with the dead class —
+/// zero production call sites; its stable-prefix concept is superseded by the Context Binder.)
 ///
 /// (The AIPU2-008 provider-agnostic agent boundary registration was removed by
 /// spaarke-ai-architecture-redesign-r1 Track-B batch 1 — the implementation was
@@ -28,7 +29,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// — top-N candidate selector, hybrid LLM intent reranker, and the options SSE payload
 /// builder — were DELETED by task 035 / FR-P2-06 with the dispatcher stack, ADR-039.)
 ///
-/// DI count: 4 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 3 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -53,13 +54,10 @@ public static class AiChatModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // chat-routing-redesign-r1 task 141 / FR-22: OrchestratorPromptBuilder.
-        // Singleton — holds an in-process MemoryCache for the stable prefix (keyed by active
-        // playbook name). Singleton lifetime is required so the cache persists across requests
-        // (ADR-009 exception: in-process structural metadata, not business data).
-        services.AddSingleton<OrchestratorPromptBuilder>();
-        services.AddSingleton<IOrchestratorPromptBuilder>(sp =>
-            sp.GetRequiredService<OrchestratorPromptBuilder>());
+        // AIR2-053 (FR-B-04): the OrchestratorPromptBuilder registration was REMOVED with the dead class
+        // (verified twice — task 002 + 2026-07-09 pre-flight audit — as having ZERO production call sites:
+        // DI-registered but never injected, BuildSystemPrompt had no consumers). Its stable-prefix concept
+        // is superseded by the Context Binder + ContextEnvelopeRenderer (deterministic envelope assembly).
 
         // AIPU2-066: AI Latency telemetry services.
         // AiLatencyTelemetry — singleton: Meter instances are thread-safe and long-lived.

@@ -63,8 +63,19 @@ public class AnalysisOptions
     public RagDeploymentModel DefaultRagModel { get; set; } = RagDeploymentModel.Shared;
 
     /// <summary>
-    /// Index name for shared RAG deployment (Model 1).
-    /// All customers share this index with tenant filtering.
+    /// DEPRECATED (FR-26 / FAILURE-MODES G-9, 2026-07-15): index name for shared RAG deployment
+    /// (Model 1). This was the WRITE-side index setting, split-brained against the READ-side
+    /// <see cref="AiSearchOptions.KnowledgeIndexName"/> — flipping one but not the other silently
+    /// indexed to one place and searched another.
+    /// <para><b>Consolidated:</b> the canonical single read/write index setting is now
+    /// <see cref="AiSearchOptions.KnowledgeIndexName"/>, resolved everywhere through
+    /// <see cref="Sprk.Bff.Api.Services.Ai.ISearchIndexNameResolver.GetDefaultIndexName"/>. The
+    /// write path (indexing job handler, RAG endpoints, <c>KnowledgeDeploymentService</c> default
+    /// deployment) no longer reads this property when <c>AiSearchOptions</c> is registered.</para>
+    /// <para><b>Migration:</b> set <c>AiSearch:KnowledgeIndexName</c> only; a lone
+    /// <c>Analysis:SharedIndexName</c> is retained solely as a backward-compat fallback for legacy
+    /// test fixtures that construct services without <c>AiSearchOptions</c>. Remove this property
+    /// once no such fixture remains.</para>
     /// </summary>
     public string SharedIndexName { get; set; } = "spaarke-files-index";
 

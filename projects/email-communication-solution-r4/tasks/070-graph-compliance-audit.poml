@@ -1,0 +1,123 @@
+<task id="070" project="email-communication-solution-r4">
+  <metadata>
+    <title>Graph compliance audit — `Mail-Advanced.*` (by 2026-12-31) + EWS (by 2026-10-01)</title>
+    <phase>Wave 7 — Microsoft hardening + auth + index</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies></dependencies>
+    <blocks></blocks>
+    <tags>bff-api, compliance</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Reviews security-/compliance-sensitive Graph usage against two hard Microsoft deadlines; a wrong verdict risks a shipping-solution compliance breach. `bff-api` + `compliance` tags and NFR-01 (first-class compliance) trigger FULL rigor. Read-only audit but must be rigorous; files a remediation task if exposure found.</rigor-reason>
+    <parallel-group>W7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only audit of Graph/EWS usage; produces a findings doc. Disjoint from all other W7 tasks. Runs anytime after W0.</parallel-reason>
+    <fr-refs>FR-23, NFR-01</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Audit the shipping BFF solution against the two hard Microsoft-2026 Graph deadlines and produce a written finding for each:
+
+    1. **`Mail-Advanced.*` (enforced 2026-12-31)** — confirm the ONLY non-draft sensitive-property write to a Graph mail item is the `IsRead=true` PATCH in `IncomingCommunicationProcessor` (~line 687). Determine whether that specific PATCH is exempt from the `Mail-Advanced.*` admin-consent requirement (per DEC-6 it is *likely* exempt; treat as an audit item, not an assumption). Grep the entire `Services/` tree for other `PATCH`/update calls to `/messages`/`mailFolders` that set sensitive properties (categories, flag, importance, extended properties, etc.).
+
+    2. **EWS (enforced-off 2026-10-01)** — confirm there is NO Exchange Web Services usage anywhere in the shipping solution (per spec: none in `src/`). Grep `src/`, scripts, and plugins for EWS SOAP/`ExchangeService`/`exchange.asmx`/`Microsoft.Exchange.WebServices` references.
+
+    For each deadline produce a written finding (exposed / not-exposed + evidence). If either audit finds real exposure, file a remediation task (with the deadline) before the corresponding date and flag it as a Human Escalation.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer with Microsoft Graph mail-API and compliance expertise. Authoritative on `Services/Communication/` Graph calls and the Microsoft 2026 Graph/EWS deprecation timeline.
+  </role>
+
+  <goal>
+    A compliance findings note (`notes/070-graph-compliance-findings.md`) with two clearly-labeled sections: (a) `Mail-Advanced.*` — the enumerated set of non-draft sensitive-property writes, the exemption determination for the `IsRead=true` PATCH, and a verdict; (b) EWS — evidence that no EWS usage exists in the shipping solution, or a filed remediation task. Each finding is dated and tied to its deadline.
+  </goal>
+
+  <context>
+    <background>
+      Microsoft is tightening Graph mail permissions: `Mail-Advanced.*` becomes required for certain sensitive-property writes (enforced 2026-12-31), and EWS is turned off for the tenant class on 2026-10-01. Spaarke's inbound pipeline is 100% Graph; the only known sensitive write is marking a processed message read. NFR-01 makes compliance first-class — this audit produces the sign-off evidence, not advisory notes.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs (~line 687 — `IsRead=true` PATCH)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (full tree — other Graph writes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/ (Graph client usage)</file>
+      <file>scripts/ + src/dataverse/plugins/ (EWS check)</file>
+      <file>projects/email-communication-solution-r4/notes/070-graph-compliance-findings.md (NEW — findings)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-23">Confirm the only non-draft sensitive-property write is the `IsRead=true` PATCH and determine its `Mail-Advanced.*` exemption before 2026-12-31; confirm no EWS before 2026-10-01. Written finding per deadline; remediation task filed if exposed.</constraint>
+    <constraint source="NFR-01">No EWS anywhere in the shipping solution (enforced-off 2026-10-01); non-draft sensitive-property writes limited to admin-consented `Mail-Advanced.*` or confirmed-exempt (enforced 2026-12-31). Compliance is first-class.</constraint>
+    <constraint source="ADR-028">Any Graph call inspected must use central `IGraphClientFactory` (`ForApp`/`ForUserAsync`); flag any self-built credential as a separate finding.</constraint>
+    <constraint source="project">Read-only audit — no code changes in this task except authoring the findings note. Remediation (if any) is a separate filed task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>graph/mail-compliance</topic>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+      <file>docs/architecture/email-processing-architecture.md</file>
+      <file>knowledge/</file>
+    </files>
+    <patterns>
+      <pattern name="Compliance findings doc" location="projects/email-communication-solution-r4/notes/">
+        One section per deadline; enumerate evidence (grep hits + file:line); explicit verdict; filed remediation task on exposure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Context check">Check context usage; handoff + stop if &gt; 70%.</step>
+    <step order="2" name="Load knowledge">Read spec FR-23 + NFR-01, DEC-6, and the Graph deadline context. If Graph deprecation specifics are unclear, consult the `researcher` subagent / `knowledge/`.</step>
+    <step order="3" name="Locate IsRead PATCH">Read `IncomingCommunicationProcessor.cs` around line 687; confirm the `IsRead=true` PATCH and its Graph endpoint/permission.</step>
+    <step order="4" name="Enumerate sensitive writes">Grep `Services/` for PATCH/update/POST to `/messages`, `/mailFolders`, extended properties, categories, flag, importance. Record each with file:line.</step>
+    <step order="5" name="Exemption determination">Determine whether the `IsRead=true` PATCH requires `Mail-Advanced.*` or is exempt; cite Microsoft guidance. Record verdict.</step>
+    <step order="6" name="EWS scan">Grep `src/`, `scripts/`, `src/dataverse/plugins/` for `ExchangeService`, `Microsoft.Exchange.WebServices`, `exchange.asmx`, EWS SOAP. Record evidence.</step>
+    <step order="7" name="Write findings">Author `notes/070-graph-compliance-findings.md` with both dated sections + verdicts.</step>
+    <step order="8" name="File remediation if exposed">If either audit finds real exposure, file a remediation task (deps + deadline) and raise a Human Escalation per root §6.</step>
+    <step order="9.5" name="FULL quality gates">Invoke `code-review` on the findings note (accuracy of cited evidence); invoke `adr-check` (ADR-028 credential check). Address Critical findings.</step>
+    <step order="10" name="Update tracking">Mark task 070 ✅ in `tasks/TASK-INDEX.md`; note the verdict.</step>
+    <step order="11" name="Reset state">Update `current-task.md`: status → completed; advance; record decisions.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Enumerate sensitive Graph writes + EWS references</tool>
+    <tool name="read">Inspect `IncomingCommunicationProcessor` + Graph client usage</tool>
+    <tool name="researcher">Confirm Graph/EWS deprecation specifics if stale in context</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes">projects/email-communication-solution-r4/notes/070-graph-compliance-findings.md (NEW — dated findings, both deadlines)</output>
+    <output type="docs">Remediation task filed (CONDITIONAL — only if exposure found)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Findings note exists with two dated sections (`Mail-Advanced.*` 2026-12-31; EWS 2026-10-01).</criterion>
+    <criterion testable="true">The complete set of non-draft sensitive-property writes is enumerated with file:line evidence; the `IsRead=true` PATCH exemption is determined with a cited verdict.</criterion>
+    <criterion testable="true">EWS scan covers `src/`, `scripts/`, and `src/dataverse/plugins/` with evidence; verdict is unambiguous (exposed / not-exposed).</criterion>
+    <criterion testable="true">If exposure found, a remediation task is filed with its deadline and a Human Escalation raised.</criterion>
+    <criterion testable="true">No code changed except the findings note.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Read-only audit — no BFF code change, so no publish-size delta expected. Still runs `/conflict-check` is NOT required (no BFF PR beyond the note). If remediation is filed and code changes later, that task carries the full BFF governance obligations.
+
+    DEC-6 is an open Unresolved Question: this task resolves it (or files remediation). W7 compliance sign-off blocks on this finding.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 REQUIRED. The verdict per deadline is the deliverable; escalate exposure per root §6.
+    </protocol>
+  </execution>
+</task>

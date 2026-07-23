@@ -77,9 +77,47 @@ public sealed record SendCommunicationRequest
     public bool ArchiveToSpe { get; init; } = false;
 
     /// <summary>
-    /// Optional array of SPE document IDs (driveItem IDs) to attach to the email.
-    /// Files are downloaded from SPE via SpeFileStore and included as base64-encoded FileAttachments
-    /// in the Graph sendMail payload. Max 150 attachments, 35MB total size.
+    /// Optional array of Dataverse <c>sprk_document</c> record GUIDs to attach.
+    /// These are DMS <b>Document record</b> IDs — NOT raw SPE driveItem/File IDs. The server
+    /// resolves each Document to its associated SPE File via the record's
+    /// <c>sprk_graphdriveid</c> + <c>sprk_graphitemid</c>, downloads it, and includes it as a
+    /// base64 <c>FileAttachment</c> in the Graph sendMail payload. Max 150 attachments, 35 MB total.
+    /// Email attachments are always tracked Documents in Spaarke's DMS (see ADR-045); the field
+    /// name is accurate — do not rename to "DriveItemIds".
     /// </summary>
     public string[]? AttachmentDocumentIds { get; init; }
+
+    /// <summary>
+    /// For reply/forward sends: the parent message's RFC-2822 <c>Internet-Message-Id</c> (Email) or the
+    /// parent message's <c>sprk_communication</c> id (Message — task 062). When provided, it is stamped
+    /// onto <c>sprk_communication.sprk_inreplyto</c> to preserve reply-thread continuity (feeds the W1
+    /// thread-continuity association rung for Email; a display/threading hint for Message). Optional.
+    /// </summary>
+    public string? InReplyToMessageId { get; init; }
+
+    /// <summary>
+    /// Reply / Reply All / Forward regarding inheritance (UAT R4 D12-1 / task 124): the SOURCE
+    /// (parent) <c>sprk_communication</c> id the new draft is composed from. When provided, the
+    /// create path copies ALL populated <c>sprk_regarding*</c> typed lookups (per
+    /// <see cref="Engine.RegardingFieldMap.AllRegardingFields"/>) plus the denormalized regarding
+    /// pointer (id/type/name/url + count) from that source onto the new record — a DIRECT COPY
+    /// (true inheritance), never a re-run of the Association Engine. Additive: only populated source
+    /// fields are set; a sibling regarding field is never cleared. Best-effort / non-fatal — an
+    /// inheritance-read failure never fails the send. Optional; only reply/forward set it.
+    /// </summary>
+    public Guid? InheritRegardingFromCommunicationId { get; init; }
+
+    /// <summary>
+    /// R1 "respond into the current thread" target (FR-12, task 062): the target
+    /// <c>sprk_communicationthread</c> record id. When provided on a <see cref="Models.CommunicationType.Message"/>
+    /// send, the outbound thread-resolution step stamps <c>sprk_communication.sprk_communicationthread</c>
+    /// directly to this id instead of running the ACS-thread find-or-create resolver (<c>ThreadResolver</c> /
+    /// <c>MessagingThreadKeyStrategy</c>). R1 has no live channel (design §6.2/§8.5): the polling timeline
+    /// reads persisted <c>sprk_communication</c> rows grouped by this lookup, so "respond into the thread"
+    /// is satisfied by the Dataverse stamp alone — ACS-thread-session reuse (posting into the SAME ACS chat
+    /// thread for live delivery) is explicitly out of scope for R1 (deferred to R2). Also honored on Email
+    /// sends (R3 FR-19): the outbound resolver pins the email to this thread (<c>AssignExplicitThreadAsync</c>)
+    /// instead of find-or-create — same send path, not a new branch. Optional.
+    /// </summary>
+    public Guid? ThreadId { get; init; }
 }

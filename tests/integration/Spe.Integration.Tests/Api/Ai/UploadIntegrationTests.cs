@@ -578,32 +578,41 @@ public class UploadTestFixture : IntegrationTestFixture
             .Setup(r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        // Return sessions for both test session IDs
-        foreach (var sessionId in new[] { TestSessionId, CleanupSessionId })
-        {
-            MockDataverseRepository
-                .Setup(r => r.GetSessionAsync(It.IsAny<string>(), sessionId, It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ChatSession(
-                    SessionId: sessionId,
-                    TenantId: "upload-test-tenant-001",
-                    DocumentId: TestDocumentId,
-                    PlaybookId: TestPlaybookId,
-                    CreatedAt: now,
-                    LastActivity: now,
-                    Messages: []));
-        }
+        // Model archive-on-delete so the fixture reflects production cold-store behavior:
+        // ChatSessionManager.DeleteSessionAsync archives the session (archive-not-delete pattern),
+        // and a subsequent GetSessionAsync must read it back as null (the session is no longer live).
+        // Without this, the mock returned the session forever, so persist-after-delete slipped past
+        // the endpoint's session-not-found → 404 guard (ChatDocumentEndpoints.cs:700-706) and
+        // reached the real SpeFileStore, which throws in the test host → 500 (the SessionCleanup
+        // false failure, #621). §F.2 Fixture-Config-FIRST: the gap was in the fixture, not the
+        // production error mapping (the 404 path already exists and is correct).
+        var archivedSessions = new HashSet<string>(StringComparer.Ordinal);
 
-        // Return null for unknown sessions
+        ChatSession BuildSession(string sessionId) => new ChatSession(
+            SessionId: sessionId,
+            TenantId: "upload-test-tenant-001",
+            DocumentId: TestDocumentId,
+            PlaybookId: TestPlaybookId,
+            CreatedAt: now,
+            LastActivity: now,
+            Messages: []);
+
+        // Return a live session for the known test IDs until archived; null otherwise.
         MockDataverseRepository
-            .Setup(r => r.GetSessionAsync(
-                It.IsAny<string>(),
-                It.Is<string>(s => s != TestSessionId && s != CleanupSessionId),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ChatSession?)null);
+            .Setup(r => r.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string sessionId, CancellationToken _) =>
+                (sessionId == TestSessionId || sessionId == CleanupSessionId)
+                    && !archivedSessions.Contains(sessionId)
+                    ? BuildSession(sessionId)
+                    : null);
 
         MockDataverseRepository
             .Setup(r => r.ArchiveSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .Returns((string _, string sessionId, CancellationToken _) =>
+            {
+                archivedSessions.Add(sessionId);
+                return Task.CompletedTask;
+            });
 
         MockDataverseRepository
             .Setup(r => r.AddMessageAsync(It.IsAny<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>(), It.IsAny<CancellationToken>()))

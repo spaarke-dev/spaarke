@@ -64,6 +64,38 @@ public class KnowledgeDeploymentServiceTests
     }
 
     [Fact]
+    public async Task GetDeploymentConfigAsync_SharedModel_UsesCanonicalKnowledgeIndexName_NotDeprecatedSharedIndexName()
+    {
+        // FR-26 / FAILURE-MODES G-9: when AiSearchOptions is registered (production), the shared
+        // write-target index follows the single canonical AiSearch:KnowledgeIndexName — the SAME
+        // setting the read path (RagService) uses — NOT the deprecated Analysis:SharedIndexName.
+        // This proves the write path lands documents in the same index reads search.
+        var analysisOptions = Options.Create(new AnalysisOptions
+        {
+            DefaultRagModel = RagDeploymentModel.Shared,
+            SharedIndexName = "legacy-write-only-index" // deprecated — must be ignored when AiSearchOptions present
+        });
+        var aiSearchOptions = Options.Create(new AiSearchOptions
+        {
+            KnowledgeIndexName = "spaarke-canonical-index" // canonical single read/write setting
+        });
+        var service = new KnowledgeDeploymentService(
+            _searchIndexClientMock.Object,
+            analysisOptions,
+            _loggerMock.Object,
+            secretClient: null,
+            aiSearchOptions: aiSearchOptions);
+
+        // Act
+        var result = await service.GetDeploymentConfigAsync("tenant-consolidated");
+
+        // Assert — write default == read default (canonical), split-brain closed
+        result.Model.Should().Be(RagDeploymentModel.Shared);
+        result.IndexName.Should().Be("spaarke-canonical-index");
+        result.IndexName.Should().NotBe("legacy-write-only-index");
+    }
+
+    [Fact]
     public async Task GetDeploymentConfigAsync_DedicatedModel_ReturnsCorrectIndexName()
     {
         // Arrange

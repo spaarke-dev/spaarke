@@ -1,0 +1,124 @@
+<task id="110" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>UAT-R1 — create-on-save: relax sessionId to optional on the transient-create (Browse/local-file) path</title>
+    <phase>9 UAT-Fix</phase>
+    <status>pending</status>
+    <estimated-hours>4</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>114</blocks>
+    <tags>bff-api,api,compose,uat-remediation</tags>
+    <rigor-hint reason="Modifies BFF wire contract (.cs) on the Save path; FULL + E2E DoD">FULL</rigor-hint>
+    <model-tier reason="BFF request-contract change on the create-on-save backbone; touches ComposeService + endpoint DTO; opus">opus</model-tier>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe reason="Edits only ComposeEndpoints.cs + ComposeService.cs (+ the save DTO). Disjoint from 111 (client toolbar) and 112 (client ConversationPane/formatter). NOT co-run with 113 (also edits ComposeEndpoints.cs) — 113 is Wave 2.">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    UAT defect #2: a user Browses/opens a local `.docx` into a fresh Compose widget (no chat session), clicks
+    Save, and gets HTTP 400 `sessionId is required in the request body for the first-Save promotion rebind`.
+    Root cause is a CONTRACT MISMATCH, not a client omission: the server hard-rejects an empty `sessionId` even
+    though the FR-07 rebind it drives (`RebindSessionDocumentIdAsync`) is ALREADY null-tolerant (warns + returns
+    null when the session doesn't exist), and the SPE upload + `sprk_document` create + indexing all complete
+    without a session. The Browse path legitimately has no session. Fix on the SERVER: make `sessionId` OPTIONAL
+    on the transient-create path and skip the FR-07 ChatSession rebind when it is absent. The chat-launched path
+    (real sessionId present) must still rebind exactly as today.
+  </prompt>
+
+  <role>
+    Senior .NET developer fluent in Minimal API request validation and the Compose create-on-save backbone
+    (`ComposeService.SaveAsync` / `PromoteIfEphemeralAsync`). You relax an over-strict precondition to match the
+    logic behind it, without weakening the chat-launched rebind or the R5-E persistence invariant.
+  </role>
+
+  <goal>
+    First Save of a transient draft with NO `sessionId` succeeds: the SPE drive-item is created (via 013's
+    backbone), `sprk_document` is created, indexing runs, and the FR-07 ChatSession rebind is skipped (not
+    attempted, no throw). First Save WITH a real `sessionId` behaves exactly as today (rebinds the session's
+    DocumentId). The three now-relaxed guards (`ComposeEndpoints.cs:1312`, `ComposeService.cs:265`, `:431`) no
+    longer 400/throw on empty session for the transient-create path.
+  </goal>
+
+  <context>
+    <background>
+      The 400 is thrown at `ComposeEndpoints.cs:1312` (`if (string.IsNullOrWhiteSpace(body.SessionId)) return
+      BadRequest("sessionId is required in the request body for first-Save promotion rebind.")`), re-asserted at
+      `ComposeService.SaveAsync` (`:265-266`) and `PromoteIfEphemeralAsync` (`:431-432`). The rebind itself,
+      `RebindSessionDocumentIdAsync` (`:1070-1077`), already handles a non-existent session by logging a warning
+      and returning null — so the guards are stricter than the code needs. Client side (NOT changed here, for
+      reference only): `ComposeWorkspace.tsx:855-862` sends `sessionId: state.sessionId`; the Browse path
+      (`handleBrowseFileSelected` → `mountTransient`, `ComposeWorkspace.types.ts:141`) never sets it, so it is
+      `''`. The assistant-upload path DOES set it (`requestUploadMount`) and is unaffected.
+    </background>
+    <relevant-files>
+      <file purpose="relax-endpoint-guard" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (guard ~1312; SaveComposeDocumentBody ~1570-1579)</file>
+      <file purpose="relax-service-guards" edit="true">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (SaveAsync ~265-266; PromoteIfEphemeralAsync ~431-432; RebindSessionDocumentIdAsync ~1070-1077 — already null-tolerant, reference)</file>
+    </relevant-files>
+    <notes>
+      Make `sessionId` OPTIONAL for the transient-create path (no existing DocumentSpeId / first Save). Where a
+      real sessionId IS supplied, keep the rebind. The cleanest shape: drop the hard `IsNullOrWhiteSpace` reject,
+      and guard the rebind call with `if (!string.IsNullOrWhiteSpace(sessionId)) { await RebindSessionDocumentIdAsync(...); }`.
+      Do NOT fabricate a throwaway session id client-side — that manufactures state to satisfy a check the server
+      does not truly need. Preserve every other create-on-save invariant from task 013 (fileless/unindexed never
+      success; idempotency).
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="project (E2E DoD, binding)">NOT ✅ until a `WebApplicationFactory` test POSTs through the REAL `/api/compose/documents/create-on-save` route with an EMPTY/absent sessionId and asserts 200 + the persisted `sprk_document` side-effect. A service-only or `Mock&lt;HttpMessageHandler&gt;` test does NOT satisfy this.</constraint>
+    <constraint source="project (R5-E)">A `sprk_document` with no SPE file OR no index is still NEVER success — this task only relaxes the session precondition, not the persistence bar.</constraint>
+    <constraint source="project">Do NOT add a client-side session generator; the fix is server-side optionality.</constraint>
+    <constraint source="ADR-013">`Services/Compose` injects no AI internals; do not add any.</constraint>
+    <constraint source="ADR-008">Auth/endpoint-filter posture on the route is unchanged (still `.RequireAuthorization()`).</constraint>
+    <constraint source="bff-hygiene">BFF-touching — state Placement Justification, measure publish-size delta vs 49.63 MB baseline, CVE scan, update tests per §10.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/create-on-save, request-validation, chat-session-rebind</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/uat-r2-defect-triage-2026-07-10.md</file>
+      <file>projects/spaarkeai-compose-r2/tasks/013-create-on-save-pipeline.poml</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="No new component — relaxes an existing guard">
+    <existing>The guard + rebind already exist in ComposeEndpoints/ComposeService; RebindSessionDocumentIdAsync already tolerates a missing session.</existing>
+    <extension>Modify existing validation only (make sessionId optional; conditional rebind). No new service, DTO type, or endpoint.</extension>
+    <cost-of-doing-nothing>Without it, the entire Browse/open-local-file → Save flow (FR-01) is dead — every first Save without a chat session returns 400, which is exactly what the owner hit in UAT.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load the triage note + task 013 + bff-extensions.md. State Placement Justification. Read the three guards + `RebindSessionDocumentIdAsync` and confirm the rebind is null-tolerant.</step>
+    <step order="1">Make `SessionId` optional on `SaveComposeDocumentBody` and remove the hard reject at `ComposeEndpoints.cs:1312` for the transient-create path (keep any genuinely-required fields: containerId, tenantId, content).</step>
+    <step order="2">In `SaveAsync`/`PromoteIfEphemeralAsync`, drop the `IsNullOrWhiteSpace(sessionId)` throws; wrap the FR-07 rebind call so it runs only when a non-empty sessionId is supplied. Preserve all other create-on-save behavior (013).</step>
+    <step order="3">Add a `WebApplicationFactory` test (tests/integration/seam/ or the Compose endpoint-contract suite) that POSTs create-on-save with EMPTY sessionId + valid containerId/content → asserts 200 + `sprk_document` created (or the interim-success projection) AND that no rebind was attempted; add a second case WITH a real sessionId asserting the rebind still fires.</step>
+    <step order="4">Build BFF; run the Compose unit + endpoint-contract + new WAF tests; measure publish-size delta vs 49.63 MB; CVE scan; NetArchTest facade green.</step>
+    <step order="5">code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/integration/seam/ComposeCreateOnSaveSessionlessSeamTests.cs (or extend the existing Compose endpoint-contract WAF suite)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">(E2E, non-waivable) A WebApplicationFactory test POSTs `/api/compose/documents/create-on-save` with an EMPTY/absent sessionId (+ containerId + content) through the real route and asserts HTTP 200 + the persisted `sprk_document` side-effect.</criterion>
+    <criterion testable="true">(positive) With a real sessionId supplied, first Save still rebinds the ChatSession DocumentId exactly as before (asserted in a WAF or service test).</criterion>
+    <criterion testable="true">(negative) The three former guards no longer 400/throw on empty sessionId for the transient-create path.</criterion>
+    <criterion testable="true">(negative, R5-E preserved) A record lacking an SPE file OR an index is still not returned as success.</criterion>
+    <criterion testable="true">No client-side session generator was added; the change is server-side only.</criterion>
+    <criterion testable="true">BFF publish-size delta reported vs 49.63 MB; no new HIGH CVE; NetArchTest facade green; unit + endpoint-contract tests pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If `SaveComposeDocumentBody` / the save DTO is shared such that making sessionId optional forces a breaking change on another consumer, STOP and escalate per CLAUDE.md §6.5 (path A exception vs additive) rather than guessing.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

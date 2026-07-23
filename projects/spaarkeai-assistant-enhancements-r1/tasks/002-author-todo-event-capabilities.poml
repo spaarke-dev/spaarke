@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Author create-flow surface-launch capabilities (matter / Event-Task / To Do) + repoint shipped create-matter/create-task</title>
+    <phase>1: Catalog &amp; Schema Foundation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 012, 021, 050</blocks>
+    <tags>dataverse, ai, solution, fields</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Dispatch-catalog authoring + repointing shipped capabilities; drives grounded execution (ADR-039). Wrong routing breaks create flows.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability modeling + a net-new "capability launches a pre-seeded surface" mechanism decision; architectural judgment with correctness stakes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dataverse catalog authoring — main-session; co-designs the hand-off contract with task 012 (client side).</parallel-reason>
+  </metadata>
+
+  <prompt>
+    RESOLVED 2026-07-15 (design §10.1, closes the earlier BLOCKED conflict): R1 create capabilities do NOT write records via a JPS — they DRAFT in chat then LAUNCH the entity's real create surface, pre-seeded. The shipped create-matter and create-task are disposition=Informational and have the LLM call dataverse.create_record directly (the multi-turn-elicitation dead-end). Repoint them to launch a surface, and split "task/to-do" intent by destination. Route by confirmed intent: matter → Create Matter wizard; Event-Task (sprk_event, subtype=Task) → Event wizard with subtype preset=Task; To Do (sprk_todo) → OOB sprk_todo create form in a modal. Author the tool descriptions + the "Event-Task vs To Do" ambiguity + chip transitions; author the surface-launch routing metadata the client hand-off (task 012) consumes.
+  </prompt>
+
+  <role>
+    SPAARKE AI platform developer expert in the ADR-039 grounded-execution catalog (sprk_playbookconsumer Bindings, sprk_analysisaction Actions, tool descriptions, chip transitions, dispositions) and the client wizard/OOB-form launch surfaces.
+  </role>
+
+  <goal>
+    Three create intents each dispatch to the correct pre-seeded launch surface (per design §10.1 routing table): (1) create-matter → Create Matter wizard; (2) create-event/Event-Task → Event wizard (subtype preset Task); (3) create-todo → OOB sprk_todo form modal. The shipped create-matter + create-task are repointed off direct dataverse.create_record onto the surface-launch hand-off. Each capability carries a tool description encoding the "Event-Task vs To Do" disambiguation + chip transitions. The surface-launch routing metadata (which surface + pre-seed contract) is authored so task 012's client hand-off can consume it.
+  </goal>
+
+  <context>
+    <background>
+      As-built (verified task 002, spaarkedev1): Binding = sprk_playbookconsumer joined to sprk_analysisaction. Shipped create-matter (UC-B-6) + create-task (UC-H-1) are disposition=Informational and instruct the LLM to call dataverse.create_record. create-task writes sprk_event(sprk_eventtype_ref="Task", recordId 124f5fc9-98ff-f011-8406-7c1e525abd8b). Both sprk_todo and sprk_event tables exist; no sprk_todo-writing capability exists. See BLOCKED.md (now resolved) + design §10.1.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">ONE probabilistic decider; do NOT introduce a second intent mechanism when authoring the Event-Task-vs-To-Do ambiguity — it is authored into tool descriptions, not a classifier.</constraint>
+    <constraint source="project">Route by design §10.1: matter→Create Matter wizard; Event-Task→Event wizard (subtype=Task preset); To Do→OOB sprk_todo form modal (Xrm.Navigation.navigateTo per MODAL-DECISION-CRITERIA). Do NOT invent a sprk_todo-writing JPS; do NOT keep the LLM-calls-create_record path for these three intents.</constraint>
+    <constraint source="project">The "capability launches a pre-seeded surface" mechanism is genuinely new: decide + document HOW a capability signals "open surface X pre-seeded" (candidate: a new sprk_disposition value or a new Binding column carrying the surface target) — this is the contract task 012 consumes; co-design it here (catalog side) with 012 (client side). If the mechanism choice needs an owner call (e.g. new disposition option-set value), surface it.</constraint>
+    <constraint source="project">Repoint (do not silently duplicate) the shipped create-matter + create-task rows. Preserve their sprk_consumertype identity where dispatch/consumers reference it; document the change.</constraint>
+    <constraint source="ADR-024">The Event-Task / To Do records still honor their regarding contracts (11-entity regarding where applicable) — the wizard/OOB form owns the write; the capability only launches it pre-seeded.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Binding contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs">The full sprk_playbookconsumer + sprk_analysisaction field set + disposition/risk/surfaces vocabulary to author against.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Re-read the shipped create-matter + create-task rows (tooldescription, disposition, surfaces, action link) as the concrete baseline being repointed.</step>
+    <step order="2">Decide + document the surface-launch mechanism (new disposition value vs new Binding column carrying the surface target + pre-seed contract). If it needs an owner call (option-set addition), surface it before authoring.</step>
+    <step order="3">Author/repoint create-matter → launch Create Matter wizard, pre-seeded (file + drafted values via the task-012 envelope contract).</step>
+    <step order="4">Author/repoint create-task → Event wizard with Event subtype preset = Task (sprk_event); update its tool description to the surface-launch behavior.</step>
+    <step order="5">Author create-todo → OOB sprk_todo create form in a modal; tool description encodes the "explicit To Do" trigger.</step>
+    <step order="6">Author the "Event-Task vs To Do" ambiguity into the tool descriptions (P4) + author sprk_chiptransitions rows for each.</step>
+    <step order="7">List owed eval cases (task 051). Verify dispatch selects each capability for its trigger utterance (surface-open is verified in 012/013). Update TASK-INDEX.md 002 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the surface-launch mechanism requires a new sprk_disposition option-set value or other schema/option-set change needing owner sign-off, STOP and surface it (§6.5) before authoring — do not silently add an option-set value.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Author/verify catalog rows (create/update sprk_playbookconsumer + sprk_analysisaction)</tool>
+    <tool name="dotnet">Build/verify BFF if the mechanism touches Binding.cs / ConsumerRoutingService</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Repointed create-matter + create-task rows; new create-todo row; surface-launch routing metadata; chip rows</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-assistant-enhancements-r1/notes/surface-launch-mechanism.md (the capability→surface hand-off contract 012 consumes)</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"create a matter" dispatches a capability that launches the pre-seeded Create Matter wizard (not direct create_record).</criterion>
+    <criterion testable="true">"create a task"/"create an event" dispatches the Event-wizard launch with subtype preset = Task; "create a to do" dispatches the OOB sprk_todo form-modal launch.</criterion>
+    <criterion testable="true">The Event-Task-vs-To-Do ambiguity resolves by inference or one-tap pick, never multi-turn text negotiation; encoded in tool descriptions only (no classifier).</criterion>
+    <criterion testable="true">The shipped create-matter + create-task are repointed off direct dataverse.create_record; the surface-launch routing metadata contract (for task 012) is documented; owed eval cases listed.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-A2 / FR-A1 / P4; design §10.1. Was BLOCKED 2026-07-15 (as-built conflict) → resolved by owner decision (wizard/form-launch hand-off, intent-routed). Co-design the hand-off contract with task 012. Owner reviews content (FR-J1).
+
+    COMPLETED 2026-07-16 (main-session, Opus/FULL). Live spaarkedev1 catalog authored:
+    - create-matter Binding (89cd91f6…) → disposition=SurfaceLaunch (100000007); tool description rewritten (draft → pre-seeded Create Matter wizard; NO dataverse.create_record, NO in-turn GUID resolution); next-step chips → create-task, create-todo.
+    - create-task Binding (3d9724e5…) → disposition=SurfaceLaunch; tool description rewritten (Event-Task → Event wizard, subtype preset Task, sprk_eventtype_ref=Task GUID 124f5fc9…; NO create_record; disambiguation authored); one-tap chip → create-todo ("Make it a To Do instead").
+    - create-todo Binding (b78b1cf5-3381-f111-ab0f-7ced8ddc4cc6, NEW) → disposition=SurfaceLaunch, consumertype=create-todo, ucid UC-H-2, surfaces=assistant; tool description encodes explicit-To-Do trigger + disambiguation; one-tap chip → create-task ("Make it an Event-Task instead").
+    - CREATE-TODO@v1 Action (6035a8e5-3381-f111-ab0f-7ced8ddc4cc6, NEW) → Prompted, JSON, allowstools=false; mirrors CREATE-TASK@v1 output {title,description,priority_suggestion,cited_refs}; framing = draft → OOB sprk_todo form pre-seeded.
+    - CREATE-MATTER@v1 (63f086d3…) + CREATE-TASK@v1 (b66c8dda…) Actions → allowstools=false (P1: drafting turn produces only JSON, no create_record/GUID resolution). CREATE-TASK@v1 input `required` relaxed to [] (due_date/assign_to now optional pre-seed hints; surface collects them — kills the loop-elicitation dead-end). capturemode left as-is (inert; arg-elicitation = task 011).
+    - Both Actions already emitted structured drafted-fields JSON pre-repoint (ai-architecture-redesign-r1) → NO output redesign needed; repoint = disposition + tool description + allowstools.
+    - Server does NO write: OutputRouter SurfaceLaunch pass-through already coded+merged; seam test DispatchAsync_SurfaceLaunchDisposition_Admits_Routes_Stores_AndRenders pins it.
+    Deliverables: notes/surface-launch-mechanism.md (contract for 012), notes/owed-eval-cases.md (E-002-01..17 for 051). Step 9.5: no code files modified (catalog rows + docs) → code gates N/A; ADR-039/024/040/043 self-checked clean. Escalation trigger (new option-set value) already resolved (owner added 100000007). Interim: rows are SurfaceLaunch before 012 client hand-off ships → dev degrades to "draft shown, no launch" (pass-through, not error) until 012/013.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files before starting. /conflict-check before any BFF PR. FULL-rigor Step 9.5.</protocol>
+  </execution>
+</task>

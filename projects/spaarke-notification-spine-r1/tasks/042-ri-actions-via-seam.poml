@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-notification-spine-r1">
+  <metadata>
+    <title>RI Actions via Layer-A Seam — Outbox + Layer-C Ping + Appnotification Mirror</title>
+    <phase>4 Comms-RI Proving Producer + Policy</phase>
+    <gate>blocked-until:040,041,012,020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Code implementation wiring RI actions through the Layer-A seam + Layer-B outbox + Layer-C ping + appnotification mirror; tags include bff-api/ai/integration-test — this task ADDS a tests/integration/seam/** file, so the TEST-MODIFYING override row (root CLAUDE.md §8) applies unconditionally; it also converges four upstream tasks (040, 041, 012, 020) into one E2E path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Converges four independently-built seams (comms-assessed producer, comms policy gate, Layer-B outbox, Layer-C SignalR delivery) into a single end-to-end RI action path spanning Layer A/B/C plus the appnotification mirror — high-blast-radius integration, not a mechanical extension of any single upstream task.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Blocked on four upstream tasks (040, 041, 012, 020); this is the convergence point of Phase 4 and must run serially after all four exist.</parallel-reason>
+    <deps>040,041,012,020</deps>
+    <tags>bff-api, api, ai, integration-test</tags>
+    <estimated-effort>4-6h</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the comms-RI action path end to end: when task 041's policy gate authorizes an assessed communication, execute the configured actions (Event/Task/Notification) via the Layer-A seam (established by task 031), write a `kind=communication-assessed` outbox row (task 012's service), best-effort ping Layer C (task 020), and explicitly mirror to `appnotification` via `NotificationService.CreateNotificationAsync` so the action surfaces in Daily Briefing.</prompt>
+
+  <role>SPAARKE platform developer with ADR-013 facade-consumption and ADR-043 dispatch-spine experience. This task is a pure convergence/wiring task across four already-built seams — do not build new infrastructure, only call the existing ones in the correct order.</role>
+
+  <goal>An "authorize" decision from task 041's comms policy gate results in: (1) the configured Event/Task/Notification record(s) created via the Layer-A seam (`PublicContracts`, never a direct Dataverse write); (2) a `kind=communication-assessed` outbox row written via the task-012 outbox service, containing IDs + minimal display metadata + `regardingRecordId` only (NFR-02/03); (3) a best-effort Layer-C SignalR ping AFTER the outbox write (outbox-before-ping); (4) an explicit `NotificationService.CreateNotificationAsync` call producing the `appnotification` mirror record, so the RI action is visible in Daily Briefing. A "deny" decision from 041 results in NONE of the above (no seam call, no outbox row, no appnotification). An E2E seam test proves the full chain both ways.</goal>
+
+  <context>
+    <background>
+      This is Phase 4's third and final deliverable (spec FR-13), the point where the comms-RI proving producer becomes an observable end-user outcome: an assessed inbound communication auto-creates the configured records and a Daily-Briefing notification (spec Success Criterion 2). It depends on the Layer-A action seam (task 031, itself blocked-until by the 040 gate) being invokable without a chat session, on the comms policy gate (041) having already decided to authorize, on the Layer-B outbox service (012) being ready to accept writes, and on the Layer-C delivery service (020) being ready to accept a best-effort ping. The substrate correction confirmed 2026-07-20: `DailyBriefingNarrator` does NOT itself write `appnotification` — narration-only; all appnotification writes are centralized in `NotificationService.CreateNotificationAsync` (`NotificationService.cs:55`) — so this task must call it explicitly, not assume the narrator's render path does it.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (Layer-A seam facade — established by task 031)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Notifications/ (Layer-B outbox service — established by task 012)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/ (DailyBriefing* — the consumer surface; does NOT write appnotification itself)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/DispositionRoutability.cs</file>
+      <file>tests/integration/seam/Communication/MessagingSpineSeamTests.cs</file>
+      <file>tests/integration/seam/Ai/DispositionRoutabilitySeamTests.cs</file>
+      <file>tests/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">RI actions MUST execute via the Layer-A seam (`PublicContracts`, ADR-013) — MUST NOT bypass it with a direct Dataverse write and MUST NOT introduce a second/parallel action path (root spec MUST NOT list: no second push/delivery/action path).</constraint>
+    <constraint source="project">The `kind=communication-assessed` outbox row MUST be written to the Layer-B outbox BEFORE the Layer-C ping fires (outbox-before-ping doctrine, ADR-041/043 store-before-render) — mirror the write-then-ping ordering already established by tasks 012/020/024.</constraint>
+    <constraint source="project">The envelope written to the outbox row carries IDs + minimal display metadata + `regardingRecordId` (ADR-024) ONLY — no message body, no privileged content, no pre-authorized action token (NFR-02/03).</constraint>
+    <constraint source="project">This task MUST explicitly call `NotificationService.CreateNotificationAsync` for the appnotification mirror — `DailyBriefingNarrator` does NOT write appnotification itself (substrate correction, verified 2026-07-20); do not assume it does.</constraint>
+    <constraint source="project">A "deny" decision from task 041's policy gate MUST short-circuit before any seam call — no Layer-A seam invocation, no outbox row, no appnotification for a denied assessment.</constraint>
+    <constraint source="ADR-038">Invoking the Layer-A seam is a dispatch/execution-spine change; a `tests/integration/seam/**` test proving the full composed chain (not a contract-shape/DI-registration test) is DoD.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-048-communication-participant-index.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/testing/integration-tests.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Outbox-before-ping producer" location="src/server/api/Sprk.Bff.Api/Services/Notifications/ (task 012/020/024 output)">The established write-then-best-effort-ping ordering for every spine producer — reuse it exactly, do not reorder or make the ping synchronous/blocking.</pattern>
+      <pattern name="Appnotification mirror call site" location="src/server/api/Sprk.Bff.Api/Services/NotificationService.cs:55 (CreateNotificationAsync)">The ONE place appnotification is written platform-wide — call it directly; do not add a second appnotification write path.</pattern>
+      <pattern name="Seam test composition" location="tests/integration/seam/Communication/MessagingSpineSeamTests.cs, tests/integration/seam/Ai/DispositionRoutabilitySeamTests.cs">Real production types through the composed path (producer → policy gate → seam → outbox → ping → appnotification); only the true external boundary is doubled.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the exact shape of task 041's authorize/deny decision output and consume it as this task's trigger input; confirm the exact shape of the Layer-A seam entrypoint established by task 031 (`PublicContracts`) for creating Event/Task/Notification records.</step>
+    <step order="2">On "authorize", call the Layer-A seam to create the configured Event/Task/Notification record(s) for the assessed communication — no direct Dataverse write.</step>
+    <step order="3">After the seam call(s) succeed, write a `kind=communication-assessed` outbox row via the task-012 outbox service with an envelope carrying IDs + minimal display metadata + `regardingRecordId` (ADR-024) pointing at the created record(s)/source communication.</step>
+    <step order="4">After the outbox write completes, best-effort ping Layer C (task-020 SignalR delivery service) — never block or fail the RI action path on a ping failure (ADR-032 null-object safety already covers SignalR-off).</step>
+    <step order="5">Explicitly call `NotificationService.CreateNotificationAsync` (`NotificationService.cs:55`) to create the appnotification mirror record so Daily Briefing surfaces the RI action.</step>
+    <step order="6">Ensure a "deny" decision from task 041 short-circuits before step 2 — verify (via test) that no seam call, outbox row, ping, or appnotification occurs for a denied assessment.</step>
+    <step order="7">Add `tests/integration/seam/Communication/RiActionsViaSeamSeamTests.cs` (namespace `Sprk.Bff.Api.Tests.Seam.Communication`) proving the full E2E chain: an assessed inbound communication with a matching, authorized rule results in the configured record(s) created via the seam, an outbox row written, and an appnotification created (visible via the Daily-Briefing read path); plus the negative case (deny → none of the above).</step>
+    <step order="8">Verify BFF publish size ≤60 MB compressed (report absolute + diff vs ~49.63 MB incl-PDB baseline, state PDB convention); run `dotnet list package --vulnerable --include-transitive` (0 new HIGH CVE); state Placement Justification per `.claude/constraints/bff-extensions.md`.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-notification-spine-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If completing the RI action path would require bypassing the Layer-A seam (a direct Dataverse write to Event/Task/Notification) or writing the outbox row before the seam call has succeeded, STOP and escalate — a second action path is a hard MUST NOT (root spec) and the outbox-before-ping ordering must never be inverted relative to the seam call it depends on.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell (publish size measurement, CVE scan)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (NEW — RI action orchestration wiring: 041 decision → 031 seam → 012 outbox → 020 ping → NotificationService mirror)</output>
+    <output type="test">tests/integration/seam/Communication/RiActionsViaSeamSeamTests.cs (NEW)</output>
+    <output type="docs">projects/spaarke-notification-spine-r1/notes/ (BFF publish-size report + Placement Justification note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given task 041 returns "authorize" for an assessed communication, when this task processes the decision, then the configured Event/Task/Notification record(s) are created via the Layer-A seam (never a direct Dataverse write).</criterion>
+    <criterion testable="true">Given the seam call(s) succeed, when the RI action path continues, then a `kind=communication-assessed` outbox row is written BEFORE the Layer-C ping fires.</criterion>
+    <criterion testable="true">Given the outbox write completes, when the ping fires, then it is best-effort (SignalR unreachable/off does not fail or roll back the already-written outbox row or the already-created seam records).</criterion>
+    <criterion testable="true">Given the outbox row is written, when its envelope is inspected, then it contains only IDs + minimal display metadata + `regardingRecordId` — no message body, no privileged content, no pre-authorized action token.</criterion>
+    <criterion testable="true">Given the RI action path completes, when appnotification is checked, then a record was created via an explicit `NotificationService.CreateNotificationAsync` call from this task's code (not assumed from the narrator).</criterion>
+    <criterion testable="true">Given task 041 returns "deny" for an assessed communication, when this task processes the decision, then NO Layer-A seam call, NO outbox row, NO Layer-C ping, and NO appnotification occur.</criterion>
+    <criterion testable="true">`tests/integration/seam/Communication/RiActionsViaSeamSeamTests.cs` exists and proves both the authorize path (record creation → outbox → appnotification, all observable) and the deny path (no side effects) using real production types through the composed chain.</criterion>
+    <criterion testable="true">An assessed inbound communication with a matching, authorized rule is observable end-to-end: configured record(s) exist AND a notification is visible via Daily Briefing's read path (spec Success Criterion 2).</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed (absolute + diff vs baseline reported, PDB convention stated); 0 new HIGH-severity CVE; Placement Justification stated per `.claude/constraints/bff-extensions.md`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13. Plan Phase 4 deliverable 3 / spec Success Criterion 2. This is the Phase-4 convergence point — after this task, the mid-point pause noted in the spec's Assumptions (wave order) is a legitimate stopping point before Phase 5 (suggestion consumer) begins.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge/files before starting. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

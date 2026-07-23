@@ -104,15 +104,22 @@ export {
 // continues to use its own local handlers for FR-25 byte-stability.
 export {
   launchCreateMatterWizard,
+  launchCreateEventWizard,
   launchCreateProjectWizard,
   launchSummarizeFilesWizard,
   launchFindSimilarWizard,
   launchAssignWorkWizard,
   launchPlaybookIntent,
+  // Promise-returning primitives — the task-012 hand-off return path.
+  resolveXrmNavigation,
+  navigateToWebResourceSurfaceAsync,
+  navigateToEntityRecordSurfaceAsync,
 } from './wizardLaunchers';
 export type {
   BaseLauncherOptions,
   SummarizeFilesLauncherOptions,
   FindSimilarLauncherOptions,
   PlaybookIntentLauncherOptions,
+  NavigateToOutcome,
+  EntityRecordSurfaceParams,
 } from './wizardLaunchers';

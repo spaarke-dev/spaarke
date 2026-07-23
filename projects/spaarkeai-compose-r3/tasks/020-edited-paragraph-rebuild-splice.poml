@@ -1,0 +1,180 @@
+<task id="020" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-02 edited-paragraph rebuild + paraId-keyed splice orchestration (server)</title>
+    <phase>2 E1</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>010,012</deps>
+    <tags>bff-api,docx,spe</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-02: a NEW server-side splice orchestration in `Services/Compose/` that rebuilds
+    ONLY the edited paragraphs' OOXML — keyed by their stable `w14:paraId` (E2, tasks 010/012) — and
+    splices them into a COPY of the retained load-time original `.docx`. Paragraphs the user never
+    touched are NOT rebuilt: they pass through from the original copy unchanged. This is the
+    "model (b)" delta substrate from design §4.2 — it produces a spliced-edited document that
+    task 021's Docxodus `WmlComparer` adapter then diffs against the retained original to synthesize
+    the redline. This task does NOT run the comparer and does NOT invert `SaveAsync` (that is the
+    keystone task 022) — it builds and unit-proves the paraId-keyed rebuild+splice step in isolation.
+    Reuse the download→annotate→replace SHAPE of `PushAnnotationsAsync` (`ComposeService.cs:1107`) as
+    the reference for operating on retained-original bytes behind the SPE facade — but the operation
+    here is paragraph OOXML surgery (Open XML SDK), not annotation writing.
+  </prompt>
+
+  <role>
+    Senior .NET 8 developer fluent in the Microsoft Open XML SDK 3.x (`DocumentFormat.OpenXml`) and
+    WordprocessingML body/paragraph structure (`w:body`, `w:p`, `w14:paraId`, table-cell paragraphs),
+    comfortable with byte-stream `.docx` manipulation behind the Spaarke `Services/Compose` boundary.
+    Understands that the editor produces typed text edits and the engine produces valid OOXML (the
+    "adeu asymmetry") — this orchestrator rebuilds paragraph OOXML from the editor's edited blocks,
+    it does not ask any model or diff layer to emit raw revision XML.
+  </role>
+
+  <goal>
+    A NEW splice-orchestration service in `src/server/api/Sprk.Bff.Api/Services/Compose/` that, given
+    (a) the retained load-time original `.docx` bytes and (b) the set of editor paragraphs that
+    changed (each carrying its `w14:paraId` from E2), produces a spliced-edited `.docx`: a copy of the
+    original in which exactly the K edited paragraphs are replaced by their rebuilt OOXML at the
+    positions identified by matching `w14:paraId`, and the untouched N-K paragraphs are byte-passed
+    from the original copy. Matching unit tests in
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` assert: exactly K paragraphs differ pre-comparer;
+    paraId-to-original-paragraph mapping is exact; a missing/unmatched paraId is a handled error, not a
+    silent no-op; table-cell paragraphs splice correctly.
+  </goal>
+
+  <context>
+    <background>
+      Design §4.2 (model (b) via Docxodus) + §8 (SAVE pipeline: "rebuild ONLY edited paragraphs' OOXML,
+      spliced by paraId"). The retained original is the baseline for every dirty save (§4.3); this task
+      owns the "rebuild edited paragraphs + splice by paraId" leg. E2 (010/012) established paraId as
+      the stable identity carried from OOXML → editor → back; FR-12 makes paraId the splice key. S1/S1b
+      proved Docxodus preserves paraIds on unchanged paragraphs incl. table cells + nested tables, so a
+      paraId-keyed splice is sound. Open XML SDK is already a BFF dependency (0 MB publish add for this
+      task's SDK use); Docxodus itself is added by task 001 and consumed by task 021, not here.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/ — NEW splice-orchestration service (this task); paraId-keyed paragraph rebuild + splice into a copy of the retained original</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1107 — PushAnnotationsAsync download→annotate→replace shape; mirror how it operates on retained-original bytes behind the facade (NOT the annotation write itself)</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — existing byte[]→byte[] OOXML manipulation pattern (Open XML SDK usage, paragraph-mark handling) to mirror for the rebuild/splice</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — paraId-primary anchoring / splice-key resolution (FR-11/FR-12, task 012); consume its paraId map</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:315 — SaveAsync (the caller that task 022 will invert to drive this orchestration); do NOT modify here</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4.2 (model (b) splice), §8 (SAVE pipeline), §10 (reuse map)</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-02, FR-12, NFR-07</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">FR-08 server pre-parse + `w14:paraId` minting on Load — every body paragraph (incl. table cells) has a unique paraId. This orchestration keys on those ids.</dependency>
+      <dependency task="012" status="pending">FR-11/FR-12 paraId-primary anchoring + paraId-as-splice-key — supplies the paraId→original-paragraph map this task splices against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-02">Rebuild ONLY the edited paragraphs' OOXML; untouched paragraphs MUST pass through from the retained-original copy unchanged (not rebuilt). Given an N-paragraph doc with K edited, exactly K paragraphs differ pre-comparer.</constraint>
+    <constraint source="spec / FR-12">`w14:paraId` is the key mapping edited editor paragraphs to original OOXML paragraphs. An edit to paragraph P updates exactly the original paragraph with matching paraId; an unmatched paraId is a handled error (surfaced), never a silent no-op or a wrong-paragraph write.</constraint>
+    <constraint source="NFR-07 / project">Untouched content — paragraph text, `w14:paraId`, styles, numbering, headers/footers, footnotes, tables (incl. nested) — is preserved by the splice. This task's output is the input to the comparer; it must not itself degrade untouched structure.</constraint>
+    <constraint source="ADR-007">Operate on byte streams only. All SPE read/write stays behind the `SpeFileStore`/`ISpeFileOperations` facade — NO `Microsoft.Graph`, `GraphServiceClient`, or `DriveItem` types in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">The new service MUST NOT inject `IOpenAiClient`, executor types, or `IConsumerRoutingService`. This is a deterministic OOXML operation with zero AI reach; Tier-1 NetArchTest enforces.</constraint>
+    <constraint source="ADR-010">Keep DI additions minimal — a single registered orchestration service; internal helpers (paragraph rebuild, paraId lookup) need not be DI-registered.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Measure BFF publish size (`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`); report absolute compressed size + delta vs ~49.63 MB baseline (state PDB convention). Open XML SDK already referenced → expect ~0 MB delta for this task. Verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-038 / NFR-06">Matching unit tests mock only at the `SpeFileStore` facade boundary. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration/ctor-null tests. Real `.docx` round-trip fixtures for the splice assertions.</constraint>
+    <constraint source="project / §10 Placement Justification">State the Placement Justification for the new service in the PR description, citing `bff-extensions.md` decision criteria (server-side DOCX surgery; reuses existing BFF seams).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML WordprocessingML paragraph structure + paraId; retained-original byte manipulation behind the SPE facade; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Retained-original delta shape" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:1107">
+        PushAnnotationsAsync download→annotate→replace — mirror how it fetches retained-original bytes and produces new bytes behind the facade; substitute paragraph rebuild+splice for the annotation write.
+      </pattern>
+      <pattern name="Byte[]→byte[] OOXML manipulation" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs">
+        Open XML SDK open-document / edit-body / save pattern with paragraph-mark handling; reuse the SDK usage shape for the paragraph splice.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm tasks 010 + 012 seams (paraId map + splice-key resolution) are available. Output the FULL rigor-level declaration. Load the knowledge files + bff-extensions.md; state the Placement Justification before designing.</step>
+    <step order="1" name="Define the edited-paragraph input contract">Define the structured input the orchestration consumes: the retained-original bytes + the set of edited editor paragraphs, each carrying its `w14:paraId` + its rebuilt content. Reuse the E2 paraId map / compose edit-payload shape where it aligns; do not invent a parallel schema. Keep the DTO in `Services/Compose/`.</step>
+    <step order="2" name="Implement paraId-keyed rebuild + splice">Open a COPY of the retained-original with the Open XML SDK; build a `w14:paraId → w:p` index over the body (incl. table-cell paragraphs). For each edited paragraph, locate the original `w:p` by paraId and replace it with the rebuilt OOXML in place; leave all other paragraphs untouched. Handle an unmatched paraId as a surfaced error. Produce the spliced-edited bytes.</step>
+    <step order="3" name="Unit tests">Author tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`: given an N-paragraph fixture with K edited, assert exactly K paragraphs differ vs the original pre-comparer; assert paraId mapping is exact (edit to P touches only P); assert a table-cell paragraph splices correctly; negative — an unmatched/missing paraId surfaces an error and does NOT write the wrong paragraph.</step>
+    <step order="4" name="Verify + size/CVE report">Build BFF + run the new tests. Run publish-size + CVE, report absolute + delta vs ~49.63 MB. Run the Tier-1 NetArchTest facade check (no AI-internal injection in Services/Compose). Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (NEW splice-orchestration service + input DTO)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs (register the new service, unconditional)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ (splice + paraId-mapping tests)</output>
+    <output type="report">Publish-size absolute + delta vs ~49.63 MB; CVE scan result; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing service rebuilds + splices paragraph OOXML by paraId. `DocxAnnotationWriter` writes redline/comment markup (annotation direction); `ComposeService` is the SPE-lifecycle facade; `AnnotationReanchorService` resolves anchors but does not perform OOXML paragraph surgery. Verified by Grep over `Services/Compose/` — no overlap.</existing>
+    <extension>Cannot be folded into `DocxAnnotationWriter` (annotation-authoring responsibility) or `ComposeService` (SPE lifecycle, SRP): the paraId-keyed rebuild+splice is a cohesive, heavily-unit-tested OOXML concern that is the input stage to the comparer (task 021) — a distinct unit warranting its own testable service.</extension>
+    <cost-of-doing-nothing>Without a paraId-keyed splice, the delta save (022) has no way to produce a spliced-edited document that preserves untouched paragraphs while carrying the K edits — FR-02 acceptance ("exactly K paragraphs differ pre-comparer") and the whole model-(b) delta substrate (§4.2) cannot be met; dirty saves stay lossy.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given an N-paragraph `.docx` with K paragraphs edited, the orchestration produces a spliced-edited document in which exactly K paragraphs differ from the retained original pre-comparer; the other N-K are unchanged.</criterion>
+    <criterion testable="true">Edited paragraphs are located and replaced by matching `w14:paraId`; an edit to paragraph P updates exactly the original paragraph with matching paraId (unit test asserts the mapping).</criterion>
+    <criterion testable="true">Untouched paragraphs pass through unchanged — text, `w14:paraId`, styles, numbering, and structural parts (headers/footers, footnotes, tables incl. nested) are preserved through the splice (NFR-07 structural/semantic).</criterion>
+    <criterion testable="true">A table-cell paragraph is spliced correctly by its paraId (S1b nested/table-cell case).</criterion>
+    <criterion testable="true">Negative: an edited paragraph whose `w14:paraId` matches no original paragraph surfaces a handled error and does NOT silently no-op or overwrite the wrong paragraph.</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type appears in `Services/Compose/` (ADR-007).</criterion>
+    <criterion testable="true">Publish size reported absolute + delta vs ~49.63 MB baseline, ≤60 MB (expect ~0 MB delta — Open XML SDK already referenced); no new HIGH CVE.</criterion>
+    <criterion testable="true">Matching unit tests exist and pass (mocked only at the SpeFileStore facade); BFF build is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    COMPLETED 2026-07-17 (FULL · opus @ xhigh · directional). All 8 acceptance criteria met.
+    - NEW `Services/Compose/ComposeParagraphSpliceService.cs` — pure `byte[]`→`byte[]`
+      `SpliceEditedParagraphs(retainedOriginal, IReadOnlyList<ComposeEditedParagraph>)`. Opens an
+      EDITABLE copy of the retained original; builds the paraId→w:p index + resolves ALL edited ids via
+      task-012 `ComposeParaIdSpliceMap` (BuildParagraphIndex + Resolve) BEFORE any mutation; rebuilds
+      each matched paragraph in place (replace runs with one new run carrying NewText) PRESERVING the
+      `w14:paraId` attribute + `w:pPr` (style/numbering) + first-run `w:rPr` (font). Untouched paragraphs
+      pass through unchanged (literal original XML). Produces the spliced-edited doc task 021's WmlComparer
+      diffs. New `ComposeEditedParagraph(ParaId, NewText)` DTO (reuses E2 paraId identity, not a parallel
+      schema) + new `ComposeSpliceException` (distinct from DocxAnnotationException so task 022 can catch
+      splice-specific failures).
+    - FAIL-FAST (FR-12): an unmatched OR duplicate edited paraId throws ComposeSpliceException BEFORE any
+      write — a batch with one valid + one unmatched id applies NEITHER (test asserts). Never a silent
+      no-op or a wrong-paragraph write.
+    - DI: registered `ComposeParagraphSpliceService` UNCONDITIONALLY in ComposeModule.cs (symmetric, no
+      feature gate — bff-extensions.md §F.1; mirrors ParaIdPreParser/DocxAnnotationWriter). Consumed by
+      task 022 (SaveAsync inversion); this task does NOT run the comparer (021) or invert SaveAsync (022).
+    - §11 reuse check: verified existing ComposeEditBatch/EditTransaction/EditValidator operate on
+      PLAINTEXT projections (string documentText + ProposedEdit) — text-level AI-edit machinery, NOT
+      OOXML byte-level paragraph splice by paraId. No overlap; new service justified.
+    - Tests: NEW ComposeParagraphSpliceServiceTests (10) — exactly-K-differ, paraId-exact mapping,
+      table-cell splice, NFR-07 paraId+style preservation, untouched-paraId preservation, empty no-op,
+      unmatched fail-fast, duplicate, malformed, empty-bytes. Unit 10 green; full Compose suite 417 green.
+    - Verify: BFF build 0 err; publish 45.94 MB compressed incl PDBs (0 pkg delta — OpenXML already
+      referenced; Docxodus is task 021's, not here); 0 vulnerable pkgs; ADR013_ComposeFacade NetArchTest
+      green.
+    - NFR-06: no seam test here — 020 adds a pure, not-yet-wired transform; the through-the-wire
+      obligation lands on task 022 (SaveAsync inversion). POML scopes this out ("does NOT invert SaveAsync").
+    - PR MUST include the §10 Placement Justification (server-side OOXML surgery on the save path; reuses
+      ComposeParaIdSpliceMap + OpenXML SDK — no client can do OOXML surgery).
+  </notes>
+</task>

@@ -1,0 +1,152 @@
+<task id="061" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Package the polling timeline as a PCF (React 16/17 platform libs) + deploy to the OOB `sprk_communication`/thread form + UI tests</title>
+    <phase>W6 — UI (polling timeline + PCF accessories)</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>060</dependencies>
+    <blocks></blocks>
+    <tags>pcf, deploy, e2e-test, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Packages a shared-library component as a PCF (React 16/17 platform libraries per ADR-022) and DEPLOYS it to a live Dataverse form via solution ZIP import — an irreversible/host-affecting operation with prescriptive deploy steps; touches `.ts` PCF code + manifest + solution. ADR-022 (platform libs), ADR-006 (PCF for form binding), ADR-026 (Path-A exception) bind; UI tests gate the render. FULL required.</rigor-reason>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New PCF folder under `src/client/pcf/` + its own solution ZIP — disjoint from 062/063 file surfaces. Depends only on 060 (the component it wraps). Deploy targets a distinct control on the OOB form.</parallel-reason>
+    <fr-refs>FR-10</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Package the `CommunicationTimeline` component (task 060) as a **PCF control** and deploy it to the OOB `sprk_communication` / communication-thread main form, so the polling timeline renders inside the model-driven app with no Code Page host.
+
+    Requirements:
+    - **PCF wrapper** in a NEW `src/client/pcf/CommunicationTimeline/` control. It is a virtual/React PCF that mounts `<CommunicationTimeline/>` from `@spaarke/ui-components`, wiring the PCF context to the component props: resolve `threadId` from the bound form record (the `sprk_thread` lookup / the thread record id), inject an `authenticatedFetch` built from the Spaarke PCF auth pattern (`@spaarke/auth` is consumed at the PCF boundary — NOT inside the shared component), and pass `bffBaseUrl` from an environment variable / control property.
+    - **React 16/17 platform libraries** (ADR-022) — the PCF MUST use the platform-provided React (16/17), NOT bundle React 18. Confirm the control manifest declares platform libraries and the component tree is React-16/17-compatible (the timeline uses no React-18-only APIs that break under 16/17; if any slipped in via 060, coordinate a fix in the shared lib rather than forking).
+    - **Solution packaging + deploy** — build production mode with `npm run build:prod` (NOT `npm run build` — AP-1), pack a solution ZIP, and import to the target environment via the `pcf-deploy` skill. Place the control on the OOB form.
+    - **No client-side ACS SDK** — the packaged bundle MUST NOT contain any `@azure/communication-*` dependency (NFR-04); the timeline reads persisted records via the BFF only.
+    - **UI tests** — verify the control renders on the form without console errors, is dark-mode correct, and reflects a new inbound message within one poll cycle.
+
+    Do NOT build the send/respond accessory PCFs here (task 062) or the quoting action (task 063) — this task packages + deploys the timeline VIEWER only.
+  </prompt>
+
+  <role>
+    Spaarke PCF engineer fluent in the virtual/React PCF pattern, ADR-022 platform libraries (React 16/17), the `pcf-deploy` solution-ZIP workflow, and the PCF `@spaarke/auth` boundary idiom. Familiar with the email-r4 `CommunicationActions`/`CommunicationConnections` PCFs as the packaging + form-placement precedent.
+  </role>
+
+  <goal>
+    A `CommunicationTimeline` PCF exists in `src/client/pcf/`, mounts the shared component, resolves `threadId`/`authenticatedFetch`/`bffBaseUrl` from PCF context, uses React 16/17 platform libraries (ADR-022), builds clean via `npm run build:prod`, packs a solution ZIP, and is deployed to the OOB `sprk_communication`/thread form via `pcf-deploy`. The bundle contains no ACS SDK. UI tests confirm it renders without console errors, is dark-mode correct, and reflects a new inbound message within one poll cycle.
+  </goal>
+
+  <context>
+    <background>
+      ADR-026 Path-A exception (spec §ADR Tensions): R1's message surface is the OOB main form + PCFs (mirroring email-r4's shipped W4 pivot) — NOT a Code Page. A form-bound PCF is within ADR-006 (PCF for form binding). This task realizes that surface for the timeline viewer; cite the Path-A exception in the deploy PR.
+
+      §11 Component Justification: the PCF wrapper is justified because the shared `CommunicationTimeline` component cannot mount on an MDA form by itself — a PCF is the only host that binds it to a `sprk_communication`/thread record and supplies the PCF auth context. The concrete failure mode without it is that FR-10's "usable message experience inside the MDA" has no delivery vehicle. It does not overlap the accessory PCFs (062, which are send/respond actions) — this is the read/timeline surface. Reuse the email-r4 `CommunicationActions` PCF's `@spaarke/auth` boundary + manifest + solution structure rather than inventing a new packaging.
+
+      ADR-022 boundary: the shared component (060) is authored React-18-friendly for the lib, but PCFs run on the platform React (16/17). The PCF wrapper must declare platform libraries and the mounted tree must be 16/17-safe. If a React-18-only API is present, fix it in the shared lib (coordinate with 060) — do NOT fork the component into the PCF.
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/CommunicationTimeline/ (NEW — control folder: index.ts, ControlManifest.Input.xml, solution)</file>
+      <file>src/client/pcf/CommunicationActions/ (READ — email-r4 PCF: @spaarke/auth boundary, manifest, solution ZIP structure to mirror)</file>
+      <file>src/client/pcf/CommunicationConnections/ (READ — virtual PCF + view/solution packaging precedent)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/ (CONSUME — the component packaged here)</file>
+      <file>src/client/pcf/CLAUDE.md (READ — PCF module rules)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (READ — deploy workflow)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">The timeline is packaged as a PCF and deployed to the OOB form; reflects a newly-captured inbound message within one poll cycle when rendered on the form.</constraint>
+    <constraint source="ADR-022">PCF uses React 16/17 PLATFORM libraries — MUST NOT bundle React 18. Manifest declares platform libraries; the mounted tree is 16/17-compatible.</constraint>
+    <constraint source="ADR-006">PCF is for form binding — the control binds to the `sprk_communication`/thread record and resolves `threadId` from the bound context.</constraint>
+    <constraint source="ADR-026">Path-A exception — OOB form + PCF, NOT a Code Page. Cite in the deploy PR.</constraint>
+    <constraint source="NFR-04">The packaged bundle MUST NOT contain any `@azure/communication-*` dependency; grep/inspect the bundle. `@spaarke/auth` is consumed at the PCF boundary only, never inside the shared component.</constraint>
+    <constraint source="project">Build with `npm run build:prod` (NOT `npm run build` — AP-1 / root §12). Pack + deploy the solution ZIP via the `pcf-deploy` skill.</constraint>
+    <constraint source="project">Reuse the email-r4 `CommunicationActions`/`CommunicationConnections` PCF packaging + auth boundary; do not invent a new pattern (§11).</constraint>
+    <constraint source="project">No BFF publish-size / CVE obligations — client + deploy only (root §10 N/A).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-006-pcf-component-architecture.md</file>
+      <file>.claude/adr/ADR-026-code-page-standard.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Virtual PCF mounting a shared component" location="src/client/pcf/CommunicationActions/">
+        The email-r4 pattern: a PCF hosts a `@spaarke/ui-components` React component, wires PCF context → props, and consumes `@spaarke/auth` at the boundary. Mirror manifest + solution structure.
+      </pattern>
+      <pattern name="ADR-022 platform libraries" location=".claude/adr/ADR-022-pcf-platform-libraries.md">
+        Declare React/ReactDOM as platform libraries in the manifest; do not bundle React 18. The mounted component tree must be 16/17-compatible.
+      </pattern>
+      <pattern name="pcf-deploy solution ZIP" location=".claude/skills/pcf-deploy/SKILL.md">
+        `npm run build:prod` → pack solution → import via PAC. Place the control on the OOB form.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/client/pcf/CommunicationActions/` + `CommunicationConnections/` (manifest, `index.ts`, `@spaarke/auth` boundary, solution ZIP layout), `src/client/pcf/CLAUDE.md`, `PCF-DEPLOYMENT-GUIDE.md`, and ADR-022/ADR-006. Confirm the shared `CommunicationTimeline` props contract from task 060.</step>
+    <step order="2">Scaffold `src/client/pcf/CommunicationTimeline/`: `ControlManifest.Input.xml` (bound to the thread/`sprk_communication` record; declare React/ReactDOM platform libraries per ADR-022; a `bffBaseUrl` property + env-var), `index.ts` implementing `init`/`updateView`/`destroy`.</step>
+    <step order="3">In `index.ts`, resolve `threadId` from the bound record (the `sprk_thread` lookup or thread record id), build an `authenticatedFetch` via the Spaarke PCF `@spaarke/auth` pattern, read `bffBaseUrl`, and mount `&lt;CommunicationTimeline threadId authenticatedFetch bffBaseUrl pollIntervalMs /&gt;` via the platform React.</step>
+    <step order="4">Verify React 16/17 compatibility of the mounted tree: run the PCF build; if a React-18-only API from 060 breaks under platform React, coordinate a shared-lib fix (do NOT fork). Grep the produced bundle for `@azure/communication` — MUST be absent (NFR-04).</step>
+    <step order="5">Run `npm run build:prod` in the control folder (NOT `npm run build` — AP-1). Resolve any manifest/type errors.</step>
+    <step order="6">Invoke the `pcf-deploy` skill: pack the solution ZIP + import to the target environment. Place the control on the OOB `sprk_communication`/thread main form (document the form + section placement).</step>
+    <step order="7">Run UI tests via the `ui-test` skill against the deployed control (see `&lt;ui-tests&gt;`): renders without console errors; dark-mode correct; reflects a new inbound message within one poll cycle.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the PCF wrapper + manifest (focus: platform libraries declared, no React 18 bundled, no ACS SDK in the bundle, auth at the boundary only); `adr-check` against ADR-022/ADR-006/ADR-026 + `spec.md` (FR-10, NFR-04). Address Critical findings.</step>
+    <step order="10">Update `tasks/TASK-INDEX.md` (061 ✅) + `current-task.md`; record decisions (form + section placement, `threadId` resolution path, `bffBaseUrl` config mechanism, UI-test evidence, any shared-lib React-16/17 fix coordinated with 060).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">email-r4 PCFs, PCF CLAUDE.md, PCF-DEPLOYMENT-GUIDE, ADR-022/006, task-060 props</tool>
+    <tool name="write">PCF index.ts + ControlManifest + solution files</tool>
+    <tool name="bash">npm run build:prod + bundle grep for @azure/communication</tool>
+    <tool name="pcf-deploy">Pack + import the solution ZIP; place on the OOB form</tool>
+    <tool name="ui-test">Render/dark-mode/poll-cycle verification on the deployed control</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/CommunicationTimeline/index.ts (NEW — mounts the shared component)</output>
+    <output type="code">src/client/pcf/CommunicationTimeline/ControlManifest.Input.xml (NEW — platform libs, thread binding, bffBaseUrl)</output>
+    <output type="code">src/client/pcf/CommunicationTimeline/ solution project + ZIP (NEW)</output>
+    <output type="docs">Deploy record: target form/section placement + UI-test evidence (in current-task.md / PR)</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test>The control renders on the OOB `sprk_communication`/thread form with NO console errors (verified via the `ui-test` skill against the deployed control).</ui-test>
+    <ui-test>Dark mode: the timeline renders correctly when the model-driven app is in dark theme (Fluent v9 tokens pass through).</ui-test>
+    <ui-test>A new inbound message (added to the thread) appears in the rendered control within one poll cycle (~5s) without a manual form refresh.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">A `CommunicationTimeline` PCF exists in `src/client/pcf/` that mounts the shared component and resolves `threadId`/`authenticatedFetch`/`bffBaseUrl` from PCF context.</criterion>
+    <criterion testable="true">The manifest declares React 16/17 platform libraries; React 18 is NOT bundled (ADR-022).</criterion>
+    <criterion testable="true">The produced bundle contains NO `@azure/communication-*` dependency (NFR-04, grep/inspect-verified).</criterion>
+    <criterion testable="true">`npm run build:prod` builds clean; a solution ZIP is packed and imported via `pcf-deploy`; the control is placed on the OOB form.</criterion>
+    <criterion testable="true">UI tests pass: renders without console errors, dark-mode correct, reflects a new inbound message within one poll cycle.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends only on task 060 (the component). Blocks nothing directly, but is the delivery vehicle for the R1 message surface (spec Success Criterion 1). The send/respond accessory PCFs are task 062; the quoting action is task 063.
+
+    If the deploy leg cannot complete in the environment (auth/import), package + validate the solution ZIP and hand the `pac solution import` + form-config remainder to the owner (mirror how email-r4 task 043 split packaging from the owner-run import) — document the split in `current-task.md`. The build + no-ACS-SDK + platform-libs checks MUST still pass.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;`. Apply FULL rigor — Step 9.5 (code-review + adr-check) MANDATORY. Build via `npm run build:prod` (NOT `npm run build` — AP-1); deploy via `pcf-deploy`; verify via `ui-test`. No BFF publish-size/CVE (root §10 N/A). Cite the ADR-026 Path-A exception in the deploy PR. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

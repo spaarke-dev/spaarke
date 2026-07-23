@@ -1,0 +1,126 @@
+<task id="081" project="messaging-communication-app-r2">
+  <metadata>
+    <title>Extend the communication architecture doc with the R2 Workspace read endpoints, participant index, regarding-mode Timeline, and the workspace widget</title>
+    <phase>W8 — Tests + Docs + Wrap</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <deps>010, 050, 070</deps>
+    <blocks></blocks>
+    <tags>docs</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Extends existing architecture documentation to describe the delivered R2 read/query/organize layer; no code, no ADR authoring (the participant-junction ADR is task 004). STANDARD rigor — Step 9.5 gates skipped, but the source-of-truth rule (root §2) binds: the doc must match shipped code.</rigor-reason>
+    <parallel-group>W8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Authors/updates docs under `docs/architecture/` — disjoint from 080 (tests). Depends on 010 (by-regarding read), 050 (participant index), 070 (auto-threading) so the sections describe shipped behavior.</parallel-reason>
+    <fr-refs>FR-01, FR-02, FR-03, FR-08, FR-09, FR-12</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Extend the canonical communication architecture doc **`docs/architecture/communication-intelligence-architecture.md`** (the R4/R1 substrate that R1 task 081 already extended) to describe the R2 **read / query / organize layer** as-built. Use the `docs-architecture` skill.
+
+    Prefer EXTENDING this canonical doc (and/or `communication-service-architecture.md` if the read/query narrative needs it) rather than authoring a new standalone doc (§11 — the communication platform is ONE platform; R2 is its read/organize layer, not a new subsystem). Add, grounded in the shipped code:
+
+    - **The Workspace read endpoints** — `GET /api/communications/by-regarding/{entityType}/{id}` (FR-01/010) + the filtered `GET /api/communications?thread=&regarding=&channel=&from=&to=&participant=` (FR-02/011/051); how they EXTEND `CommunicationThreadReadService` + `IImpersonatedCommunicationQuery` + `ICommunicationAccessFilter` (the blessed R1 impersonation read path); the entity-set-agnostic behavior across all 11 regarding families; the impersonation + 2-rule (privacy + internal-only) access filter; **NO membership-union on reads** (retired 2026-07-16), **no new access mechanism**.
+    - **The participant index** — the `sprk_communicationparticipant` junction (message grain; `sprk_communication` parent + two typed nullable person lookups `sprk_systemuser`/`sprk_contact` [exactly one set] + role {From/To/Cc/Bcc} + `sprk_addresstext` + `sprk_isresolved`); populated at capture/send reusing `ParticipantCorrelationRung`; unresolved external addresses written as rows; how it powers the `participant=` facet; the ADR-034 path-C rationale (2 typed lookups honor the tuple *intent*). Cross-reference the participant-junction ADR (task 004).
+    - **The auto-threading policy** — the 3-tier `IThreadResolver` (subject/conversation → per-record default → per-user master) + the `default-thread` marker; the marker-gated `BuildTopic` naming re-derive; the thread typed-regarding lookups + Lookup discriminator + RegardingResolver placement (FR-06/07/09).
+    - **Surface 1 — the regarding-mode Timeline** (FR-03/020) — the `CommunicationTimeline` regarding mode (threads-as-collapsible-groups → interleaved email+chat), the form-bound PCF on all 11 forms, the count-only VisualHost card (T-1 boundary: content flows only through the BFF `internal-only` filter, never VisualHost client-fetch).
+    - **Surface 3 — the workspace widget** (FR-12) — the `communications-list` Pattern D upgrade in `@spaarke/communication-components`, dual-deploy (LegalWorkspace + SpaarkeAi), type-string preserved.
+
+    Cross-reference the relevant ADRs (024 regarding, 034 membership/participant, 028 auth/impersonation, 032 kill-switch, 046 channel / no second regarding mechanism, 038 testing) + the task-004 participant ADR. Keep it a design/rationale doc (WHY + structure) with code entry-point pointers — no implementation dumps.
+  </prompt>
+
+  <role>
+    Spaarke architecture writer authoritative on the Communication subsystem. Uses the `docs-architecture` skill and follows repo architecture-doc conventions (decisions + rationale + code entry-point pointers). Extends the canonical R4/R1 communication doc rather than forking a new one.
+  </role>
+
+  <goal>
+    `docs/architecture/communication-intelligence-architecture.md` (and `communication-service-architecture.md` if needed) accurately describe the R2 as-built read/organize layer — Workspace read endpoints, participant index, auto-threading policy + thread regarding/naming, the regarding-mode Timeline (Surface 1), and the workspace widget (Surface 3) — cross-referencing the relevant ADRs + the task-004 participant ADR. The doc matches shipped code and is extended (not forked) from the canonical substrate.
+  </goal>
+
+  <context>
+    <background>
+      R1 task 081 extended `docs/architecture/communication-intelligence-architecture.md` (the canonical R4 substrate) with the thread model + ACS transport + inbound ingestor seam. R2 adds the READ/QUERY/ORGANIZE layer on top — the biggest as-built additions since R1. This task documents them by extending the SAME doc, keeping ONE communication architecture narrative (§11: R2 is the read/organize layer, not a new subsystem).
+
+      The task-004 participant-junction ADR is the codified schema decision; this doc is the architecture-level companion — it describes the delivered read/query/participant structure + rationale and points at that ADR + the code entry points (read service, access filter, thread resolver, participant rung, junction).
+
+      Source-of-truth (root §2): verify each described behavior against shipped code (010 by-regarding, 011/051 query + participant facet, 050 participant write, 070 auto-threading, 020/021/022 regarding-mode Timeline, 030 widget) before documenting it. Do NOT document plan-only intentions. The access model is impersonation + 2-rule filter with NO membership-union — document it exactly, since the retired union must not reappear even in prose.
+    </background>
+    <relevant-files>
+      <file>docs/architecture/communication-intelligence-architecture.md (EXTEND — add R2 read endpoints + participant index + auto-threading + Surface 1 + widget sections)</file>
+      <file>docs/architecture/communication-service-architecture.md (EXTEND if the read/query narrative needs it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs + Access/CommunicationAccessFilter.cs (read path — code entry points)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (auto-threading — code entry point)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ParticipantCorrelationRung.cs (participant write — code entry point)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/ + src/client/shared/Spaarke.Communication.Components/ (Surface 1 + widget — code entry points)</file>
+      <file>projects/messaging-communication-app-r2/tasks/004-author-participant-junction-adr.poml (participant ADR to cross-reference)</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md (impersonation + 2-rule; membership-union retired)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR support">Extend the communication architecture doc with the R2 Workspace read endpoints (by-regarding/query), the participant index, the auto-threading policy + thread regarding/naming, the regarding-mode Timeline (Surface 1), and the workspace widget (Surface 3). Cross-reference the task-004 participant ADR.</constraint>
+    <constraint source="root §2 source-of-truth">Code wins — verify each described behavior against shipped code before documenting it; no plan-only content. Document the access model as impersonation + 2-rule filter with NO membership-union.</constraint>
+    <constraint source="docs conventions">Architecture doc = decisions + rationale + code entry-point pointers; NO implementation detail / code dumps.</constraint>
+    <constraint source="project §11">EXTEND the canonical R4/R1 communication doc; do NOT fork a new standalone subsystem doc (R2 is the read/organize layer, not a new subsystem). Justify if a new file is unavoidable.</constraint>
+    <constraint source="project">Cross-reference the relevant ADRs (024/034/028/032/046/038) + the task-004 participant ADR; do not restate ADR content verbatim.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/architecture-authoring</topic>
+    <files>
+      <file>projects/messaging-communication-app-r2/spec.md</file>
+      <file>projects/messaging-communication-app-r2/plan.md</file>
+      <file>projects/messaging-communication-app-r2/CLAUDE.md</file>
+      <file>projects/messaging-communication-app-r2/notes/r2-resource-investigation.md</file>
+      <file>.claude/skills/docs-architecture/SKILL.md</file>
+      <file>docs/architecture/communication-intelligence-architecture.md</file>
+      <file>docs/architecture/communication-service-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-046-acs-messaging-channel.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>../messaging-communication-app-r1/notes/access-model-decision.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read spec (FR-01/02/03/08/09/12 + NFR-03), plan §2/§4, the `docs-architecture` skill, the access-model-decision note, and the existing `communication-intelligence-architecture.md` (esp. the R1-added thread/ACS/ingestor sections) to find the right insertion points.</step>
+    <step order="2">Verify against code: read the shipped 010 by-regarding read, 011/051 query + participant facet, 050 participant write, 070 auto-threading, 020/021/022 regarding-mode Timeline, 030 widget — ground each section in real code entry points. Confirm the access model is impersonation + 2-rule with NO membership-union.</step>
+    <step order="3">Extend the canonical doc with: (a) Workspace read endpoints (by-regarding + filtered query; extend the impersonation read path; entity-set-agnostic; 2-rule filter; no union), (b) the participant index (junction schema + capture/send write + unresolved rows + `participant=` + ADR-034 path-C), (c) auto-threading (3-tier resolver + `default-thread` marker + naming re-derive + thread regarding lookups/discriminator/RegardingResolver), (d) Surface 1 regarding-mode Timeline (component + 11-form PCF + count-only VisualHost T-1 boundary), (e) Surface 3 widget (Pattern D upgrade + dual-deploy + type-string preserved).</step>
+    <step order="4">Cross-reference the task-004 participant ADR + ADRs 024/034/028/032/046/038; cross-link the data-model doc for schema detail. Use code entry-point pointers, not code dumps.</step>
+    <step order="5">Self-check: verify every claim matches shipped code; remove anything speculative or plan-only; confirm the access-model prose says impersonation + 2-rule with NO membership-union; confirm the doc reads as ONE communication architecture (R2 = read/organize layer).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (081 ✅) + `current-task.md`. If a CLAUDE.md §17 pointer update is warranted, note it for the main session (sub-agents cannot write `.claude/`).</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Shipped code (read service, access filter, resolver, participant rung, Timeline, widget) + existing arch docs + task-004 ADR</tool>
+    <tool name="docs-architecture">Extend the architecture doc(s)</tool>
+    <tool name="edit">Update the canonical communication doc(s)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/architecture/communication-intelligence-architecture.md (EXTENDED — R2 read endpoints + participant index + auto-threading + Surface 1 + widget)</output>
+    <output type="docs">docs/architecture/communication-service-architecture.md (EXTENDED if the read/query narrative needs it)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The doc describes the Workspace read endpoints (by-regarding + filtered query) as EXTENSIONS of `CommunicationThreadReadService`/`IImpersonatedCommunicationQuery`/`ICommunicationAccessFilter`, entity-set-agnostic across 11 families, with the impersonation + 2-rule filter and **NO membership-union** — each matching shipped code.</criterion>
+    <criterion testable="true">It describes the `sprk_communicationparticipant` junction (message grain; 2 typed lookups; role; unresolved rows), the capture/send write via `ParticipantCorrelationRung`, and the `participant=` facet — cross-referencing the task-004 ADR + the ADR-034 path-C rationale.</criterion>
+    <criterion testable="true">It describes the 3-tier auto-threading policy + `default-thread` marker + naming re-derive + thread regarding lookups/discriminator/RegardingResolver (FR-06/07/09).</criterion>
+    <criterion testable="true">It describes Surface 1 (regarding-mode Timeline component + 11-form PCF + count-only VisualHost T-1 boundary) and Surface 3 (Pattern D widget upgrade + dual-deploy + type-string preserved).</criterion>
+    <criterion testable="true">It cross-references the relevant ADRs (024/034/028/032/046/038) + the task-004 participant ADR and is EXTENDED from the canonical doc (not a new standalone subsystem doc), per §11; it is design/rationale + code entry-point pointers with no implementation dumps and no plan-only content (root §2).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    STANDARD rigor — no Step 9.5 gates, but the source-of-truth rule (root §2) binds: verify against shipped code. Authored after 010 (reads) + 050 (participant) + 070 (auto-threading) land so the sections describe real behavior. The participant-junction ADR AUTHORING is task 004, not here — this is the architecture-doc companion. Be especially careful the access-model prose does NOT reintroduce the retired membership-union.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load `&lt;knowledge&gt;&lt;files&gt;`. Apply STANDARD rigor — Step 9.5 SKIPPED. Verify every documented behavior against shipped code before writing. Extend the canonical R4/R1 doc per §11 — do not fork a new subsystem doc. Dispatch at model-tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

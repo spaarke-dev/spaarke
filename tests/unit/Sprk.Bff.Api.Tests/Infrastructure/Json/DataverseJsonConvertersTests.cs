@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.Json;
-using Sprk.Bff.Api.Models.Email;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.Json;
@@ -125,84 +124,18 @@ public class DataverseJsonConvertersTests
     }
 
     [Fact]
-    public void DataverseWebhookPayload_DeserializesWithBracedGuids()
-    {
-        // Arrange - Real Dataverse RemoteExecutionContext format
-        var emailId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
-        var correlationId = Guid.NewGuid();
-        var json = $@"{{
-            ""MessageName"": ""Create"",
-            ""PrimaryEntityName"": ""email"",
-            ""PrimaryEntityId"": ""{{{emailId}}}"",
-            ""UserId"": ""{{{userId}}}"",
-            ""CorrelationId"": ""{{{correlationId}}}"",
-            ""Depth"": 1,
-            ""Stage"": 40
-        }}";
-
-        // Act
-        var payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(json, DataverseJsonOptions.Default);
-
-        // Assert
-        payload.Should().NotBeNull();
-        payload!.PrimaryEntityId.Should().Be(emailId);
-        payload.UserId.Should().Be(userId);
-        payload.CorrelationId.Should().Be(correlationId);
-        payload.MessageName.Should().Be("Create");
-        payload.PrimaryEntityName.Should().Be("email");
-    }
-
-    [Fact]
-    public void DataverseWebhookPayload_HandlesAllGuidFields()
-    {
-        // Arrange - Test all GUID fields in the payload
-        var primaryEntityId = Guid.NewGuid();
-        var userId = Guid.NewGuid();
-        var organizationId = Guid.NewGuid();
-        var businessUnitId = Guid.NewGuid();
-        var correlationId = Guid.NewGuid();
-        var operationId = Guid.NewGuid();
-
-        var json = $@"{{
-            ""MessageName"": ""Create"",
-            ""PrimaryEntityName"": ""email"",
-            ""PrimaryEntityId"": ""{{{primaryEntityId}}}"",
-            ""UserId"": ""{{{userId}}}"",
-            ""OrganizationId"": ""{{{organizationId}}}"",
-            ""BusinessUnitId"": ""{{{businessUnitId}}}"",
-            ""CorrelationId"": ""{{{correlationId}}}"",
-            ""OperationId"": ""{{{operationId}}}"",
-            ""Depth"": 1,
-            ""Stage"": 40
-        }}";
-
-        // Act
-        var payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(json, DataverseJsonOptions.Default);
-
-        // Assert
-        payload.Should().NotBeNull();
-        payload!.PrimaryEntityId.Should().Be(primaryEntityId);
-        payload.UserId.Should().Be(userId);
-        payload.OrganizationId.Should().Be(organizationId);
-        payload.BusinessUnitId.Should().Be(businessUnitId);
-        payload.CorrelationId.Should().Be(correlationId);
-        payload.OperationId.Should().Be(operationId);
-    }
-
-    [Fact]
     public void DataverseJsonOptions_Default_IsCaseInsensitive()
     {
         // Arrange - Dataverse uses PascalCase property names
         var guid = Guid.NewGuid();
-        var json = $@"{{ ""primaryEntityId"": ""{guid}"" }}"; // lowercase
+        var json = $@"{{ ""id"": ""{guid}"" }}"; // lowercase
 
         // Act
-        var payload = JsonSerializer.Deserialize<DataverseWebhookPayload>(json, DataverseJsonOptions.Default);
+        var result = JsonSerializer.Deserialize<TestGuidModel>(json, DataverseJsonOptions.Default);
 
         // Assert
-        payload.Should().NotBeNull();
-        payload!.PrimaryEntityId.Should().Be(guid);
+        result.Should().NotBeNull();
+        result!.Id.Should().Be(guid);
     }
 
     private class TestGuidModel

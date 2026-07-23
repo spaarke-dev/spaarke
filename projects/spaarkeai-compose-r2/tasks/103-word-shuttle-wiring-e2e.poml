@@ -1,0 +1,132 @@
+<task id="103" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>E2E-R4 — Word-shuttle wiring: client callers + EnsureSubscriptionAsync origin call + reanchor mount + poll path (Cluster 3)</title>
+    <phase>9 E2E Remediation</phase>
+    <status>in-progress</status>
+    <estimated-hours>14</estimated-hours>
+    <effort>high</effort>
+    <dependencies>050, 051, 052, 053, 054</dependencies>
+    <blocks>082</blocks>
+    <tags>frontend, bff-api, spe, word, testing, e2e-remediation</tags>
+    <rigor-hint reason="Wires the Word round-trip shuttle whose endpoints + components are all built but none connected; client callers + subscription origin call + reanchor mount + poll path + the in-process forcing test; FULL, unconditional Step 9.5">FULL</rigor-hint>
+    <model-tier reason="Cross-toolchain wiring (client push/pull callers + reanchor mount + BFF EnsureSubscriptionAsync origin call) on the Word round-trip; ADR-007/030 surface">opus</model-tier>
+    <parallel-group>e2e-remediation-serial</parallel-group>
+    <parallel-safe reason="Touches ComposeEndpoints.cs (BFF) AND Spaarke.Compose.Components (ComposeToolbar/ComposeWorkspace) shared with 100/101/104 — run SOLO, last in the serial tail">false</parallel-safe>
+    <source>notes/e2e-gap-register.md Cluster 3 (gaps 3.1–3.5 wiring; 3.3 config = owner/056; 3.6/055 = separate build task)</source>
+  </metadata>
+
+  <prompt>
+    Wire the Word round-trip shuttle so it actually runs. The endpoints (push-annotations 050,
+    pull-annotations 051, webhook + poll check-changes 053, reanchor 054) and the client components
+    (reanchor banner/panel + hooks 054) are ALL BUILT and unit-green — but NONE are connected: "Push to
+    Word" has no client trigger and the endpoint is orphaned (3.1); the SPE webhook subscription is never
+    created because EnsureSubscriptionAsync has zero callers (3.2); pull-annotations has no client caller
+    (3.4); and the return-from-Word reanchor UI + poll check-changes are never mounted in ComposeWorkspace
+    (3.5). Close the Cluster 3 WIRING gaps (3.1, 3.2, 3.4, 3.5) and land an in-process forcing-function
+    test for the poll path (the leg that does NOT depend on live webhook config). Do NOT rewrite the
+    already-correct endpoints/components — connect them.
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the Word-shuttle endpoints (push/pull annotations, check-changes,
+    reanchor) + their client hooks/UI (task 050–054 output), the SpeSyncOrchestrator subscription lifecycle
+    (EnsureSubscriptionAsync), the ComposeToolbar/ComposeWorkspace mount surface, and WebApplicationFactory
+    integration tests.
+  </role>
+
+  <goal>
+    "Push to Word" is triggerable from the toolbar and calls push-annotations; opening a Compose document
+    calls EnsureSubscriptionAsync so a subscription exists (not an empty renewal set forever); the
+    return-from-Word reanchor banner/panel + the poll check-changes path are mounted in ComposeWorkspace so
+    a user coming back from Word sees re-anchored changes; pull-annotations has a client caller. Every hop
+    connects. A WebApplicationFactory test drives the POLL path (check-changes → reanchor) through the real
+    routes in-process. Cluster 3 wiring gaps 3.1/3.2/3.4/3.5 closed; 3.3 config (056/DEF-03) + 3.6 (task
+    055) named as owner-queued / separate-sequenced (NOT silently deferred).
+  </goal>
+
+  <context>
+    <background>
+      Source of truth: notes/e2e-gap-register.md Cluster 3 (gaps 3.1–3.6) with file:line evidence, and
+      design.md §6 (Word round-trip). SCOPE BOUNDARIES (important):
+      - IN SCOPE (wiring false-greens, fix now): 3.1 push-to-Word client trigger, 3.2 EnsureSubscriptionAsync
+        origin call, 3.4 pull-annotations client caller, 3.5 reanchor UI mount + poll check-changes path.
+      - OWNER-QUEUED (name, do NOT attempt): 3.3 = the Compose:Webhook:{SigningKey,ClientState,NotificationUrl}
+        Key Vault provisioning = DEF-03 / task 056 (live-env secrets). The webhook DELIVERY leg is ✅◐
+        E2E-pending on this; the POLL fallback (check-changes) is fully testable in-process and is your
+        forcing-function path.
+      - SEPARATE SEQUENCED TASK (do NOT fold in): 3.6 = task 055 (FR-28 deterministic push/save orchestration
+        + Tier-2c preview) is a genuine NOT-built new service, already its own 🔲 task. Leave the seam
+        consumable; do not build 055 here.
+      Task 104 just landed the typed bus union in Spaarke.AI.Widgets/src/events/PaneEventTypes.ts — if you
+      emit any bus signal, use the typed discriminants there; zero `as any`.
+    </background>
+    <relevant-files>
+      <file purpose="push-to-word-trigger" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeToolbar.tsx — add the "Push to Word" toolbar action that calls the existing push-annotations endpoint (gap 3.1).</file>
+      <file purpose="subscription-origin-call" edit="true">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs (~87 EnsureSubscriptionAsync) — call it on Compose document load so a subscription is actually created; today it has zero callers and the renewal service renews an empty set forever (gap 3.2). Find the document-load path (ComposeService.LoadAsync / the endpoint) and invoke it there.</file>
+      <file purpose="pull-caller" edit="true">the compose client — add the pull-annotations caller (gap 3.4), reusing the existing hook/service pattern from 051.</file>
+      <file purpose="reanchor-mount" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — mount the return-from-Word reanchor banner/panel (ComposeReanchorBanner + ConflictPanel + useComposeReanchor from task 054) and wire a change signal via the POLL check-changes path (poll-on-focus), since the webhook delivery needs owner config (gap 3.5).</file>
+      <file purpose="endpoints-REUSE" edit="false">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — push-annotations / pull-annotations / check-changes / reanchor routes already exist (050–054). Do NOT rewrite; you may add a caller-facing binding only if a route is genuinely missing (it is not — verify first).</file>
+      <file purpose="reanchor-ui-REUSE" edit="false">the 054 client components (ComposeReanchorBanner, ConflictPanel, useComposeReanchor) — already built; MOUNT them, do not rebuild.</file>
+      <file purpose="e2e-test" edit="true">tests/integration/contract/Api/Ai/ComposeWordShuttlePollEndpointContractTests.cs (NEW) — the in-process forcing test for the poll path: check-changes → reanchor through the real routes.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="wire-dont-rebuild">The endpoints (050–054) and reanchor components (054) are correct — CONNECT them, do NOT rewrite. Verify a route exists before adding one (Component Justification §11).</constraint>
+    <constraint source="owner-config-boundary">Do NOT attempt to provision Compose:Webhook:* Key Vault secrets (that is DEF-03 / task 056, owner/live-env). Name it. The webhook-delivery leg is ✅◐ E2E-pending on it; wire + test the POLL path instead (no secrets needed).</constraint>
+    <constraint source="no-fold-055">Do NOT build task 055 (deterministic push/save orchestration + Tier-2c preview) here — it is a separate 🔲 task. Leave the seam consumable.</constraint>
+    <constraint source="ADR-007">SPE reads/writes + subscription go through the SpeFileStore / SpeSyncOrchestrator facade; no Microsoft.Graph types leak into Services/Compose.</constraint>
+    <constraint source="ADR-030">Any bus signal for the reanchor/return-from-Word flow uses a typed discriminant (from PaneEventTypes.ts) — zero `as any`.</constraint>
+    <constraint source="cleanGuid">Any Xrm-sourced GUID entering an @odata.bind or /entityset(guid) URL is wrapped with cleanGuid from @spaarke/ui-components. SPE ids / drive ids in JSON bodies are not OData URLs and are not wrapped.</constraint>
+    <constraint source="no-defer">Close the wiring gaps 3.1/3.2/3.4/3.5 in this pass; do NOT file deferrals for them. (3.3 config = owner task 056; 3.6 = task 055 — both already tracked, not new deferrals.)</constraint>
+    <constraint source="bff-hygiene">BFF-touching: report publish-size delta vs 49.63 MB baseline + CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/word-roundtrip, spe-subscription-lifecycle, reanchor-mount, webapplicationfactory-e2e</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r2/notes/e2e-gap-register.md</file>
+      <file>projects/spaarkeai-compose-r2/notes/defer-issues.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-030-typed-event-bus.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the register Cluster 3 + this POML + defer-issues DEF-03. Confirm the 050–054 endpoints + 054 reanchor components exist and are correct (they are — wire, don't rebuild). Find the Compose document-load path (for the EnsureSubscriptionAsync origin call) and the ComposeToolbar/ComposeWorkspace mount points.</step>
+    <step order="1">Push-to-Word (gap 3.1): add the toolbar action calling the existing push-annotations endpoint.</step>
+    <step order="2">Subscription origin call (gap 3.2): invoke EnsureSubscriptionAsync on Compose document load so a subscription is created (not an empty renewal set). Keep it within the SpeSyncOrchestrator facade.</step>
+    <step order="3">Pull caller (gap 3.4): add the pull-annotations client caller reusing the 051 pattern.</step>
+    <step order="4">Reanchor mount + poll (gap 3.5): mount the 054 reanchor banner/panel in ComposeWorkspace and wire the POLL check-changes path (poll-on-focus) as the change signal (webhook delivery stays owner-config-gated). Typed bus discriminants only.</step>
+    <step order="5">ANTI-RECURRENCE TEST (definition-of-done, non-waivable): add ComposeWordShuttlePollEndpointContractTests — a WebApplicationFactory test driving the POLL path (check-changes → reanchor) through the real routes in-process, asserting a detected change reanchors. (The webhook-delivery leg is ✅◐ E2E-pending on task 056 config — state that.)</step>
+    <step order="6">Verify: dotnet build + dotnet test (new + Compose regression); Compose.Components tsc + jest; publish-size + CVE. Run Step 9.5 (code-review + adr-check) UNCONDITIONALLY. Update this POML notes. NAME task 056 (webhook config) + task 055 (deterministic orchestration) as the remaining sequenced/owner items. Do NOT edit TASK-INDEX/current-task (main session reconciles).</step>
+  </steps>
+
+  <outputs>
+    <output type="code">ComposeToolbar.tsx (Push-to-Word action) + pull-annotations client caller</output>
+    <output type="code">SpeSyncOrchestrator EnsureSubscriptionAsync origin call on document load</output>
+    <output type="code">ComposeWorkspace.tsx (reanchor banner/panel mounted + poll check-changes path)</output>
+    <output type="test">tests/integration/contract/Api/Ai/ComposeWordShuttlePollEndpointContractTests.cs (poll path: check-changes → reanchor)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">"Push to Word" is triggerable from the toolbar and calls the existing push-annotations endpoint (gap 3.1 closed).</criterion>
+    <criterion testable="true">EnsureSubscriptionAsync is invoked on Compose document load so a subscription is created; the renewal service no longer renews an empty set (gap 3.2 closed), within the SpeSyncOrchestrator facade.</criterion>
+    <criterion testable="true">A pull-annotations client caller exists (gap 3.4 closed); the 054 reanchor banner/panel is mounted in ComposeWorkspace and the poll check-changes path drives the change signal (gap 3.5 closed).</criterion>
+    <criterion testable="true">A WebApplicationFactory test drives the poll path (check-changes → reanchor) through the real routes in-process and asserts a detected change reanchors (anti-recurrence definition-of-done for the testable leg).</criterion>
+    <criterion testable="true">Task 056 (webhook Key Vault config / DEF-03) + task 055 (deterministic orchestration) are NAMED as owner-queued / separate-sequenced; the webhook-delivery leg is marked ✅◐ E2E-pending on 056; no silent deferral of in-scope wiring. Zero `as any`; typed discriminants; no route rewritten. Publish-size + CVE reported; Step 9.5 clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If wiring EnsureSubscriptionAsync on load genuinely requires the webhook NotificationUrl/secrets to be present to even construct the subscription (i.e. the origin call cannot be made without owner config), STOP and surface per CLAUDE.md §6/§6.5 — then 3.2 is also ✅◐ E2E-pending on task 056, not a clean close. Likewise if closing a wiring gap needs a route/contract that only task 055 provides.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    (to be filled by the executing agent)
+  </notes>
+</task>

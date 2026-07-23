@@ -1,0 +1,124 @@
+<task id="082" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>Flagship gate G-R3 — browser-verified fidelity round-trip + toolset demo on spaarkedev1</title>
+    <phase>6 Wrap</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>081</deps>
+    <tags>e2e-test,frontend,uat</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Run the flagship graduation gate G-R3 — browser-verified on the spaarkedev1 deployment (task 081), one
+    run — that proves R3's fidelity theme end-to-end. Open a formatted contract (letterhead header/footer,
+    multi-level clause numbering, custom styles, a table) in Compose; edit 3 clauses incl. one bold/italic
+    run change AND accept one AI redline (which must show its rationale + a grounding-tied confidence band);
+    exercise the toolset — a find/replace AND a table edit in the same session; then Save and reopen and
+    verify the CORE outcome: header/footer/numbering/styles/table are INTACT and the 3 edits + accepted
+    redline are present as tracked changes, each anchored to the correct paragraph by `w14:paraId`. Plus the
+    supporting import round-trip criterion: a doc that ALREADY has Word revisions/comments opens with them
+    rendered in-editor and preserved across save. Use the `ui-test` skill (Chrome integration). This is the
+    graduation gate — every G-R3 numbered step must pass in one browser run.
+  </prompt>
+
+  <role>
+    Senior QA / UAT engineer fluent in browser-based UI testing via the Spaarke `ui-test` Chrome integration,
+    the Compose editor round-trip, and legal-document fidelity verification (headers/footers, multi-level
+    numbering, custom styles, tables, tracked changes, paraId anchoring). Comfortable driving a full flagship
+    end-to-end run and recording pass/fail per numbered criterion.
+  </role>
+
+  <goal>
+    A recorded, browser-verified G-R3 pass on spaarkedev1: (1) a formatted contract renders with structure
+    intact; (2) 3 clause edits (incl. a bold/italic run change) show as tracked changes and one accepted AI
+    redline shows rationale + a grounding-tied confidence band; (3) find/replace + a table edit both work with
+    tracked-changes marks intact; (4) after Save+reopen the header/footer/numbering/styles/table are intact and
+    the 3 edits + accepted redline persist as tracked changes anchored by paraId; (5) a doc with pre-existing
+    Word revisions/comments opens with them rendered and preserved across save. Each numbered G-R3 step is
+    recorded pass/fail with evidence; a failure blocks graduation (does not silently pass).
+  </goal>
+
+  <context>
+    <background>
+      G-R3 (spec Success Criteria) is the fidelity-round-trip + toolset-demo graduation gate — the single
+      flagship end-to-end that proves R3's theme (design §16 D5 / owner clarification "graduation gate =
+      fidelity round-trip + toolset demo"). It runs against the full R3 deploy (task 081) on spaarkedev1, in
+      the browser, one run. Steps 1–4 are the flagship list; supporting criterion 5 is the import round-trip
+      (FR-24/25/26). Criteria 6–8 (publish-size/CVE, NetArchTest + slice test, real-template hardening) are
+      verified elsewhere (tasks 080, 024/052, 003) and are cross-referenced, not re-run here.
+    </background>
+    <relevant-files>
+      <file role="test-target">spaarkedev1 SpaarkeAi Code Page — the deployed R3 Compose editor (task 081) under browser test</file>
+      <file role="skill">.claude/skills/ui-test/SKILL.md — browser-based UI testing via Chrome integration (the driver for this gate)</file>
+      <file role="fixture">A formatted contract `.docx` (letterhead header/footer, multi-level clause numbering, custom styles, a table) — the flagship fixture</file>
+      <file role="fixture">A `.docx` that already carries Word revisions/comments — the import round-trip fixture (supporting criterion 5)</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md §Success Criteria (G-R3 flagship steps 1–4 + supporting criterion 5)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="081" status="pending">Deploy full R3 to spaarkedev1 — the known-good deployment this gate runs against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec Success Criteria / G-R3">The gate is browser-verified on spaarkedev1, one run. Every numbered G-R3 step (1–4) + supporting criterion 5 must pass; a failure blocks graduation and is recorded, not silently passed.</constraint>
+    <constraint source="FR-07 / NFR-07 (fidelity invariant)">The core Save+reopen check MUST show header/footer/multi-level numbering/custom styles/table intact (untouched content preserved); re-serialization is cosmetic-only.</constraint>
+    <constraint source="FR-11/FR-16 / E2">Each edit + accepted redline MUST be anchored to the correct paragraph by `w14:paraId` after the round-trip.</constraint>
+    <constraint source="FR-13/FR-14 / E3">The accepted AI redline MUST show its rationale (primary) + a grounding-tied confidence band (secondary); low-confidence edits are never auto-accepted.</constraint>
+    <constraint source="FR-24/25/26">The import round-trip fixture MUST open with its Word revisions/comments rendered in-editor and preserved across save.</constraint>
+    <constraint source="charter-6.5">A failed criterion is escalated (blocks graduation) per §6.5 — no partial/optimistic pass.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Browser-based UI testing (Chrome integration); Compose fidelity round-trip verification; paraId anchoring; E3 confidence surface</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/spaarkeai-compose-r3/spec.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Declare rigor (FULL). Confirm task 081 deployed R3 to spaarkedev1 and all surfaces are healthy. Load the `ui-test` skill + spec Success Criteria. Prepare the two fixtures (formatted contract; a doc with existing Word revisions/comments).</step>
+    <step order="1" name="G-R3 step 1 — open formatted contract">Open the formatted contract in Compose; verify it renders with letterhead header/footer, multi-level clause numbering, custom styles, and the table intact. Record pass/fail + evidence.</step>
+    <step order="2" name="G-R3 step 2 — edits + AI redline">Edit 3 clauses (incl. one bold/italic run change); accept one AI redline. Verify the edits show as tracked changes and the AI redline shows rationale + a grounding-tied confidence band. Record.</step>
+    <step order="3" name="G-R3 step 3 — toolset">Exercise a find/replace AND a table edit in the same session. Verify both work and the tracked-changes marks remain intact/uncorrupted. Record.</step>
+    <step order="4" name="G-R3 step 4 — save + reopen (the core)">Save, then reopen. Verify header/footer/numbering/styles/table are INTACT; the 3 edits + accepted redline are present as tracked changes; each redline is anchored to the correct paragraph by `w14:paraId`. Record.</step>
+    <step order="5" name="Supporting criterion 5 — import round-trip">Open the doc that already has Word revisions/comments; verify they render in-editor; save + reopen; verify they are preserved (FR-24/25/26). Record.</step>
+    <step order="6" name="Record + gate">Compile the G-R3 result (each numbered step pass/fail + evidence). If any step fails, the gate BLOCKS graduation — escalate per §6.5, do not pass. Update TASK-INDEX + the README graduation checkboxes.</step>
+  </steps>
+
+  <ui-tests>
+    <ui-test criterion="G-R3.1" maps-to="spec Success Criteria #1">Open a formatted contract (letterhead header/footer, multi-level clause numbering, custom styles, a table) → renders with structure intact.</ui-test>
+    <ui-test criterion="G-R3.2" maps-to="spec Success Criteria #2">Edit 3 clauses incl. one bold/italic run change + accept one AI redline → edits show as tracked changes; the AI redline shows rationale + a grounding-tied confidence band.</ui-test>
+    <ui-test criterion="G-R3.3" maps-to="spec Success Criteria #3">Exercise a find/replace + a table edit in the same session → both work; tracked-changes marks intact.</ui-test>
+    <ui-test criterion="G-R3.4" maps-to="spec Success Criteria #4 (the core)">Save then reopen → header/footer/numbering/styles/table intact; the 3 edits + accepted redline present as tracked changes, each anchored to the correct paragraph by `w14:paraId`.</ui-test>
+    <ui-test criterion="G-R3.5" maps-to="spec Success Criteria #5 (supporting)">Open a doc that already has Word revisions/comments → they render in-editor and are preserved across save (import round-trip FR-24/25/26).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="report">G-R3 flagship result: each numbered step (1–4) + supporting criterion 5 recorded pass/fail with browser evidence</output>
+    <output type="docs">projects/spaarkeai-compose-r3/README.md graduation checkboxes updated</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">G-R3 step 1: a formatted contract (letterhead header/footer, multi-level clause numbering, custom styles, a table) opens in Compose and renders with structure intact.</criterion>
+    <criterion testable="true">G-R3 step 2: 3 clause edits (incl. one bold/italic run change) show as tracked changes, and one accepted AI redline shows its rationale + a grounding-tied confidence band.</criterion>
+    <criterion testable="true">G-R3 step 3: a find/replace AND a table edit both work in the same session with the tracked-changes marks intact.</criterion>
+    <criterion testable="true">G-R3 step 4 (the core): after Save+reopen, header/footer/numbering/styles/table are intact; the 3 edits + accepted redline persist as tracked changes, each anchored to the correct paragraph by `w14:paraId`.</criterion>
+    <criterion testable="true">Supporting criterion 5: a doc that already has Word revisions/comments opens with them rendered in-editor and preserved across save (FR-24/25/26).</criterion>
+    <criterion testable="true">The gate is browser-verified on spaarkedev1 in one run; each numbered step is recorded pass/fail with evidence, and any failure BLOCKS graduation (escalated per §6.5, not silently passed).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

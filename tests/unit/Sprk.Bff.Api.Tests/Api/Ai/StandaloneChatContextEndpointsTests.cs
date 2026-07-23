@@ -291,6 +291,7 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
     [InlineData("opportunity")]
     [InlineData("incident")]
     [InlineData("sprk_matter")]
+    [InlineData("sprk_document")] // Wave 4 / FIX F — Compose document host is now accepted.
     public async Task GetStandaloneContext_AllSupportedEntityTypes_Return200(string entityType)
     {
         // Arrange
@@ -304,6 +305,42 @@ public class StandaloneChatContextEndpointsTests : IClassFixture<CustomWebAppFac
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             $"entity type '{entityType}' is in the supported allowlist and should return 200");
+    }
+
+    // =========================================================================
+    // sprk_document — Compose document host (spaarkeai-compose-r2 Wave 4 / FIX F)
+    //
+    // Wire-body regression: a document-hosted Compose tab used to receive a 400
+    // ("entity type 'sprk_document' is not supported") on the standalone
+    // context-mapping fetch, surfacing as client console noise. sprk_document is
+    // now an accepted type and returns a valid 200 with an empty context mapping.
+    // =========================================================================
+
+    [Fact]
+    public async Task GetStandaloneContext_WithSprkDocument_Returns200_WithEmptyContextFields()
+    {
+        // Arrange
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        var entityId = Guid.NewGuid().ToString();
+
+        // Act — the exact wire path the client (AiSessionProvider) drives.
+        var response = await _client.SendAsync(WithTenantHeader(new HttpRequestMessage(HttpMethod.Get,
+            $"{BaseUrl}?entityType=sprk_document&entityId={entityId}")));
+
+        // Assert — 200, NOT the prior 400.
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "sprk_document is now an accepted entity type (FIX F) and must not return 400");
+
+        var json = await response.Content.ReadAsStringAsync();
+        var context = JsonSerializer.Deserialize<StandaloneChatContextResponse>(json, JsonOptions);
+
+        context.Should().NotBeNull();
+        context!.EntityType.Should().Be("sprk_document", "the response echoes the requested entity type");
+        context.EntityId.Should().Be(entityId);
+        context.DisplayName.Should().Be("Document");
+        context.ContextFields.Should().NotBeNull("response must include a (possibly empty) ContextFields list");
+        context.ContextFields.Should().BeEmpty(
+            "sprk_document is supported-but-unmapped — a graceful empty mapping, not a fabricated one");
     }
 }
 

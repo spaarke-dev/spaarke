@@ -247,7 +247,7 @@ Tokens are cached in memory with expiration tracking. A 5-minute buffer ensures 
 - [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) — Fluent UI v9 requirements
 - [sdap-auth-patterns.md](sdap-auth-patterns.md) — Authentication patterns
 - [sdap-bff-api-patterns.md](sdap-bff-api-patterns.md) — BFF API endpoint patterns
-- [email-processing-architecture.md](email-processing-architecture.md) — Email-to-document conversion pipeline
+- [communication-intelligence-architecture.md](communication-intelligence-architecture.md) — Communication Intelligence substrate incl. the .eml→document conversion pipeline (canonical R4)
 
 ---
 

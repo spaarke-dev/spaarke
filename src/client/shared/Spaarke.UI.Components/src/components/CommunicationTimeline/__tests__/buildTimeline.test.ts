@@ -1,0 +1,359 @@
+/**
+ * buildTimeline.test.ts (task 060, step 6/10)
+ *
+ * Unit coverage for the pure `buildTimeline` (chronological ordering +
+ * reply-nesting depth) and `mapThreadMessageDtoToTimelineMessage` (DTO →
+ * domain mapping) helpers. Both are pure (no I/O, no platform APIs —
+ * ADR-012), so these are ADR-038 domain-logic behavior contracts
+ * (MAINTAIN-class), not scaffolding.
+ */
+import {
+  buildTimeline,
+  mapThreadMessageDtoToTimelineMessage,
+  mapRegardingReadResultToGroups,
+} from '../CommunicationTimeline.buildTimeline';
+import type { TimelineMessage } from '../CommunicationTimeline.types';
+import type { IRegardingReadResultDto, IThreadMessageDto } from '../../../services/communicationTimelineApi';
+
+function msg(id: string, overrides: Partial<TimelineMessage> = {}): TimelineMessage {
+  return {
+    id,
+    channelType: 'email',
+    channelTypeRaw: 100000000,
+    sender: `sender-${id}@example.com`,
+    sentOn: undefined,
+    createdOn: undefined,
+    body: `body-${id}`,
+    bodyFormat: 'html',
+    inReplyTo: undefined,
+    privilege: 0,
+    attachments: [],
+    ...overrides,
+  };
+}
+
+describe('buildTimeline — chronological ordering', () => {
+  it('returns an empty array for no messages', () => {
+    expect(buildTimeline([])).toEqual([]);
+  });
+
+  it('orders messages chronologically by sentOn ascending', () => {
+    const a = msg('a', { sentOn: '2026-07-01T10:00:00Z' });
+    const b = msg('b', { sentOn: '2026-07-01T09:00:00Z' });
+    const c = msg('c', { sentOn: '2026-07-01T11:00:00Z' });
+
+    const result = buildTimeline([a, b, c]);
+
+    expect(result.map(e => e.message.id)).toEqual(['b', 'a', 'c']);
+  });
+
+  it('falls back to createdOn when sentOn is absent', () => {
+    const a = msg('a', { sentOn: undefined, createdOn: '2026-07-01T10:00:00Z' });
+    const b = msg('b', { sentOn: undefined, createdOn: '2026-07-01T09:00:00Z' });
+
+    const result = buildTimeline([a, b]);
+
+    expect(result.map(e => e.message.id)).toEqual(['b', 'a']);
+  });
+
+  it('interleaves email and chat messages purely by time, channel-agnostic', () => {
+    const email = msg('email-1', { channelType: 'email', sentOn: '2026-07-01T10:00:00Z' });
+    const chat = msg('chat-1', { channelType: 'message', sentOn: '2026-07-01T10:05:00Z' });
+    const emailReply = msg('email-2', { channelType: 'email', sentOn: '2026-07-01T10:10:00Z' });
+
+    const result = buildTimeline([emailReply, email, chat]);
+
+    expect(result.map(e => e.message.id)).toEqual(['email-1', 'chat-1', 'email-2']);
+  });
+
+  it('stable tie-breaks simultaneous messages by id', () => {
+    const a = msg('b-id', { sentOn: '2026-07-01T10:00:00Z' });
+    const b = msg('a-id', { sentOn: '2026-07-01T10:00:00Z' });
+
+    const result = buildTimeline([a, b]);
+
+    expect(result.map(e => e.message.id)).toEqual(['a-id', 'b-id']);
+  });
+});
+
+describe('buildTimeline — reply-nesting depth', () => {
+  it('assigns depth 0 to a message with no inReplyTo', () => {
+    const root = msg('root', { sentOn: '2026-07-01T10:00:00Z' });
+    const result = buildTimeline([root]);
+    expect(result[0].depth).toBe(0);
+  });
+
+  it('assigns depth 1 to a direct reply whose inReplyTo matches an in-thread id', () => {
+    const root = msg('root', { sentOn: '2026-07-01T10:00:00Z' });
+    const reply = msg('reply', { sentOn: '2026-07-01T10:05:00Z', inReplyTo: 'root' });
+
+    const result = buildTimeline([root, reply]);
+    const byId = new Map(result.map(e => [e.message.id, e.depth]));
+
+    expect(byId.get('root')).toBe(0);
+    expect(byId.get('reply')).toBe(1);
+  });
+
+  it('assigns increasing depth across a reply chain, independent of display order', () => {
+    const root = msg('root', { sentOn: '2026-07-01T10:00:00Z' });
+    const reply1 = msg('reply1', { sentOn: '2026-07-01T10:05:00Z', inReplyTo: 'root' });
+    const reply2 = msg('reply2', { sentOn: '2026-07-01T10:10:00Z', inReplyTo: 'reply1' });
+
+    const result = buildTimeline([reply2, root, reply1]);
+    const byId = new Map(result.map(e => [e.message.id, e.depth]));
+
+    // Order stays strictly chronological — nesting is depth-only, not re-grouping.
+    expect(result.map(e => e.message.id)).toEqual(['root', 'reply1', 'reply2']);
+    expect(byId.get('root')).toBe(0);
+    expect(byId.get('reply1')).toBe(1);
+    expect(byId.get('reply2')).toBe(2);
+  });
+
+  it('degrades to depth 0 when inReplyTo does not match any in-thread id (e.g. RFC-2822 Internet-Message-Id)', () => {
+    const email = msg('email-1', {
+      sentOn: '2026-07-01T10:00:00Z',
+      inReplyTo: '<some-external-rfc2822-id@mail.example.com>',
+    });
+
+    const result = buildTimeline([email]);
+    expect(result[0].depth).toBe(0);
+  });
+
+  it('is cycle-safe — a self-referencing or circular inReplyTo chain resolves to depth 0 rather than recursing forever', () => {
+    const a = msg('a', { sentOn: '2026-07-01T10:00:00Z', inReplyTo: 'b' });
+    const b = msg('b', { sentOn: '2026-07-01T10:05:00Z', inReplyTo: 'a' });
+    const selfRef = msg('self', { sentOn: '2026-07-01T10:10:00Z', inReplyTo: 'self' });
+
+    expect(() => buildTimeline([a, b, selfRef])).not.toThrow();
+    const result = buildTimeline([a, b, selfRef]);
+    for (const entry of result) {
+      expect(entry.depth).toBe(0);
+    }
+  });
+});
+
+describe('mapThreadMessageDtoToTimelineMessage', () => {
+  function dto(overrides: Partial<IThreadMessageDto> = {}): IThreadMessageDto {
+    return {
+      messageId: 'm1',
+      body: '<p>hi</p>',
+      bodyFormat: 100000001, // HTML
+      communicationType: 100000000, // Email
+      from: 'alice@example.com',
+      direction: null,
+      sentBy: null,
+      sentByName: null,
+      sentAt: '2026-07-01T10:00:00Z',
+      createdOn: '2026-07-01T09:59:00Z',
+      inReplyTo: null,
+      privilege: 0,
+      attachments: [],
+      ...overrides,
+    };
+  }
+
+  it('maps CommunicationType.Email (100000000) to channelType "email"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ communicationType: 100000000 }));
+    expect(result.channelType).toBe('email');
+  });
+
+  it('maps CommunicationType.Message (100000004) to channelType "message"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ communicationType: 100000004 }));
+    expect(result.channelType).toBe('message');
+  });
+
+  it('defaults unknown/null communicationType to "email"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ communicationType: null }));
+    expect(result.channelType).toBe('email');
+  });
+
+  it('maps BodyFormat.PlainText (100000000) to bodyFormat "text"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ bodyFormat: 100000000 }));
+    expect(result.bodyFormat).toBe('text');
+  });
+
+  it('maps BodyFormat.HTML (100000001) to bodyFormat "html"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ bodyFormat: 100000001 }));
+    expect(result.bodyFormat).toBe('html');
+  });
+
+  it('defaults unknown/null bodyFormat to "html"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ bodyFormat: null }));
+    expect(result.bodyFormat).toBe('html');
+  });
+
+  it('prefers sentAt over createdOn for sentOn, but keeps createdOn separately for the poll cursor', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({ sentAt: '2026-07-01T10:00:00Z', createdOn: '2026-07-01T09:59:00Z' })
+    );
+    expect(result.sentOn).toBe('2026-07-01T10:00:00Z');
+    expect(result.createdOn).toBe('2026-07-01T09:59:00Z');
+  });
+
+  it('falls back to createdOn for sentOn when sentAt is null', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ sentAt: null, createdOn: '2026-07-01T09:59:00Z' }));
+    expect(result.sentOn).toBe('2026-07-01T09:59:00Z');
+  });
+
+  it('maps attachment refs field-for-field, converting null → undefined', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({
+        attachments: [
+          {
+            communicationAttachmentId: 'att-1',
+            documentId: 'doc-1',
+            fileName: 'contract.pdf',
+            attachmentType: 100000000,
+          },
+          { communicationAttachmentId: 'att-2', documentId: null, fileName: null, attachmentType: null },
+        ],
+      })
+    );
+
+    expect(result.attachments).toEqual([
+      { id: 'att-1', documentId: 'doc-1', fileName: 'contract.pdf', attachmentType: 100000000 },
+      { id: 'att-2', documentId: undefined, fileName: undefined, attachmentType: undefined },
+    ]);
+  });
+
+  // R3 task 011 (FR-18/FR-02) — sender-identity enrichment pass-through. ConversationView's
+  // mine/others bubble alignment keys on `senderSystemUserId`, so this mapping must be exact.
+  it('passes sentBy/sentByName through unchanged as senderSystemUserId/senderName', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({ sentBy: '11111111-1111-1111-1111-111111111111', sentByName: 'Alice Example' })
+    );
+    expect(result.senderSystemUserId).toBe('11111111-1111-1111-1111-111111111111');
+    expect(result.senderName).toBe('Alice Example');
+  });
+
+  // R3 task 043 (FR-21) — privilege/privacy markers, additive pass-through. These ride the access-filtered row the
+  // BFF returned; the mapping is a straight copy (no client-side access inference).
+  it('passes isInternalOnly/isPrivate through unchanged', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(
+      dto({ isInternalOnly: true, isPrivate: true, privilege: 100000002 })
+    );
+    expect(result.isInternalOnly).toBe(true);
+    expect(result.isPrivate).toBe(true);
+    expect(result.privilege).toBe(100000002);
+  });
+
+  it('defaults isInternalOnly/isPrivate to false when the wire fields are absent', () => {
+    // A row predating task 043 carries no marker fields — the mapping must default them to false, never undefined,
+    // so downstream marker rendering is deterministic (and never guesses "restricted").
+    const bare = dto();
+    delete (bare as { isInternalOnly?: boolean }).isInternalOnly;
+    delete (bare as { isPrivate?: boolean }).isPrivate;
+    const result = mapThreadMessageDtoToTimelineMessage(bare);
+    expect(result.isInternalOnly).toBe(false);
+    expect(result.isPrivate).toBe(false);
+  });
+
+  it('maps Direction.Incoming (100000000) to "incoming"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: 100000000 }));
+    expect(result.direction).toBe('incoming');
+  });
+
+  it('maps Direction.Outgoing (100000001) to "outgoing"', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: 100000001 }));
+    expect(result.direction).toBe('outgoing');
+  });
+
+  it('defaults null/unset direction, sentBy, sentByName to null', () => {
+    const result = mapThreadMessageDtoToTimelineMessage(dto({ direction: null, sentBy: null, sentByName: null }));
+    expect(result.direction).toBeNull();
+    expect(result.senderSystemUserId).toBeNull();
+    expect(result.senderName).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapRegardingReadResultToGroups (R2 task 020, FR-03 — regarding-mode grouping)
+// ---------------------------------------------------------------------------
+
+describe('mapRegardingReadResultToGroups', () => {
+  function threadDto(
+    threadId: string,
+    name: string | null,
+    messages: IThreadMessageDto[] = []
+  ): IRegardingReadResultDto['threads'][number] {
+    return { threadId, name, messages, count: messages.length };
+  }
+
+  function messageDto(id: string, overrides: Partial<IThreadMessageDto> = {}): IThreadMessageDto {
+    return {
+      messageId: id,
+      body: `body-${id}`,
+      bodyFormat: 100000001,
+      communicationType: 100000000,
+      from: `sender-${id}@example.com`,
+      sentAt: null,
+      createdOn: null,
+      inReplyTo: null,
+      privilege: 0,
+      attachments: [],
+      ...overrides,
+    };
+  }
+
+  function regardingDto(threads: IRegardingReadResultDto['threads']): IRegardingReadResultDto {
+    return {
+      entityType: 'sprk_matter',
+      recordId: 'record-1',
+      threads,
+      threadCount: threads.length,
+      messageCount: threads.reduce((sum, t) => sum + t.count, 0),
+    };
+  }
+
+  it('returns an empty array when the record has no threads', () => {
+    expect(mapRegardingReadResultToGroups(regardingDto([]))).toEqual([]);
+  });
+
+  it('maps each thread to a group carrying its name and message count', () => {
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', 'Matter — Acme', [messageDto('m1')])]));
+
+    expect(result).toHaveLength(1);
+    expect(result[0].threadId).toBe('t1');
+    expect(result[0].name).toBe('Matter — Acme');
+    expect(result[0].messageCount).toBe(1);
+    expect(result[0].messages).toHaveLength(1);
+    expect(result[0].messages[0].id).toBe('m1');
+  });
+
+  it('falls back to a placeholder label when the thread name is null', () => {
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', null)]));
+    expect(result[0].name).toBe('Untitled thread');
+  });
+
+  it('falls back to a placeholder label when the thread name is blank', () => {
+    const result = mapRegardingReadResultToGroups(regardingDto([threadDto('t1', '   ')]));
+    expect(result[0].name).toBe('Untitled thread');
+  });
+
+  it("maps each group's messages via mapThreadMessageDtoToTimelineMessage (reused, not re-implemented)", () => {
+    const result = mapRegardingReadResultToGroups(
+      regardingDto([threadDto('t1', 'Thread A', [messageDto('m1', { communicationType: 100000004 })])])
+    );
+    // channelType 'message' only comes from mapThreadMessageDtoToTimelineMessage's own mapping —
+    // proves this function delegates rather than re-deriving the DTO -> domain mapping.
+    expect(result[0].messages[0].channelType).toBe('message');
+  });
+
+  it('orders groups by most-recent message activity, newest first', () => {
+    const older = threadDto('older', 'Older thread', [messageDto('m1', { sentAt: '2026-07-01T09:00:00Z' })]);
+    const newer = threadDto('newer', 'Newer thread', [messageDto('m2', { sentAt: '2026-07-01T11:00:00Z' })]);
+
+    const result = mapRegardingReadResultToGroups(regardingDto([older, newer]));
+
+    expect(result.map(g => g.threadId)).toEqual(['newer', 'older']);
+  });
+
+  it('treats a thread with no messages as having no activity (sorts last)', () => {
+    const withMessages = threadDto('active', 'Active thread', [messageDto('m1', { sentAt: '2026-07-01T09:00:00Z' })]);
+    const empty = threadDto('empty', 'Empty thread', []);
+
+    const result = mapRegardingReadResultToGroups(regardingDto([empty, withMessages]));
+
+    expect(result.map(g => g.threadId)).toEqual(['active', 'empty']);
+  });
+});

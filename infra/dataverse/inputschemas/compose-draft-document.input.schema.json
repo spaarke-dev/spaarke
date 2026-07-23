@@ -1,0 +1,17 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-draft-document (spaarkeai-compose-r2 DEF-08). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). The drafting REQUEST is the load-bearing LLM input; the session's documents + prior ledger outputs are supplied by the retrieval/context layer (not maker-provided input fields). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). Custom keyword ledger_resolution is maker metadata (OpenAI-tolerated unknown keyword). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "actionCode": "compose-draft-document",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["request"],
+    "properties": {
+      "request": {
+        "type": "string",
+        "description": "The user's drafting request in their own words (e.g. 'write a client letter summarizing the NDA findings', 'draft a memo responding to the termination notice'). The agent loop supplies this from the user's message; the session's documents and prior ledger outputs are grounded in by the retrieval/context layer.",
+        "maxLength": 4000,
+        "ledger_resolution": "The user's drafting utterance. Session documents + prior compose/informational ledger outputs are supplied by the context layer at dispatch time (not a maker-provided field)."
+      }
+    }
+  }
+}

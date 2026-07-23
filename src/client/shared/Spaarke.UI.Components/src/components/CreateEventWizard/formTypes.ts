@@ -20,6 +20,14 @@ export interface ICreateEventFormState {
   regardingRecordId: string;
   /** Regarding Record display name. */
   regardingRecordName: string;
+  /**
+   * Assigned To — `contact` GUID. Maps to `sprk_assignedto` (spaarkeai-
+   * assistant-enhancements-r1 task 014 / FR-A4). Optional: an event/task can
+   * be created with no assignee.
+   */
+  assignedToId: string;
+  /** Display name of the assigned contact. */
+  assignedToName: string;
 }
 
 export const EMPTY_EVENT_FORM: ICreateEventFormState = {
@@ -31,4 +39,6 @@ export const EMPTY_EVENT_FORM: ICreateEventFormState = {
   description: '',
   regardingRecordId: '',
   regardingRecordName: '',
+  assignedToId: '',
+  assignedToName: '',
 };

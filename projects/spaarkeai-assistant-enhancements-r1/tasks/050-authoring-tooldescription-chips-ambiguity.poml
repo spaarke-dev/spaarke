@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-assistant-enhancements-r1">
+  <metadata>
+    <title>Authoring: richer sprk_tooldescription + chips + narrow ambiguity set + Q&amp;A→list</title>
+    <phase>6: Authoring, Eval &amp; Hardening</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>051</blocks>
+    <tags>dataverse, ai, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Catalog content authoring with owner review; no code, but affects dispatch behavior.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Content authoring against shipped conventions; owner reviews the result (FR-J1).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Catalog authoring — main-session; feeds eval task 051.</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Author richer sprk_tooldescription + sprk_chiptransitions rows for the R1 capabilities. Author the narrow high-frequency ambiguity set (file/open/close/matter + To Do/Event) into tool descriptions. Author bare Q&amp;A to DISPATCH a list-* capability whose chips fire (owner decision option (a)) — e.g. "what are my tasks?" dispatches a list capability. Owner (Ralph) reviews the content.
+  </prompt>
+
+  <role>
+    SPAARKE AI catalog author expert in tool-description authoring, chip transitions, and the ADR-039 ambiguity-in-descriptions pattern.
+  </role>
+
+  <goal>
+    Richer tool descriptions + chip rows for the R1 capabilities; the narrow ambiguity set authored into descriptions; a list-* capability that "what are my tasks?" dispatches (whose chips fire). Owner-reviewed.
+  </goal>
+
+  <context>
+    <background>
+      Owner is the FR-J1 reviewer. Option (a): no new machinery for bare Q&amp;A — author it to dispatch a list capability whose chips fire (feeds 043's SNS).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Ambiguity is authored into tool descriptions — NOT a classifier/second decider.</constraint>
+    <constraint source="project">Q&amp;A dispatches a list-* capability (option a); no new bare-Q&amp;A machinery. Owner reviews (FR-J1).</constraint>
+    <constraint source="project">Every catalog change owes eval cases — authored in task 051 (list them here).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Enrich sprk_tooldescription for the R1 capabilities; author the file/open/close/matter + To Do/Event ambiguity cues.</step>
+    <step order="2">Author sprk_chiptransitions rows so dispatched capabilities emit useful next-step chips.</step>
+    <step order="3">Ensure a list-* capability exists that "what are my tasks?" dispatches; its chips fire (feeds 043).</step>
+    <step order="4">List the owed eval cases for task 051.</step>
+    <step order="5">Request owner review of the authored content; incorporate feedback. Update TASK-INDEX.md 050 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Owner review is a required gate (FR-J1): if the owner has not approved the tool-description/chip content, do NOT mark the task complete.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Author/verify catalog rows</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">Enriched sprk_tooldescription + sprk_chiptransitions rows + list-* Q&amp;A capability</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The R1 capabilities have enriched tool descriptions encoding the narrow ambiguity set.</criterion>
+    <criterion testable="true">"what are my tasks?" dispatches a list-* capability whose chips fire.</criterion>
+    <criterion testable="true">Owner (Ralph) has reviewed and approved the content (FR-J1).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-J1 / FR-G2. Owner review = completion gate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files. Owner review before completion.</protocol>
+  </execution>
+</task>

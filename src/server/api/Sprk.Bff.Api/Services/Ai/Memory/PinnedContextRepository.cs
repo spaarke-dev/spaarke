@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Memory;
 ///
 /// <para>
 /// Storage: Cosmos container <c>memory</c> (REUSED — same container as
-/// <see cref="MatterMemoryService"/> and <c>WorkspaceStateService</c> durable rows), partition
+/// the retired <c>MatterMemoryService</c> and <c>WorkspaceStateService</c> durable rows), partition
 /// key <c>/tenantId</c> per ADR-014 binding. Document discriminator
 /// <c>documentType = "pinned-context"</c> co-exists with matter-memory + workspace-tab
 /// documents on the same partition without id collision (the <c>pinned-context_</c> id prefix
@@ -44,7 +44,7 @@ namespace Sprk.Bff.Api.Services.Ai.Memory;
 /// </summary>
 public sealed class PinnedContextRepository : IPinnedContextRepository
 {
-    /// <summary>Cosmos container name (reused with <see cref="MatterMemoryService"/> and workspace-tab durable rows).</summary>
+    /// <summary>Cosmos container name (reused with the retired <c>MatterMemoryService</c> and workspace-tab durable rows).</summary>
     internal const string ContainerName = "memory";
 
     /// <summary>Cosmos document discriminator value — also embedded in the id prefix.</summary>
@@ -83,7 +83,7 @@ public sealed class PinnedContextRepository : IPinnedContextRepository
     /// <summary>
     /// Constructor used by tests that want to inject a Container mock directly without
     /// constructing a full <see cref="CosmosClient"/> mock graph. Mirrors the
-    /// <see cref="MatterMemoryService"/> internal constructor pattern.
+    /// the retired <c>MatterMemoryService</c> internal constructor pattern.
     /// </summary>
     internal PinnedContextRepository(Container container, ILogger<PinnedContextRepository> logger)
     {

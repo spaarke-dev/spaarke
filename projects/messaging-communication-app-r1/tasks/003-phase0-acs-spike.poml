@@ -1,0 +1,143 @@
+<task id="003" project="messaging-communication-app-r1">
+  <metadata>
+    <title>Phase-0: ACS spike (identity + server-minted chat token + thread + Event Grid round-trip; latency, echo-dedup, publish-size)</title>
+    <phase>W0 — Phase 0 Verification + Foundation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 011, 012, 020, 030</blocks>
+    <tags>spike, acs</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Throwaway exploratory spike proving ACS end-to-end server-side. Output is a findings report + throwaway spike code under `notes/spikes/`, NOT production code — no Step 9.5 gates. But it gates ALL ACS work (010/011/012/020/030), so the findings (latency, echo-dedup, publish-size delta) must be rigorous. STANDARD per §8.</rigor-reason>
+    <parallel-group>W0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>—</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Phase-0 ACS proving spike (design §12.3, §8). ACS is entirely net-new to Spaarke (design §2 — no `Azure.Communication.*` anywhere). Before committing to the W1/W2 build, PROVE the full server-side round-trip and measure the three numbers the plan says gate the build:
+
+    1. **Create an ACS identity** server-side (BFF trusted-service role) — `createUser` / `createUserAndToken`.
+    2. **Mint a `chat`-scoped token server-side** for that identity (uniform server-minting — Entra→ACS exchange is VoIP-only per design §8.2; even internal users get server-minted chat tokens).
+    3. **Create a chat thread** with **30-day retention** and **add participants** (`ChatThreadClient.AddParticipants`).
+    4. **Send a message** to the thread server-side (`SendMessage`, sender's minted token).
+    5. **Capture the message via an Event Grid round-trip** — subscribe to `ChatMessageReceivedInThread`, receive the event (or simulate the documented event schema if a live Event Grid subscription is not provisionable in the spike window), and prove the **subscription-validation handshake** (echo `validationCode`).
+
+    MEASURE and report:
+    - **send→persist latency** (send server-side → the Event Grid echo arrives) — the number that tells us the polling cadence (~5s, FR-10/NFR-07) is comfortably above capture latency.
+    - **echo-dedup behavior** — our OWN outbound message emits an Event Grid `ChatMessageReceivedInThread`; prove that de-duping on the ACS **message id** makes the echo a no-op (design §4 — the seam that lets outbound stay persist-on-send while inbound stays capture-on-event). Confirm the ACS message id is stable + present on both the send response and the inbound event.
+    - **`dotnet publish` size delta** — add `Azure.Communication.Chat` 1.4.0 + `Azure.Communication.Identity` 1.3.1 to a throwaway probe and measure the compressed publish delta vs the ~45.30 MB baseline (design §8.9 claims "negligible, thin over `Azure.Core`" — verify it).
+
+    Use `Azure-Samples/communication-services-authentication-hero-csharp` as the starting point (BFF trusted-service token minting + identity mapping — the blueprint) and `...-dotnet-quickstarts` for thread/participant/send server code. Consult the ACS researcher memory at `.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md` (if absent, run the `researcher` subagent to (re)establish ACS findings and note the gap). This is THROWAWAY spike code under `notes/spikes/` — NOT production `Services/Acs/`. Output findings to `notes/spikes/003-acs-spike.md`.
+  </prompt>
+
+  <role>
+    Spaarke BFF integration engineer proving a net-new Azure transport. Fluent in the ACS trusted-service model (BFF mints identities + tokens; clients hold none), `Azure.Communication.Identity` / `Azure.Communication.Chat`, Event Grid subscription-validation + at-least-once delivery, and the Spaarke publish-size discipline (root §10 / NFR-01). Spike posture — prove and measure, throwaway code.
+  </role>
+
+  <goal>
+    A findings report at `notes/spikes/003-acs-spike.md` proving the server-side ACS round-trip (identity → chat token → thread w/ 30-day retention → send → Event Grid capture + validation handshake) with three measured numbers: send→persist latency, echo-dedup confirmation (stable ACS message id dedupes the own-echo), and the `dotnet publish` size delta for the two ACS SDKs. W1/W2 (010/011/012/020/030) can be built against proven behavior and confirmed footprint rather than assumptions.
+  </goal>
+
+  <context>
+    <background>
+      Design §13 R-1 names ACS being entirely net-new as the top risk; §12.3 mandates this spike first. The three measured numbers each de-risk a specific downstream decision: latency validates the ~5s poll (§6.2/NFR-07); echo-dedup validates the persist-on-send + capture-on-event coexistence (§4 — the whole outbound/inbound model rests on the ACS message id being a stable idempotency key); publish-size validates the §8.9/NFR-01 claim before the SDKs are committed to the production project (root §10 ceiling ≤60 MB, ≥+5 MB single-task delta requires justification).
+
+      §11 Component Justification: no production component is introduced here — this is throwaway spike code. The production ACS components it de-risks (identity/token minting in 010, thread ops in 011, provisioning in 012) carry their own justification. Cost-of-doing-nothing for THIS task: building 010/011/012/020/030 on unverified ACS behavior — e.g., discovering mid-W3 that the echo is not dedupable (breaking §4) or that the SDK footprint blows the size ceiling.
+    </background>
+    <relevant-files>
+      <file>projects/messaging-communication-app-r1/design.md (§4 flows/echo-dedup, §8 ACS integration, §8.9 footprint, §12.3 spike mandate)</file>
+      <file>src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj (baseline package set — for the throwaway publish-size probe)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ (existing channel + job patterns the production build will reuse — reference only, do not modify in the spike)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">THROWAWAY spike — spike code lives under `notes/spikes/` (per template §"What goes in notes"). MUST NOT add production code to `Services/Acs/` or `Services/Communication/`; MUST NOT commit the ACS SDK refs into `Sprk.Bff.Api.csproj` (measure in a throwaway probe project/branch and revert).</constraint>
+    <constraint source="design §8.2">Token minting is SERVER-SIDE only; the spike proves uniform server-minting (`chat` scope). No client-side ACS SDK, no token to a browser (NFR-04).</constraint>
+    <constraint source="design §8.3">Event Grid is at-least-once + unordered + may duplicate → prove idempotent dedupe on the ACS message id (the echo-dedup measurement). Prove the subscription-validation handshake (echo `validationCode`).</constraint>
+    <constraint source="design §8.7">Thread created with 30-day retention (or explicit delete-post-persist) — verify the retention setting is honoured at create.</constraint>
+    <constraint source="root §10 / NFR-01">Report the `dotnet publish -c Release` compressed size delta for `Azure.Communication.Chat` 1.4.0 + `Azure.Communication.Identity` 1.3.1 vs the ~45.30 MB baseline; flag if ≥+5 MB (design §8.9 predicts negligible).</constraint>
+    <constraint source="ADR-028">Any credential in the spike uses central `TokenCredential` patterns; MUST NOT `new` a `ConfidentialClientApplication` (even in throwaway code, model the production auth path).</constraint>
+    <constraint source="project">If a live ACS resource / Event Grid subscription cannot be provisioned in the spike window, simulate the documented event schema + validation handshake and clearly label which numbers are MEASURED vs ESTIMATED-from-docs; do not block the project — deliver the report with the gap noted.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/messaging-communication-app-r1/spec.md</file>
+      <file>projects/messaging-communication-app-r1/design.md</file>
+      <file>projects/messaging-communication-app-r1/plan.md</file>
+      <file>projects/messaging-communication-app-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/agent-memory/researcher/acs-chat-integration-2026-07-16.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-004-async-job-contract.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+    <patterns>
+      <pattern name="ACS trusted-service token minting" location="Azure-Samples/communication-services-authentication-hero-csharp">
+        BFF creates ACS identities + mints scoped tokens; identity mapped to the app's user store. The blueprint for task 010.
+      </pattern>
+      <pattern name="ACS thread/participant/send (server)" location="Azure-Samples/communication-services-dotnet-quickstarts">
+        `ChatThreadClient` create-thread / AddParticipants / SendMessage server code. The blueprint for task 011/020.
+      </pattern>
+      <pattern name="Event Grid subscription-validation handshake" location="design.md §8.3">
+        Echo the `validationCode` on the SubscriptionValidationEvent; then idempotent capture on ACS message id. The blueprint for task 030/031.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `design.md` §4/§8/§8.9/§12.3 + the ACS researcher memory (if present; else run `researcher` to (re)establish findings and note the gap). Read `.claude/constraints/bff-extensions.md` for the publish-size procedure.</step>
+    <step order="2">Stand up a throwaway spike (console app or a scratch branch/probe under `notes/spikes/`) referencing `Azure.Communication.Identity` 1.3.1 + `Azure.Communication.Chat` 1.4.0. Use the auth-hero-csharp sample as the identity/token skeleton.</step>
+    <step order="3">Prove identity + token: `createUserAndToken(["chat"])` server-side; capture the `communicationUserId` and the token scope/lifetime (1–24h). Confirm no token would need to reach a client.</step>
+    <step order="4">Prove thread: create a chat thread with 30-day retention; `AddParticipants`; `SendMessage`. Capture the ACS message id from the send response.</step>
+    <step order="5">Prove capture: subscribe an Event Grid handler (or simulate the documented `ChatMessageReceivedInThread` schema); prove the subscription-validation handshake (echo `validationCode`); receive the event for the sent message; confirm the ACS message id on the event matches the send response (echo-dedup key).</step>
+    <step order="6">MEASURE send→persist latency (send → event arrival). MEASURE echo-dedup: assert de-duping on the ACS message id makes the own-echo a no-op. Label MEASURED vs ESTIMATED where a live subscription was unavailable.</step>
+    <step order="7">MEASURE publish-size: `dotnet publish -c Release` a probe with vs without the two ACS SDKs; report the compressed delta vs ~45.30 MB. Revert any probe changes to `Sprk.Bff.Api.csproj`.</step>
+    <step order="8">Write `notes/spikes/003-acs-spike.md`: the proven round-trip, the three numbers, the recommended poll cadence given the latency, the echo-dedup key confirmation, the size delta + go/no-go vs the ceiling, and a "consumed by 010/011/012/030/031" section mapping each finding to the production task it de-risks.</step>
+    <step order="9">Delete/quarantine the throwaway spike code under `notes/spikes/`; confirm no ACS refs leaked into `Sprk.Bff.Api.csproj`. Update `tasks/TASK-INDEX.md` (003 ✅) + `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Design/constraints/researcher-memory + baseline csproj</tool>
+    <tool name="bash">Build/run the throwaway spike; `dotnet publish` size probe; latency timing</tool>
+    <tool name="edit">Author the throwaway spike code (under notes/spikes/) + the findings report</tool>
+    <tool name="researcher">(If ACS memory absent) re-establish ACS integration findings</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/messaging-communication-app-r1/notes/spikes/003-acs-spike.md (findings: round-trip proof + latency + echo-dedup + publish-size delta + per-task de-risk map)</output>
+    <output type="notes" ephemeral="true">projects/messaging-communication-app-r1/notes/spikes/ (throwaway spike code — quarantined/deleted after measurement)</output>
+    <output type="docs">projects/messaging-communication-app-r1/tasks/TASK-INDEX.md (status update 003 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/spikes/003-acs-spike.md` documents a proven (or documented-schema-simulated + clearly labelled) server-side round-trip: identity → `chat`-scoped server-minted token → thread w/ 30-day retention → AddParticipants → SendMessage → Event Grid `ChatMessageReceivedInThread` capture with the validation handshake.</criterion>
+    <criterion testable="true">A **send→persist latency** number is reported, with a recommended poll cadence relative to it (~5s target).</criterion>
+    <criterion testable="true">**Echo-dedup** is confirmed: the ACS message id is stable + present on both the send response and the inbound event, and de-duping on it makes the own-echo a no-op.</criterion>
+    <criterion testable="true">A **`dotnet publish` compressed size delta** for `Azure.Communication.Chat` 1.4.0 + `Azure.Communication.Identity` 1.3.1 vs ~45.30 MB is reported with a go/no-go vs the 60 MB ceiling.</criterion>
+    <criterion testable="true">A "consumed by 010/011/012/030/031" section maps each finding to the production task it de-risks.</criterion>
+    <criterion testable="true">No ACS SDK reference leaked into `Sprk.Bff.Api.csproj`; no production `Services/Acs/` code was added; spike code is quarantined under `notes/spikes/`.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Gates ALL ACS work: 010 (identity/token), 011 (thread/membership), 012 (provisioning), 020 (channel sender/archiver over ACS), 030 (Event Grid ingress). Land it before W1 opens.
+
+    The echo-dedup finding is load-bearing for the entire outbound/inbound coexistence (design §4). If the ACS message id proves NOT to be a stable dedupe key, that is a design-level finding — escalate before W3 (031) is built on it.
+
+    Publish-size: design §8.9 predicts negligible (thin over `Azure.Core`, already present). If the measured delta contradicts that (≥+5 MB), flag it — it changes the root §10 posture for every ACS BFF task.
+
+    If the ACS researcher memory file is absent (it is referenced by design/plan but may not be present in this worktree), run the `researcher` subagent to establish the findings and record that the memory file needed (re)creation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — throwaway spike, no Step 9.5 gates — but the three measured numbers must be rigorous (they gate W1/W2). No production code, no committed ACS refs. Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

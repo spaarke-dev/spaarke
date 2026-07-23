@@ -298,7 +298,12 @@ export const CreateProjectStep: React.FC<ICreateProjectStepProps> = ({
       assignedOutsideCounselName: v => serviceRef.current.searchOrganizations(v),
     },
     onApply: handlePrefillApply,
-    skipIfInitialized: !!hasInitialValues,
+    // UAT #1 (W-3 parity, 2026-07-18): a hand-off launch pre-fills the form from the
+    // drafted seed AND carries the source file. Skip the native pre-fill only when the
+    // form was seeded AND no file is present; when a carried file IS present, let the
+    // wizard re-profile it (fills project-type / practice-area + shows the AI badges) —
+    // useAiPrefill re-evaluates this per run, so an async-arriving file still triggers it.
+    skipIfInitialized: !!hasInitialValues && uploadedFiles.length === 0,
     logPrefix: 'CreateProject',
   });
 

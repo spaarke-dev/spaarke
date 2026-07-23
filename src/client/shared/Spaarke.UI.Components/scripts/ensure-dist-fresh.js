@@ -6,10 +6,19 @@
  * `dist/` predates its `src/`. There is no npm workspace here — the symlink
  * consumers get is never told to rebuild, so nothing forces `dist/` current.
  *
+ * EXTENDED 2026-07-10 (visual-host-version-update VHVU-001): consumers that
+ * bundle this package's `src/` directly (e.g. VisualHost) also compile the
+ * bare-specifier imports inside those src files — `@spaarke/sdap-client` and
+ * `@spaarke/auth` — resolving them against THIS package's node_modules. Those
+ * sibling packages ship as `tsc` output too, so their `dist/` must be fresh or
+ * the consumer build fails with TS2307 (missing type declarations). We now
+ * freshen the sibling dists before our own, so the whole chain is deterministic
+ * from a clean worktree (given each package's node_modules is installed).
+ *
  * Consumers (PCF `package.json`s) wire this in as a `prebuild` / `prebuild:prod`
  * script — npm auto-runs any `pre<script>` before the matching `npm run
  * <script>`, for arbitrary script names, not just reserved lifecycle events
- * (verified empirically 2026-07-07). Fast no-op when `dist/` is already
+ * (verified empirically 2026-07-07). Fast no-op when everything is already
  * fresh; only pays the `tsc` cost when something actually changed.
  *
  * Deliberately dependency-free (fs/path/child_process only) so it never
@@ -22,8 +31,7 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const LIB_ROOT = path.resolve(__dirname, '..');
-const SRC_DIR = path.join(LIB_ROOT, 'src');
-const DIST_DIR = path.join(LIB_ROOT, 'dist');
+const SHARED_ROOT = path.resolve(LIB_ROOT, '..'); // src/client/shared
 
 const IGNORED_DIR_NAMES = new Set(['node_modules', '__tests__', '__mocks__']);
 
@@ -50,27 +58,44 @@ function newestMtimeMs(dir, extensions) {
   return newest;
 }
 
-const srcNewest = newestMtimeMs(SRC_DIR, ['.ts', '.tsx']);
+/**
+ * Rebuild `pkgRoot`'s dist via `npm run build` if its dist is stale/missing
+ * relative to its src. No-op fast path when fresh. Graceful skip (with a loud
+ * warning) when the package has no node_modules — the caller's own install
+ * step is expected to provide it; we never run `npm install` ourselves.
+ */
+function ensureFresh(pkgRoot, label) {
+  const srcDir = path.join(pkgRoot, 'src');
+  const distDir = path.join(pkgRoot, 'dist');
 
-if (srcNewest === 0) {
-  // No source found (unexpected layout) — nothing to validate against.
-  process.exit(0);
-}
+  const srcNewest = newestMtimeMs(srcDir, ['.ts', '.tsx']);
+  if (srcNewest === 0) return; // no source (unexpected layout) — nothing to validate
 
-const distNewest = newestMtimeMs(DIST_DIR, ['.js', '.d.ts']);
+  const distNewest = newestMtimeMs(distDir, ['.js', '.d.ts']);
+  if (distNewest !== 0 && distNewest >= srcNewest) return; // fresh — fast path
 
-if (distNewest === 0 || distNewest < srcNewest) {
-  console.log(
-    '[ensure-dist-fresh] @spaarke/ui-components dist/ is stale or missing relative to src/ — rebuilding (tsc)...'
-  );
+  if (!fs.existsSync(path.join(pkgRoot, 'node_modules'))) {
+    console.warn(
+      `[ensure-dist-fresh] ${label} dist is stale/missing but node_modules is absent — ` +
+        `run \`npm install\` in ${pkgRoot}. Skipping its build (downstream may fail).`
+    );
+    return;
+  }
+
+  console.log(`[ensure-dist-fresh] ${label} dist is stale or missing — rebuilding (npm run build)...`);
   try {
-    execSync('npm run build', { cwd: LIB_ROOT, stdio: 'inherit' });
+    execSync('npm run build', { cwd: pkgRoot, stdio: 'inherit' });
   } catch (err) {
     console.error(
-      '[ensure-dist-fresh] @spaarke/ui-components build FAILED — downstream PCF build will likely fail too. ' +
-        'Run `npm run build` in src/client/shared/Spaarke.UI.Components manually to see the full error.'
+      `[ensure-dist-fresh] ${label} build FAILED — downstream build will likely fail too. ` +
+        `Run \`npm run build\` in ${pkgRoot} to see the full error.`
     );
     process.exit(1);
   }
 }
-// else: dist/ is already fresh — no-op, fast path.
+
+// Freshen sibling deps that ui-components imports (needed when a consumer bundles
+// ui-components src) BEFORE ui-components itself, so the whole chain is current.
+ensureFresh(path.join(SHARED_ROOT, 'Spaarke.SdapClient'), '@spaarke/sdap-client');
+ensureFresh(path.join(SHARED_ROOT, 'Spaarke.Auth'), '@spaarke/auth');
+ensureFresh(LIB_ROOT, '@spaarke/ui-components');

@@ -87,6 +87,70 @@ Plus deterministic engine-outcome cases in the origin eval family suite (`Origin
 
 ---
 
+## 8. F-8 follow-up (2026-07-10): safety-perimeter signal threaded + producer escalation
+
+> Closes the CONSUMER half of audit finding **F-8** (`e2e-completion-audit-2026-07-10.md`): the gate's
+> `SafetyPerimeterDegraded` input was a hardcoded `false` (plumbed-but-unfed). It is now a REAL,
+> honored, tested seam. The PRODUCER half is honestly ESCALATED (below).
+
+### 8.1 What the investigation found (the real signal sources)
+
+- **`SafetyPerimeterDegraded` — a real per-turn producer EXISTS but is not on the live path.**
+  `PromptShieldService.ScanAsync` returns `PromptShieldResult.FailedOpen` on timeout / 429 / 5xx /
+  auth / parse failure (`Services/Ai/Safety/PromptShieldService.cs:99-126`, `PromptShieldResult.cs:39-52`).
+  That fail-open verdict is the exact overlay-2 signal. **BUT** the only component that runs the scan and
+  computes it — `SafetyPipelineMiddleware` (`Services/Ai/Chat/Middleware/SafetyPipelineMiddleware.cs:171`)
+  — is **NOT wired into `SprkChatAgentFactory.WrapWithMiddleware`** (verified: `new SafetyPipelineMiddleware(`
+  appears ONLY in its own test). It was dropped from the live pipeline by the R1 dispatcher-deletion
+  (commit `26fde1f68`). So **no live per-turn PromptShield verdict is produced at gate time today.**
+- **`ContentSafetyFlagged` — no distinct producer, by design.** The PromptShield perimeter is
+  block-or-pass: a detected injection is a HARD BLOCK that `yield break`s upstream and never reaches
+  the loop (`SafetyPipelineMiddleware.cs:184-207`). There is no "flagged-but-proceeding" verdict to
+  thread. The overlay-1 bucket the engine keys on `ContentSafetyFlagged` is the SAME bucket
+  `DispatchUncertain` feeds (`ConfirmationPolicyEngine.cs:109`), so overlay 1 is already reachable/honored.
+- **`dispatchUncertain` (routing/dispatch confidence) — no live producer** on the interactive chat
+  tool-loop path; the routing candidate-match confidence lives on the dispatch path, not here. Layer 1
+  (the agent asking) covers ambiguity. Unchanged from the task-044 delivery.
+
+### 8.2 What was wired (consumer, real + tested)
+
+`SideEffectGateAIFunction` gains an OPTIONAL `Func<bool>? safetyPerimeterDegradedProbe` (mirrors
+`dispatchUncertaintyProbe`). `EvaluatePolicy` now sets `SafetyPerimeterDegraded = probe?.Invoke() ?? false`
+— replacing the hardcoded `false`. The gate HONORS a real fail-open signal when threaded and honestly
+stays unfired otherwise; the value NEVER hardcoded (anti-shim tests fail if it were). Fail-closed floors,
+034 pre-suspend validation, R5-E hard block, and Tier-0/1 free reads all preserved.
+
+Tests (`ConfirmationPolicyGateLiveDecisionTests.cs`, real gate path, engine NOT mocked):
+- `Invoke_Tier2bWrite_WhenSafetyPerimeterDegraded_ConfirmsInsteadOfExecuting` — overlay 2 flips a gated
+  WRITE to confirm (same Tier-2b tool as the happy-path test i; only the probe differs → anti-shim).
+- `Invoke_Tier1MemoryWrite_WhenSafetyPerimeterDegraded_StillExecutes_ReadsAndDraftsFailOpen` — overlay 2
+  leaves a Tier-1 silent-eligible tool (memory.write's real profile) fail-open (D-F0(b)) → no over-gating.
+- `Invoke_Tier1MemoryWrite_HealthyRequest_ExecutesSilently_NoDialog` — regression pin: no signal ⇒
+  byte-identical legacy silent execute.
+- `Invoke_Tier1MemoryWrite_WhenInjectionSuspectOverlayFires_Confirms_EvenThoughSilentEligible` — overlay 1
+  forces a confirm even for a Tier-1 tool (the bucket a content-safety flag would take).
+
+### 8.3 ESCALATION (producer half — needs human sign-off)
+
+Threading a LIVE safety-perimeter signal requires re-activating `SafetyPipelineMiddleware` on the chat
+hot path. That is NOT done here because it is a security-posture + behavior change that must be
+human-approved:
+- Adds a pre-LLM PromptShield call (100 ms budget, fail-open) + a **hard-block leg** to EVERY chat turn
+  (currently the injection perimeter is dark on this path — a separate, larger gap this investigation
+  surfaced, akin to F-1/F-2 "built-but-not-load-bearing").
+- Correct re-wiring is non-trivial: the middleware's dependencies (`IPromptShieldService`,
+  `IGroundednessCheckService`, `CitationSafetyCheck`) are **Scoped**, but the agent-creation scope is
+  disposed before streaming — a captive-dependency correctness hazard that needs careful design + review.
+- It also activates the middleware's post-LLM groundedness/citation/audit machinery, which is broader
+  than F-8 needs.
+
+Recommendation: a dedicated task (with sign-off) to re-wire `SafetyPipelineMiddleware` correctly and pass
+a captured per-turn signal holder to both the middleware (writes `FailedOpen`) and the gate's
+`safetyPerimeterDegradedProbe` (reads it). The gate consumer is already ready; only the producer activation
+remains.
+
+---
+
 ## 7. Archived escalation (prior attempt — for provenance)
 
 The prior version of this note documented that `RequestOriginClassifier`'s `Explicit` verdict had no production producer (no Click path to this gate, no proposal ledger, no `SessionGate.Origin`, and deriving it from the utterance is ADR-039-banned), so honest wiring resolved 100% `Inferred` and the "explicit executes no-dialog" criterion could not be met without a hardcode. That analysis drove the operator's 2026-07-09 reframe (this note), which severs the origin slot from authorization provenance and rebinds it to (declared-risk × ambiguity) confidence — making the happy path ride on the already-real tier + completeness signals. The E-1..E-6 machinery remains in the codebase (exercised by the origin eval family on constructed inputs) but is NOT a producer dependency of the live gate.

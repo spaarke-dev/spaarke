@@ -127,4 +127,13 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+
+  <!-- NFR-09 real-firm-template hardening fixtures (task 003): genuinely Word-authored Common Paper
+       standard agreements (CC BY 4.0, public standards — not client docs). Copied to test output so
+       Nfr09RealTemplateHardeningTests can resolve them via AppContext.BaseDirectory + relative path. -->
+  <ItemGroup>
+    <Content Include="Fixtures\Compose\RealTemplates\*.docx" Link="Fixtures\Compose\RealTemplates\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

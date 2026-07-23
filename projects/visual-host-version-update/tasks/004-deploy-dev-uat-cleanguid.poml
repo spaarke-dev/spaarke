@@ -1,0 +1,42 @@
+<task id="VHVU-004" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Deploy v1.4.35 to dev + UAT braced-GUID create</title>
+    <status>not-started</status>
+    <phase>A0</phase>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>pcf, deploy, uat</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-002,VHVU-003</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <optional>true</optional>
+  </metadata>
+  <prompt>OPTIONAL / OWNER-GATED — NOT critical path (decoupled 2026-07-10 per owner). Ships the cleanGuid fix to dev via the INTERIM inline-wizard v1.4.35 build. Downstream tasks (A1-B) build on code state, not on this deploy, so nothing waits on it — 010 depends on 003 (code ready), not on 004. Note the interim inline model is REPLACED by A3 (VHVU-030/031 navigateTo cutover), and 031 redeploys VisualHost; cleanGuid reaches users via 031 regardless. Run 004 ONLY if the owner wants the GUID fix in dev now, ahead of the navigateTo cutover. Deployment is outward-facing — confirm target + gates before importing.</prompt>
+  <role>PCF deployment engineer</role>
+  <goal>VisualHost v1.4.35 deployed to dev; the native-picker (braced-GUID) create path for Event/Invoice/Report Card via the "+" no longer 400s with `Error in query syntax`.</goal>
+  <constraints>
+    <constraint source="project">Deploy to dev only; no prod promotion in this project.</constraint>
+    <constraint source="deploy">Follow the pcf-deploy / PCF-DEPLOYMENT-GUIDE workflow; custom-page republish + cache-clear if applicable.</constraint>
+    <constraint source="escalation">Confirm the dev environment target with the owner before import (outward-facing action).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/VisualHost/Solution/pack.ps1</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Pack + import the VisualHost solution to dev (pcf-deploy skill). Republish custom page if VisualHost is hosted in one.</step>
+    <step id="2">Hard-refresh; confirm the footer shows v1.4.35.</step>
+    <step id="3">UAT: on a host record, click "+" → create Event via the native lookup picker (braced GUID). Confirm the record creates with no `Error in query syntax`.</step>
+    <step id="4">Repeat the UAT for Invoice and Report Card "+".</step>
+    <step id="5">Report results; request owner sign-off before Phase A1.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>v1.4.35 live in dev (footer confirms).</criterion>
+    <criterion>Braced-GUID create succeeds for Event/Invoice/Report Card via "+".</criterion>
+    <criterion>No `Error in query syntax` 400s.</criterion>
+    <criterion>Owner sign-off recorded before A1.</criterion>
+  </acceptance-criteria>
+</task>

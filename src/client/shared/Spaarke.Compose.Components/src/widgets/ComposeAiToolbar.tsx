@@ -34,16 +34,22 @@
  *
  * ---------------------------------------------------------------------------
  * PHASE-4 STUB BOUNDARY (binding — read before wiring a real Binding here):
- * `DEFAULT_ACTIONS` below ships with `bindingId: ''` for all three primary
- * actions. The real `sprk_playbookconsumer` Binding GUIDs are authored by
- * Phase 4 catalog-row tasks (040-044), which are core-A0-gated (blocked on
- * core task 020, the triple-twin description hoist) — see
- * `projects/spaarkeai-compose-r2/CLAUDE.md` "Core Phase A0 dependency".
+ * `DEFAULT_ACTIONS` below ships with `bindingId: ''` for all FIVE actions
+ * (three primary clause-selection actions + two overflow whole-document
+ * actions). The real `sprk_playbookconsumer` Binding GUIDs are authored
+ * mirror-first (`infra/dataverse/sprk_playbookconsumer-rows.json`) and MINTED
+ * PER-ENVIRONMENT AT CATALOG SEED TIME (task 047 — owner/live-env). They are
+ * NOT knowable at build/seed time (portable actionCode lookups resolve to a
+ * fresh row GUID per environment), and the `/dispatch` route is GUID-only
+ * (no client-side consumer→GUID resolver), so button ENABLEMENT genuinely
+ * depends on that deploy (E2E-pending on 047 — see spaarkeai-compose-r2
+ * task 101 escalation).
  * An empty `bindingId` renders the button DISABLED (honest stub — clicking a
  * disabled button cannot silently no-op or 400) rather than wired-but-broken.
- * Phase 4 activates each action with ONE call to
- * `registerComposeAiToolbarAction({ ...same id..., bindingId: '<real GUID>' })`
- * — no edit to this file required (the registration-extensibility guarantee,
+ * Activation is ONE call per action to
+ * `registerComposeAiToolbarAction({ ...same id..., bindingId: '<seeded GUID>' })`
+ * from the real mount path once the host can resolve the deployed GUIDs — no
+ * edit to this file required (the registration-extensibility guarantee,
  * design.md §2.0).
  *
  * ---------------------------------------------------------------------------
@@ -80,7 +86,27 @@
  * @see src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx
  *      (the pattern this component mirrors for the dispatch call shape)
  * @see ./ComposeEditor.tsx ("AI TOOLBAR MOUNT" region — host wiring)
- * @see ./ComposeFormatToolbar.tsx (sibling BubbleMenu content; NOT an AI-action surface)
+ * @see ./ComposeFormatToolbar.tsx (the PERSISTENT top toolbar; unrelated surface)
+ *
+ * ---------------------------------------------------------------------------
+ * TASK 111 (UAT-R2, 2026-07-10) — layout fix + two mount paths: the
+ * selection-triggered BubbleMenu popup (unchanged mechanism) is now AI-ACTIONS
+ * ONLY (the sibling formatting Toolbar that used to live alongside this
+ * component in ComposeEditor's BubbleMenu was removed — see ComposeEditor.tsx
+ * "AI TOOLBAR MOUNT" region). This component owns its OWN single `<Toolbar>`
+ * (previously a Fragment of `<ToolbarDivider/>` + a second `<Toolbar>`, both
+ * mounted as siblings inside the host's flex row — the divider had no Toolbar
+ * context (collapsed/misaligned) and two Toolbars each imposed their own
+ * padding). (GAP FIX, UAT 2026-07-15: the in-Toolbar dividers were subsequently
+ * REMOVED — Fluent's ToolbarDivider `padding: 0 12px` produced a large visual gap
+ * between the primary AI icons and the trailing Email / overflow icons; every
+ * action now sits in one tightly-spaced row at the single `columnGap` token. See
+ * the "GAP FIX" note in the render body.) A new
+ * `forceVisible` prop lets ComposeEditor's right-click (context-menu) trigger
+ * render this toolbar even on a COLLAPSED selection (point-insertion) — see
+ * `forceVisible` doc below; `handleActionClick`'s existing collapsed-selection
+ * dispatch guard is UNCHANGED (a right-click with no selection still no-ops
+ * on click rather than dispatching).
  */
 
 import * as React from 'react';
@@ -88,7 +114,6 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
-  ToolbarDivider,
   Tooltip,
   Menu,
   MenuTrigger,
@@ -98,7 +123,15 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Info24Regular, ArrowSwapRegular, DocumentEdit24Regular, MoreHorizontal20Regular } from '@fluentui/react-icons';
+import {
+  Info24Regular,
+  ArrowSwapRegular,
+  DocumentEdit24Regular,
+  MoreVertical20Regular,
+  Mail24Regular,
+  Open24Regular,
+  Send24Regular,
+} from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
 import {
   createConsumerDispatcher,
@@ -108,6 +141,39 @@ import {
 } from '@spaarke/ui-components';
 import type { DispatchPaneEvent, WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 import type { ComposeDocumentRef } from '../types/compose-contracts';
+import type { TipTapNode } from '../utils/docxBridge';
+
+/**
+ * spaarkeai-compose-r2 — clean-body extraction for the Email stub (FIX #10b).
+ *
+ * A plain `doc.textBetween(...)` concatenates BOTH halves of a pending redline — the struck original
+ * AND the proposed insertion — yielding a garbled email body ("old textnew text"). This walks the
+ * TipTap JSON and renders pending redlines as their ACCEPTED text: struck (deletion-marked) originals
+ * are DROPPED, AI insertions are kept as ordinary text, so the emailed draft matches what the author
+ * is composing. It is the ACCEPT-view, NOT the {@link buildRejectBaselineJson} reject baseline — an
+ * email of a chat-drafted document must carry the drafted content, which the reject baseline (which
+ * drops all insertions) would strip to empty. Textblocks are joined with newlines to keep paragraphs.
+ */
+export function extractCleanDraftText(doc: TipTapNode): string {
+  const TEXTBLOCK_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock']);
+  const blocks: string[] = [];
+  const inlineText = (n: TipTapNode): string => {
+    if (n.type === 'text') {
+      if (n.marks?.some(m => m.type === 'deletion')) return ''; // struck original — drop
+      return n.text ?? '';
+    }
+    return (n.content ?? []).map(inlineText).join('');
+  };
+  const walk = (n: TipTapNode): void => {
+    if (n.type && TEXTBLOCK_TYPES.has(n.type)) {
+      blocks.push(inlineText(n)); // textblock: collect its inline run, do not double-descend
+      return;
+    }
+    (n.content ?? []).forEach(walk);
+  };
+  walk(doc);
+  return blocks.join('\n').trim();
+}
 
 /**
  * FR-18 host-provided serialization seam (spaarkeai-compose-r2 tasks 030 + 032).
@@ -133,6 +199,23 @@ export type ComposeActionEnqueue = (request: {
   bindingId: string;
   /** Forwarded verbatim to `dispatchConsumer` as its second argument. */
   args?: DispatchConsumerArgs;
+  /**
+   * DEF-09: the editor's DOCUMENT session id, set ONLY for editor-materializing
+   * compose EDIT actions (`materializesInEditor`). Its presence tells the host
+   * (ConversationPane) to (a) route this dispatch to the DOCUMENT session — so its
+   * `compose` SessionOutput lands where `ComposeWorkspace` reads `compose-outputs`
+   * to materialize the inline redline — and (b) emit a CONFIRMATION-only Assistant
+   * line instead of the full proposed-text prose. Absent for informational actions
+   * (explain/compare/defined-terms/summarize-changes), which keep chat-session
+   * dispatch + Assistant-rendered prose.
+   */
+  documentSessionId?: string;
+  /**
+   * DEF-11: present ⇒ this edit action revises the WHOLE open document (`compose-revise-document`),
+   * not just a selection. The host uses it ONLY to pick the Assistant confirmation copy variant;
+   * routing/materialize/Accept-all are unaffected (mirrors `ComposeActionRequest.revisionScope`).
+   */
+  revisionScope?: 'selection' | 'whole-document';
 }) => Promise<DispatchConsumerResult>;
 
 // ---------------------------------------------------------------------------
@@ -169,6 +252,17 @@ export interface ComposeAiToolbarAction {
   readonly bindingId: string;
   /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". */
   readonly placement: 'primary' | 'overflow';
+  /**
+   * DEF-09: `true` for a compose-DISPOSITION EDIT action whose result materializes
+   * as an inline redline IN the Compose document (Draft alternative today; a future
+   * clause-insertion action later). Drives two host behaviors when routed through the
+   * Assistant queue: the dispatch targets the editor's DOCUMENT session (so the write
+   * and the redline-materialize read coincide), and the Assistant shows a CONFIRMATION
+   * only — never the proposed-text prose (that lives in the redline). Omitted/false for
+   * the four INFORMATIONAL actions (explain/compare/summarize-changes/defined-terms),
+   * which keep chat-session dispatch + Assistant-rendered prose.
+   */
+  readonly materializesInEditor?: boolean;
 }
 
 /**
@@ -180,10 +274,32 @@ const EXPLAIN_TOOLTIP =
 const COMPARE_TOOLTIP =
   'Compare this clause against the matter/firm playbook — surfaces matches, deviations, and a risk score.';
 const DRAFT_TOOLTIP = 'Draft an alternative version of this clause as a pending suggestion you can accept or reject.';
+// Tooltip copy for the whole-document overflow action (excerpt of the authored
+// `sprk_playbookconsumer` toolDescription — same "tool descriptions ARE the
+// prompt" sourcing rule as the primary three).
+const DEFINED_TERMS_TOOLTIP =
+  'Scan the document for defined terms and check they are used consistently. Read-only; results render in the Context pane.';
 
 /**
- * The three R2-committed primary actions (design.md §2.0/§2.1-§2.3). All
- * ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
+ * The R2-committed AI actions (design.md §2.0/§2.1-§2.5). The three
+ * clause-selection actions are `primary` (always-visible buttons); the
+ * whole-document defined-terms action is `overflow` (in the "More actions…"
+ * menu). All dispatch through the SAME 046 seam (`handleActionClick` →
+ * `enqueueComposeAction` / `dispatchConsumer`) — no new route or discriminant.
+ *
+ * All ship with `bindingId: ''` — see file header "PHASE-4 STUB BOUNDARY".
+ * The empty bindingId renders every action DISABLED until the deployed
+ * `sprk_playbookconsumer` Binding GUID is registered via
+ * `registerComposeAiToolbarAction` (see file header). Those GUIDs are minted
+ * per-environment at catalog SEED time (task 047, owner/live-env), so button
+ * ENABLEMENT is E2E-pending on that deploy — but the trigger ENTRY POINTS
+ * (this registry) exist now.
+ *
+ * NOTE (FIX #5, UAT): `compose-summarize-word-changes` was REMOVED from this
+ * selection-toolbar registry. It is a RETURN-FROM-WORD action requiring real
+ * tracked-change data (`changesText`); on the selection toolbar it has no change
+ * data, so the LLM fabricates a phantom "[Insertion]". Its legitimate trigger is
+ * the return-from-Word reanchor UI (Cluster 3 / task 054), not this toolbar.
  */
 const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
   {
@@ -206,6 +322,19 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: DRAFT_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
+    // inline redline in the document, so route to the DOCUMENT session + confirm-only.
+    materializesInEditor: true,
+  },
+  {
+    // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
+    // authored Binding row ("overflow-menu trigger"); results surface read-only
+    // in the Context pane.
+    id: 'compose-defined-terms',
+    label: 'Defined terms',
+    tooltip: DEFINED_TERMS_TOOLTIP,
+    bindingId: '',
+    placement: 'overflow',
   },
 ];
 
@@ -213,14 +342,43 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
 let registeredActions: ComposeAiToolbarAction[] = [];
 
 /**
- * Register (or replace, by `id`) an inline AI toolbar action. Phase 4 calls
- * this once per catalog row to swap a stub's `bindingId: ''` for the real
- * Binding GUID; a follow-on project calls this to add a wholly new action
- * (e.g. clause-insertion, design.md §2.0's "canonical deferred extension")
- * WITHOUT editing this file.
+ * Re-render subscribers. `registerComposeAiToolbarAction` is called from the
+ * HOST mount path (an ANCESTOR of this component — see
+ * `useComposeToolbarActivation`), so a registration mutates MODULE state
+ * without re-rendering an already-mounted toolbar via props. Each mounted
+ * toolbar subscribes here so a LATE registration (the async
+ * capability-discovery fetch resolves AFTER first paint) flips the matching
+ * buttons disabled → enabled WITHOUT a remount and WITHOUT waiting for an
+ * unrelated selection/transaction to force a re-read. This is a private module
+ * signal — NOT a PaneEventBus event (ADR-030 closed union untouched); one
+ * listener per mounted toolbar, removed on unmount.
+ */
+const registrationListeners = new Set<() => void>();
+
+/**
+ * Register (or replace, by `id`) an inline AI toolbar action. Task 048 (the
+ * capability-discovery activation hook) calls this once per matching compose
+ * capability to swap a stub's `bindingId: ''` for the real deployed Binding
+ * GUID; a follow-on project calls this to add a wholly new action (e.g.
+ * clause-insertion, design.md §2.0's "canonical deferred extension") WITHOUT
+ * editing this file. Notifies subscribed toolbars so the change is visible
+ * immediately.
  */
 export function registerComposeAiToolbarAction(action: ComposeAiToolbarAction): void {
   registeredActions = [...registeredActions.filter(a => a.id !== action.id), action];
+  registrationListeners.forEach(listener => listener());
+}
+
+/**
+ * Subscribe to registry mutations; returns an unsubscribe fn. Consumed by
+ * `ComposeAiToolbar` so an async host registration re-renders the mounted
+ * toolbar.
+ */
+export function subscribeComposeAiToolbarActions(listener: () => void): () => void {
+  registrationListeners.add(listener);
+  return () => {
+    registrationListeners.delete(listener);
+  };
 }
 
 /** Merges `DEFAULT_ACTIONS` with registrations (registrations win by id). */
@@ -269,6 +427,17 @@ export interface ComposeAiToolbarProps {
    * fetch/SSE/MSAL. Production hosts must NOT set this.
    */
   dispatchConsumerOverride?: DispatchConsumer;
+  /**
+   * Task 111 — bypasses the collapsed-selection render guard so the toolbar
+   * renders even with NO selection (a caret / point-insertion). Used by
+   * ComposeEditor's right-click (context-menu) trigger, which must open the
+   * toolbar at the click point regardless of whether text is selected. Does
+   * NOT affect `handleActionClick`'s dispatch guard — clicking an action on a
+   * collapsed selection still no-ops defensively (unchanged). Defaults to
+   * `false` (the selection-triggered BubbleMenu mount path, which keeps the
+   * original "renders nothing on collapsed selection" behavior).
+   */
+  forceVisible?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,10 +445,30 @@ export interface ComposeAiToolbarProps {
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // DEF-17 (UAT-R3): the inline AI bubble renders on ONE line. `flexWrap: 'nowrap'`
+  // keeps the primary buttons + in-context divider + overflow (⋯) trigger on a
+  // single row; any action that does not fit belongs in the "More actions…"
+  // overflow menu (placement: 'overflow'), NOT on a second wrapped row.
+  //
+  // FIX #9 (UAT): the elevated SURFACE now lives on THIS Toolbar (previously on
+  // ComposeEditor's `bubbleMenu` wrapper, which produced the partial-background
+  // finding). Putting the background + shadow on the Toolbar makes it span the
+  // WHOLE menu — every item sits on the one surface. A light-grey elevated neutral
+  // (`colorNeutralBackground3`) reads clearly on the white page and stays legible
+  // in dark mode (the token flips); `shadow16` keeps the elevation. `columnGap`
+  // gives a comfortable, even spacing between the icon-only buttons — not cramped,
+  // not spread. Semantic tokens only (ADR-021 dark-mode-correct).
   toolbar: {
     display: 'flex',
     alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXXS,
+    flexWrap: 'nowrap',
+    whiteSpace: 'nowrap',
+    columnGap: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    boxShadow: tokens.shadow16,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalXS,
   },
 });
 
@@ -297,6 +486,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     actions,
     enqueueComposeAction,
     dispatchConsumerOverride,
+    forceVisible,
   } = props;
   const styles = useStyles();
 
@@ -317,6 +507,13 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       editor.off('transaction', handler);
     };
   }, [editor]);
+
+  // Re-render when the module action registry changes — a host's async
+  // capability-discovery registration (task 048) lands AFTER first paint, so
+  // an already-mounted toolbar must re-read `getComposeAiToolbarActions()` to
+  // flip the matching buttons from stub-disabled to enabled. `forceUpdate` is
+  // stable (useReducer dispatch), so an empty dep set is correct.
+  React.useEffect(() => subscribeComposeAiToolbarActions(() => forceUpdate()), []);
 
   const { getAccessToken } = useAuth();
 
@@ -376,7 +573,17 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       // dispatcher (standalone mount, no concurrent queue to coordinate with).
       if (enqueueComposeAction) {
         const requestId = `${action.id}#${(clickSeqRef.current += 1)}`;
-        void enqueueComposeAction({ id: requestId, bindingId: action.bindingId, args }).catch(swallow);
+        // DEF-09: for a compose-disposition EDIT action, thread the editor's DOCUMENT
+        // session so the host routes the dispatch there (write ⇄ redline-read coincide)
+        // and shows a confirmation-only line. Informational actions omit it (chat session
+        // + Assistant prose). The standalone `dispatchConsumer` fallback below already
+        // targets the document session via its own `getSessionId: () => sessionId`.
+        void enqueueComposeAction({
+          id: requestId,
+          bindingId: action.bindingId,
+          args,
+          ...(action.materializesInEditor ? { documentSessionId: sessionId } : {}),
+        }).catch(swallow);
       } else {
         void dispatchConsumer(action.bindingId, args).catch(swallow);
       }
@@ -384,67 +591,143 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId]
   );
 
+  // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
+  // surface; an explicit email path is a STUB for now. Both menu items open a
+  // new STUB email widget tab by dispatching a `workspace` `widget_load` on the
+  // EXISTING PaneEventBus (ADR-030; NO new bus, NO dispatch endpoint). The
+  // contract MATCHES the chat "email" chip another agent emits:
+  //   workspace / widget_load, widgetType 'email', displayName 'Email',
+  //   widgetData { layoutName: 'Email', mode: 'open' | 'send', ... }.
+  // WorkspacePane resolves the EmailStubWidget for `widgetType === 'email'`.
+  //   - Open in Email → mode 'open', carries the drafted body text.
+  //   - Send in Email → mode 'send', carries the current file as an attachment.
+  const handleEmailAction = React.useCallback(
+    (mode: 'open' | 'send'): void => {
+      if (!editor) return;
+      // Clean the drafted body so pending redlines email as their ACCEPTED text, not the garbled
+      // struck-original + proposed-insertion concatenation `textBetween` produces.
+      const draftedText = extractCleanDraftText(editor.getJSON() as TipTapNode);
+      const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
+      dispatch('workspace', {
+        type: 'widget_load',
+        widgetType: 'email',
+        displayName: 'Email',
+        widgetData: {
+          layoutName: 'Email',
+          mode,
+          ...(mode === 'open' ? { bodyText: draftedText } : {}),
+          ...(mode === 'send' ? { attachmentFileName } : {}),
+        },
+      });
+    },
+    [editor, documentRef, dispatch]
+  );
+
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
-  if (from === to) return null; // NEGATIVE case — collapsed/empty selection shows no toolbar
+  // NEGATIVE case — collapsed/empty selection shows no toolbar, UNLESS the
+  // host force-opened it (task 111 right-click / point-insertion trigger).
+  if (from === to && !forceVisible) return null;
 
   const allActions = actions ?? getComposeAiToolbarActions();
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
+  // Task 111 — SINGLE Toolbar (no wrapping Fragment, no orphaned top-level
+  // divider). GAP FIX (UAT, 2026-07-15): the two ToolbarDividers were removed.
+  // Fluent's ToolbarDivider ships `padding: 0 12px`, which (with the toolbar's
+  // columnGap on each side) produced a ~40px "large gap" between the primary AI
+  // icons and the trailing Email / overflow (⋮) affordances. Removing them lets
+  // every action sit in ONE tightly-spaced, evenly-spaced row at the single
+  // `columnGap` token — no large gap, all actions still reachable, all
+  // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
-    <>
-      <ToolbarDivider />
-      <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
-        {primaryActions.map(action => (
-          <Tooltip key={action.id} content={action.tooltip} relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              icon={actionIcon(action.id)}
-              disabled={!action.bindingId}
-              aria-label={action.label}
-              data-testid={`compose-ai-toolbar-${action.id}`}
-              onClick={() => handleActionClick(action)}
-            >
-              {action.label}
-            </ToolbarButton>
-          </Tooltip>
-        ))}
+    <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+      {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
+          hover Tooltip names each tool. Names come from `action.label`. */}
+      {primaryActions.map(action => (
+        <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={actionIcon(action.id)}
+            disabled={!action.bindingId}
+            aria-label={action.label}
+            data-testid={`compose-ai-toolbar-${action.id}`}
+            onClick={() => handleActionClick(action)}
+          />
+        </Tooltip>
+      ))}
 
-        <Menu positioning="below-end">
-          <MenuTrigger disableButtonEnhancement>
+      {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
+          labelled buttons; both items dispatch a workspace/widget_load that opens
+          the EmailStubWidget tab (see handleEmailAction). */}
+      <Menu positioning="below-end">
+        <MenuTrigger disableButtonEnhancement>
+          <Tooltip content="Email" relationship="description" withArrow>
             <ToolbarButton
               appearance="subtle"
-              icon={<MoreHorizontal20Regular />}
+              icon={<Mail24Regular />}
+              aria-label="Email"
+              data-testid="compose-ai-toolbar-email"
+            />
+          </Tooltip>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem
+              icon={<Open24Regular />}
+              data-testid="compose-ai-toolbar-email-open"
+              onClick={() => handleEmailAction('open')}
+            >
+              Open in Email
+            </MenuItem>
+            <MenuItem
+              icon={<Send24Regular />}
+              data-testid="compose-ai-toolbar-email-send"
+              onClick={() => handleEmailAction('send')}
+            >
+              Send in Email
+            </MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+
+      <Menu positioning="below-end">
+        <MenuTrigger disableButtonEnhancement>
+          <Tooltip content="More actions" relationship="description" withArrow>
+            <ToolbarButton
+              appearance="subtle"
+              // FIX #9 — VERTICAL three-dots overflow affordance.
+              icon={<MoreVertical20Regular />}
               aria-label="More actions"
               data-testid="compose-ai-toolbar-more"
             />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              {overflowActions.length === 0 ? (
-                <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
-                  No additional actions yet
+          </Tooltip>
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            {overflowActions.length === 0 ? (
+              <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
+                No additional actions yet
+              </MenuItem>
+            ) : (
+              overflowActions.map(action => (
+                <MenuItem
+                  key={action.id}
+                  disabled={!action.bindingId}
+                  title={action.tooltip}
+                  data-testid={`compose-ai-toolbar-overflow-${action.id}`}
+                  onClick={() => handleActionClick(action)}
+                >
+                  {action.label}
                 </MenuItem>
-              ) : (
-                overflowActions.map(action => (
-                  <MenuItem
-                    key={action.id}
-                    disabled={!action.bindingId}
-                    title={action.tooltip}
-                    data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                    onClick={() => handleActionClick(action)}
-                  >
-                    {action.label}
-                  </MenuItem>
-                ))
-              )}
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      </Toolbar>
-    </>
+              ))
+            )}
+          </MenuList>
+        </MenuPopover>
+      </Menu>
+    </Toolbar>
   );
 }
 

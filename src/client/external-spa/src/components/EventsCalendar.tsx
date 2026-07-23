@@ -19,6 +19,7 @@
 import * as React from 'react';
 import {
   makeStyles,
+  shorthands,
   tokens,
   Text,
   Spinner,
@@ -38,7 +39,7 @@ import {
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import { CalendarRegular, AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
+import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
 import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
 import { AccessLevel, ApiError } from '../types';
 
@@ -79,9 +80,7 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     borderRadius: tokens.borderRadiusMedium,
     padding: tokens.spacingHorizontalXL,
-    borderWidth: '1px',
-    borderStyle: 'dashed',
-    borderColor: tokens.colorNeutralStroke2,
+    ...shorthands.border('1px', 'dashed', tokens.colorNeutralStroke2),
   },
   emptyStateIcon: {
     fontSize: '40px',

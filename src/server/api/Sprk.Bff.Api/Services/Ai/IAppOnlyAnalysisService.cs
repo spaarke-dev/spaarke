@@ -25,20 +25,32 @@ public interface IAppOnlyAnalysisService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Analyze a document from an existing stream (e.g., from email attachment).
+    /// Analyze a document from an existing stream (e.g., an email attachment already in memory,
+    /// or a file downloaded under the caller's OBO identity).
     /// </summary>
     /// <param name="documentId">The Dataverse Document ID to update.</param>
     /// <param name="fileName">The file name for extension detection.</param>
     /// <param name="fileStream">The file content stream.</param>
     /// <param name="playbookName">Optional playbook name override (default: "Document Profile").</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="graphDriveId">
+    /// Optional SPE drive id for the record. Forwarded into the node-based execution's
+    /// <c>DocumentContext.Metadata</c> so DeliverToIndex-style nodes in the profile playbook have the
+    /// same pointers the app-only <see cref="AnalyzeDocumentAsync"/> path supplies. When null, any
+    /// node that requires the SPE pointer fails, and because a single failed node aborts the whole
+    /// run (no ContinueOnError — GitHub #233) the profile field-write is skipped. Pass the resolved
+    /// pointers to get full parity with the proven upload path.
+    /// </param>
+    /// <param name="graphItemId">Optional SPE drive-item id for the record (see <paramref name="graphDriveId"/>).</param>
     /// <returns>Analysis result with success status and any generated profile data.</returns>
     Task<AppOnlyDocumentAnalysisResult> AnalyzeDocumentFromStreamAsync(
         Guid documentId,
         string fileName,
         Stream fileStream,
         string? playbookName = null,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? graphDriveId = null,
+        string? graphItemId = null);
 
     /// <summary>
     /// Analyze an email and its attachments as a combined context.

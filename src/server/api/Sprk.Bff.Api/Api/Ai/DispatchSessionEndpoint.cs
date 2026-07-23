@@ -217,6 +217,10 @@ public static class DispatchSessionEndpoint
             Args: body.Args,
             CorrelationId: correlationId,
             ActingUserEmail: actingUserEmail);
+        // Task 022 (FR-D2) routing-confidence producer, Click path: a chip click is an EXPLICIT user
+        // selection of a specific binding id (ADR-039 D4 — the id IS the routing decision), i.e.
+        // maximally confident. So DispatchUncertain stays at its record default (false) — the
+        // ConfirmWhenUncertain tier does not fire on an explicit user selection. No scorer is consulted.
 
         // ADR-015: identifiers only — never log args content (chip args may carry
         // maker-authored values; file ids are identifiers, but the raw JSON is not parsed

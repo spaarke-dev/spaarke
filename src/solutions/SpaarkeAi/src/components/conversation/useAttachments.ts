@@ -35,6 +35,7 @@ import {
   buildFileConfirmationMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
+  makeFileStatusMessage,
 } from "./summarizeRouting";
 
 const READY_CONFIRMATION_DEBOUNCE_MS = 250;
@@ -53,6 +54,15 @@ export interface AttachmentsDeps {
   inject: (message: IChatMessage) => void;
   /** The Event-path batching machine (membership/settlement seams). */
   eventBatch: EventBatchMachine;
+  /**
+   * Wave 3 Part 1 (UAT-R3 Test #1 real repro): invoked with the server session-file id the instant a
+   * chat attachment is promoted to a `ChatSessionFile` via `POST /documents` (the 202's `documentId`).
+   * The host caches it as the session's ACTIVE source document (most-recent-upload-wins) so "Open in
+   * Compose" opens THAT uploaded file — even when it was never mounted in Compose — instead of seeding
+   * the assistant message prose. Mirrors the server-side `session.ActiveDocument` set on the same
+   * upload (Wave 2). Optional — omitted by callers that don't track an active source document.
+   */
+  onSessionFileUploaded?: (info: { sessionFileId: string; fileName: string }) => void;
 }
 
 export interface AttachmentsController {
@@ -63,6 +73,14 @@ export interface AttachmentsController {
   sessionAttachmentCount: number;
   /** Count of chips promoted to server-side session files ("N indexed"). */
   promotedCount: number;
+  /**
+   * True while any ready chip's `/documents` promotion POST is in flight. The
+   * composer lock (#2b, UAT 2026-07-18) gates on this so a typed instruction
+   * can't be sent during the upload/classify window and silently dropped —
+   * SprkChat's own `extracting`/`streaming` locks cover the client-extract and
+   * agent-turn windows, but the promotion POST sits between them uncovered.
+   */
+  isPromoting: boolean;
   handleAttachmentsChanged: (chips: AttachmentChip[]) => void;
   handleAttachmentRemoved: (chip: AttachmentChip, index: number) => void;
   handleAttachmentReady: (attachment: ChatAttachment) => void;
@@ -80,6 +98,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     dispatch,
     inject,
     eventBatch,
+    onSessionFileUploaded,
   } = deps;
   // Destructured stable methods (each is a stable useCallback inside
   // useEventBatch) so dependency arrays below key on the functions, not the
@@ -97,6 +116,9 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
   const [promotedChipIds, setPromotedChipIds] = React.useState<ReadonlySet<string>>(
     () => new Set<string>()
   );
+  // #2b (UAT 2026-07-18): rendered mirror of `pendingPromotionIdsRef` so the host
+  // can lock the composer while a promotion POST is in flight (see `isPromoting`).
+  const [isPromoting, setIsPromoting] = React.useState(false);
 
   // Held original Files (keyed by filename) so the auto-promote effect can
   // POST multipart binary. SprkChat forwards the original `File` reference
@@ -180,7 +202,8 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
           readyConfirmationTimerRef.current = null;
           const body = buildFileConfirmationMessage(filenames);
           if (body !== null) {
-            inject(makeLocalAssistantMessage(body));
+            // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
+            inject(makeFileStatusMessage(body, filenames.length === 1 ? "File attached" : `${filenames.length} files attached`));
           }
         }, READY_CONFIRMATION_DEBOUNCE_MS);
       }
@@ -352,6 +375,10 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
               : null;
           if (documentId !== null) {
             queueDocumentUploadedEvent(chipId, documentId);
+            // Wave 3 Part 1 (Test #1 real repro): mirror the server-side session.ActiveDocument set on
+            // this same upload — cache the just-promoted file as the active source document so "Open in
+            // Compose" opens THAT file (compose.upload) even when it was never mounted in Compose.
+            onSessionFileUploaded?.({ sessionFileId: documentId, fileName: chipFilename });
           } else {
             markEventFilePromotionFailed(chipId);
           }
@@ -381,9 +408,16 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       }
     };
 
+    setIsPromoting(true);
     void (async () => {
-      for (const item of queue) {
-        await promoteOne(item.chipId, item.chipFilename, item.attemptNumber);
+      try {
+        for (const item of queue) {
+          await promoteOne(item.chipId, item.chipFilename, item.attemptNumber);
+        }
+      } finally {
+        // Clear only when no promotions remain in flight (a later effect run may
+        // have started its own batch that this one must not prematurely unlock).
+        if (pendingPromotionIdsRef.current.size === 0) setIsPromoting(false);
       }
     })();
   }, [
@@ -394,6 +428,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     bffBaseUrl,
     queueDocumentUploadedEvent,
     markEventFilePromotionFailed,
+    onSessionFileUploaded,
   ]);
 
   /**
@@ -444,6 +479,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
     pendingConfirmFilenamesRef.current = [];
     heldFilesRef.current.clear();
     setPromotedChipIds(new Set());
+    setIsPromoting(false);
     if (readyConfirmationTimerRef.current !== null) {
       clearTimeout(readyConfirmationTimerRef.current);
       readyConfirmationTimerRef.current = null;
@@ -459,6 +495,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       uploadedFileCount,
       sessionAttachmentCount,
       promotedCount,
+      isPromoting,
       handleAttachmentsChanged,
       handleAttachmentRemoved,
       handleAttachmentReady,
@@ -470,6 +507,7 @@ export function useAttachments(deps: AttachmentsDeps): AttachmentsController {
       uploadedFileCount,
       sessionAttachmentCount,
       promotedCount,
+      isPromoting,
       handleAttachmentsChanged,
       handleAttachmentRemoved,
       handleAttachmentReady,

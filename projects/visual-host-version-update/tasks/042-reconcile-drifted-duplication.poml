@@ -1,0 +1,39 @@
+<task id="VHVU-042" project="VisualHost Decoupling & @spaarke/visuals Extraction">
+  <metadata>
+    <title>Reconcile drifted duplication (single VisualType owner; one EventDueDateCard)</title>
+    <status>complete</status>
+    <phase>B2</phase>
+    <estimated-effort>4 hours</estimated-effort>
+    <tags>shared-lib, dedup, types</tags>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <dependencies>VHVU-041</dependencies>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+  <prompt>The visualization types drifted: VisualHost's local types/index.ts is a 13-member VisualType superset fork of the shared lib's stale 8-member ChartDefinitionTypes; EventDueDateCard is physically duplicated in VisualHost + ui-components. Make @spaarke/visuals the single owner and reconcile the stale copies.</prompt>
+  <role>Front-end engineer resolving type/component duplication</role>
+  <goal>One canonical VisualType/IChartDefinition/ICardConfig/DrillInteraction and one EventDueDateCard, owned by @spaarke/visuals; ui-components re-exports or removes its stale copies; no consumer breaks.</goal>
+  <constraints>
+    <constraint source="design">@spaarke/visuals is the single owner. ui-components re-exports for back-compat or removes if unused.</constraint>
+    <constraint source="shared-surface">Verify no other consumer of the ui-components stale types/EventDueDateCard breaks. Coordinate with PR #508.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/ChartDefinitionTypes.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DrillInteractionTypes.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/EventDueDateCard/</file>
+    </files>
+  </knowledge>
+  <steps>
+    <step id="1">Confirm @spaarke/visuals owns the full (13-member) VisualType + related interfaces.</step>
+    <step id="2">Replace the shared-lib stale types with re-exports from @spaarke/visuals (or remove if unused); grep all consumers first.</step>
+    <step id="3">De-duplicate EventDueDateCard: keep the @spaarke/visuals copy; re-export or remove the ui-components copy.</step>
+    <step id="4">Build all affected packages/consumers; confirm nothing breaks.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion>One VisualType definition repo-wide.</criterion>
+    <criterion>One EventDueDateCard.</criterion>
+    <criterion>No consumer build breaks (verified by grep + build).</criterion>
+  </acceptance-criteria>
+</task>

@@ -292,10 +292,20 @@ public sealed record OutcomeCardLink
 /// <param name="TargetUrl">
 /// Optional server-composed navigation target for a <c>navigate</c> chip. Identifier/URL only.
 /// </param>
+/// <param name="TargetBindingId">
+/// Optional target <c>sprk_playbookconsumer</c> row GUID for an <c>invoke_capability</c> chip —
+/// the resolution datum the Click path's <c>dispatchConsumer(bindingId, args)</c> helper needs
+/// (task 062, FR-A1-06 gap close). Populated ONLY from the source Binding's DECLARED
+/// <see cref="ChipTransition.TargetBindingId"/> (<see cref="Sprk.Bff.Api.Services.Ai.CompletionEngine.MapNextStepChips"/>)
+/// — never model-invented (ADR-039). Null for a bare <c>navigate</c> placeholder chip (no declared
+/// target Binding) and for special affordance chips composed outside a Binding's transitions
+/// (e.g. the gate auto-execute path's "Undo" chip).
+/// </param>
 public sealed record NextStepChip(
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("actionKind")] string ActionKind,
-    [property: JsonPropertyName("targetUrl")] string? TargetUrl = null);
+    [property: JsonPropertyName("targetUrl")] string? TargetUrl = null,
+    [property: JsonPropertyName("targetBindingId")] string? TargetBindingId = null);
 
 /// <summary>How the outcome completes: immediately (single-shot) or over ordered async steps (job-aware).</summary>
 public enum OutcomeCompletionMode

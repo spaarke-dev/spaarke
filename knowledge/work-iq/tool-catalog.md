@@ -2,9 +2,11 @@
 
 > **Provenance**: Compiled from Microsoft Learn `mcp-server-reference/*` pages on 2026-05-14. See `SOURCE.md` for per-server URLs. Snapshots of full reference pages live in `docs/`.
 >
-> **Preview notice**: All Work IQ MCP servers below are in **public preview** as of 2026-05-14. Subject to supplemental terms of use.
+> **Preview notice**: Captured 2026-05-14 when all Work IQ MCP servers were public preview. **Updated 2026-07-14**: Work IQ reached **GA on 2026-06-16**; the overview + core API-overview pages are now GA-worded, but this catalog's per-server tool tables were NOT re-verified against current docs in this refresh (that's a full monthly-refresh task — see `SOURCE.md`). Treat the per-server/per-tool details below as **preview-era and unconfirmed for GA** until the next full refresh.
 >
-> **Licensing**: Every Work IQ MCP server requires a Microsoft 365 Copilot license per consuming user.
+> **Licensing**: Stale (2026-05-14) — previously believed to require a Microsoft 365 Copilot license per consuming user. **Superseded**: GA billing (2026-06-16) is **usage-based / Copilot Credits, decoupled from M365 Copilot seat licensing** for custom/agent callers. See `NOTES.md` § Licensing prerequisites for detail + citations.
+>
+> **R4 note**: Work IQ MCP is **delegated-only** — application/app-only auth is explicitly not supported ([Learn: permissions](https://learn.microsoft.com/en-us/microsoft-365/copilot/extensibility/work-iq/permissions)). Spaarke's `email-communication-solution-r4` project evaluated and **excluded** Work IQ as an app-only classifier (DEC-7); see `NOTES.md` for the full reasoning.
 
 ## Remote server URL pattern
 

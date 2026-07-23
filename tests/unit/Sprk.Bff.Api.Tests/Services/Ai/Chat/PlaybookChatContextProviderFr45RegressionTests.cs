@@ -12,29 +12,29 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 
 /// <summary>
-/// BINDING INVARIANT (chat-routing-redesign-r1 FR-45): IPlaybookChatContextProvider
-/// MUST invoke IMatterMemoryService.ToSystemPromptFragmentAsync at per-turn context
-/// assembly time when the session has a matter context. Architecture §11.1 confirms
-/// the wiring; CLAUDE.md decision log (2026-06-21) treats this as 'do not regress'.
-/// Task 078 audit evidence: notes/handoffs/078-fr-45-line-verified.md.
+/// BINDING INVARIANT (chat-routing-redesign-r1 FR-45, GENERALIZED by AIR2-050 / FR-B-01):
+/// IPlaybookChatContextProvider MUST invoke <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/>
+/// at per-turn context assembly time when the session host context identifies a RECORD —
+/// originally matter-only, generalized to ANY (entityType, entityId) by task 050 (the matter-only
+/// guard was the FR-B-01 regression to remove). Architecture §11.1 confirms the wiring;
+/// CLAUDE.md decision log (2026-06-21 + 2026-07-09) treats this as 'do not regress'.
 /// </summary>
 /// <remarks>
 /// DO NOT REGRESS. If a future change to PlaybookChatContextProvider removes this
-/// invocation, the matter-memory pillar of the 6-tier memory model goes dark and
-/// chat sessions for matter contexts lose long-term memory continuity. This test
-/// class is the binding enforcement.
+/// invocation, the record-memory pillar of the memory model goes dark and chat sessions
+/// for record contexts lose long-term memory continuity. This test class is the binding
+/// enforcement.
 ///
 /// Coverage:
 /// <list type="bullet">
 /// <item>Behavioral (Moq.Verify): the production composer DOES call
-/// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> exactly once at
-/// runtime when the session host context identifies a matter.</item>
+/// <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/> exactly once at runtime when the
+/// session host context identifies a matter — and (task-050 generalization) exactly once for a
+/// NON-matter record too, carrying that record's (entityType, entityId).</item>
 /// <item>Source-text (file grep): the production source file contains the literal
 /// invocation site — pins the wiring even if the runtime path is later refactored.</item>
-/// <item>Guard (Moq.Verify Times.Never): the production composer DOES NOT invoke
-/// the memory service when the host context is null or non-matter — the
-/// EntityType=="matter" guard at <see cref="PlaybookChatContextProvider.cs"/>
-/// (~line 663) remains intact.</item>
+/// <item>Guard (Moq.Verify Times.Never): the production composer DOES NOT invoke the store
+/// when the host context is null or has no entity keying.</item>
 /// </list>
 ///
 /// This file is the dedicated FR-45 regression class. It complements (but does not
@@ -55,7 +55,7 @@ public class PlaybookChatContextProviderFr45RegressionTests
     private readonly Mock<IPlaybookService> _playbookServiceMock;
     private readonly Mock<IDataverseService> _dataverseServiceMock;
     private readonly Mock<ILogger<PlaybookChatContextProvider>> _loggerMock;
-    private readonly Mock<IMatterMemoryService> _matterMemoryServiceMock;
+    private readonly Mock<IMemoryItemStore> _memoryItemStoreMock;
 
     public PlaybookChatContextProviderFr45RegressionTests()
     {
@@ -63,7 +63,7 @@ public class PlaybookChatContextProviderFr45RegressionTests
         _playbookServiceMock = new Mock<IPlaybookService>();
         _dataverseServiceMock = new Mock<IDataverseService>();
         _loggerMock = new Mock<ILogger<PlaybookChatContextProvider>>();
-        _matterMemoryServiceMock = new Mock<IMatterMemoryService>();
+        _memoryItemStoreMock = new Mock<IMemoryItemStore>();
 
         // Default: playbook with action, no scopes — enough to exercise the
         // playbook-mode code path without touching knowledge or skill enrichment.
@@ -97,8 +97,8 @@ public class PlaybookChatContextProviderFr45RegressionTests
     /// <summary>
     /// FR-45 BEHAVIORAL INVARIANT: when the session host context identifies a matter,
     /// <see cref="PlaybookChatContextProvider.GetContextAsync"/> MUST invoke
-    /// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> exactly once
-    /// at runtime, carrying the tenant + matterId pair from the host context.
+    /// <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/> exactly once at runtime,
+    /// carrying the ("matter", matterId) subject pair from the host context.
     /// </summary>
     /// <remarks>
     /// This complements the source-text test below by proving the wiring works at
@@ -108,12 +108,11 @@ public class PlaybookChatContextProviderFr45RegressionTests
     /// this test even if the source-text test still passes.
     /// </remarks>
     [Fact]
-    public async Task GetContextAsync_InvokesToSystemPromptFragmentAsync_ExactlyOnce_ForMatterContextSession()
+    public async Task GetContextAsync_InvokesToRecordPromptFragmentAsync_ExactlyOnce_ForMatterContextSession()
     {
-        // Arrange — matter context session: EntityType == "matter" with non-empty
-        // EntityId. Tenant is required for Cosmos partition key (production guard).
-        _matterMemoryServiceMock
-            .Setup(m => m.ToSystemPromptFragmentAsync(
+        // Arrange — matter context session: EntityType == "matter" with non-empty EntityId.
+        _memoryItemStoreMock
+            .Setup(m => m.ToRecordPromptFragmentAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
@@ -134,20 +133,63 @@ public class PlaybookChatContextProviderFr45RegressionTests
             hostContext: hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — context returned cleanly AND the service was invoked once.
+        // Assert — context returned cleanly AND the store was invoked once with the subject pair.
         context.Should().NotBeNull();
         context.SystemPrompt.Should().NotBeNullOrEmpty();
 
-        _matterMemoryServiceMock.Verify(
-            m => m.ToSystemPromptFragmentAsync(
-                TestTenantId,
+        _memoryItemStoreMock.Verify(
+            m => m.ToRecordPromptFragmentAsync(
+                "matter",
                 TestMatterId,
                 It.IsAny<CancellationToken>()),
             Times.Once,
-            "FR-45 BINDING — chat-routing-redesign-r1 task 080: the per-turn " +
-            "composition seam MUST invoke IMatterMemoryService.ToSystemPromptFragmentAsync " +
-            "with (tenantId, matterId) when the session host context identifies a matter. " +
+            "FR-45 BINDING — chat-routing-redesign-r1 task 080 (retargeted by AIR2-050): the " +
+            "per-turn composition seam MUST invoke IMemoryItemStore.ToRecordPromptFragmentAsync " +
+            "with (entityType, entityId) when the session host context identifies a record. " +
             "Architecture §11.1. Do NOT regress.");
+    }
+
+    /// <summary>
+    /// TASK-050 GENERALIZATION INVARIANT (FR-B-01): a NON-matter record host (project, invoice,
+    /// document, ...) now ALSO reads record memory — the matter-only guard was the regression
+    /// task 050 removed. The invocation carries that record's own (entityType, entityId).
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_InvokesToRecordPromptFragmentAsync_ForNonMatterRecordSession()
+    {
+        // Arrange
+        _memoryItemStoreMock
+            .Setup(m => m.ToRecordPromptFragmentAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(string.Empty);
+
+        var projectHost = new ChatHostContext(
+            EntityType: "project",
+            EntityId: "project-abc-123");
+
+        var sut = CreateProvider();
+
+        // Act
+        var context = await sut.GetContextAsync(
+            TestDocumentId,
+            TestTenantId,
+            TestPlaybookId,
+            hostContext: projectHost,
+            cancellationToken: CancellationToken.None);
+
+        // Assert
+        context.Should().NotBeNull();
+        _memoryItemStoreMock.Verify(
+            m => m.ToRecordPromptFragmentAsync(
+                "project",
+                "project-abc-123",
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "FR-B-01 (task 050) — record memory is GENERIC over (entityType, entityId); " +
+            "non-matter hosts must read their record memory too. Matter-only keying was " +
+            "the regression to remove.");
     }
 
     /// <summary>
@@ -158,7 +200,7 @@ public class PlaybookChatContextProviderFr45RegressionTests
     /// (per notes/handoffs/078-fr-45-line-verified.md).
     /// </summary>
     [Fact]
-    public void PlaybookChatContextProvider_Source_ContainsMatterMemoryServiceInvocation_FR45()
+    public void PlaybookChatContextProvider_Source_ContainsRecordMemoryInvocation_FR45()
     {
         // Arrange + Act — read the production source file via the assembly-path walk
         // pattern used by task 078's source-text tests.
@@ -167,51 +209,43 @@ public class PlaybookChatContextProviderFr45RegressionTests
 
         // Assert — literal field-access invocation. We do not assert on the bare
         // method name (which appears multiple times in XML doc-comments) — we
-        // assert on `_matterMemoryService.ToSystemPromptFragmentAsync(` to lock the
+        // assert on `_memoryItemStore.ToRecordPromptFragmentAsync(` to lock the
         // actual call site.
         source.Should().Contain(
-            "_matterMemoryService.ToSystemPromptFragmentAsync(",
+            "_memoryItemStore.ToRecordPromptFragmentAsync(",
             "FR-45 binding invariant violated — see architecture §11.1 + CLAUDE.md " +
-            "decision log (2026-06-21). The PlaybookChatContextProvider source MUST " +
-            "contain a MatterMemoryService.ToSystemPromptFragmentAsync invocation. " +
-            "Do NOT remove or rename this without updating spec FR-45 and CLAUDE.md.");
+            "decision log (2026-06-21, generalized 2026-07-09 by AIR2-050). The " +
+            "PlaybookChatContextProvider source MUST contain a " +
+            "IMemoryItemStore.ToRecordPromptFragmentAsync invocation. " +
+            "Do NOT remove or rename this without updating spec FR-45/FR-B-01 and CLAUDE.md.");
     }
 
     /// <summary>
-    /// FR-45 GUARD INVARIANT: when the session host context is null OR identifies a
-    /// non-matter entity type, the provider MUST NOT invoke
-    /// <see cref="IMatterMemoryService.ToSystemPromptFragmentAsync"/> — the early-return
-    /// guard at <see cref="PlaybookChatContextProvider.cs"/> (~line 663,
-    /// <c>EntityType != "matter"</c>) must remain intact. We assert this by setting
-    /// the mock to THROW if invoked — if the guard breaks, the test fails loudly
-    /// with the unexpected-invocation exception rather than a soft Verify failure.
+    /// FR-45 GUARD INVARIANT (task-050 shape): when the session host context is null OR carries
+    /// no entity keying, the provider MUST NOT invoke
+    /// <see cref="IMemoryItemStore.ToRecordPromptFragmentAsync"/>. (The former matter-only guard
+    /// case was deliberately REMOVED by task 050 — non-matter records now read memory; see the
+    /// generalization test above.) We assert by setting the mock to THROW if invoked — if the
+    /// guard breaks, the test fails loudly with the unexpected-invocation exception rather than
+    /// a soft Verify failure.
     /// </summary>
-    /// <remarks>
-    /// Variant chosen: <b>throw-on-invoke</b> + assert NOT INVOKED. The production
-    /// invocation IS guarded by the explicit
-    /// <c>!string.Equals(hostContext.EntityType, "matter", StringComparison.OrdinalIgnoreCase)</c>
-    /// check (PlaybookChatContextProvider.cs lines 663–669). Throwing on invocation
-    /// proves the guard works at runtime — a refactor that drops the guard would
-    /// surface the call and fail the test with a clear error, not a silent mock
-    /// recording.
-    /// </remarks>
     [Fact]
-    public async Task GetContextAsync_HandlesGracefully_WhenSessionHasNoMatterContext()
+    public async Task GetContextAsync_HandlesGracefully_WhenSessionHasNoRecordContext()
     {
-        // Arrange — set the matter memory mock to throw if invoked; this would
-        // surface any regression in the guard immediately rather than silently.
-        _matterMemoryServiceMock
-            .Setup(m => m.ToSystemPromptFragmentAsync(
+        // Arrange — set the store mock to throw if invoked; this would surface any
+        // regression in the guard immediately rather than silently.
+        _memoryItemStoreMock
+            .Setup(m => m.ToRecordPromptFragmentAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(
-                "FR-45 guard violated — ToSystemPromptFragmentAsync invoked for non-matter session"));
+                "FR-45 guard violated — ToRecordPromptFragmentAsync invoked without record keying"));
 
         var sut = CreateProvider();
 
         // Act — case 1: no host context at all (null). Provider must complete
-        // without invoking the matter memory service.
+        // without invoking the memory store.
         var contextWithoutHost = await sut.GetContextAsync(
             TestDocumentId,
             TestTenantId,
@@ -219,37 +253,34 @@ public class PlaybookChatContextProviderFr45RegressionTests
             hostContext: null,
             cancellationToken: CancellationToken.None);
 
-        // Act — case 2: host context present but EntityType is NOT "matter".
-        // Guard at PlaybookChatContextProvider.cs:663-669 must short-circuit.
-        var nonMatterHost = new ChatHostContext(
-            EntityType: "sprk_document",
-            EntityId: "doc-999");
+        // Act — case 2: host context present but with no entity keying (empty EntityType/EntityId).
+        var keylessHost = new ChatHostContext(
+            EntityType: "",
+            EntityId: "");
 
-        var contextWithNonMatterHost = await sut.GetContextAsync(
+        var contextWithKeylessHost = await sut.GetContextAsync(
             TestDocumentId,
             TestTenantId,
             TestPlaybookId,
-            hostContext: nonMatterHost,
+            hostContext: keylessHost,
             cancellationToken: CancellationToken.None);
 
         // Assert — both calls returned valid contexts without throwing, AND the
-        // matter memory service was never invoked.
+        // memory store was never invoked.
         contextWithoutHost.Should().NotBeNull();
         contextWithoutHost.SystemPrompt.Should().NotBeNullOrEmpty();
 
-        contextWithNonMatterHost.Should().NotBeNull();
-        contextWithNonMatterHost.SystemPrompt.Should().NotBeNullOrEmpty();
+        contextWithKeylessHost.Should().NotBeNull();
+        contextWithKeylessHost.SystemPrompt.Should().NotBeNullOrEmpty();
 
-        _matterMemoryServiceMock.Verify(
-            m => m.ToSystemPromptFragmentAsync(
+        _memoryItemStoreMock.Verify(
+            m => m.ToRecordPromptFragmentAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()),
             Times.Never,
-            "FR-45 GUARD INVARIANT — chat-routing-redesign-r1 task 080: " +
-            "PlaybookChatContextProvider MUST NOT invoke matter-memory when " +
-            "the host context is null or non-matter. The EntityType==\"matter\" " +
-            "guard at lines 663–669 must remain intact.");
+            "FR-45 GUARD INVARIANT — PlaybookChatContextProvider MUST NOT invoke record " +
+            "memory when the host context is null or carries no entity keying.");
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -260,7 +291,7 @@ public class PlaybookChatContextProviderFr45RegressionTests
             _playbookServiceMock.Object,
             _dataverseServiceMock.Object, // IDataverseService inherits IDocumentDataverseService
             _loggerMock.Object,
-            _matterMemoryServiceMock.Object);
+            _memoryItemStoreMock.Object);
 
     /// <summary>
     /// Resolves the path to a BFF source file relative to the test assembly's

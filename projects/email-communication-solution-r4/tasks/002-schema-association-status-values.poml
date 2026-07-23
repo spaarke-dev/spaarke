@@ -1,0 +1,119 @@
+<task id="002" project="email-communication-solution-r4">
+  <metadata>
+    <title>Add `Suggested` + `Ambiguous` values to the `sprk_associationstatus` option set (verify integers via MCP)</title>
+    <phase>Wave 0 — Shared foundation (schema · ADR · server send-changes · retire OOB-email)</phase>
+    <status>completed</status>
+    <completed>2026-07-14</completed>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>015, 042</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Option-set value addition via `dataverse-create-schema` skill; no `.cs`/`.ts` code change; STANDARD per CLAUDE.md §8 rigor table. MCP integer verification is a hard gate but not a code-review trigger.</rigor-reason>
+    <parallel-group>W0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <fr-refs>FR-02</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    Add two values to the `sprk_associationstatus` global/local option set so the Association Engine can express its full status ladder: `Suggested` (0.50–0.85 deterministic, or ANY AI rung) and `Ambiguous` (conflicting high-confidence matches). The existing values (e.g., `Resolved`, `Pending Review`) stay unchanged.
+
+    CRITICAL (DEC-5, MUST rule): verify the integer values via Dataverse MCP BEFORE assigning them. The spec suggests ~100000002 / 100000003 but these are provisional — enumerate the current option-set values via MCP `describe`, confirm no collision, and assign the next free non-colliding integers. Record the verification (queried existing values + chosen new integers) in the task notes.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse engineer. Authoritative on option-set management via the `dataverse-create-schema` skill. Disciplined about integer-collision verification before assignment.
+  </role>
+
+  <goal>
+    `sprk_associationstatus` has `Suggested` + `Ambiguous` values with MCP-verified, collision-free integers; existing values untouched; the verification evidence recorded in task notes; owning solution exports cleanly.
+  </goal>
+
+  <context>
+    <background>
+      FR-11 (task 015) maps engine confidence to `sprk_associationstatus`: deterministic ≥0.85 → `Resolved` (auto-file); 0.50–0.85 or any AI rung → `Suggested`; &lt;0.50/none → `Pending Review`; conflicting high-confidence → `Ambiguous`. Two of those four target values (`Suggested`, `Ambiguous`) do not yet exist. Task 042's "Communications Awaiting Association" view filters on `sprk_associationstatus in (Suggested, Pending Review, Ambiguous)`, so both new values must exist before that view can be authored.
+
+      DEC-5 makes MCP integer verification a MUST because option-set integers assigned by guesswork collide across environments and are effectively immutable once records reference them.
+    </background>
+    <relevant-files>
+      <file>docs/data-model/sprk_communication.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/IncomingAssociationResolver.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify new option-set integers via Dataverse MCP before assignment (DEC-5 / spec MUST rule). No guessed integers.</constraint>
+    <constraint source="project">Suggested ~100000002 / Ambiguous ~100000003 are PROVISIONAL — confirm no collision; use the next free integers if occupied. Record the queried existing values + chosen integers in task notes.</constraint>
+    <constraint source="project">Existing `sprk_associationstatus` values MUST remain unchanged (no re-numbering, no relabeling).</constraint>
+    <constraint source="project">Update `docs/data-model/sprk_communication.md` to document the new status values + their integers + their meaning in the FR-11 ladder.</constraint>
+    <constraint source="ADR-024">Status values feed the ADR-024 regarding-write path via task 015; keep semantics consistent with the engine's confidence ladder.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-solution-r4/spec.md</file>
+      <file>projects/email-communication-solution-r4/CLAUDE.md</file>
+      <file>projects/email-communication-solution-r4/plan.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/data-model/sprk_communication.md</file>
+    </files>
+    <patterns>
+      <pattern name="Option-set value add (verified integers)" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Enumerate current values via MCP `describe`; compute next free non-colliding integer; add the value via Web API `InsertOptionValue`. Never hardcode an integer without first confirming it is free.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `.claude/skills/dataverse-create-schema/SKILL.md` + `dataverse-mcp-usage/SKILL.md` for the option-set add + MCP describe conventions.</step>
+    <step order="2">Via Dataverse MCP `describe`, enumerate ALL current `sprk_associationstatus` values (labels + integers). Record them verbatim in task notes.</step>
+    <step order="3">Compute two free, non-colliding integers for `Suggested` + `Ambiguous`. Start from the provisional 100000002 / 100000003; if occupied, take the next free integers. Record the collision check + chosen integers.</step>
+    <step order="4">Add `Suggested` + `Ambiguous` via `dataverse-create-schema` (Web API `InsertOptionValue`), using the verified integers.</step>
+    <step order="5">Re-verify via MCP `describe` — confirm both values present with the assigned integers and that no existing value changed.</step>
+    <step order="6">Update `docs/data-model/sprk_communication.md`: document both new values, their integers, and their place in the FR-11 confidence ladder.</step>
+    <step order="7">Export the owning solution so downstream environments pick up the values.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark task 002 ✅; confirm dependents 015/042 unblocked.</step>
+    <step order="9">Update `current-task.md` per task-execute: status → completed; record chosen integers in Decisions Made.</step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">`describe` to enumerate + re-verify option-set values</tool>
+    <tool name="dataverse-create-schema">Add option-set values via Web API</tool>
+    <tool name="edit">Document new values in the data-model doc</tool>
+    <tool name="pac">Solution export</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse">`sprk_associationstatus.Suggested` — added with MCP-verified integer</output>
+    <output type="dataverse">`sprk_associationstatus.Ambiguous` — added with MCP-verified integer</output>
+    <output type="docs">docs/data-model/sprk_communication.md (UPDATED — documents both values + integers + ladder role)</output>
+    <output type="notes" ephemeral="true">projects/email-communication-solution-r4/notes/task-002-optionset-verification.md (queried values + collision check + chosen integers)</output>
+    <output type="dataverse">Solution export</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`sprk_associationstatus` contains `Suggested` + `Ambiguous` with no integer collision against any pre-existing value.</criterion>
+    <criterion testable="true">The MCP-queried existing values + the chosen new integers are recorded in task notes (verification evidence).</criterion>
+    <criterion testable="true">No pre-existing `sprk_associationstatus` value changed label or integer.</criterion>
+    <criterion testable="true">`docs/data-model/sprk_communication.md` documents both new values with their integers + ladder meaning.</criterion>
+    <criterion testable="true">Owning solution exports cleanly with the new values.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The provisional 100000002 / 100000003 are a starting guess only — the MCP verification in step 2/3 is the authority. If either is occupied, the task uses the next free integer and documents the deviation; that is expected, not an error.
+
+    Both values are required before task 042 authors the "Communications Awaiting Association" view (filters on `Suggested`/`Pending Review`/`Ambiguous`) and before task 015 assigns statuses from the confidence ladder.
+
+    Option-set integers are effectively immutable once records reference them — this is why DEC-5 makes verification a MUST. Do not skip step 2.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor per `&lt;rigor-hint&gt;` — Step 9.5 gates SKIPPED. The MCP integer verification (steps 2–3) is a HARD gate: do not add values without it.
+    </protocol>
+  </execution>
+</task>

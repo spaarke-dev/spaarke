@@ -61,15 +61,15 @@ public class CommunicationServiceTests
             .Returns(CreateMockGraphClient());
 
         _sut = new CommunicationService(
-            _graphClientFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             Mock.Of<IGenericEntityService>(),
             Mock.Of<IDocumentDataverseService>(),
-            null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             _loggerMock.Object);
     }
@@ -145,15 +145,15 @@ public class CommunicationServiceTests
             Mock.Of<IDistributedCache>(),
             Mock.Of<ILogger<ApprovedSenderValidator>>());
         return new CommunicationService(
-            _graphClientFactoryMock.Object,
+            CommunicationChannelTestFactory.CreateDispatcher(_graphClientFactoryMock.Object),
             senderValidator,
             Mock.Of<ICommunicationDataverseService>(),
             Mock.Of<IGenericEntityService>(),
             Mock.Of<IDocumentDataverseService>(),
-            null!, // EmlGenerationService — not tested here
             null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
+            Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             _loggerMock.Object);
     }

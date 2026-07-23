@@ -377,6 +377,66 @@ public class SprkChatAgentFactoryWorkspaceStateTests
     }
 
     // ---------------------------------------------------------------------
+    // spaarkeai-compose-r2 — Compose tab ("the flip") derives to DocumentViewer
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_ComposeTab_DerivesDocumentViewerWithFilename()
+    {
+        var factory = CreateFactory();
+        // The flipped Compose Direct widget (widgetType "compose") HOLDS A DOCUMENT.
+        // When its persisted widgetData carries the active-document identity as a
+        // DocumentViewer payload, the derivation MUST surface the real filename so the
+        // Assistant knows WHICH document is open in Compose — not merely "a Compose dashboard".
+        var tabs = new[]
+        {
+            MakeTab("compose-1", widgetType: "compose",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-compose-1",
+                    Filename = "engagement-letter-draft.docx",
+                    MimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    SizeBytes = 45678,
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        result.Should().Contain("widgetType=compose");
+        // The FILENAME must be present (the core fix).
+        result.Should().Contain("filename: engagement-letter-draft.docx");
+        // A compose tab must NOT be rendered as a Dashboard (name-only) shape.
+        result.Should().NotContain("dashboardName");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_ComposeTab_NoServerReadableFilename_DerivesDocumentViewerWithGracefulDefault()
+    {
+        var factory = CreateFactory();
+        // Contract-gap case: a Compose tab whose typed widgetData deserialized as a Dashboard
+        // payload (kind "Dashboard", dashboardName "Compose") carries NO document filename.
+        // The derivation still emits a DocumentViewer (a document is open in Compose), with a
+        // graceful default filename — never the Dashboard variant, never the layout label as a
+        // filename.
+        var tabs = new[]
+        {
+            MakeTab("compose-2", widgetType: "compose",
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-compose",
+                    DashboardName = "Compose",
+                    LastViewedSection = null,
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        result.Should().Contain("widgetType=compose");
+        result.Should().Contain($"filename: {SprkChatAgentFactory.ComposeDefaultFilename}");
+        result.Should().NotContain("dashboardName");
+    }
+
+    // ---------------------------------------------------------------------
     // Task 074 — FR-58 + FR-59 privacy filter (BOTH conditions required)
     // ---------------------------------------------------------------------
 

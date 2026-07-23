@@ -1,0 +1,47 @@
+<task id="018" project="email-communication-solution-r4">
+  <metadata>
+    <title>Association Engine cache thread-safety — _recordTypeRefCache → ConcurrentDictionary</title>
+    <phase>Wave 1 — Server: enrichment + deterministic engine</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>015</dependencies>
+    <blocks>—</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>One-line type swap on a singleton's private field; no behavior change, no new surface. Owner-directed follow-up from the 015 code-review Warning (thread-safety), tracked in-project per explicit owner instruction (NOT deferred).</rigor-reason>
+    <parallel-group>W1-status</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <fr-refs>NFR-06</fr-refs>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+  </metadata>
+
+  <prompt>
+    The Association Engine (`IncomingAssociationResolver`) is a DI singleton. Its private
+    `_recordTypeRefCache` was a plain `Dictionary&lt;string,(Guid,string)?&gt;` mutated from
+    `ResolveRecordTypeRefAsync` on the request thread. Inbound (and, once 017 wires it, outbound)
+    communications resolve on parallel threads, so concurrent writes to the plain dictionary are a data
+    race (torn state / lost writes / rare corruption). Swap it to a `ConcurrentDictionary`. The
+    read-then-query-then-write is intentionally left non-atomic: the cached value is deterministic per
+    key, so a rare double-query just re-writes the same entry — no lock needed, no corruption.
+  </prompt>
+
+  <goal>
+    `_recordTypeRefCache` is a `ConcurrentDictionary`; the singleton resolver is safe under concurrent
+    ResolveAsync calls. Build clean; existing Communication tests (which exercise resolver-field
+    population) still pass; no behavior change.
+  </goal>
+
+  <acceptance-criteria>
+    <criterion testable="true">`_recordTypeRefCache` is a `ConcurrentDictionary&lt;string,(Guid,string)?&gt;`.</criterion>
+    <criterion testable="true">`dotnet build` clean; Communication test suite green (no regression).</criterion>
+    <criterion testable="true">No behavior change — cache semantics (lazy populate, null-negative caching) preserved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Owner instruction (2026-07-15): resolve the 015 code-review thread-safety Warning IN THIS PROJECT
+    (fold into 016/017 or a new task), NOT via a deferred issue. Filed as its own task for traceability.
+    A deterministic concurrency unit test would be flaky scaffolding (ADR-038 B10) — the fix is correct by
+    the ConcurrentDictionary type guarantee and is covered indirectly by the existing resolver-field tests.
+  </notes>
+</task>

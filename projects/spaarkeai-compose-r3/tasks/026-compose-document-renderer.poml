@@ -1,0 +1,160 @@
+<task id="026" project="spaarkeai-compose-r3">
+  <metadata>
+    <title>FR-01a — `ComposeDocumentRenderer`: server-side born-in-editor OOXML authoring (styles + multi-level numbering + tables + paraId)</title>
+    <phase>2 E1</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>xhigh</effort>
+    <parallel-group>W2-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>010,022</deps>
+    <tags>bff-api,docx,ooxml,compose</tags>
+    <estimated-effort>5-7 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    THE CREATION-PATH KEYSTONE (FR-01a). The E1 edit path (task 022, `ComposeParagraphRedlineSynthesizer`)
+    deltas onto a retained original. But a document BORN IN THE EDITOR — AI-drafted (DEF-08 `initialHtml`
+    seed) or blank/browse-local — has NO retained original to delta against. Today it is saved by the LOSSY
+    client `docx.js` writer (`tipTapToDocxBytes`), which flattens multi-level numbering, real styles, and
+    firm formatting into a stripped approximation — so an AI-drafted legal document is degraded the moment
+    it is first saved. This is the other half of the fidelity story R3 must fix.
+
+    Build `Services/Compose/ComposeDocumentRenderer.cs` — a pure, deterministic OpenXML authoring engine
+    that materializes a HIGH-FIDELITY `.docx` from a server-received editor CONTENT MODEL (paragraphs /
+    headings / lists / tables / inline runs + marks, each paragraph paraId-keyed). This is the server-side
+    replacement for the client `docx.js` exporter, and the reason the client can stop authoring bytes
+    entirely (task 027). It makes the SERVER the single authority for ALL `.docx` authoring: delta-onto-
+    original for loaded docs (022), full render for born-in-editor docs (this task).
+
+    Fidelity bar (research-validated — this matches how Harvey authors documents: deterministic backend
+    code owns the OOXML, the LLM/editor only supplies text/structure): real Word paragraph + heading styles
+    (Normal, Heading1-6), STYLE-LINKED true MULTI-LEVEL NUMBERING for legal clause schemes (1 / 1.1 / 1.1.1),
+    native tables, inline bold/italic/underline, and a valid unique `w14:paraId` on every emitted `w:p`
+    (incl. table-cell paragraphs) so the rendered doc is a first-class E2 substrate for the very next edit.
+  </prompt>
+
+  <role>
+    Senior .NET / OOXML engineer. Deep `DocumentFormat.OpenXml` (3.5.1) fluency — especially the parts NO
+    existing Spaarke code has ever authored: `NumberingDefinitionsPart` (`w:abstractNum` / `w:num`,
+    multi-level `w:lvl` with `%N` `w:lvlText`, `w:isLgl`, `w:lvlRestart`, style-linked numbering) and a
+    real `StyleDefinitionsPart` catalog. Understands the adeu asymmetry (the editor supplies a text/structure
+    model; the engine produces valid OOXML) and that numbering MUST be correct AT BIRTH or later
+    tracked-change edits corrupt it (it cannot be cheaply retrofit).
+  </role>
+
+  <goal>
+    A pure `ComposeDocumentRenderer.SynthesizeDocument(ComposeContentModel model, string author)` →
+    `byte[]` that produces a well-formed, Word-openable `.docx` from the content model, with: real
+    paragraph/heading styles (a `StyleDefinitionsPart` catalog — Normal + Heading1-6 + ListParagraph); a
+    `NumberingDefinitionsPart` with ONE multi-level `abstractNum` (ilvl 0-8) STYLE-LINKED to the heading /
+    list styles (no direct paragraph `numId` → no double-numbering); native `w:tbl` tables; inline
+    `w:b`/`w:i`/`w:u` runs; and a minted, unique `w14:paraId` on every `w:p` (using the E2 mint scheme —
+    `ST_LongHexNumber`, `0 &lt; x &lt; 0x80000000`, 8-hex uppercase). The output round-trips cleanly through
+    the mammoth import + `ParaIdPreParser` on the NEXT Load (headings via real styles → mammoth `hN`), and a
+    subsequent tracked-change edit (022 synthesizer) does not corrupt its numbering. No external NuGet
+    (pure `DocumentFormat.OpenXml`, already referenced). No AI reach. Wired into `ComposeService.SaveAsync`
+    create-on-save path (task 022 seam) so a born-in-editor first Save persists a rendered high-fidelity doc.
+  </goal>
+
+  <context>
+    <background>
+      Design §4.4 (born-in-editor render path — the no-retained-original branch), §8 (unified SAVE pipeline:
+      server owns all authoring), §11 (server-side render-from-model is NOT an AI dispatch — ADR-039
+      complied). External evidence: Harvey builds/edits documents with deterministic server-side OOXML code
+      and confines the LLM to text (harvey.ai engineering blog); client JS exporters (docx.js) are
+      generators, not fidelity round-trippers. The consequential net-new authoring surface is multi-level
+      numbering — ZERO `NumberingDefinitionsPart` authoring exists anywhere in `src/server/` today.
+    </background>
+    <relevant-files>
+      <file role="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs — NEW pure engine: ComposeContentModel → byte[] high-fidelity .docx (styles + multi-level numbering + tables + inline marks + minted paraId)</file>
+      <file role="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs — NEW content-model DTOs (mirror-first with the client contract): a paraId-keyed block model (paragraph/heading/list-item/table + inline runs with bold/italic/underline)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — SaveAsync/ResolveSaveBaselineAsync create-path branch: when the request carries a ContentModel (born-in-editor, no Content bytes + no original), call the renderer to produce contentToPersist before UploadSmallAsUserAsync</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs — SaveComposeDocumentRequest: + ComposeContentModel? ContentModel (additive; the born-in-editor authoring source)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs — register ComposeDocumentRenderer (unconditional singleton, ADR-010, like the synthesizer)</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs — the ONLY from-scratch authoring precedent: WordprocessingDocument.Create + Body scaffolding (:55-60), CreateStyledTable/CreateTableCell (:412-486), AddStyleDefinitions/CreateStyle (:134-176), SanitizeText (:557-563). Reuse the patterns; its numbering is FAKE (literal "1. " text) — do NOT copy that.</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs — the E2 mint scheme (RandomNumberGenerator.GetInt32(1,int.MaxValue).ToString("X8"), range guard, dedup). Apply at BUILD time (set Paragraph.ParagraphId on every emitted w:p).</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeParagraphRedlineSynthesizer.cs — TextRun/rPr-cloning idiom; the same run-builder shape for inline bold/italic/underline.</file>
+      <file role="fixture">tests/unit/Sprk.Bff.Api.Tests/Fixtures/Compose/RealTemplates/commonpaper-cloud-service-agreement.docx — the fidelity TARGET (9-level numbering, 345 paras, 395 paraIds, 6 tables). Unzip to inspect its numbering.xml/styles.xml idioms.</file>
+      <file role="design">projects/spaarkeai-compose-r3/design.md §4.4, §8, §11</file>
+      <file role="spec">projects/spaarkeai-compose-r3/spec.md FR-01a, FR-27 (authored-document numbering fidelity)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="done">ParaIdPreParser mint scheme — the renderer mints paraIds using the same ST_LongHexNumber contract so rendered docs are a valid E2 substrate.</dependency>
+      <dependency task="022" status="done">SaveAsync inversion + the create-on-save seam the renderer plugs into (server owns contentToPersist).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-01a">A born-in-editor document (no retained original) MUST be authored server-side from the client content model — NOT by a client docx.js reconstruction. The renderer is the server-side replacement for the removed client exporter.</constraint>
+    <constraint source="spec / FR-27 (numbering fidelity)">Multi-level numbering MUST be authored via ONE style-linked `w:abstractNum` (ilvl 0-8) referenced by the heading/list STYLES (`w:pStyle` in the level and/or `numPr` in the style's pPr) — NOT a direct paragraph `numId` alongside a style-supplied numId (that produces double/ghost numbering). Legal cascades use `%N` `lvlText` (e.g. `%1.%2.%3`); `w:isLgl` for Arabic-forced hybrids; a new NumberingInstance (unique numId) + `w:lvlRestart` for lists that restart at 1.</constraint>
+    <constraint source="spec / NFR-07 + E2">Every emitted `w:p` (incl. table-cell + nested-table paragraphs) MUST carry a unique, OOXML-valid `w14:paraId` (mint scheme per ParaIdPreParser). The rendered doc is a first-class E2 substrate — the NEXT edit's synthesizer must find its paragraphs by paraId.</constraint>
+    <constraint source="round-trip parity">Headings MUST use real `Heading1..6` paragraph styles (mammoth import maps style→`hN`); inline formatting via real `w:b`/`w:i`/`w:u`; tables via native `w:tbl`. The renderer's output must survive the Load import + `ParaIdPreParser` cleanly.</constraint>
+    <constraint source="ADR-039">Server-side rendering-from-a-content-model is DETERMINISTIC OOXML authoring, NOT an AI dispatch — no new dispatch endpoint, no catalog rows, no `Services/Ai` types. (Design §11 records this as a non-conflict; cite it.)</constraint>
+    <constraint source="ADR-013 / NFR-05">`Services/Compose/` injects no AI internals; the renderer is pure (`ComposeContentModel` in / `byte[]` out) — Tier-1 NetArchTest `ADR013_ComposeFacade` stays green.</constraint>
+    <constraint source="ADR-007">SPE write stays behind the SpeFileStore facade (the renderer produces bytes only; SaveAsync persists them) — no `Microsoft.Graph` type in the renderer.</constraint>
+    <constraint source="ADR-010">Register the renderer as a stateless thread-safe singleton (pure, no per-call instance state).</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">No new NuGet (pure `DocumentFormat.OpenXml` 3.5.1). Report publish size absolute + delta vs baseline; verify no new HIGH CVE.</constraint>
+    <constraint source="tracked-changes × numbering">Numbering MUST be instance-clean + style-linked at birth — a malformed `numId` or direct+style double-numbering stays invisible until a later tracked-change edit layers on, then corrupts the redline (research finding). Get it right here; it cannot be cheaply fixed later.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OpenXML from-scratch authoring; NumberingDefinitionsPart (abstractNum/num, multi-level, style-linked, isLgl, lvlRestart); StyleDefinitionsPart catalog; native tables; w14:paraId minting; mammoth round-trip parity; BFF hygiene</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-frozen-engine.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="From-scratch package + style catalog + tables" location="src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs:55">
+        WordprocessingDocument.Create + AddMainDocumentPart + Body scaffolding; AddStyleDefinitions/CreateStyle (:134-176); CreateStyledTable/CreateTableRow/CreateTableCell (:412-486); SanitizeText (:557). Reuse the patterns; author a FULLER style catalog (Heading4-6, Normal, ListParagraph) and REAL numbering (its numbering is fake literal text — do not copy).
+      </pattern>
+      <pattern name="w14:paraId mint (apply at build time)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs:70">
+        RandomNumberGenerator.GetInt32(1,int.MaxValue) → ToString("X8"), range 0&lt;x&lt;0x80000000, reject-and-retry against a seen-set. Set Paragraph.ParagraphId on every emitted w:p.
+      </pattern>
+      <pattern name="Style-linked multi-level numbering (net-new — the make-or-break)" location="external: Microsoft Learn NumberingDefinitionsPart / AbstractNum / Level / NumberingStyleLink; officeopenxml.com WPnumbering">
+        ONE abstractNum, 9 w:lvl (ilvl 0-8): per level w:start(1), w:numFmt(decimal), w:lvlText("%1.%2.…%N"), w:lvlJc, w:pPr(indent/hanging), optional w:pStyle link. ONE NumberingInstance (w:num, unique numId) per restart-scoped list; add w:lvlRestart. Link Heading1-N (or ListParagraph) to the abstractNum via the STYLE, not a direct paragraph numId. isLgl for Article/Section Arabic-forced hybrids.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + fidelity target">Output the FULL rigor declaration. Load knowledge files + bff-extensions.md; state the Placement Justification (born-in-editor authoring stays in Services/Compose, pure engine, no AI). UNZIP the RealTemplates CSA fixture and study its `word/numbering.xml` + `word/styles.xml` — the target idioms for style-linked multi-level numbering. Confirm the design §4.4 / §11 (ADR-039 non-conflict) framing.</step>
+    <step order="1" name="Content-model DTOs (mirror-first)">Define `ComposeContentModel` — a paraId-keyed block model: blocks = paragraph | heading(level) | listItem(level, ordered) | table(rows/cells) ; inline runs = { text, bold, italic, underline } ; each block carries its `paraId` (client-minted or server-minted). Mirror the shape the client will POST (task 027) — do NOT invent a parallel schema; align field names with the TipTap node/mark surface (paragraph/heading level/textAlign, bulletList/orderedList, table, bold/italic/underline).</step>
+    <step order="2" name="Style catalog">Author a `StyleDefinitionsPart`: Normal, Heading1-6 (with OutlineLevel + BasedOn Normal + real StyleRunProperties + StyleParagraphProperties spacing/keepNext), ListParagraph. Reuse the DocxExportService CreateStyle idiom, extended.</step>
+    <step order="3" name="Multi-level numbering (the keystone)">Author a `NumberingDefinitionsPart` with ONE multi-level `abstractNum` (ilvl 0-8; `%N` lvlText cascade; isLgl where legal-hybrid; indent/hanging pPr per level) STYLE-LINKED to the heading/list styles (no direct paragraph numId). Emit a NumberingInstance per restart-scoped ordered list (unique numId + lvlRestart). This is the single largest net-new surface — verify against the CSA fixture idioms.</step>
+    <step order="4" name="Body render + paraId">Walk the content model → Body: paragraphs/headings with the right pStyle + (for numbered blocks) numPr referencing the style-linked numbering; native w:tbl tables (reuse DocxExportService table builders); inline w:b/w:i/w:u runs (SanitizeText). Mint + set a unique `w14:paraId` on EVERY w:p (incl. table cells). Return byte[].</step>
+    <step order="5" name="Wire into SaveAsync + DI">Add `ComposeContentModel? ContentModel` to SaveComposeDocumentRequest (additive). In SaveAsync/ResolveSaveBaselineAsync create-path: when ContentModel is present (born-in-editor, no Content + no original), contentToPersist = renderer.SynthesizeDocument(model, author) before UploadSmallAsUserAsync. Register the renderer singleton in ComposeModule.</step>
+    <step order="6" name="Tests">Unit tests (real .docx assertions, no transport mocks): a 1/1.1/1.1.1 clause tree renders with a style-linked abstractNum + correct lvlText (NOT literal "1." text runs); headings carry Heading1-N styles; every w:p has a unique w14:paraId incl. table cells; inline bold/italic/underline emit w:b/w:i/w:u; the rendered bytes re-open + round-trip through ParaIdPreParser; a GOLDEN-FILE numbering test (generate → assert the numbering.xml shape). SaveAsync create-path test: ContentModel present → renderer output persisted (capture at SpeFileStore facade, sibling to ComposeServiceDeltaSaveTests).</step>
+    <step order="7" name="Verify + report">Build BFF; run Compose suite + ADR013_ComposeFacade + ADR007 facade NetArchTest. Publish; report absolute compressed size + delta vs baseline (no new NuGet → ~0 pkg delta); `dotnet list package --vulnerable` no new HIGH. PR: §10 Placement Justification + the design §11 ADR-039-non-conflict citation. The born-in-editor through-the-wire seam rides task 024.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (pure content-model → high-fidelity .docx engine)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs (paraId-keyed content-model DTOs, mirror-first)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs + IComposeService.cs (create-path render branch + ContentModel contract field) + ComposeModule.cs (DI)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocumentRendererTests.cs (numbering golden-file + styles + paraId + round-trip + SaveAsync create-path)</output>
+    <output type="report">Publish-size absolute + delta; CVE scan; Placement Justification; ADR-039 non-conflict citation for the PR</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A born-in-editor content model with a 1 / 1.1 / 1.1.1 clause tree renders to a .docx whose numbering is a STYLE-LINKED multi-level `w:abstractNum` (ilvl 0-8, `%N` lvlText) referenced via the heading/list styles — NOT literal "1. " text runs and NOT a direct paragraph numId alongside a style numId.</criterion>
+    <criterion testable="true">Headings render with real `Heading1..6` paragraph styles; inline formatting renders as `w:b`/`w:i`/`w:u`; tables render as native `w:tbl` — all round-trip through the mammoth import + `ParaIdPreParser` on the next Load.</criterion>
+    <criterion testable="true">Every emitted `w:p` (incl. table-cell + nested-table paragraphs) carries a unique OOXML-valid `w14:paraId` (mint scheme per `ParaIdPreParser`); a subsequent `ComposeParagraphRedlineSynthesizer` edit finds paragraphs by those paraIds.</criterion>
+    <criterion testable="true">A born-in-editor first Save (SaveComposeDocumentRequest carries ContentModel, no Content bytes, no DocumentSpeId) persists the server-RENDERED bytes via create-on-save (captured at the SpeFileStore facade) — no client docx.js reconstruction anywhere in the path.</criterion>
+    <criterion testable="true">A tracked-change edit applied to a rendered doc (via task 022 synthesizer) does not corrupt its numbering (numbering is instance-clean + style-linked at birth).</criterion>
+    <criterion testable="true">`Services/Compose/` injects no AI-internal type (Tier-1 NetArchTest green); no `Microsoft.Graph` type in the renderer; no new NuGet; publish ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">The PR states the Placement Justification and cites design §11 that server-side render-from-model is deterministic OOXML authoring, NOT an AI dispatch (ADR-039 complied).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

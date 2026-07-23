@@ -65,6 +65,20 @@ describe('RichFilePreview', () => {
       renderWithProviders(<RichFilePreview {...props} />);
       expect(screen.getByText('Document Preview')).toBeInTheDocument();
     });
+
+    it('renders the title by default (showTitle omitted)', async () => {
+      renderWithProviders(<RichFilePreview {...defaultProps()} />);
+      expect(screen.getByText('Contract.pdf')).toBeInTheDocument();
+    });
+
+    it('suppresses its own title when showTitle=false (wrapper owns the title — no double header)', async () => {
+      // The nav-mode dialog shell renders the title; the renderer must not, or
+      // the two stack into a "double header". The 3-dot menu still renders.
+      renderWithProviders(<RichFilePreview {...defaultProps({ showTitle: false })} />);
+      expect(screen.queryByText('Contract.pdf')).not.toBeInTheDocument();
+      // The rest of the renderer still mounts (metadata Details render).
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
   });
 
   describe('preview-URL fetch lifecycle', () => {

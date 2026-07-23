@@ -47,7 +47,7 @@ import {
 
 import type { IDataverseClient, EntityMetadata, SavedQueryResult } from '../../services/IDataverseClient';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
-import type { DataGridConfiguration } from '../../types/DataGridConfiguration';
+import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
 import {
   DataGridContextProvider,
@@ -64,7 +64,13 @@ import {
   type ResolvedColumn,
 } from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
-import { overlayParentContextFilter, overlayHostFilters, type HostFilterCondition } from './fetchXmlOverlay';
+import {
+  overlayParentContextFilter,
+  overlayHostFilters,
+  overlayMembershipFilter,
+  type HostFilterCondition,
+} from './fetchXmlOverlay';
+import type { MembershipResolver } from '../../services/membership';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
 import {
   discoverChips,
@@ -126,6 +132,25 @@ export interface DataGridProps {
    * See {@link HostFilterCondition} for the value shape + supported operators.
    */
   hostFilters?: ReadonlyArray<HostFilterCondition>;
+
+  /**
+   * OPTIONAL — resolver for the `behavior.membershipFilter` feature. When the
+   * resolved config declares `behavior.membershipFilter` AND this prop is
+   * supplied, the framework resolves the caller's membership record ids (via the
+   * shared membership service) and overlays an `IN(ids)` condition — scoping the
+   * grid to "records the user is on", broader than `ownerid eq-userid`.
+   *
+   * The shared lib is context-agnostic (ADR-012), so the host injects the
+   * resolver — typically `createMembershipResolver(authFetch)` from
+   * `@spaarke/ui-components/services/membership`, built from the host's
+   * `authenticatedFetch`. When ABSENT, `membershipFilter` degrades gracefully:
+   * no overlay is applied and the base savedquery runs (the correct behavior for
+   * pure MDA form-subgrids that have no BFF token).
+   *
+   * Pass a referentially-stable resolver (`useMemo`/`useCallback`) so the resolve
+   * effect does not re-run every render.
+   */
+  membershipResolver?: MembershipResolver;
 
   /**
    * OPTIONAL — fires every time `useLazyLoad` resolves a fresh records page.
@@ -703,6 +728,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     dataverseClient: dataverseClientProp,
     parentContext,
     hostFilters,
+    membershipResolver,
     onRecordsLoaded,
     onRecordOpen,
     onRecordAction: _onRecordAction,
@@ -851,6 +877,49 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     );
   }, [loadState.entityMetadata, loadState.configRecord, loadState.savedQuery, overrides]);
 
+  // ─── Membership filter (behavior.membershipFilter) — gated async resolve ───
+  // When the resolved config declares `behavior.membershipFilter` AND the host
+  // supplied a `membershipResolver`, resolve the caller's membership record ids
+  // (via the shared membership service) and overlay `IN(ids)` in the fetchXml memo
+  // below — scoping the grid to "records the user is on", broader than
+  // `ownerid eq-userid`. When no resolver is present the feature degrades to the
+  // base query (correct for MDA form-subgrids with no BFF token).
+  const membershipFilterCfg = resolved?.behavior?.membershipFilter;
+  const membershipEntityName = resolved?.entityName ?? '';
+  const membershipActive = Boolean(membershipFilterCfg && membershipResolver && membershipEntityName);
+  // `undefined` = pending resolution OR feature inactive; `null` = resolved-but-
+  // failed (fail-soft → base query); `string[]` = resolved ids (empty ⇒
+  // impossible-match → empty grid, never everyone's records).
+  const [membershipIds, setMembershipIds] = React.useState<string[] | null | undefined>(undefined);
+  // Stable key so the resolve effect only re-runs on genuine config changes
+  // (roles/identityTypes/attribute), not on every `resolved` object identity churn.
+  const membershipFilterKey = React.useMemo(
+    () => (membershipFilterCfg ? JSON.stringify(membershipFilterCfg) : ''),
+    [membershipFilterCfg]
+  );
+  React.useEffect(() => {
+    if (!membershipActive || !membershipResolver) {
+      setMembershipIds(undefined);
+      return;
+    }
+    let cancelled = false;
+    setMembershipIds(undefined); // re-gate while (re)resolving
+    const cfg: MembershipFilter = membershipFilterCfg === true ? {} : (membershipFilterCfg ?? {});
+    membershipResolver(membershipEntityName, { roles: cfg.roles, identityTypes: cfg.identityTypes })
+      .then(ids => {
+        if (!cancelled) setMembershipIds(ids);
+      })
+      .catch(() => {
+        if (!cancelled) setMembershipIds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // membershipFilterKey captures roles/identityTypes; membershipEntityName +
+    // refreshCounter re-resolve on entity change / manual refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipActive, membershipEntityName, membershipFilterKey, membershipResolver, refreshCounter]);
+
   // Filter chip state (controlled inside DataGrid). Reset on configId or
   // activeSavedQueryId change (different grid / different view).
   const [chipState, setChipState] = React.useState<ChipState>({});
@@ -891,6 +960,22 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     if (xml && hostFilters && hostFilters.length > 0) {
       xml = overlayHostFilters(xml, hostFilters);
     }
+    // Membership overlay (behavior.membershipFilter). Gate while a resolver-backed
+    // resolution is pending so we never flash unfiltered records; degrade to the
+    // base query when the feature is inactive or the resolver failed (ids === null).
+    if (xml && membershipActive) {
+      if (membershipIds === undefined) {
+        // Pending — hold the query (empty fetchXml ⇒ useLazyLoad no-op) so the
+        // grid does not briefly render every record before the scope is applied.
+        return '';
+      }
+      if (membershipIds !== null) {
+        const attr =
+          (membershipFilterCfg !== true && membershipFilterCfg?.attribute) || resolved?.primaryIdAttribute || '';
+        if (attr) xml = overlayMembershipFilter(xml, attr, membershipIds);
+      }
+      // membershipIds === null → fail-soft: no overlay, base query runs.
+    }
     if (xml && chipDescriptors.length > 0) {
       xml = augmentFetchXmlWithChips(xml, chipDescriptors, chipState);
     }
@@ -900,6 +985,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       parentFilter,
       hasParentFilterMatch: Boolean(parentFilter && parentContext?.[parentFilter.parentContextKey]),
       hostFilterCount: hostFilters?.length ?? 0,
+      membershipActive,
+      membershipIdCount: membershipIds === undefined || membershipIds === null ? membershipIds : membershipIds.length,
       chipStateKeys: Object.keys(chipState),
       fetchXml: xml,
     });
@@ -907,8 +994,12 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }, [
     loadState.savedQuery,
     resolved?.behavior?.parentContextFilter,
+    resolved?.primaryIdAttribute,
     parentContext,
     hostFilters,
+    membershipActive,
+    membershipIds,
+    membershipFilterCfg,
     chipDescriptors,
     chipState,
   ]);

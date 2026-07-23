@@ -148,7 +148,7 @@ The `.claude/protocols/AIP-00x` documents were removed 2026-07-08; they had been
 | Topic | Canonical location |
 |-------|--------------------|
 | Task execution, context management, handoffs | root [CLAUDE.md](CLAUDE.md) §5 + [.claude/skills/task-execute/SKILL.md](.claude/skills/task-execute/SKILL.md) + [.claude/skills/context-handoff/SKILL.md](.claude/skills/context-handoff/SKILL.md) |
-| POML task file format specification | [.claude/skills/task-create/SKILL.md](.claude/skills/task-create/SKILL.md) + [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) |
+| POML task file format specification | **AUTHORITATIVE**: [.claude/skills/task-create/SKILL.md](.claude/skills/task-create/SKILL.md) (Steps 3.5.x–3.85 + Step 4). Copy-paste skeleton (pointer, kept in sync): [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) |
 | Human escalation triggers and format | root [CLAUDE.md](CLAUDE.md) §6 + §6.5 (ADR Conflict Resolution Protocol) |
 
 ---
@@ -159,7 +159,7 @@ The `.claude/protocols/AIP-00x` documents were removed 2026-07-08; they had been
 |----------|----------|---------|
 | Project README | [.claude/templates/project-README.template.md](.claude/templates/project-README.template.md) | project-setup skill |
 | Project Plan | [.claude/templates/project-plan.template.md](.claude/templates/project-plan.template.md) | project-setup skill |
-| Task Execution | [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) | task-create skill |
+| Task POML skeleton (pointer; authoritative source is task-create) | [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) | task-create skill |
 | AI Knowledge Article | [.claude/templates/ai-knowledge-article.template.md](.claude/templates/ai-knowledge-article.template.md) | Documentation creation |
 
 ---

@@ -1,7 +1,7 @@
 <task id="AIR2-073" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Track-B hygiene sweep — TimeProvider probes, ScopeModelIndex drift, dead App Service env keys</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>H — G-R2-D Hardening</phase>
     <gate>G-R2-D (hardening)</gate>
     <estimated-effort>0.5 day</estimated-effort>

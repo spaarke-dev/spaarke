@@ -96,6 +96,43 @@ describe('SprkChat', () => {
       });
     });
 
+    // CHAT-4 (UAT 2026-07-19): hosts that render their own get-started surface suppress the
+    // built-in "No messages yet" empty state.
+    it('CHAT-4: hideEmptyState suppresses the built-in "No messages yet"', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} hideEmptyState />);
+      });
+      await waitFor(() => expect(screen.getByTestId('chat-message-list')).toBeInTheDocument());
+      expect(screen.queryByText('No messages yet')).not.toBeInTheDocument();
+    });
+
+    // CHAT-6 (UAT 2026-07-19): the slash-command ("Prompt") button is suppressible per host.
+    it('CHAT-6: renders the strip Prompt button by default', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} />);
+      });
+      expect(screen.getByTestId('strip-prompt-menu-button')).toBeInTheDocument();
+    });
+
+    it('CHAT-6: hidePromptMenu hides the strip Prompt button', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} hidePromptMenu />);
+      });
+      expect(screen.queryByTestId('strip-prompt-menu-button')).not.toBeInTheDocument();
+      // The attach button remains — only the slash-command affordance is gated.
+      expect(screen.getByTestId('strip-attach-button')).toBeInTheDocument();
+    });
+
+    // CHAT-5 (UAT 2026-07-19): the host-supplied composer placeholder + taller default rows.
+    it('CHAT-5: forwards inputPlaceholder + inputMinRows to the composer', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} inputPlaceholder="Let's get started…" inputMinRows={3} />);
+      });
+      const textarea = screen.getByTestId('chat-input-textarea');
+      expect(textarea).toHaveAttribute('placeholder', "Let's get started…");
+      expect(textarea).toHaveAttribute('rows', '3');
+    });
+
     it('should apply custom className to root', async () => {
       await act(async () => {
         renderWithProviders(<SprkChat {...defaultProps} className="my-custom-class" />);

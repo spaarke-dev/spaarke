@@ -1,613 +1,141 @@
-# Task Execution Template (POML Format)
+# Task POML — Canonical Skeleton (Pointer)
 
-> **Last Updated**: December 4, 2025
+> **Version**: 3.0 · **Last Updated**: 2026-07-16 (rewritten by pipeline-modernization sweep; supersedes the v2.0 / Dec-2025 fossil)
+> **Format**: Prompt Orchestration Markup Language (POML) — valid XML; `.poml` extension. Markdown only inside text nodes.
 >
-> **Purpose**: POML-formatted template for executing individual tasks with context management, progress review, and resource gathering.
+> ## ⚠️ This file is a POINTER, not the source of truth
 >
-> **Format**: Prompt Orchestration Markup Language (POML) - https://microsoft.github.io/poml/stable/
+> The **authoritative field set + semantics** for a task POML live in
+> [`.claude/skills/task-create/SKILL.md`](../skills/task-create/SKILL.md), which is the single source of truth:
 >
-> **File Extension**: `.poml` (valid XML document)
+> | Field group | Authoritative rule |
+> |---|---|
+> | `<rigor>` + `<rigor-reason>` | task-create **Step 3.5.5** (rigor decision tree) |
+> | `<model-tier>` + `<model-tier-reason>` · `<effort>` | task-create **Step 3.5.5b** (Sonnet-5 tiering + effort rubric) |
+> | `<steps mode="…">` · `<escalation><trigger>` | task-create **Step 3.5.5c** (step mode + escalation) |
+> | `<justification>` (NEW-surface tasks) | task-create **Step 3.5.6** (§11 three-question gate) |
+> | `<parallel-group>` + `<parallel-safe>` | task-create **Step 3.8** (wave grouping — EVERY task) |
+> | goal-eligibility (per **wave**, recorded in TASK-INDEX.md) | task-create **Step 3.85** |
+> | `<ui-tests>` (pcf/frontend/fluent-ui/e2e-test) | task-create **Step 3.65** |
+> | `<knowledge>` (tag → files) | task-create **Step 3.4** (Tag-to-Knowledge Mapping) |
+>
+> **Do NOT author a task by copying this skeleton alone** and stopping — run `task-create` (or read its Step 4
+> block) so the per-field decision logic is applied. The skeleton below exists so you can see the *shape* the
+> skill produces without a round-trip; the skill decides *what goes in each field*. Keeping the skeleton here in
+> sync with task-create Step 4 is a maintenance obligation (see `ai-procedure-maintenance` Checklist F).
+>
+> **Execution protocol** (Steps 0.5 → 11, rigor gates, checkpointing) lives in
+> [`.claude/skills/task-execute/SKILL.md`](../skills/task-execute/SKILL.md) — NOT here. A task file is *data*; how it
+> runs is the skill.
 
 ---
 
-## Task File Structure
-
-Task files use the `.poml` extension and are valid XML documents. Use Markdown only inside text nodes.
-
-When creating a task file, use this POML structure:
+## Current canonical skeleton (mirror of `task-create` Step 4)
 
 ```xml
-<task id="{PROJ-NNN}" project="{Project Name}">
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="{NNN}" project="{project-name}">
   <metadata>
     <title>{Task Title}</title>
-    <status>not-started | in-progress | complete | blocked</status>
-    <estimated-effort>{X hours/days}</estimated-effort>
-    <actual-effort>{X hours/days}</actual-effort>
-    <assigned>{AI Agent / Developer Name}</assigned>
-    <started>{YYYY-MM-DD}</started>
-    <completed>{YYYY-MM-DD}</completed>
+    <phase>{N} {Phase Name}</phase>
+    <gate>startable | blocked | {dep-condition}</gate>       <!-- readiness -->
+    <status>not-started</status>                              <!-- not-started | in-progress | completed | blocked | deferred -->
+    <rigor>FULL | STANDARD | MINIMAL</rigor>                  <!-- Step 3.5.5 (author hint; task-execute may override) -->
+    <rigor-reason>{trigger from the Step 3.5.5 decision tree}</rigor-reason>
+    <model-tier>sonnet | opus | fable</model-tier>           <!-- Step 3.5.5b; sonnet default -->
+    <model-tier-reason>{trigger}</model-tier-reason>
+    <effort>low | medium | high | xhigh</effort>             <!-- Step 3.5.5b rubric; high default, xhigh only where justified -->
+    <parallel-group>{group id or "none"}</parallel-group>    <!-- Step 3.8 -->
+    <parallel-safe>true | false</parallel-safe>              <!-- Step 3.8; FORCED false if <relevant-files> touches .claude/ -->
+    <parallel-reason>{why, when parallel-safe is false}</parallel-reason>
+    <deps>{comma-separated task IDs or "none"}</deps>
+    <tags>{standard vocabulary — see task-create Standard Tag Vocabulary}</tags>
+    <estimated-effort>{optional, e.g. 2-4 hours}</estimated-effort>
   </metadata>
 
-  <prompt>
-    {Natural-language description of the task's intent - what needs to be accomplished
-    and why it matters to the project.}
-  </prompt>
+  <prompt>{1-3 sentences: what to accomplish + why. Explicit, literal — Sonnet-5 does not infer intent.}</prompt>
+  <role>SPAARKE platform developer. {Specific expertise needed.} Follow ADRs strictly.</role>
+  <goal>{Clear, measurable definition of done — the artifact(s) that will exist.}</goal>
 
-  <role>
-    {The persona or agent mode the AI should adopt for this task.}
-    
-    Examples:
-    - "Senior .NET developer familiar with Minimal APIs and SharePoint Embedded"
-    - "PCF control developer with expertise in Fluent UI v9 and React"
-    - "Full-stack developer with Dataverse plugin experience"
-  </role>
-
-  <goal>
-    {The final expected outcome - a clear, measurable definition of done.}
-    
-    Example: "A working API endpoint at /api/documents/{id}/permissions that returns
-    document permissions for the authenticated user, with unit tests achieving 80% coverage."
-  </goal>
-
-  <inputs>
-    <file purpose="design-spec">{path to design specification}</file>
-    <file purpose="project-plan">docs/projects/{project-name}/plan.md</file>
-    <file purpose="task-list">docs/projects/{project-name}/tasks.md</file>
-    <file purpose="module-guidance">{path to relevant CLAUDE.md}</file>
-    <!-- Add other required input files -->
-  </inputs>
+  <context>
+    <background>{Why this task exists — from spec.md/plan.md.}</background>
+    <relevant-files>
+      <file role="new|modify|canonical-reference">{exact path — name the reference impl to copy}</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="{NNN}" status="pending|complete">{what it provides}</dependency>
+    </dependencies>
+  </context>
 
   <constraints>
-    <!-- Hard rules restricting the AI - pulled from ADRs and project requirements -->
-    <constraint source="ADR-001">No Azure Functions - use Minimal API patterns</constraint>
-    <constraint source="ADR-002">Plugin execution must be &lt; 50ms p95</constraint>
-    <constraint source="ADR-008">Use endpoint filters for authorization, not middleware</constraint>
-    <constraint source="project">Must not break existing tests</constraint>
-    <constraint source="project">Must maintain backward compatibility with existing API</constraint>
+    <!-- Each constraint carries an explicit SCOPE clause; a bare rule is a defect (Step 3.5.5b authoring rule). -->
+    <constraint source="ADR-{NNN}">{scoped rule}</constraint>
+    <constraint source="project">{project-specific rule}</constraint>
   </constraints>
 
   <knowledge>
-    <!-- Reference technical approach and best practices -->
-    <topic>{topic area - e.g., graph/mail, pcf/fluent-ui, dataverse/plugins}</topic>
-    <files>
-      <file>docs/adr/{relevant-adr}.md</file>
-      <file>docs/KM-{topic}.md</file>
-      <file>{path to relevant knowledge article}</file>
-    </files>
-    <patterns>
-      <pattern name="{pattern name}" location="{file path}">
-        {Brief description of the pattern and how to apply it}
-      </pattern>
-    </patterns>
+    <topic>{domain}</topic>
+    <files><file>.claude/adr/ADR-{NNN}-{slug}.md</file></files>          <!-- concise ADR; Step 3.4 mapping -->
+    <patterns><pattern name="{name}" location="{path}">{how to apply}</pattern></patterns>
   </knowledge>
 
-  <context>
-    <!-- Additional qualitative background -->
-    <background>{Why this task exists, business context}</background>
-    <dependencies>
-      <dependency task="{PROJ-NNN}" status="complete|in-progress">
-        {Description of dependency}
-      </dependency>
-    </dependencies>
-    <related-work>
-      <item>{Reference to similar past work or related features}</item>
-    </related-work>
-  </context>
-
-  <steps>
-    <!-- Deterministic sequence of actions -->
-    <step order="0" name="Context Check">
-      Check context usage. If &gt; 70%, create handoff summary and request new chat.
-    </step>
-    <step order="1" name="Review Progress">
-      Read project README and tasks.md. Verify dependencies complete. Check for previous work.
-    </step>
-    <step order="2" name="Gather Resources">
-      Read all files in &lt;inputs&gt; and &lt;knowledge&gt;. Extract applicable constraints.
-    </step>
-    <step order="3" name="Plan Implementation">
-      Break into subtasks. Identify code patterns to follow. List files to create/modify.
-    </step>
-    <step order="4" name="Implement">
-      Execute subtasks in order. Run context check after each. Write tests alongside code.
-    </step>
-    <step order="5" name="Verify">
-      Run tests. Verify build. Check acceptance criteria. Validate ADR compliance.
-    </step>
-    <step order="6" name="Document">
-      Update task status. Add code comments. Create completion report.
-    </step>
+  <steps mode="directional">   <!-- directional (default): goal+criteria+constraints bind, sequence adaptable.
+                                    prescriptive: exact sequence binds (migrations/deploys/irreversible) — Step 3.5.5c -->
+    <step order="0" name="Context + rigor declaration">{...}</step>
+    <step order="1">{concrete action}</step>
+    <step order="N-1">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="N">Document any deviation in projects/{project-name}/notes/.</step>
   </steps>
 
-  <tools>
-    <!-- External tools or services the AI can use -->
-    <tool name="dotnet">Build and test .NET projects</tool>
-    <tool name="npm">Build and test TypeScript/PCF projects</tool>
-    <tool name="git">Version control operations</tool>
-    <tool name="pac">Power Platform CLI for solution operations</tool>
-  </tools>
+  <escalation>   <!-- REQUIRED for tasks with a known judgment boundary / failure mode (Step 3.5.5c) -->
+    <trigger>{If X differs from the spec, STOP and escalate per CLAUDE.md §6 rather than adapting.}</trigger>
+  </escalation>
+
+  <justification>   <!-- REQUIRED only for NEW-surface tasks (new file/endpoint/DI/package/column) — §11 / Step 3.5.6.
+                         OMIT for modify-only tasks. Hollow answers fail code-review Step 6.6. -->
+    <existing>{closest neighbor — cite file:line from Grep, or "none found" + the grep run}</existing>
+    <extension>{Yes/No + reason ≤2 sentences. "Cleaner separation" is NOT a reason.}</extension>
+    <cost-of-doing-nothing>{concrete behavior/contract that fails — NOT "scalability"/"flexibility".}</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>   <!-- REQUIRED for tags pcf/frontend/fluent-ui/e2e-test — Step 3.65. Include ADR-021 dark-mode check. -->
+    <test name="{name}"><steps><step>{action}</step></steps><expected>{outcome}</expected></test>
+  </ui-tests>
+
+  <tools><tool name="dotnet">Build/test .NET</tool><tool name="npm">Build PCF/TS (build:prod for PCF)</tool></tools>
 
   <outputs>
-    <!-- Artifacts to be produced or modified -->
-    <output type="code">{path to files to create/modify}</output>
-    <output type="test">{path to test files}</output>
-    <output type="docs">docs/projects/{project-name}/tasks.md (status update)</output>
-    <output type="report">Task completion report</output>
+    <output type="code">{exact path}</output>
+    <output type="test">{exact path}</output>
   </outputs>
 
-  <examples>
-    <!-- Reference samples or patterns -->
-    <example name="{example name}" location="{file path}">
-      {Description of what this example demonstrates and how to apply it}
-    </example>
-  </examples>
-
   <acceptance-criteria>
-    <criterion testable="true">{Specific, testable criterion 1}</criterion>
-    <criterion testable="true">{Specific, testable criterion 2}</criterion>
-    <criterion testable="true">{Specific, testable criterion 3}</criterion>
+    <!-- CLOSED SET: exhaustive, not illustrative. Include negative/authorization cases (401, empty-input, unauthorized). -->
+    <criterion testable="true">Given {precondition}, when {action}, then {result}.</criterion>
+    <criterion testable="true">Negative: {unauthorized/malformed path} returns {expected}, not an unhandled error.</criterion>
+    <criterion testable="true">All unit tests pass; build is green.</criterion>
   </acceptance-criteria>
+
+  <notes>{Implementation hints; spec.md section refs. Completion summary appended here when done.}</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
 ```
 
 ---
 
-## AI Agent Execution Protocol
+## Completeness gate (what a valid task POML MUST carry)
 
-### 🧠 Step 0: Context Management Check
+A task POML is **incomplete** (and fails the `task-create` Validation Checklist + `code-review` POML check) if it is
+missing any of: `<model-tier>`, `<effort>`, `<rigor>`, `<parallel-group>`, `<parallel-safe>`, `<steps mode="…">`, or —
+for a NEW-surface task — `<justification>`. This is the exact drift that produced the 2026-07-16 finding; the gate
+exists so the omission is caught mechanically rather than by author vigilance. See
+`scripts/Validate-TaskPoml.ps1` and `task-create` Validation Checklist.
 
-**CRITICAL: Perform this check before starting AND after each major subtask.**
-
-```xml
-<context-check>
-  <threshold warning="50" critical="70" emergency="85" />
-  <action level="normal">Proceed with task execution</action>
-  <action level="warning">Monitor closely, consider completing current subtask</action>
-  <action level="critical">STOP - Create handoff summary and request new chat</action>
-  <action level="emergency">Immediately create handoff, context may be truncated</action>
-</context-check>
-```
-
-#### Context Reset Protocol
-
-When context exceeds 70%, create a **handoff summary**:
-
-```xml
-<handoff>
-  <task-reference>
-    <id>{Task ID}</id>
-    <title>{Task Title}</title>
-    <project>{Project Name}</project>
-  </task-reference>
-  
-  <progress>
-    <completed>
-      <subtask>{Subtask 1 completed}</subtask>
-      <subtask>{Subtask 2 completed}</subtask>
-    </completed>
-    <remaining>
-      <subtask>{Subtask 3 remaining}</subtask>
-      <subtask>{Subtask 4 remaining}</subtask>
-    </remaining>
-    <current-state>{Description of where work stopped}</current-state>
-  </progress>
-  
-  <files-modified>
-    <file path="{path}" change="created|modified" status="complete|partial">
-      {Brief description of changes}
-    </file>
-  </files-modified>
-  
-  <decisions>
-    <decision>{Decision 1 and rationale}</decision>
-    <decision>{Decision 2 and rationale}</decision>
-  </decisions>
-  
-  <blockers>
-    <blocker status="resolved|open">{Issue and resolution/status}</blocker>
-  </blockers>
-  
-  <next-steps order="sequential">
-    <step>{Next immediate action}</step>
-    <step>{Following action}</step>
-  </next-steps>
-  
-  <resources-needed>
-    <adrs>{List of ADRs to re-read}</adrs>
-    <files>{List of files to read}</files>
-    <knowledge>{List of knowledge articles}</knowledge>
-  </resources-needed>
-</handoff>
-```
-
-**Then instruct user**: "Context is at {X}%. Please start a new chat and provide this handoff summary to continue."
+> **Deprecated field aliases** (accepted for back-compat, not emitted by new task-create runs): `<rigor-hint>` → use
+> `<rigor>`; `<dependencies>` (as a metadata sibling) → use `<deps>`. The `<dependencies>` element is still valid
+> *inside* `<context>` to describe prerequisite tasks.
 
 ---
 
-### 📋 Step 1: Review Task in Context of Progress
-
-Before writing any code, review using the task's `<context>` section:
-
-```xml
-<review-checklist>
-  <item name="project-status">
-    <action>Read: docs/projects/{project-name}/README.md</action>
-    <check>Current project status, blockers, decisions made</check>
-  </item>
-  
-  <item name="dependencies">
-    <action>Read: docs/projects/{project-name}/tasks.md</action>
-    <check>All dependency tasks are ✅ Complete</check>
-    <if-blocked>Report blocker and STOP</if-blocked>
-  </item>
-  
-  <item name="previous-work">
-    <action>Search for partial implementations</action>
-    <action>Check git status for uncommitted changes</action>
-    <action>Review TODO comments related to this task</action>
-  </item>
-  
-  <item name="task-validity">
-    <check>Has the design changed since task was created?</check>
-    <check>Is the task still aligned with project goals?</check>
-    <if-changed>Flag for review before proceeding</if-changed>
-  </item>
-</review-checklist>
-```
-
-**Output**:
-```markdown
-## Pre-Execution Review
-
-**Project Status**: {On Track / At Risk / Blocked}
-**Dependencies Met**: {Yes / No - list missing}
-**Previous Work Found**: {None / Partial - describe}
-**Task Still Valid**: {Yes / No - explain}
-
-**Proceed?**: {Yes / No - explain if No}
-```
-
----
-
-### 📚 Step 2: Gather Required Resources
-
-Read all items specified in the task's `<inputs>`, `<knowledge>`, and `<context>` sections.
-
-```xml
-<resource-gathering>
-  <from-task-definition>
-    <read ref="inputs/*">All files listed in inputs section</read>
-    <read ref="knowledge/files/*">All knowledge articles referenced</read>
-    <read ref="knowledge/patterns/*">All patterns to follow</read>
-    <read ref="context/dependencies">Dependency task outputs</read>
-  </from-task-definition>
-  
-  <standard-resources>
-    <resource type="adr-index">docs/adr/README-ADRs.md</resource>
-    <resource type="root-claude">CLAUDE.md</resource>
-    <resource type="module-claude" conditional="api-work">src/server/api/Spe.Bff.Api/CLAUDE.md</resource>
-    <resource type="module-claude" conditional="pcf-work">src/client/pcf/CLAUDE.md</resource>
-    <resource type="module-claude" conditional="shared-dotnet">src/server/shared/CLAUDE.md</resource>
-    <resource type="module-claude" conditional="shared-ui">src/client/shared/CLAUDE.md</resource>
-    <resource type="module-claude" conditional="test-work">tests/CLAUDE.md</resource>
-  </standard-resources>
-  
-  <pattern-search>
-    <search-for>Similar implementations in codebase</search-for>
-    <search-for>Shared utilities to reuse</search-for>
-    <search-for>Service patterns to follow</search-for>
-  </pattern-search>
-</resource-gathering>
-```
-
-**Output**:
-```markdown
-## Resources Gathered
-
-### From Task Definition
-| Source | File | Key Information |
-|--------|------|-----------------|
-| inputs | {path} | {what was extracted} |
-| knowledge | {path} | {what was extracted} |
-
-### ADRs Reviewed
-| ADR | Key Constraint for This Task |
-|-----|------------------------------|
-| {ADR-NNN} | {constraint} |
-
-### Knowledge Articles
-| Article | Relevant Section |
-|---------|------------------|
-| {KM-XXX} | {section} |
-
-### Code Patterns Found
-| Pattern | Location | How to Apply |
-|---------|----------|--------------|
-| {pattern} | {file path} | {usage} |
-
-### Reusable Components
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| {name} | {path} | {how it helps} |
-```
-
----
-
-### 🔨 Step 3: Execute Task
-
-Follow the `<steps>` defined in the task, breaking each into subtasks:
-
-```xml
-<subtasks>
-  <subtask id="1" name="{First subtask}" status="not-started">
-    {Smallest unit of work}
-  </subtask>
-  <subtask id="2" name="{Second subtask}" status="not-started">
-    {Description}
-  </subtask>
-  <subtask id="3" name="Write/update tests" status="not-started">
-    Unit tests for new functionality
-  </subtask>
-  <subtask id="4" name="Verify tests pass" status="not-started">
-    Run test suite, fix failures
-  </subtask>
-  <subtask id="5" name="Update task status" status="not-started">
-    Mark complete in tasks.md
-  </subtask>
-</subtasks>
-```
-
-#### For Each Subtask
-
-```xml
-<subtask-execution>
-  <step>CONTEXT CHECK - Is context still &lt; 70%?</step>
-  <step>Read relevant code sections</step>
-  <step>Plan the change (think before coding)</step>
-  <step>Implement the change</step>
-  <step>Verify change (run tests if applicable)</step>
-  <step>Mark subtask complete</step>
-  <step>CONTEXT CHECK again</step>
-</subtask-execution>
-```
-
-#### Coding Standards Checklist
-
-Validate against task's `<constraints>`:
-
-```xml
-<coding-checklist>
-  <item>Following patterns from &lt;knowledge&gt; section</item>
-  <item>Complying with all &lt;constraints&gt;</item>
-  <item>Reusing existing utilities where possible</item>
-  <item>Adding appropriate error handling</item>
-  <item>Including necessary logging</item>
-  <item>Writing tests for new functionality</item>
-</coding-checklist>
-```
-
----
-
-### ✅ Step 4: Verify Completion
-
-Validate against task's `<acceptance-criteria>` and `<outputs>`:
-
-```xml
-<verification>
-  <acceptance-criteria-check>
-    <!-- Verify each criterion from task definition -->
-    <criterion ref="1" status="pass|fail" evidence="{how verified}" />
-    <criterion ref="2" status="pass|fail" evidence="{how verified}" />
-  </acceptance-criteria-check>
-  
-  <outputs-check>
-    <!-- Verify each output from task definition was produced -->
-    <output ref="code" status="created|modified" path="{actual path}" />
-    <output ref="test" status="created|modified" path="{actual path}" />
-  </outputs-check>
-  
-  <test-verification>
-    <command type="dotnet">dotnet test {test-project-path}</command>
-    <command type="npm">npm test</command>
-  </test-verification>
-  
-  <build-verification>
-    <command type="dotnet">dotnet build</command>
-    <command type="npm">npm run build</command>
-  </build-verification>
-  
-  <quality-check>
-    <item>No new compiler warnings</item>
-    <item>No hardcoded secrets or URLs</item>
-    <item>Error handling in place</item>
-    <item>Logging appropriate (not excessive)</item>
-  </quality-check>
-</verification>
-```
-
----
-
-### 📝 Step 5: Update Documentation
-
-```xml
-<documentation-updates>
-  <update target="docs/projects/{project-name}/tasks.md">
-    Change task status from 🔄 to ✅
-    Add completion date and any notes
-  </update>
-  
-  <update target="docs/projects/{project-name}/README.md" conditional="if-needed">
-    Update progress, any new risks/decisions
-  </update>
-  
-  <code-documentation>
-    <item>New public methods have XML doc comments (C#)</item>
-    <item>New functions have JSDoc comments (TypeScript)</item>
-    <item>Complex logic has inline comments explaining "why"</item>
-  </code-documentation>
-</documentation-updates>
-```
-
----
-
-### 📊 Step 6: Task Completion Report
-
-```xml
-<completion-report>
-  <summary>
-    <task-id>{Task ID}</task-id>
-    <task-title>{Task Title}</task-title>
-    <status>complete</status>
-    <actual-effort>{X hours/days}</actual-effort>
-  </summary>
-  
-  <work-summary>{1-2 sentence summary of what was accomplished}</work-summary>
-  
-  <files-changed>
-    <file path="{path}" change="created|modified|deleted">
-      {Brief description}
-    </file>
-  </files-changed>
-  
-  <tests>
-    <added>{count}</added>
-    <modified>{count}</modified>
-    <all-passing>true|false</all-passing>
-  </tests>
-  
-  <constraints-verified>
-    <constraint source="{ADR-NNN}">Verified: {how}</constraint>
-  </constraints-verified>
-  
-  <notes-for-future>
-    <item type="tech-debt">{Any technical debt introduced}</item>
-    <item type="improvement">{Suggestions for improvement}</item>
-    <item type="related">{Related tasks to consider}</item>
-  </notes-for-future>
-  
-  <context-status>
-    <usage>{X}%</usage>
-    <recommendation>continue|reset</recommendation>
-  </context-status>
-</completion-report>
-```
-
----
-
-## Quick Reference: Context Thresholds
-
-| Context % | Level | Action |
-|-----------|-------|--------|
-| < 50% | Normal | ✅ Proceed normally |
-| 50-70% | Warning | ⚠️ Monitor, consider wrapping up current subtask |
-| > 70% | Critical | 🛑 STOP - Create handoff summary and reset |
-| > 85% | Emergency | 🚨 CRITICAL - Immediately create handoff, may lose context |
-
-## Quick Reference: Ephemeral Files (Notes Directory)
-
-**Location**: `docs/projects/{project-name}/notes/`
-
-Use this directory for **temporary working files** that support task execution but are NOT permanent project artifacts:
-
-### Recommended Structure
-```
-projects/{project-name}/notes/
-├── scratch.md              # General brainstorming, quick notes
-├── debug/                  # Debugging session artifacts
-│   ├── 2025-12-04-auth-issue.md
-│   └── api-responses.json
-├── spikes/                 # Exploratory code/research
-│   ├── redis-spike.cs
-│   └── spike-results.md
-├── drafts/                 # Work-in-progress before finalization
-│   └── draft-api-design.md
-└── handoffs/               # Context handoff summaries
-    └── handoff-001.md
-```
-
-### What Goes in Notes (Ephemeral)
-
-| Artifact Type | Location | Example |
-|---------------|----------|---------|
-| Brainstorming | `notes/scratch.md` | Ideas, rough outlines |
-| Debug sessions | `notes/debug/` | Troubleshooting logs, captured responses |
-| Spike/POC code | `notes/spikes/` | Throwaway exploration code |
-| Draft content | `notes/drafts/` | WIP before moving to final location |
-| Handoff summaries | `notes/handoffs/` | Context reset handoffs |
-| Test data | `notes/test-data/` | Sample payloads, mock data |
-| Meeting notes | `notes/meetings/` | Discussion records |
-
-### What Does NOT Go in Notes
-
-| Artifact Type | Correct Location |
-|---------------|------------------|
-| Final code | `src/` (appropriate module) |
-| Tests | `tests/` |
-| Design spec | `docs/projects/{project-name}/spec.md` |
-| Project docs | `docs/projects/{project-name}/` (root) |
-| Permanent diagrams | `docs/projects/{project-name}/` or committed to repo |
-
-### Rules
-- ✅ Create freely for working notes, debugging, exploration
-- ✅ Reference in handoff summaries for continuity
-- ✅ Use subdirectories to organize by purpose
-- ❌ Do NOT store final artifacts here (move to proper location when done)
-- ❌ Do NOT reference in permanent documentation
-- 🗑️ Contents cleaned up when project completes (via `/repo-cleanup` skill)
-
-### Example Usage in Task Outputs
-```xml
-<outputs>
-  <!-- Ephemeral working files -->
-  <output type=\"notes\" ephemeral=\"true\">projects/{project-name}/notes/debug/auth-trace.md</output>
-  <output type=\"notes\" ephemeral=\"true\">projects/{project-name}/notes/spikes/caching-poc.cs</output>
-  
-  <!-- Permanent artifacts (NOT in notes/) -->
-  <output type=\"code\">src/server/api/Services/CacheService.cs</output>
-  <output type=\"test\">tests/unit/CacheService.Tests.cs</output>
-  <output type=\"docs\">projects/{project-name}/tasks/001-setup.md</output>
-</outputs>
-```
-
-### Handoff Summary Location
-When context reaches 70%, save handoff to `notes/handoffs/`:
-```
-notes/handoffs/handoff-{NNN}-{date}.md
-```
-This allows the next session to find and continue from the handoff.
-
-## Quick Reference: Resource Locations
-
-| Resource | Location |
-|----------|----------|
-| **Project files** | `projects/{project-name}/` |
-| Project spec | `projects/{project-name}/spec.md` |
-| Project tasks | `projects/{project-name}/tasks/` |
-| **Ephemeral notes** | `projects/{project-name}/notes/` |
-| ADRs | `docs/reference/adr/` |
-| Knowledge base | `docs/ai-knowledge/` |
-| Templates | `docs/ai-knowledge/templates/` |
-| API CLAUDE.md | `src/server/api/Spe.Bff.Api/CLAUDE.md` |
-| PCF CLAUDE.md | `src/client/pcf/CLAUDE.md` |
-| Root CLAUDE.md | `CLAUDE.md` |
-
-## Quick Reference: POML Tags
-
-| Tag | Purpose |
-|-----|---------|
-| `<prompt>` | Natural-language description of task intent |
-| `<role>` | Persona or agent mode to adopt |
-| `<goal>` | Final expected outcome |
-| `<inputs>` | Required files and artifacts |
-| `<constraints>` | Hard rules restricting the AI |
-| `<steps>` | Deterministic sequence of actions |
-| `<tools>` | External tools or services available |
-| `<outputs>` | Artifacts to be produced or modified |
-| `<context>` | Additional qualitative background |
-| `<examples>` | Reference samples or patterns |
-| `<knowledge>` | Technical approach and best practices references |
-| `<acceptance-criteria>` | Testable success criteria |
-
----
-
-*Template version: 2.0 | POML Format | For use with AI Agent Playbook*
+*Template version: 3.0 | POML pointer | authoritative source: `.claude/skills/task-create/SKILL.md`*

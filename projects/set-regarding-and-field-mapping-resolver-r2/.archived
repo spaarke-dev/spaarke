@@ -1,0 +1,13 @@
+Archived: 2026-07-12
+Final status: Completed
+Project Issue: #638 (https://github.com/spaarke-dev/spaarke/issues/638) — closed
+Parent Epic: #535 (ENTITY FUNCTIONALITY)
+Closing merge: eab76748f (task-016 nav-prop convergence, on master)
+Worktree: c:/code_files/spaarke-wt-set-regarding-and-field-mapping-resolver-r2 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/set-regarding-and-field-mapping-resolver-r2 (still on origin)
+
+Notes:
+- Registered (/devops-project-register #638) then archived (/devops-project-archive) on 2026-07-12.
+- Task 090 wrap-up (/test-diet, /repo-cleanup, README/plan -> Complete, lessons-learned) INTENTIONALLY LEFT OPEN per owner.
+  All substantive tasks complete on master, including the §6.5 task-016 matterService nav-prop convergence.
+- No deploy required (client-only refactor; create payload byte-identical).
