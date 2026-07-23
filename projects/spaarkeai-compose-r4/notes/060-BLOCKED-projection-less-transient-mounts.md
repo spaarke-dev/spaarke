@@ -1,4 +1,24 @@
-# Task 060 — BLOCKED: residual `mammoth` removal gated on projection-less transient mounts
+# Task 060 — residual `mammoth` removal gated on projection-less transient mounts
+
+> **RESOLUTION (2026-07-23, owner directive — §6.5 Path-A exception)**: Retain `mammoth` as the client
+> transient/Browse mapper for R4. Rationale: (1) it causes NO errors — Browse / Assistant-upload /
+> Open-in-Compose flows work today via mammoth (lossy but functional), and the task-038 guardrails already
+> treat a browsed docx as "loaded" so unsupported edit controls are disabled; (2) it is NOT an R4 regression —
+> mammoth was always the transient mapper; (3) routing transient mounts through the projection builder is
+> net-new functional work, which the owner directed to defer to R5. FR-12's "mammoth is gone" criterion is
+> amended to **"mammoth removed from the stored-Load write/display path; retained solely as the client
+> transient/Browse mapper (cited exception) — full removal tracked as R5 G6."** The CORE hard-replace is
+> complete: the write path is fully on `ComposeShadowPatchEngine` (+ `ComposeDocumentRenderer` for
+> born-in-editor, cited I-5 exception), and both legacy WRITERS (`DocxAnnotationWriter`,
+> `ComposeParagraphRedlineSynthesizer`) are confirmed gone (zero live refs). mammoth is a READ/display mapper,
+> not a write-path author — it does not violate I-5 or I-7. Deferred work: `projects/spaarkeai-compose-r5`
+> **G6 (transient-mount projection unification)**. Original BLOCKED analysis retained below.
+> **Honesty note**: a transient Browse/upload docx renders + saves via the lossy mammoth→contentModel path, so
+> complex formatting in *those secondary flows* can degrade on save (pre-existing; not the R4 primary
+> stored-doc workflow). Surfaced to the owner 2026-07-23; deferred to R5 G6 unless the owner elects a
+> predecessor task.
+
+---
 
 > **Status**: 🛑 BLOCKED (escalation per root CLAUDE.md §6) — no deletion performed.
 > **Date**: 2026-07-23

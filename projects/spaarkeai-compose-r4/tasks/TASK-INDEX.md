@@ -43,7 +43,7 @@
 | 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | done | ✅ |
 | 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | done | ✅ |
 | 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | done | ✅ |
-| 060 | Hard-replace cutover completion — remove mammoth (FR-12); **KEEP renderer (C-revised)** | 6 Hardening | opus / high | FULL | 032,034,**006,036,038** | blocked on 038 | 🔲 |
+| 060 | Hard-replace cutover completion (FR-12); **KEEP renderer (C-revised)** | 6 Hardening | opus / high | FULL | 032,034,**006,036,038** | ✅ done-with-exception: writers gone; mammoth retained for transient mounts → R5 G6 (§6.5 Path-A) | ✅ |
 | 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | blocked | 🔲 |
 | 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | blocked | 🔲 |
 | 063 | **Flagship gate G — all 8 criteria green** | 6 Hardening | opus / high | FULL | 062 | blocked | 🔲 |
