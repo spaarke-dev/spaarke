@@ -33,7 +33,7 @@
 | 037 | Born-in-editor tables + save unification | 3 Patch Engine | opus / xhigh | FULL | 030,031 | half-1 landed (73ca66e09); unification → **C-revised** (renderer kept, cited I-5 exc.); table gating superseded by 038 | ✅ |
 | 038 | **Zero-error guardrail pass** (disable unsupported edit-path controls + op-log loss-proofing) | 3 Patch Engine | opus / xhigh | FULL | 032,036 | ✅ startable — R4 no-errors gate | 🔄 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
-| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ⏸ verified; Azure deploy held for owner | 🔲 |
+| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ✅ DEPLOYED to dev 2026-07-23: BFF (spaarke-bff-dev, hash-verified, save 401/push-annotations 404) + sprk_spaarkeai (Dataverse, published) | ✅ |
 | 036 | Retire DocxAnnotationWriter + push-annotations **(Path B ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 032 | done (bae44955b) | ✅ |
 | 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
 | 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
