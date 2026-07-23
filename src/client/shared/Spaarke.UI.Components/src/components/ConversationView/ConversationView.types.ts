@@ -89,12 +89,10 @@ export interface ConversationViewProps {
   onError?: (error: Error) => void;
 
   /**
-   * Fired when the user activates the "Mark as read" tool in the message
-   * toolbar (R3 UAT 2026-07-22). The host clears THIS thread's list-pane unread
-   * badge (the affordance moved off the thread row into the message toolbar);
-   * `ConversationView` additionally advances its own unread watermark so the
-   * open conversation stops counting loaded messages as unread. Omit it and the
-   * tool still advances the local watermark — it just doesn't reach the list badge.
+   * @deprecated No-op since R3 UAT 2026-07-23 (item 11): the "Mark as read" tool
+   * was removed from the message toolbar. The prop is retained so the
+   * `ConversationWorkspace` renderer seam and its hosts keep compiling; it is not
+   * used. Safe to stop passing.
    */
   onMarkThreadRead?: () => void;
 

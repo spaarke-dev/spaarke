@@ -77,8 +77,7 @@ import {
   ConversationWorkspace,
   ConversationView,
   getCurrentUserId,
-  createXrmDataService,
-  searchUsersAndContacts,
+  createXrmNavigationService,
 } from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
 import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
@@ -192,17 +191,12 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   // a safe degrade, never a crash.
   const currentUserSystemUserId = React.useMemo(() => getCurrentUserId() ?? '', []);
 
-  // Recipient directory search for the shell's built-in New-conversation modal
-  // (R3 UAT 2026-07-22 item 5a — the ＋ was inert because no host wired it).
-  // Reuses the host-context `Xrm.WebApi` users+contacts lookup every other
-  // Spaarke composer uses (searchUsersAndContacts → systemuser + contact; NO
-  // BFF/OBO per DATA-ACCESS-DECISION-CRITERIA). No second identity/search
-  // mechanism (root CLAUDE.md §11).
-  const lookupDataService = React.useMemo(() => createXrmDataService(), []);
-  const handleSearchRecipients = React.useCallback(
-    (query: string) => searchUsersAndContacts(lookupDataService, query),
-    [lookupDataService]
-  );
+  // Record-lookup service for the shell's built-in New-conversation modal (item
+  // 9 — name + associate-to-record picker). Reuses the shared Xrm-backed
+  // navigation adapter (`createXrmNavigationService` → `Xrm.Utility.lookupObjects`,
+  // the SAME wizard-associate record picker used across Spaarke; NO second
+  // mechanism, root CLAUDE.md §11).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
   // Right-pane renderer seam (see ConversationWorkspace.tsx module header
   // "Renderer seam") — wires the REAL `<ConversationView>` in, mounted (not
@@ -257,7 +251,7 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         <ConversationWorkspace
           authenticatedFetch={authenticatedFetch}
           renderConversation={renderConversation}
-          onSearchRecipients={handleSearchRecipients}
+          navigationService={navigationService}
         />
       </div>
     </div>

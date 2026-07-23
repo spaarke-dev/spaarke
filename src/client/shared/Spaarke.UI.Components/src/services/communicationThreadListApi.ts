@@ -401,6 +401,69 @@ export async function startDirectThread(
 }
 
 // ---------------------------------------------------------------------------
+// createRecordThread — POST /api/communications/threads (R3 UAT 2026-07-23 item 9)
+// ---------------------------------------------------------------------------
+//
+// Create a NEW named, record-anchored thread. Unlike startDirectThread (participant-based 1:1), this
+// anchors to an ADR-024 regarding record (no participant); the caller is resolved server-side and becomes
+// the thread owner (so the new empty thread is immediately visible in the caller's all-mode list). Mirrors
+// the BFF DTOs field-for-field (camelCase, ASP.NET STJ).
+// ---------------------------------------------------------------------------
+
+/** Mirrors `CreateRecordThreadRequest`. */
+export interface ICreateRecordThreadRequestDto {
+  /** Optional thread name; blank → derived from the record name server-side. */
+  name?: string;
+  /** The regarding record's logical entity name (one of the 11 ADR-024 families). */
+  regardingEntityType: string;
+  /** The regarding record's id (GUID). */
+  regardingRecordId: string;
+  /** Optional regarding record display name. */
+  regardingRecordName?: string;
+}
+
+/** Mirrors `CreateRecordThreadResponse`. */
+export interface ICreateRecordThreadResultDto {
+  /** The new record-anchored thread's `sprk_communicationthreadid`. */
+  threadId: string;
+}
+
+/**
+ * Creates a new named, record-anchored thread (`POST /api/communications/threads`). Throws
+ * {@link CommunicationThreadListError} on any non-2xx response (parsed ProblemDetails per ADR-019),
+ * exactly like the other write wrappers in this module.
+ */
+export async function createRecordThread(
+  request: ICreateRecordThreadRequestDto,
+  client: IThreadListApiClientOptions
+): Promise<ICreateRecordThreadResultDto> {
+  if (!request.regardingEntityType || !request.regardingRecordId) {
+    throw new Error('createRecordThread: regardingEntityType and regardingRecordId are required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('createRecordThread: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, '/api/communications/threads');
+  const response = await client.authenticatedFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: request.name,
+      regardingEntityType: request.regardingEntityType,
+      regardingRecordId: request.regardingRecordId,
+      regardingRecordName: request.regardingRecordName,
+    }),
+  });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+
+  return (await response.json()) as ICreateRecordThreadResultDto;
+}
+
+// ---------------------------------------------------------------------------
 // setThreadPinned — PATCH /api/communications/threads/{threadId}/pin (task 041 / FR-24)
 // ---------------------------------------------------------------------------
 //

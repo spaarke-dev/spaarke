@@ -52,9 +52,7 @@ import {
   ArrowClockwiseRegular,
   ArrowForwardRegular,
   ChatRegular,
-  MailReadRegular,
   MailRegular,
-  MailUnreadRegular,
   SearchRegular,
   SendRegular,
 } from '@fluentui/react-icons';
@@ -641,7 +639,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     bffBaseUrl,
     pollIntervalMs,
     onError,
-    onMarkThreadRead,
     onOpenEmail,
     onForwardMessage,
     onOpenAttachment,
@@ -653,22 +650,18 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const listStyles = useListStyles();
   const [state, dispatch] = React.useReducer(communicationTimelineReducer, initialTimelineState);
 
-  // In-conversation filters (task 014 / FR-09). Purely presentational local
-  // state — filtering the rendered set never re-fetches or mutates the core.
-  // The Email/Message type toggles + the word facet keep their original
-  // additive AND-of-facets semantics (see `messagePassesFilters`); task 062
-  // (§B7) only changed the CONTROLS (icon-only toggles + a revealed search box)
-  // and added an Unread facet.
-  const [emailEnabled, setEmailEnabled] = React.useState(true);
-  const [messageEnabled, setMessageEnabled] = React.useState(true);
+  // In-conversation channel filter (R3 UAT 2026-07-23 item 10). Single-select,
+  // Teams-style: default `'all'` shows everything; clicking the Email icon SOLOS
+  // emails (`'email'`), clicking Message SOLOS chats (`'message'`); clicking the
+  // active one returns to `'all'`. The pure predicate `messagePassesFilters`
+  // (and its exhaustive unit tests) keep their `emailEnabled`/`messageEnabled`
+  // shape — we DERIVE those two booleans from `channelFilter` so the helper is
+  // unchanged. The former additive both-on-by-default toggles + the Unread facet
+  // are removed (item 11). Purely presentational — never re-fetches the core.
+  const [channelFilter, setChannelFilter] = React.useState<'all' | 'email' | 'message'>('all');
+  const emailEnabled = channelFilter !== 'message';
+  const messageEnabled = channelFilter !== 'email';
   const [word, setWord] = React.useState('');
-  // Unread facet (task 062 / §B7). Additive with the type + word facets. A
-  // message counts as "unread" when it arrived AFTER the caller first opened
-  // this conversation (i.e. newer than the snapshot captured on the initial
-  // load) — the honest, data-available definition of "new since you looked",
-  // given the read-model carries no per-message read flag. See
-  // `initialCursorRef` below.
-  const [unreadOnly, setUnreadOnly] = React.useState(false);
   // Search reveal (task 062 / §B7): the word facet's text box is hidden behind
   // a search icon and revealed on demand, Teams-style.
   const [searchOpen, setSearchOpen] = React.useState(false);
@@ -682,11 +675,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
   const unreadSinceRef = React.useRef<string | undefined>(undefined);
   const liveRegionRef = React.useRef<HTMLDivElement | null>(null);
   const prevMessageCountRef = React.useRef(0);
-  // Snapshot of the newest `createdOn` at the moment the conversation first
-  // finished loading — the watermark the Unread facet (task 062 / §B7) compares
-  // against. Captured once; messages strictly newer than it are "unread".
-  const initialCursorRef = React.useRef<string | undefined>(undefined);
-  const hasCapturedInitialCursorRef = React.useRef(false);
 
   React.useEffect(() => {
     let newest: string | undefined;
@@ -695,19 +683,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     }
     sinceCursorRef.current = newest;
   }, [state.messages]);
-
-  // Capture the initial-load watermark exactly once, when the first read
-  // resolves (`status === 'ready'`). An empty thread captures `''`, so any
-  // subsequently-arriving message counts as unread.
-  React.useEffect(() => {
-    if (hasCapturedInitialCursorRef.current || state.status !== 'ready') return;
-    let newest: string | undefined;
-    for (const m of state.messages) {
-      if (m.createdOn && (!newest || m.createdOn > newest)) newest = m.createdOn;
-    }
-    initialCursorRef.current = newest ?? '';
-    hasCapturedInitialCursorRef.current = true;
-  }, [state.status, state.messages]);
 
   const handleMessages = React.useCallback((incoming: TimelineMessage[]) => {
     dispatch({ type: 'MERGE_POLL', messages: incoming });
@@ -753,18 +728,8 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     [emailEnabled, messageEnabled, word]
   );
   const filteredTimeline = React.useMemo(
-    () =>
-      timeline.filter(entry => {
-        // Type + word facets (task 014 / FR-09) — unchanged semantics.
-        if (!messagePassesFilters(entry.message, filters)) return false;
-        // Unread facet (task 062 / §B7), additive: only messages strictly newer
-        // than the initial-load watermark pass when it's active.
-        if (!unreadOnly) return true;
-        const cursor = initialCursorRef.current;
-        if (cursor === undefined) return false; // watermark not captured yet — nothing counts as unread
-        return (entry.message.createdOn ?? '') > cursor;
-      }),
-    [timeline, filters, unreadOnly]
+    () => timeline.filter(entry => messagePassesFilters(entry.message, filters)),
+    [timeline, filters]
   );
   const renderItems = React.useMemo(() => buildConversationRenderItems(filteredTimeline), [filteredTimeline]);
 
@@ -804,22 +769,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     isAtBottomRef.current = true;
     setShowJumpToLatest(false);
   }, []);
-
-  // "Mark as read" tool (R3 UAT 2026-07-22 item 5c — relocated from the thread
-  // row into the message toolbar). Advances the unread watermark so every
-  // currently-loaded message counts as read, clears the unread-only facet (else
-  // the filtered list would go empty), and lets the host clear this thread's
-  // list-pane badge via the `onMarkThreadRead` seam.
-  const markAsRead = React.useCallback(() => {
-    let newest: string | undefined;
-    for (const m of state.messages) {
-      if (m.createdOn && (!newest || m.createdOn > newest)) newest = m.createdOn;
-    }
-    initialCursorRef.current = newest ?? '';
-    hasCapturedInitialCursorRef.current = true;
-    setUnreadOnly(false);
-    onMarkThreadRead?.();
-  }, [state.messages, onMarkThreadRead]);
 
   React.useEffect(() => {
     const el = listRef.current;
@@ -934,52 +883,37 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
         </Text>
       )}
 
-      {/* Chat-area icon toolbar (task 062 / §B7) — icon-only Email / Message /
-          Unread filters + a search icon that reveals a message text filter.
-          Replaces the former Email/Message text toggles + "All messages" word
-          dropdown; the additive AND-of-facets semantics are unchanged. Every
-          control keeps a resolvable accessible name; the toggles reflect state
-          via aria-pressed and the revealed input is labeled (NFR-05). Only
-          meaningful once there's a thread to filter. */}
+      {/* Chat-area toolbar (R3 UAT 2026-07-23 items 10/11) — SOLO channel filters:
+          default shows all; the Email icon solos emails, the Message icon solos
+          chats, clicking the active one returns to "all". Active = brand
+          background + white icon. A search icon reveals a text filter; Refresh is
+          always available. The Unread-only + Mark-as-read icons were removed
+          (item 11). Every control keeps a resolvable accessible name (NFR-05). */}
       {state.status === 'ready' && (
         <div className={filterStyles.bar} role="group" aria-label="Message tools">
-          {/* Icon filter toggles (task 062 / §B7) + Mark-as-read (item 5c) only
-              matter once there's a thread to filter. Refresh (item 7) is always
-              present so an empty thread can still be polled on demand. */}
           {timeline.length > 0 && (
             <>
               <ToggleButton
                 size="small"
                 appearance="subtle"
-                className={emailEnabled ? filterStyles.toggleActive : undefined}
+                className={channelFilter === 'email' ? filterStyles.toggleActive : undefined}
                 icon={<MailRegular />}
-                checked={emailEnabled}
-                aria-pressed={emailEnabled}
-                aria-label="Show email messages"
-                title="Show email messages"
-                onClick={() => setEmailEnabled(prev => !prev)}
+                checked={channelFilter === 'email'}
+                aria-pressed={channelFilter === 'email'}
+                aria-label="Show only emails"
+                title="Show only emails"
+                onClick={() => setChannelFilter(prev => (prev === 'email' ? 'all' : 'email'))}
               />
               <ToggleButton
                 size="small"
                 appearance="subtle"
-                className={messageEnabled ? filterStyles.toggleActive : undefined}
+                className={channelFilter === 'message' ? filterStyles.toggleActive : undefined}
                 icon={<ChatRegular />}
-                checked={messageEnabled}
-                aria-pressed={messageEnabled}
-                aria-label="Show chat messages"
-                title="Show chat messages"
-                onClick={() => setMessageEnabled(prev => !prev)}
-              />
-              <ToggleButton
-                size="small"
-                appearance="subtle"
-                className={unreadOnly ? filterStyles.toggleActive : undefined}
-                icon={<MailUnreadRegular />}
-                checked={unreadOnly}
-                aria-pressed={unreadOnly}
-                aria-label="Show unread messages only"
-                title="Show unread messages only"
-                onClick={() => setUnreadOnly(prev => !prev)}
+                checked={channelFilter === 'message'}
+                aria-pressed={channelFilter === 'message'}
+                aria-label="Show only messages"
+                title="Show only messages"
+                onClick={() => setChannelFilter(prev => (prev === 'message' ? 'all' : 'message'))}
               />
               <ToggleButton
                 size="small"
@@ -1012,19 +946,9 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                   onChange={(_e, data) => setWord(data.value)}
                 />
               )}
-              {/* Mark-as-read tool (item 5c) — relocated here from the thread row. */}
-              <Tooltip content="Mark conversation as read" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<MailReadRegular />}
-                  aria-label="Mark conversation as read"
-                  onClick={markAsRead}
-                />
-              </Tooltip>
             </>
           )}
-          {/* Refresh (item 7) — moved out of the compose row into the toolbar. */}
+          {/* Refresh — always available so an empty thread can still be polled. */}
           <Tooltip content="Refresh conversation" relationship="label">
             <Button
               appearance="subtle"

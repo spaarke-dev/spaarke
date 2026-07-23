@@ -87,6 +87,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // POST /api/communications/threads — create a NEW named, record-anchored thread (R3 UAT 2026-07-23
+        // item 9). Distinct from POST /threads/direct (participant-based 1:1): this anchors to an ADR-024
+        // regarding record (no participant), owner = the server-resolved caller (so the empty thread is
+        // visible in the caller's all-mode list). Distinct route: POST verb + literal /threads segment, no
+        // route param — no collision with GET /threads (list), POST /threads/direct, or /threads/{id}/*.
+        group.MapPost("/threads", CreateRecordThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateRecordThread")
+            .WithDescription("Create a new named, record-anchored thread (item 9): owner = server-resolved caller, denormalized ADR-024 regarding pointer, Record-Anchored type. 403 on unresolved caller; 400 on missing regarding.")
+            .Produces<CreateRecordThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /threads/{threadId}/messages — the polling timeline's thread-read (task 050 / FR-11). Returns the
         // caller's READABLE sprk_communication rows in the thread, impersonated (Dataverse row-level security) +
         // the shared internal-only/privilege filter (task 042). Optional ?since=<iso> for incremental polls;
@@ -296,6 +309,50 @@ public static class CommunicationEndpoints
             CallerSystemUserId = callerId,
             OtherParticipantSystemUserId = request.OtherParticipantSystemUserId,
         });
+    }
+
+    /// <summary>
+    /// Creates a NEW named, record-anchored thread (R3 UAT 2026-07-23 item 9). Resolves the caller
+    /// server-side (never client-supplied — the caller becomes the owner so the new thread is visible in
+    /// their all-mode list) and delegates the create to <see cref="IThreadResolver.CreateRecordThreadAsync"/>.
+    /// Unlike POST /threads/direct this is NOT participant-based — it anchors to an ADR-024 regarding record.
+    /// </summary>
+    private static async Task<IResult> CreateRecordThreadAsync(
+        CreateRecordThreadRequest request,
+        IThreadResolver threadResolver,
+        ICallerSystemUserResolver callerResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(context.User, ct);
+        if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var callerId) || callerId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; cannot create a thread.",
+                statusCode: 403);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingRecordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "regardingEntityType and a non-empty regardingRecordId are required.",
+                statusCode: 400);
+        }
+
+        var threadId = await threadResolver.CreateRecordThreadAsync(
+            callerId,
+            request.Name,
+            new RecordThreadAnchor(
+                request.RegardingEntityType,
+                request.RegardingRecordId.ToString(),
+                request.RegardingRecordName),
+            ct);
+
+        return TypedResults.Ok(new CreateRecordThreadResponse { ThreadId = threadId });
     }
 
     /// <summary>
