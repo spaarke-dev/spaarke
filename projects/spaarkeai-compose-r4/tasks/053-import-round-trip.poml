@@ -2,8 +2,8 @@
   <metadata>
     <title>Import round-trip — pre-existing Word revisions/comments render as first-class tracked changes/threads (FR-10)</title>
     <phase>5 Concurrency + save</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend + BFF implementation modifying .ts/.tsx/.cs; a new editor mount surface for imported revisions/comments; tags include frontend + bff-api + docx.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -165,6 +165,58 @@
     The through-the-wire proof (imported revisions/comments accept/reject-able and survive save) is authored as
     the task 054 seam slice under `tests/integration/seam/Compose/`. Import mount is a separate surface from the
     050/051/052 save path (parallel-safe true). Run `/conflict-check` before the BFF PR.
+
+    COMPLETED 2026-07-22. Step 0 context load found the R3 base this branch extends already shipped the FULL
+    mount (not just the reader): `importedRevisions.ts`/`importedComments.ts` (R3 tasks 050/051) already project
+    `ImportedRevision[]`/`ImportedComment[]` onto `InsertionMark`/`DeletionMark`/`CommentAnchorMark`, paraId-primary
+    anchored; `ComposeEditor.tsx` already wires both into BOTH mount paths (server-projection + mammoth fallback);
+    `ComposeService.LoadAsync` already runs the existing `DocxAnnotationReader` and projects the result onto Load
+    (no `ComposeDocxProjectionBuilder.cs` change needed — deviation from the POML's suggested step 1, server work
+    had already landed); `usePendingRedline.accept`/`.reject` already scan the live document by ledgerRef
+    (not gated on hook `pending` state), so the SAME per-change popover already accept/reject-s an imported
+    revision's `imported:{id}` ledgerRef unmodified.
+
+    The GAP actually closed: invariant I-7 ("surfaces for review, never silently dropped") was already satisfied
+    for COMMENTS (`groupImportedComments` is pure, always seeds the FR-23 panel regardless of anchor resolution)
+    but NOT for REVISIONS — `applyImportedRevisions` computed an `unresolved` count that `ComposeEditor.tsx`
+    discarded at both call sites, so an unresolvable revision rendered nothing and surfaced nowhere. Fixed:
+    `applyImportedRevisions` now returns `unresolvedItems: ImportedRevision[]`; new
+    `renderUnresolvedRevisionPlaceholders` (same file) REUSES the task-021 opaque-atom node (`composeInlineAtom`,
+    zero new schema) to surface each unresolved revision as a review marker APPENDED at the document end (never
+    a guessed in-place position — I-7 bans text-search placement), run as a separate pass after the main
+    resolution loop so an earlier placeholder never pollutes a later revision's fuzzy search. Wired into
+    `ComposeEditor.tsx` at both mount sites, before the paraId snapshot/op-log reset (same load-time-baseline
+    contract every other import-mark helper follows) + folded into the existing `onImportWarnings` banner as a
+    privacy-safe count. Dark mode (ADR-021): zero new CSS — reuses the `.compose-atom`/`.compose-atom-inline`
+    rules `ComposeEditor.opaqueAtomTheme.test.ts` already proves token-based.
+
+    Escalation trigger did NOT fire — the placeholder mechanism surfaces every unresolved revision without ever
+    needing to drop one; no schema change required.
+
+    Save survival: no new save-path code needed. The unified Patch Engine only touches edited paraIds (I-4);
+    resolved imports patch back at their real paraId (pre-existing); the review placeholder carries no paraId
+    and is wiped by the same `opLogRef.reset()` every import-mark mount already relies on, so it never reaches
+    save. Proven client-side (re-mount from the identical Load-response data reproduces byte-identical
+    HTML/marks) in the new `importRoundTrip.test.tsx`; the through-the-wire half is task 054's seam slice.
+
+    Files changed (client only — NO `.cs` files; server-side FR-10 support was already complete, so BFF publish
+    size is UNCHANGED by this task): `importedRevisions.ts` (unresolvedItems + renderUnresolvedRevisionPlaceholders),
+    `importedRevisions.test.ts` (updated + new coverage), `ComposeEditor.tsx` (wiring at both mount sites),
+    `importRoundTrip.test.tsx` (new — FR-10 acceptance suite: render, accept/reject-able incl. deletion-accept
+    actually removing text, negative unresolvable-revision-surfaces + unresolvable-comment-parity, save/reload
+    determinism). Placement Justification: no new server surface; client-only editor-mount work per the task's
+    own `<justification>`.
+
+    Verification: `npx jest importedRevisions importedComments importRoundTrip opaqueAtomTheme` — 4 suites, 30
+    tests green. `npm run typecheck` A/B-verified via `git stash` against baseline — byte-identical pre-existing
+    error set (8 `@spaarke/ai-widgets`/`@spaarke/document-operations` sibling-dist errors, environmental per root
+    CLAUDE.md); zero new errors introduced. Full-mount `ComposeEditor`/`ComposeWorkspace` React-render tests
+    could not run in this worktree (pre-existing environmental gap — `@spaarke/ui-components` has no installed
+    `node_modules`/built `dist/` here; confirmed via the same `git stash` A/B, already documented by task 024's
+    `ComposeEditor.opaqueAtomTheme.test.ts`); `importRoundTrip.test.tsx` exercises the same production code
+    paths via `usePendingRedline` (imported `type`-only from `ComposeEditor.tsx`, erased at compile time) over
+    a headless editor built from ComposeEditor's own extension set. Full decision record:
+    `projects/spaarkeai-compose-r4/notes/task-053-import-round-trip-decisions.md`.
   </notes>
 
   <execution>

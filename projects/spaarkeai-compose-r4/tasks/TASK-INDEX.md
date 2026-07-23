@@ -40,8 +40,8 @@
 | 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | done | ✅ |
 | 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | done | ✅ |
 | 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | done | ✅ |
-| 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | blocked | 🔲 |
-| 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | blocked | 🔲 |
+| 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | done | ✅ |
+| 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | done | ✅ |
 | 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006,036,037** | blocked | 🔲 |
 | 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | blocked | 🔲 |
 | 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | blocked | 🔲 |

@@ -172,6 +172,43 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         payload.Should().NotContain("ODataError");
         ((int)response.StatusCode).Should().NotBe(500);
     }
+
+    [Fact]
+    public async Task CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns412WithActionableCopy_NotOpaque500()
+    {
+        // FR-08 (task 051/054): the create-on-save counterpart to the 423 test above — extends the DEF-14
+        // proof to the NEGATIVE case task 051's own acceptance criteria names explicitly: "a genuinely
+        // concurrent EXTERNAL edit between create and content write ... yields a clean 412 / ProblemDetails
+        // ... not a 500". Before 051's ODataError catch chain, UploadSmallAsUserAsync had NO precondition
+        // translation at all — a real Graph 412 on a transient-draft create fell through to the final
+        // generic re-throw, leaking a raw ODataError and surfacing as an opaque 500. This proves the SAME
+        // 412-clean-copy the replace route already had is now ALSO wired for create-on-save.
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new EtagPreconditionFailedException("spe-item-create-moved", "\"stale-create-etag\""));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var body = new
+        {
+            containerId = "container-etag-04",
+            sessionId = Guid.NewGuid().ToString(),
+            tenantId = "tenant-aad-create-etag",
+            content = new byte[] { 0x50, 0x4B, 0x03, 0x04 }, // DOCX ZIP signature
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/compose/documents/create-on-save", body);
+
+        // Assert — 412 Precondition Failed, actionable copy, no ODataError / 500 leak.
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
+            "a create-on-save that races a genuinely concurrent external edit must surface as 412, not an opaque 500");
+        var payload = await response.Content.ReadAsStringAsync();
+        payload.Should().Contain("reload", "the 412 copy tells the user to reload and reapply");
+        payload.Should().NotContain("ODataError", "the raw Graph error must never leak to the client");
+        ((int)response.StatusCode).Should().NotBe(500);
+    }
 }
 
 // =====================================================================================
@@ -223,6 +260,26 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
             "the Kiota ODataError (HTTP 423 / resourceLocked) on a create-on-save upload must translate to the typed lock exception, not leak a raw Microsoft.Graph type");
+    }
+
+    [Fact]
+    public async Task UploadSmallAsUser_WhenGraphReturns412_ThrowsEtagPreconditionFailedException()
+    {
+        // FR-08 (task 051/054): the create-on-save counterpart to the 423 translation test above, and the
+        // translation-layer half of Def14_ComposeSaveLockedDocumentTests'
+        // CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns412... route-layer test. Before
+        // task 051, UploadSmallAsUserAsync had NO ODataError translation at all — a real Graph 412 on a
+        // create-on-save upload leaked straight up through ISpeFileOperations (an ADR-007 violation)
+        // instead of translating to the typed precondition exception ComposeEndpoints.ExecuteSaveAsync
+        // already knew how to map to a clean 412.
+        var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
+
+        var act = () => sut.UploadSmallAsUserAsync(
+            new DefaultHttpContext(), "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+
+        await act.Should().ThrowAsync<EtagPreconditionFailedException>(
+            "the Kiota ODataError (HTTP 412) on a create-on-save upload must translate to the typed precondition exception, not leak a raw Microsoft.Graph type");
     }
 
     private static UploadSessionManager BuildManager(HttpStatusCode status, string errorCode)

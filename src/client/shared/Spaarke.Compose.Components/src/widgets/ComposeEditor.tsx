@@ -135,7 +135,7 @@ import {
 } from './stepOperationInterceptor';
 import { Extension } from '@tiptap/core';
 import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
-import { applyImportedRevisions } from './importedRevisions';
+import { applyImportedRevisions, renderUnresolvedRevisionPlaceholders } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
   ParaIdMapEntry,
@@ -1623,8 +1623,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         editor.commands.setContent(projection.html);
         // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot mirror the mammoth
         // path below (applied AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers).
-        applyImportedRevisions(editor, importedRevisions);
+        const projectionRevisionResult = applyImportedRevisions(editor, importedRevisions);
         applyImportedCommentAnchors(editor, importedComments);
+        // FR-10 / I-7 (task 053): a revision whose paraId is unresolvable (Word regenerated it on an
+        // external save AND the fuzzy fallback also missed) MUST surface for review, never be silently
+        // dropped. Appended AFTER the resolved revisions/comments are placed (never during — an earlier
+        // placeholder must not pollute a later revision's fuzzy-anchor search) and BEFORE the paraId
+        // snapshot/op-log reset below, so it folds into the load-time baseline like every other import mark.
+        renderUnresolvedRevisionPlaceholders(editor, projectionRevisionResult.unresolvedItems);
         paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
         // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced — the load is NOT a
         // user edit; the op-log must start empty, aligned to this load-time reject-state baseline.
@@ -1632,14 +1638,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
         onDirtyChange?.(isTransientMount);
         // Surface Partial fidelity gaps via the existing banner (codes only — no document content, ADR-015).
+        const projectionImportWarnings: Array<{ type: string; message: string }> = [];
         if (projection.status === 'partial' && projection.warnings.length > 0) {
-          onImportWarnings?.([
-            {
-              type: 'warning',
-              message:
-                'Some formatting may not display fully in Compose — open in Word to review the complete document.',
-            },
-          ]);
+          projectionImportWarnings.push({
+            type: 'warning',
+            message:
+              'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+          });
+        }
+        if (projectionRevisionResult.unresolvedItems.length > 0) {
+          projectionImportWarnings.push({
+            type: 'warning',
+            message: `${projectionRevisionResult.unresolvedItems.length} imported revision(s) could not be automatically placed — see the review marker(s) at the end of the document.`,
+          });
+        }
+        if (projectionImportWarnings.length > 0) {
+          onImportWarnings?.(projectionImportWarnings);
         }
         return;
       }
@@ -1662,7 +1676,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // load-time reject-state baseline (an untouched imported revision then reads as NOT edited on the
           // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
           // and the dirty flag is reset just below, so this render is not a user edit.
-          applyImportedRevisions(editor, importedRevisions);
+          const mammothRevisionResult = applyImportedRevisions(editor, importedRevisions);
           // FR-25 (task 051, import round-trip): anchor each imported comment thread's root span with the
           // visible commentAnchor mark (the SAME mark a user's own "create thread" gesture applies), keyed
           // by the same thread id `initialCommentThreads` (above) used to seed the FR-23 panel. Applied
@@ -1670,6 +1684,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
           // reject-state baseline, not read as a user edit on the next save.
           applyImportedCommentAnchors(editor, importedComments);
+          // FR-10 / I-7 (task 053): surface any revision that could not be anchored (see the projection
+          // branch above for the full rationale) — appended once, after the resolved revisions/comments,
+          // and folded into the load-time baseline below (never a user edit).
+          renderUnresolvedRevisionPlaceholders(editor, mammothRevisionResult.unresolvedItems);
           // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the baseline the C2
           // minted-id map + the live Track Changes decoration diff against. Captured AFTER the stamp so
           // every block carries its server paraId.
@@ -1685,7 +1703,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             // eslint-disable-next-line no-console
             console.info(`[ComposeEditor] mammoth surfaced ${messages.length} warning(s) on import`);
           }
-          onImportWarnings?.(messages);
+          const combinedImportWarnings = [...messages];
+          if (mammothRevisionResult.unresolvedItems.length > 0) {
+            combinedImportWarnings.push({
+              type: 'warning',
+              message: `${mammothRevisionResult.unresolvedItems.length} imported revision(s) could not be automatically placed — see the review marker(s) at the end of the document.`,
+            });
+          }
+          onImportWarnings?.(combinedImportWarnings);
         })
         .catch(err => {
           // eslint-disable-next-line no-console
