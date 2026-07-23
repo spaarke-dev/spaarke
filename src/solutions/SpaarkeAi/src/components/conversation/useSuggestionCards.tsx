@@ -36,7 +36,8 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens } from "@fluentui/react-components";
+import { makeStyles, shorthands, tokens, Button } from "@fluentui/react-components";
+import { LightbulbFilamentRegular, ChevronDownRegular, ChevronRightRegular } from "@fluentui/react-icons";
 import type { IChatMessage } from "@spaarke/ui-components";
 import { SuggestionCard } from "./SuggestionCard";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
@@ -95,6 +96,51 @@ const useStyles = makeStyles({
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
   },
+  // Collapsed-by-default disclosure banner ("You have N new notifications") so a
+  // stack of proactive suggestions never dominates the conversation space (UAT
+  // 2026-07-22). Click toggles the card list. Tokens only (ADR-021) — brand-accented
+  // to match SuggestionCard, but full-width + subtle so it reads as a header, not a card.
+  banner: {
+    display: "flex",
+    alignItems: "center",
+    columnGap: tokens.spacingHorizontalS,
+    justifyContent: "flex-start",
+    width: "100%",
+    minWidth: 0,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorBrandForeground2,
+    ...shorthands.border("1px", "solid", tokens.colorBrandStroke2),
+    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    fontWeight: tokens.fontWeightSemibold,
+    boxShadow: tokens.shadow2,
+    cursor: "pointer",
+    // No hover highlight (UAT 2026-07-22): the banner is a disclosure toggle, not a
+    // clickable record — only the suggestion cards (clickable rows) get hover. Explicitly
+    // pin the hover/active states to the resting appearance so the Fluent Button's built-in
+    // subtle-hover does not fire on the banner.
+    ":hover": {
+      backgroundColor: tokens.colorNeutralBackground1,
+      color: tokens.colorBrandForeground2,
+    },
+    ":hover:active": {
+      backgroundColor: tokens.colorNeutralBackground1,
+      color: tokens.colorBrandForeground2,
+    },
+  },
+  bannerLabel: {
+    flexGrow: 1,
+    textAlign: "left",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  cardList: {
+    display: "flex",
+    flexDirection: "column",
+    rowGap: tokens.spacingVerticalS,
+  },
 });
 
 export interface SuggestionCardsDeps {
@@ -121,6 +167,14 @@ export interface SuggestionCardsDeps {
    * the host resolves `actionHint` → Binding.
    */
   readonly onSuggestionAction: (envelope: SuggestionEnvelopeLite) => void | Promise<void>;
+  /**
+   * Dismiss an outbox row server-side (`POST /api/notifications/{outboxRowId}/dismiss`) so it no
+   * longer appears in `/pending` (UAT 2026-07-22). Called by the card's dismiss 'x' AND after a
+   * successful action, so an acted-on / dismissed suggestion does not reappear on the next poll.
+   * Fail-soft: the hook removes the card locally regardless (a failed server dismiss just means it
+   * may reappear on a later poll — never an error to the user).
+   */
+  readonly dismiss: (outboxRowId: string) => Promise<void>;
   /** Stable local failure line injector (ADR-019) — wire to the injection queue's `inject`. */
   readonly inject: (message: IChatMessage) => void;
   /** Injected clock for deterministic expiry filtering in tests. Defaults to `Date.now`. */
@@ -162,12 +216,15 @@ function isExpired(expiresAt: string, nowMs: number): boolean {
 }
 
 export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsController {
-  const { subscribe, fetchPending, onSuggestionAction, inject, now } = deps;
+  const { subscribe, fetchPending, onSuggestionAction, dismiss, inject, now } = deps;
   const styles = useStyles();
 
   const [suggestions, setSuggestions] = React.useState<ReadonlyArray<RenderableSuggestion>>([]);
   // While any suggestion's re-ground/dispatch is in flight, disable the whole stack (single decision per turn).
   const [acting, setActing] = React.useState(false);
+  // Collapsed by default — the banner shows a count; the card list drops down on click
+  // (UAT 2026-07-22: a stack of cards was consuming the conversation space).
+  const [expanded, setExpanded] = React.useState(false);
 
   // Re-ground the full pending suggestion set from the BFF. Non-fatal: a failed
   // refresh leaves the prior set intact (the next signal / poll tick retries).
@@ -223,21 +280,39 @@ export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsCo
         }
         // Route through the host's EXISTING dispatch (task 052) — never a new path.
         await onSuggestionAction(item.envelope);
-        // Consume the suggestion once handed off.
+        // Consume the suggestion once handed off — locally AND server-side (dismiss the outbox row)
+        // so an acted-on suggestion does not reappear on the next poll. Dismiss is best-effort.
         setSuggestions((prev) => prev.filter((s) => s.outboxRowId !== item.outboxRowId));
+        void dismiss(item.outboxRowId).catch(() => {
+          /* best-effort: a failed server dismiss only risks a later re-appearance, never an error */
+        });
       } catch {
         inject(makeLocalAssistantMessage(FAIL_MESSAGE));
       } finally {
         setActing(false);
       }
     },
-    [fetchPending, onSuggestionAction, inject]
+    [fetchPending, onSuggestionAction, dismiss, inject]
+  );
+
+  // Explicit dismiss ('x') — remove the card locally and dismiss the outbox row server-side so it
+  // never reappears. Best-effort on the server call (local removal always happens).
+  const handleDismiss = React.useCallback(
+    (item: RenderableSuggestion): void => {
+      setSuggestions((prev) => prev.filter((s) => s.outboxRowId !== item.outboxRowId));
+      void dismiss(item.outboxRowId).catch(() => {
+        /* best-effort — a failed dismiss only risks the card reappearing on a later poll */
+      });
+    },
+    [dismiss]
   );
 
   const suggestionSlot = React.useMemo<React.ReactNode>(() => {
     if (rendered.length === 0) {
       return null;
     }
+    const count = rendered.length;
+    const label = count === 1 ? "You have 1 new notification" : `You have ${count} new notifications`;
     return (
       <div
         className={styles.stack}
@@ -245,22 +320,39 @@ export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsCo
         aria-label="Suggestions"
         data-testid="suggestion-cards"
       >
-        {rendered.map((s) => (
-          <SuggestionCard
-            key={s.outboxRowId}
-            suggestion={{
-              suggestionId: s.envelope.suggestionId,
-              title: s.envelope.title,
-              snippet: s.envelope.snippet,
-              actionHint: s.envelope.actionHint,
-            }}
-            disabled={acting}
-            onAction={() => void handleAction(s)}
-          />
-        ))}
+        <Button
+          className={styles.banner}
+          appearance="subtle"
+          onClick={() => setExpanded((e) => !e)}
+          aria-expanded={expanded}
+          aria-controls="suggestion-card-list"
+          data-testid="suggestion-banner"
+        >
+          <LightbulbFilamentRegular aria-hidden />
+          <span className={styles.bannerLabel}>{label}</span>
+          {expanded ? <ChevronDownRegular aria-hidden /> : <ChevronRightRegular aria-hidden />}
+        </Button>
+        {expanded ? (
+          <div id="suggestion-card-list" className={styles.cardList}>
+            {rendered.map((s) => (
+              <SuggestionCard
+                key={s.outboxRowId}
+                suggestion={{
+                  suggestionId: s.envelope.suggestionId,
+                  title: s.envelope.title,
+                  snippet: s.envelope.snippet,
+                  actionHint: s.envelope.actionHint,
+                }}
+                disabled={acting}
+                onAction={() => void handleAction(s)}
+                onDismiss={() => handleDismiss(s)}
+              />
+            ))}
+          </div>
+        ) : null}
       </div>
     );
-  }, [rendered, acting, handleAction, styles.stack]);
+  }, [rendered, acting, handleAction, handleDismiss, expanded, styles.stack, styles.banner, styles.bannerLabel, styles.cardList]);
 
   return React.useMemo(
     () => ({ suggestionSlot, count: rendered.length }),

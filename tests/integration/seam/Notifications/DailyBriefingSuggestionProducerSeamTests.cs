@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -58,6 +59,14 @@ public sealed class DailyBriefingSuggestionProducerSeamTests
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_notificationoutbox"),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((DataverseEntity e, CancellationToken _) => { outboxWrites.Add(e); return Guid.NewGuid(); });
+
+        // Interpreting fake for the idempotency read (GetPendingAsync): return the rows written so far,
+        // so a SECOND ProduceAsync run sees the first run's suggestions as live/pending. GetPendingAsync's
+        // owner/dismissed/expiry criteria are exercised in the OutboxService seam tests — here the producer
+        // only needs the real service to round-trip its own writes back as the pending set.
+        entity
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression _, CancellationToken __) => new EntityCollection(outboxWrites.ToList()));
 
         var outbox = new OutboxService(entity.Object, NullLogger<OutboxService>.Instance); // REAL outbox
         var delivery = new RecordingDelivery();
@@ -164,6 +173,61 @@ public sealed class DailyBriefingSuggestionProducerSeamTests
         var written = await h.Producer.ProduceAsync(h.Recipient, items);
 
         written.Should().Be(2, "MaxPerRun caps the per-run suggestion volume");
+        h.OutboxWrites.Should().HaveCount(2);
+    }
+
+    // ── IDEMPOTENCY (UAT 2026-07-22): re-rendering the briefing must NOT accumulate duplicate rows. ──
+    [Fact]
+    public async Task ProduceAsync_SameRecordAcrossReRenders_WritesOnlyOnce()
+    {
+        var h = BuildHarness(GateOptions(enabled: true));
+        var recordId = Guid.NewGuid();
+        var item = Item("sprk_matter", recordId.ToString(), "Acme v. Beta");
+
+        // First render → one row.
+        var firstRun = await h.Producer.ProduceAsync(h.Recipient, new[] { item });
+        firstRun.Should().Be(1);
+
+        // Second + third render of the SAME briefing → ZERO new rows (a live suggestion already exists).
+        var secondRun = await h.Producer.ProduceAsync(h.Recipient, new[] { item });
+        var thirdRun = await h.Producer.ProduceAsync(h.Recipient, new[] { item });
+
+        secondRun.Should().Be(0, "an undismissed, unexpired suggestion for this record already exists (idempotency)");
+        thirdRun.Should().Be(0);
+        h.OutboxWrites.Should().ContainSingle("the record's suggestion must not accumulate across re-renders");
+    }
+
+    // ── Within a single run, two high-priority items for the SAME record yield ONE row. ──
+    [Fact]
+    public async Task ProduceAsync_DuplicateRecordInSameRun_WritesOnlyOnce()
+    {
+        var h = BuildHarness(GateOptions(enabled: true));
+        var recordId = Guid.NewGuid();
+        var items = new[]
+        {
+            Item("sprk_matter", recordId.ToString(), "Acme v. Beta"),
+            Item("sprk_matter", recordId.ToString(), "Acme v. Beta (again)"),
+        };
+
+        var written = await h.Producer.ProduceAsync(h.Recipient, items);
+
+        written.Should().Be(1, "two candidates for the same record de-duplicate to one row within a run");
+        h.OutboxWrites.Should().ContainSingle();
+    }
+
+    // ── A DIFFERENT record still gets its own suggestion after one already exists (dedup is per-record). ──
+    [Fact]
+    public async Task ProduceAsync_DifferentRecordAfterExisting_WritesTheNewOne()
+    {
+        var h = BuildHarness(GateOptions(enabled: true));
+        var first = Item("sprk_matter", Guid.NewGuid().ToString(), "Acme v. Beta");
+        var second = Item("sprk_matter", Guid.NewGuid().ToString(), "Delta v. Echo");
+
+        (await h.Producer.ProduceAsync(h.Recipient, new[] { first })).Should().Be(1);
+        // Re-render surfaces BOTH the existing record and a new one → only the new one is written.
+        var reRun = await h.Producer.ProduceAsync(h.Recipient, new[] { first, second });
+
+        reRun.Should().Be(1, "the already-suggested record is skipped; the new record still gets its suggestion");
         h.OutboxWrites.Should().HaveCount(2);
     }
 }
