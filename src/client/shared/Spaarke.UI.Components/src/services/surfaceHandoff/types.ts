@@ -35,9 +35,11 @@
  *                      `Xrm.Navigation.navigateTo({pageType:'webresource'})`.
  *  - `oob-form`      — an OOB entity create form in a modal via
  *                      `navigateTo({pageType:'entityrecord'})` (thinner pre-seed).
- *  - `workspace-tab` — (future, Class 2a) an in-app widget tab; transport is the
- *                      in-app event bus, NOT this sessionStorage rendezvous.
- *  - `layout`        — (future, Class 2a) a workspace layout apply.
+ *  - `workspace-tab` — (Class 2a, ACTIVE since task 050) an in-app widget tab
+ *                      (grid/widget); transport is the PaneEventBus `widget_load`
+ *                      channel, NOT this sessionStorage rendezvous. The registry
+ *                      entry's `surface` is the registered widget type.
+ *  - `layout`        — (Class 2a) a workspace layout apply (same event-bus channel).
  */
 export type SurfaceKind = 'wizard' | 'oob-form' | 'workspace-tab' | 'layout';
 
