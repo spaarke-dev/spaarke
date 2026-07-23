@@ -76,7 +76,7 @@ import { authenticatedFetch } from '@spaarke/auth';
 import { ConversationWorkspace, ConversationView, getCurrentUserId } from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
 import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
-import { createNotificationsClient } from './createNotificationsClient';
+import { getCommunicationArrivalsSubscribe } from './communicationArrivalsSeam';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — `makeStyles` at module scope (ADR-021: Fluent v9 semantic tokens
@@ -170,8 +170,11 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
     [dispatchToast]
   );
 
+  // Register-only injection: the host wires `setCommunicationArrivalsSubscribe(...)` once at bootstrap, bound
+  // to its ONE shared @spaarke/notifications client. If it never did, `subscribe` is undefined and awareness
+  // is simply off — this widget never constructs its own client (one-connection invariant, ADR-047).
   const { unreadCount, reset } = useCommunicationArrivals({
-    createClient: createNotificationsClient,
+    subscribe: getCommunicationArrivalsSubscribe(),
     onArrival: handleArrival,
   });
 

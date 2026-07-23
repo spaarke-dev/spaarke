@@ -40,7 +40,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 042 | FR-20 attachments open/preview/download + attach-on-compose (SPE) | 5 | ✅ | FULL/**opus**/high | 011,020 | serial |
 | 043 | FR-21 privilege/privacy accuracy (permitted recipients) | 5 | ✅ | FULL/**opus**/**xhigh** | 002,011 | serial |
 | 044 | FR-23 configure Dataverse Search for `sprk_communication` | 5 | ✅ | STANDARD/sonnet/high | none | Wave 17 (E) |
-| 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ✅ | FULL/**opus**/high | 003 (+spine) | serial (blocked) |
+| 045 | FR-22 notification awareness (`communication-arrived` → badge+toast) | 5 | ✅ | FULL/**opus**/high | 003 (+spine) | serial (UNBLOCKED 2026-07-22 — spine in master; consumer-only, Option A) |
 | 046 | FR-25 per-user read-state (best-effort) | 5 | ⏸ | FULL/opus/high | 003 | serial (deferred) |
 | 050 | Deploy full solution + UAT across 11 entities | 6 | 🔲 | STANDARD/sonnet/high | 034,041,042,043,044,045 | serial (prescriptive) |
 | 060 | UAT: send 401 "Denied by resource provider" investigation/fix ([#676](https://github.com/spaarke-dev/spaarke/issues/676)) | 7 | ✅ | FULL/**opus**/**xhigh** | none | Wave 25 (F) |
@@ -76,7 +76,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 011+020 ── 042                                │
 002+011 ── 043                                │
 044 (search config, independent)              │
-003(+spine) ── 045 ⛔                          │
+003(+spine) ── 045 ✅ (unblocked 2026-07-22)  │
                 034,041,042,043,044,045 ── 050 ── 090
 ```
 
@@ -111,7 +111,7 @@ Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · �
 | 18 | 041 | 1 | 040,012 | NO |
 | 19 | 042 | 1 | 011,020 | NO (opus) |
 | 20 | 043 | 1 | 002,011 | NO (opus/xhigh, correctness-critical) |
-| 21 | 045 ⛔ | 1 | 003 + spine | NO (blocked on notification spine) |
+| 21 | 045 ✅ | 1 | 003 + spine | UNBLOCKED 2026-07-22 — spine shipped to master; consumer-only (Option A register-only wiring) |
 | 22 | 046 ⏸ | 1 | 003 | NO (deferred/best-effort) |
 | 23 | 050 | 1 | 034,041,042,043,044,(045) | NO (deploy, prescriptive) |
 | 24 | 090 | 1 | all | NO (wrap-up, prescriptive) |
@@ -135,7 +135,7 @@ Stop after 24 turns if neither state is reached.
 ## Coordination notes (hot-path)
 
 - **`/conflict-check` before every Phase 1 / Phase 5 BFF wave** — `Services/Communication/**` is shared with active worktrees `messaging-communication-app-r1/r2` + `email-communication-solution-r4`.
-- **Phase 5 FR-22 (task 045) is ⛔ blocked** — the notification spine (`communication-arrived`) is not in master; it lives in `email-communication-solution-r4/projects/spaarke-notification-spine-r1`. Confirm the producer/consumer contract at P1 (`plan.md` Risk R1); do not unblock by inventing a contract.
+- **Phase 5 FR-22 (task 045) — ✅ UNBLOCKED + COMPLETE (2026-07-22)**. The notification spine shipped to master via `spaarke-notification-spine-r1` (Layers A–D; `CommunicationArrivedProducer` emits `communication-arrived` at 5 points). Contract confirmed against `SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md` — NO invented contract, NO second producer. Consumer wired Option A (register-only): `CommunicationsWorkspaceWidget` consumes the host's ONE shared `@spaarke/notifications` client via a module-level seam set once by SpaarkeAi `initNotificationsClient()`; removed the prior rogue `new NotificationsClient()` (ADR-047 one-connection violation). Deploy deferred to the coordinated cross-project rollout.
 - **SpaarkeAi hot-path (task 031)** — the `communications-list` widget upgrade is in-place; keep the type string + section id (NFR-06). Coordinate the shared-lib bundle republish with peers per `projects/INDEX.md`.
 - **ADR tensions** (both Path C, cite in the deploy PRs): ADR-006 (DataGrid web-resource, task 033) · ADR-026 (Path-A PCF, task 030).
 

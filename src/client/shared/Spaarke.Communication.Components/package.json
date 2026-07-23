@@ -28,7 +28,6 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../Spaarke.Auth",
-    "@spaarke/notifications": "file:../Spaarke.Notifications",
     "@spaarke/ui-components": "file:../Spaarke.UI.Components"
   },
   "devDependencies": {

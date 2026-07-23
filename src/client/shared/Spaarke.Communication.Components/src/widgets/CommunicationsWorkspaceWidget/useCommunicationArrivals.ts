@@ -15,6 +15,14 @@
  * Live SignalR pushes are signal-only (`event.envelope` is `undefined`; `source: 'live'`); poll-fallback
  * events carry the envelope. This hook uses ONLY `outboxRowId`/`kind`/`source` — never `envelope` content
  * — so awareness is identical on both paths and no content ever rides the awareness path.
+ *
+ * <b>Register-only (task 045 / Option A):</b> the hook receives a `subscribe` function that registers a
+ * `communication-arrived` handler on the HOST's ONE shared `@spaarke/notifications` client and returns an
+ * unregister function. The hook NEVER constructs a client and NEVER calls start/stop — the host owns the
+ * connection lifecycle (SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE §4: one connection per host). If `subscribe`
+ * is `undefined` (host never wired the spine), awareness is simply OFF — no rogue client, no second negotiate.
+ * The widget supplies the real `subscribe` from the module-level seam (`communicationArrivalsSeam.ts`), which
+ * the host sets once at bootstrap. This mirrors how `useSuggestionCards` receives its `subscribe`.
  */
 
 import * as React from 'react';
@@ -28,16 +36,19 @@ export interface ArrivalEvent {
   envelope?: unknown;
 }
 
-/** The minimal client surface this hook needs — structurally satisfied by `@spaarke/notifications`' `NotificationsClient`. */
-export interface ArrivalNotificationsClient {
-  registerHandler(kind: 'communication-arrived', callback: (event: ArrivalEvent) => void): () => void;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-}
+/**
+ * Register-only subscription: registers a `communication-arrived` handler on the host's shared client and
+ * returns an unregister function. Bound by the host to `getNotificationsClient().registerHandler(...)`; the
+ * hook never sees the client itself, so it cannot start/stop the shared connection.
+ */
+export type ArrivalSubscribe = (onArrival: (event: ArrivalEvent) => void) => () => void;
 
 export interface UseCommunicationArrivalsOptions {
-  /** Factory for the notifications client. Injected so the hook is testable without the real spine client. */
-  createClient: () => ArrivalNotificationsClient;
+  /**
+   * Host-provided register-only subscription (from the `communicationArrivalsSeam`). `undefined` → the host
+   * never wired the spine, so awareness stays OFF and NO client is constructed (one-connection invariant).
+   */
+  subscribe?: ArrivalSubscribe;
   /**
    * Invoked once per consumed `communication-arrived` event (the widget raises a toast). Receives the
    * signal-only event — callers MUST NOT treat it as content (NFR-03).
@@ -57,46 +68,42 @@ export interface UseCommunicationArrivalsResult {
  * unread-arrival counter. Awareness only — see the module header.
  */
 export function useCommunicationArrivals(options: UseCommunicationArrivalsOptions): UseCommunicationArrivalsResult {
-  const { createClient, onArrival } = options;
+  const { subscribe, onArrival } = options;
 
   const [unreadCount, setUnreadCount] = React.useState(0);
 
-  // Keep the latest onArrival without re-subscribing the client on every render.
+  // Keep the latest onArrival without re-subscribing on every render.
   const onArrivalRef = React.useRef(onArrival);
   React.useEffect(() => {
     onArrivalRef.current = onArrival;
   }, [onArrival]);
 
-  // `createClient` is captured once at mount; consumers pass a stable factory (module-level function).
-  const createClientRef = React.useRef(createClient);
+  // `subscribe` is captured once at mount; consumers pass a stable reference (the module-level seam getter's
+  // result, or a test fake). A null/undefined seam means the host never wired the spine → awareness OFF.
+  const subscribeRef = React.useRef(subscribe);
 
   React.useEffect(() => {
+    const doSubscribe = subscribeRef.current;
+    if (!doSubscribe) {
+      // Host did not wire the notification spine — awareness is disabled. We NEVER construct our own client
+      // here: a second client would open a second SignalR connection + negotiate (one-connection invariant,
+      // ADR-047 / SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE §4).
+      return;
+    }
+
     let unregister: (() => void) | undefined;
-    let client: ArrivalNotificationsClient | undefined;
-
     try {
-      client = createClientRef.current();
-
-      // Register BEFORE start() so no early signal is missed (README contract).
-      unregister = client.registerHandler('communication-arrived', event => {
-        // AWARENESS ONLY (NFR-03): bump the unread counter + notify the host. NEVER fetch content here.
+      // Register ONLY — the host owns the connection lifecycle (start/stop). Unmount just unregisters this
+      // consumer; it never stops the shared connection (which would break every other consumer, e.g. suggestions).
+      unregister = doSubscribe(event => {
+        // AWARENESS ONLY (NFR-03): bump the unread counter + notify the host (toast). NEVER fetch content here.
         setUnreadCount(n => n + 1);
         onArrivalRef.current?.(event);
       });
-
-      // start() rejects on live-connect failure, but poll-fallback has ALREADY started inside the client
-      // (NFR-04 degrade) — so awareness still works. Swallow the rejection; do not surface a hard error.
-      void client.start().catch((err: unknown) => {
-        // eslint-disable-next-line no-console
-        console.warn(
-          '[communications] notification-spine live connect unavailable; awareness continues via poll-fallback:',
-          err
-        );
-      });
     } catch (err) {
-      // Defensive: a synchronous failure constructing/registering the client must not crash the widget.
+      // Defensive: a synchronous failure registering the handler must not crash the widget.
       // eslint-disable-next-line no-console
-      console.warn('[communications] notification-spine consumer failed to initialize (awareness disabled):', err);
+      console.warn('[communications] notification-spine consumer failed to register (awareness disabled):', err);
     }
 
     return () => {
@@ -105,9 +112,6 @@ export function useCommunicationArrivals(options: UseCommunicationArrivalsOption
       } catch {
         /* no-op */
       }
-      void client?.stop().catch(() => {
-        /* best-effort teardown */
-      });
     };
   }, []);
 
