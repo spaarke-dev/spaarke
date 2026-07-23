@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-07-23 — Assistant UI element criteria pointer · spaarkeai-assistant-enhancements-r1 task 051/090 doc-review)
+
+- **Added — root `CLAUDE.md` §17 pointer** to [`docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md`](../docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md) (the bubble/chip/card/tab four-question decision + do/don't rules), placed beside its siblings `ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` and `MODAL-DECISION-CRITERIA.md`. Closes the pointer gap found in the R1 pre-090 documentation review (the standards doc shipped 2026-07-22 without a root pointer). No behavioral rule change — a discoverability pointer only. Authored main-session per §3 write boundary.
+
 ### Added (2026-07-22 — Assistant surface-launch mechanism doc · spaarkeai-assistant-enhancements-r1)
 
 - **Added — root `CLAUDE.md` §17 pointer** to the new [`docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`](../docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md). Documents how the Assistant **deterministically** opens follow-on surfaces: `consumerType` (the Binding's routing decision) → `surfaceLaunchRegistry` static lookup → `handleSurfaceLaunch` branches on `kind` (wizard/oob-form via sessionStorage hand-off; workspace-tab/layout via PaneEventBus `widget_load`). Covers the two entry paths (SSE text-path + click/chip), the hand-off envelope, the intentionally-thin BFF (no surface identity server-side — surface identity stays in CODE per ADR-039 / BFF §10), 7 invariants, and the **extension recipe** (new surface = Action+Binding data + ONE registry entry in code). REQUIRED reading before adding any surface-opening capability. Grounds the registry-robustness change (retired the hardcoded `list-tasks` branch; activated the `workspace-tab` kind). Authored main-session per §3 write boundary.
