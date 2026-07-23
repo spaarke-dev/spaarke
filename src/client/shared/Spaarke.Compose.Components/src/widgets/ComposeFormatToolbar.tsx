@@ -4,8 +4,10 @@
  * FIX #5 (spaarkeai-compose-r2 UAT): the toolbar was consolidated from TWO wrapping
  * rows of individual icon buttons into ONE row grouped behind labelled Fluent v9
  * `Menu` dropdowns. The dropdown TRIGGER buttons carry WORD labels (Body / Paragraph
- * / Font / Word); the tools INSIDE each dropdown are ICON-only buttons with a hover
- * Tooltip naming each command. `Save` + `Undo`/`Redo` are icon-only buttons pushed
+ * / Font / Word); the tools INSIDE the Paragraph/Font/Table dropdowns are ICON-only
+ * buttons with a hover Tooltip naming each command, while the Word dropdown (task 039
+ * P3) is a VERTICAL list of icon+label rows (Open web / Open desktop). The Track
+ * Changes toggle is icon-only (task 039 P1). `Save` + `Undo`/`Redo` are icon-only buttons pushed
  * to the RIGHT edge (a `flex:1` spacer). This is a REORGANIZATION only — every
  * command previously reachable stays wired with its disabled/active state intact.
  *
@@ -80,6 +82,7 @@ import {
   ArrowUndo24Regular,
   ArrowRedo24Regular,
   ChevronDown16Regular,
+  DocumentEdit24Regular,
   OpenRegular,
   DesktopRegular,
   SaveRegular,
@@ -133,6 +136,21 @@ const useStyles = makeStyles({
   // Pushes Save + Undo/Redo to the right edge of the single row.
   spacer: {
     flexGrow: 1,
+  },
+  // task 039 P3: the Word dropdown is now a VERTICAL, labelled list (was a horizontal icon-only
+  // palette) — each action reads as a full-width menu row with an icon + text label. Semantic tokens only.
+  wordMenuColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    minWidth: '176px',
+    paddingInline: tokens.spacingHorizontalXS,
+    paddingBlock: tokens.spacingVerticalXS,
+    rowGap: tokens.spacingVerticalXXS,
+  },
+  // Left-align the icon + label inside each vertical Word action (Fluent Button centers by default).
+  wordMenuItem: {
+    justifyContent: 'flex-start',
   },
 });
 
@@ -637,44 +655,62 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      {/* ---- Word (Open in Web / Desktop / Push to Word) ---- */}
+      {/* ---- Word (Open web / Open desktop handoff) ----
+             task 039 P3: rendered as a VERTICAL, labelled dropdown (icon + text row per action).
+             task 039 P4: there is NO "Push to Word" control here — the DocxAnnotationWriter push-to-Word
+             surface was fully retired in task 036, so the only Word items are the Open-in-Web/Desktop
+             SPE launch handoff (+ the deliberate Save duplicate). Nothing to remove. */}
       {showWordMenu ? (
         <Menu positioning="below-start">
           <MenuTrigger disableButtonEnhancement>
             <DropdownButton label="Word" disabled={controlDisabled} testId="compose-format-word-menu" />
           </MenuTrigger>
           <MenuPopover>
-            <div className={styles.dropdownPalette} role="group" aria-label="Word document actions">
+            <div className={styles.wordMenuColumn} role="group" aria-label="Word document actions">
               {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
-                  icon — users instinctively look in the Word menu to save. Same handler
+                  button — users instinctively look in the Word menu to save. Same handler
                   (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
                   the host wires Save. */}
               {onSave ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<SaveRegular />}
-                  label={isSaving ? 'Saving…' : 'Save'}
                   disabled={saveDisabled}
                   onClick={onSave}
-                  testId="compose-format-word-save"
-                />
+                  data-testid="compose-format-word-save"
+                >
+                  {isSaving ? 'Saving…' : 'Save'}
+                </Button>
               ) : null}
               {onOpenInWord ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<OpenRegular />}
-                  label="Open in Word for Web"
+                  aria-label="Open in Word for the Web"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWord}
-                  testId="compose-format-open-word-web"
-                />
+                  data-testid="compose-format-open-word-web"
+                >
+                  Open web
+                </Button>
               ) : null}
               {onOpenInWordDesktop ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<DesktopRegular />}
-                  label="Open in Word Desktop"
+                  aria-label="Open in the Word desktop app"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWordDesktop}
-                  testId="compose-format-open-word-desktop"
-                />
+                  data-testid="compose-format-open-word-desktop"
+                >
+                  Open desktop
+                </Button>
               ) : null}
             </div>
           </MenuPopover>
@@ -684,7 +720,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       {/* Spacer — pushes Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
 
-      {/* ---- Track Changes toggle (item 4, UAT round-4) — labelled, right-aligned ---- */}
+      {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.
+             The visible "Track changes" text label was dropped for an icon-only toggle; the accessible
+             NAME (aria-label) + pressed state (aria-pressed) + the descriptive Tooltip are all retained
+             (ADR-021 — the primary/subtle appearance carries the on/off state, dark-mode-correct). ---- */}
       {onToggleTrackChanges ? (
         <Tooltip
           content={
@@ -697,14 +736,13 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         >
           <ToolbarButton
             appearance={trackChangesEnabled ? 'primary' : 'subtle'}
+            icon={<DocumentEdit24Regular />}
             aria-pressed={trackChangesEnabled === true}
             aria-label="Toggle track changes"
             disabled={controlDisabled}
             onClick={onToggleTrackChanges}
             data-testid="compose-format-track-changes"
-          >
-            Track changes
-          </ToolbarButton>
+          />
         </Tooltip>
       ) : null}
 

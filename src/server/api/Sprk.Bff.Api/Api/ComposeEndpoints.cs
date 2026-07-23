@@ -1136,10 +1136,20 @@ public static class ComposeEndpoints
         // retained-original 'content' (clean save / same-session fast-path) OR 'baselineVersionId' (the server
         // re-fetches the load-time version). A dirty save additionally carries 'operationLog' (applied onto the
         // baseline by the engine). One of content / baselineVersionId MUST be resolvable.
+        //
+        // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR document (blank page /
+        // AI-draft — the client holds NO retained original bytes and there is no real SPE baseline version to
+        // delta onto) re-authors its whole content via 'contentModel' on EVERY in-session save. That is a valid
+        // dirty save: ResolveSaveBaselineAsync (ComposeService.cs) renders the .docx from ContentModel FIRST
+        // (mutually exclusive with content / baselineVersionId / operationLog), then the replace branch does
+        // ReplaceFileContentAsUserAsync on the EXISTING item — updating in place, never minting a duplicate. The
+        // CLIENT gates this: only a doc with no retained original (`!state.docxBytes`) sends contentModel; a
+        // loaded/imported doc still sends op-log + baseline → tracked changes (REQ-2 unchanged).
         var hasContent = body.Content is { Length: > 0 };
         var hasBaseline = !string.IsNullOrWhiteSpace(body.BaselineVersionId);
-        if (!hasContent && !hasBaseline)
-            return BadRequest("Provide the retained-original 'content' bytes, or 'baselineVersionId', so the server can resolve the save baseline the operation log applies onto (the client authors no .docx bytes).");
+        var hasContentModel = body.ContentModel is { Blocks.Count: > 0 };
+        if (!hasContent && !hasBaseline && !hasContentModel)
+            return BadRequest("Provide the retained-original 'content' bytes, 'baselineVersionId', or a born-in-editor 'contentModel', so the server can resolve the save baseline the operation log applies onto (the client authors no .docx bytes).");
 
         logger.LogInformation(
             "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} ops={OpCount} comments={CommentCount} TraceId={TraceId}",

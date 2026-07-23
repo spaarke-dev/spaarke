@@ -319,7 +319,7 @@ export interface ComposeWorkspaceProps {
   /** Called when the user clicks Browse in the empty state. */
   onBrowseRequested?: () => void;
 
-  /** Called when the user clicks Search for Document in the empty state. */
+  /** Called when the user clicks the "Open Document" CTA (task 039 P2 label; formerly "Search for Document") in the empty state. */
   onSearchRequested?: () => void;
 
   /** Called once the workspace has mounted (LEGALWORKSPACE-EMBEDDED-MODE §6). */
@@ -1096,6 +1096,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             : { content: encodeRetained(state.docxBytes!) }),
         };
       } else {
+        // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
+        // holds NO retained original bytes (`!state.docxBytes`, the SAME discriminant the create path's
+        // `bornInEditorRender` uses) and its create-on-save returned the drive-ITEM id as VersionId — there is
+        // no real SPE baseline version to re-fetch. So on EVERY in-session replace save it RE-AUTHORS via
+        // `contentModel` (mirroring the create path), never entering the baseline-less op-log path that 400s.
+        // The server renders the .docx and ReplaceFileContentAsUserAsync's it onto the EXISTING item (same
+        // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
+        // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
+        const bornInEditor = !state.docxBytes;
         requestBody = {
           // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
           // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
@@ -1106,16 +1115,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
           annotations: saveAnnotations,
-          // The load-time version id = the op-log's BASE VERSION; lets the server re-fetch the baseline even
-          // without the client bytes.
-          baselineVersionId: state.versionId ?? undefined,
-          // Same-session fast-path: still holding the retained original → send it (byte-identical).
-          content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
-          // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch Engine
-          // onto the resolved baseline (undefined on a clean save → the baseline persists byte-identical).
-          operationLog,
-          // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors.
+          // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
+          // (harmless on the born-in-editor branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
+          ...(bornInEditor
+            ? // Born-in-editor: re-author the whole document server-side from the content model. No baseline /
+              // op-log — the doc was authored in the editor, there is nothing to diff onto.
+              { contentModel: editorRef.current.buildContentModel() }
+            : {
+                // Loaded/imported dirty save (UNCHANGED — REQ-2). The load-time version id = the op-log's BASE
+                // VERSION; lets the server re-fetch the baseline even without the client bytes.
+                baselineVersionId: state.versionId ?? undefined,
+                // Same-session fast-path: still holding the retained original → send it (byte-identical).
+                content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+                // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch
+                // Engine onto the resolved baseline (undefined on a clean save → baseline persists byte-identical).
+                operationLog,
+              }),
         };
       }
 

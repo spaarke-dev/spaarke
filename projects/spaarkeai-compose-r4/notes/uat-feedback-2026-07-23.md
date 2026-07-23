@@ -34,3 +34,25 @@
 
 ## Architectural note (connective tissue)
 V1 (duplicate records) and T1 (no tracking on Assistant upload) are the **same root cause**: the transient/Assistant-upload mount uses the renderer + create-on-save clean path, while the directly-opened **stored doc** uses the projection path (versions the same doc + tracks edits). **R5 G6 (route transient mounts through the projection builder)** fixes both structurally. The Save-Version-vs-New UX (V1) is a distinct, worth-sooner ask.
+
+---
+
+## 🛠️ Task 039 resolution (BUG A + P1–P4) — 2026-07-23
+
+**BUG A (born-BLANK duplicate + 2nd-save 400) — FIXED in 039.** A born-in-editor doc (blank page / AI-draft,
+`!state.docxBytes`) now re-authors via `{ contentModel }` on EVERY in-session save (create-on-save first, then
+the REPLACE path). Server `ComposeEndpoints` accepts a non-empty `contentModel` as a valid dirty save; the
+replace branch renders the `.docx` and `ReplaceFileContentAsUserAsync`'s the EXISTING drive-item → updates in
+place, no duplicate `sprk_document` per save. Proven by `ComposeServiceBornInEditorSaveTests`
+(`SaveAsync_WithContentModelOnExistingItem_UpdatesSameItemAndDoesNotCreate`) + the client
+`ComposeWorkspace.bornInEditorSave.test.tsx` (2nd save hits `{id}/save` with `contentModel`, no op-log/baseline).
+
+**V1 Assistant-upload duplicates — NOT covered by 039; remains R5 G6 (confirmed).** The Assistant-upload (and
+Browse-local) flow mounts transient **WITH** `docxBytes` (the uploaded bytes) via `mountTransient`. Because
+`state.docxBytes` is present, 039's `!state.docxBytes` born-in-editor discriminant does **NOT** apply to it —
+by design (per task 039 scope: only born-BLANK duplicate prevention is in scope; forcing the Assistant path
+onto the contentModel branch would discard the uploaded original + regress its tracked-changes intent). The
+Assistant-upload duplicate-record behavior (UAT round-1's 8 records) is the **transient-identity** issue —
+each Assistant "revise" re-mounts a fresh transient (speDriveItemId reset) so its saves re-enter create-on-save
+— and is resolved **structurally by R5 G6 (transient-mount projection unification)**, together with T1 (no
+tracking on Assistant upload). No 039 change is made to that path.
