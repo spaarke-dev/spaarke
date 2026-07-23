@@ -120,14 +120,31 @@ const COMMUNICATION_REGARDING_TARGETS: EntityTypeOption[] = [
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // "Our modal" size (round 3 items 10-12): 1040 × 72vh, page-mounted + centered
+  // (Fluent Dialog `modalType="modal"` centers on the viewport). Flex column so
+  // the header + scrollable content + footer stack and the content scrolls.
   surface: {
-    maxWidth: '560px',
-    width: '560px',
+    width: 'min(1040px, 95vw)',
+    maxWidth: 'min(1040px, 95vw)',
+    height: '72vh',
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+    flex: '1 1 auto',
   },
   content: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
+    // Scroll the body content; the DialogTitle (header) + DialogActions (footer)
+    // stay pinned.
+    flex: '1 1 auto',
+    minHeight: 0,
+    overflowY: 'auto',
   },
   section: {
     display: 'flex',
@@ -308,7 +325,7 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
   return (
     <Dialog open={open} onOpenChange={handleDialogOpenChange} modalType="modal">
       <DialogSurface className={styles.surface} aria-label={title}>
-        <DialogBody>
+        <DialogBody className={styles.body}>
           <DialogTitle>{title}</DialogTitle>
           <DialogContent className={styles.content}>
             {/* Section 1 — New Thread: name + associate-to-record. */}

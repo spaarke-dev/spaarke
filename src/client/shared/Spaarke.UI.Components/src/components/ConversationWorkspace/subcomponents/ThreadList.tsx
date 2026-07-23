@@ -24,7 +24,7 @@
  */
 import * as React from 'react';
 import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { AddRegular, ChevronLeftRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
+import { AddRegular, CommentMultipleRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 
 export interface IThreadListRow {
   threadId: string;
@@ -51,12 +51,18 @@ export interface IThreadListProps {
   onSelectThread: (threadId: string) => void;
   onCreateThread?: () => void;
   /**
-   * Collapse the thread pane (R3 UAT 2026-07-23 item 3). When wired, the pane
-   * header shows a "Threads" title (item 5) that — along with a trailing chevron
-   * — collapses the pane. `ConversationWorkspace` owns the collapsed state +
-   * renders the re-expand strip. Omit to hide the collapse affordance.
+   * Collapse the thread pane. When wired, clicking the "Threads" title row
+   * collapses the pane (R3 UAT 2026-07-23 round 3 item 5 — no separate chevron).
+   * `ConversationWorkspace` owns the collapsed state + renders the icon-only
+   * re-expand strip. Omit to hide the collapse affordance.
    */
   onCollapse?: () => void;
+  /**
+   * Optional accessory rendered to the right of the "Threads" title (round 3
+   * item 3) — e.g. the widget's "N new communications" count. Kept out of the
+   * collapse click target.
+   */
+  titleAccessory?: React.ReactNode;
   /**
    * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
    * inverse of the row's current `isPinned`). The host owns optimistic UI + rollback (see `ConversationWorkspace`);
@@ -97,12 +103,10 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
   },
-  // "Threads" title — a clickable header region that collapses the pane (item 3).
-  // A button so it's keyboard-operable; fills the row so the whole header reads
-  // as the collapse target.
+  // "Threads" title — icon + label, a clickable region that collapses the pane
+  // (round 3 item 5 — whole row collapses, no separate chevron). Content-width
+  // so the ＋ can right-align (item 6).
   headerTitle: {
-    flex: '1 1 auto',
-    minWidth: 0,
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
@@ -111,30 +115,54 @@ const useStyles = makeStyles({
     borderRightStyle: 'none',
     borderBottomStyle: 'none',
     borderLeftStyle: 'none',
-    paddingTop: 0,
-    paddingRight: 0,
-    paddingBottom: 0,
-    paddingLeft: 0,
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalXS,
+    paddingRight: tokens.spacingHorizontalXS,
+    borderRadius: tokens.borderRadiusSmall,
     cursor: 'pointer',
     textAlign: 'left',
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
     outlineStyle: 'none',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
     ':focus-visible': {
       outlineWidth: '2px',
       outlineStyle: 'solid',
       outlineColor: tokens.colorStrokeFocus2,
-      borderRadius: tokens.borderRadiusSmall,
     },
   },
   // Static (non-collapsible) title when no `onCollapse` is wired.
   headerTitleStatic: {
-    flex: '1 1 auto',
-    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
     color: tokens.colorNeutralForeground1,
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
+  },
+  // "Threads" icon (round 3 item 4).
+  titleIcon: {
+    fontSize: '18px',
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
+  // Count accessory right of the title (item 3) — e.g. "82 new communications".
+  titleAccessory: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  // Pushes the ＋ to the right edge of the header row (item 6).
+  headerSpacer: {
+    flex: '1 1 auto',
+    minWidth: tokens.spacingHorizontalS,
   },
   list: {
     flex: '1 1 auto',
@@ -234,6 +262,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   onSelectThread,
   onCreateThread,
   onCollapse,
+  titleAccessory,
   onTogglePin,
   className,
 }) => {
@@ -281,8 +310,29 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
-        {/* ＋ create control moved to the LEFT (item 8). Icon-only; the accessible
-            name stays "New thread" for keyboard + screen-reader users (NFR-05). */}
+        {/* "Threads" title = icon + label (round 3 items 4/5). Clicking the row
+            collapses the pane when `onCollapse` is wired (no separate chevron);
+            otherwise a static label. */}
+        {onCollapse ? (
+          <button
+            type="button"
+            className={styles.headerTitle}
+            aria-label="Collapse threads pane"
+            onClick={onCollapse}
+          >
+            <CommentMultipleRegular className={styles.titleIcon} />
+            <span>Threads</span>
+          </button>
+        ) : (
+          <span className={styles.headerTitleStatic}>
+            <CommentMultipleRegular className={styles.titleIcon} />
+            <span>Threads</span>
+          </span>
+        )}
+        {/* Count accessory (item 3) — kept out of the collapse click target. */}
+        {titleAccessory && <span className={styles.titleAccessory}>{titleAccessory}</span>}
+        <span className={styles.headerSpacer} />
+        {/* ＋ create control right-aligned (item 6). */}
         <Tooltip content="New thread" relationship="label">
           <Button
             appearance="subtle"
@@ -293,29 +343,6 @@ export const ThreadList: React.FC<IThreadListProps> = ({
             disabled={!onCreateThread}
           />
         </Tooltip>
-        {/* "Threads" title (item 5). Clickable to collapse the pane (item 3) when
-            `onCollapse` is wired; otherwise a static label. */}
-        {onCollapse ? (
-          // The visible "Threads" text is the accessible name; the trailing
-          // chevron carries the explicit "Collapse threads pane" label so the two
-          // header collapse targets stay distinguishable.
-          <button type="button" className={styles.headerTitle} onClick={onCollapse}>
-            Threads
-          </button>
-        ) : (
-          <Text className={styles.headerTitleStatic}>Threads</Text>
-        )}
-        {onCollapse && (
-          <Tooltip content="Collapse threads pane" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<ChevronLeftRegular />}
-              aria-label="Collapse threads pane"
-              onClick={onCollapse}
-            />
-          </Tooltip>
-        )}
       </div>
 
       {status === 'loading' && (

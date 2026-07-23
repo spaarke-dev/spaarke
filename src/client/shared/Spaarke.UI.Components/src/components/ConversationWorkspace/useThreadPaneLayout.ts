@@ -82,7 +82,7 @@ function persist(storageKey: string, state: PersistedState): void {
 export function useThreadPaneLayout(options: UseThreadPaneLayoutOptions = {}): UseThreadPaneLayoutResult {
   const {
     storageKey = 'sprk-comm-thread-pane',
-    defaultFrac = 0.2,
+    defaultFrac = 0.33,
     minThreadPx = 160,
     minConversationPx = 320,
   } = options;
@@ -94,6 +94,7 @@ export function useThreadPaneLayout(options: UseThreadPaneLayoutOptions = {}): U
 
   const persistedRef = useRef(loadPersisted(storageKey));
   const hasPersistedWidthRef = useRef(typeof persistedRef.current?.widthPx === 'number');
+  const hasSizedRef = useRef(false);
 
   const [threadWidthPx, setThreadWidthPx] = useState<number>(() => {
     const p = persistedRef.current;
@@ -114,16 +115,35 @@ export function useThreadPaneLayout(options: UseThreadPaneLayoutOptions = {}): U
     [minThreadPx, minConversationPx]
   );
 
-  // On mount, size from the real container: default to `defaultFrac` of container
-  // width when nothing was persisted; otherwise clamp the persisted width to fit.
+  // Observe the container so the pane sizes correctly once it has a real width
+  // (e.g. a modal that animates in — the width is 0 on first paint) AND re-clamps
+  // when the container/window resizes so the panes always follow the container
+  // (R3 UAT round 3 item 16). First real width sizes to `defaultFrac` (unless a
+  // persisted width exists); later resizes only re-clamp the current width.
   useEffect(() => {
     const c = containerRef.current;
     if (!c) return;
-    const cw = c.getBoundingClientRect().width;
-    if (cw <= 0) return;
-    setThreadWidthPx(prev => clamp(hasPersistedWidthRef.current ? prev : Math.round(cw * defaultFrac)));
+
+    const sizeToContainer = () => {
+      const cw = c.getBoundingClientRect().width;
+      if (cw <= 0) return;
+      setThreadWidthPx(prev => {
+        if (!hasSizedRef.current) {
+          hasSizedRef.current = true;
+          return clamp(hasPersistedWidthRef.current ? prev : Math.round(cw * defaultFrac));
+        }
+        return clamp(prev);
+      });
+    };
+
+    sizeToContainer();
+
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(sizeToContainer);
+    ro.observe(c);
+    return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [clamp, defaultFrac]);
 
   // Persist on change.
   useEffect(() => {

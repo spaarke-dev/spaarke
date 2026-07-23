@@ -50,10 +50,13 @@ const ConversationWorkspaceR16 = ConversationWorkspace as unknown as React.Compo
 const ConversationViewR16 = ConversationView as unknown as React.ComponentType<ConversationViewProps>;
 
 const useStyles = makeStyles({
+  // "Our modal" size (round 3 items 13-15): 1040 × 72vh, centered (matches the
+  // shared NewThreadModal). 72vh (vs 85vh) leaves headroom so the modal reads as
+  // centered rather than top-anchored inside the Dataverse form host.
   surface: {
-    width: 'min(1200px, 92vw)',
-    maxWidth: 'min(1200px, 92vw)',
-    height: '85vh',
+    width: 'min(1040px, 95vw)',
+    maxWidth: 'min(1040px, 95vw)',
+    height: '72vh',
     padding: 0,
     display: 'flex',
     flexDirection: 'column',

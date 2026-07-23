@@ -50,7 +50,7 @@
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { ChevronRightRegular } from '@fluentui/react-icons';
+import { CommentMultipleRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import {
@@ -133,6 +133,13 @@ export interface ConversationWorkspaceProps {
   /** Fired whenever the selected thread changes (including the initial default-select). */
   onThreadSelected?: (threadId: string | undefined) => void;
 
+  /**
+   * Optional accessory rendered to the right of the "Threads" title (round 3
+   * item 3) — the widget passes its "N new communications" count here so it
+   * lives in the thread-pane header instead of a separate awareness bar.
+   */
+  threadsHeaderAccessory?: React.ReactNode;
+
   /** Fired on a list-load failure. The shell also renders an inline error state. */
   onError?: (error: Error) => void;
 
@@ -211,10 +218,9 @@ const useStyles = makeStyles({
       outlineOffset: '-2px',
     },
   },
-  collapsedLabel: {
-    writingMode: 'vertical-rl',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
+  collapsedIcon: {
+    fontSize: '20px',
+    color: tokens.colorNeutralForeground2,
   },
   placeholder: {
     display: 'flex',
@@ -256,6 +262,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   navigationService,
   onCreateThread,
   onThreadSelected,
+  threadsHeaderAccessory,
   onError,
   pageSize = 50,
   className,
@@ -478,7 +485,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   return (
     <div ref={containerRef} className={mergeClasses(styles.root, className)}>
       {collapsed ? (
-        // Collapsed rail (item 3) — click to re-expand the thread pane.
+        // Collapsed rail (round 3 item 5) — ICON ONLY (no "Threads" text); click to re-expand.
         <button
           type="button"
           className={styles.collapsedStrip}
@@ -486,8 +493,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
           title="Threads"
           onClick={toggleCollapse}
         >
-          <ChevronRightRegular />
-          <span className={styles.collapsedLabel}>Threads</span>
+          <CommentMultipleRegular className={styles.collapsedIcon} />
         </button>
       ) : (
         <>
@@ -500,6 +506,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
               onSelectThread={handleSelectThread}
               onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
               onCollapse={toggleCollapse}
+              titleAccessory={threadsHeaderAccessory}
               onTogglePin={handleTogglePin}
             />
           </div>

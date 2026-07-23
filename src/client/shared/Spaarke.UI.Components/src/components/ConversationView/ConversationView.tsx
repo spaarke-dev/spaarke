@@ -303,6 +303,15 @@ const useFilterStyles = makeStyles({
       color: tokens.colorNeutralForegroundOnBrand,
     },
   },
+  // Inactive/OFF filter state (round 3 items 7/8/9): a BLUE icon on transparent
+  // (vs the default neutral-gray), so the pair reads blue-icon-off →
+  // white-on-blue-on. Semantic tokens only (ADR-021).
+  toggleInactive: {
+    color: tokens.colorBrandForeground1,
+    ':hover': {
+      color: tokens.colorBrandForeground1,
+    },
+  },
 });
 
 // Jump-to-latest affordance (task 062 / §B8): a circular down-arrow button
@@ -896,7 +905,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               <ToggleButton
                 size="small"
                 appearance="subtle"
-                className={channelFilter === 'email' ? filterStyles.toggleActive : undefined}
+                className={channelFilter === 'email' ? filterStyles.toggleActive : filterStyles.toggleInactive}
                 icon={<MailRegular />}
                 checked={channelFilter === 'email'}
                 aria-pressed={channelFilter === 'email'}
@@ -907,7 +916,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               <ToggleButton
                 size="small"
                 appearance="subtle"
-                className={channelFilter === 'message' ? filterStyles.toggleActive : undefined}
+                className={channelFilter === 'message' ? filterStyles.toggleActive : filterStyles.toggleInactive}
                 icon={<ChatRegular />}
                 checked={channelFilter === 'message'}
                 aria-pressed={channelFilter === 'message'}
@@ -918,7 +927,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
               <ToggleButton
                 size="small"
                 appearance="subtle"
-                className={searchOpen ? filterStyles.toggleActive : undefined}
+                className={searchOpen ? filterStyles.toggleActive : filterStyles.toggleInactive}
                 icon={<SearchRegular />}
                 checked={searchOpen}
                 aria-pressed={searchOpen}
