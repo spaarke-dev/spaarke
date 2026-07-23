@@ -3,7 +3,7 @@
   <metadata>
     <title>Eval cases per catalog change + negative profile-injection cases</title>
     <phase>6: Authoring, Eval &amp; Hardening</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>030, 050</dependencies>
     <blocks>none</blocks>
