@@ -39,13 +39,29 @@ export interface ISendEmailDialogRegarding {
   name?: string;
 }
 
-// R6-4 (UAT 2026-07-21): Fluent's default DialogSurface caps at ~600px, which made the Assistant's
-// email modal read smaller than the standard Spaarke email surface. Widen to 760px to match the
-// engine's `dialog` mount cap (there is no shared modal-width token — see MODAL-DECISION-CRITERIA).
+// Standard Spaarke mid-size modal rectangle (owner UAT 2026-07-22): 720px × 70vh — the recurring
+// mid-size across ~6 Spaarke dialogs (QuickStartModal, daily-update email dialog, ContainerTypeConfig).
+// Distinct from the two MODAL-DECISION-CRITERIA layouts (OOB 85%×85% / content-driven preview): the
+// canonical compose/read surface is a fixed mid-size rectangle, not full-height. The surface owns the
+// bounded height; `body` fills it and scrolls internally so the composer content (attachments + body)
+// scrolls while the dialog stays a clean rectangle.
 const useDialogStyles = makeStyles({
   surface: {
-    maxWidth: '760px',
+    maxWidth: '720px',
     width: '92vw',
+    height: '70vh',
+    display: 'flex',
+    flexDirection: 'column',
+    // Surface itself never scrolls — the body owns the scroll region below.
+    overflow: 'hidden',
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    // minHeight:0 lets the flex child shrink below its content size so overflow engages.
+    minHeight: 0,
+    flexGrow: 1,
+    overflowY: 'auto',
   },
 });
 
@@ -142,7 +158,7 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       }}
     >
       <DialogSurface className={dialogStyles.surface}>
-        <DialogBody>
+        <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
