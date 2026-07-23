@@ -60,10 +60,11 @@ const useDialogStyles = makeStyles({
   body: {
     display: 'flex',
     flexDirection: 'column',
-    // minHeight:0 lets the flex child shrink below its content size so overflow engages.
+    // The composer now owns the scroll region (pinned header/footer + scrollable body,
+    // owner UAT round 3), so the dialog body itself never scrolls.
     minHeight: 0,
     flexGrow: 1,
-    overflowY: 'auto',
+    overflow: 'hidden',
   },
 });
 

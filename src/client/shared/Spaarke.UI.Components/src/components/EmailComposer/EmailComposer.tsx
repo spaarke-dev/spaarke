@@ -131,27 +131,51 @@ const useStyles = makeStyles({
     clip: 'rect(0 0 0 0)',
   },
 
+  // Scrollable body between the pinned header and the pinned action bar (owner UAT
+  // round 3 #4/#5): the modal itself is a fixed rectangle that never scrolls — only
+  // this middle region scrolls when content overflows.
+  scrollBody: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    paddingRight: tokens.spacingHorizontalXS,
+  },
+  // Extra breathing room between the recipients block (Bcc line) and Subject (#1).
+  subjectSpacer: {
+    marginTop: tokens.spacingVerticalS,
+  },
+
   // `page` — full-width first-class entity-form chrome (replaces the OOB
   // sprk_communication form; the highest-value visual deliverable per §5.10).
+  // `height: 100%` lets the pinned-header/scroll-body/pinned-footer layout fill a
+  // bounded host (the CommunicationActions PCF dialog); standalone it resolves to
+  // content height and the page scrolls normally.
   page: {
-    maxWidth: '960px',
+    height: '100%',
+    minHeight: 0,
+    maxWidth: '1000px',
     marginLeft: 'auto',
     marginRight: 'auto',
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalXXL,
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
   },
 
-  // `dialog` — bounded width; R6-4 (UAT 2026-07-21): widened 600 → 760 to match the standard
-  // Spaarke email surface (the 960px page composer) more closely without going full-page.
+  // `dialog` — bounded width; fills the host dialog height for the pinned layout.
   dialog: {
+    height: '100%',
+    minHeight: 0,
     width: '100%',
-    maxWidth: '760px',
+    maxWidth: '1000px',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
   },
 
   // `inline` — no chrome; fills the wizard step container; wizard owns
@@ -294,42 +318,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   // ── Render ──────────────────────────────────────────────────────────────
   const mountClass = props.mount === 'page' ? styles.page : props.mount === 'dialog' ? styles.dialog : styles.inline;
+  const isChromed = props.mount !== 'inline';
 
-  return (
-    <div
-      ref={rootRef}
-      tabIndex={-1}
-      className={mergeClasses(styles.base, mountClass, props.className)}
-      role="region"
-      aria-label="Email composer"
-    >
-      {props.mount !== 'inline' && (
-        <div className={styles.header}>
-          <Text as="h2" size={600} weight="semibold">
-            {state.mode === 'view'
-              ? 'Email'
-              : state.mode === 'reply'
-                ? 'Reply'
-                : state.mode === 'forward'
-                  ? 'Forward'
-                  : state.mode === 'draft'
-                    ? 'Edit Draft'
-                    : 'New Email'}
-          </Text>
-          {props.onCancel && (
-            <div className={styles.headerActions}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<Dismiss20Regular />}
-                aria-label="Close dialog"
-                onClick={() => props.onCancel?.()}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
+  const middle = (
+    <>
       {showAssociations && state.associations.length > 0 && (
         <div className={styles.section} role="region" aria-label="Linked records">
           <AssociationChips associations={state.associations} />
@@ -399,7 +391,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      <div className={styles.section} role="region" aria-label="Subject">
+      <div className={mergeClasses(styles.section, styles.subjectSpacer)} role="region" aria-label="Subject">
         <Input
           value={state.subject}
           onChange={e => dispatch({ type: 'SET_FIELD', field: 'subject', value: e.target.value })}
@@ -426,6 +418,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
+          onBrowseDocuments={props.onBrowseDocuments}
           readOnly={state.readOnly}
           errorMessage={fieldErrors.attachments}
         />
@@ -441,6 +434,45 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         errorMessage={fieldErrors.body}
         minHeight={props.mount === 'dialog' ? 200 : 220}
       />
+    </>
+  );
+
+  return (
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className={mergeClasses(styles.base, mountClass, props.className)}
+      role="region"
+      aria-label="Email composer"
+    >
+      {isChromed && (
+        <div className={styles.header}>
+          <Text as="h2" size={600} weight="semibold">
+            {state.mode === 'view'
+              ? 'Email'
+              : state.mode === 'reply'
+                ? 'Reply'
+                : state.mode === 'forward'
+                  ? 'Forward'
+                  : state.mode === 'draft'
+                    ? 'Edit Draft'
+                    : 'New Email'}
+          </Text>
+          {props.onCancel && (
+            <div className={styles.headerActions}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                aria-label="Close dialog"
+                onClick={() => props.onCancel?.()}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {isChromed ? <div className={styles.scrollBody}>{middle}</div> : middle}
 
       <ComposerActionBar
         mount={props.mount}

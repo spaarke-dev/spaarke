@@ -139,7 +139,9 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     overflow: 'hidden',
   },
-  dialogBody: { minHeight: 0, flexGrow: 1, overflowY: 'auto', display: 'block' },
+  // The composer owns the scroll region (pinned header/footer + scrollable body, owner
+  // UAT round 3), so the dialog body fills the fixed surface and never scrolls itself.
+  dialogBody: { minHeight: 0, flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   versionText: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,

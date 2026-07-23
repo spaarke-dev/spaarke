@@ -19,7 +19,8 @@
  * tested functionality for no benefit.
  */
 import * as React from 'react';
-import { Textarea, ToggleButton, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { Tooltip, Button, Textarea, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import { TextFont20Regular, TextT20Regular } from '@fluentui/react-icons';
 import { RichTextEditor } from '../../RichTextEditor';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
 
@@ -44,6 +45,7 @@ export interface IBodyEditorProps {
 
 const useStyles = makeStyles({
   wrapper: {
+    position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
@@ -51,7 +53,8 @@ const useStyles = makeStyles({
     minHeight: 0,
   },
   // Editor area — `position: relative` anchors the floating format toggle; the
-  // whole area is vertically resizeable (owner UAT #6).
+  // whole area is vertically resizeable (owner UAT #6). overflowX hidden removes
+  // the horizontal scrollbar (owner UAT round 3 #3).
   editorArea: {
     position: 'relative',
     display: 'flex',
@@ -59,7 +62,8 @@ const useStyles = makeStyles({
     flexGrow: 1,
     minHeight: 0,
     resize: 'vertical',
-    overflow: 'auto',
+    overflowY: 'auto',
+    overflowX: 'hidden',
   },
   // Rich/Plain toggle floats at the top-right, sitting at the right end of the RTF
   // toolbar row (owner UAT #4). The RTF tools are left-aligned so this never overlaps them.
@@ -102,27 +106,26 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
 
   return (
     <div className={styles.wrapper} role="region" aria-label="Message body">
+      {!readOnly && (
+        // Single icon toggle (owner UAT round 3 #3): shows the CURRENT mode's glyph;
+        // click switches. Rich = formatting glyph; Plain = plain-"T" glyph.
+        <div className={styles.toggleFloat} role="group" aria-label="Body format">
+          <Tooltip
+            content={format === 'HTML' ? 'Rich text — switch to plain text' : 'Plain text — switch to rich text'}
+            relationship="label"
+          >
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={format === 'HTML' ? <TextFont20Regular /> : <TextT20Regular />}
+              aria-label={format === 'HTML' ? 'Switch to plain text' : 'Switch to rich text'}
+              onClick={() => onFormatChange(format === 'HTML' ? 'PlainText' : 'HTML')}
+            />
+          </Tooltip>
+        </div>
+      )}
+
       <div className={styles.editorArea} style={{ minHeight }}>
-        {!readOnly && (
-          <div className={styles.toggleFloat} role="group" aria-label="Body format">
-            <ToggleButton
-              checked={format === 'HTML'}
-              onClick={() => onFormatChange('HTML')}
-              size="small"
-              appearance={format === 'HTML' ? 'primary' : 'outline'}
-            >
-              Rich text
-            </ToggleButton>
-            <ToggleButton
-              checked={format === 'PlainText'}
-              onClick={() => onFormatChange('PlainText')}
-              size="small"
-              appearance={format === 'PlainText' ? 'primary' : 'outline'}
-            >
-              Plain text
-            </ToggleButton>
-          </div>
-        )}
 
         {format === 'HTML' ? (
           <div className={styles.editorFill}>

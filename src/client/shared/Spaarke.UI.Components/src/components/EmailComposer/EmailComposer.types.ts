@@ -331,6 +331,15 @@ export interface IEmailComposerProps {
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
 
+  /**
+   * Opens the host's document-lookup overlay so the user can attach/link an existing
+   * `sprk_document` (owner UAT round 3, 2026-07-22). When supplied, AttachmentList
+   * renders a "look up a document" tool; the host adds each pick back through the
+   * composer's attachment state. Absent → only the from-computer add tool renders.
+   * Context-agnostic (ADR-012): the engine never queries Dataverse itself.
+   */
+  onBrowseDocuments?: () => void;
+
   // — Send-side behavior —
   sendMode?: CommunicationSendMode;
   fromMailbox?: string;
