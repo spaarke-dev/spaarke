@@ -125,8 +125,20 @@ const useStyles = makeStyles({
   // Suggested-by-engine create icons get a subtle brand tint (the icon-only ✨ cue).
   suggestedIcon: { color: tokens.colorBrandForeground1 },
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBottom: tokens.spacingVerticalXS },
-  dialogSurface: { maxWidth: '900px', width: '90vw', height: '85vh', padding: 0 },
-  dialogBody: { height: '100%', display: 'block' },
+  // Standard Spaarke mid-size modal rectangle (owner UAT 2026-07-22): 720px × 70vh — matches the
+  // shared SendEmailDialog (Assistant / FilePreview / SummarizeFiles). Surface owns the bounded
+  // height + flex column; dialogBody is the scroll region so the composer content scrolls while the
+  // modal stays a clean rectangle (was 900px × 85vh).
+  dialogSurface: {
+    maxWidth: '720px',
+    width: '92vw',
+    height: '70vh',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  dialogBody: { minHeight: 0, flexGrow: 1, overflowY: 'auto', display: 'block' },
   versionText: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
