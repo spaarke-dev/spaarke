@@ -142,7 +142,6 @@ export type {
 
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5)
 export {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
@@ -156,8 +155,6 @@ export type {
   RecoveredRevision,
   PullAnnotationsResult,
   CheckChangesResult,
-  PushAnnotationsArgs,
-  UseComposePushAnnotationsResult,
   PullAnnotationsArgs,
   UseComposePullAnnotationsResult,
   CheckChangesArgs,

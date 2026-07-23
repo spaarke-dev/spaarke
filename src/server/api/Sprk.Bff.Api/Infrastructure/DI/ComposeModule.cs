@@ -30,7 +30,11 @@ public static class ComposeModule
         services.AddSingleton<ComposeEditTransaction>();                       // FR-21 (task 022) — snapshot/rollback wrapper; holds no per-operation instance state (see class remarks), safe as a singleton
         services.AddSingleton<SemanticAppendixGenerator>();                     // FR-22 (task 023)
         services.AddSingleton<CriticMarkupRenderer>();                          // FR-22 (task 023)
-        services.AddSingleton<DocxAnnotationWriter>();                          // FR-24 (task 050) — pure OOXML annotation writer; thread-safe stateless singleton (ADR-010). Consumed by ComposeService.PushAnnotationsAsync (registered unconditionally, same as its consumer — no asymmetric-registration risk per bff-extensions.md §F.1)
+        // DocxAnnotationWriter RETIRED (task 036, §6.5 Path B): the text-anchored push-annotations WRITE
+        // surface it byte-authored was retired entirely — the LAST text-search byte-author is gone, so I-5
+        // (one byte-author = ComposeShadowPatchEngine) + I-7 (no write-path text-search) now hold literally.
+        // Grep shows zero remaining call sites. The read-direction DocxAnnotationReader (unregistered, used
+        // directly by the pull/reanchor endpoints) is unaffected.
         services.AddSingleton<ParaIdPreParser>();                               // FR-08 (task 010, E2) — pure OOXML w14:paraId collect/mint pre-parse; thread-safe stateless singleton (ADR-010). Consumed by ComposeService.LoadAsync; registered UNCONDITIONALLY (same lifetime as its consumer — symmetric per bff-extensions.md §F.1, no feature gate)
         // ComposeParagraphRedlineSynthesizer RETIRED (task 032, FR-06 write-path cutover): the paragraph-diff
         // save path is superseded by the ID-anchored ComposeShadowPatchEngine below. Its DI registration is

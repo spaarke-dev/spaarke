@@ -512,14 +512,8 @@ export interface ComposeEditorProps {
   onOpenInWord?: () => void;
   /** Open the current document in the Word desktop app. */
   onOpenInWordDesktop?: () => void;
-  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
-  onPushToWord?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
   wordActionsDisabled?: boolean;
-  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
-  canPushToWord?: boolean;
-  /** True while a push-to-Word is in flight. */
-  isPushingToWord?: boolean;
   /** Save handler (create-on-save first Save, or update). Renders the Save button when set. */
   onSave?: () => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
@@ -1243,10 +1237,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       enqueueComposeAction,
       onOpenInWord,
       onOpenInWordDesktop,
-      onPushToWord,
       wordActionsDisabled,
-      canPushToWord,
-      isPushingToWord,
       onSave,
       canSave,
       isSaving,
@@ -1968,10 +1959,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           disabled={isImporting}
           onOpenInWord={onOpenInWord}
           onOpenInWordDesktop={onOpenInWordDesktop}
-          onPushToWord={onPushToWord}
           wordActionsDisabled={wordActionsDisabled}
-          canPushToWord={canPushToWord}
-          isPushingToWord={isPushingToWord}
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}

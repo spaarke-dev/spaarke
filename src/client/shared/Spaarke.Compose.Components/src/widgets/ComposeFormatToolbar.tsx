@@ -16,10 +16,10 @@
  *   - Table     — insert table (2x2 + header row), add/delete row, add/delete column,
  *                 delete table (task 041, FR-18). Row/column/delete-table commands are
  *                 disabled outside a table (`editor.can().<cmd>()` dry-run).
- *   - Word      — Open in Word Web, Open in Word Desktop, Push to Word. These were
+ *   - Word      — Open in Word Web, Open in Word Desktop. These were
  *                 previously top-level actions on the separate `ComposeToolbar`
  *                 command bar (rendered by ComposeWorkspace). The host now binds the
- *                 handlers (`onOpenInWord` / `onOpenInWordDesktop` / `onPushToWord`)
+ *                 handlers (`onOpenInWord` / `onOpenInWordDesktop`)
  *                 and threads them here via ComposeEditor. The dropdown is omitted
  *                 when the host wires no Word handlers.
  *   - Save      — icon button (right-aligned); rendered only when `onSave` is wired.
@@ -82,7 +82,6 @@ import {
   ChevronDown16Regular,
   OpenRegular,
   DesktopRegular,
-  ArrowUploadRegular,
   SaveRegular,
   TableAdd24Regular,
   TableInsertRow24Regular,
@@ -147,14 +146,8 @@ export interface ComposeFormatToolbarProps {
   onOpenInWord?: () => void;
   /** Open the current document in the Word desktop app. */
   onOpenInWordDesktop?: () => void;
-  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
-  onPushToWord?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action is in flight). */
   wordActionsDisabled?: boolean;
-  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
-  canPushToWord?: boolean;
-  /** True while a push-to-Word is in flight. */
-  isPushingToWord?: boolean;
 
   // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
   /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
@@ -263,10 +256,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     disabled,
     onOpenInWord,
     onOpenInWordDesktop,
-    onPushToWord,
     wordActionsDisabled,
-    canPushToWord,
-    isPushingToWord,
     onSave,
     canSave,
     isSaving,
@@ -362,9 +352,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const canDeleteColumn = canRunTableCommand(editor, 'deleteColumn');
   const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
-  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onPushToWord);
+  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
-  const pushDisabled = controlDisabled || canPushToWord !== true || isPushingToWord === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
   return (
@@ -599,15 +588,6 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                   disabled={openInWordDisabled}
                   onClick={onOpenInWordDesktop}
                   testId="compose-format-open-word-desktop"
-                />
-              ) : null}
-              {onPushToWord ? (
-                <PaletteIconButton
-                  icon={<ArrowUploadRegular />}
-                  label={isPushingToWord ? 'Pushing to Word…' : 'Push to Word'}
-                  disabled={pushDisabled}
-                  onClick={onPushToWord}
-                  testId="compose-format-push-to-word"
                 />
               ) : null}
             </div>

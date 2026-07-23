@@ -68,9 +68,7 @@ public sealed class ComposeServiceSaveAnnotationsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private static FileHandleDto ReplacedDriveItem() => new(

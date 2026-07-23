@@ -92,8 +92,10 @@ public sealed class ComposeWritePathTextSearchAuditTests
         }
 
         // The retired text-search writer (DocxAnnotationWriter.LocateTarget — the R3 interior-location
-        // 422 root cause per corpus-manifest.md row 1) must NOT be reachable from the save path. It
-        // remains wired ONLY to PushAnnotationsAsync (task 036 scope, out of this task's bounds).
+        // 422 root cause per corpus-manifest.md row 1) must NOT be reachable from the save path.
+        // DocxAnnotationWriter and the push-annotations surface it fed are now FULLY retired (task 036,
+        // §6.5 Path B); this audit remains as a regression guard that the save path never regrows a
+        // text-search writer field.
         savePathSlice.Should().NotContain("_annotationWriter",
             "the save path (SaveAsync/ResolveSaveBaselineAsync) must never invoke the retired " +
             "DocxAnnotationWriter — that text-search writer is wired only to the push-annotations surface " +

@@ -115,7 +115,6 @@ import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5).
 import {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
@@ -801,14 +800,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [anchoredAnnotations, definedTermsTracking, state.status, state.sessionId, bffBaseUrl, tenantId]);
 
   // -------------------------------------------------------------------------
-  // Word round-trip shuttle (task 103) — push (3.1) / pull (3.4) / reanchor + poll (3.5)
+  // Word round-trip shuttle (task 103) — pull (3.4) / reanchor + poll (3.5)
   // -------------------------------------------------------------------------
-  // The push-annotations (050), pull-annotations (051), check-changes (053), and reanchor (054)
-  // endpoints + the 054 reanchor banner/panel were all BUILT but never CONNECTED. This block wires
-  // them: a "Push to Word" toolbar action (3.1), and a return-from-Word poll-on-focus that pulls the
-  // current native annotations (3.4) + re-anchors prior anchors (3.5) into the mounted banner/panel.
+  // The pull-annotations (051), check-changes (053), and reanchor (054) endpoints + the 054 reanchor
+  // banner/panel were all BUILT but never CONNECTED. This block wires them: a return-from-Word
+  // poll-on-focus that pulls the current native annotations (3.4) + re-anchors prior anchors (3.5)
+  // into the mounted banner/panel. (The "Push to Word" leg (3.1) has been retired.)
   const { summary: reanchorSummary, reanchor: runReanchor, reset: resetReanchor } = useComposeReanchor({ bffBaseUrl });
-  const { push: pushAnnotations, pushing: isPushingToWord } = useComposePushAnnotations({ bffBaseUrl });
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
 
@@ -827,41 +825,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     () => anchoredAnnotationsToDocxAnnotations(anchoredAnnotations),
     [anchoredAnnotations]
   );
-  const canPushToWord =
-    (state.status === 'loaded' || state.status === 'saving') &&
-    !!state.documentRef?.speDriveItemId &&
-    !!effectiveDriveId &&
-    !!state.etag &&
-    composeDocxAnnotations.length > 0;
-
-  const handlePushToWord = React.useCallback(async (): Promise<void> => {
-    if (!state.documentRef?.speDriveItemId || !effectiveDriveId || !state.etag) return;
-    // C3 fix (UAT 2026-07-20): Push-to-Word carried ONLY session comments/anchored annotations — it never
-    // read the pending AI redline marks, so redlines never pushed (comments did). Prepend them (same shape,
-    // mirrors triggerSave's `saveAnnotations` ordering) so a push writes w:ins/w:del too.
-    const redlineAnnotations = editorRef.current?.getRedlineAnnotations?.() ?? [];
-    const pushableAnnotations = [...redlineAnnotations, ...composeDocxAnnotations];
-    if (pushableAnnotations.length === 0) return;
-    try {
-      await pushAnnotations({
-        documentSpeId: state.documentRef.speDriveItemId,
-        driveId: effectiveDriveId,
-        tenantId,
-        ifMatch: state.etag,
-        annotations: pushableAnnotations,
-      });
-    } catch {
-      // The hook surfaces a user-safe error; a push failure must not crash the editing session.
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    state.documentRef?.speDriveItemId,
-    state.etag,
-    effectiveDriveId,
-    tenantId,
-    composeDocxAnnotations,
-    pushAnnotations,
-  ]);
 
   // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
   // check-changes; when the document changed, PULL the current native annotations (3.4) and
@@ -2346,18 +2309,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               onOpenInWordDesktop={() => {
                 void openInWordFlushed('desktop');
               }}
-              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
-              // draft has no SPE drive-item to write native annotations into yet).
-              onPushToWord={
-                state.documentRef?.speDriveItemId
-                  ? () => {
-                      void handlePushToWord();
-                    }
-                  : undefined
-              }
               wordActionsDisabled={wordActionsDisabled}
-              canPushToWord={canPushToWord}
-              isPushingToWord={isPushingToWord}
               onSave={() => {
                 void triggerSave();
               }}

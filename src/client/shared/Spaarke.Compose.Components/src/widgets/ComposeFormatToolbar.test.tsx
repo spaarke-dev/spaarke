@@ -273,29 +273,26 @@ describe('ComposeFormatToolbar — Paragraph dropdown (lists / blockquote / alig
 });
 
 // ---------------------------------------------------------------------------
-// 5. Word dropdown — Open-in-Word Web/Desktop + Push to Word wired
+// 5. Word dropdown — Open-in-Word Web/Desktop wired
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
-  it('opening Word reveals the three actions and each fires its handler', async () => {
+  it('opening Word reveals the Open-in-Word actions and each fires its handler', async () => {
     const user = userEvent.setup();
     const onOpenInWord = jest.fn();
     const onOpenInWordDesktop = jest.fn();
-    const onPushToWord = jest.fn();
-    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop, onPushToWord, canPushToWord: true } });
+    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop } });
 
     await user.click(screen.getByTestId('compose-format-word-menu'));
 
     await user.click(screen.getByTestId('compose-format-open-word-web'));
     await user.click(screen.getByTestId('compose-format-open-word-desktop'));
-    await user.click(screen.getByTestId('compose-format-push-to-word'));
 
     expect(onOpenInWord).toHaveBeenCalledTimes(1);
     expect(onOpenInWordDesktop).toHaveBeenCalledTimes(1);
-    expect(onPushToWord).toHaveBeenCalledTimes(1);
   });
 
-  it('Open-in-Word items are disabled when wordActionsDisabled is set; Push is disabled without canPushToWord', async () => {
+  it('Open-in-Word items are disabled when wordActionsDisabled is set', async () => {
     const user = userEvent.setup();
     renderFormatToolbar(
       {},
@@ -303,9 +300,7 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
         props: {
           onOpenInWord: jest.fn(),
           onOpenInWordDesktop: jest.fn(),
-          onPushToWord: jest.fn(),
           wordActionsDisabled: true,
-          canPushToWord: false,
         },
       }
     );
@@ -313,7 +308,6 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
 
     expect(screen.getByTestId('compose-format-open-word-web')).toBeDisabled();
     expect(screen.getByTestId('compose-format-open-word-desktop')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-push-to-word')).toBeDisabled();
   });
 });
 

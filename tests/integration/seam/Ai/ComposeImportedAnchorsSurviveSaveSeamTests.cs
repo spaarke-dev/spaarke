@@ -46,8 +46,9 @@
 // DI-registration test; NO ctor-null test. Mocks live ONLY at the ISpeFileOperations /
 // IGenericEntityService / IPostUploadIndexingEnqueuer module boundaries (the SAME fixture as task
 // 024) — the HTTP boundary, the real ComposeEndpoints route mapping, and the real
-// ComposeService/ComposeShadowPatchEngine/DocxAnnotationReader/DocxAnnotationWriter/
-// ParaIdPreParser are all production types.
+// ComposeService/ComposeShadowPatchEngine/DocxAnnotationReader/
+// ParaIdPreParser are all production types. (DocxAnnotationWriter fully retired by task 036;
+// tracked-change fixtures are now synthesized by the test-only TrackedChangeDocxBuilder.)
 
 using System.Net;
 using System.Net.Http.Json;
@@ -344,9 +345,9 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
 
     /// <summary>Builds a small, deterministic 3-paragraph <c>.docx</c> — EVERY paragraph carrying a
     /// real physical <c>w14:paraId</c> (<see cref="FixtureParaIds"/>), exactly as a genuinely
-    /// Word-authored document does — and redlines/comments it via <see cref="DocxAnnotationWriter"/>
-    /// (the SAME writer that produces the exact Word-for-Web <c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>
-    /// markup the read side + tasks 050/051's own fixtures use): an insertion on paragraph 0, a
+    /// Word-authored document does — and redlines/comments it via <see cref="TrackedChangeDocxBuilder"/>
+    /// (the SAME test-only fixture builder that produces the exact Word-for-Web <c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>
+    /// markup the read side + tasks 050/051's own fixtures use; DocxAnnotationWriter fully retired by task 036): an insertion on paragraph 0, a
     /// deletion + comment on paragraph 1, paragraph 2 left untouched as the eventual dirty-edit
     /// target.</summary>
     private static byte[] BuildRedlinedAndCommentedFixture(string para0, string para1, string para2)
@@ -354,11 +355,11 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
         var source = CreateDocx(para0, para1, para2);
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
         };
-        return new DocxAnnotationWriter().Annotate(source, annotations);
+        return new TrackedChangeDocxBuilder().Annotate(source, annotations);
     }
 
     private static byte[] CreateDocx(params string[] paragraphs)

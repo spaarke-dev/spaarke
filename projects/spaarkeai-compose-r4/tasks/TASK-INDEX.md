@@ -29,11 +29,11 @@
 | 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | done | ✅ |
 | 031 | Structural operations — split/merge/insert/delete (FR-05) + client wiring | 3 Patch Engine | opus / xhigh | FULL | 030 | done | ✅ |
 | 032 | Cutover: SAVE→engine + op-log send + retire redline-synthesizer (FR-06, re-scoped) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | done | ✅ |
-| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030,**037** | ⏸ deferred→037 | 🔲 |
-| 037 | 🔔 Born-in-editor + table-authoring op (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 030,031, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
+| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030,**037** | folds into 037 | 🔲 |
+| 037 | Born-in-editor tables **import-only (Path C ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 030,031 | ✅ decision made → startable after 036 | 🔲 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
 | 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ⏸ verified; Azure deploy held for owner | 🔲 |
-| 036 | 🔔 Retire DocxAnnotationWriter + push-annotations (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 032, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
+| 036 | Retire DocxAnnotationWriter + push-annotations **(Path B ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 032 | ✅ decision made → startable | 🔄 |
 | 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
 | 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
 | 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | done | ✅ |

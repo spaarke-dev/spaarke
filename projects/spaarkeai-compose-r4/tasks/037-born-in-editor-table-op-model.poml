@@ -3,8 +3,9 @@
   <metadata>
     <title>Born-in-editor + table authoring in the op model — schema extension (FR-09 / FR-11 completion)</title>
     <phase>3 Patch Engine</phase>
-    <gate>blocked</gate>
+    <gate>startable</gate>
     <status>not-started</status>
+    <owner-decision-resolved date="2026-07-22">Path C — IMPORT-ONLY tables (disable insertTable without a loaded baseline; tables import-only; unify born-in-editor with no table case; retire the second byte-author). Task 033 folds in. See notes/owner-decisions-036-037.md.</owner-decision-resolved>
     <rigor>FULL</rigor>
     <rigor-reason>Extends the FR-11 operation-schema spine (the shared contract both ends compile against) + the Patch Engine + the born-in-editor save path. High blast radius; FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>

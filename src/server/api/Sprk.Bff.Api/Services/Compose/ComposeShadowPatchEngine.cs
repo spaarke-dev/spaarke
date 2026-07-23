@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// onto retained OOXML: <c>(retained bytes, operation log) -&gt; patched bytes</c>. Every text edit /
 /// redline / comment lands at its <c>w14:paraId</c> (resolved O(1)) + run-local offset with <b>ZERO
 /// write-path text-search</b> (invariant I-7). This engine consolidates the two retiring writers
-/// (<see cref="DocxAnnotationWriter"/> — the text-search 422 root cause — and
+/// (<c>DocxAnnotationWriter</c> — the text-search 422 root cause — and
 /// <see cref="ComposeParagraphRedlineSynthesizer"/> — the paragraph-diff path) into ONE operational
 /// applier; task 032 retires those, task 031 adds the structural paragraph ops.
 /// </summary>
@@ -39,7 +39,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// flatten by itself, but a split does — re-flattening is what keeps this correct (finding #2).
 /// </para>
 /// <para>
-/// <b>Native OOXML emission (EDGE-1…4, migrated from <see cref="DocxAnnotationWriter"/>).</b>
+/// <b>Native OOXML emission (EDGE-1…4, migrated from <c>DocxAnnotationWriter</c>).</b>
 /// Insertions wrap a fresh run in <see cref="InsertedRun"/> (<c>w:ins</c>); deletions replace runs with
 /// <see cref="DeletedRun"/> (<c>w:del</c>) whose text is <see cref="DeletedText"/> (<c>w:delText</c>,
 /// EDGE-4 — <c>w:t</c> inside <c>w:del</c> yields a file Word treats as corrupt); comments (EDGE-1) are

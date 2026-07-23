@@ -3,8 +3,9 @@
   <metadata>
     <title>Retire DocxAnnotationWriter — migrate or retire the FR-24 push-annotations surface (I-7 completeness)</title>
     <phase>3 Patch Engine</phase>
-    <gate>blocked</gate>
+    <gate>startable</gate>
     <status>not-started</status>
+    <owner-decision-resolved date="2026-07-22">Path B — RETIRE push-annotations entirely (remove endpoints 9/9b + PushAnnotationsAsync/PreviewPushAnnotationsAsync + ComposePushSavePreviewCalculator + client useComposePushAnnotations/Word-shuttle push leg + tests), then delete DocxAnnotationWriter.cs + DocxAnnotation.TargetText. See notes/owner-decisions-036-037.md.</owner-decision-resolved>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes the last text-search byte-author + touches a deployed BFF endpoint + client surface. High blast radius; FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>

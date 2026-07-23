@@ -1,13 +1,10 @@
 /**
  * useComposeWordShuttle.test.tsx — coverage for the Word round-trip shuttle client wiring
- * (task 103, Cluster 3). Verifies the mappers + the three fetch hooks POST the right routes/bodies,
- * and that the "Push to Word" toolbar action (gap 3.1) is rendered + wired.
+ * (task 103, Cluster 3). Verifies the mappers + the pull / check-changes fetch hooks POST the right
+ * routes/bodies.
  */
 
-import * as React from 'react';
-import { render, screen, renderHook, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { renderHook, act } from '@testing-library/react';
 
 // @spaarke/auth is the fetch boundary — mock useAuth (the hooks call it unconditionally). The
 // hooks also accept a fetchOverride escape hatch, used below to assert wire shapes.
@@ -22,17 +19,7 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-// ComposeToolbar depends on useDocumentActions (Open-in-Word) — mock to no-op handlers.
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({
-    openInWeb: jest.fn(),
-    openInDesktop: jest.fn(),
-    isActing: false,
-  }),
-}));
-
 import {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToDocxAnnotations,
@@ -41,7 +28,6 @@ import {
   selectSaveRedlineAnnotations,
   DocxTrackChangeKind,
 } from './useComposeWordShuttle';
-import { ComposeToolbar } from './ComposeToolbar';
 import type { AnchoredAnnotation } from '../types/compose-contracts';
 
 function anchor(overrides: Partial<AnchoredAnnotation> & Pick<AnchoredAnnotation, 'id' | 'type'>): AnchoredAnnotation {
@@ -127,41 +113,6 @@ describe('anchoredAnnotationsToPriorAnchors (gap 3.5 mapping)', () => {
   });
 });
 
-describe('useComposePushAnnotations (gap 3.1)', () => {
-  it('POSTs push-annotations with driveId/tenantId/ifMatch/annotations', async () => {
-    const fetchMock = okJson({});
-    const { result } = renderHook(() =>
-      useComposePushAnnotations({ bffBaseUrl: 'https://bff', fetchOverride: fetchMock })
-    );
-
-    await act(async () => {
-      await result.current.push({
-        documentSpeId: 'spe-1',
-        driveId: 'b!drive-1',
-        tenantId: 't1',
-        ifMatch: '"etag-1"',
-        annotations: [
-          {
-            kind: DocxTrackChangeKind.Comment,
-            targetText: 'x',
-            commentText: 'y',
-            author: 'A',
-            date: '2026-07-10T00:00:00Z',
-          },
-        ],
-      });
-    });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://bff/api/compose/document/spe-1/push-annotations',
-      expect.objectContaining({ method: 'POST' })
-    );
-    const body = JSON.parse((fetchMock as jest.Mock).mock.calls[0][1].body);
-    expect(body).toMatchObject({ driveId: 'b!drive-1', tenantId: 't1', ifMatch: '"etag-1"' });
-    expect(body.annotations).toHaveLength(1);
-  });
-});
-
 describe('useComposeCheckChanges (poll half of gap 3.5)', () => {
   it('POSTs check-changes with the containerId and returns the changed flag', async () => {
     const fetchMock = okJson({
@@ -208,39 +159,6 @@ describe('useComposePullAnnotations (gap 3.4)', () => {
       'https://bff/api/compose/document/spe-1/pull-annotations',
       expect.objectContaining({ method: 'POST' })
     );
-  });
-});
-
-describe('ComposeToolbar — Push to Word action (gap 3.1)', () => {
-  const renderTb = (ui: React.ReactElement) => render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);
-
-  it('renders the Push to Word button and fires the handler when enabled', async () => {
-    const onPush = jest.fn();
-    renderTb(
-      <ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" onPushToWordRequested={onPush} canPushToWord />
-    );
-
-    const button = screen.getByTestId('compose-toolbar-push-to-word');
-    expect(button).toBeEnabled();
-    await userEvent.click(button);
-    expect(onPush).toHaveBeenCalledTimes(1);
-  });
-
-  it('disables the button when there is nothing to push', () => {
-    renderTb(
-      <ComposeToolbar
-        documentId="spe-1"
-        bffBaseUrl="https://bff"
-        onPushToWordRequested={jest.fn()}
-        canPushToWord={false}
-      />
-    );
-    expect(screen.getByTestId('compose-toolbar-push-to-word')).toBeDisabled();
-  });
-
-  it('does not render the button when no push handler is provided', () => {
-    renderTb(<ComposeToolbar documentId="spe-1" bffBaseUrl="https://bff" />);
-    expect(screen.queryByTestId('compose-toolbar-push-to-word')).toBeNull();
   });
 });
 
