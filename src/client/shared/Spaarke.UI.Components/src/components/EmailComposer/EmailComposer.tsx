@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { forwardRef, useImperativeHandle } from 'react';
 import {
-  Field,
+  Button,
   Input,
   Link,
   MessageBar,
@@ -34,6 +34,7 @@ import {
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
+import { Dismiss20Regular } from '@fluentui/react-icons';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 
@@ -49,7 +50,6 @@ import type {
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
-import { SendModeRadio } from './subcomponents/SendModeRadio';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 
@@ -109,8 +109,19 @@ const useStyles = makeStyles({
   },
   header: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  bccToggleRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
   },
   liveRegion: {
     position: 'absolute',
@@ -169,6 +180,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     [props.attachmentSources, props.wizardContext]
   );
   const showSendModeRadio = props.sendMode === undefined;
+
+  // Bcc is hidden by default (owner UAT mockup 2026-07-22 shows To/Cc only); a small
+  // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
+  const [showBccToggle, setShowBccToggle] = React.useState(false);
+  const bccVisible = showBccToggle || state.bcc.length > 0;
 
   // ── Re-derive state when mode/sourceRecord/communicationId change on an
   //    already-mounted instance (host swaps props rather than remounting) ──
@@ -300,6 +316,17 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
                     ? 'Edit Draft'
                     : 'New Email'}
           </Text>
+          {props.onCancel && (
+            <div className={styles.headerActions}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                aria-label="Close dialog"
+                onClick={() => props.onCancel?.()}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -353,25 +380,34 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
         />
-        <RecipientField
-          label="Bcc"
-          disabled={state.readOnly}
-          value={state.bcc}
-          onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
-          onSearch={props.onSearchRecipients}
-        />
+        {bccVisible ? (
+          <RecipientField
+            label="Bcc"
+            disabled={state.readOnly}
+            value={state.bcc}
+            onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
+            onSearch={props.onSearchRecipients}
+          />
+        ) : (
+          !state.readOnly && (
+            <div className={styles.bccToggleRow}>
+              <Button appearance="subtle" size="small" onClick={() => setShowBccToggle(true)}>
+                Bcc
+              </Button>
+            </div>
+          )
+        )}
       </div>
 
       <div className={styles.section} role="region" aria-label="Subject">
-        <Field label="Subject" required validationState={fieldErrors.subject ? 'error' : 'none'}>
-          <Input
-            value={state.subject}
-            onChange={e => dispatch({ type: 'SET_FIELD', field: 'subject', value: e.target.value })}
-            placeholder="Subject"
-            aria-label="Subject"
-            disabled={state.readOnly}
-          />
-        </Field>
+        <Input
+          value={state.subject}
+          onChange={e => dispatch({ type: 'SET_FIELD', field: 'subject', value: e.target.value })}
+          placeholder="Add a subject"
+          aria-label="Subject"
+          disabled={state.readOnly}
+          appearance="underline"
+        />
         {fieldErrors.subject && (
           <Text size={200} role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
             {fieldErrors.subject}
@@ -379,17 +415,8 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      <BodyEditor
-        value={state.body}
-        format={state.bodyFormat}
-        onChange={value => dispatch({ type: 'SET_FIELD', field: 'body', value })}
-        onFormatChange={value => dispatch({ type: 'SET_BODY_FORMAT', value })}
-        readOnly={state.readOnly}
-        required={!props.allowEmptyBody}
-        errorMessage={fieldErrors.body}
-        minHeight={props.mount === 'dialog' ? 200 : 220}
-      />
-
+      {/* Attachments sit ABOVE the body (owner UAT mockup 2026-07-22): Add files +
+          Related documents (with per-item Attach/Link) precede the message editor. */}
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
           mode={state.mode}
@@ -404,13 +431,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         />
       </div>
 
-      {showSendModeRadio && !state.readOnly && (
-        <SendModeRadio
-          value={state.sendMode}
-          onChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
-          disabled={state.readOnly}
-        />
-      )}
+      <BodyEditor
+        value={state.body}
+        format={state.bodyFormat}
+        onChange={value => dispatch({ type: 'SET_FIELD', field: 'body', value })}
+        onFormatChange={value => dispatch({ type: 'SET_BODY_FORMAT', value })}
+        readOnly={state.readOnly}
+        required={!props.allowEmptyBody}
+        errorMessage={fieldErrors.body}
+        minHeight={props.mount === 'dialog' ? 200 : 220}
+      />
 
       <ComposerActionBar
         mount={props.mount}
@@ -419,6 +449,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSavingDraft={state.isSavingDraft}
         canSend={canSend}
         isDraftRecord={props.isDraftRecord}
+        sendMode={state.sendMode}
+        showSendModeChoice={showSendModeRadio && !state.readOnly}
+        onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
         onSend={() => {
           send().catch(() => {
             /* onError callback already notified; swallow here so the button

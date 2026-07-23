@@ -19,7 +19,6 @@
 import * as React from 'react';
 import {
   Input,
-  Field,
   Tag,
   TagGroup,
   Spinner,
@@ -110,6 +109,32 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
+  // Inline "To [ input ]" row (owner UAT mockup 2026-07-22): a boxed label on the
+  // left, an underline input filling the rest — the Outlook-style recipient row.
+  inlineRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  labelBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+  },
+  inlineInput: {
+    flexGrow: 1,
+  },
   tagGroup: {
     display: 'flex',
     flexWrap: 'wrap',
@@ -172,11 +197,6 @@ const useStyles = makeStyles({
   },
   requiredMark: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -336,21 +356,16 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const renderLabel = (): React.ReactElement => (
-    <span className={styles.labelRow}>
-      {label}
-      {required && (
-        <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
-        </span>
-      )}
-    </span>
-  );
-
   return (
     <div className={styles.wrapper} ref={wrapperRef} role="group" aria-label={label}>
-      <Field label={renderLabel()} required={required} validationState={errorMessage ? 'error' : 'none'}>
+      <div className={styles.inlineRow}>
+        <span className={styles.labelBox} aria-hidden="true">
+          {label}
+          {required && <span className={styles.requiredMark}>{' *'}</span>}
+        </span>
         <Input
+          className={styles.inlineInput}
+          appearance="underline"
           value={draft}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
@@ -360,7 +375,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
           disabled={disabled}
           autoComplete="off"
         />
-      </Field>
+      </div>
 
       {value.length > 0 && (
         <TagGroup

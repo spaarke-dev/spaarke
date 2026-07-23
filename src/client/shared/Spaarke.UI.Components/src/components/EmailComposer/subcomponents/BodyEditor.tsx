@@ -47,6 +47,9 @@ const useStyles = makeStyles({
   formatRow: {
     display: 'flex',
     gap: tokens.spacingHorizontalXS,
+    // Owner UAT mockup 2026-07-22: Rich text / Plain text toggle sits at the top-right,
+    // above the editor toolbar (was top-left).
+    justifyContent: 'flex-end',
   },
   field: {
     display: 'flex',

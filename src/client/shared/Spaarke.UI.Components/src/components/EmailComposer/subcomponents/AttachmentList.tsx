@@ -158,11 +158,15 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
   const styles = useStyles();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  // A source-carried attachment (has a Document id) in reply/replyAll/forward mode
-  // exposes the per-item include toggles (task 104). Locally-picked files (no
-  // documentId yet) and compose mode do not.
+  // A Document-backed attachment (has a Document id) exposes the per-item Attach/Link
+  // toggles: in reply/replyAll/forward for source-carried attachments (task 104), AND
+  // for `related` documents in ANY mode incl. compose (owner UAT mockup 2026-07-22 —
+  // "New Email" shows Related documents with Attach/Link). Locally-picked files (no
+  // documentId yet) never show the toggles.
   const showIncludeToggles = (item: IAttachmentItem): boolean =>
-    !readOnly && (mode === 'reply' || mode === 'forward') && !!item.documentId;
+    !readOnly &&
+    !!item.documentId &&
+    (mode === 'reply' || mode === 'forward' || item.source === 'related');
 
   const includedItems = items.filter(a => a.selected !== false);
   const totalBytes = includedItems.reduce((sum, a) => sum + a.sizeBytes, 0);

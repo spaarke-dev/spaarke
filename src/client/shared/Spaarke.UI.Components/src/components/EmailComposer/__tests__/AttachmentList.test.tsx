@@ -162,9 +162,11 @@ describe('AttachmentList — reply/forward include toggles (task 104)', () => {
     expect(screen.queryByRole('checkbox', { name: /Insert a link/ })).toBeNull();
   });
 
-  it('does not render include toggles in compose mode', () => {
+  it('renders the Attach toggle for related documents in compose mode (owner UAT 2026-07-22)', () => {
+    // Related documents expose Attach/Link in ANY mode incl. compose (mockup: "New Email"
+    // shows Related documents with Attach/Link). Non-Document-backed local picks still do not.
     renderList({ mode: 'compose', items: [item('c1', 'related', 16)] });
-    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: /attach/i })).toBeInTheDocument();
   });
 
   it('does not render include toggles for items lacking a documentId (local picks)', () => {
