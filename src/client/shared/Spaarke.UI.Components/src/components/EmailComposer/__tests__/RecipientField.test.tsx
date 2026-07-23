@@ -209,16 +209,14 @@ describe('RecipientField — directory resolution via onSearch boundary', () => 
     // The host query matches fullname OR email; typing an address must still find
     // the contact. Here the search is asked for an email fragment and returns the
     // contact — selecting it commits that email.
-    const onSearch = jest
-      .fn()
-      .mockResolvedValue([
-        {
-          id: 'contact-9',
-          name: 'Ralph Schroeder (ralph@example.com)',
-          email: 'ralph@example.com',
-          entityType: 'contact',
-        },
-      ]);
+    const onSearch = jest.fn().mockResolvedValue([
+      {
+        id: 'contact-9',
+        name: 'Ralph Schroeder (ralph@example.com)',
+        email: 'ralph@example.com',
+        entityType: 'contact',
+      },
+    ]);
     const onChangeSpy = jest.fn();
     renderWithProviders(<Harness onSearch={onSearch} onChangeSpy={onChangeSpy} />);
     const input = getInput();
