@@ -293,6 +293,17 @@ const FLOW2_MIN_CHARS = 10;
  */
 const SELECTION_TEXT_CAP = 2000;
 
+/**
+ * task 038 (spaarkeai-compose-r4 zero-error guardrails) — the user-visible, non-blocking notice shown
+ * when a step the closed op set cannot yet carry is DEFERRED (a structural/unrepresentable step or a
+ * refused opaque-atom edit). It exists to catch formatted/linked PASTE, which bypasses the toolbar
+ * gate (change 1/2) and would otherwise be silently dropped. The SAVE STILL SUCCEEDS for the
+ * representable edits — this banner only informs, it never blocks. The deferred features are
+ * implemented in projects/spaarkeai-compose-r5 (G3 heading/list/alignment, G4 tables, G5 hyperlinks).
+ */
+const DEFERRED_FORMAT_NOTICE =
+  "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied. Your text edits are still saved.";
+
 // ---------------------------------------------------------------------------
 // Props + imperative handle
 // ---------------------------------------------------------------------------
@@ -539,11 +550,24 @@ export interface ComposeEditorHandle {
    * (`paraId, runIndex, run-local-offset`) op stream the host sends on a dirty save of a LOADED doc, which
    * the server applies via `ComposeShadowPatchEngine`. This is the ONLY dirty-save capture path — it
    * replaced the retired paragraph-diff export `collectEditedParagraphs` (R3 FR-01, removed task 023).
-   * Serializing RESETS the log, so a subsequent save starts empty and already-applied ops are never
-   * re-sent onto the new baseline. Ops flagged `deletedContentFlag` (their anchor landed in later-deleted
-   * content) are surfaced in the snapshot; the host excludes them from what it applies (never-silently-drop).
+   *
+   * task 038 (zero-error guardrails): this is now NON-DESTRUCTIVE — it reads the log WITHOUT resetting it
+   * or clearing the dirty flag, so a rejected (422) save leaves the document dirty with its op-log intact
+   * and a retry re-sends the same edits (no batch loss). The host clears the persisted batch ONLY after a
+   * confirmed 200 by calling {@link commitSaved}. Ops flagged `deletedContentFlag` (their anchor landed in
+   * later-deleted content) are surfaced in the snapshot; the host excludes them from what it applies
+   * (never-silently-drop).
    */
   serializeOperationLog(): ComposeOperationLogSnapshot;
+
+  /**
+   * task 038 (zero-error guardrails): commit the batch returned by the most recent
+   * {@link serializeOperationLog} AFTER the save POST confirmed (HTTP 200). Drops exactly that batch from
+   * the op-log while PRESERVING any edits made during the in-flight save, then recomputes the dirty flag
+   * from whatever remains. The host MUST call this only on a 200 for a save that sent an op-log; a failed
+   * save never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   */
+  commitSaved(): void;
 
   /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
@@ -853,6 +877,28 @@ const useStyles = makeStyles({
     flex: 1,
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
+  },
+  // task 038 (spaarkeai-compose-r4 zero-error guardrails) — the NON-BLOCKING, dismissible sticky notice
+  // shown when a deferred/unrepresentable/refused step is seen (most importantly formatted/linked PASTE).
+  // Calm + informative (a warning tone, NOT an error/blocker). Sticky so it stays visible above the
+  // scrolling body until dismissed. Semantic tokens only (ADR-021 dark-mode-correct; no hardcoded hex).
+  deferralNotice: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    color: tokens.colorStatusWarningForeground1,
+    borderBottom: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  deferralNoticeText: {
+    flex: 1,
+    minWidth: 0,
   },
   // Wave 6 (DEF-G) — reference-only state for a non-docx file that reached the
   // editor. Calm + informative (NOT an error / not a blank editor). Semantic
@@ -1249,6 +1295,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+
+    // task 038 (spaarkeai-compose-r4 zero-error guardrails): a NON-BLOCKING, dismissible sticky notice
+    // surfaced when a deferred/unrepresentable/refused step is seen (most importantly formatted or linked
+    // PASTE, which bypasses the toolbar gate). Declared BEFORE the op-log init below so the op-log's
+    // classifier callbacks can close over the stable `setDeferralNotice` setter. Non-null ⇒ the banner
+    // is shown; the save path is unaffected (informs only, never blocks).
+    const [deferralNotice, setDeferralNotice] = React.useState<string | null>(null);
     // R3 FR-01 (task 027): the LOAD-TIME `{ paraId → reject-state text }` snapshot, captured right after
     // stampParaIds (and after a born-in-editor seed). Feeds `getBaselineParaIdMap()` (the C2 minted-id
     // stamp) and the live Track Changes decoration baseline; the retired paragraph-diff export that used
@@ -1261,6 +1314,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // interceptor's discipline). `serializeOperationLog()` on the handle reads it at save time; the load effect
     // + serialize both `reset()` it (a fresh document / a completed save must not carry stale ops).
     const opLogRef = React.useRef<RebasedOperationLog | null>(null);
+    // task 038: the op-log high-water mark captured by `serializeOperationLog()` so a later
+    // `commitSaved()` (invoked ONLY after a confirmed 200) drops exactly the persisted batch while
+    // preserving any edits made during the in-flight save. `-Infinity` before the first serialize.
+    const committedBoundaryRef = React.useRef<number>(Number.NEGATIVE_INFINITY);
     if (opLogRef.current === null) {
       opLogRef.current = new RebasedOperationLog({
         onStructuralStep: (_step, reason) => {
@@ -1268,17 +1325,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // rewrite, list wrap/unwrap). Recognized, not mis-mapped — surfaced for diagnosis (never dropped).
           // eslint-disable-next-line no-console
           console.debug('[ComposeEditor] op-log: deferred structural step', reason);
+          // task 038: inform the user (non-blocking). Catches formatted/linked PASTE that slips past the
+          // disabled toolbar controls. The representable text edits in this batch still save.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
         },
         onUnrepresentableStep: (_step, reason) => {
           // A step whose shape the closed op set genuinely cannot represent (e.g. a mark outside the closed
           // ComposeMarkType set) — the escalation seam (root §6/§6.5). Surfaced, never silently dropped.
           // eslint-disable-next-line no-console
           console.warn('[ComposeEditor] op-log: unrepresentable step (surfaced, not applied)', reason);
+          // task 038: same non-blocking notice — a pasted hyperlink/mark outside the closed set lands here.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
         },
         onRefusedAtomEdit: () => {
           // An edit whose range entered an opaque atom (field/content-control) — refused by contract (FR-02).
           // eslint-disable-next-line no-console
           console.debug('[ComposeEditor] op-log: refused opaque-atom edit');
+          // task 038: inform the user that the edit over a protected field/content-control was not applied.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
         },
       });
     }
@@ -1833,18 +1897,28 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       (): ComposeEditorHandle => ({
         // R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 operation-log snapshot
         // the host sends on a dirty save of a LOADED doc (the server applies it via ComposeShadowPatchEngine).
-        // RESETS the log after serializing so a subsequent save starts empty — already-applied ops are never
-        // re-sent onto the new baseline. This is the ONLY dirty-save capture path (task 023 removed the
-        // retired paragraph-diff export `collectEditedParagraphs`).
+        // This is the ONLY dirty-save capture path (task 023 removed the retired paragraph-diff export
+        // `collectEditedParagraphs`).
+        // task 038 (zero-error guardrails): NON-DESTRUCTIVE — reads the log WITHOUT resetting it or clearing
+        // the dirty flag. It records the current high-water mark so `commitSaved()` can later drop exactly
+        // this batch (after a confirmed 200) while preserving concurrent edits. A rejected save leaves the
+        // log + dirty intact so a retry re-sends the same edits (no batch loss).
         serializeOperationLog: () => {
           if (!editor) {
             throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
           }
-          const snapshot = opLogRef.current!.serialize(editor.state.doc);
-          opLogRef.current!.reset();
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
-          return snapshot;
+          committedBoundaryRef.current = opLogRef.current!.nextSeq;
+          return opLogRef.current!.serialize(editor.state.doc);
+        },
+        // task 038 (zero-error guardrails): clear the just-persisted op-log batch + recompute the dirty flag
+        // AFTER the save POST confirmed (200). Preserves any edits appended during the in-flight save; a
+        // failed save never calls this, so the batch survives for a retry.
+        commitSaved: () => {
+          if (!opLogRef.current) return;
+          opLogRef.current.commitSaved(committedBoundaryRef.current);
+          const stillDirty = opLogRef.current.size > 0;
+          dirtyRef.current = stillDirty;
+          onDirtyChange?.(stillDirty);
         },
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
@@ -1971,6 +2045,29 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
         />
+        {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
+            deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
+            past the disabled toolbar controls). Informs only; the representable edits still save. */}
+        {deferralNotice ? (
+          <div
+            className={styles.deferralNotice}
+            role="status"
+            aria-live="polite"
+            data-testid="compose-deferral-notice"
+          >
+            <Text size={200} className={styles.deferralNoticeText}>
+              {deferralNotice}
+            </Text>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Dismiss16Regular />}
+              aria-label="Dismiss notice"
+              onClick={() => setDeferralNotice(null)}
+              data-testid="compose-deferral-notice-dismiss"
+            />
+          </div>
+        ) : null}
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
             inside the editor (see editorProps.handleKeyDown above) and dismissed

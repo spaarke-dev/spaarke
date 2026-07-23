@@ -957,6 +957,30 @@ export class RebasedOperationLog {
   }
 
   /**
+   * The seq the NEXT appended entry will carry — a stable high-water mark captured at serialize time so
+   * {@link commitSaved} can later drop exactly the serialized batch while preserving edits appended
+   * AFTER the serialize (spaarkeai-compose-r4 task 038: concurrent edits made during an in-flight save
+   * must not be discarded when that save confirms).
+   */
+  get nextSeq(): number {
+    return this.seqCounter;
+  }
+
+  /**
+   * spaarkeai-compose-r4 task 038 (zero-error guardrails): after a serialized batch has PERSISTED (the
+   * save POST returned 200), drop the entries that were part of it — those captured before the
+   * `throughSeq` high-water mark ({@link nextSeq} read at serialize time) — while PRESERVING any entries
+   * appended AFTER the serialize (concurrent edits made during the in-flight save). This replaces the
+   * former "serialize + full {@link reset} BEFORE the POST" sequencing, which emptied the log up-front so
+   * a rejected (422) save left nothing to retry: the retry re-sent an empty log and every valid text edit
+   * in that batch was lost on reload. A failed save simply never calls this, so the batch stays intact for
+   * the retry. `baseVersion` + `seqCounter` are preserved (the dirty session continues).
+   */
+  commitSaved(throughSeq: number): void {
+    this.entries = this.entries.filter(entry => entry.seq >= throughSeq);
+  }
+
+  /**
    * Process ONE doc-changing transaction: rebase every already-logged entry through its
    * `Mapping`, then classify + append the transaction's own operations. Returns the operations
    * newly appended by THIS transaction (empty for a transaction that only rebases, e.g. deferred

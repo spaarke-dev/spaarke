@@ -1196,6 +1196,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // next load; here we mirror that for post-save.
       setIsDirty(false);
 
+      // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
+      // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
+      // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
+      // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
+      // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
+      // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
+      // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
+      // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
+      // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
+      // each save (buildContentModel), so it needs no op-log commit.
+      if (operationLog) {
+        editorRef.current?.commitSaved?.();
+      }
+
       // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
       // let the host write any chosen parent association (associate() no-ops on "none"). The
       // document already exists, so an association failure is non-fatal — do not surface it as a

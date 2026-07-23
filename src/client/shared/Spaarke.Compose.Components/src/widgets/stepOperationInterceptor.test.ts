@@ -637,3 +637,81 @@ describe('RebasedOperationLog — ambiguous same-position ordering is surfaced, 
     expect(ambiguous.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// task 038 (spaarkeai-compose-r4 zero-error guardrails) — the op-log survives a
+// REJECTED save and is cleared ONLY on a confirmed 200. This is the data-integrity
+// core: before task 038, serialize() reset the log BEFORE the POST, so a 422 emptied
+// the log and a retry re-sent nothing — every valid text edit in the batch was lost on
+// reload. serialize() is now non-destructive; commitSaved(nextSeq) drops the persisted
+// batch only on success, preserving concurrent edits made during the in-flight save.
+// ---------------------------------------------------------------------------
+describe('RebasedOperationLog — op-log survives a rejected save, cleared only on confirmed success (task 038)', () => {
+  it('serialize is NON-DESTRUCTIVE: a rejected save leaves the log intact so a retry re-sends the SAME ops', () => {
+    const doc0 = onePara(PARA_ID, 'Hello');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    const tr = state.tr.insertText('X', abs(5), abs(5));
+    log.recordTransaction(tr);
+    state = state.apply(tr);
+
+    // First save attempt → serialize the batch (the host POSTs this). The save is REJECTED (422), so the
+    // host does NOT call commitSaved — nothing clears the log.
+    const firstSend = log.serialize(state.doc);
+    expect(firstSend.orderedOps).toHaveLength(1);
+    expect((firstSend.orderedOps[0].operation as InsertTextOperation).text).toBe('X');
+
+    // Retry: serialize AGAIN. The op is STILL present — the batch was not lost by the failed save.
+    const retrySend = log.serialize(state.doc);
+    expect(retrySend.orderedOps).toHaveLength(1);
+    expect(retrySend.orderedOps[0].operation).toEqual(firstSend.orderedOps[0].operation);
+    expect(log.size).toBe(1);
+  });
+
+  it('commitSaved(nextSeq) clears exactly the persisted batch on a confirmed 200 (no re-apply next save)', () => {
+    const doc0 = onePara(PARA_ID, 'Hello');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+    const tr = state.tr.insertText('X', abs(5), abs(5));
+    log.recordTransaction(tr);
+    state = state.apply(tr);
+
+    const boundary = log.nextSeq; // high-water mark captured at serialize time
+    log.serialize(state.doc);
+    // Save confirmed (200): commit the batch.
+    log.commitSaved(boundary);
+
+    // The next save starts empty — already-applied ops are never re-sent onto the new baseline.
+    expect(log.serialize(state.doc).orderedOps).toEqual([]);
+    expect(log.size).toBe(0);
+  });
+
+  it('commitSaved PRESERVES edits made DURING the in-flight save (concurrent edit not discarded)', () => {
+    const doc0 = onePara(PARA_ID, 'Hello');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    // Edit A — part of the batch being saved.
+    const trA = state.tr.insertText('A', abs(5), abs(5));
+    log.recordTransaction(trA);
+    state = state.apply(trA);
+
+    // Host serializes A and POSTs it; capture the boundary BEFORE the concurrent edit.
+    const boundary = log.nextSeq;
+    log.serialize(state.doc);
+
+    // Edit B arrives DURING the in-flight save (the editor stays editable while saving).
+    const trB = state.tr.insertText('B', abs(6), abs(6));
+    log.recordTransaction(trB);
+    state = state.apply(trB);
+
+    // Save confirms (200): commit ONLY the batch through `boundary` — B must survive for the next save.
+    log.commitSaved(boundary);
+
+    const remaining = log.serialize(state.doc);
+    expect(remaining.orderedOps).toHaveLength(1);
+    expect((remaining.orderedOps[0].operation as InsertTextOperation).text).toBe('B');
+    expect(log.size).toBe(1);
+  });
+});

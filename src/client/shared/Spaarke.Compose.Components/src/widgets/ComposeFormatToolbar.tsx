@@ -155,20 +155,29 @@ export interface ComposeFormatToolbarProps {
   /** Toggle the live Track Changes overlay. Rendered only when supplied. */
   onToggleTrackChanges?: () => void;
 
-  // ---- Table authoring gate (task 037, owner Path C — IMPORT-ONLY tables) ----
+  // ---- Deferred edit-path gate (task 038, supersedes task 037 — R4 zero-error guardrails) ----
   /**
    * True when the editor is over a LOADED/imported baseline (an uploaded `.docx`, a stored
-   * document, or an opened template — anything with a retained original). False for a
+   * document, or an opened template — anything with a retained original). False/undefined for a
    * from-scratch BORN-IN-EDITOR draft (blank page / AI-draft) that has NO retained original.
    *
-   * When `false`, the "Insert table" command is DISABLED: tables are **import-only** — they
-   * survive byte-identical inside uploaded documents (via the retained original) but cannot be
-   * authored fresh from an empty editor. This is the owner-signed-off Path C product decision
-   * (task 037): the closed op schema has no table-authoring primitive, so a born-in-editor table
-   * has no unified save path. Row/column/delete-table commands are unaffected (they are already
-   * gated by `editor.can()` — a born-in-editor draft has no table for them to act on).
+   * Task 038 (R4 zero-error release gate) uses this to gate the controls whose edit-path support is
+   * DEFERRED to R5 (projects/spaarkeai-compose-r5), so R4 ships with no user-triggerable errors and no
+   * silent data loss:
+   *  - When `true` (LOADED doc): the alignment buttons, the heading dropdown, the bullet/ordered list
+   *    buttons, AND "Insert table" are DISABLED — the tracked-edit engine either 422s (alignment) or
+   *    silently drops (heading/list/table) these constructs. Each shows an "Available in a future
+   *    release" tooltip.
+   *  - When falsy (BORN-IN-EDITOR draft): those controls are ENABLED — the ComposeDocumentRenderer
+   *    authors headings/lists/tables/alignment cleanly for a from-scratch document.
    *
-   * Defaults to `true` (undefined ⇒ enabled) so existing callers/tests keep full table support.
+   * NOTE the table polarity is INVERTED vs task 037 (which disabled born-in-editor tables): the renderer
+   * authors born-in-editor tables cleanly, but the engine has no table op and would silently drop a
+   * loaded-doc table — so table-insert is enabled born-in-editor and disabled loaded. Hyperlinks are
+   * disabled in BOTH modes independently of this flag (not representable in R4 — R5 G5).
+   *
+   * Defaults to falsy (undefined ⇒ born-in-editor treatment ⇒ these controls enabled), so a standalone/
+   * library mount that never threads the flag keeps full authoring.
    */
   hasLoadedBaseline?: boolean;
 
@@ -247,11 +256,19 @@ function PaletteIconButton(props: {
   disabled?: boolean;
   onClick: () => void;
   testId: string;
+  /**
+   * task 038 (spaarkeai-compose-r4 zero-error guardrails): when the control is disabled because its
+   * underlying feature is DEFERRED (not merely read-only), the hover tooltip explains why instead of
+   * naming the unavailable command. The accessible NAME (`aria-label`) stays the command so assistive
+   * tech still announces what the control is; only the descriptive Tooltip changes.
+   */
+  deferredReason?: string;
 }): React.JSX.Element {
+  // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
+  // `description` (not a second `label`) so the two do not both claim the accessible name.
+  const tooltipContent = props.disabled && props.deferredReason ? props.deferredReason : props.label;
   return (
-    // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
-    // `description` (not a second `label`) so the two do not both claim the accessible name.
-    <Tooltip content={props.label} relationship="description" withArrow>
+    <Tooltip content={tooltipContent} relationship="description" withArrow>
       <Button
         appearance={props.active ? 'primary' : 'subtle'}
         size="small"
@@ -374,11 +391,27 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
-  // task 037 (owner Path C — IMPORT-ONLY tables): disable "Insert table" for a from-scratch
-  // born-in-editor draft (no loaded/imported baseline). Tables stay authorable/editable on
-  // loaded documents; only NEW-from-scratch table authoring is removed. `undefined ⇒ enabled`
-  // preserves existing callers. The read-only gate (`controlDisabled`) still wins.
-  const tableInsertDisabled = controlDisabled || hasLoadedBaseline === false;
+  // ---- task 038 (spaarkeai-compose-r4 zero-error guardrail pass) --------------------------------
+  // The tracked-edit path (loaded/imported docs) has NO representation for alignment (the engine throws
+  // StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits (silently deferred).
+  // On a LOADED doc (`hasLoadedBaseline === true`) DISABLE those controls; a BORN-IN-EDITOR draft
+  // (blank / AI-draft, `hasLoadedBaseline` falsy) keeps them (the ComposeDocumentRenderer authors them
+  // cleanly). This SUPERSEDES + INVERTS task 037's table gating: the renderer authors born-in-editor
+  // tables cleanly, but the engine has no table op and would silently drop a loaded-doc table — so
+  // table-insert is ENABLED born-in-editor and DISABLED loaded (the exact opposite of what 037 shipped).
+  // Hyperlinks are unrepresentable in BOTH modes in R4 (no mark op, no content-model href). Every
+  // deferred feature is documented in projects/spaarkeai-compose-r5 (G3 alignment/heading/list, G4
+  // tables, G5 hyperlinks). The read-only gate (`controlDisabled`) is OR'd in — preserved, not replaced.
+  const isLoadedBaseline = hasLoadedBaseline === true;
+  /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
+  const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
+  const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
+  // Alignment + heading + bullet/ordered list — deferred on loaded docs.
+  const structuralEditDisabled = controlDisabled || isLoadedBaseline;
+  // INVERTED from task 037: enabled born-in-editor, disabled loaded.
+  const tableInsertDisabled = controlDisabled || isLoadedBaseline;
+  // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
+  const hyperlinkDisabled = true;
 
   return (
     <Toolbar
@@ -388,29 +421,49 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       data-testid="compose-format-toolbar"
     >
       {/* ---- Body (block/heading style) ---- */}
-      <Menu positioning="below-start">
-        <MenuTrigger disableButtonEnhancement>
+      {/* task 038: heading changes are deferred on a LOADED doc (the engine has no setBlockAttr applier
+          — R5 G3), so render a disabled, tooltip'd button instead of an openable menu. A born-in-editor
+          draft keeps the full heading menu. testId is stable across both branches. */}
+      {isLoadedBaseline ? (
+        <Tooltip content={FUTURE_RELEASE_TOOLTIP} relationship="description" withArrow>
           <Button
             appearance="subtle"
             size="small"
-            disabled={controlDisabled}
+            disabled
             className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
+            aria-label={`${currentBlockLabel(editor)} — block style`}
             data-testid="compose-format-heading-menu"
           >
             {currentBlockLabel(editor)}
           </Button>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
-            <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
-            <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
-            <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+        </Tooltip>
+      ) : (
+        <Menu positioning="below-start">
+          <MenuTrigger disableButtonEnhancement>
+            <Button
+              appearance="subtle"
+              size="small"
+              disabled={controlDisabled}
+              className={styles.menuButton}
+              icon={<ChevronDown16Regular />}
+              iconPosition="after"
+              data-testid="compose-format-heading-menu"
+            >
+              {currentBlockLabel(editor)}
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
+              <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
+              <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
+              <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      )}
 
       {/* ---- Paragraph (lists / blockquote / alignment) ---- */}
       <Menu positioning="below-start">
@@ -423,7 +476,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -431,7 +485,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />
@@ -447,7 +502,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignLeft24Regular />}
               label="Align left"
               active={editor.isActive({ textAlign: 'left' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               testId="compose-format-align-left"
             />
@@ -455,7 +511,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignCenter24Regular />}
               label="Align center"
               active={editor.isActive({ textAlign: 'center' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               testId="compose-format-align-center"
             />
@@ -463,7 +520,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignRight24Regular />}
               label="Align right"
               active={editor.isActive({ textAlign: 'right' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               testId="compose-format-align-right"
             />
@@ -514,7 +572,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
               label={editor.isActive('link') ? 'Remove link' : 'Add link'}
               active={editor.isActive('link')}
-              disabled={controlDisabled}
+              // task 038: hyperlinks are not representable in R4 in EITHER mode (no mark op, no
+              // content-model href — R5 G5). Disabled everywhere; controlDisabled is subsumed.
+              disabled={controlDisabled || hyperlinkDisabled}
+              deferredReason={FUTURE_RELEASE_TOOLTIP}
               onClick={toggleLink}
               testId="compose-format-link"
             />
@@ -533,6 +594,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TableAdd24Regular />}
               label="Insert table"
               disabled={tableInsertDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={insertTable}
               testId="compose-format-table-insert"
             />
