@@ -72,6 +72,7 @@ export type {
   EmailAttachmentSourceKind,
   IComposerAttachmentSource,
   IAttachmentItem,
+  IDocumentSearchResult,
   IWizardContext,
   IRecipient,
   ValidationErrorCode,

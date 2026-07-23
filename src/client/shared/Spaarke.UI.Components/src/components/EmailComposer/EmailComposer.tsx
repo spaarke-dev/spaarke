@@ -52,6 +52,7 @@ import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
+import { DocumentLookupDialog } from './subcomponents/DocumentLookupDialog';
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -131,47 +132,31 @@ const useStyles = makeStyles({
     clip: 'rect(0 0 0 0)',
   },
 
-  // Scrollable body between the pinned header and the pinned action bar (owner UAT
-  // round 3 #4/#5): the modal itself is a fixed rectangle that never scrolls — only
-  // this middle region scrolls when content overflows.
-  scrollBody: {
-    flexGrow: 1,
-    minHeight: 0,
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalM,
-    paddingRight: tokens.spacingHorizontalXS,
-  },
   // Extra breathing room between the recipients block (Bcc line) and Subject (#1).
   subjectSpacer: {
     marginTop: tokens.spacingVerticalS,
   },
 
-  // `page` — full-width first-class entity-form chrome (replaces the OOB
-  // sprk_communication form; the highest-value visual deliverable per §5.10).
-  // `height: 100%` lets the pinned-header/scroll-body/pinned-footer layout fill a
-  // bounded host (the CommunicationActions PCF dialog); standalone it resolves to
-  // content height and the page scrolls normally.
+  // `page` — fills the full host container (owner UAT round 4: the composer must fill
+  // the modal, not shrink-to-content and center). `height: 100%` + the flex layout
+  // gives pinned header / fields / flex-grow message editor (its own shared scroll) /
+  // pinned footer. NO margin:auto / maxWidth — those made the composer collapse to
+  // content width inside the flex dialog body.
   page: {
     height: '100%',
     minHeight: 0,
-    maxWidth: '1000px',
-    marginLeft: 'auto',
-    marginRight: 'auto',
+    width: '100%',
     paddingTop: tokens.spacingVerticalL,
     paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
   },
 
-  // `dialog` — bounded width; fills the host dialog height for the pinned layout.
+  // `dialog` — fills the host dialog width + height for the pinned layout.
   dialog: {
     height: '100%',
     minHeight: 0,
     width: '100%',
-    maxWidth: '1000px',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalL,
@@ -209,6 +194,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
   const [showBccToggle, setShowBccToggle] = React.useState(false);
   const bccVisible = showBccToggle || state.bcc.length > 0;
+
+  // Built-in document-lookup overlay (owner UAT round 3/4) — opened from AttachmentList's
+  // "look up a document" tool when the host supplies onSearchDocuments.
+  const [docLookupOpen, setDocLookupOpen] = React.useState(false);
 
   // ── Re-derive state when mode/sourceRecord/communicationId change on an
   //    already-mounted instance (host swaps props rather than remounting) ──
@@ -418,7 +407,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
-          onBrowseDocuments={props.onBrowseDocuments}
+          onBrowseDocuments={props.onSearchDocuments ? () => setDocLookupOpen(true) : undefined}
           readOnly={state.readOnly}
           errorMessage={fieldErrors.attachments}
         />
@@ -472,7 +461,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         </div>
       )}
 
-      {isChromed ? <div className={styles.scrollBody}>{middle}</div> : middle}
+      {/* Fields + message flow directly in the flex column: the message editor
+          (BodyEditor, flex-grow) fills the remaining space and owns the single scroll
+          region via the shared RichTextEditor (owner UAT round 4). */}
+      {middle}
 
       <ComposerActionBar
         mount={props.mount}
@@ -502,6 +494,30 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         onReply={props.onReply}
         onForward={props.onForward}
       />
+
+      {props.onSearchDocuments && (
+        <DocumentLookupDialog
+          open={docLookupOpen}
+          onClose={() => setDocLookupOpen(false)}
+          onSearch={props.onSearchDocuments}
+          onAdd={doc =>
+            dispatch({
+              type: 'ADD_ATTACHMENT',
+              item: {
+                id: `doc:${doc.documentId}`,
+                source: 'related',
+                fileName: doc.fileName,
+                sizeBytes: doc.sizeBytes ?? 0,
+                mimeType: doc.mimeType,
+                documentId: doc.documentId,
+                linkUrl: doc.linkUrl,
+                selected: true,
+                linkSelected: false,
+              },
+            })
+          }
+        />
+      )}
     </div>
   );
 });

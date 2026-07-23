@@ -125,10 +125,11 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     flexShrink: 0,
   },
-  // Single non-wrapping summary line (owner UAT round 3 #2).
+  // Single non-wrapping summary line, right-aligned (owner UAT round 4).
   summaryRow: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'flex-end',
     gap: tokens.spacingHorizontalS,
     whiteSpace: 'nowrap',
     overflow: 'hidden',

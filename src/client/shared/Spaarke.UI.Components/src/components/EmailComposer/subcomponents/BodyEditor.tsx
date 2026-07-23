@@ -24,6 +24,23 @@ import { TextFont20Regular, TextT20Regular } from '@fluentui/react-icons';
 import { RichTextEditor } from '../../RichTextEditor';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
 
+/**
+ * Convert an HTML body to readable plain text when the user switches to Plain text,
+ * so the textarea shows text — NOT raw `<p class="editor-paragraph">…</p>` markup
+ * (owner UAT round 4). Block boundaries become newlines; remaining tags are stripped
+ * and entities decoded via the browser parser.
+ */
+function htmlToPlainText(html: string): string {
+  if (!html || !/[<&]/.test(html)) return html; // already plain
+  const withBreaks = html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '• ');
+  const el = document.createElement('div');
+  el.innerHTML = withBreaks;
+  return (el.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -52,18 +69,17 @@ const useStyles = makeStyles({
     flex: 1,
     minHeight: 0,
   },
-  // Editor area — `position: relative` anchors the floating format toggle; the
-  // whole area is vertically resizeable (owner UAT #6). overflowX hidden removes
-  // the horizontal scrollbar (owner UAT round 3 #3).
+  // Editor area — `position: relative` anchors the floating format toggle. Fills the
+  // remaining composer height; the shared RichTextEditor owns its own scroll (with the
+  // standard circle-down-arrow), so this container does NOT add a second scrollbar
+  // (owner UAT round 4: single scroll, correct placement).
   editorArea: {
     position: 'relative',
     display: 'flex',
     flexDirection: 'column',
     flexGrow: 1,
     minHeight: 0,
-    resize: 'vertical',
-    overflowY: 'auto',
-    overflowX: 'hidden',
+    overflow: 'hidden',
   },
   // Rich/Plain toggle floats at the top-right, sitting at the right end of the RTF
   // toolbar row (owner UAT #4). The RTF tools are left-aligned so this never overlaps them.
@@ -119,7 +135,15 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
               size="small"
               icon={format === 'HTML' ? <TextFont20Regular /> : <TextT20Regular />}
               aria-label={format === 'HTML' ? 'Switch to plain text' : 'Switch to rich text'}
-              onClick={() => onFormatChange(format === 'HTML' ? 'PlainText' : 'HTML')}
+              onClick={() => {
+                if (format === 'HTML') {
+                  // Strip markup so the textarea shows text, not raw HTML tags.
+                  onChange(htmlToPlainText(value));
+                  onFormatChange('PlainText');
+                } else {
+                  onFormatChange('HTML');
+                }
+              }}
             />
           </Tooltip>
         </div>

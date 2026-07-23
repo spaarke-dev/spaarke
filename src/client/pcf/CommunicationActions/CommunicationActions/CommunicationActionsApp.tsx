@@ -44,6 +44,7 @@ import {
   type ISendEmailPageProps,
   type EmailComposerMode,
   type IAttachmentItem,
+  type IDocumentSearchResult,
   searchUsersAndContacts,
   createXrmDataService,
 } from '@spaarke/ui-components';
@@ -318,6 +319,30 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     [dataService]
   );
 
+  // Document-lookup overlay search (owner UAT round 3/4): search sprk_document by name;
+  // linkUrl is the Dataverse record deep-link so the composer's "Link" option can insert it.
+  const handleSearchDocuments = React.useCallback(
+    async (query: string): Promise<IDocumentSearchResult[]> => {
+      const safe = query.replace(/'/g, "''");
+      const options =
+        `?$select=sprk_documentid,sprk_documentname,sprk_filename,sprk_filesize` +
+        `&$filter=contains(sprk_documentname,'${safe}')` +
+        `&$orderby=sprk_documentname asc&$top=15`;
+      const result = await dataService.retrieveMultipleRecords('sprk_document', options);
+      const base = resolveDataverseUrl();
+      return result.entities.map(e => {
+        const id = e['sprk_documentid'] as string;
+        return {
+          documentId: id,
+          fileName: (e['sprk_documentname'] as string) || (e['sprk_filename'] as string) || 'Document',
+          sizeBytes: (e['sprk_filesize'] as number) ?? 0,
+          linkUrl: base ? `${base}/main.aspx?pagetype=entityrecord&etn=sprk_document&id=${id}` : undefined,
+        };
+      });
+    },
+    [dataService]
+  );
+
   // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
   // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
   // the OOB `navigateTo` dialog can later be swapped for a custom Fluent dialog
@@ -375,6 +400,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       authenticatedFetch,
       bffBaseUrl,
       onSearchRecipients: handleSearchRecipients,
+      onSearchDocuments: handleSearchDocuments,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -384,7 +410,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, sourceAttachments]);
+  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, handleSearchDocuments, sourceAttachments]);
 
   if (authError) {
     return (

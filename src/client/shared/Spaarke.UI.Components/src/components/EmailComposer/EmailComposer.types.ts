@@ -105,6 +105,21 @@ export interface IAttachmentItem {
   linkUrl?: string;
 }
 
+/**
+ * A document returned by the host's `onSearchDocuments` for the document-lookup overlay
+ * (owner UAT round 3/4). The user can Attach it (its `documentId` flows into the send
+ * payload) and/or Link it (a body hyperlink, when `linkUrl` is resolvable).
+ */
+export interface IDocumentSearchResult {
+  /** `sprk_document` GUID. */
+  documentId: string;
+  fileName: string;
+  sizeBytes?: number;
+  mimeType?: string;
+  /** Optional deep-link/preview URL — enables the Link option for this document. */
+  linkUrl?: string;
+}
+
 /** Files a hosting wizard has already uploaded, offered as a pre-checked attachment source. */
 export interface IWizardContext {
   uploadedFiles: {
@@ -332,13 +347,13 @@ export interface IEmailComposerProps {
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
 
   /**
-   * Opens the host's document-lookup overlay so the user can attach/link an existing
-   * `sprk_document` (owner UAT round 3, 2026-07-22). When supplied, AttachmentList
-   * renders a "look up a document" tool; the host adds each pick back through the
-   * composer's attachment state. Absent → only the from-computer add tool renders.
-   * Context-agnostic (ADR-012): the engine never queries Dataverse itself.
+   * Search existing `sprk_document` records for the built-in document-lookup overlay
+   * (owner UAT round 3/4, 2026-07-22). When supplied, AttachmentList renders a "look
+   * up a document" tool that opens a modal OVER the composer; picks are added to the
+   * composer's attachment state (Attach and/or Link). Absent → only the from-computer
+   * add tool renders. Context-agnostic (ADR-012): the host binds the Dataverse query.
    */
-  onBrowseDocuments?: () => void;
+  onSearchDocuments?: (query: string) => Promise<IDocumentSearchResult[]>;
 
   // — Send-side behavior —
   sendMode?: CommunicationSendMode;
