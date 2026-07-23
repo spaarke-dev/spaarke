@@ -1957,6 +1957,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         <ComposeFormatToolbar
           editor={editor}
           disabled={isImporting}
+          // task 037 (owner Path C — IMPORT-ONLY tables): a from-scratch born-in-editor draft
+          // (blank / AI-draft via `initialHtml`) mounts with NO retained original (`docxBytes`
+          // null, no server `projection`) — disable NEW table authoring there. A loaded/imported
+          // doc (uploaded `.docx`, opened template, or stored-doc projection) keeps full tables.
+          hasLoadedBaseline={docxBytes !== null || projection != null}
           onOpenInWord={onOpenInWord}
           onOpenInWordDesktop={onOpenInWordDesktop}
           wordActionsDisabled={wordActionsDisabled}

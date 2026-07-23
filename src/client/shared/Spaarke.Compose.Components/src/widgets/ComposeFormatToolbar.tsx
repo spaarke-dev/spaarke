@@ -155,6 +155,23 @@ export interface ComposeFormatToolbarProps {
   /** Toggle the live Track Changes overlay. Rendered only when supplied. */
   onToggleTrackChanges?: () => void;
 
+  // ---- Table authoring gate (task 037, owner Path C — IMPORT-ONLY tables) ----
+  /**
+   * True when the editor is over a LOADED/imported baseline (an uploaded `.docx`, a stored
+   * document, or an opened template — anything with a retained original). False for a
+   * from-scratch BORN-IN-EDITOR draft (blank page / AI-draft) that has NO retained original.
+   *
+   * When `false`, the "Insert table" command is DISABLED: tables are **import-only** — they
+   * survive byte-identical inside uploaded documents (via the retained original) but cannot be
+   * authored fresh from an empty editor. This is the owner-signed-off Path C product decision
+   * (task 037): the closed op schema has no table-authoring primitive, so a born-in-editor table
+   * has no unified save path. Row/column/delete-table commands are unaffected (they are already
+   * gated by `editor.can()` — a born-in-editor draft has no table for them to act on).
+   *
+   * Defaults to `true` (undefined ⇒ enabled) so existing callers/tests keep full table support.
+   */
+  hasLoadedBaseline?: boolean;
+
   // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
   /** Save handler (create-on-save first Save, or update). */
   onSave?: () => void;
@@ -257,6 +274,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onOpenInWord,
     onOpenInWordDesktop,
     wordActionsDisabled,
+    hasLoadedBaseline,
     onSave,
     canSave,
     isSaving,
@@ -355,6 +373,12 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
+
+  // task 037 (owner Path C — IMPORT-ONLY tables): disable "Insert table" for a from-scratch
+  // born-in-editor draft (no loaded/imported baseline). Tables stay authorable/editable on
+  // loaded documents; only NEW-from-scratch table authoring is removed. `undefined ⇒ enabled`
+  // preserves existing callers. The read-only gate (`controlDisabled`) still wins.
+  const tableInsertDisabled = controlDisabled || hasLoadedBaseline === false;
 
   return (
     <Toolbar
@@ -508,7 +532,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             <PaletteIconButton
               icon={<TableAdd24Regular />}
               label="Insert table"
-              disabled={controlDisabled}
+              disabled={tableInsertDisabled}
               onClick={insertTable}
               testId="compose-format-table-insert"
             />

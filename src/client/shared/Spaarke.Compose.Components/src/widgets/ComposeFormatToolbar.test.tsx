@@ -312,6 +312,35 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 5b. Table dropdown — Insert table gated to import-only (task 037, owner Path C)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Table insert gated to import-only (task 037)', () => {
+  it('Insert table is ENABLED by default (loaded/imported doc — hasLoadedBaseline omitted ⇒ enabled)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar();
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // Regression guard: existing callers that never pass the prop keep full table authoring.
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is ENABLED when hasLoadedBaseline is true (uploaded .docx / stored doc / template)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is DISABLED in born-in-editor mode (hasLoadedBaseline=false — no retained original)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // Owner Path C: tables are import-only — a from-scratch draft cannot author a NEW table.
+    expect(screen.getByTestId('compose-format-table-insert')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6. Save button — right-aligned icon button honoring canSave / isSaving
 // ---------------------------------------------------------------------------
 
