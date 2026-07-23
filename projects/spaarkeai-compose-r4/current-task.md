@@ -1,7 +1,7 @@
 # Current Task State — Spaarke Compose R4
 
-> **Last Updated**: 2026-07-22 (by context-handoff, pre-compaction)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r4` @ `3e0abc7cc` (12 commits unpushed; all work committed locally).
+> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r4`.
 
 ---
 
@@ -10,59 +10,35 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r4 (Shadow Document Architecture — hard-replace of Compose save layer) |
-| **Progress** | **27 / 36 tasks done. Phases 0–5 COMPLETE.** |
-| **Status** | ⏸ **Autonomous run paused — Phase 6 gated on OWNER DECISIONS** |
-| **Next Action** | Get owner input on the 3 items below, then run Phase 6: `060 → 061 → 062 → 063 → 090`. |
+| **Progress** | **All code + verification COMPLETE. Stopped at the deploy boundary (owner-orchestrated).** |
+| **Status** | ⏸ **Autonomous run paused at deploy boundary** — remaining = 035/062 (deploy), 063 (gate, post-deploy), 090 (wrap-up) |
+| **Next Action** | OWNER orchestrates deploy: task 035 (dev) + task 062 (full R4 + CIPO UAT). Then 063 flagship gate + 090 wrap-up. |
 
-### 🔔 OWNER DECISIONS NEEDED to unblock Phase 6 (nothing else is blocking)
-1. **Task 036 — push-to-Word annotations** (`DocxAnnotationWriter`, text-anchored): **Path B** (migrate to op-log) **or Path C** (retire the feature — likely redundant now that R4 emits native Word tracked changes). See `notes/task-032-pushannotations-scope.md`.
-2. **Task 037 — born-in-editor tables** (closed op-schema has no table op): **Path B** (extend the FR-11 op schema to author `w:tbl`, retire the renderer) **or Path C** (make tables import-only). See `notes/task-033-table-operation-gap.md`.
-3. **Deploy authorization**: task **035** (dev deploy — verified, held) + task **062** (full R4 deploy + CIPO UAT). Outward actions, not taken autonomously.
+### What shipped this session (all committed on work/spaarkeai-compose-r4)
+- **036** (`bae44955b`) — RETIRED push-to-Word annotations (Path B); deleted `DocxAnnotationWriter` (last text-search byte-author). I-7 complete.
+- **037/033** — resolved **C-revised** (owner): born-in-editor stays on `ComposeDocumentRenderer` (clean-authoring, zero text-search — cited I-5 exception). Two byte-authors kept separate by design.
+- **038** (`a5368d5b5`) — **ZERO-ERROR guardrail pass**: unsupported edit-path controls disabled on loaded docs, table gating corrected, hyperlinks disabled, formatted-paste informs via banner, and the critical **op-log-preservation fix** (no rejected save can lose a batch).
+- **060** (`da1ab0e94`) — hard-replace core complete (write path fully on the engine; both legacy WRITERS gone). mammoth RETAINED for 3 transient docx mounts (Browse/upload/open-in-Compose) — §6.5 Path-A exception → R5 G6.
+- **061** (`0a9710cd1`) — acceptance evidence ALL GREEN: 28/28 corpus byte-diff, 515 server + 531 client tests, publish **46.11 MB** (−3.52 vs 49.63), no new HIGH CVE, ADR-013 NetArch green.
 
-Both 036 + 037 block **Success Criterion 7** ("one byte-author"). Interim: push-annotations on `DocxAnnotationWriter`, born-in-editor on `ComposeDocumentRenderer` — documented §6.5 exceptions, **zero regression**.
+### 🔔 OWNER — the deploy boundary (the only thing left before wrap-up)
+1. **Task 035** — deploy patch-engine core to **dev** (verified at 46.11 MB; held for owner).
+2. **Task 062** — deploy full R4 + **CIPO operator UAT** (owner-orchestrated per user: "I need to help orchestrate the deploy").
+3. After deploy: **063** flagship gate (8 criteria — Criterion 7 "one byte-author" met with the two documented C-revised/mammoth exceptions), then **090** wrap-up (+ `/test-diet`).
 
-### Critical Context (1-3 sentences)
-R4's save-path hard-replace is LIVE: all saves route through the single `ComposeShadowPatchEngine` (op-log → surgical `w:ins`/`w:del`/`w:comment`, zero write-path text-search). Two shipped constructs the closed 10-op schema can't express (push-annotations comments, born-in-editor tables) were kept working via documented §6.5 exceptions and deferred to owner Path-B/C decisions (036/037). Publish 46–47.5 MB compressed (≤60); 552/552 Compose tests green.
+### Owner decisions on record (this session)
+- **036 → Path B (retire push-annotations).** **037 → C-revised (keep renderer, cite I-5 exception).** **060 → Path-A (retain mammoth for transient mounts → R5).**
+- **Scope boundary**: R4 = keep two authors separate, ship **error-free with documented functional limits**; editing-completeness deferred to **`projects/spaarkeai-compose-r5`** (gaps G1–G6, code-grounded + sized).
+- **KEY constraint honored**: no user-triggerable errors, no silent data loss (task 038 + the transient-mount limit is pre-existing/non-error).
 
----
-
-## Task Ledger (source of truth: `tasks/TASK-INDEX.md`)
-
-**DONE (27):** 001–006 (Phase 0 gate 🟢), 010–013 (ingest), 020–024 (capture), 030/031/032 (engine + structural + save-path cutover), 023 (cleanup), 034 (seam proof), 040–042 (AI anchoring), 050–054 (concurrency + import).
-
-**REMAINING (9), all gated:**
-| Task | State | Gated on |
-|---|---|---|
-| 035 | verified (46.13 MB); Azure dev deploy held | owner deploy auth |
-| 033 | deferred → folds into 037 | 037 |
-| 036 | 🔔 deferred | owner Path B/C (push-annotations) |
-| 037 | 🔔 deferred | owner Path B/C (born-in-editor tables) |
-| 060 | blocked | 036, 037 (hard-replace completion / remove mammoth) |
-| 061 | blocked | 060 (corpus proof + size + CVE + NetArch) |
-| 062 | blocked | 060, 061 + deploy auth (full deploy + CIPO UAT) |
-| 063 | blocked | 062 (flagship gate — needs Criterion 7 = 036+037) |
-| 090 | blocked | 063 (wrap-up + /test-diet) |
-
-## Key decisions made this run
-- **Patch engine = `DocumentFormat.OpenXml`** (zero new package); Docxodus REJECTED (task 005 A/B; `notes/patch-engine-ab-decision.md`).
-- **ADR-049** authored (invariants I-1…I-7, D1–D5, Path-B amendment of R3 paragraph-diff).
-- **3 WBS gaps resolved**: 023 re-sequenced→031 (structural capture); 036 created (push-annotations, task-032 Path A); 037 created (born-in-editor tables, task-033).
-- Offset space = **editor-visible run flatten** (task 011 → engine 030 consumes the same).
+## Deferred to R5 (`projects/spaarkeai-compose-r5/README.md`)
+G1 cross-session authored-doc clean lifecycle · G2 clean-apply mode · G3 setBlockAttr applier (headings/lists/alignment on edit path) · G4 table op (tracked) · G5 hyperlinks · G6 transient-mount projection unification (removes mammoth). None requires merging the two byte-authors.
 
 ## Health
-- Every phase build-verified + gates-clean + committed per wave. 552/552 Compose tests green; full BFF suite 8920/8920 baseline.
-- Publish 46.13 MB compressed (Release; ↓ from 49.63 baseline via 032 deletion). Only HIGH CVE = pre-existing `System.Security.Cryptography.Xml` transitive (R4 added zero packages).
-- Pre-existing ADR-007 GraphIsolation arch-test failure lives in `Services/Communication/**` + `Api/Office` — **NOT Compose, out of R4 scope** (flag for a separate ticket).
+- Every task build-verified + committed. Server Compose 515/515; client 531/531; 038 guardrails 64/64; corpus byte-diff 28/28. Publish 46.11 MB compressed (≤60). Only HIGH CVE = pre-existing `System.Security.Cryptography.Xml` transitive. ADR-007 arch failure = pre-existing Communication/Office (zero Compose types).
 
-## How to resume after compaction
-1. Read this Quick Recovery. 2. `tasks/TASK-INDEX.md` for the full status grid. 3. For Phase 6, first get the 3 owner decisions above. 4. Once 036/037 paths chosen: execute 036 + 037 (each POML has `<owner-decision-required>` + steps), then 060→061→062→063→090 via `task-execute`. 5. Deferred-decision analyses: `notes/task-032-pushannotations-scope.md`, `notes/task-033-table-operation-gap.md`.
+## How to resume
+`/project-continue` or "where was I?". Deploy is owner-led — do NOT run 035/062 autonomously. After deploy, 063 → 090.
 
 ## Portfolio
-[Project #679](https://github.com/spaarke-dev/spaarke/issues/679) · Tasks Completed 27/36 · 12 commits unpushed on `work/spaarkeai-compose-r4` (push when ready).
-
----
-
-## Recovery Instructions
-`/project-continue` (full reload) · "where was I?" (quick). Full protocol: [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md).
-
-*Primary source of truth for active work state. All 27 completed tasks are committed; nothing uncommitted except this file.*
+[Project #679](https://github.com/spaarke-dev/spaarke/issues/679) · Branch `work/spaarkeai-compose-r4`.
