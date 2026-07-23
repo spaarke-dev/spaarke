@@ -27,8 +27,7 @@ import { Button, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluent
 import { OpenRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
 import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
-import { MessageAttachments } from '../../CommunicationTimeline/subcomponents/MessageAttachments';
-import type { TimelineAttachment, TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
+import type { TimelineMessage } from '../../CommunicationTimeline/CommunicationTimeline.types';
 
 export interface IEmailInFlowBlockProps {
   /** The email-type `sprk_communication` row to render as a compact block. */
@@ -41,18 +40,14 @@ export interface IEmailInFlowBlockProps {
    * in view/detail for this email — this component never mounts the dialog.
    */
   onOpen?: (message: TimelineMessage) => void;
-  /**
-   * Open/preview/download an email attachment via the existing SPE
-   * document-viewer path (task 042 / FR-20). Threaded from `ConversationView`;
-   * the host mounts `<RichFilePreviewDialog />`. Omit it and attachments render
-   * as passive chips.
-   */
-  onOpenAttachment?: (attachment: TimelineAttachment, message: TimelineMessage) => void;
 }
 
 const SUBJECT_FALLBACK = '(no subject)';
 const FROM_FALLBACK = 'Unknown sender';
 const TO_FALLBACK = '—';
+
+/** Max characters of the body preview shown on the card (R3 UAT 2026-07-22 item 2). */
+const PREVIEW_MAX_CHARS = 100;
 
 const useStyles = makeStyles({
   row: {
@@ -72,13 +67,13 @@ const useStyles = makeStyles({
   block: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-    maxWidth: '75%',
+    gap: tokens.spacingVerticalXS,
+    maxWidth: '85%',
     minWidth: 0,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
     borderRadius: tokens.borderRadiusMedium,
     // Per-side longhands (griffel rejects the `border*` shorthands) — a thin
     // stroke plus the distinct background2 sets the compact email block apart
@@ -107,7 +102,11 @@ const useStyles = makeStyles({
     flex: 1,
     minWidth: 0,
   },
+  // Item 2 (R3 UAT 2026-07-22): larger, less-compressed type — subject reads at
+  // base400, meta/snippet at base300 (was base200). Semantic tokens only (ADR-021).
   subject: {
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
     wordBreak: 'break-word',
@@ -118,21 +117,30 @@ const useStyles = makeStyles({
     minWidth: 0,
   },
   metaLabel: {
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground3,
     flexShrink: 0,
   },
   metaValue: {
+    fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground2,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     minWidth: 0,
   },
-  attachmentsRow: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalXXS,
+  // ~100-char body preview (item 2) — clamped to two lines so a long snippet
+  // never blows out the card height.
+  snippet: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground2,
+    wordBreak: 'break-word',
+  },
+  // Sent/received date line (item 2).
+  dateLine: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -142,13 +150,49 @@ function withFallback(value: string | null | undefined, fallback: string): strin
   return trimmed ? trimmed : fallback;
 }
 
-export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, isOwn, onOpen, onOpenAttachment }) => {
+/**
+ * ~100-char plain-text preview of the email body (item 2). Strips HTML tags from
+ * html bodies and collapses whitespace so the snippet reads as running text, then
+ * truncates on a character budget with an ellipsis. Returns '' when there's no body.
+ */
+function messagePreview(message: TimelineMessage, max = PREVIEW_MAX_CHARS): string {
+  const raw = message.body ?? '';
+  const text = (message.bodyFormat === 'html' ? raw.replace(/<[^>]*>/g, ' ') : raw).replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}…`;
+}
+
+/**
+ * "Sent/Received {date}" line (item 2), from `sentOn ?? createdOn`. The verb is
+ * chosen from `sprk_direction` (outgoing → Sent, incoming → Received); when the
+ * direction is unknown the bare date is shown. Returns null when no valid
+ * timestamp is available so the line is simply omitted.
+ */
+function formatSentReceived(message: TimelineMessage): string | null {
+  const raw = message.sentOn ?? message.createdOn;
+  if (!raw) return null;
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  const when = date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+  const verb = message.direction === 'incoming' ? 'Received ' : message.direction === 'outgoing' ? 'Sent ' : '';
+  return `${verb}${when}`;
+}
+
+export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, isOwn, onOpen }) => {
   const styles = useStyles();
 
   const subject = withFallback(message.subject, SUBJECT_FALLBACK);
   const from = withFallback(message.sender, FROM_FALLBACK);
   const recipients = (message.to ?? []).map(t => t.trim()).filter(Boolean);
   const to = recipients.length > 0 ? recipients.join(', ') : TO_FALLBACK;
+  const preview = messagePreview(message);
+  const sentReceived = formatSentReceived(message);
 
   const regionLabel = `Email: ${subject}, from ${from}`;
 
@@ -187,22 +231,17 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
         </div>
 
         <div className={styles.metaLine}>
-          <Text size={200} className={styles.metaLabel}>
-            To:
-          </Text>
-          <Text size={200} className={styles.metaValue} title={to}>
+          <Text className={styles.metaLabel}>To:</Text>
+          <Text className={styles.metaValue} title={to}>
             {to}
           </Text>
         </div>
 
-        {message.attachments.length > 0 && (
-          <MessageAttachments
-            className={styles.attachmentsRow}
-            attachments={message.attachments}
-            message={message}
-            onOpenAttachment={onOpenAttachment}
-          />
-        )}
+        {/* ~100-char body preview (item 2) — replaces the removed attachment list. */}
+        {preview && <Text className={styles.snippet}>{preview}</Text>}
+
+        {/* Sent/received date (item 2). */}
+        {sentReceived && <Text className={styles.dateLine}>{sentReceived}</Text>}
       </div>
     </div>
   );

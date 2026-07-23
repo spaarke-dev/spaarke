@@ -51,6 +51,7 @@
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { ILookupItem } from '../../types/LookupTypes';
 import {
   getThreadUnreadCount,
   listThreads,
@@ -59,6 +60,7 @@ import {
   type IThreadListApiClientOptions,
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
+import { NewThreadModal } from '../NewThreadModal';
 import { ThreadList, type IThreadListRow, type ThreadListStatus } from './subcomponents/ThreadList';
 
 // ---------------------------------------------------------------------------
@@ -77,6 +79,14 @@ export interface IConversationRendererProps {
   threadId: string;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
+  /**
+   * Clears the currently-selected thread's list-pane unread badge (R3 UAT
+   * 2026-07-22 item 5c). Wired to the shell's optimistic unread-clear so the
+   * relocated "Mark as read" tool in `ConversationView`'s message toolbar can
+   * dismiss the badge the thread row now shows as a dot. Forward it to
+   * `<ConversationView onMarkThreadRead={…} />`.
+   */
+  onMarkThreadRead: () => void;
 }
 
 export interface ConversationWorkspaceProps {
@@ -98,7 +108,23 @@ export interface ConversationWorkspaceProps {
    */
   renderConversation?: (props: IConversationRendererProps) => React.ReactNode;
 
-  /** Fired when the ＋ (create thread) affordance is activated. The NewThreadModal itself is task 024 — this shell only wires the callback. */
+  /**
+   * Recipient directory search for the built-in New-conversation modal (item
+   * 5a). When provided, the shell OWNS the create flow: the ＋ affordance opens
+   * `<NewThreadModal />` internally and, on success, refreshes the list and
+   * selects the new/reused thread — no host wiring beyond this search binding.
+   * The host binds it to `searchUsersAndContacts` (host-context `Xrm.WebApi`).
+   * Omit it (and `onCreateThread`) to hide the ＋.
+   */
+  onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+
+  /**
+   * Fired when the ＋ (create thread) affordance is activated. OPTIONAL host
+   * notification. When `onSearchRecipients` is supplied the shell also opens its
+   * built-in `<NewThreadModal />`; a host that wants to own the create surface
+   * itself can instead supply only `onCreateThread` (no `onSearchRecipients`)
+   * and mount its own modal.
+   */
   onCreateThread?: () => void;
 
   /** Fired whenever the selected thread changes (including the initial default-select). */
@@ -132,7 +158,9 @@ const useStyles = makeStyles({
   rightPane: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 auto',
+    // flex-basis 0 (not auto) so the pane's width is a proportion of the shell,
+    // independent of the widest message bubble it contains (R3 UAT item 3).
+    flex: '1 1 0%',
     minHeight: 0,
     minWidth: 0,
     overflow: 'hidden',
@@ -174,6 +202,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   bffBaseUrl,
   regarding,
   renderConversation,
+  onSearchRecipients,
   onCreateThread,
   onThreadSelected,
   onError,
@@ -181,6 +210,12 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   className,
 }) => {
   const styles = useStyles();
+
+  // Built-in New-conversation modal (item 5a). The shell owns the create flow
+  // when `onSearchRecipients` is supplied; `reloadToken` forces a list re-fetch
+  // after a create so the new/reused thread appears.
+  const [newThreadOpen, setNewThreadOpen] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
 
   const client = React.useMemo<IThreadListApiClientOptions>(
     () => ({ authenticatedFetch, bffBaseUrl }),
@@ -226,7 +261,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityType, recordId, pageSize, client]);
+  }, [entityType, recordId, pageSize, client, reloadToken]);
 
   // No thread-list text filter anymore (task 062 / §B4) — the visible set is
   // exactly the loaded, access-filtered set for the current scope.
@@ -301,6 +336,31 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     [onThreadSelected]
   );
 
+  // — New-conversation create flow (item 5a) —
+  // The ＋ affordance is enabled when the shell can start a create (its own modal
+  // via `onSearchRecipients`, or a host-owned surface via `onCreateThread`).
+  const canCreateThread = !!onSearchRecipients || !!onCreateThread;
+
+  const handleOpenNewThread = React.useCallback(() => {
+    // Notify the host (optional), and open the built-in modal when the shell owns
+    // the create surface.
+    onCreateThread?.();
+    if (onSearchRecipients) setNewThreadOpen(true);
+  }, [onCreateThread, onSearchRecipients]);
+
+  const handleThreadCreated = React.useCallback(
+    (threadId: string) => {
+      // find-or-create returned a thread — select it immediately (the right pane
+      // renders straight off `selectedThreadId`, so the conversation shows before
+      // the list refresh completes) and re-fetch the list so the row appears.
+      setNewThreadOpen(false);
+      setSelectedThreadId(threadId);
+      onThreadSelected?.(threadId);
+      setReloadToken(t => t + 1);
+    },
+    [onThreadSelected]
+  );
+
   const handleMarkThreadRead = React.useCallback((threadId: string) => {
     // Optimistic local clear — no persisted per-user watermark endpoint exists
     // for the list pane (see communicationThreadListApi.ts note); the true
@@ -343,7 +403,14 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
-      renderConversation({ threadId: selectedThreadId, authenticatedFetch, bffBaseUrl })
+      renderConversation({
+        threadId: selectedThreadId,
+        authenticatedFetch,
+        bffBaseUrl,
+        // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
+        // the message-toolbar tool fires.
+        onMarkThreadRead: () => handleMarkThreadRead(selectedThreadId),
+      })
     ) : (
       <DefaultConversationPane threadId={selectedThreadId} />
     )
@@ -359,11 +426,25 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
         errorMessage={errorMessage}
         selectedThreadId={selectedThreadId}
         onSelectThread={handleSelectThread}
-        onMarkThreadRead={handleMarkThreadRead}
-        onCreateThread={onCreateThread}
+        onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
         onTogglePin={handleTogglePin}
       />
       <div className={styles.rightPane}>{rightPane}</div>
+
+      {/* Built-in New-conversation modal (item 5a) — only mounted when the shell
+          owns the create surface (a recipient-search binding was supplied). */}
+      {onSearchRecipients && (
+        <NewThreadModal
+          open={newThreadOpen}
+          onDismiss={() => setNewThreadOpen(false)}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl={bffBaseUrl}
+          onSearchRecipients={onSearchRecipients}
+          onThreadCreated={handleThreadCreated}
+          regarding={regarding ? { entityType: regarding.entityType, id: regarding.id } : undefined}
+          onError={onError}
+        />
+      )}
     </div>
   );
 };

@@ -10,10 +10,11 @@
 | Field | Value |
 |-------|-------|
 | **Active work** | UAT refinement of the Communications widget + modal (conversation UI). NOT a POML task — direct UAT iteration. |
-| **Status** | Feedback captured + file-mapped + committed. **Implementation NOT started.** |
-| **Next Action** | Implement **Batch A** first (see "UAT Work Item" below) — `ConversationView.tsx` toolbar/send/refresh/mark-as-read. Then Batch B (`EmailInFlowBlock.tsx`), then Batch C (`ConversationWorkspace.tsx` + `ThreadList.tsx`). Update each component's `__tests__`. |
+| **Status** | **IMPLEMENTED 2026-07-22 — all 7 UAT items done.** Tests green (ui-components 97/97, communication-components 9/9), both consumer packages typecheck clean. Not yet committed. |
+| **Next Action** | Commit the UAT batch (5 shared files + 2 hosts + tests + rebuilt dist), then HOLD deploy for coordinated rollout. See `notes/uat-feedback-comm-widget-2026-07-22.md` for the per-item resolution table. |
 | **Branch** | `work/messaging-communication-app-r3` — synced with master (a few notes commits ahead since last sync). |
 | **Deploy** | HELD for the operator's **coordinated cross-project rollout** — do NOT deploy without the user sequencing it. |
+| **Re-UAT watch** | Item 1 (full-height): if the "small box" persists after deploy, the cause is the OUTER dashboard wrapper (`WorkspaceWidgetRegistry` / `communications.registration.ts`), not these shared files — the shell's own height/width chain is now correct. |
 
 ### Critical Context (3 sentences)
 Task 045 (FR-22 notification awareness) is DONE + merged to master (Option A register-only wiring; consumer-only; no second producer). SpaarkeAi was just deployed carrying it. The current work is a 7-item UAT batch on the **shared** conversation components (`@spaarke/ui-components` `ConversationWorkspace`/`ConversationView` + `@spaarke/communication-components` `CommunicationsWorkspaceWidget`) — fixes reach BOTH the dashboard widget AND the modal code page (`sprk_communicationconversationpage`) because they share these components.

@@ -25,7 +25,6 @@
 import * as React from 'react';
 import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { AddRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
-import { UnreadIndicator } from '../../CommunicationTimeline/subcomponents/UnreadIndicator';
 
 export interface IThreadListRow {
   threadId: string;
@@ -50,7 +49,6 @@ export interface IThreadListProps {
   errorMessage?: string;
   selectedThreadId?: string;
   onSelectThread: (threadId: string) => void;
-  onMarkThreadRead?: (threadId: string) => void;
   onCreateThread?: () => void;
   /**
    * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
@@ -96,18 +94,24 @@ const useStyles = makeStyles({
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
+    // Breathing room between thread rows (R3 UAT 2026-07-22 item 5b).
+    rowGap: tokens.spacingVerticalXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
   },
   row: {
     display: 'flex',
     flexDirection: 'column',
     cursor: 'pointer',
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
+    // Roomier rows (item 5b) — vertical M padding + a rounded card look now that
+    // rows are separated by a gap rather than a divider line.
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: tokens.strokeWidthThin,
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke3,
+    borderRadius: tokens.borderRadiusMedium,
     outlineStyle: 'none',
     ':hover': {
       backgroundColor: tokens.colorNeutralBackground1Hover,
@@ -141,9 +145,21 @@ const useStyles = makeStyles({
     flexShrink: 0,
     minWidth: 'auto',
     padding: 0,
+    // Smaller pin glyph (item 5b) — the icon font-size drives the SVG size.
+    fontSize: tokens.fontSizeBase200,
   },
   pinButtonActive: {
     color: tokens.colorBrandForeground1,
+  },
+  // Compact unread signal (item 5b) — a brand dot replaces the "N new messages"
+  // text row + its inline "Mark as read" button (that action moved to the message
+  // toolbar, item 5c). Semantic token → adapts in dark mode (ADR-021).
+  unreadDot: {
+    flexShrink: 0,
+    width: '8px',
+    height: '8px',
+    borderRadius: tokens.borderRadiusCircular,
+    backgroundColor: tokens.colorBrandBackground,
   },
   centeredState: {
     display: 'flex',
@@ -167,7 +183,6 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   errorMessage,
   selectedThreadId,
   onSelectThread,
-  onMarkThreadRead,
   onCreateThread,
   onTogglePin,
   className,
@@ -280,6 +295,16 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                   <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
                     {displayName}
                   </Text>
+                  {/* Unread signal as a compact brand dot (item 5b) — replaces the
+                      former "N new messages" text + inline Mark-as-read row. */}
+                  {typeof row.unreadCount === 'number' && row.unreadCount > 0 && (
+                    <span
+                      className={styles.unreadDot}
+                      role="img"
+                      aria-label={`${row.unreadCount} unread message${row.unreadCount === 1 ? '' : 's'}`}
+                      title={`${row.unreadCount} unread message${row.unreadCount === 1 ? '' : 's'}`}
+                    />
+                  )}
                   {onTogglePin && (
                     <Button
                       appearance="transparent"
@@ -297,12 +322,6 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                     />
                   )}
                 </div>
-                {typeof row.unreadCount === 'number' && row.unreadCount > 0 && (
-                  <UnreadIndicator
-                    unreadCount={row.unreadCount}
-                    onMarkAsRead={() => onMarkThreadRead?.(row.threadId)}
-                  />
-                )}
               </div>
             );
           })}

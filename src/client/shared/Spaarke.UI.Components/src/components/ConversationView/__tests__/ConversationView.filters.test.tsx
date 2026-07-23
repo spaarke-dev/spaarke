@@ -293,3 +293,46 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Show email messages' })).toBeInTheDocument());
   });
 });
+
+// ---------------------------------------------------------------------------
+// Message toolbar changes (R3 UAT 2026-07-22): Send icon-only (item 6),
+// Refresh relocated into the toolbar (item 7), Mark-as-read tool (item 5c).
+// ---------------------------------------------------------------------------
+
+describe('ConversationView — message toolbar (R3 UAT 2026-07-22)', () => {
+  it('Send is icon-only (no visible "Send" text) and Refresh is a toolbar tool', async () => {
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await waitFor(() => expect(screen.getByRole('article')).toBeInTheDocument());
+
+    // Send: reachable by accessible name (aria-label), but renders no "Send" text label (item 6).
+    const send = screen.getByRole('button', { name: 'Send message' });
+    expect(send).toHaveTextContent('');
+    // Refresh: present as a toolbar tool (item 7 — moved out of the compose row).
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeInTheDocument();
+  });
+
+  it('the "Mark conversation as read" tool fires onMarkThreadRead (item 5c)', async () => {
+    const onMarkThreadRead = jest.fn();
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({
+      authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'],
+      onMarkThreadRead,
+    });
+
+    await waitFor(() => expect(screen.getByRole('article')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Mark conversation as read' }));
+    expect(onMarkThreadRead).toHaveBeenCalledTimes(1);
+  });
+
+  it('Refresh is available even when the thread is empty (item 7)', async () => {
+    const { fetchMock } = buildFetch([]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    expect(await screen.findByText('No messages yet.')).toBeInTheDocument();
+    // The filter toggles + mark-as-read stay hidden (nothing to filter), but Refresh persists.
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark conversation as read' })).not.toBeInTheDocument();
+  });
+});

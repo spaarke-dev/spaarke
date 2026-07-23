@@ -52,4 +52,23 @@ Reference for item 4 active-state: `@spaarke/events-components` `CalendarFilterP
 
 Tests to update alongside: `ConversationView/__tests__/*`, `ConversationWorkspace/__tests__/*`.
 
-## Status: captured + fully file-mapped. NOT yet implemented. Deploy = coordinated rollout.
+## Status: IMPLEMENTED 2026-07-22 (all 7 items). Tests green (ui-components 97/97, communication-components 9/9). Deploy = coordinated rollout (HELD).
+
+### What shipped per item
+| # | Item | Resolution |
+|---|------|-----------|
+| 1 | Full container | ConversationView root `width:100% / minWidth:0`; ConversationWorkspace rightPane `flex:1 1 0%`. Height chain already correct (widget root/body → shell root all `height:100%`+`minHeight:0`). If the box persists it's the OUTER dashboard wrapper, not these files. |
+| 2 | Email card | `EmailInFlowBlock`: subject base400, meta/snippet base300 (was 200); attachment list REMOVED; ~100-char HTML-stripped body snippet ADDED; "Sent/Received {date}" line ADDED (verb from `sprk_direction`). `onOpenAttachment` prop dropped from the block. |
+| 3 | Pane resizes w/ msg width | Stabilized via rightPane `flex:1 1 0%` + ConversationView root `width:100%/minWidth:0`. |
+| 4 | Toolbar right-align + on/off bg | Filter bar `justify-content:flex-end`, gap S; active toggle = `colorBrandBackground`/`colorNeutralForegroundOnBrand` class (dark-blue on, transparent off). |
+| 5a | `+` new thread | Was inert (no host wired `onCreateThread`). `ConversationWorkspace` now OWNS the create flow: hosts inject `onSearchRecipients` → shell opens the existing `NewThreadModal` (task 024) → `startDirectThread` → selects + refreshes the list. |
+| 5b | Thread rows | Row gap + M padding + rounded rows (divider line removed); "N new messages" text → compact brand **dot** (count in aria-label); pin icon smaller (`fontSizeBase200`). |
+| 5c | Mark-as-read | Removed from thread rows; ADDED as a message-toolbar tool in `ConversationView`; plumbed back to the thread badge via the `renderConversation` seam (`onMarkThreadRead`). |
+| 6 | Send icon-only | `SendRegular` icon button, "Send" text label removed. |
+| 7 | Refresh → toolbar | Moved out of the compose input row into the message toolbar (still present on empty threads). |
+
+### Files changed (all shared → reach BOTH widget + modal code page)
+- `Spaarke.UI.Components`: `ConversationView/ConversationView.tsx` + `.types.ts`, `ConversationView/subcomponents/EmailInFlowBlock.tsx`, `ConversationWorkspace/ConversationWorkspace.tsx`, `ConversationWorkspace/subcomponents/ThreadList.tsx` (+ tests: filters, emailInFlow, ConversationWorkspace)
+- `Spaarke.Communication.Components`: `CommunicationsWorkspaceWidget.tsx` (onSearchRecipients + onMarkThreadRead forward)
+- `sprk_communicationconversationpage/src/App.tsx` (same host wiring)
+- Rebuilt `Spaarke.UI.Components/dist` so consumer `.d.ts` picks up new props.
