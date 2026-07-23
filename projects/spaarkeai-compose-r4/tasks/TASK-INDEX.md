@@ -32,7 +32,7 @@
 | 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030,**037** | ⏸ deferred→037 | 🔲 |
 | 037 | 🔔 Born-in-editor + table-authoring op (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 030,031, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
-| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | blocked | 🔲 |
+| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ⏸ verified; Azure deploy held for owner | 🔲 |
 | 036 | 🔔 Retire DocxAnnotationWriter + push-annotations (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 032, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
 | 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | blocked | 🔲 |
 | 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | blocked | 🔲 |

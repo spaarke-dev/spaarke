@@ -10,10 +10,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **Phases 0–2 COMPLETE** (020/021/022/024 done; **023 deferred→031**). Next: Phase 3 Patch Engine (030–035) |
+| **Task** | ✅ **Phases 0–3 (build) COMPLETE** — 19/36. 030/031/032/023/034 done; 035 verified (46.13 MB compressed, deploy held). Next: Phase 4 AI anchoring (040–042) |
 | **Step** | — |
-| **Status** | Phase 2 done (48/48 client tests green) — Phase 3 startable |
-| **Next Action** | Run Phase 3: 030 (ComposeShadowPatchEngine core, build on the 005 spike's SpikeOpenXmlApplier) → 031 (structural ops — server + **client onStructuralStep wiring** per re-sequence) → 032 (retire writers, gated) · 033 born-in-editor · 034 seam+corpus · 035 deploy. Then 023 runs after 031. Autonomous. |
+| **Status** | Phase 3 build done (545/545 Compose tests green) — Phase 4 startable |
+| **Next Action** | Run Phase 4: 040 (AI generate-window bookmark + resolve-on-return, opus) → 041 (validate anchors + fuzzy-as-comment fallback) → 042 (concurrent-edit test). Then Phase 5 (050–054). Autonomous. |
+
+> **DEFERRED (owner Path B/C, blocking Success Criterion 7 only — NOT Phase 4/5):** 036 push-annotations, 037 born-in-editor tables. 033 folded behind 037. **035 Azure dev deploy held for owner OK.** Publish 46.13 MB compressed (↓ from 49.63); only pre-existing HIGH CVE (System.Security.Cryptography.Xml transitive).
 
 > **023 re-sequenced (Path A, 2026-07-22)**: its coverage check found `collectEditedParagraphs` handles whole-paragraph delete/merge (`{paraId,text:''}` sentinel — a real UAT-corruption guard) with no equivalent in the 020/022 interceptor (structural steps deferred). 023 now deps on **031**; 031's scope extended to wire the client `onStructuralStep`→structural-op emission. No regression window. Analysis: `notes/task-023-coverage-gap.md`.
 
