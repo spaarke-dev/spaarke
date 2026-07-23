@@ -24,7 +24,7 @@
  */
 import * as React from 'react';
 import { Button, Spinner, Text, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { AddRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
+import { AddRegular, ChevronLeftRegular, PinFilled, PinRegular } from '@fluentui/react-icons';
 
 export interface IThreadListRow {
   threadId: string;
@@ -51,6 +51,13 @@ export interface IThreadListProps {
   onSelectThread: (threadId: string) => void;
   onCreateThread?: () => void;
   /**
+   * Collapse the thread pane (R3 UAT 2026-07-23 item 3). When wired, the pane
+   * header shows a "Threads" title (item 5) that — along with a trailing chevron
+   * — collapses the pane. `ConversationWorkspace` owns the collapsed state +
+   * renders the re-expand strip. Omit to hide the collapse affordance.
+   */
+  onCollapse?: () => void;
+  /**
    * Fired when the row's pin toggle is activated (task 041, FR-24). `nextPinned` is the DESIRED next state (the
    * inverse of the row's current `isPinned`). The host owns optimistic UI + rollback (see `ConversationWorkspace`);
    * this component only renders whatever `isPinned` it is given and reports the user's intent. Omit to hide the
@@ -66,27 +73,68 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
-    minWidth: '240px',
-    borderRightWidth: tokens.strokeWidthThin,
-    borderRightStyle: 'solid',
-    borderRightColor: tokens.colorNeutralStroke2,
-    // Subtle contrast fill vs. the message pane (`colorNeutralBackground1`) so
-    // the thread/side pane reads as distinct (task 062 / §B6). Semantic token —
-    // adapts in dark mode.
+    // Width is owned by the parent resizer (item 1/2); keep min-width:0 so the
+    // pane can shrink to ~20% without the 240px floor fighting the splitter.
+    minWidth: 0,
+    // Light-grey contrast fill vs. the white message pane (`colorNeutralBackground1`)
+    // so the thread pane reads as distinct (item 4). Semantic token — adapts in
+    // dark mode.
     backgroundColor: tokens.colorNeutralBackground2,
   },
+  // Thread-pane header (items 5/8/3): "Threads" title, a leading ＋ (create), and
+  // a collapse affordance. The title area + trailing chevron both collapse.
   toolbar: {
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    // Icon-only ＋ sits at the trailing edge (task 062 / §B5) — Teams-style.
-    justifyContent: 'flex-end',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalXS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     flexShrink: 0,
+  },
+  // "Threads" title — a clickable header region that collapses the pane (item 3).
+  // A button so it's keyboard-operable; fills the row so the whole header reads
+  // as the collapse target.
+  headerTitle: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    backgroundColor: 'transparent',
+    borderTopStyle: 'none',
+    borderRightStyle: 'none',
+    borderBottomStyle: 'none',
+    borderLeftStyle: 'none',
+    paddingTop: 0,
+    paddingRight: 0,
+    paddingBottom: 0,
+    paddingLeft: 0,
+    cursor: 'pointer',
+    textAlign: 'left',
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    outlineStyle: 'none',
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+      borderRadius: tokens.borderRadiusSmall,
+    },
+  },
+  // Static (non-collapsible) title when no `onCollapse` is wired.
+  headerTitleStatic: {
+    flex: '1 1 auto',
+    minWidth: 0,
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
   },
   list: {
     flex: '1 1 auto',
@@ -145,8 +193,9 @@ const useStyles = makeStyles({
     flexShrink: 0,
     minWidth: 'auto',
     padding: 0,
-    // Smaller pin glyph (item 5b) — the icon font-size drives the SVG size.
-    fontSize: tokens.fontSizeBase200,
+    // Smaller pin glyph (R3 UAT 2026-07-23 item 7) — the icon font-size drives
+    // the SVG size; base100 (~10px) is a subtle affordance.
+    fontSize: tokens.fontSizeBase100,
   },
   pinButtonActive: {
     color: tokens.colorBrandForeground1,
@@ -184,6 +233,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   selectedThreadId,
   onSelectThread,
   onCreateThread,
+  onCollapse,
   onTogglePin,
   className,
 }) => {
@@ -231,18 +281,41 @@ export const ThreadList: React.FC<IThreadListProps> = ({
   return (
     <div className={mergeClasses(styles.root, className)}>
       <div className={styles.toolbar}>
-        {/* Icon-only ＋ create control (task 062 / §B5) — the accessible name
-            stays "New thread" so keyboard + screen-reader users still identify
-            it despite the label being visually icon-only (NFR-05). */}
+        {/* ＋ create control moved to the LEFT (item 8). Icon-only; the accessible
+            name stays "New thread" for keyboard + screen-reader users (NFR-05). */}
         <Tooltip content="New thread" relationship="label">
           <Button
-            appearance="primary"
+            appearance="subtle"
+            size="small"
             icon={<AddRegular />}
             aria-label="New thread"
             onClick={() => onCreateThread?.()}
             disabled={!onCreateThread}
           />
         </Tooltip>
+        {/* "Threads" title (item 5). Clickable to collapse the pane (item 3) when
+            `onCollapse` is wired; otherwise a static label. */}
+        {onCollapse ? (
+          // The visible "Threads" text is the accessible name; the trailing
+          // chevron carries the explicit "Collapse threads pane" label so the two
+          // header collapse targets stay distinguishable.
+          <button type="button" className={styles.headerTitle} onClick={onCollapse}>
+            Threads
+          </button>
+        ) : (
+          <Text className={styles.headerTitleStatic}>Threads</Text>
+        )}
+        {onCollapse && (
+          <Tooltip content="Collapse threads pane" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ChevronLeftRegular />}
+              aria-label="Collapse threads pane"
+              onClick={onCollapse}
+            />
+          </Tooltip>
+        )}
       </div>
 
       {status === 'loading' && (
@@ -292,11 +365,8 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                 onFocus={() => setFocusedThreadId(row.threadId)}
               >
                 <div className={styles.rowHeader}>
-                  <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
-                    {displayName}
-                  </Text>
-                  {/* Unread signal as a compact brand dot (item 5b) — replaces the
-                      former "N new messages" text + inline Mark-as-read row. */}
+                  {/* Unread signal as a compact brand dot, now on the LEFT of the
+                      row (R3 UAT 2026-07-23 item 6) — before the thread name. */}
                   {typeof row.unreadCount === 'number' && row.unreadCount > 0 && (
                     <span
                       className={styles.unreadDot}
@@ -305,6 +375,9 @@ export const ThreadList: React.FC<IThreadListProps> = ({
                       title={`${row.unreadCount} unread message${row.unreadCount === 1 ? '' : 's'}`}
                     />
                   )}
+                  <Text className={mergeClasses(styles.rowName, isSelected ? styles.rowNameSelected : undefined)}>
+                    {displayName}
+                  </Text>
                   {onTogglePin && (
                     <Button
                       appearance="transparent"

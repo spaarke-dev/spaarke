@@ -50,8 +50,9 @@
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { ChevronRightRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
-import type { ILookupItem } from '../../types/LookupTypes';
+import type { INavigationService } from '../../types/serviceInterfaces';
 import {
   getThreadUnreadCount,
   listThreads,
@@ -61,7 +62,9 @@ import {
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
 import { NewThreadModal } from '../NewThreadModal';
+import { PanelSplitter } from '../PanelSplitter/PanelSplitter';
 import { ThreadList, type IThreadListRow, type ThreadListStatus } from './subcomponents/ThreadList';
+import { useThreadPaneLayout } from './useThreadPaneLayout';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -109,14 +112,14 @@ export interface ConversationWorkspaceProps {
   renderConversation?: (props: IConversationRendererProps) => React.ReactNode;
 
   /**
-   * Recipient directory search for the built-in New-conversation modal (item
-   * 5a). When provided, the shell OWNS the create flow: the ＋ affordance opens
-   * `<NewThreadModal />` internally and, on success, refreshes the list and
-   * selects the new/reused thread — no host wiring beyond this search binding.
-   * The host binds it to `searchUsersAndContacts` (host-context `Xrm.WebApi`).
-   * Omit it (and `onCreateThread`) to hide the ＋.
+   * Record-lookup service for the built-in New-conversation modal (item 5a +
+   * item 9). When provided, the shell OWNS the create flow: the ＋ affordance
+   * opens `<NewThreadModal />` internally (name + associate-to-record picker +
+   * optional plain-text message) and, on success, refreshes the list and selects
+   * the new thread. The host binds `createXrmNavigationService()` (Xrm-backed
+   * record lookup). Omit it (and `onCreateThread`) to hide the ＋.
    */
-  onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  navigationService?: INavigationService;
 
   /**
    * Fired when the ＋ (create thread) affordance is activated. OPTIONAL host
@@ -155,15 +158,63 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  // Fixed-width thread pane wrapper (items 1/2) — the resizer owns the px width;
+  // ThreadList fills it. flex-shrink:0 so the splitter, not flexbox, sets width.
+  leftPane: {
+    display: 'flex',
+    flexShrink: 0,
+    minWidth: 0,
+    height: '100%',
+    overflow: 'hidden',
+  },
   rightPane: {
     display: 'flex',
     flexDirection: 'column',
-    // flex-basis 0 (not auto) so the pane's width is a proportion of the shell,
-    // independent of the widest message bubble it contains (R3 UAT item 3).
+    // flex-basis 0 (not auto) so the conversation is a proportion of the shell,
+    // independent of the widest message bubble it contains (2026-07-22 item 3).
     flex: '1 1 0%',
     minHeight: 0,
     minWidth: 0,
     overflow: 'hidden',
+    // White conversation surface vs. the grey thread pane (2026-07-23 item 4).
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Collapsed thread-pane strip (item 3) — a thin clickable rail that re-expands
+  // the pane, mirroring the SpaarkeAi collapsed-pane pattern. Vertical "Threads"
+  // label. Semantic tokens only (ADR-021).
+  collapsedStrip: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    flexShrink: 0,
+    width: '32px',
+    height: '100%',
+    paddingTop: tokens.spacingVerticalM,
+    cursor: 'pointer',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderTopStyle: 'none',
+    borderBottomStyle: 'none',
+    borderLeftStyle: 'none',
+    borderRightWidth: tokens.strokeWidthThin,
+    borderRightStyle: 'solid',
+    borderRightColor: tokens.colorNeutralStroke2,
+    color: tokens.colorNeutralForeground2,
+    outlineStyle: 'none',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: '-2px',
+    },
+  },
+  collapsedLabel: {
+    writingMode: 'vertical-rl',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
   },
   placeholder: {
     display: 'flex',
@@ -202,7 +253,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   bffBaseUrl,
   regarding,
   renderConversation,
-  onSearchRecipients,
+  navigationService,
   onCreateThread,
   onThreadSelected,
   onError,
@@ -210,6 +261,12 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   className,
 }) => {
   const styles = useStyles();
+
+  // Resizable + collapsible thread pane (R3 UAT 2026-07-23 items 1/2/3). Default
+  // width = 20% of the container; drag the splitter to resize; click the
+  // "Threads" header (or chevron) to collapse to a thin re-expand rail.
+  const { threadWidthPx, collapsed, toggleCollapse, splitterHandlers, isDragging, containerRef, currentRatio } =
+    useThreadPaneLayout();
 
   // Built-in New-conversation modal (item 5a). The shell owns the create flow
   // when `onSearchRecipients` is supplied; `reloadToken` forces a list re-fetch
@@ -336,17 +393,17 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     [onThreadSelected]
   );
 
-  // — New-conversation create flow (item 5a) —
+  // — New-conversation create flow (item 5a / item 9) —
   // The ＋ affordance is enabled when the shell can start a create (its own modal
-  // via `onSearchRecipients`, or a host-owned surface via `onCreateThread`).
-  const canCreateThread = !!onSearchRecipients || !!onCreateThread;
+  // via `navigationService`, or a host-owned surface via `onCreateThread`).
+  const canCreateThread = !!navigationService || !!onCreateThread;
 
   const handleOpenNewThread = React.useCallback(() => {
     // Notify the host (optional), and open the built-in modal when the shell owns
     // the create surface.
     onCreateThread?.();
-    if (onSearchRecipients) setNewThreadOpen(true);
-  }, [onCreateThread, onSearchRecipients]);
+    if (navigationService) setNewThreadOpen(true);
+  }, [onCreateThread, navigationService]);
 
   const handleThreadCreated = React.useCallback(
     (threadId: string) => {
@@ -419,27 +476,53 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   );
 
   return (
-    <div className={mergeClasses(styles.root, className)}>
-      <ThreadList
-        rows={threadListRows}
-        status={listStatus}
-        errorMessage={errorMessage}
-        selectedThreadId={selectedThreadId}
-        onSelectThread={handleSelectThread}
-        onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
-        onTogglePin={handleTogglePin}
-      />
+    <div ref={containerRef} className={mergeClasses(styles.root, className)}>
+      {collapsed ? (
+        // Collapsed rail (item 3) — click to re-expand the thread pane.
+        <button
+          type="button"
+          className={styles.collapsedStrip}
+          aria-label="Expand threads pane"
+          title="Threads"
+          onClick={toggleCollapse}
+        >
+          <ChevronRightRegular />
+          <span className={styles.collapsedLabel}>Threads</span>
+        </button>
+      ) : (
+        <>
+          <div className={styles.leftPane} style={{ width: `${threadWidthPx}px` }}>
+            <ThreadList
+              rows={threadListRows}
+              status={listStatus}
+              errorMessage={errorMessage}
+              selectedThreadId={selectedThreadId}
+              onSelectThread={handleSelectThread}
+              onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
+              onCollapse={toggleCollapse}
+              onTogglePin={handleTogglePin}
+            />
+          </div>
+          <PanelSplitter
+            onMouseDown={splitterHandlers.onMouseDown}
+            onKeyDown={splitterHandlers.onKeyDown}
+            onDoubleClick={splitterHandlers.onDoubleClick}
+            isDragging={isDragging}
+            currentRatio={currentRatio}
+          />
+        </>
+      )}
       <div className={styles.rightPane}>{rightPane}</div>
 
-      {/* Built-in New-conversation modal (item 5a) — only mounted when the shell
-          owns the create surface (a recipient-search binding was supplied). */}
-      {onSearchRecipients && (
+      {/* Built-in New-conversation modal (item 5a / item 9) — only mounted when
+          the shell owns the create surface (a navigation service was supplied). */}
+      {navigationService && (
         <NewThreadModal
           open={newThreadOpen}
           onDismiss={() => setNewThreadOpen(false)}
           authenticatedFetch={authenticatedFetch}
           bffBaseUrl={bffBaseUrl}
-          onSearchRecipients={onSearchRecipients}
+          navigationService={navigationService}
           onThreadCreated={handleThreadCreated}
           regarding={regarding ? { entityType: regarding.entityType, id: regarding.id } : undefined}
           onError={onError}

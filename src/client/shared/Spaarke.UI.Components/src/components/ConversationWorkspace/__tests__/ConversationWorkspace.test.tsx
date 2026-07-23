@@ -17,6 +17,7 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ConversationWorkspace } from '../ConversationWorkspace';
 import type { ConversationWorkspaceProps, IConversationRendererProps } from '../ConversationWorkspace';
+import type { INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Fetch fixtures
@@ -167,9 +168,9 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     expect(onCreateThread).toHaveBeenCalledTimes(1);
   });
 
-  it('opens the built-in New-conversation modal when onSearchRecipients is supplied (R3 UAT 2026-07-22 item 5a)', async () => {
-    const onSearchRecipients = jest.fn(async () => []);
-    renderWorkspace({ onSearchRecipients });
+  it('opens the built-in New-conversation modal when a navigationService is supplied (item 5a / item 9)', async () => {
+    const navigationService = { openLookup: jest.fn().mockResolvedValue([]) } as unknown as INavigationService;
+    renderWorkspace({ navigationService });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
     // No modal until the ＋ is clicked.
@@ -179,6 +180,31 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
 
     // The shell owns the create surface: NewThreadModal opens in-place.
     expect(await screen.findByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thread-pane header + collapse (R3 UAT 2026-07-23 items 3/5/8)
+// ---------------------------------------------------------------------------
+
+describe('ConversationWorkspace — thread pane header + collapse', () => {
+  it('renders a "Threads" title and collapses/expands the pane on the header affordance', async () => {
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // Title present (item 5); create ＋ present (item 8).
+    expect(screen.getByText('Threads')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument();
+
+    // Collapse (item 3) — the thread list content disappears, a re-expand rail appears.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse threads pane' }));
+    await waitFor(() => expect(screen.queryByText('Acme Matter')).not.toBeInTheDocument());
+    const expandRail = screen.getByRole('button', { name: 'Expand threads pane' });
+    expect(expandRail).toBeInTheDocument();
+
+    // Expand — the thread list returns.
+    fireEvent.click(expandRail);
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
   });
 });
 
