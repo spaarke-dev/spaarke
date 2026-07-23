@@ -1,8 +1,7 @@
-# Current Task State
+# Current Task State — Spaarke Compose R4
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-22 (pipeline init)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-07-22 (by context-handoff, pre-compaction)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r4` @ `3e0abc7cc` (12 commits unpushed; all work committed locally).
 
 ---
 
@@ -10,124 +9,60 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **Phases 0–3 (build) COMPLETE** — 19/36. 030/031/032/023/034 done; 035 verified (46.13 MB compressed, deploy held). Next: Phase 4 AI anchoring (040–042) |
-| **Step** | — |
-| **Status** | Phase 3 build done (545/545 Compose tests green) — Phase 4 startable |
-| **Next Action** | Run Phase 4: 040 (AI generate-window bookmark + resolve-on-return, opus) → 041 (validate anchors + fuzzy-as-comment fallback) → 042 (concurrent-edit test). Then Phase 5 (050–054). Autonomous. |
+| **Project** | spaarkeai-compose-r4 (Shadow Document Architecture — hard-replace of Compose save layer) |
+| **Progress** | **27 / 36 tasks done. Phases 0–5 COMPLETE.** |
+| **Status** | ⏸ **Autonomous run paused — Phase 6 gated on OWNER DECISIONS** |
+| **Next Action** | Get owner input on the 3 items below, then run Phase 6: `060 → 061 → 062 → 063 → 090`. |
 
-> **DEFERRED (owner Path B/C, blocking Success Criterion 7 only — NOT Phase 4/5):** 036 push-annotations, 037 born-in-editor tables. 033 folded behind 037. **035 Azure dev deploy held for owner OK.** Publish 46.13 MB compressed (↓ from 49.63); only pre-existing HIGH CVE (System.Security.Cryptography.Xml transitive).
+### 🔔 OWNER DECISIONS NEEDED to unblock Phase 6 (nothing else is blocking)
+1. **Task 036 — push-to-Word annotations** (`DocxAnnotationWriter`, text-anchored): **Path B** (migrate to op-log) **or Path C** (retire the feature — likely redundant now that R4 emits native Word tracked changes). See `notes/task-032-pushannotations-scope.md`.
+2. **Task 037 — born-in-editor tables** (closed op-schema has no table op): **Path B** (extend the FR-11 op schema to author `w:tbl`, retire the renderer) **or Path C** (make tables import-only). See `notes/task-033-table-operation-gap.md`.
+3. **Deploy authorization**: task **035** (dev deploy — verified, held) + task **062** (full R4 deploy + CIPO UAT). Outward actions, not taken autonomously.
 
-> **023 re-sequenced (Path A, 2026-07-22)**: its coverage check found `collectEditedParagraphs` handles whole-paragraph delete/merge (`{paraId,text:''}` sentinel — a real UAT-corruption guard) with no equivalent in the 020/022 interceptor (structural steps deferred). 023 now deps on **031**; 031's scope extended to wire the client `onStructuralStep`→structural-op emission. No regression window. Analysis: `notes/task-023-coverage-gap.md`.
+Both 036 + 037 block **Success Criterion 7** ("one byte-author"). Interim: push-annotations on `DocxAnnotationWriter`, born-in-editor on `ComposeDocumentRenderer` — documented §6.5 exceptions, **zero regression**.
 
-> **Pre-existing tech debt flagged 2026-07-22** (NOT R4): ADR-007 GraphIsolation arch test fails on baseline — Graph* types leak in `Services/Communication/**` + `Api/Office/Errors` + `Infrastructure/Errors` (email/messaging subsystems). Zero Compose involvement. Out of R4 scope; flag to owner.
-
-### Files Modified This Session (Wave W0a)
-- `.claude/adr/ADR-049-compose-shadow-document.md` (new — task 001) + `.claude/adr/INDEX.md` (entry)
-- `tests/fixtures/compose-corpus/` — 3 LFS sample docs + `corpus-manifest.md` (task 002)
-- `src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs` (new — task 003)
-- `src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts` (new) + `compose-contracts.ts`/`index.ts` (re-export) + tests (task 003)
-- `notes/task-002-corpus-deviations.md`, `notes/task-003-operation-schema-decisions.md`
-
-### Critical Context
-R4 is a MISSION-CRITICAL hard-replace of the Compose save layer with a Shadow Document Architecture. **Phase 0 (tasks 001–006) is a proof gate** that MUST be green before any old-path deletion (023/032/060). Wave W0a done: ADR-049 codified (invariants I-1…I-7, D1–D5, Path-B amendment of R3 paragraph-diff); operation schema built (10 ops, client+server, round-trips green, publish 46.11 MB); corpus staged as LFS. **⚠️ Corpus deviation finding (task 002): the 3 sample docs carry FEWER worst-offender features than the WBS assumed (CIPO doc is track-changes-clean as saved; only its footer page-number SDT is real SDT coverage). Owner worst-offenders needed in Phase 0 to fully exercise NFR-01 — see `notes/task-002-corpus-deviations.md`. This affects the 004 harness + 005 spike + 006 gate evidence bar.**
+### Critical Context (1-3 sentences)
+R4's save-path hard-replace is LIVE: all saves route through the single `ComposeShadowPatchEngine` (op-log → surgical `w:ins`/`w:del`/`w:comment`, zero write-path text-search). Two shipped constructs the closed 10-op schema can't express (push-annotations comments, born-in-editor tables) were kept working via documented §6.5 exceptions and deferred to owner Path-B/C decisions (036/037). Publish 46–47.5 MB compressed (≤60); 552/552 Compose tests green.
 
 ---
 
-## Active Task (Full Details)
+## Task Ledger (source of truth: `tasks/TASK-INDEX.md`)
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — (first task: `tasks/001-shadow-document-adr.poml`) |
-| **Title** | — |
-| **Phase** | Ready to start Phase 0 (Gate) |
-| **Status** | none |
-| **Started** | — |
+**DONE (27):** 001–006 (Phase 0 gate 🟢), 010–013 (ingest), 020–024 (capture), 030/031/032 (engine + structural + save-path cutover), 023 (cleanup), 034 (seam proof), 040–042 (AI anchoring), 050–054 (concurrency + import).
 
----
+**REMAINING (9), all gated:**
+| Task | State | Gated on |
+|---|---|---|
+| 035 | verified (46.13 MB); Azure dev deploy held | owner deploy auth |
+| 033 | deferred → folds into 037 | 037 |
+| 036 | 🔔 deferred | owner Path B/C (push-annotations) |
+| 037 | 🔔 deferred | owner Path B/C (born-in-editor tables) |
+| 060 | blocked | 036, 037 (hard-replace completion / remove mammoth) |
+| 061 | blocked | 060 (corpus proof + size + CVE + NetArch) |
+| 062 | blocked | 060, 061 + deploy auth (full deploy + CIPO UAT) |
+| 063 | blocked | 062 (flagship gate — needs Criterion 7 = 036+037) |
+| 090 | blocked | 063 (wrap-up + /test-diet) |
 
-## Progress
+## Key decisions made this run
+- **Patch engine = `DocumentFormat.OpenXml`** (zero new package); Docxodus REJECTED (task 005 A/B; `notes/patch-engine-ab-decision.md`).
+- **ADR-049** authored (invariants I-1…I-7, D1–D5, Path-B amendment of R3 paragraph-diff).
+- **3 WBS gaps resolved**: 023 re-sequenced→031 (structural capture); 036 created (push-annotations, task-032 Path A); 037 created (born-in-editor tables, task-033).
+- Offset space = **editor-visible run flatten** (task 011 → engine 030 consumes the same).
 
-### Completed Steps
-*No steps completed yet*
+## Health
+- Every phase build-verified + gates-clean + committed per wave. 552/552 Compose tests green; full BFF suite 8920/8920 baseline.
+- Publish 46.13 MB compressed (Release; ↓ from 49.63 baseline via 032 deletion). Only HIGH CVE = pre-existing `System.Security.Cryptography.Xml` transitive (R4 added zero packages).
+- Pre-existing ADR-007 GraphIsolation arch-test failure lives in `Services/Communication/**` + `Api/Office` — **NOT Compose, out of R4 scope** (flag for a separate ticket).
 
-### Current Step
-*No task started — project just initialized.*
+## How to resume after compaction
+1. Read this Quick Recovery. 2. `tasks/TASK-INDEX.md` for the full status grid. 3. For Phase 6, first get the 3 owner decisions above. 4. Once 036/037 paths chosen: execute 036 + 037 (each POML has `<owner-decision-required>` + steps), then 060→061→062→063→090 via `task-execute`. 5. Deferred-decision analyses: `notes/task-032-pushannotations-scope.md`, `notes/task-033-table-operation-gap.md`.
 
-### Files Modified (All Task)
-*No files modified yet*
-
-### Decisions Made
-- 2026-07-22: Cutover = hard replace (owner-confirmed); Phase 0 proof gate is the pre-commit safety net.
-- 2026-07-22: D1–D5 locked; anchor = `(paraId, runIndex, run-local-offset)`.
-
----
-
-## Next Action
-
-**Next Step**: Start task 001 (Shadow-Document ADR) via `task-execute`.
-
-**Pre-conditions**:
-- On branch `work/spaarkeai-compose-r4` (already checked out).
-- Read `spec.md`, `design.md`, and `notes/as-built-inventory.md` before implementation tasks.
-
-**Key Context**:
-- Phase 0 gate (task 006) blocks all cutover/deletion tasks.
-- BFF=Y — every BFF task: Placement Justification + publish-size + seam slice + `/conflict-check`.
-
-**Expected Output**:
-- Task 001 produces the R4 Shadow-Document ADR (`.claude/adr/`) + the ADR-Tension Path-B amendment of the R3 paragraph-diff decision.
-
----
-
-## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-07-22 (pipeline init)
-- Focus: Project initialized via `/project-pipeline`.
-
-### Key Learnings
-- `Services/Compose/` overlaps 4 sibling projects — `/conflict-check` before every BFF PR.
-- Consume `Services/Ai/PublicContracts/` seams; NO fork of `Services/Ai/`.
-
-### Handoff Notes
-*No handoff notes*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: spaarkeai-compose-r4
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-013: AI facade — no AI internals in `Services/Compose/`
-- ADR-007: no `Microsoft.Graph` above `SpeFileStore`
-- ADR-038: seam DoD; banned mock/DI/ctor tests
-- ADR-039/040: engine frozen; no new AI dispatch
-
-### Knowledge Files Loaded
-*Loaded per-task by task-execute from each POML's `<knowledge>` section.*
+## Portfolio
+[Project #679](https://github.com/spaarke-dev/spaarke/issues/679) · Tasks Completed 27/36 · 12 commits unpushed on `work/spaarkeai-compose-r4` (push when ready).
 
 ---
 
 ## Recovery Instructions
+`/project-continue` (full reload) · "where was I?" (quick). Full protocol: [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md).
 
-1. **Quick Recovery**: Read the "Quick Recovery" section above.
-2. **Load task file**: `tasks/{task-id}-*.poml`.
-3. **Load knowledge files**: From the task's `<knowledge>` section.
-4. **Resume**: From "Next Action".
-
-**Commands**: `/project-continue` · `/context-handoff` · "where was I?"
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+*Primary source of truth for active work state. All 27 completed tasks are committed; nothing uncommitted except this file.*
