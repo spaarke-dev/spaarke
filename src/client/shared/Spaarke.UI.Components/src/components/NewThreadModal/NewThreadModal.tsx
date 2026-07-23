@@ -139,26 +139,78 @@ const useStyles = makeStyles({
   content: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    // Scroll the body content; the DialogTitle (header) + DialogActions (footer)
-    // stay pinned.
+    gap: tokens.spacingVerticalXL,
     flex: '1 1 auto',
     minHeight: 0,
     overflowY: 'auto',
+    // Hide the scrollbar (round 4) — the textarea fills so content rarely scrolls.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { width: 0, height: 0 },
   },
+  // A clearly-delineated section (round 4): a bold header with an underline rule
+  // over a subordinate, indented body so the fields read as "under" the section.
   section: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
   },
-  sectionHeading: {
+  sectionHeader: {
+    fontSize: tokens.fontSizeBase400,
+    lineHeight: tokens.lineHeightBase400,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    paddingBottom: tokens.spacingVerticalXS,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
   },
-  hint: {
-    color: tokens.colorNeutralForeground3,
+  sectionBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    // Subordinate the fields under their section header.
+    paddingLeft: tokens.spacingHorizontalM,
   },
-  actionSpinnerRow: {
+  // The "Send a message" section fills the remaining modal height so the textarea
+  // can expand (round 4).
+  messageSection: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    flex: '1 1 auto',
+    minHeight: 0,
+  },
+  messageBody: {
+    display: 'flex',
+    flex: '1 1 auto',
+    minHeight: '120px',
+    paddingLeft: tokens.spacingHorizontalM,
+  },
+  // Fluent Textarea — fill the section's available height + width.
+  messageTextarea: {
+    width: '100%',
+    height: '100%',
+    '& textarea': {
+      height: '100%',
+      maxHeight: 'none',
+    },
+  },
+  errorText: {
+    color: tokens.colorPaletteRedForeground1,
+    fontSize: tokens.fontSizeBase200,
+  },
+  // Footer: a top rule demarcating the modal foot; Cancel left, Create right.
+  footer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    paddingTop: tokens.spacingVerticalM,
+  },
+  footerRight: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
@@ -328,23 +380,21 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
         <DialogBody className={styles.body}>
           <DialogTitle>{title}</DialogTitle>
           <DialogContent className={styles.content}>
-            {/* Section 1 — New Thread: name + associate-to-record. */}
+            {/* Section 1 — New Thread: name + associate-to-record. The header rule
+                + indented body make the fields read as subordinate to the section. */}
             <div className={styles.section} role="group" aria-label="New thread">
-              <Text className={styles.sectionHeading}>New Thread</Text>
-              <Field label="Name">
-                <Input
-                  value={name}
-                  onChange={(_e, data) => setName(data.value)}
-                  disabled={submitting}
-                  placeholder="Conversation name (optional — defaults to the record)"
-                />
-              </Field>
-              <Field
-                label="Associate to record"
-                required
-                validationState={associationError ? 'error' : 'none'}
-                validationMessage={associationError}
-              >
+              <div className={styles.sectionHeader}>New Thread</div>
+              <div className={styles.sectionBody}>
+                <Field label="Name">
+                  <Input
+                    value={name}
+                    onChange={(_e, data) => setName(data.value)}
+                    disabled={submitting}
+                    placeholder="Conversation name (optional — defaults to the record)"
+                  />
+                </Field>
+                {/* AssociateToStep renders its own "Associate To" sub-heading + the
+                    record-type dropdown + Select Record — no duplicate label here. */}
                 <AssociateToStep
                   entityTypes={COMMUNICATION_REGARDING_TARGETS}
                   navigationService={navigationService}
@@ -353,21 +403,29 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
                   disabled={submitting}
                   locked={recordLocked}
                 />
-              </Field>
+                {associationError && (
+                  <Text role="alert" className={styles.errorText}>
+                    {associationError}
+                  </Text>
+                )}
+              </div>
             </div>
 
-            {/* Section 2 — Message: OPTIONAL plain-text first message (no rich-text controls). */}
-            <div className={styles.section} role="group" aria-label="Message">
-              <Text className={styles.sectionHeading}>Message</Text>
-              <Field label="Message">
+            {/* Section 2 — Send a message: OPTIONAL plain-text first message. No
+                duplicate field label (the section header is enough); fills height. */}
+            <div className={styles.messageSection} role="group" aria-label="Send a message">
+              <div className={styles.sectionHeader}>Send a message</div>
+              <div className={styles.messageBody}>
                 <Textarea
+                  className={styles.messageTextarea}
                   value={body}
                   onChange={(_e, data) => setBody(data.value)}
                   disabled={submitting}
-                  resize="vertical"
+                  resize="none"
+                  aria-label="Message"
                   placeholder="Optional — add a first message, or start the conversation empty."
                 />
-              </Field>
+              </div>
             </div>
 
             {notice && (
@@ -376,18 +434,17 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
               </MessageBar>
             )}
           </DialogContent>
-          <DialogActions>
-            {submitting && (
-              <div className={styles.actionSpinnerRow} aria-hidden="true">
-                <Spinner size="tiny" />
-              </div>
-            )}
+          <DialogActions className={styles.footer}>
+            {/* Cancel left-justified, Create right-justified, top rule = modal foot. */}
             <Button appearance="secondary" onClick={handleCancel} disabled={submitting}>
               Cancel
             </Button>
-            <Button appearance="primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
-              {submitting ? 'Creating…' : 'Create'}
-            </Button>
+            <div className={styles.footerRight}>
+              {submitting && <Spinner size="tiny" aria-hidden="true" />}
+              <Button appearance="primary" onClick={handleSubmit} disabled={submitting} aria-busy={submitting}>
+                {submitting ? 'Creating…' : 'Create'}
+              </Button>
+            </div>
           </DialogActions>
         </DialogBody>
       </DialogSurface>

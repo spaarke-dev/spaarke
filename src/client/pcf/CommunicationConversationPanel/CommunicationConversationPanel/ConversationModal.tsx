@@ -24,6 +24,7 @@
  */
 
 import * as React from 'react';
+import * as ReactDOM from 'react-dom';
 import {
   Dialog,
   DialogSurface,
@@ -31,6 +32,8 @@ import {
   DialogTitle,
   DialogContent,
   Button,
+  FluentProvider,
+  webLightTheme,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -38,6 +41,7 @@ import { DismissRegular } from '@fluentui/react-icons';
 import {
   ConversationWorkspace,
   ConversationView,
+  createXrmNavigationService,
   type ConversationWorkspaceProps,
   type ConversationViewProps,
   type IConversationRendererProps,
@@ -112,6 +116,11 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
 }) => {
   const s = useStyles();
 
+  // Record-lookup service for the shell's built-in New-conversation modal (round
+  // 4 PCF item 3 — the ＋ was inert because the PCF host never wired it). The
+  // create modal opens record-scoped (regarding = the host record, locked).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
   const renderConversation = React.useCallback(
     (props: IConversationRendererProps) => (
       <ConversationViewR16
@@ -130,7 +139,13 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
     // component casts above). Runtime is unaffected.
   ) as unknown as ConversationWorkspaceProps['renderConversation'];
 
-  return (
+  // Portal the whole modal to document.body (round 4 PCF item 1). Fluent's
+  // DialogSurface is `position:fixed`, which anchors to the nearest TRANSFORMED
+  // ancestor rather than the viewport — the Dataverse form host has one, so the
+  // modal top-anchored. Mounting at document.body escapes that ancestor so the
+  // surface centers on the viewport. The re-wrapped FluentProvider keeps the
+  // portaled subtree themed (fluent-v9-portal-gotcha).
+  const dialog = (
     <Dialog open={open} onOpenChange={(_ev, data) => (!data.open ? onClose() : undefined)} modalType="modal">
       <DialogSurface className={s.surface}>
         {/* §B1 (UAT): moved out of DialogTitle's inline action slot so it pins to the
@@ -152,6 +167,7 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
                 bffBaseUrl={bffBaseUrl}
                 regarding={{ entityType, id }}
                 renderConversation={renderConversation}
+                navigationService={navigationService}
               />
             </div>
           </DialogContent>
@@ -159,4 +175,6 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
       </DialogSurface>
     </Dialog>
   );
+
+  return ReactDOM.createPortal(<FluentProvider theme={webLightTheme}>{dialog}</FluentProvider>, document.body);
 };
