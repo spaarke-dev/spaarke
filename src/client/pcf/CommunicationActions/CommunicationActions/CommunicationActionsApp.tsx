@@ -576,7 +576,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         </div>
       )}
 
-      <Dialog open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
+      {/* modalType="alert" disables light-dismiss (backdrop-click + Escape). Required so the
+          native Xrm.Utility.lookupObjects record-lookup pane — which renders OUTSIDE this dialog's
+          DOM — does NOT trigger a focus-loss dismiss that auto-closes the composer (UAT round 6).
+          All intentional closes route through the composer's own X / Cancel / Send → onClose/onSent. */}
+      <Dialog modalType="alert" open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
         <DialogSurface className={s.dialogSurface}>
           <DialogBody className={s.dialogBody}>{composerProps && <SendEmailPageR16 {...composerProps} />}</DialogBody>
         </DialogSurface>
