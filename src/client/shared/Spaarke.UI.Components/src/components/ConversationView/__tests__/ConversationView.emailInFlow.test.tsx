@@ -201,6 +201,34 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     expect(within(block).getByText('—')).toBeInTheDocument();
   });
 
+  it('shows a ~100-char body snippet + a sent/received date, and no attachment list (R3 UAT 2026-07-22 item 2)', async () => {
+    const longBody = `<p>${'Lorem ipsum dolor sit amet consectetur '.repeat(6)}</p>`;
+    const messages = [
+      dto('email1', {
+        communicationType: EMAIL,
+        subject: 'Status',
+        from: 'alice@example.com',
+        to: ['bob@example.com'],
+        direction: 100000000, // Incoming → "Received"
+        sentBy: USER_2,
+        body: longBody,
+        bodyFormat: 100000001, // HTML — tags must be stripped from the snippet
+        sentAt: '2026-07-20T10:00:00Z',
+      }),
+    ];
+    renderView({ authenticatedFetch: buildFetch(messages) as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    const block = await screen.findByRole('group', { name: /^Email: Status/ });
+    // HTML-stripped, ellipsised body preview.
+    const snippet = within(block).getByText(/^Lorem ipsum dolor sit amet/);
+    expect(snippet.textContent).toMatch(/…$/);
+    expect(snippet.textContent).not.toContain('<'); // tags stripped
+    // Sent/received date line (verb from direction; year always present).
+    expect(within(block).getByText(/2026/)).toBeInTheDocument();
+    // The attachment list was removed from the card (item 2) — no attachment chips.
+    expect(within(block).queryByText(/attachment/i)).not.toBeInTheDocument();
+  });
+
   it('renders the email block under dark mode via the host FluentProvider (ADR-021) without error', async () => {
     const messages = [
       dto('email1', { communicationType: EMAIL, subject: 'Dark mode', from: 'alice@example.com', sentBy: USER_1 }),

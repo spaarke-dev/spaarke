@@ -52,6 +52,7 @@ import {
   ArrowClockwiseRegular,
   ArrowForwardRegular,
   ChatRegular,
+  MailReadRegular,
   MailRegular,
   MailUnreadRegular,
   SearchRegular,
@@ -80,6 +81,10 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     height: '100%',
     minHeight: 0,
+    // Full-width + min-width:0 so the pane's width is driven by its flex parent,
+    // NOT by the widest message bubble (R3 UAT 2026-07-22 item 3).
+    width: '100%',
+    minWidth: 0,
     backgroundColor: tokens.colorNeutralBackground1,
   },
   // Conversation title header (task 025 / FR-12) — only rendered when a `title`
@@ -258,11 +263,15 @@ const useComposeStyles = makeStyles({
 // the controls became icon-only + a revealed search box. Semantic tokens only
 // (ADR-021).
 const useFilterStyles = makeStyles({
+  // Message toolbar (R3 UAT 2026-07-22 item 4): the tools right-align at the
+  // trailing edge with roomier spacing. Refresh (item 7) + Mark-as-read (item
+  // 5c) live here now alongside the icon filters.
   bar: {
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalM,
@@ -278,6 +287,23 @@ const useFilterStyles = makeStyles({
   },
   search: {
     minWidth: '180px',
+  },
+  // Active/ON filter state (R3 UAT 2026-07-22 item 4): dark-blue brand fill when
+  // the facet is on, transparent (subtle) when off — mirrors the Calendar
+  // brand-active pattern. Semantic tokens only (ADR-021), so it adapts in dark
+  // mode. Applied over an `appearance="subtle"` ToggleButton whose default
+  // checked fill would otherwise be a low-contrast neutral.
+  toggleActive: {
+    backgroundColor: tokens.colorBrandBackground,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ':hover': {
+      backgroundColor: tokens.colorBrandBackgroundHover,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
+    ':hover:active': {
+      backgroundColor: tokens.colorBrandBackgroundPressed,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
   },
 });
 
@@ -414,23 +440,17 @@ const ConversationComposeBar: React.FC<ConversationComposeBarProps> = ({
           aria-label="Message"
           resize="vertical"
         />
-        <Tooltip content="Refresh conversation" relationship="label">
+        {/* Send is icon-only (R3 UAT 2026-07-22 item 6) — no "Send" text label.
+            Refresh moved OUT of this row into the message toolbar (item 7). */}
+        <Tooltip content="Send message" relationship="label">
           <Button
-            appearance="subtle"
-            icon={<ArrowClockwiseRegular />}
-            aria-label="Refresh conversation"
-            onClick={onRefresh}
+            appearance="primary"
+            icon={<SendRegular />}
+            aria-label="Send message"
+            disabled={!canSend}
+            onClick={() => void submit()}
           />
         </Tooltip>
-        <Button
-          appearance="primary"
-          icon={<SendRegular />}
-          aria-label="Send message"
-          disabled={!canSend}
-          onClick={() => void submit()}
-        >
-          Send
-        </Button>
       </div>
       {/* No wrapper live region — each transient child is its own live region
           (role=status → polite, role=alert → assertive) to avoid nested-live-
@@ -621,6 +641,7 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     bffBaseUrl,
     pollIntervalMs,
     onError,
+    onMarkThreadRead,
     onOpenEmail,
     onForwardMessage,
     onOpenAttachment,
@@ -784,6 +805,22 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     setShowJumpToLatest(false);
   }, []);
 
+  // "Mark as read" tool (R3 UAT 2026-07-22 item 5c — relocated from the thread
+  // row into the message toolbar). Advances the unread watermark so every
+  // currently-loaded message counts as read, clears the unread-only facet (else
+  // the filtered list would go empty), and lets the host clear this thread's
+  // list-pane badge via the `onMarkThreadRead` seam.
+  const markAsRead = React.useCallback(() => {
+    let newest: string | undefined;
+    for (const m of state.messages) {
+      if (m.createdOn && (!newest || m.createdOn > newest)) newest = m.createdOn;
+    }
+    initialCursorRef.current = newest ?? '';
+    hasCapturedInitialCursorRef.current = true;
+    setUnreadOnly(false);
+    onMarkThreadRead?.();
+  }, [state.messages, onMarkThreadRead]);
+
   React.useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -904,68 +941,99 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
           control keeps a resolvable accessible name; the toggles reflect state
           via aria-pressed and the revealed input is labeled (NFR-05). Only
           meaningful once there's a thread to filter. */}
-      {timeline.length > 0 && (
-        <div className={filterStyles.bar} role="group" aria-label="Filter messages">
-          <ToggleButton
-            size="small"
-            appearance="subtle"
-            icon={<MailRegular />}
-            checked={emailEnabled}
-            aria-pressed={emailEnabled}
-            aria-label="Show email messages"
-            title="Show email messages"
-            onClick={() => setEmailEnabled(prev => !prev)}
-          />
-          <ToggleButton
-            size="small"
-            appearance="subtle"
-            icon={<ChatRegular />}
-            checked={messageEnabled}
-            aria-pressed={messageEnabled}
-            aria-label="Show chat messages"
-            title="Show chat messages"
-            onClick={() => setMessageEnabled(prev => !prev)}
-          />
-          <ToggleButton
-            size="small"
-            appearance="subtle"
-            icon={<MailUnreadRegular />}
-            checked={unreadOnly}
-            aria-pressed={unreadOnly}
-            aria-label="Show unread messages only"
-            title="Show unread messages only"
-            onClick={() => setUnreadOnly(prev => !prev)}
-          />
-          <ToggleButton
-            size="small"
-            appearance="subtle"
-            icon={<SearchRegular />}
-            checked={searchOpen}
-            aria-pressed={searchOpen}
-            aria-expanded={searchOpen}
-            aria-label="Search messages"
-            title="Search messages"
-            onClick={() =>
-              setSearchOpen(prev => {
-                const next = !prev;
-                // Closing the search clears the active word facet so a hidden
-                // filter never keeps silently narrowing the list.
-                if (!next) setWord('');
-                return next;
-              })
-            }
-          />
-          {searchOpen && (
-            <Input
-              className={filterStyles.search}
-              size="small"
-              contentBefore={<SearchRegular />}
-              value={word}
-              placeholder="Filter messages"
-              aria-label="Filter messages by text"
-              onChange={(_e, data) => setWord(data.value)}
-            />
+      {state.status === 'ready' && (
+        <div className={filterStyles.bar} role="group" aria-label="Message tools">
+          {/* Icon filter toggles (task 062 / §B7) + Mark-as-read (item 5c) only
+              matter once there's a thread to filter. Refresh (item 7) is always
+              present so an empty thread can still be polled on demand. */}
+          {timeline.length > 0 && (
+            <>
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={emailEnabled ? filterStyles.toggleActive : undefined}
+                icon={<MailRegular />}
+                checked={emailEnabled}
+                aria-pressed={emailEnabled}
+                aria-label="Show email messages"
+                title="Show email messages"
+                onClick={() => setEmailEnabled(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={messageEnabled ? filterStyles.toggleActive : undefined}
+                icon={<ChatRegular />}
+                checked={messageEnabled}
+                aria-pressed={messageEnabled}
+                aria-label="Show chat messages"
+                title="Show chat messages"
+                onClick={() => setMessageEnabled(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={unreadOnly ? filterStyles.toggleActive : undefined}
+                icon={<MailUnreadRegular />}
+                checked={unreadOnly}
+                aria-pressed={unreadOnly}
+                aria-label="Show unread messages only"
+                title="Show unread messages only"
+                onClick={() => setUnreadOnly(prev => !prev)}
+              />
+              <ToggleButton
+                size="small"
+                appearance="subtle"
+                className={searchOpen ? filterStyles.toggleActive : undefined}
+                icon={<SearchRegular />}
+                checked={searchOpen}
+                aria-pressed={searchOpen}
+                aria-expanded={searchOpen}
+                aria-label="Search messages"
+                title="Search messages"
+                onClick={() =>
+                  setSearchOpen(prev => {
+                    const next = !prev;
+                    // Closing the search clears the active word facet so a hidden
+                    // filter never keeps silently narrowing the list.
+                    if (!next) setWord('');
+                    return next;
+                  })
+                }
+              />
+              {searchOpen && (
+                <Input
+                  className={filterStyles.search}
+                  size="small"
+                  contentBefore={<SearchRegular />}
+                  value={word}
+                  placeholder="Filter messages"
+                  aria-label="Filter messages by text"
+                  onChange={(_e, data) => setWord(data.value)}
+                />
+              )}
+              {/* Mark-as-read tool (item 5c) — relocated here from the thread row. */}
+              <Tooltip content="Mark conversation as read" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<MailReadRegular />}
+                  aria-label="Mark conversation as read"
+                  onClick={markAsRead}
+                />
+              </Tooltip>
+            </>
           )}
+          {/* Refresh (item 7) — moved out of the compose row into the toolbar. */}
+          <Tooltip content="Refresh conversation" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<ArrowClockwiseRegular />}
+              aria-label="Refresh conversation"
+              onClick={pollNow}
+            />
+          </Tooltip>
         </div>
       )}
 
@@ -1035,7 +1103,6 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
                       message={item.entry.message}
                       isOwn={isOwnMessage(item.entry.message, currentUserSystemUserId)}
                       onOpen={onOpenEmail}
-                      onOpenAttachment={onOpenAttachment}
                     />
                   ) : (
                     <MessageBubble

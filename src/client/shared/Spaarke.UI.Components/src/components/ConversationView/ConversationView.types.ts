@@ -89,6 +89,16 @@ export interface ConversationViewProps {
   onError?: (error: Error) => void;
 
   /**
+   * Fired when the user activates the "Mark as read" tool in the message
+   * toolbar (R3 UAT 2026-07-22). The host clears THIS thread's list-pane unread
+   * badge (the affordance moved off the thread row into the message toolbar);
+   * `ConversationView` additionally advances its own unread watermark so the
+   * open conversation stops counting loaded messages as unread. Omit it and the
+   * tool still advances the local watermark — it just doesn't reach the list badge.
+   */
+  onMarkThreadRead?: () => void;
+
+  /**
    * Fired when the user activates the open-icon on an EMAIL-in-flow block
    * (task 021, FR-04). Email-type communications render as a compact
    * subject/from/to block (`<EmailInFlowBlock />`) rather than a chat bubble;
