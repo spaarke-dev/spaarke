@@ -3,7 +3,7 @@
     <title>Validate returned anchors before apply; fuzzy-as-comment last resort (FR-07, apply)</title>
     <phase>4 AI anchoring</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend + BFF implementation on the AI apply path modifying .ts/.tsx/.cs; correctness-critical anchor validation (never silently place); tags include frontend + bff-api + docx.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -159,6 +159,58 @@
     Apply half of FR-07; the capture half (bookmark + resolve-on-return) is task 040. Success Criterion 3
     (AI drift-proof; bad anchors refused) is proven by task 042's automated ProseMirror test. Run
     `/conflict-check` before any BFF-touching PR.
+
+    ── COMPLETION (2026-07-22) ──
+    NO BFF/server files touched — client-only, envelope-only. The fuzzy last resort REUSES the shipped
+    `AnnotationReanchorService` via its EXISTING route (`POST /api/compose/document/{id}/reanchor-annotations`,
+    the SAME `useComposeReanchor().reanchor` function shape) — injected into the new hook, not reimplemented,
+    not a new endpoint. No AI dispatch endpoint added (ADR-039); no `Services/Ai/` fork (ADR-013).
+
+    Files:
+      - NEW  src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiApplyValidation.ts
+             (`validateComposeOperationAnchor` — pure structural anchor check against the LIVE doc: paraId
+              existence, run/offset bounds via the reused `runsOfBlock`, opaque-atom-interior refusal
+              mirroring FR-02; `applyValidatedComposeOperation` — applies a structurally-valid INLINE op
+              (insertText/deleteRange/replaceRange/setMark/clearMark) via a normal TipTap transaction, which
+              the EXISTING `RebasedOperationLog`/step-interceptor plugin on the same editor instance captures
+              automatically (no second capture path); `useAiApplyValidation` — the controller: validate→apply
+              or validate-fail/apply-fail→surface, running the injected fuzzy-reanchor lookup for a confidence
+              hint. SCOPE DECISION (documented in the file header, not an ADR conflict — a literal reading of
+              NFR-02/I-7): the four paragraph-structural op types (split/merge/insert/deleteParagraph) are
+              anchor-validated but NEVER applied by this task — always surfaced, MORE conservative than
+              required. A SECOND, stronger decision: even an AUTO-band fuzzy match NEVER auto-applies — the
+              reanchor endpoint returns a paragraph INDEX+preview (a summary datum), not a client-resolvable
+              run-local anchor, so there is no safe non-guessing way to place it; AUTO only upgrades the
+              surfaced item's confidence hint. This means the §6 escalation trigger — "any code path that
+              would silently place an unvalidatable op" — has NO satisfying code path in this module by
+              construction. Verified directly by a dedicated test asserting an AUTO-band hint still surfaces.)
+      - NEW  .../src/widgets/hooks/useAiApplyValidation.test.ts (24 tests: pure validator incl. atom-interior
+             + unknown-target-paraId; applier incl. structural-op-never-applied; hook incl. AUTO/REVIEW/ORPHAN
+             fuzzy hints ALL surfacing never auto-placing, reanchor-failure still surfaces, dismissReview,
+             no-editor-mounted).
+      - EDIT .../src/widgets/ComposeAiToolbar.tsx (ADDITIVE opt-in `aiApplyValidation` prop: an 'operations'
+             `resolveOnReturn` result is handed to `validateAndApply`; a new dark-mode-correct review banner
+             (colorStatusWarning* tokens — the SAME warning tokens ComposeEditor's existing redline/reanchor
+             surfaces use) renders surfaced items with a Dismiss action, independent of selection state so it
+             survives a selection change. Absent controller ⇒ unchanged from 040.)
+      - EDIT .../src/widgets/hooks/useAiGenerateBookmark.ts (doc-only: cross-reference to the now-implemented
+             041 apply path — no functional change).
+      - EDIT .../src/widgets/hooks/useAiGenerateBookmark.test.tsx (4 new tests: an 'operations' resolution
+             reaches `validateAndApply`; a 'refused' resolution does NOT; dark-mode render of a hand-built
+             review item; dismiss wiring.)
+      - EDIT .../src/index.ts (additive exports: `useAiApplyValidation` + its public types).
+
+    Escalation: NONE fired. No code path silently places an unvalidatable operation (verified structurally by
+    construction + by a dedicated AUTO-band test) and none silently drops one (every validation/apply failure
+    surfaces via `AiApplyReviewItem`, including a fuzzy-lookup network failure).
+
+    Verify: client `npm run typecheck` — R4 files clean (only pre-existing `@spaarke/*` sibling-dist +
+    ComposeWorkspace.tsx:1768 implicit-any errors remain, both pre-existing/environmental per 040's own notes).
+    `npx jest useAiApplyValidation useAiGenerateBookmark stepOperationInterceptor opaqueAtomNode` → 71/71 pass
+    (pre-fix debugging surfaced + corrected an unrelated latent bug: `runsOfBlock`'s leaf-run `markKey` sentinel
+    is NOT a literal space as the source's visual rendering suggests — `isAtomRun` now does a robust `.includes
+    ('leaf:')` substring check instead of assuming the exact sentinel byte). No BFF touched — no publish-size /
+    CVE report required.
   </notes>
 
   <execution>

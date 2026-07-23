@@ -34,9 +34,9 @@
 | 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
 | 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ⏸ verified; Azure deploy held for owner | 🔲 |
 | 036 | 🔔 Retire DocxAnnotationWriter + push-annotations (owner Path B/C) | 3 Patch Engine | opus / xhigh | FULL | 032, **owner-decision** | ⏸ deferred (product decision) | 🔲 |
-| 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | blocked | 🔲 |
-| 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | blocked | 🔲 |
-| 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | blocked | 🔲 |
+| 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
+| 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
+| 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | done | ✅ |
 | 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | blocked | 🔲 |
 | 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | blocked | 🔲 |
 | 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | blocked | 🔲 |

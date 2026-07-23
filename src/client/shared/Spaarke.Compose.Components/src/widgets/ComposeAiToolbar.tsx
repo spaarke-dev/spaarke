@@ -114,12 +114,14 @@ import { type Editor } from '@tiptap/react';
 import {
   Toolbar,
   ToolbarButton,
+  Button,
   Tooltip,
   Menu,
   MenuTrigger,
   MenuPopover,
   MenuList,
   MenuItem,
+  Text,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
@@ -131,6 +133,7 @@ import {
   Mail24Regular,
   Open24Regular,
   Send24Regular,
+  Dismiss16Regular,
 } from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
 import {
@@ -142,6 +145,8 @@ import {
 import type { DispatchPaneEvent, WorkspacePaneEvent } from '@spaarke/ai-widgets/events';
 import type { ComposeDocumentRef } from '../types/compose-contracts';
 import type { TipTapNode } from '../utils/docxBridge';
+import type { AiGenerateBookmarkController } from './hooks/useAiGenerateBookmark';
+import type { AiApplyReviewReason, AiApplyValidationController } from './hooks/useAiApplyValidation';
 
 /**
  * spaarkeai-compose-r2 — clean-body extraction for the Email stub (FIX #10b).
@@ -438,6 +443,49 @@ export interface ComposeAiToolbarProps {
    * original "renders nothing on collapsed selection" behavior).
    */
   forceVisible?: boolean;
+  /**
+   * FR-07 (task 040) drift-proof AI anchoring — the generate-window bookmark controller
+   * (`useAiGenerateBookmark`). OPT-IN + additive: when provided, clicking a
+   * `materializesInEditor` (Generate) action drops a request-scoped bookmark at the current
+   * selection, rebases it through concurrent user edits, and adds the resolved `targetParaId`
+   * to the dispatch slots as model context; on the dispatch result it calls `resolveOnReturn`
+   * so the returned JSON operations land at the REBASED selection (the apply/validate is
+   * task 041, driven by the controller's surface callbacks). When ABSENT (the default, and
+   * every existing mount/test), dispatch behavior is UNCHANGED — no bookmark, no extra slot.
+   * The dispatch itself is unchanged (envelope-only, `Services/Ai/PublicContracts` via
+   * `dispatchConsumer`; no new endpoint — ADR-039).
+   */
+  aiGenerateBookmark?: AiGenerateBookmarkController;
+  /**
+   * FR-07 (task 041) apply-side gate — the validate-before-apply + fuzzy-as-comment last-resort
+   * controller (`useAiApplyValidation`). OPT-IN + additive, mirroring `aiGenerateBookmark`: when
+   * BOTH `aiGenerateBookmark` and `aiApplyValidation` are supplied, a successful (`status:
+   * 'operations'`) `resolveOnReturn` result is handed to `aiApplyValidation.validateAndApply` —
+   * every returned operation's anchor is validated against the live document; a valid one applies
+   * cleanly, an unvalidatable one surfaces as a review item in this toolbar's review banner
+   * (rendered below the toolbar, dark-mode-correct — ADR-021). NEVER silently placed, NEVER
+   * silently dropped (FR-07 / NFR-02 / I-7). When ABSENT, behavior is UNCHANGED from task 040 —
+   * `resolveOnReturn`'s result is resolved but nothing further happens here.
+   */
+  aiApplyValidation?: AiApplyValidationController;
+}
+
+/** Short, human-readable label for a surfaced review item's reason (the toolbar's review banner). */
+function reviewReasonLabel(reason: AiApplyReviewReason): string {
+  switch (reason) {
+    case 'unknown-paraId':
+      return 'the target paragraph could no longer be found';
+    case 'unknown-target-paraId':
+      return 'the merge target paragraph could no longer be found';
+    case 'out-of-range':
+      return 'the target position moved out of range';
+    case 'atom-interior':
+      return 'the target overlaps non-editable content';
+    case 'not-applied':
+      return 'the suggestion could not be applied automatically';
+    default:
+      return 'needs review';
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -470,6 +518,28 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalS,
     paddingBlock: tokens.spacingVerticalXS,
   },
+  // FR-07 (task 041) — the review banner surfacing unvalidatable AI operations. The SAME warning
+  // semantic tokens ComposeEditor.tsx's redline/reanchor "needs attention" surfaces already use
+  // (colorStatusWarning*) — dark-mode-correct, no hex literals (ADR-021).
+  reviewBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+    marginTop: tokens.spacingVerticalXS,
+    padding: tokens.spacingHorizontalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    border: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  reviewItem: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+  },
+  reviewItemText: {
+    color: tokens.colorStatusWarningForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -487,6 +557,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     enqueueComposeAction,
     dispatchConsumerOverride,
     forceVisible,
+    aiGenerateBookmark,
+    aiApplyValidation,
   } = props;
   const styles = useStyles();
 
@@ -548,6 +620,16 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       const selectionText =
         rawText.length > TOOLBAR_SELECTION_TEXT_CAP ? rawText.slice(0, TOOLBAR_SELECTION_TEXT_CAP) : rawText;
 
+      // FR-07 (task 040) — GENERATE-WINDOW BOOKMARK (opt-in via `aiGenerateBookmark`; drops only
+      // for a `materializesInEditor` Generate action). Drop a request-scoped bookmark at the
+      // current selection, rebased through concurrent edits, and send the resolved target paraId
+      // as model context. `resolveOnReturn` (below) resolves it to the CURRENT position so the
+      // returned ops land at the rebased selection (apply/validate = task 041, via the controller's
+      // surface callbacks). Absent controller ⇒ nothing added (unchanged dispatch shape).
+      const useBookmark = !!aiGenerateBookmark && action.materializesInEditor === true;
+      const bookmarkRequestId = useBookmark ? `${action.id}#bm${(clickSeqRef.current += 1)}` : undefined;
+      const bookmarkContext = useBookmark ? aiGenerateBookmark!.beginGenerate({ requestId: bookmarkRequestId }) : undefined;
+
       // Slots mirror the SHIPPED compose-selection scope's authored field
       // list (task 024) — not invented (see Spike 0 §3a: the server owns the
       // typed parse against the Action's sprk_inputschema; this is the
@@ -560,6 +642,10 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           documentSpeId: documentRef?.speDriveItemId,
           documentRecordId: documentRef?.sprkDocumentId,
           sessionId,
+          // FR-07: the durable target paraId as model context (only when a Generate bookmark was
+          // dropped AND the caret sat in a paraId-bearing block). The model returns JSON operations
+          // referencing this paraId, not free text to search (I-7).
+          ...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
         },
       };
 
@@ -567,6 +653,25 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       // wired, the Assistant pane's existing dispatch-failure line (mirrors
       // useConsumerChips.tsx) is the user-visible surface.
       const swallow = (): void => undefined;
+
+      // FR-07: on the dispatch RESULT, resolve the bookmark to its current (rebased) position and
+      // hand the returned JSON operations to the apply path (task 041, via the controller's surface
+      // callbacks — free text is refused, a deleted-content bookmark is surfaced for review). Only
+      // when a bookmark was dropped; a rejected dispatch clears it so no stale bookmark leaks.
+      // Task 041: when an `aiApplyValidation` controller is ALSO supplied, a successful
+      // ('operations') resolution is handed to `validateAndApply` — every returned op's anchor is
+      // validated against the live doc before it applies; an unvalidatable op surfaces via the
+      // review banner below, never silently placed. Absent controller ⇒ behavior UNCHANGED (040).
+      const resolveReturn = (result: DispatchConsumerResult): void => {
+        if (!useBookmark || !bookmarkRequestId) return;
+        const outcome = aiGenerateBookmark!.resolveOnReturn(bookmarkRequestId, result?.result);
+        if (outcome?.status === 'operations' && aiApplyValidation) {
+          void aiApplyValidation.validateAndApply(outcome);
+        }
+      };
+      const onDispatchError = (): void => {
+        if (useBookmark && bookmarkRequestId) aiGenerateBookmark!.clearBookmark(bookmarkRequestId);
+      };
 
       // FR-18: route through the host serial queue when threaded (serializes
       // rapid Compare→Draft clicks); else fall back to the toolbar's own bound
@@ -583,12 +688,22 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           bindingId: action.bindingId,
           args,
           ...(action.materializesInEditor ? { documentSessionId: sessionId } : {}),
-        }).catch(swallow);
+        })
+          .then(resolveReturn)
+          .catch(() => {
+            onDispatchError();
+            swallow();
+          });
       } else {
-        void dispatchConsumer(action.bindingId, args).catch(swallow);
+        void dispatchConsumer(action.bindingId, args)
+          .then(resolveReturn)
+          .catch(() => {
+            onDispatchError();
+            swallow();
+          });
       }
     },
-    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId]
+    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId, aiGenerateBookmark, aiApplyValidation]
   );
 
   // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
@@ -626,9 +741,13 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   if (!editor) return null;
 
   const { from, to } = editor.state.selection;
-  // NEGATIVE case — collapsed/empty selection shows no toolbar, UNLESS the
-  // host force-opened it (task 111 right-click / point-insertion trigger).
-  if (from === to && !forceVisible) return null;
+  // NEGATIVE case — collapsed/empty selection hides the ACTION toolbar, UNLESS the host
+  // force-opened it (task 111 right-click / point-insertion trigger). Task 041: the review banner
+  // (surfaced unvalidatable AI operations) is independent of selection state — a surfaced item
+  // must stay visible even after the selection that triggered it changes, so it is NOT gated here.
+  const showActionToolbar = !(from === to && !forceVisible);
+  const reviewItems = aiApplyValidation?.reviewQueue ?? [];
+  if (!showActionToolbar && reviewItems.length === 0) return null;
 
   const allActions = actions ?? getComposeAiToolbarActions();
   const primaryActions = allActions.filter(a => a.placement === 'primary');
@@ -643,6 +762,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   // `columnGap` token — no large gap, all actions still reachable, all
   // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
+    <>
+    {showActionToolbar ? (
     <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
       {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
           hover Tooltip names each tool. Names come from `action.label`. */}
@@ -728,6 +849,36 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
         </MenuPopover>
       </Menu>
     </Toolbar>
+    ) : null}
+
+    {/* FR-07 (task 041) — review banner: unvalidatable AI operations, surfaced never silently
+        placed/dropped (FR-07 / NFR-02 / I-7). Dark-mode-correct semantic tokens only (ADR-021). */}
+    {reviewItems.length > 0 ? (
+      <div className={styles.reviewBanner} role="status" data-testid="compose-ai-review-banner">
+        {reviewItems.map(item => (
+          <div key={item.id} className={styles.reviewItem} data-testid={`compose-ai-review-item-${item.id}`}>
+            <Text size={200} className={styles.reviewItemText}>
+              An AI suggestion needs review — {reviewReasonLabel(item.reason)}
+              {item.fuzzy?.matchedParagraphPreview
+                ? ` (possible match: "${item.fuzzy.matchedParagraphPreview}")`
+                : ''}
+              .
+            </Text>
+            <Tooltip content="Dismiss" relationship="description" withArrow>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss16Regular />}
+                aria-label="Dismiss review item"
+                data-testid={`compose-ai-review-dismiss-${item.id}`}
+                onClick={() => aiApplyValidation?.dismissReview(item.id)}
+              />
+            </Tooltip>
+          </div>
+        ))}
+      </div>
+    ) : null}
+    </>
   );
 }
 

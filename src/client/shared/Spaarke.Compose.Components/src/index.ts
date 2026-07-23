@@ -58,6 +58,46 @@ export type { ComposeAiToolbarProps, ComposeAiToolbarAction, ComposeActionEnqueu
 export { useComposeToolbarActivation } from './widgets/useComposeToolbarActivation';
 export type { UseComposeToolbarActivationOptions } from './widgets/useComposeToolbarActivation';
 
+// R4 FR-07 — drift-proof AI generate-window bookmark (task 040, CAPTURE half). Drops a
+// request-scoped ProseMirror `SelectionBookmark` at the selection on Generate, rebases it through
+// concurrent user edits via the op-log `Mapping`, sends the target paraId as model context, and
+// resolves it to the current position on return (the apply/validate half is task 041).
+export { useAiGenerateBookmark, extractComposeOperations } from './widgets/hooks/useAiGenerateBookmark';
+export type {
+  AiGenerateBookmarkController,
+  AiGenerateBookmarkContext,
+  AiGenerateResolvedBookmark,
+  AiGenerateReturnResult,
+  AiGenerateOperationsResult,
+  AiGenerateRefusedResult,
+  AiGenerateUnknownResult,
+  AiGenerateReviewReason,
+  AiGenerateRefusalReason,
+  UseAiGenerateBookmarkOptions,
+} from './widgets/hooks/useAiGenerateBookmark';
+
+// R4 FR-07 — validate-before-apply + fuzzy-as-comment last resort (task 041, the APPLY half of
+// task 040's generate-window bookmark). Validates every AI-returned operation's paraId/offset
+// against the live document; a valid anchor applies cleanly, an unvalidatable one surfaces as a
+// review item (never silently placed, never silently dropped) via the shipped
+// `AnnotationReanchorService` fuzzy-reanchor route (injected, not reimplemented).
+export {
+  useAiApplyValidation,
+  validateComposeOperationAnchor,
+  applyValidatedComposeOperation,
+} from './widgets/hooks/useAiApplyValidation';
+export type {
+  AiApplyValidationController,
+  UseAiApplyValidationOptions,
+  AiApplyOutcome,
+  AiApplyReviewItem,
+  AiApplyFuzzyHint,
+  AiApplyReviewReason,
+  AiApplyReanchorFn,
+  AnchorValidationReason,
+  AnchorValidationResult,
+} from './widgets/hooks/useAiApplyValidation';
+
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)
 // -------------------------------------------------------------------------
