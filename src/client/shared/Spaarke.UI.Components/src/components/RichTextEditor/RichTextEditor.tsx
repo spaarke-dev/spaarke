@@ -270,22 +270,44 @@ interface InitialContentPluginProps {
   html: string;
 }
 
+// Treat editors that serialize to nothing (or a single empty paragraph) as empty,
+// so an empty incoming value and a freshly-cleared editor compare equal and we don't
+// ping-pong on empty content.
+function isEffectivelyEmptyHtml(html: string): boolean {
+  const t = (html || '').replace(/\s+/g, '').toLowerCase();
+  return t === '' || /^<p[^>]*>(<br\/?>)?<\/p>$/.test(t);
+}
+
 function InitialContentPlugin({ html }: InitialContentPluginProps): null {
   const [editor] = useLexicalComposerContext();
-  const hasInitialized = React.useRef(false);
 
+  // Controlled sync: apply the incoming `html` whenever it differs from what the editor
+  // currently holds. This covers BOTH (a) the initial (possibly async-loaded) content and
+  // (b) EXTERNAL programmatic edits after mount — e.g. EmailComposer appending a record link
+  // to a forwarded body. Echoes of the editor's OWN onChange serialize back identically, so
+  // user typing compares equal and is skipped (no cursor reset / no re-insert).
+  //
+  // Previously this initialized exactly once (first non-empty value). That silently dropped
+  // any later external change once the editor had content — the forward-mode "add record"
+  // bug: a reply starts empty so the appended link WAS the first non-empty value (worked),
+  // but a forward starts prefilled so it was already initialized (the link never appeared).
   useEffect(() => {
-    if (html && !hasInitialized.current) {
-      hasInitialized.current = true;
-      editor.update(() => {
-        const parser = new DOMParser();
-        const dom = parser.parseFromString(html, 'text/html');
-        const nodes = $generateNodesFromDOM(editor, dom);
-        const root = $getRoot();
-        root.clear();
-        $insertNodes(nodes);
-      });
-    }
+    let current = '';
+    editor.getEditorState().read(() => {
+      current = $generateHtmlFromNodes(editor);
+    });
+    const incoming = html || '';
+    if (current === incoming) return;
+    if (isEffectivelyEmptyHtml(current) && isEffectivelyEmptyHtml(incoming)) return;
+
+    editor.update(() => {
+      const parser = new DOMParser();
+      const dom = parser.parseFromString(incoming, 'text/html');
+      const nodes = $generateNodesFromDOM(editor, dom);
+      const root = $getRoot();
+      root.clear();
+      $insertNodes(nodes);
+    });
   }, [editor, html]);
 
   return null;
