@@ -576,11 +576,14 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         </div>
       )}
 
-      {/* modalType="alert" disables light-dismiss (backdrop-click + Escape). Required so the
+      {/* modalType="non-modal": renders NO backdrop scrim and no focus trap. Required so the
           native Xrm.Utility.lookupObjects record-lookup pane — which renders OUTSIDE this dialog's
-          DOM — does NOT trigger a focus-loss dismiss that auto-closes the composer (UAT round 6).
-          All intentional closes route through the composer's own X / Cancel / Send → onClose/onSent. */}
-      <Dialog modalType="alert" open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
+          DOM at page level — stays fully interactive (a "modal"/"alert" backdrop covers the whole
+          viewport and swallows clicks on the lookup pane; "modal" also light-dismisses the composer
+          on that focus loss). Non-modal fixes both the UAT-r6 auto-close and the UAT-r7 "lookup
+          behind the modal / can't select" issue. The composer still renders as an elevated floating
+          surface; all closes route through its own X / Cancel / Send → onClose/onSent. */}
+      <Dialog modalType="non-modal" open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
         <DialogSurface className={s.dialogSurface}>
           <DialogBody className={s.dialogBody}>{composerProps && <SendEmailPageR16 {...composerProps} />}</DialogBody>
         </DialogSurface>
