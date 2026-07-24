@@ -2,8 +2,8 @@
   <metadata>
     <title>Phase-1 ingest/projection through-the-wire seam slice (NFR-06)</title>
     <phase>1 Backend ingest</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `tests/**` and has tags including `testing` / `integration-test` — the TEST-MODIFYING override row (root §8) forces code-review + adr-check at Step 9.5 UNCONDITIONALLY; also a BFF-path (bff-api) seam.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -15,8 +15,8 @@
     <tags>bff-api,testing,integration-test</tags>
     <estimated-effort>1 day</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -142,6 +142,39 @@
     `tests/integration/seam/**` vertical-slice-seam per ADR-038 §7), not new product surface. Depends on
     010/011/012 all landing first. `test-diet` (project wrap-up) will classify this as MAINTAIN (seam slice
     = KEEP category).
+
+    COMPLETED 2026-07-22. New file: `tests/integration/seam/Compose/ComposePhase1IngestSeamTests.cs` (6 test
+    methods: 2 `[Theory]` across all 3 corpus docs + 4 `[Fact]`, 10 total test cases, all green). Reuses
+    `ComposeFidelitySeamFixture` (Ai/) + `ComposeCorpusFixtureLocator`/`ComposeOoxmlPackagePartComparer`
+    (task 004, Compose/) — zero new WebApplicationFactory host-config duplication.
+
+    Proves, through the real `GET /api/compose/documents/{id}` and `POST .../save` endpoints:
+    (a) paraId persistence (task 010) — a real load→save→reload round trip shows the SAME durable
+    `w14:paraId`s, verified by directly opening the wire-returned `Content` bytes (not the `IsMinted` flag —
+    see finding below) — across all 3 corpus docs, plus a dedicated synthetic-fixture test proving the mint
+    mechanism itself (no corpus doc has an id-less paragraph);
+    (b) the offset-addressing table (task 011) round-trips offsets→run splits deterministically — across all
+    3 corpus docs, using wire-obtained `Content` fed into the real `ComposeDocxProjectionBuilder` (documented
+    approach: the table has zero wire surface, matching task 012's own decision to keep it internal — this is
+    NOT the ADR-038 escalation case since no mock/DI/ctor-null shape is used, just a direct call to a real
+    stateless production type on real wire-sourced bytes);
+    (c) opaque atoms (task 012) survive a no-op save byte-for-byte — a synthetic field+SDT+drawing document
+    (corpus lacks body-level coverage, per task 012's own finding) loads without editor error, atoms render
+    as `contenteditable="false"` placeholders in the wire response's `Projection.Html`, and the whole-file
+    bytes are unchanged after a no-op save;
+    negative — an empty/id-less paragraph doc, and a genuinely-unreadable-bytes doc, both ingest through the
+    wire without an unhandled exception (200 OK, fail-closed for the latter).
+
+    FINDING (documented in the test file, not an escalation): `LoadComposeDocumentResponse.ParaIdMap[i].IsMinted`
+    is structurally ALWAYS false through the wire — `ComposeService.LoadAsync` runs
+    `ComposeBaselineParaIdStamper.MintAndPersist` BEFORE building the projection, so by the time
+    `ComposeDocxProjectionBuilder` walks the (already-stamped) bytes it never sees a gap. Tests instead open
+    the wire-returned `Content` bytes directly (`ExtractParaIds` helper) to verify minted ids are physically
+    embedded — a stronger, more direct proof than the flag would have given anyway.
+
+    Verification: `dotnet build` green; `dotnet test .../Compose` 521/521 green (10 new, zero regressions in
+    the other 511). No production `.cs` changed (test-only) — publish size and CVE surface unaffected by
+    this task.
   </notes>
 
   <execution>

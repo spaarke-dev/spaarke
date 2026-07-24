@@ -15,11 +15,7 @@
 
 import * as React from 'react';
 import { act, render, screen } from '@testing-library/react';
-import {
-  useCommunicationArrivals,
-  type ArrivalEvent,
-  type ArrivalSubscribe,
-} from './useCommunicationArrivals';
+import { useCommunicationArrivals, type ArrivalEvent, type ArrivalSubscribe } from './useCommunicationArrivals';
 
 /**
  * In-memory fake register-only subscription — records the handler, lets a test FIRE arrivals
@@ -186,9 +182,7 @@ describe('useCommunicationArrivals (FR-22 / SC-10)', () => {
   it('unregisters the consumer on unmount (register-only — never stops the shared connection)', () => {
     const spine = makeFakeSubscribe();
 
-    const { unmount } = render(
-      <Harness subscribe={spine.subscribe} onArrival={jest.fn()} contentFetch={jest.fn()} />
-    );
+    const { unmount } = render(<Harness subscribe={spine.subscribe} onArrival={jest.fn()} contentFetch={jest.fn()} />);
     expect(spine.isRegistered()).toBe(true);
 
     unmount();

@@ -16,7 +16,11 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
-import { ConversationView, ConversationWorkspace } from '@spaarke/ui-components';
+import {
+  ConversationView,
+  ConversationWorkspace,
+  createXrmNavigationService,
+} from '@spaarke/ui-components';
 import { authenticatedFetch } from './services/authInit';
 import { getBffBaseUrl } from './config/runtimeConfig';
 import { getUserId } from './services/xrmProvider';
@@ -43,17 +47,29 @@ export const App: React.FC = () => {
 
   const bffBaseUrl = getBffBaseUrl();
 
+  // Record-lookup service for the shell's built-in New-conversation modal (item 9
+  // — name + associate-to-record picker). Same shared Xrm-backed navigation
+  // adapter the widget host uses (createXrmNavigationService → Xrm lookup).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
   return (
     <div className={styles.root}>
       <ConversationWorkspace
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
-        renderConversation={({ threadId, authenticatedFetch: threadFetch, bffBaseUrl: threadBffBaseUrl }) => (
+        navigationService={navigationService}
+        renderConversation={({
+          threadId,
+          authenticatedFetch: threadFetch,
+          bffBaseUrl: threadBffBaseUrl,
+          onMarkThreadRead,
+        }) => (
           <ConversationView
             threadId={threadId}
             authenticatedFetch={threadFetch}
             bffBaseUrl={threadBffBaseUrl}
             currentUserSystemUserId={currentUserSystemUserId}
+            onMarkThreadRead={onMarkThreadRead}
           />
         )}
       />

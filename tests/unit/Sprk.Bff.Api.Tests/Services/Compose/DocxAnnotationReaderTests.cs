@@ -15,18 +15,18 @@ namespace Sprk.Bff.Api.Tests.Services.Compose;
 /// <para>
 /// <b>ADR-038 KEEP category</b>: <c>domain-logic</c> — the reader is a pure byte[]-in /
 /// record-out transform with no I/O and no collaborators to mock. Tests build a real
-/// <c>.docx</c> with the Open XML SDK (reusing <see cref="DocxAnnotationWriter"/> where that
+/// <c>.docx</c> with the Open XML SDK (reusing <see cref="TrackedChangeDocxBuilder"/> where that
 /// mirrors real Word output, and hand-built packages for reader-specific shapes like
 /// multi-paragraph comment ranges), run the reader, then assert the recovered payload. No
-/// <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI, no transport mocks — same shape as the sibling
-/// <see cref="DocxAnnotationWriterTests"/>.
+/// <c>Mock&lt;HttpMessageHandler&gt;</c>, no DI, no transport mocks. (The retired DocxAnnotationWriter
+/// production type was replaced by the test-only <c>TrackedChangeDocxBuilder</c> fixture; task 036 Path B.)
 /// </para>
 /// </summary>
 public class DocxAnnotationReaderTests
 {
     private static readonly DateTime When = new(2026, 7, 9, 15, 42, 0, DateTimeKind.Utc);
     private readonly DocxAnnotationReader _sut = new();
-    private readonly DocxAnnotationWriter _writer = new();
+    private readonly TrackedChangeDocxBuilder _writer = new();
 
     // -- Happy path: comment + insertion + deletion, real Word-shaped markup ---------------------
 
@@ -39,9 +39,9 @@ public class DocxAnnotationReaderTests
         var source = CreateDocx("The quick brown fox jumps over the lazy dog.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick", CommentText = "Consider a stronger adjective.", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick", CommentText = "Consider a stronger adjective.", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
         };
         var edited = _writer.Annotate(source, annotations);
 
@@ -77,7 +77,7 @@ public class DocxAnnotationReaderTests
         var source = CreateDocx("Body text here.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "Body", NewText = " (edit)", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "Body", NewText = " (edit)", Author = "AI", Date = When },
         };
         var edited = _writer.Annotate(source, annotations);
 
@@ -94,7 +94,7 @@ public class DocxAnnotationReaderTests
         var source = CreateDocx("Alpha beta gamma delta.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "beta gamma", CommentText = "This is the reviewer's note, not document text.", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "beta gamma", CommentText = "This is the reviewer's note, not document text.", Author = "AI", Date = When },
         };
         var edited = _writer.Annotate(source, annotations);
 
@@ -136,8 +136,8 @@ public class DocxAnnotationReaderTests
         var source = CreateDocx("Alpha beta gamma.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "beta", Author = "AI", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "beta", CommentText = "Flagged.", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "beta", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "beta", CommentText = "Flagged.", Author = "AI", Date = When },
         };
         var edited = _writer.Annotate(source, annotations);
 
@@ -155,8 +155,8 @@ public class DocxAnnotationReaderTests
         var source = CreateDocx("One two three four.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "two", NewText = "+ins", Author = "AI", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "three", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "two", NewText = "+ins", Author = "AI", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "three", Author = "AI", Date = When },
         };
         var edited = _writer.Annotate(source, annotations);
 
@@ -224,7 +224,7 @@ public class DocxAnnotationReaderTests
 
     /// <summary>
     /// Hand-builds a document whose single comment's <c>CommentRangeStart</c>/<c>CommentRangeEnd</c>
-    /// markers straddle TWO paragraphs — a shape <see cref="DocxAnnotationWriter"/> cannot produce
+    /// markers straddle TWO paragraphs — a shape <see cref="TrackedChangeDocxBuilder"/> cannot produce
     /// (its <c>ApplyComment</c> anchors within one located paragraph), but one Word itself allows
     /// and Spike 6 explicitly flagged as unexercised. Exercises EDGE-R4 (the anchor-range walk must
     /// flatten across paragraph boundaries).

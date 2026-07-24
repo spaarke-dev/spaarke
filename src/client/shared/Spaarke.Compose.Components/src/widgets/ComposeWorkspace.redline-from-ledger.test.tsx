@@ -167,7 +167,6 @@ jest.mock('./hooks', () => ({
   useComposeHeartbeatGate: () => undefined,
 }));
 jest.mock('./useComposeWordShuttle', () => ({
-  useComposePushAnnotations: () => ({ push: jest.fn(), pushing: false }),
   useComposePullAnnotations: () => ({ pull: jest.fn() }),
   useComposeCheckChanges: () => ({ checkChanges: jest.fn() }),
   anchoredAnnotationsToPriorAnchors: () => [],

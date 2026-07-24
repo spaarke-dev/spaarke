@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Added 2026-07-20 (UAT round 2, C1/C2). C1: <see cref="DocxAnnotationWriter"/> located annotation
+/// Added 2026-07-20 (UAT round 2, C1/C2). C1: <c>DocxAnnotationWriter</c> located annotation
 /// targets by an EXACT ordinal search while the client had already folded — a single curly apostrophe
 /// or NBSP drift produced a 422 "tracked change could not be located". C2: the save-time paraId stamp
 /// (<see cref="ComposeBaselineParaIdStamper"/>) verifies a baseline paragraph's text against the

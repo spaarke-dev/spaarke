@@ -1,7 +1,50 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-22 (context-handoff — all UAT rounds R1–R5 merged to master, NOT deployed)
+> **Last Updated**: 2026-07-23 (context-handoff — EmailComposer redesign arc through UAT round 5 / PCF v1.3.9; NOT merged, NOT deployed)
 > **Recovery**: Read "Quick Recovery" first.
+
+## Quick Recovery (READ THIS FIRST) — 2026-07-23
+
+| Field | Value |
+|-------|-------|
+| **Active work** | **EmailComposer full redesign to match owner mockup** (FR-21 "same form everywhere"), driven by 5 rounds of owner UAT screenshots. All on branch `work/email-communication-solution-r4`, **committed, NOT pushed/merged/deployed**. |
+| **Latest artifact** | **CommunicationActions PCF v1.3.9** ZIP: `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.3.9.zip` (bundle sha `5a3dc1117a97`; version verified in all 5 locations + inside the ZIP). Owner imports it (unmanaged → Publish All → hard refresh; footer must read v1.3.9). v1.3.8 = same code, v1.3.9 = fresh rebuild to bust Dataverse control cache. |
+| **Status** | Awaiting owner import + visual confirm of v1.3.9 (fill-fix + record-lookup). |
+| **Next Action** | On owner confirm the composer is right: (1) run `code-review` + `adr-check` on the shared-lib EmailComposer redesign; (2) then the **wizard full-match restyle** (8 wizard email surfaces via shared `EmailStep`, owner chose "full match: chips + rich text"); (3) then owner-directed **merge + deploy**. If owner reports a visual issue, iterate on the composer + rebuild the PCF (bump version, all 5 places, fresh build:prod, sha-verify — per `/pcf-deploy`). |
+
+### Composer redesign — commit trail (all on worktree branch, NOT merged)
+- `d94781eaa` provenance quote-escape (items 1-3 deferred batch: item 2 done; 1 & 3 already done) + `35cc41127` checkpoint.
+- `e3609af53` SendEmailDialog → 720×70vh · `cb5249a00` CommunicationActions 720×70vh v1.3.2 · `4e3eecf51` v1.3.3 cache-bust.
+- `535ebe5cf` **EmailComposer redesign to mockup** (v1.3.4): attachments-above-body, inline To/Cc labels, subject placeholder, split Send (send-from in caret), Bcc toggle, header X.
+- `d516a2f07` **UAT r2** (v1.3.5): landscape size, chips-in-field, toggle-top-right, no Message label, resizeable, Cancel-left.
+- `daa0c3bad` **UAT r3** (v1.3.6): fixed-layout dialog (pinned header/footer), attachment collapsible + header toolbar + no source pills + files-no-checkbox/docs-Attach-Link + 1-line summary, single-icon rich/plain toggle.
+- `2d01ed6c1` **UAT r4** (v1.3.7): fill-container attempt + single-scroll + plain-text HTML-strip + right-align count + (first) document-lookup overlay modal.
+- `d2c7b5002` **UAT r5** (v1.3.8): **fixed left-clip** via `box-sizing:border-box` on composer base; **replaced doc-only overlay with RECORD lookup (RegardingResolver pattern)** — search icon → entity menu (Document/Matter/Project/Event/Communication/WorkAssignment/Invoice/Budget/Analysis/Organization/Contact) → host `Xrm.Utility.lookupObjects`; Document→attach (Attach/Link), other record→body link. Removed `DocumentLookupDialog` + `onSearchDocuments`; added `recordLookupCatalog` + `onLookupRecord` (host owns Xrm + URL, ADR-012). `a08e3f441` v1.3.9 fresh rebuild.
+
+### Composer redesign — files touched (shared lib `@spaarke/ui-components`, all committed)
+- `EmailComposer.tsx` (layout restructure, box-sizing, handleRecordPicked, escapeHtml), `EmailComposer.types.ts` (IRecordLookupTarget/IPickedRecord + recordLookupCatalog/onLookupRecord props), `subcomponents/RecipientField.tsx` (inline boxed labels + chips-in-field), `BodyEditor.tsx` (single-icon toggle, htmlToPlainText, single scroll), `AttachmentList.tsx` (collapsible + header toolbar + search-icon record-lookup menu + files/docs checkbox rules + 1-line summary), `ComposerActionBar.tsx` (Cancel-left + split Send w/ send-from menu), `wrappers/SendEmailPage.tsx` + `SendEmailDialog.tsx` (720→1040×72vh, prop forwarding), `EmailComposer/index.ts` (barrel). Deleted `subcomponents/DocumentLookupDialog.tsx`.
+- PCF: `src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx` (dialogSurface 1040×72vh, `handleLookupRecord` via window.Xrm, `RECORD_LOOKUP_CATALOG`) + `authInit`/version files.
+- **142 EmailComposer jest tests green; shared-lib `tsc --noEmit` clean** at HEAD (verified each round).
+
+### Composer redesign — key decisions + open follow-ups
+- Owner chose **wizard = "Full match (chips + rich text)"** across the 8 wizard email surfaces (shared `EmailStep` feeds create-record wizards via `SendEmailFollowOnStep`, DocumentUploadWizard, DocumentEmailWizard) — **NOT YET STARTED** (deferred until composer confirmed).
+- RTF toolbar left AS-IS (owner: don't adjust the shared RichTextEditor); circle-down-arrow scroll = the shared editor's own scroll.
+- Deferred/noted: documents attached via the picker show `0 B` (OOB lookup returns only id+name — could enrich with a `sprk_filesize` fetch); the mockup's header "expand/pop-out" icon left out (needs a host handler).
+- `code-review` + `adr-check` on the redesign **still owed** before final merge.
+- The composer redesign flows to OTHER surfaces (SpaarkeAi Assistant, LegalWorkspace FilePreview, SummarizeFilesWizard) via the shared lib — they need their own solution rebuilds at deploy time (other projects' surfaces).
+
+---
+
+
+## Deferred-items batch status (2026-07-22, on `work/email-communication-solution-r4` branch — commit `d94781eaa`, NOT pushed/merged/deployed)
+
+- **Item 1 — FR-03 `sprk_servicerequest` as regarding target**: ✅ **ALREADY COMPLETE** (task 003, prior wave). Verified: `CommunicationService.RegardingLookupMap`:1819, `RegardingFieldMap.All`:18, `IncomingAssociationResolver.GetPrimaryNameField`:499 (→`sprk_name`), `docs/data-model/sprk_servicerequest.md`. `TODO_REGARDING_CATALOG` deliberately NOT touched (it's a `sprk_todo` catalog using `sprk_regardingcontact`, not a communication catalog — documented in the doc §4.1). No number-field convention for servicerequest → correctly absent from `GetReferenceNumberField`. **No work needed.**
+- **Item 2 — escape embedded `"` in name-match provenance**: ✅ **DONE + committed `d94781eaa`**. New shared `RungProvenanceFormat.EscapeValue` (server-only quote→apostrophe neutralize) applied to the user-controlled `name`/`number` in BOTH `RecordNameMatchRung` (3.5) and `ContactNameMatchRung` (3.6). Keeps the shipped PCF `provenance.ts` parser (`key="([^"]*)"`, no unescape) uncorrupted by a quote in a record/contact name — **no PCF rebundle needed**. Real display name still on `Target.Name`. +1 regression test; 571 Communication tests green; build 0 errors; code-review + adr-check CLEAN.
+- **Item 3 — `_recordTypeRefCache` → `ConcurrentDictionary`**: ✅ **ALREADY DONE** (task 018; `IncomingAssociationResolver.cs`:346 is already `ConcurrentDictionary` with the race-condition comment). **No work needed.**
+
+**HELD for owner input** (unchanged): (a) FR-21 wizard email-step migration — needs the "standard composer form" decision. (b) #7 split-index test relocate — recommend it rides task-050 KEEP-path reorg.
+
+**Deploy note**: master's undeployed BFF (124+132) + this worktree's `d94781eaa` (item 2) are all BFF — one `/bff-deploy` covers them once merged. PCF imports unchanged (Connections v1.6.1 / Actions v1.3.1 / Attachments v1.3.0). Item 2 needs NO PCF change.
 
 ---
 

@@ -14,8 +14,8 @@
  *      Receiver / picker UI is OUT OF SCOPE for R1 of this task; the callback
  *      fires so a parent (ComposeWorkspace, task 042) can route the action.
  *
- *   2. **Search for Document** — opens the existing Spaarke Document search
- *      flow (Path A: pick an existing `sprk_document` record). Receiver is the
+ *   2. **Open Document** (task 039 P2: label was "Search for Document") — opens the existing
+ *      Spaarke Document search flow (Path A: pick an existing `sprk_document` record). Receiver is the
  *      existing SemanticSearch surface; the callback fires so the parent can
  *      route the action.
  *
@@ -163,7 +163,8 @@ export interface ComposeEmptyStateProps {
   onBrowseRequested: () => void;
 
   /**
-   * Invoked when the user clicks the "Search for Document" CTA. The parent
+   * Invoked when the user clicks the "Open Document" CTA (task 039 P2 renamed the label
+   * from "Search for Document"; behavior + handler name unchanged). The parent
    * routes this to:
    *   - R1 standard: PaneEventBus dispatch on the `workspace` channel with
    *     an additive `compose_search_requested`-style event (consumer wires the
@@ -288,7 +289,7 @@ export function ComposeEmptyState({
             aria-label="Search for an existing Spaarke document"
             data-testid="compose-empty-state-search"
           >
-            Search for Document
+            Open Document
           </Button>
         </div>
       </Card>

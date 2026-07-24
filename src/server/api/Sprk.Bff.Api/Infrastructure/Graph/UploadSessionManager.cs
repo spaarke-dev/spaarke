@@ -279,6 +279,62 @@ public class UploadSessionManager
                 uploadedItem.WebUrl,
                 uploadedItem.ParentReference?.DriveId ?? containerId);
         }
+        // ── FR-08 (task 051, spaarkeai-compose-r4): PRIMARY catch surface, mirroring the DEF-14 fix
+        //    already applied to ReplaceFileContentAsUserAsync above. The Graph SDK v5 / Kiota `PutAsync`
+        //    call above raises `Microsoft.Graph.Models.ODataErrors.ODataError`, NOT the legacy
+        //    `Microsoft.Graph.ServiceException` — the ServiceException catches below this block are DEAD
+        //    CODE for this call (Kiota never throws that type). Without these ODataError filters, ANY
+        //    Graph error during create-on-save (incl. a create-time precondition/conflict whose message
+        //    text reads "the resource has been changed since the caller last read it" — the deployed R3
+        //    UAT eTag-mismatch surface, spec FR-08) fell through to the generic `catch (Exception ex) {
+        //    throw; }` below, leaking the RAW ODataError type up through ISpeFileOperations into
+        //    Services/Compose/ (an ADR-007 violation) and surfacing as an opaque 500 at the endpoint
+        //    instead of the typed 412 ProblemDetails the caller already knows how to render. ADR-007: the
+        //    Microsoft.Graph type is caught + translated HERE, inside Infrastructure.Graph — only the
+        //    domain exceptions cross the ISpeFileOperations facade.
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogError(ex, "SPE create (upload-small): access denied for container={ContainerId} path={Path}",
+                containerId, path);
+            throw new UnauthorizedAccessException($"Access denied to container {containerId}: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 413)
+        {
+            _logger.LogWarning("SPE create (upload-small): content too large for path {Path} in container {ContainerId}", path, containerId);
+            throw new ArgumentException("Content size exceeds limit. Use chunked upload for large files.", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 412)
+        {
+            // FR-08 (task 051): the create-time precondition surface — "the resource has been changed
+            // since the caller last read it" (or a genuine 412) — now surfaces as the SAME typed
+            // EtagPreconditionFailedException ReplaceFileContentAsUserAsync throws on the equivalent
+            // Graph response, already mapped by ComposeEndpoints.ExecuteSaveAsync to a clean 412
+            // ProblemDetails ("This document changed since you opened it — reload and reapply"), never a
+            // 500 and never a misleadingly-generic InvalidOperationException.
+            _logger.LogWarning(ex, "SPE create (upload-small): precondition failed for container={ContainerId} path={Path}",
+                containerId, path);
+            throw new EtagPreconditionFailedException(path, ifMatch: null, ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 423 || IsResourceLockedCode(ex.Error?.Code))
+        {
+            _logger.LogWarning(ex, "SPE create (upload-small): resource locked for container={ContainerId} path={Path} code={Code}",
+                containerId, path, ex.Error?.Code);
+            throw new DocumentLockedByWordException(path, ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning(ex, "SPE create (upload-small): Graph throttling for container={ContainerId} path={Path}", containerId, path);
+            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "SPE create (upload-small) Graph error for container={ContainerId} path={Path}: {Message}",
+                containerId, path, ex.Error?.Message ?? ex.Message);
+            throw new InvalidOperationException($"Failed to upload file: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        // ── Belt-and-suspenders: the legacy ServiceException path is retained in case a non-Kiota code
+        //    path (or a future SDK) raises it. Harmless; the ODataError filters above are the primary
+        //    surface (mirrors ReplaceFileContentAsUserAsync's identical belt-and-suspenders comment).
         catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogError(ex, "Access denied uploading to container {ContainerId}: HTTP {StatusCode} - {Message}",

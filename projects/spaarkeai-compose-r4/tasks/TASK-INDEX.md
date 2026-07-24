@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Compose R4 (Shadow Document Architecture)
 
 > **Generated**: 2026-07-22 by `/project-pipeline`
-> **Total tasks**: 34 (6 Gate · 4 Ingest · 5 Capture · 6 Patch Engine · 3 AI · 5 Concurrency · 4 Hardening/cutover · 1 wrap-up)
+> **Total tasks**: 36 (6 Gate · 4 Ingest · 5 Capture · 8 Patch Engine · 3 AI · 5 Concurrency · 4 Hardening/cutover · 1 wrap-up) — 036 (push-annotations) + 037 (born-in-editor tables) added 2026-07-22: two shipped constructs the closed op-schema can't express; both deferred owner Path B/C decisions blocking Success Criterion 7 (one byte-author).
 > **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ complete · 🔁 needs-retry · ⛔ blocked
 > **Cutover**: HARD-REPLACE. **Task 006 (Phase 0 gate) is a HARD prerequisite to every deletion/cutover task (023, 032, 060).**
 
@@ -11,38 +11,42 @@
 
 | # | Task | Phase | Tier / Effort | Rigor | Deps | Gate | Status |
 |---|---|---|---|---|---|---|---|
-| 001 | Shadow-Document ADR + R3 Path-B amendment | 0 Gate | opus / high | FULL | — | startable | 🔲 |
-| 002 | Fidelity corpus as LFS fixtures (sample-docs) | 0 Gate | sonnet / medium | STANDARD | — | startable | 🔲 |
-| 003 | Operation schema — the shared spine (FR-11) | 0 Gate | opus / xhigh | FULL | — | startable | 🔲 |
-| 004 | Round-trip byte-diff harness (NFR-01) | 0 Gate | sonnet / high | FULL | 002 | blocked | 🔲 |
-| 005 | Applier spike on CIPO + patch-engine A/B | 0 Gate | opus / xhigh | FULL | 002,003 | blocked | 🔲 |
-| 006 | **Phase 0 GATE — go/no-go for cutover** | 0 Gate | opus / high | FULL | 003,004,005 | blocked | 🔲 |
-| 010 | Persist w14:paraId on ingest (FR-01) | 1 Ingest | sonnet / high | FULL | 001 | blocked | 🔲 |
-| 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | blocked | 🔲 |
-| 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | blocked | 🔲 |
-| 013 | Phase-1 ingest/projection seam slice (NFR-06) | 1 Ingest | sonnet / high | FULL | 010,011,012 | blocked | 🔲 |
-| 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | blocked | 🔲 |
-| 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | blocked | 🔲 |
-| 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | blocked | 🔲 |
-| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,**006** | blocked | 🔲 |
-| 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | blocked | 🔲 |
-| 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | blocked | 🔲 |
-| 031 | Structural operations — split/merge/insert/delete (FR-05) | 3 Patch Engine | opus / xhigh | FULL | 030 | blocked | 🔲 |
-| 032 | Retire both legacy writers (FR-06) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | blocked | 🔲 |
-| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030 | blocked | 🔲 |
-| 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | blocked | 🔲 |
-| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | blocked | 🔲 |
-| 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | blocked | 🔲 |
-| 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | blocked | 🔲 |
-| 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | blocked | 🔲 |
-| 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | blocked | 🔲 |
-| 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | blocked | 🔲 |
-| 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | blocked | 🔲 |
-| 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | blocked | 🔲 |
-| 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | blocked | 🔲 |
-| 060 | Hard-replace cutover completion — remove mammoth (FR-12) | 6 Hardening | opus / high | FULL | 032,034,**006** | blocked | 🔲 |
-| 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | blocked | 🔲 |
-| 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | blocked | 🔲 |
+| 001 | Shadow-Document ADR + R3 Path-B amendment | 0 Gate | opus / high | FULL | — | startable | ✅ |
+| 002 | Fidelity corpus as LFS fixtures (sample-docs) | 0 Gate | sonnet / medium | STANDARD | — | startable | ✅ |
+| 003 | Operation schema — the shared spine (FR-11) | 0 Gate | opus / xhigh | FULL | — | startable | ✅ |
+| 004 | Round-trip byte-diff harness (NFR-01) | 0 Gate | sonnet / high | FULL | 002 | startable | ✅ |
+| 005 | Applier spike on CIPO + patch-engine A/B | 0 Gate | opus / xhigh | FULL | 002,003 | startable | ✅ |
+| 006 | **Phase 0 GATE — 🟢 GREEN, cutover authorized** | 0 Gate | opus / high | FULL | 003,004,005 | passed | ✅ |
+| 010 | Persist w14:paraId on ingest (FR-01) | 1 Ingest | sonnet / high | FULL | 001 | done | ✅ |
+| 011 | Intra-paragraph offset-addressing table (FR-01) | 1 Ingest | opus / xhigh | FULL | 001,003 | done | ✅ |
+| 012 | Opaque atoms — server projection (FR-02) | 1 Ingest | sonnet / high | FULL | 011 | done | ✅ |
+| 013 | Phase-1 ingest/projection seam slice (NFR-06) | 1 Ingest | sonnet / high | FULL | 010,011,012 | done | ✅ |
+| 020 | ProseMirror step→operation interceptor (FR-03) | 2 Capture | opus / xhigh | FULL | 003 | done | ✅ |
+| 021 | Opaque-atom node — client schema (FR-02) | 2 Capture | sonnet / high | FULL | 012 | done | ✅ |
+| 022 | Rebased operation log per session (FR-03) | 2 Capture | sonnet / xhigh | FULL | 020 | done | ✅ |
+| 023 | Delete paragraph-diff export — client (FR-06) | 2 Capture | sonnet / high | FULL | 022,006,031,032 | done | ✅ |
+| 024 | Phase-2 client capture tests | 2 Capture | sonnet / high | FULL | 020,021,022 | done | ✅ |
+| 030 | ComposeShadowPatchEngine core (FR-04) | 3 Patch Engine | opus / xhigh | FULL | 003,005,**006** | done | ✅ |
+| 031 | Structural operations — split/merge/insert/delete (FR-05) + client wiring | 3 Patch Engine | opus / xhigh | FULL | 030 | done | ✅ |
+| 032 | Cutover: SAVE→engine + op-log send + retire redline-synthesizer (FR-06, re-scoped) | 3 Patch Engine | opus / high | FULL | 030,031,**006** | done | ✅ |
+| 033 | Born-in-editor unification (FR-09) | 3 Patch Engine | sonnet / xhigh | FULL | 030 | resolved: born-in-editor stays on renderer (cited I-5 exception, C-revised) | ✅ |
+| 037 | Born-in-editor tables + save unification | 3 Patch Engine | opus / xhigh | FULL | 030,031 | half-1 landed (73ca66e09); unification → **C-revised** (renderer kept, cited I-5 exc.); table gating superseded by 038 | ✅ |
+| 038 | **Zero-error guardrail pass** (disable unsupported edit-path controls + op-log loss-proofing) | 3 Patch Engine | opus / xhigh | FULL | 032,036 | done (a5368d5b5) | ✅ |
+| 039 | **UAT remediation** — born-in-editor 2nd-save error fix (no-errors) + dup-records + UX polish | 6 Hardening | opus / high | FULL | 032,036,038 | ✅ done (6bdc9d5f) + REDEPLOYED to dev 2026-07-23 (BFF + sprk_spaarkeai) | ✅ |
+| 034 | Patch-engine seam slices + corpus proof (NFR-01/02) | 3 Patch Engine | sonnet / high | FULL | 030,031,004 | done | ✅ |
+| 035 | Deploy patch-engine core to dev | 3 Patch Engine | sonnet / high | FULL | 032,034 | ✅ DEPLOYED to dev 2026-07-23: BFF (spaarke-bff-dev, hash-verified, save 401/push-annotations 404) + sprk_spaarkeai (Dataverse, published) | ✅ |
+| 036 | Retire DocxAnnotationWriter + push-annotations **(Path B ✅ owner)** | 3 Patch Engine | opus / xhigh | FULL | 032 | done (bae44955b) | ✅ |
+| 040 | AI generate-window bookmark + resolve-on-return (FR-07) | 4 AI | opus / xhigh | FULL | 020,**006** | done | ✅ |
+| 041 | Validate anchors; fuzzy-as-comment fallback (FR-07) | 4 AI | sonnet / xhigh | FULL | 040 | done | ✅ |
+| 042 | AI anchoring tests — concurrent-edit | 4 AI | sonnet / high | FULL | 040,041 | done | ✅ |
+| 050 | Version-stamp + re-anchor-on-stale (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 032 | done | ✅ |
+| 051 | eTag sequencing for create-on-save (FR-08) | 5 Concurrency | sonnet / xhigh | FULL | 050 | done | ✅ |
+| 052 | HTTP 423 lock → ProblemDetails (FR-08) | 5 Concurrency | sonnet / high | FULL | 050 | done | ✅ |
+| 053 | Import round-trip — revisions/comments mount (FR-10) | 5 Concurrency | sonnet / xhigh | FULL | 021,030 | done | ✅ |
+| 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | done | ✅ |
+| 060 | Hard-replace cutover completion (FR-12); **KEEP renderer (C-revised)** | 6 Hardening | opus / high | FULL | 032,034,**006,036,038** | ✅ done-with-exception: writers gone; mammoth retained for transient mounts → R5 G6 (§6.5 Path-A) | ✅ |
+| 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | ✅ all green (0a9710cd1): 28/28 byte-diff, 515+531 tests, 46.11 MB, no new CVE, ADR-013 green | ✅ |
+| 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | 🔔 **READY — owner-orchestrated deploy (deploy boundary)** | 🔲 |
 | 063 | **Flagship gate G — all 8 criteria green** | 6 Hardening | opus / high | FULL | 062 | blocked | 🔲 |
 | 090 | Project wrap-up (+ /test-diet gate) | Wrap-up | sonnet / medium | STANDARD | 063 | blocked | 🔲 |
 

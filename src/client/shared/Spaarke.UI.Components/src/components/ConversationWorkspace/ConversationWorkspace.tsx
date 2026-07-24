@@ -50,7 +50,9 @@
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { CommentMultipleRegular } from '@fluentui/react-icons';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import type { INavigationService } from '../../types/serviceInterfaces';
 import {
   getThreadUnreadCount,
   listThreads,
@@ -59,7 +61,10 @@ import {
   type IThreadListApiClientOptions,
   type IThreadListItemDto,
 } from '../../services/communicationThreadListApi';
+import { NewThreadModal } from '../NewThreadModal';
+import { PanelSplitter } from '../PanelSplitter/PanelSplitter';
 import { ThreadList, type IThreadListRow, type ThreadListStatus } from './subcomponents/ThreadList';
+import { useThreadPaneLayout } from './useThreadPaneLayout';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -77,6 +82,14 @@ export interface IConversationRendererProps {
   threadId: string;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl?: string;
+  /**
+   * Clears the currently-selected thread's list-pane unread badge (R3 UAT
+   * 2026-07-22 item 5c). Wired to the shell's optimistic unread-clear so the
+   * relocated "Mark as read" tool in `ConversationView`'s message toolbar can
+   * dismiss the badge the thread row now shows as a dot. Forward it to
+   * `<ConversationView onMarkThreadRead={…} />`.
+   */
+  onMarkThreadRead: () => void;
 }
 
 export interface ConversationWorkspaceProps {
@@ -98,11 +111,34 @@ export interface ConversationWorkspaceProps {
    */
   renderConversation?: (props: IConversationRendererProps) => React.ReactNode;
 
-  /** Fired when the ＋ (create thread) affordance is activated. The NewThreadModal itself is task 024 — this shell only wires the callback. */
+  /**
+   * Record-lookup service for the built-in New-conversation modal (item 5a +
+   * item 9). When provided, the shell OWNS the create flow: the ＋ affordance
+   * opens `<NewThreadModal />` internally (name + associate-to-record picker +
+   * optional plain-text message) and, on success, refreshes the list and selects
+   * the new thread. The host binds `createXrmNavigationService()` (Xrm-backed
+   * record lookup). Omit it (and `onCreateThread`) to hide the ＋.
+   */
+  navigationService?: INavigationService;
+
+  /**
+   * Fired when the ＋ (create thread) affordance is activated. OPTIONAL host
+   * notification. When `onSearchRecipients` is supplied the shell also opens its
+   * built-in `<NewThreadModal />`; a host that wants to own the create surface
+   * itself can instead supply only `onCreateThread` (no `onSearchRecipients`)
+   * and mount its own modal.
+   */
   onCreateThread?: () => void;
 
   /** Fired whenever the selected thread changes (including the initial default-select). */
   onThreadSelected?: (threadId: string | undefined) => void;
+
+  /**
+   * Optional accessory rendered to the right of the "Threads" title (round 3
+   * item 3) — the widget passes its "N new communications" count here so it
+   * lives in the thread-pane header instead of a separate awareness bar.
+   */
+  threadsHeaderAccessory?: React.ReactNode;
 
   /** Fired on a list-load failure. The shell also renders an inline error state. */
   onError?: (error: Error) => void;
@@ -129,13 +165,62 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
+  // Fixed-width thread pane wrapper (items 1/2) — the resizer owns the px width;
+  // ThreadList fills it. flex-shrink:0 so the splitter, not flexbox, sets width.
+  leftPane: {
+    display: 'flex',
+    flexShrink: 0,
+    minWidth: 0,
+    height: '100%',
+    overflow: 'hidden',
+  },
   rightPane: {
     display: 'flex',
     flexDirection: 'column',
-    flex: '1 1 auto',
+    // flex-basis 0 (not auto) so the conversation is a proportion of the shell,
+    // independent of the widest message bubble it contains (2026-07-22 item 3).
+    flex: '1 1 0%',
     minHeight: 0,
     minWidth: 0,
     overflow: 'hidden',
+    // White conversation surface vs. the grey thread pane (2026-07-23 item 4).
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // Collapsed thread-pane strip (item 3) — a thin clickable rail that re-expands
+  // the pane, mirroring the SpaarkeAi collapsed-pane pattern. Vertical "Threads"
+  // label. Semantic tokens only (ADR-021).
+  collapsedStrip: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalS,
+    flexShrink: 0,
+    width: '32px',
+    height: '100%',
+    paddingTop: tokens.spacingVerticalM,
+    cursor: 'pointer',
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderTopStyle: 'none',
+    borderBottomStyle: 'none',
+    borderLeftStyle: 'none',
+    borderRightWidth: tokens.strokeWidthThin,
+    borderRightStyle: 'solid',
+    borderRightColor: tokens.colorNeutralStroke2,
+    color: tokens.colorNeutralForeground2,
+    outlineStyle: 'none',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground2Hover,
+    },
+    ':focus-visible': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorStrokeFocus2,
+      outlineOffset: '-2px',
+    },
+  },
+  collapsedIcon: {
+    fontSize: '20px',
+    color: tokens.colorNeutralForeground2,
   },
   placeholder: {
     display: 'flex',
@@ -174,13 +259,27 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   bffBaseUrl,
   regarding,
   renderConversation,
+  navigationService,
   onCreateThread,
   onThreadSelected,
+  threadsHeaderAccessory,
   onError,
   pageSize = 50,
   className,
 }) => {
   const styles = useStyles();
+
+  // Resizable + collapsible thread pane (R3 UAT 2026-07-23 items 1/2/3). Default
+  // width = 20% of the container; drag the splitter to resize; click the
+  // "Threads" header (or chevron) to collapse to a thin re-expand rail.
+  const { threadWidthPx, collapsed, toggleCollapse, splitterHandlers, isDragging, containerRef, currentRatio } =
+    useThreadPaneLayout();
+
+  // Built-in New-conversation modal (item 5a). The shell owns the create flow
+  // when `onSearchRecipients` is supplied; `reloadToken` forces a list re-fetch
+  // after a create so the new/reused thread appears.
+  const [newThreadOpen, setNewThreadOpen] = React.useState(false);
+  const [reloadToken, setReloadToken] = React.useState(0);
 
   const client = React.useMemo<IThreadListApiClientOptions>(
     () => ({ authenticatedFetch, bffBaseUrl }),
@@ -226,7 +325,7 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityType, recordId, pageSize, client]);
+  }, [entityType, recordId, pageSize, client, reloadToken]);
 
   // No thread-list text filter anymore (task 062 / §B4) — the visible set is
   // exactly the loaded, access-filtered set for the current scope.
@@ -301,6 +400,31 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
     [onThreadSelected]
   );
 
+  // — New-conversation create flow (item 5a / item 9) —
+  // The ＋ affordance is enabled when the shell can start a create (its own modal
+  // via `navigationService`, or a host-owned surface via `onCreateThread`).
+  const canCreateThread = !!navigationService || !!onCreateThread;
+
+  const handleOpenNewThread = React.useCallback(() => {
+    // Notify the host (optional), and open the built-in modal when the shell owns
+    // the create surface.
+    onCreateThread?.();
+    if (navigationService) setNewThreadOpen(true);
+  }, [onCreateThread, navigationService]);
+
+  const handleThreadCreated = React.useCallback(
+    (threadId: string) => {
+      // find-or-create returned a thread — select it immediately (the right pane
+      // renders straight off `selectedThreadId`, so the conversation shows before
+      // the list refresh completes) and re-fetch the list so the row appears.
+      setNewThreadOpen(false);
+      setSelectedThreadId(threadId);
+      onThreadSelected?.(threadId);
+      setReloadToken(t => t + 1);
+    },
+    [onThreadSelected]
+  );
+
   const handleMarkThreadRead = React.useCallback((threadId: string) => {
     // Optimistic local clear — no persisted per-user watermark endpoint exists
     // for the list pane (see communicationThreadListApi.ts note); the true
@@ -343,7 +467,14 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
 
   const rightPane = selectedThreadId ? (
     renderConversation ? (
-      renderConversation({ threadId: selectedThreadId, authenticatedFetch, bffBaseUrl })
+      renderConversation({
+        threadId: selectedThreadId,
+        authenticatedFetch,
+        bffBaseUrl,
+        // Relocated mark-as-read (item 5c): clear THIS thread's list badge when
+        // the message-toolbar tool fires.
+        onMarkThreadRead: () => handleMarkThreadRead(selectedThreadId),
+      })
     ) : (
       <DefaultConversationPane threadId={selectedThreadId} />
     )
@@ -352,18 +483,58 @@ export const ConversationWorkspace: React.FC<ConversationWorkspaceProps> = ({
   );
 
   return (
-    <div className={mergeClasses(styles.root, className)}>
-      <ThreadList
-        rows={threadListRows}
-        status={listStatus}
-        errorMessage={errorMessage}
-        selectedThreadId={selectedThreadId}
-        onSelectThread={handleSelectThread}
-        onMarkThreadRead={handleMarkThreadRead}
-        onCreateThread={onCreateThread}
-        onTogglePin={handleTogglePin}
-      />
+    <div ref={containerRef} className={mergeClasses(styles.root, className)}>
+      {collapsed ? (
+        // Collapsed rail (round 3 item 5) — ICON ONLY (no "Threads" text); click to re-expand.
+        <button
+          type="button"
+          className={styles.collapsedStrip}
+          aria-label="Expand threads pane"
+          title="Threads"
+          onClick={toggleCollapse}
+        >
+          <CommentMultipleRegular className={styles.collapsedIcon} />
+        </button>
+      ) : (
+        <>
+          <div className={styles.leftPane} style={{ width: `${threadWidthPx}px` }}>
+            <ThreadList
+              rows={threadListRows}
+              status={listStatus}
+              errorMessage={errorMessage}
+              selectedThreadId={selectedThreadId}
+              onSelectThread={handleSelectThread}
+              onCreateThread={canCreateThread ? handleOpenNewThread : undefined}
+              onCollapse={toggleCollapse}
+              titleAccessory={threadsHeaderAccessory}
+              onTogglePin={handleTogglePin}
+            />
+          </div>
+          <PanelSplitter
+            onMouseDown={splitterHandlers.onMouseDown}
+            onKeyDown={splitterHandlers.onKeyDown}
+            onDoubleClick={splitterHandlers.onDoubleClick}
+            isDragging={isDragging}
+            currentRatio={currentRatio}
+          />
+        </>
+      )}
       <div className={styles.rightPane}>{rightPane}</div>
+
+      {/* Built-in New-conversation modal (item 5a / item 9) — only mounted when
+          the shell owns the create surface (a navigation service was supplied). */}
+      {navigationService && (
+        <NewThreadModal
+          open={newThreadOpen}
+          onDismiss={() => setNewThreadOpen(false)}
+          authenticatedFetch={authenticatedFetch}
+          bffBaseUrl={bffBaseUrl}
+          navigationService={navigationService}
+          onThreadCreated={handleThreadCreated}
+          regarding={regarding ? { entityType: regarding.entityType, id: regarding.id } : undefined}
+          onError={onError}
+        />
+      )}
     </div>
   );
 };

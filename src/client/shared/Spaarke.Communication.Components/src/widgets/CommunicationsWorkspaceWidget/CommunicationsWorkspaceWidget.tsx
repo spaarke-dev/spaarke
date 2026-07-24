@@ -61,10 +61,8 @@
 import * as React from 'react';
 import {
   makeStyles,
-  shorthands,
   tokens,
   Button,
-  CounterBadge,
   Toast,
   ToastTitle,
   ToastBody,
@@ -73,7 +71,12 @@ import {
   useToastController,
 } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { ConversationWorkspace, ConversationView, getCurrentUserId } from '@spaarke/ui-components';
+import {
+  ConversationWorkspace,
+  ConversationView,
+  getCurrentUserId,
+  createXrmNavigationService,
+} from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
 import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
 import { getCommunicationArrivalsSubscribe } from './communicationArrivalsSeam';
@@ -93,29 +96,25 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     minWidth: 0,
-    minHeight: 0,
+    // Fill the workspace container (round 3 item 1 / round 4). The SectionPanel
+    // card + WorkspaceShell row are content-driven (deliberately NOT height:100%
+    // — see WorkspaceShell.styles.ts), so a widget must declare its own height
+    // floor to claim the tab. This mirrors the established full-height widget
+    // pattern (SmartTodo's `calc(100vh - 200px)`): a floor that reaches the
+    // bottom of the tab (app header + tab bar + section header ≈ 200px chrome).
+    // `height:100%` still wins when the host DOES constrain height (bounded tile).
+    minHeight: 'calc(100vh - 200px)',
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
-  // FR-22 awareness bar — a slim, flex-shrink:0 strip above the conversation shell that shows the
-  // unread-arrival badge. Only rendered when there are unseen arrivals, so the zero state is visually
-  // identical to before (NFR-06 upgrade-in-place). Fluent v9 semantic tokens only (ADR-021).
-  awarenessBar: {
-    display: 'flex',
-    alignItems: 'center',
-    flexShrink: 0,
-    columnGap: tokens.spacingHorizontalS,
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke2),
-    backgroundColor: tokens.colorNeutralBackground2,
-    color: tokens.colorNeutralForeground2,
+  // FR-22 awareness count (round 3 item 3) — rendered as the ThreadList header
+  // accessory instead of a separate bar; clickable to mark-as-seen (reset).
+  awarenessAccessory: {
+    minWidth: 0,
+    color: tokens.colorBrandForeground1,
     fontSize: tokens.fontSizeBase200,
   },
-  awarenessLabel: {
-    flexGrow: 1,
-    minWidth: 0,
-  },
-  // Body wrapper so the two-pane conversation shell fills the space beneath the (optional) awareness bar.
+  // Body wrapper so the two-pane conversation shell fills the whole widget.
   body: {
     display: 'flex',
     flexGrow: 1,
@@ -186,42 +185,48 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   // a safe degrade, never a crash.
   const currentUserSystemUserId = React.useMemo(() => getCurrentUserId() ?? '', []);
 
+  // Record-lookup service for the shell's built-in New-conversation modal (item
+  // 9 — name + associate-to-record picker). Reuses the shared Xrm-backed
+  // navigation adapter (`createXrmNavigationService` → `Xrm.Utility.lookupObjects`,
+  // the SAME wizard-associate record picker used across Spaarke; NO second
+  // mechanism, root CLAUDE.md §11).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
   // Right-pane renderer seam (see ConversationWorkspace.tsx module header
   // "Renderer seam") — wires the REAL `<ConversationView>` in, mounted (not
-  // re-implemented) per root CLAUDE.md §11.
+  // re-implemented) per root CLAUDE.md §11. Forwards the shell's
+  // `onMarkThreadRead` (item 5c) so the message-toolbar tool clears the list badge.
   const renderConversation = React.useCallback(
-    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl }: IConversationRendererProps) => (
+    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl, onMarkThreadRead }: IConversationRendererProps) => (
       <ConversationView
         threadId={threadId}
         authenticatedFetch={fetchFn}
         bffBaseUrl={bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
+        onMarkThreadRead={onMarkThreadRead}
       />
     ),
     [currentUserSystemUserId]
   );
 
+  // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —
+  // replaces the separate awareness bar + duplicative circle badge. Clickable to
+  // mark-as-seen (reset). Only present when there are unseen arrivals.
+  const threadsHeaderAccessory =
+    unreadCount > 0 ? (
+      <Button
+        appearance="transparent"
+        size="small"
+        className={styles.awarenessAccessory}
+        onClick={reset}
+        title="Mark as seen"
+      >
+        {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
+      </Button>
+    ) : undefined;
+
   return (
     <div className={styles.root}>
-      {/* FR-22 awareness bar (unread badge) — only shown when there are unseen arrivals, so the zero
-          state is unchanged from before (NFR-06). Clicking "Mark as seen" clears the counter. */}
-      {unreadCount > 0 && (
-        <div className={styles.awarenessBar} role="status" aria-live="polite">
-          <CounterBadge
-            count={unreadCount}
-            appearance="filled"
-            color="informative"
-            aria-label={`${unreadCount} new communication${unreadCount === 1 ? '' : 's'}`}
-          />
-          <span className={styles.awarenessLabel}>
-            {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
-          </span>
-          <Button size="small" appearance="subtle" onClick={reset}>
-            Mark as seen
-          </Button>
-        </div>
-      )}
-
       {/* Awareness toaster — raises an info toast per consumed `communication-arrived` (signal-only). */}
       <Toaster toasterId={toasterId} position="top-end" />
 
@@ -234,7 +239,12 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
             base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
             `resolveUrl` — the same behavior every other production
             `authenticatedFetch`-importing surface in this codebase relies on). */}
-        <ConversationWorkspace authenticatedFetch={authenticatedFetch} renderConversation={renderConversation} />
+        <ConversationWorkspace
+          authenticatedFetch={authenticatedFetch}
+          renderConversation={renderConversation}
+          navigationService={navigationService}
+          threadsHeaderAccessory={threadsHeaderAccessory}
+        />
       </div>
     </div>
   );

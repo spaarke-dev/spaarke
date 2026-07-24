@@ -141,9 +141,11 @@ public sealed class ContactNameMatchRung : IAssociationRung
                     continue;
 
                 var displayName = string.IsNullOrWhiteSpace(fullName) ? phrase : fullName;
+                // Escape the user-controlled name so an embedded double-quote can't corrupt the
+                // quote-delimited provenance mini-format the review UI parses (see RungProvenanceFormat).
                 var provenance =
                     $"contact-name-match:where={location}:matched=fullname:" +
-                    $"name=\"{displayName}\":reason=\"name in {location}\"";
+                    $"name=\"{RungProvenanceFormat.EscapeValue(displayName)}\":reason=\"name in {location}\"";
 
                 var match = new RungMatch
                 {

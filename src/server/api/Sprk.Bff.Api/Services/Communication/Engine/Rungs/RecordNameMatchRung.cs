@@ -274,9 +274,12 @@ public sealed class RecordNameMatchRung : IAssociationRung
                 : $"name in {v.Location}";
 
             // Parseable provenance for the CommunicationConnections review UI (match reason + record number).
+            // Escape the user-controlled name/number values so an embedded double-quote can't corrupt the
+            // quote-delimited mini-format the review UI parses (see RungProvenanceFormat).
             var provenance =
                 $"record-name-match:{result.RecordType}:where={v.Location}:matched={v.Kind}:" +
-                $"name=\"{result.RecordName}\":number=\"{recordNumber}\":reason=\"{reason}\"";
+                $"name=\"{RungProvenanceFormat.EscapeValue(result.RecordName)}\":" +
+                $"number=\"{RungProvenanceFormat.EscapeValue(recordNumber)}\":reason=\"{reason}\"";
 
             var match = new RungMatch
             {

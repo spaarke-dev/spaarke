@@ -17,6 +17,7 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ConversationWorkspace } from '../ConversationWorkspace';
 import type { ConversationWorkspaceProps, IConversationRendererProps } from '../ConversationWorkspace';
+import type { INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Fetch fixtures
@@ -136,7 +137,13 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     renderWorkspace({ authenticatedFetch });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('3 new messages')).toBeInTheDocument());
+    // R3 UAT 2026-07-22 item 5b: the "N new messages" text row + inline
+    // "Mark as read" button were replaced by a compact unread dot (the
+    // mark-as-read action moved to the message toolbar, item 5c). The dot
+    // carries the count in its accessible name.
+    await waitFor(() => expect(screen.getByLabelText('3 unread messages')).toBeInTheDocument());
+    expect(screen.queryByText('3 new messages')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark as read/i })).not.toBeInTheDocument();
   });
 
   it('has NO thread-list text filter (task 062 / §B4 — removed in the Teams-style redesign)', async () => {
@@ -159,6 +166,45 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onCreateThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the built-in New-conversation modal when a navigationService is supplied (item 5a / item 9)', async () => {
+    const navigationService = { openLookup: jest.fn().mockResolvedValue([]) } as unknown as INavigationService;
+    renderWorkspace({ navigationService });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // No modal until the ＋ is clicked.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+
+    // The shell owns the create surface: NewThreadModal opens in-place.
+    expect(await screen.findByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thread-pane header + collapse (R3 UAT 2026-07-23 items 3/5/8)
+// ---------------------------------------------------------------------------
+
+describe('ConversationWorkspace — thread pane header + collapse', () => {
+  it('renders a "Threads" title and collapses/expands the pane on the header affordance', async () => {
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // Title present (item 5); create ＋ present (item 8).
+    expect(screen.getByText('Threads')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument();
+
+    // Collapse (item 3) — the thread list content disappears, a re-expand rail appears.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse threads pane' }));
+    await waitFor(() => expect(screen.queryByText('Acme Matter')).not.toBeInTheDocument());
+    const expandRail = screen.getByRole('button', { name: 'Expand threads pane' });
+    expect(expandRail).toBeInTheDocument();
+
+    // Expand — the thread list returns.
+    fireEvent.click(expandRail);
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
   });
 });
 

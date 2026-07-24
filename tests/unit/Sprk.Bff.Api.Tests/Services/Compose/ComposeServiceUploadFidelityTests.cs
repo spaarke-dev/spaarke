@@ -80,9 +80,7 @@ public sealed class ComposeServiceUploadFidelityTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
@@ -143,6 +141,14 @@ public sealed class ComposeServiceUploadFidelityTests
 
     private void ArrangeReplaceExisting(out Func<byte[]> capturedBytesAccessor)
     {
+        // FR-08 (task 050): SaveAsync's replace-content branch fetches the live metadata (eTag) up front
+        // to assert the version stamp before applying. No prior stamp exists in these tests (a Strict mock
+        // must have an explicit setup for every invocation) — returning null degrades to "not stale",
+        // matching this file's existing byte-identical assertions.
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
         byte[]? captured = null;
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))

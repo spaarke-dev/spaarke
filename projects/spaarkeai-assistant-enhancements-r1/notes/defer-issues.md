@@ -14,6 +14,8 @@
 | D-013-02 | create-todo OOB pre-fill needs **logical-name draftValues** (title→sprk_name, description→sprk_description, priority_suggestion→sprk_priority) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-16 (built) |
 | D-013-03 | create-task Event-subtype **display name** for the dropdown (only the Task GUID is client-side) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-21 (preset carries the fixed "Task" name + mapper binds the pair) |
 | D-013-04 | **completeHandoff(recordId)** not wired into wizard `onFinish` → launches read back as "cancelled" (P5 honest-ack on the launch path) | Gap | task 013b (2026-07-16) | ✅ RESOLVED 2026-07-16 (built) |
+| D-090-01 | `sprk_userpreference` client-reference consistency sweep (no schema change) | Deferral | task 090 wrap-up | https://github.com/spaarke-dev/spaarke/issues/684 |
+| D-090-02 | R1.5 proactive-push (SignalR + durable outbox + Daily-Briefing producer) | Deferral → **SUPERSEDED** | task 090 wrap-up | ✅ DELIVERED via `spaarke-notification-spine-r1` (owner 2026-07-20; live on dev) — NO issue |
 
 ---
 
@@ -75,3 +77,36 @@
 - **What it needs**: confirm/lock the `sprk_userprofile` security role so a user can only create/update a row keyed to **their own** `systemuserid` (or move the write behind a server endpoint that re-derives the caller key server-side — heavier, new BFF surface). This is a **Dataverse security-role configuration** task, not a client-code defect.
 - **Trigger to revisit**: before production enablement of the questionnaire write; owner/security review of the `sprk_userprofile` role.
 - ✅ **RESOLVED 2026-07-16**: owner confirmed `sprk_userprofile` is **user-scoped** — a user cannot create/update a row keyed to another user's `sprk_systemuser`, so the forge vector is closed at the Dataverse role level. No code change needed.
+
+---
+
+## D-090-01 — `sprk_userpreference` client-reference consistency sweep
+
+- **Concrete behavior deferred**: R1 shipped the User Model on `sprk_userprofile` (the My Assistant questionnaire — a DISTINCT entity, working). The separate `sprk_userpreference` entity (theme, kanban prefs) is referenced across several clients. The 090 wrap-up notes a pending consistency sweep of the client references (singular logical name vs the entity-set name in Web API calls). A 2026-07-23 scan confirms **`sprk_userpreference` (singular) is the established, working convention** across `SmartTodo`, `LegalWorkspace`, `Spaarke.UI.Components/themeStorage.ts`, and `Spaarke.SmartTodo.Components` — theme + kanban persistence work today. So this is a **narrow consistency check** (confirm every call uses the correct singular logical name + the `sprk_userpreferences` entity-SET name in OData paths), NOT a broad rename, and **no schema change**.
+- **Why deferred**: not an R1 functional requirement; out of the reactive-first scope; zero user-facing impact today (persistence works). Filing keeps it visible.
+- **Trigger to revisit**: next SmartTodo/theme-persistence touch, or a dedicated hygiene pass.
+- **Fix sketch**: grep `sprk_userpreference` across `src/**/*.{ts,tsx}`; verify each `retrieveMultipleRecords`/`createRecord`/`updateRecord` uses the correct entity logical name and that OData collection paths use the plural set name. No Dataverse metadata change.
+- **GitHub Issue**: https://github.com/spaarke-dev/spaarke/issues/684 (filed 2026-07-23)
+
+## D-090-02 — R1.5 proactive-push (SUPERSEDED / DELIVERED)
+
+- **Original 090 instruction**: file an "R1.5 proactive-push spec-pass follow-on" (design.md §14.1a/§14.1b/§12.5/§15.4).
+- **Correction (do NOT file)**: R1.5 was **folded into `spaarke-notification-spine-r1`** by owner decision 2026-07-20 (memory [[r15-folds-into-notification-spine]]). That project **shipped** the shared spine (Layer B outbox `sprk_notificationoutbox`, `OutboxService`, `SignalRDeliveryService`, `@spaarke/notifications` client, `DailyBriefingSuggestionProducer` gated by `SuggestionGateOptions`) and it is **LIVE on dev** this session — the Assistant renders proactive Daily-Briefing suggestion cards (`useSuggestionCards`/`SuggestionCard`) with a server-persisted dismiss endpoint. Delivery is poll-fallback (Azure SignalR not yet provisioned on dev — a separate infra follow-up, non-blocking).
+- **Net**: the R1.5 requirement is **delivered via the shared spine**, not deferred. Filing a spec-pass issue would be noise for already-shipped work. Remaining open infra item (SignalR provisioning for live push) is tracked under the notification-spine project, not here.
+
+---
+
+## Identified next-round (assistant-R2 / follow-on) backlog — recorded at close (2026-07-23)
+
+> No formal `assistant-r2` project exists (the surfaceTarget r2 idea was investigated + abandoned as data-defined routing that contradicts ADR-039). These are the identified follow-on items, consolidated here from `current-task.md` / code comments / UAT backlogs so they survive the project-close reset. None gate R1. File as GitHub issues at the owner's discretion when a next round is scoped.
+
+| ID | Item | Concrete behavior / decision | Where it lives now | Owner action |
+|----|------|------------------------------|--------------------|--------------|
+| N-01 | **"Add a task" captureMode** | Owner decision: keep chat-elicit-first (`Loop Elicitation`) vs launch-form-immediately (`Modal`, 100000001) on the 3 create Bindings. Live catalog-data flip; verify Modal required-args semantics first. NOT a bug — routing is correct. | current-task.md | Decide; if Modal, PATCH `sprk_capturemode` on create-matter/task/todo. |
+| N-02 | **compose-draft-document no-file** | Possible latent issue when no session file is attached (mirror the `documentText` fix pattern used elsewhere). Unverified — needs a repro. | current-task.md follow-up | Repro + confirm; fix if real. |
+| N-03 | **R4-7 empty "Actions available…" header** | A new session showed the header text (from a file in Compose) with NO actions listed beneath — confusing empty state. | current-task.md "Only open items" | Re-capture repro. |
+| N-04 | **R4-9 Context / Execution-Trace pane consistency** | The Execution-Trace pane loads inconsistently; it logs the session's grounded tool calls from the ledger (reads empty when a turn made no tool call). | current-task.md "Only open items" | Re-capture repro; decide if empty-state copy is needed. |
+| N-05 | **priority_suggestion option-set coercion** | create-todo `priority_suggestion` label VALUE is passed through as a string; the OOB `sprk_priority` option-set needs the integer. Key normalization is done (D-013-02); VALUE coercion is the remaining follow-up (noted in `launchSurface.ts`). | code comment (D-013-02) | Add a label→option-set-int map on the OOB launch path. |
+| N-06 | **Catalog mirror parity + eval promotion** | create-todo / create-project Bindings are LIVE on spaarkedev1 but NOT in `infra/dataverse/sprk_playbookconsumer-rows.json` (list-tasks IS mirrored). When they gain a server dependency (or before prod promotion): add to the mirror, add `ConsumerTypes` constants, and flip the 051 eval cases `live-catalog`→`existing` (+ optionally add golden-utterances.json cases). | deploy-report.md + `notes/test-diet-report.md` | Do with prod promotion. |
+| N-07 | **SignalR live push** | Proactive suggestions run on POLL fallback on dev; Azure SignalR (Serverless) not provisioned. Provision for real-time push. Owned by `spaarke-notification-spine-r1` — cross-referenced here. | deploy-report.md + notification-spine project | Provision when live push is wanted. |
+| N-08 | **Two pre-existing broken client test suites** | `useConsumerChips.surface-launch` + `ConsumerChips` fail with a `.tsx` `jest.fn<…>()` babel-parse error (fail identically with R1 changes stashed — NOT introduced by R1). | current-task.md Critical Context | Separate fix pass (babel/ts-jest config). |

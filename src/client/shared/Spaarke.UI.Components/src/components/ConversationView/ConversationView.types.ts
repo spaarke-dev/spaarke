@@ -89,6 +89,14 @@ export interface ConversationViewProps {
   onError?: (error: Error) => void;
 
   /**
+   * @deprecated No-op since R3 UAT 2026-07-23 (item 11): the "Mark as read" tool
+   * was removed from the message toolbar. The prop is retained so the
+   * `ConversationWorkspace` renderer seam and its hosts keep compiling; it is not
+   * used. Safe to stop passing.
+   */
+  onMarkThreadRead?: () => void;
+
+  /**
    * Fired when the user activates the open-icon on an EMAIL-in-flow block
    * (task 021, FR-04). Email-type communications render as a compact
    * subject/from/to block (`<EmailInFlowBlock />`) rather than a chat bubble;

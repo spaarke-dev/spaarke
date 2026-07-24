@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>Zero-error guardrail pass — disable unsupported edit-path controls + prevent compound save-loss (no-errors release gate)</title>
+    <phase>3 Patch Engine</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the client save orchestration (op-log lifecycle) + editor toolbar gating. Directly protects data integrity on every save. High blast radius; FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The op-log-preservation fix (item 4) is subtle save-orchestration sequencing where a mistake causes data loss; opus judgment warranted.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeFormatToolbar.tsx (also modified by 037) + ComposeEditor.tsx + ComposeWorkspace.tsx save path; sequential.</parallel-reason>
+    <deps>032,036</deps>
+    <tags>frontend,pcf,compose,data-integrity</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>Created 2026-07-23 by orchestrator after the R4 zero-error audit. Owner directive: R4 ships error-free with documented functional limits; limits deferred to projects/spaarkeai-compose-r5. Supersedes task 037's table gating (inverts it to the correct surface). Full audit evidence in the conversation + notes/owner-decisions-036-037.md.</origin>
+
+    <justification>
+      Existing: 037 Half-1 added a `hasLoadedBaseline` prop + table gating to ComposeFormatToolbar. Extension: this task
+      EXTENDS that same prop to the other unsupported controls and INVERTS the table polarity (037 gated the wrong
+      surface — the renderer supports born-in-editor tables; the engine drops loaded-doc tables). Cost-of-doing-nothing:
+      concrete user-triggerable failures — an alignment click on a loaded doc throws a 422 AND (via the op-log reset)
+      silently discards every other valid text edit in the same save batch on reload (ET-1); heading/list/table/hyperlink
+      edits on loaded docs are silently dropped (SDL-1..5). No new component — extends existing client surfaces.
+    </justification>
+  </metadata>
+
+  <prompt>
+    Make R4 ship with ZERO user-triggerable errors and ZERO silent data loss, while the unsupported editing features
+    (headings/lists/tables/hyperlinks/alignment on the tracked edit path; hyperlinks anywhere) are DEFERRED to R5.
+    Do NOT implement any of the deferred features — guard them. Four changes (server needs none — MapPatchException
+    already returns typed 4xx, never 500, and Apply throws before any SPE write):
+
+    1. Mode-gate the unsupported controls in ComposeFormatToolbar.tsx: disable the alignment buttons, the heading
+       dropdown, and the list (bullet/ordered) buttons when `hasLoadedBaseline` is truthy (loaded/imported doc).
+       INVERT the table-insert gating: it is currently disabled on born-in-editor and enabled on loaded — flip it so
+       table-insert is ENABLED on born-in-editor (the renderer authors tables cleanly) and DISABLED on loaded docs
+       (the engine has no table op and would silently drop it). Each disabled control gets a tooltip like
+       "Available in a future release." Keep the existing read-only (`controlDisabled`) gating intact (OR it in).
+    2. Disable the hyperlink button in BOTH modes (links are not representable in R4 — no mark op, no content-model
+       href) with the same tooltip.
+    3. Convert the silent deferral callbacks (`onStructuralStep`/`onUnrepresentableStep`/`onRefusedAtomEdit`, currently
+       console.debug/warn in ComposeEditor.tsx ~1265-1283) into a NON-BLOCKING, user-visible sticky notice (e.g.
+       "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied."). This catches
+       formatted/linked PASTE, which bypasses the toolbar gate and would otherwise silently drop. Non-blocking — the
+       save still succeeds for the representable edits.
+    4. CRITICAL DATA-INTEGRITY FIX: stop `serializeOperationLog()` from emptying the op-log and clearing the dirty flag
+       until the save POST returns 200. Today it resets before the POST (ComposeEditor.tsx ~1839-1848, sequenced from
+       ComposeWorkspace.tsx ~998/1116/1197); on a 422 (any refused op, or an op that slips through via paste) the log
+       is already gone, so a retry sends an empty log and every valid text edit in that batch vanishes on reload.
+       Reorder so the log/dirty are cleared ONLY on confirmed 200, and a failed save leaves the doc dirty with the log
+       intact so a retry re-sends the same edits. Verify no other caller depends on the pre-POST reset timing.
+
+    This closes ET-1/ET-2/ET-3 (compound loss) + SDL-1..5 (silent loss). Verify against the corpus that a loaded doc
+    still saves ordinary text edits cleanly, and that an unsupported action is prevented (control disabled) or informed
+    (paste banner), never a thrown error or a lost batch.
+  </prompt>
+  <role>SPAARKE platform developer — the Compose React client (TipTap/ProseMirror step interceptor, op-log lifecycle, Fluent v9 toolbar). Understands the R4 save orchestration and the (paraId,runIndex,offset) op model. Follows ADRs strictly (ADR-021 Fluent tokens/dark-mode; ADR-038 seam tests).</role>
+  <goal>R4 Compose ships with no user-triggerable errors and no silent data loss: unsupported edit-path controls disabled on loaded docs (table gating inverted to the correct surface), hyperlinks disabled in both modes, formatted-paste surfaces a non-blocking notice, and no rejected save can discard the valid edits in its batch. All deferred features documented in projects/spaarkeai-compose-r5.</goal>
+
+  <context>
+    <background>
+      R4 zero-error audit (2026-07-23) mapped every user-triggerable failure. Server side is already clean
+      (MapPatchException → typed 4xx, never 500; Apply throws before any SPE write, so nothing partial persists). The
+      gaps are all client-side: (a) controls that emit unsupported ops/edits on loaded docs, (b) silent dropping of
+      deferred/unrepresentable steps, (c) the op-log reset that runs before the POST and turns a recoverable 422 into
+      batch data loss. Owner decision: keep the two byte-authors separate; born-in-editor stays on ComposeDocumentRenderer
+      (cited I-5 exception, tables supported); defer headings/lists/tables/hyperlinks/alignment editing + authored-doc
+      clean lifecycle to R5 (see ../spaarkeai-compose-r5/README.md).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — gate alignment/heading/list; INVERT table gating; disable hyperlink both modes; tooltips</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — deferral callbacks → non-blocking banner; op-log reset only on 200</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — save sequencing so op-log/dirty clear only on confirmed 200; wire the paste/deferral notice surface</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.test.tsx — gating tests (disabled on loaded, table enabled on born-in-editor)</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts — classifyStep: which edits are defer-structural/unrepresentable (do NOT change classification; R4 keeps them deferred)</file>
+      <file role="reference">projects/spaarkeai-compose-r5/README.md — the deferred features these guards stand in for</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="complete">Save path on the engine (op-log send).</dependency>
+      <dependency task="036" status="complete">Push-annotations retired.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner / R5">Do NOT implement any deferred feature (no setBlockAttr applier, no table op, no hyperlink op, no clean-apply mode). GUARD only. Those are R5 (projects/spaarkeai-compose-r5).</constraint>
+    <constraint source="data-integrity">A failed/rejected save MUST leave the document dirty with its op-log intact so a retry re-sends the same edits. No save may discard un-persisted edits. This is the primary acceptance bar.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; disabled-state + tooltip must pass the dark-mode test; no new colors.</constraint>
+    <constraint source="ADR-038 / NFR-06">Client component tests for gating + a test proving a rejected save preserves the op-log/dirty (no batch loss). No banned .NET mock/DI/ctor tests.</constraint>
+    <constraint source="project / §10">Client-only; no BFF change expected (confirm publish size unchanged). Run /conflict-check (ComposeFormatToolbar overlaps 037).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose client save orchestration; op-log lifecycle; Fluent v9 toolbar gating; graceful degradation of unsupported constructs</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r5/README.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor">Output the FULL rigor declaration. Load the R5 README + ADR-049/038. Re-read the four target files to confirm current line anchors (they may have shifted since the audit).</step>
+    <step order="1" name="Toolbar gating">In ComposeFormatToolbar.tsx: OR `hasLoadedBaseline` into disabled for alignment + heading + list controls; INVERT the table-insert gating (enable born-in-editor, disable loaded); disable hyperlink in both modes; add "Available in a future release" tooltips. Preserve `controlDisabled` read-only gating.</step>
+    <step order="2" name="Non-blocking deferral notice">Wire onStructuralStep/onUnrepresentableStep/onRefusedAtomEdit to a sticky, dismissible, non-blocking banner (covers formatted paste). Do NOT block the save.</step>
+    <step order="3" name="Op-log preservation (critical)">Reorder the save flow so serializeOperationLog()'s reset of the op-log + dirty flag happens ONLY after a confirmed 200. On non-200, leave the doc dirty with the op-log intact for retry. Trace all callers of the reset to ensure no regression.</step>
+    <step order="4" name="Tests">Add toolbar-gating tests (controls disabled on loaded; table enabled on born-in-editor, disabled on loaded; hyperlink disabled both) + a save-failure test proving the op-log + dirty survive a rejected (422) save and a retry re-sends. Keep dark-mode test green.</step>
+    <step order="5" name="Verify + gates">npm run build + the client vitest suite; /conflict-check; confirm no BFF change (publish size unchanged). Update TASK-INDEX.md is main-session-only — do NOT edit it. Report deviations.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The op-log reset is entangled with other state such that deferring it to post-200 would regress another flow (e.g. optimistic UI) — surface the coupling rather than force it.</trigger>
+    <trigger>Any target control cannot be cleanly disabled per-mode without a larger refactor of the toolbar's enabled-state model — surface for a scoping decision.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">Toolbar gating (alignment/heading/list disabled on loaded; table inverted; hyperlink disabled both) + non-blocking deferral banner + op-log-preserved-on-failure save flow + tests.</output>
+    <output type="report">Confirmation that each ET-/SDL- failure mode is now prevented (disabled) or informed (banner) or loss-proof (op-log preserved); build + test results; /conflict-check; publish-size-unchanged note.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On a LOADED doc, the alignment buttons, heading dropdown, list buttons, and table-insert are DISABLED (with tooltip); on a BORN-IN-EDITOR doc, table-insert (and heading/list/alignment) are ENABLED. The hyperlink button is DISABLED in both modes.</criterion>
+    <criterion testable="true">A rejected/failed save (e.g. 422) leaves the document DIRTY with its op-log INTACT; a retry re-sends the same edits; no valid text edit is lost on reload. Proven by a client test.</criterion>
+    <criterion testable="true">Formatted/linked PASTE on a loaded doc surfaces the non-blocking notice and does not silently drop without informing; the representable part of the save still succeeds.</criterion>
+    <criterion testable="true">No deferred feature was implemented (no setBlockAttr applier, table op, hyperlink op, or clean-apply mode) — grep the diff for engine/op-schema changes = none.</criterion>
+    <criterion testable="true">Client build + vitest suite green; dark-mode test green; /conflict-check clean; no BFF change (publish size unchanged). Deferred limits documented in projects/spaarkeai-compose-r5/README.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Created 2026-07-23 from the R4 zero-error audit. Supersedes task 037's table gating (which gated the wrong surface).
+    The four fixes map to: ET-1 (alignment 422 + compound loss), SDL-1/2/3 (heading/list/table silent drop),
+    SDL-4/5 (hyperlink silent loss), and the batch-preservation fix that also protects ET-2/ET-3 residual 422s. All
+    underlying features are deferred to projects/spaarkeai-compose-r5 (G3/G4/G5 + G1/G2).
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

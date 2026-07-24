@@ -3,7 +3,7 @@
     <title>Intra-paragraph offset-addressing table in the projection (FR-01)</title>
     <phase>1 Backend ingest</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF `.cs` (tags include bff-api); offset→run mapping over formatted/split runs + existing tracked changes is the hardest ingest surface and load-bearing for the Patch Engine — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -145,6 +145,24 @@
     Shared-file task with 012 (both touch `ComposeDocxProjectionBuilder.cs`) — sequence 011 BEFORE 012;
     `parallel-safe:false`. This is the offset→run mapping design §5.0 flags as where R4 "succeeds or
     struggles"; opus/xhigh is deliberate. Through-the-wire proof lives in task 013.
+
+    COMPLETED 2026-07-22. Extended `ComposeDocxProjection` with `OffsetAddressingTable`
+    (`ParaOffsetMap`/`RunBoundary`/`RunTrackChange`/`RunOffsetResolution`) and `ComposeDocxProjectionBuilder`
+    to emit it in the identity pass (index-aligned with `ParaIdMap` by construction). Run-index space = the
+    editor-visible run FLATTEN (mirrors `RenderInline`: hyperlink/ins/del/sdt descent) — the offset space the
+    client measures; on a track-changes-clean, hyperlink-free paragraph it coincides with the task-005 spike's
+    `para.Elements<Run>()`. Deterministic left-biased resolution; out-of-range REJECTED not clamped
+    (`TryResolve`=false / `Resolve` throws). Pre-existing `w:ins`/`w:del` runs are INCLUDED + tagged
+    (`RunTrackChange`) so they stay addressable — the table records the structural fact, task 030 owns the
+    tracked-change merge semantic. ESCALATION NOT FIRED: the table is deterministic (one split per offset), and
+    the corpus is track-changes-clean (manifest note 1a; live-redline is placeholder row 4, not supplied) so no
+    ambiguous corpus case exists to surface. Verified: BFF build green; ComposeDocxProjectionBuilderTests pass
+    (5 new in-memory + 1 corpus theory over all 3 fixtures — determinism, contiguous spans, every in-domain
+    offset resolves, past-end rejected, incl. CIPO 108 paras + Engagement Letter mid-run w:br); Tier-1 NetArch
+    `ADR013_ComposeFacadeTests` green; publish 46.11 MB compressed (0 delta vs baseline, ≤60 MB); no new HIGH
+    CVE (zero package adds). Design record: `notes/task-011-offset-addressing-table-decisions.md`. Task 030
+    must index the SAME flatten (carries `patch-engine-ab-decision.md` finding #2 forward). Gates: code-review +
+    adr-check clean.
   </notes>
 
   <execution>

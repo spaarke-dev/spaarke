@@ -2,8 +2,31 @@
   <metadata>
     <title>Hard-replace cutover completion — remove residual mammoth, confirm one engine (FR-12)</title>
     <phase>6 Hardening + cutover</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>startable</gate>
+    <status>done-with-exception</status>
+    <resolution date="2026-07-23" source="owner §6.5 Path-A">
+      CORE hard-replace COMPLETE: write path fully on ComposeShadowPatchEngine (+ renderer for born-in-editor,
+      cited I-5 exception); both legacy WRITERS (DocxAnnotationWriter, ComposeParagraphRedlineSynthesizer) +
+      collectEditedParagraphs + LocateTarget confirmed ZERO live-code refs (comments acceptable). mammoth
+      removal DEFERRED as a §6.5 Path-A exception: three transient docx mounts (Browse local file — client-only
+      per ADR-040; Assistant-upload; Open-in-Compose) have no server projection and legitimately need the client
+      mammoth mapper; routing them through the projection builder is net-new functional work → R5 G6. mammoth is
+      a READ/display mapper, not a write-path author — retaining it does not violate I-5/I-7. Causes no errors
+      (038 guardrails treat browsed docx as loaded). FR-12 "mammoth gone" amended to "removed from stored-Load
+      path; retained as transient/Browse mapper." Evidence + honesty note (transient-flow save fidelity):
+      notes/060-BLOCKED-projection-less-transient-mounts.md.
+    </resolution>
+    <adjustment date="2026-07-23" source="owner C-revised + task 038">
+      C-REVISED (owner 2026-07-23): the two byte-authors are kept separate for R4. `ComposeShadowPatchEngine`
+      is the sole EDIT-path byte-author; `ComposeDocumentRenderer` is RETAINED as the born-in-editor
+      clean-authoring path (cited I-5 exception — zero text-search, I-7 fully honored). Therefore "exactly ONE
+      engine / one byte-author" in this task means one EDIT-path byte-author + the retained renderer. DO NOT
+      delete `ComposeDocumentRenderer`, `SynthesizeDocument`, or `buildContentModel`. Scope of this task is the
+      residual `mammoth` fallback removal + the legacy grep-audit ONLY. Grep for `DocxAnnotationWriter` /
+      `ComposeParagraphRedlineSynthesizer` / `LocateTarget` must show zero LIVE-CODE references; retrospective
+      `//`-comment / doc-string mentions left by task 036 are acceptable (036 already proved zero live refs).
+      Deps updated: 032,034,006,036,038.
+    </adjustment>
     <rigor>FULL</rigor>
     <rigor-reason>Irreversible final removal of all legacy client + server write paths; modifies .ts/.tsx and touches the BFF Compose surface; gated on the Phase 0 gate (006); high blast radius — the canonical FULL trigger set (deletion + bff-api + frontend tags).</rigor-reason>
     <model-tier>opus</model-tier>

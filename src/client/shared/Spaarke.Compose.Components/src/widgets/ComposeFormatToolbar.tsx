@@ -4,8 +4,10 @@
  * FIX #5 (spaarkeai-compose-r2 UAT): the toolbar was consolidated from TWO wrapping
  * rows of individual icon buttons into ONE row grouped behind labelled Fluent v9
  * `Menu` dropdowns. The dropdown TRIGGER buttons carry WORD labels (Body / Paragraph
- * / Font / Word); the tools INSIDE each dropdown are ICON-only buttons with a hover
- * Tooltip naming each command. `Save` + `Undo`/`Redo` are icon-only buttons pushed
+ * / Font / Word); the tools INSIDE the Paragraph/Font/Table dropdowns are ICON-only
+ * buttons with a hover Tooltip naming each command, while the Word dropdown (task 039
+ * P3) is a VERTICAL list of icon+label rows (Open web / Open desktop). The Track
+ * Changes toggle is icon-only (task 039 P1). `Save` + `Undo`/`Redo` are icon-only buttons pushed
  * to the RIGHT edge (a `flex:1` spacer). This is a REORGANIZATION only — every
  * command previously reachable stays wired with its disabled/active state intact.
  *
@@ -16,10 +18,10 @@
  *   - Table     — insert table (2x2 + header row), add/delete row, add/delete column,
  *                 delete table (task 041, FR-18). Row/column/delete-table commands are
  *                 disabled outside a table (`editor.can().<cmd>()` dry-run).
- *   - Word      — Open in Word Web, Open in Word Desktop, Push to Word. These were
+ *   - Word      — Open in Word Web, Open in Word Desktop. These were
  *                 previously top-level actions on the separate `ComposeToolbar`
  *                 command bar (rendered by ComposeWorkspace). The host now binds the
- *                 handlers (`onOpenInWord` / `onOpenInWordDesktop` / `onPushToWord`)
+ *                 handlers (`onOpenInWord` / `onOpenInWordDesktop`)
  *                 and threads them here via ComposeEditor. The dropdown is omitted
  *                 when the host wires no Word handlers.
  *   - Save      — icon button (right-aligned); rendered only when `onSave` is wired.
@@ -80,9 +82,9 @@ import {
   ArrowUndo24Regular,
   ArrowRedo24Regular,
   ChevronDown16Regular,
+  DocumentEdit24Regular,
   OpenRegular,
   DesktopRegular,
-  ArrowUploadRegular,
   SaveRegular,
   TableAdd24Regular,
   TableInsertRow24Regular,
@@ -135,6 +137,21 @@ const useStyles = makeStyles({
   spacer: {
     flexGrow: 1,
   },
+  // task 039 P3: the Word dropdown is now a VERTICAL, labelled list (was a horizontal icon-only
+  // palette) — each action reads as a full-width menu row with an icon + text label. Semantic tokens only.
+  wordMenuColumn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    minWidth: '176px',
+    paddingInline: tokens.spacingHorizontalXS,
+    paddingBlock: tokens.spacingVerticalXS,
+    rowGap: tokens.spacingVerticalXXS,
+  },
+  // Left-align the icon + label inside each vertical Word action (Fluent Button centers by default).
+  wordMenuItem: {
+    justifyContent: 'flex-start',
+  },
 });
 
 export interface ComposeFormatToolbarProps {
@@ -147,20 +164,40 @@ export interface ComposeFormatToolbarProps {
   onOpenInWord?: () => void;
   /** Open the current document in the Word desktop app. */
   onOpenInWordDesktop?: () => void;
-  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
-  onPushToWord?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action is in flight). */
   wordActionsDisabled?: boolean;
-  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
-  canPushToWord?: boolean;
-  /** True while a push-to-Word is in flight. */
-  isPushingToWord?: boolean;
 
   // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
   /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
   trackChangesEnabled?: boolean;
   /** Toggle the live Track Changes overlay. Rendered only when supplied. */
   onToggleTrackChanges?: () => void;
+
+  // ---- Deferred edit-path gate (task 038, supersedes task 037 — R4 zero-error guardrails) ----
+  /**
+   * True when the editor is over a LOADED/imported baseline (an uploaded `.docx`, a stored
+   * document, or an opened template — anything with a retained original). False/undefined for a
+   * from-scratch BORN-IN-EDITOR draft (blank page / AI-draft) that has NO retained original.
+   *
+   * Task 038 (R4 zero-error release gate) uses this to gate the controls whose edit-path support is
+   * DEFERRED to R5 (projects/spaarkeai-compose-r5), so R4 ships with no user-triggerable errors and no
+   * silent data loss:
+   *  - When `true` (LOADED doc): the alignment buttons, the heading dropdown, the bullet/ordered list
+   *    buttons, AND "Insert table" are DISABLED — the tracked-edit engine either 422s (alignment) or
+   *    silently drops (heading/list/table) these constructs. Each shows an "Available in a future
+   *    release" tooltip.
+   *  - When falsy (BORN-IN-EDITOR draft): those controls are ENABLED — the ComposeDocumentRenderer
+   *    authors headings/lists/tables/alignment cleanly for a from-scratch document.
+   *
+   * NOTE the table polarity is INVERTED vs task 037 (which disabled born-in-editor tables): the renderer
+   * authors born-in-editor tables cleanly, but the engine has no table op and would silently drop a
+   * loaded-doc table — so table-insert is enabled born-in-editor and disabled loaded. Hyperlinks are
+   * disabled in BOTH modes independently of this flag (not representable in R4 — R5 G5).
+   *
+   * Defaults to falsy (undefined ⇒ born-in-editor treatment ⇒ these controls enabled), so a standalone/
+   * library mount that never threads the flag keeps full authoring.
+   */
+  hasLoadedBaseline?: boolean;
 
   // ---- Save (FIX #5) — icon button, right-aligned; rendered only when `onSave` set ----
   /** Save handler (create-on-save first Save, or update). */
@@ -237,11 +274,19 @@ function PaletteIconButton(props: {
   disabled?: boolean;
   onClick: () => void;
   testId: string;
+  /**
+   * task 038 (spaarkeai-compose-r4 zero-error guardrails): when the control is disabled because its
+   * underlying feature is DEFERRED (not merely read-only), the hover tooltip explains why instead of
+   * naming the unavailable command. The accessible NAME (`aria-label`) stays the command so assistive
+   * tech still announces what the control is; only the descriptive Tooltip changes.
+   */
+  deferredReason?: string;
 }): React.JSX.Element {
+  // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
+  // `description` (not a second `label`) so the two do not both claim the accessible name.
+  const tooltipContent = props.disabled && props.deferredReason ? props.deferredReason : props.label;
   return (
-    // The Button carries the accessible NAME via `aria-label`; the Tooltip is therefore a
-    // `description` (not a second `label`) so the two do not both claim the accessible name.
-    <Tooltip content={props.label} relationship="description" withArrow>
+    <Tooltip content={tooltipContent} relationship="description" withArrow>
       <Button
         appearance={props.active ? 'primary' : 'subtle'}
         size="small"
@@ -263,10 +308,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     disabled,
     onOpenInWord,
     onOpenInWordDesktop,
-    onPushToWord,
     wordActionsDisabled,
-    canPushToWord,
-    isPushingToWord,
+    hasLoadedBaseline,
     onSave,
     canSave,
     isSaving,
@@ -362,10 +405,31 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const canDeleteColumn = canRunTableCommand(editor, 'deleteColumn');
   const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
-  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onPushToWord);
+  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
-  const pushDisabled = controlDisabled || canPushToWord !== true || isPushingToWord === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
+
+  // ---- task 038 (spaarkeai-compose-r4 zero-error guardrail pass) --------------------------------
+  // The tracked-edit path (loaded/imported docs) has NO representation for alignment (the engine throws
+  // StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits (silently deferred).
+  // On a LOADED doc (`hasLoadedBaseline === true`) DISABLE those controls; a BORN-IN-EDITOR draft
+  // (blank / AI-draft, `hasLoadedBaseline` falsy) keeps them (the ComposeDocumentRenderer authors them
+  // cleanly). This SUPERSEDES + INVERTS task 037's table gating: the renderer authors born-in-editor
+  // tables cleanly, but the engine has no table op and would silently drop a loaded-doc table — so
+  // table-insert is ENABLED born-in-editor and DISABLED loaded (the exact opposite of what 037 shipped).
+  // Hyperlinks are unrepresentable in BOTH modes in R4 (no mark op, no content-model href). Every
+  // deferred feature is documented in projects/spaarkeai-compose-r5 (G3 alignment/heading/list, G4
+  // tables, G5 hyperlinks). The read-only gate (`controlDisabled`) is OR'd in — preserved, not replaced.
+  const isLoadedBaseline = hasLoadedBaseline === true;
+  /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
+  const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
+  const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
+  // Alignment + heading + bullet/ordered list — deferred on loaded docs.
+  const structuralEditDisabled = controlDisabled || isLoadedBaseline;
+  // INVERTED from task 037: enabled born-in-editor, disabled loaded.
+  const tableInsertDisabled = controlDisabled || isLoadedBaseline;
+  // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
+  const hyperlinkDisabled = true;
 
   return (
     <Toolbar
@@ -375,29 +439,49 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       data-testid="compose-format-toolbar"
     >
       {/* ---- Body (block/heading style) ---- */}
-      <Menu positioning="below-start">
-        <MenuTrigger disableButtonEnhancement>
+      {/* task 038: heading changes are deferred on a LOADED doc (the engine has no setBlockAttr applier
+          — R5 G3), so render a disabled, tooltip'd button instead of an openable menu. A born-in-editor
+          draft keeps the full heading menu. testId is stable across both branches. */}
+      {isLoadedBaseline ? (
+        <Tooltip content={FUTURE_RELEASE_TOOLTIP} relationship="description" withArrow>
           <Button
             appearance="subtle"
             size="small"
-            disabled={controlDisabled}
+            disabled
             className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
+            aria-label={`${currentBlockLabel(editor)} — block style`}
             data-testid="compose-format-heading-menu"
           >
             {currentBlockLabel(editor)}
           </Button>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
-            <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
-            <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
-            <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+        </Tooltip>
+      ) : (
+        <Menu positioning="below-start">
+          <MenuTrigger disableButtonEnhancement>
+            <Button
+              appearance="subtle"
+              size="small"
+              disabled={controlDisabled}
+              className={styles.menuButton}
+              icon={<ChevronDown16Regular />}
+              iconPosition="after"
+              data-testid="compose-format-heading-menu"
+            >
+              {currentBlockLabel(editor)}
+            </Button>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
+              <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
+              <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
+              <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      )}
 
       {/* ---- Paragraph (lists / blockquote / alignment) ---- */}
       <Menu positioning="below-start">
@@ -410,7 +494,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -418,7 +503,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />
@@ -434,7 +520,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignLeft24Regular />}
               label="Align left"
               active={editor.isActive({ textAlign: 'left' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               testId="compose-format-align-left"
             />
@@ -442,7 +529,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignCenter24Regular />}
               label="Align center"
               active={editor.isActive({ textAlign: 'center' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               testId="compose-format-align-center"
             />
@@ -450,7 +538,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignRight24Regular />}
               label="Align right"
               active={editor.isActive({ textAlign: 'right' })}
-              disabled={controlDisabled}
+              disabled={structuralEditDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               testId="compose-format-align-right"
             />
@@ -501,7 +590,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
               label={editor.isActive('link') ? 'Remove link' : 'Add link'}
               active={editor.isActive('link')}
-              disabled={controlDisabled}
+              // task 038: hyperlinks are not representable in R4 in EITHER mode (no mark op, no
+              // content-model href — R5 G5). Disabled everywhere; controlDisabled is subsumed.
+              disabled={controlDisabled || hyperlinkDisabled}
+              deferredReason={FUTURE_RELEASE_TOOLTIP}
               onClick={toggleLink}
               testId="compose-format-link"
             />
@@ -519,7 +611,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             <PaletteIconButton
               icon={<TableAdd24Regular />}
               label="Insert table"
-              disabled={controlDisabled}
+              disabled={tableInsertDisabled}
+              deferredReason={deferredIfLoaded}
               onClick={insertTable}
               testId="compose-format-table-insert"
             />
@@ -562,53 +655,62 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      {/* ---- Word (Open in Web / Desktop / Push to Word) ---- */}
+      {/* ---- Word (Open web / Open desktop handoff) ----
+             task 039 P3: rendered as a VERTICAL, labelled dropdown (icon + text row per action).
+             task 039 P4: there is NO "Push to Word" control here — the DocxAnnotationWriter push-to-Word
+             surface was fully retired in task 036, so the only Word items are the Open-in-Web/Desktop
+             SPE launch handoff (+ the deliberate Save duplicate). Nothing to remove. */}
       {showWordMenu ? (
         <Menu positioning="below-start">
           <MenuTrigger disableButtonEnhancement>
             <DropdownButton label="Word" disabled={controlDisabled} testId="compose-format-word-menu" />
           </MenuTrigger>
           <MenuPopover>
-            <div className={styles.dropdownPalette} role="group" aria-label="Word document actions">
+            <div className={styles.wordMenuColumn} role="group" aria-label="Word document actions">
               {/* UX-1 (UAT 2026-07-19): a deliberate DUPLICATE of the right-aligned Save
-                  icon — users instinctively look in the Word menu to save. Same handler
+                  button — users instinctively look in the Word menu to save. Same handler
                   (`onSave`) + same enable predicate (`saveDisabled`); rendered only when
                   the host wires Save. */}
               {onSave ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<SaveRegular />}
-                  label={isSaving ? 'Saving…' : 'Save'}
                   disabled={saveDisabled}
                   onClick={onSave}
-                  testId="compose-format-word-save"
-                />
+                  data-testid="compose-format-word-save"
+                >
+                  {isSaving ? 'Saving…' : 'Save'}
+                </Button>
               ) : null}
               {onOpenInWord ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<OpenRegular />}
-                  label="Open in Word for Web"
+                  aria-label="Open in Word for the Web"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWord}
-                  testId="compose-format-open-word-web"
-                />
+                  data-testid="compose-format-open-word-web"
+                >
+                  Open web
+                </Button>
               ) : null}
               {onOpenInWordDesktop ? (
-                <PaletteIconButton
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
                   icon={<DesktopRegular />}
-                  label="Open in Word Desktop"
+                  aria-label="Open in the Word desktop app"
                   disabled={openInWordDisabled}
                   onClick={onOpenInWordDesktop}
-                  testId="compose-format-open-word-desktop"
-                />
-              ) : null}
-              {onPushToWord ? (
-                <PaletteIconButton
-                  icon={<ArrowUploadRegular />}
-                  label={isPushingToWord ? 'Pushing to Word…' : 'Push to Word'}
-                  disabled={pushDisabled}
-                  onClick={onPushToWord}
-                  testId="compose-format-push-to-word"
-                />
+                  data-testid="compose-format-open-word-desktop"
+                >
+                  Open desktop
+                </Button>
               ) : null}
             </div>
           </MenuPopover>
@@ -618,7 +720,10 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       {/* Spacer — pushes Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
 
-      {/* ---- Track Changes toggle (item 4, UAT round-4) — labelled, right-aligned ---- */}
+      {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.
+             The visible "Track changes" text label was dropped for an icon-only toggle; the accessible
+             NAME (aria-label) + pressed state (aria-pressed) + the descriptive Tooltip are all retained
+             (ADR-021 — the primary/subtle appearance carries the on/off state, dark-mode-correct). ---- */}
       {onToggleTrackChanges ? (
         <Tooltip
           content={
@@ -631,14 +736,13 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         >
           <ToolbarButton
             appearance={trackChangesEnabled ? 'primary' : 'subtle'}
+            icon={<DocumentEdit24Regular />}
             aria-pressed={trackChangesEnabled === true}
             aria-label="Toggle track changes"
             disabled={controlDisabled}
             onClick={onToggleTrackChanges}
             data-testid="compose-format-track-changes"
-          >
-            Track changes
-          </ToolbarButton>
+          />
         </Tooltip>
       ) : null}
 

@@ -42,6 +42,10 @@ public sealed class ComposeServiceBornInEditorSaveTests
     private const string ResolvedDriveId = "drive-026";
     private const string CreatedSpeItemId = "spe-created-026";
 
+    // task 039 (born-in-editor 2nd save) — the doc is already promoted (DocumentSpeId + DriveId set).
+    private const string ExistingSpeItemId = "spe-existing-039";
+    private const string ExistingDriveId = "drive-039";
+
     private readonly Mock<ISpeFileOperations> _spe = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _dataverse = new(MockBehavior.Strict);
     private readonly Mock<IPostUploadIndexingEnqueuer> _indexing = new(MockBehavior.Strict);
@@ -60,9 +64,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private static FileHandleDto CreatedDriveItem() => new(
@@ -166,5 +168,114 @@ public sealed class ComposeServiceBornInEditorSaveTests
 
         body.Descendants<Paragraph>().Select(p => p.ParagraphId?.Value)
             .Should().OnlyContain(id => !string.IsNullOrEmpty(id), "every rendered w:p carries a w14:paraId (E2 substrate)");
+    }
+
+    private static FileHandleDto ReplacedDriveItem() => new(
+        Id: ExistingSpeItemId,
+        Name: "draft.docx",
+        ParentId: null,
+        Size: 6789,
+        CreatedDateTime: DateTimeOffset.UtcNow,
+        LastModifiedDateTime: DateTimeOffset.UtcNow,
+        ETag: "\"etag-replaced-039\"",
+        IsFolder: false,
+        WebUrl: "https://spe/web/draft",
+        DriveId: ExistingDriveId);
+
+    private void ArrangeReplaceOnSave(out Func<byte[]> capturedBytesAccessor)
+    {
+        byte[]? captured = null;
+
+        // The replace path reads the live metadata for the FR-08 pre-write staleness assert. Returning null
+        // keeps preWriteETag null (no prior stamp to assert against); the ContentModel branch skips the
+        // stamp block regardless — so this is the only metadata read on this path.
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
+        // The born-in-editor replace save overwrites the EXISTING drive-item in place (never a create).
+        _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var buffer = new MemoryStream();
+                stream.CopyTo(buffer);
+                captured = buffer.ToArray();
+            })
+            .ReturnsAsync(ReplacedDriveItem());
+
+        // FR-06 idempotent promotion: the row already exists (created on the FIRST save) → no create.
+        _dataverse.Setup(d => d.RetrieveByAlternateKeyAsync(
+                "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document") { Id = Guid.NewGuid() });
+
+        _indexing.Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        capturedBytesAccessor = () => captured
+            ?? throw new InvalidOperationException("ReplaceFileContentAsUserAsync was never invoked.");
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithContentModelOnExistingItem_UpdatesSameItemAndDoesNotCreate()
+    {
+        // task 039 (UAT round 1+2, born-in-editor 2nd save): the doc was promoted on its FIRST save
+        // (DocumentSpeId now set) but holds NO retained original bytes and no real SPE baseline version.
+        // The 2nd..Nth in-session save re-authors via ContentModel on the REPLACE path — it must overwrite
+        // the SAME drive-item (update, not a create-on-save) so no duplicate sprk_document is minted per
+        // save, and it must NOT 400 on a missing baseline.
+        ArrangeReplaceOnSave(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = new SaveComposeDocumentRequest
+        {
+            // Second save of a born-in-editor doc: DocumentSpeId + DriveId are now set (rebound from the
+            // first create-on-save); ContentModel re-authors the whole doc; NO Content / BaselineVersionId /
+            // OperationLog (there is nothing to diff onto).
+            DocumentSpeId = ExistingSpeItemId,
+            DriveId = ExistingDriveId,
+            ContentModel = new ComposeContentModel
+            {
+                Blocks = new[]
+                {
+                    new ComposeBlock
+                    {
+                        Kind = ComposeBlockKind.Heading, Level = 1,
+                        Runs = new[] { new ComposeInlineRun { Text = "Definitions" } },
+                    },
+                    new ComposeBlock
+                    {
+                        Kind = ComposeBlockKind.Paragraph,
+                        Runs = new[] { new ComposeInlineRun { Text = "Second in-session save." } },
+                    },
+                },
+            },
+            SessionId = Guid.NewGuid().ToString(),
+            TenantId = Tenant,
+        };
+
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        // (a) It UPDATED the SAME drive-item via replace — never a create-on-save upload (no duplicate record).
+        _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _spe.Verify(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _spe.Verify(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // (b) The result points at the SAME existing SPE item (same-record update).
+        result.DocumentSpeId.Should().Be(ExistingSpeItemId);
+
+        // (c) The persisted bytes are a real server-authored .docx rendered FROM the content model (the
+        // renderer path, not an op-log patch onto a baseline), so the 2nd save succeeds with no baseline error.
+        var persisted = capturedBytes();
+        using var doc = WordprocessingDocument.Open(new MemoryStream(persisted, writable: false), isEditable: false);
+        var body = doc.MainDocumentPart!.Document!.Body!;
+        body.InnerText.Should().Contain("Second in-session save.");
+        body.Descendants<Paragraph>().Select(p => p.ParagraphId?.Value)
+            .Should().OnlyContain(id => !string.IsNullOrEmpty(id), "every rendered w:p carries a w14:paraId");
     }
 }

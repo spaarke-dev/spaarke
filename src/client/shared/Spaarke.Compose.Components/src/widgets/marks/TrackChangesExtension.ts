@@ -6,13 +6,14 @@
  * server-managed document to render as live tracked-change redlines AND to PERSIST on save. Rendering
  * edits as content marks (insertion/deletion) would break persistence — `rejectStateText`
  * (docxBridge.ts) strips insertion marks and keeps deletion-marked text, so a marked paragraph's
- * reject-state equals the original and `collectEditedParagraphs` emits NOTHING → the edit is lost.
- * Instead, this extension leaves the document content equal to the user's REAL edited text (so the
- * existing FR-02 path — `collectEditedParagraphs` → BFF `ComposeParagraphRedlineSynthesizer` —
- * synthesizes the `w:ins`/`w:del` tracked changes server-side, exactly as it already does) and renders
- * the live redline purely as a ProseMirror DECORATION diffed against the load-time baseline. A
- * decoration is a VIEW layer: it cannot change content, cannot desync positions, cannot corrupt the
- * `.docx`. Toggle off → decorations vanish, content untouched.
+ * reject-state snapshot would equal the original and the op-log would capture no operation for it →
+ * the edit is lost. Instead, this extension leaves the document content equal to the user's REAL edited
+ * text (so the ID-anchored operation-log path — the step interceptor → `ComposeShadowPatchEngine`,
+ * tasks 020/022/032 — synthesizes the `w:ins`/`w:del` tracked changes server-side, exactly as it already
+ * does; this replaced the retired R3 `collectEditedParagraphs` → `ComposeParagraphRedlineSynthesizer`
+ * path) and renders the live redline purely as a ProseMirror DECORATION diffed against the load-time
+ * baseline. A decoration is a VIEW layer: it cannot change content, cannot desync positions, cannot
+ * corrupt the `.docx`. Toggle off → decorations vanish, content untouched.
  *
  * NFR-03: no TipTap product feature — a plain MIT `@tiptap/core` Extension + `@tiptap/pm` Plugin +
  * DecorationSet. No `@tiptap-pro/*`, no AGPL.
@@ -24,8 +25,9 @@
  * @see ./InsertionMark.ts · ./DeletionMark.ts — the `compose-mark-insertion` / `compose-mark-deletion`
  *      token classes this reuses for consistent redline styling (ADR-021 dark-mode-correct)
  * @see ../hooks/trackChangesDiff.ts — the pure word-diff → positioned-region engine
- * @see ../../utils/docxBridge.ts — `captureParaIdSnapshot` (the baseline) + `collectEditedParagraphs`
- *      (the persistence path this design deliberately rides)
+ * @see ../../utils/docxBridge.ts — `captureParaIdSnapshot` (the baseline)
+ * @see ../stepOperationInterceptor.ts — the ID-anchored operation-log capture (the persistence path
+ *      this design deliberately rides)
  */
 import { Extension } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';

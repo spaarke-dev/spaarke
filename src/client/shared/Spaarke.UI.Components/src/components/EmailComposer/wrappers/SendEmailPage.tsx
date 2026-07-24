@@ -15,7 +15,7 @@
 import * as React from 'react';
 
 import { EmailComposer } from '../EmailComposer';
-import type { EmailComposerMode, IAttachmentItem } from '../EmailComposer.types';
+import type { EmailComposerMode, IAttachmentItem, IRecordLookupTarget, IPickedRecord } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -43,6 +43,13 @@ export interface ISendEmailPageProps {
    * when omitted the fields stay free-text-only (autocomplete is additive).
    */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Record-lookup targets + host lookup for the attachments "look up a record" tool
+   * (owner UAT round 5, RegardingResolver pattern). Forwarded to the engine. A document
+   * pick attaches; any other record type is linked in the body. Optional/additive.
+   */
+  recordLookupCatalog?: IRecordLookupTarget[];
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;

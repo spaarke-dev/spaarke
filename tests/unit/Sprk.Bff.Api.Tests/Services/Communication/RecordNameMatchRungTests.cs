@@ -54,6 +54,32 @@ public class RecordNameMatchRungTests
     }
 
     [Fact]
+    public async Task Evaluate_WhenRecordNameContainsQuotes_NeutralizesThemInProvenance()
+    {
+        // A record name with embedded double-quotes must not corrupt the quote-delimited provenance
+        // mini-format the CommunicationConnections review UI parses (provenance.ts parseNameMatch uses
+        // key="([^"]*)" with NO unescape). The name value is neutralized; number/reason stay parseable
+        // and the real display name still rides on Target.Name untouched.
+        var matterId = Guid.NewGuid();
+        SetupIndex(RungTestSupport.Hit(RecordEntityType.Matter, matterId, 0.7, "Smith \"Slippery\" Co"));
+
+        var matches = await Build().EvaluateAsync(
+            RungTestSupport.Envelope(subject: "Fw: engagement for Smith Slippery Co", bodyText: null),
+            new AssociationContext(), CancellationToken.None);
+
+        var match = matches.Should().ContainSingle().Subject;
+        match.Target!.Name.Should().Be("Smith \"Slippery\" Co");   // real name preserved for display
+
+        // The name segment carries only its two delimiter quotes — the embedded pair is neutralized.
+        var nameSegment = match.Provenance.Split(":number=")[0];
+        nameSegment.Count(ch => ch == '"').Should().Be(2);
+
+        // reason remains extractable by the client's key-anchored regex despite the quoted name.
+        System.Text.RegularExpressions.Regex.Match(match.Provenance, "reason=\"([^\"]*)\"")
+            .Groups[1].Value.Should().Be("name in subject");
+    }
+
+    [Fact]
     public async Task Evaluate_WhenNameAppearsInBody_EmitsMatchAtBodyConfidence()
     {
         SetupIndex(RungTestSupport.Hit(RecordEntityType.Project, Guid.NewGuid(), 0.6, "Smith v Smith"));

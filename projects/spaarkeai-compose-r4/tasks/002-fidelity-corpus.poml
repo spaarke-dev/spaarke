@@ -3,9 +3,8 @@
     <title>Assemble the fidelity corpus as LFS fixtures (sample-docs + owner worst-offenders)</title>
     <phase>0 Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
     <rigor>STANDARD</rigor>
-    <rigor-reason>New fixture files + a catalog markdown; no `.cs`/`.ts` implementation, no cutover. New-file creation with a defined contract — STANDARD.</rigor-reason>
+    <rigor-reason>New fixture files + a catalog markdown; no `.cs`/`.ts` implementation, no cutover. New-file creation with a defined contract — STANDARD. (Executed with the `testing` tag TEST-MODIFYING override per root CLAUDE.md §8 — Step 9.5 code-review + adr-check ran unconditionally.)</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Mechanical assembly + cataloguing against a fully-specified feature-coverage matrix; no architectural judgment.</model-tier-reason>
     <effort>medium</effort>
@@ -15,8 +14,9 @@
     <tags>testing,fixtures,docx</tags>
     <estimated-effort>0.5 day</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -141,6 +141,22 @@
     Owner supplies additional redacted worst-offenders during Phase 0 (spec Unresolved Question). The manifest's
     placeholder rows are the intake slots. Blocks the final NFR-01 acceptance bar, NOT Phase-0 start — the three
     seed docs are enough to stand up the harness (task 004) and the applier spike (task 005).
+
+    COMPLETION SUMMARY (2026-07-22): All three sample docs copied verbatim from `notes/sample-docs/` into
+    `tests/fixtures/compose-corpus/` (byte-identical, `diff -q` confirmed) and staged; `git lfs ls-files` +
+    `git show :<path>` confirm all three land as LFS pointers (not raw binaries) — the escalation trigger
+    did NOT fire. `corpus-manifest.md` authored with the required feature-coverage table (verified by direct
+    OOXML inspection, not narrative assumption) + 5 labelled owner-intake placeholder rows (§2) + a consumers
+    section (§3). CIPO doc flagged as THE Phase-0 spike/UAT doc + interior-location-422 + empty-paragraph-drift
+    case per constraint. DEVIATION recorded in `projects/spaarkeai-compose-r4/notes/task-002-corpus-deviations.md`:
+    empirical OOXML inspection found the CIPO doc's current saved copy carries no live `w:ins`/`w:del` markup
+    (track-changes-clean as staged, despite filename/design-doc framing), `Engagement Letter.docx` has no
+    numbered clauses, and `01 - Test Matter Create Fields Only.docx` has no OOXML `w:sdt`/`w:fldSimple` (its
+    "fields" are semantic/business data fields in prose, not Word field codes). All three files were still
+    copied verbatim per the task's explicit instruction; the manifest documents both the task's narrative
+    framing and the verified findings side by side so tasks 004/006 work from ground truth. TASK-INDEX.md
+    and current-task.md were NOT touched (sub-agent write boundary — owned by the main session per dispatch
+    instructions).
   </notes>
 
   <execution>

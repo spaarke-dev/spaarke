@@ -3,7 +3,7 @@
     <title>ComposeShadowPatchEngine core — resolve-by-paraId + split-run + native `w:ins`/`w:del`/`w:comment` (FR-04)</title>
     <phase>3 Patch Engine</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New load-bearing `.cs` byte-author on the BFF hot path; implements the surgical patch surface; modifies OOXML; deps on 3 tasks. FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -155,6 +155,16 @@
 
   <notes>
     Front-loaded hard surface (design §6). Structural paragraph ops are NOT in this task — they are 031, sequenced last in the applier. The underlying engine (Docxodus vs OpenXML-SDK) is fixed by the task 005 A/B — follow that decision record, do not re-run the A/B here.
+
+    --- COMPLETION (2026-07-22) ---
+    DELIVERED: NEW `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs` (concrete stateless singleton) — `Apply(byte[] retained, ComposeOperationLog, comments?, author?, timestamp?) -> byte[]`. Promoted + hardened the task-005 `SpikeOpenXmlApplier`: O(1) resolve-by-w14:paraId (dictionary, ZERO write-path text-search — grep-verified), editor-visible run-flatten (MIRRORS `ComposeDocxProjectionBuilder.CollectRunBoundaries` — descends w:hyperlink/w:ins/w:del/w:sdt, atoms as single slots — NOT raw Elements&lt;Run&gt;(), per finding #2), general SplitRun preserving RunProperties on both halves (multi-child text+glyph), native w:ins/w:del(w:delText, EDGE-4)/w:comment. Migrated EDGE-1..4 (comment-before-trackchange ordering; w:delText; monotonic revision-id seeding) from DocxAnnotationWriter (NOT deleted — task 032). Sequential per-op application, re-flatten per op (finding #1 drift-safe). Added durable paraId+range-anchored `ComposeAnchoredComment` (text-search-free replacement for DocxAnnotation comments) + structured `ComposePatchException`/`ComposePatchErrorKind`.
+    SCOPE HELD: text/mark/comment ops (insertText, deleteRange, replaceRange, setMark, clearMark) + comments. Structural ops (split/merge/insert/deleteParagraph) + setBlockAttr route to a clear task-031 NotSupported seam (ComposePatchErrorKind.StructuralOpNotYetImplemented). NOT routed through ComposeService.SaveAsync (task 032).
+    ESCALATION EDGE (POML &lt;escalation&gt;, root §6.5): reconciling a new edit onto a run INSIDE a pre-existing w:ins/w:del is genuinely ambiguous — the engine REFUSES (TrackedChangeReconciliationUnsupported), deterministic, never mis-places bytes. Not a task blocker: corpus (CIPO) is track-changes-clean so the settled-run path is fully corpus-proven; the reconciliation semantic is surfaced for a later decision, not silently approximated.
+    DI: `services.AddSingleton&lt;ComposeShadowPatchEngine&gt;()` in ComposeModule.cs (unconditional/symmetric per bff-extensions.md §F.1).
+    TESTS: 15 unit tests `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeShadowPatchEngineTests.cs` (interior insert/delete/replace/setMark/comment land at paraId+offset; RunProperties preserved; flatten-over-hyperlink alignment; NEGATIVE unknown-paraId refused; no-op byte-identical; structural-op + tracked-change-reconciliation + bad-schema refused) + seam `tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs` (drives engine over EVERY corpus doc: no-op whole-file byte-identical + real interior insert leaves untouched PARTS byte-identical & untouched paragraph subtrees unchanged, reusing task-004 ComposeOoxmlPackagePartComparer).
+    VERIFY: `dotnet build` GREEN; `dotnet test --filter ~Compose` = 541 passed / 0 failed; ADR013_ComposeFacadeTests (Tier-1) GREEN. (3 pre-existing ArchTest failures — ADR-007 Communication/Office, ADR-010 IComposeService/AutoFileSettings — are baseline, unrelated; my engine adds no new violation.)
+    SIZE/CVE: compressed publish 47.48 MB incl PDBs / 46.66 MB excl (&lt;60 MB ceiling; below ~49.63 baseline; marginal delta ~0 — zero new package). No new HIGH CVE (System.Security.Cryptography.Xml HIGH is pre-existing transitive; engine adds no crypto/package).
+    GATES: code-review PASS, adr-check PASS. /conflict-check: silent pass (no open PR on Services/Compose or ComposeModule.cs).
   </notes>
 
   <execution>

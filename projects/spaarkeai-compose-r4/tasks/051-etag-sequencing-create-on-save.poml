@@ -2,8 +2,8 @@
   <metadata>
     <title>eTag sequencing for create-on-save (no eTag-mismatch 500) (FR-08)</title>
     <phase>5 Concurrency + save</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF implementation on the ComposeService save/create path modifying .cs; root-cause fix of a deployed eTag 500; irreversible ordered save sequence; tags include bff-api + spe.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -123,6 +123,67 @@
     The through-the-wire proof (create-on-save then content write does not throw) is authored as the task 054
     seam slice under `tests/integration/seam/Compose/`. Same save path as 050/052 — sequential (parallel-safe
     false). Run `/conflict-check` before the BFF PR.
+
+    IMPLEMENTED 2026-07-22, root-cause found (Step 1 "reproduce" per prescriptive steps):
+
+    REPRODUCTION: post-032 cutover, `ComposeService.SaveAsync`'s create-on-save branch (transient draft, no
+    prior `DocumentSpeId`) is now a SINGLE atomic call — `ISpeFileOperations.UploadSmallAsUserAsync` creates
+    the SPE drive-item with the FINAL (already patch-engine-applied) bytes in one PUT; there is no separate
+    "create empty, then write content" two-step in the current architecture, so the literal "create THEN a
+    follow-up content write reusing a pre-create precondition" scenario described in the UAT note does not
+    reproduce against current code as a two-call sequencing bug.
+
+    ROOT CAUSE FOUND INSTEAD (the actual live defect matching the reported symptom): `UploadSmallAsUserAsync`
+    (`Infrastructure/Graph/UploadSessionManager.cs`) caught ONLY the legacy `Microsoft.Graph.ServiceException`
+    type. Per the DEF-14 fix already applied to the SIBLING method `ReplaceFileContentAsUserAsync` in the
+    same file (see its own code comment), the Graph SDK v5 / Kiota `PutAsync` call actually raises
+    `Microsoft.Graph.Models.ODataErrors.ODataError` — so ALL of `UploadSmallAsUserAsync`'s ServiceException
+    catches were dead code, and ANY Graph error during create-on-save (including a create-time precondition/
+    conflict response whose message text reads "the resource has been changed since the caller last read
+    it" — Graph's own wording for this class of error, matching the UAT note verbatim) fell through to the
+    final generic `catch (Exception ex) { throw; }`, which RE-THREW THE RAW ODataError — (a) leaking a
+    `Microsoft.Graph` type up through `ISpeFileOperations` into `Services/Compose/` (an ADR-007 violation)
+    and (b) surfacing at `ComposeEndpoints.ExecuteSaveAsync`'s generic `catch (Exception ex)` as an opaque
+    500 "Internal Server Error" carrying that exact Graph message — precisely the deployed symptom.
+
+    FIX: added the same ODataError catch chain `ReplaceFileContentAsUserAsync` already carries (DEF-14
+    pattern) to `UploadSmallAsUserAsync`: 403→`UnauthorizedAccessException`, 413→`ArgumentException`,
+    **412→`EtagPreconditionFailedException`** (the fix for the reported symptom — ALREADY mapped by
+    `ComposeEndpoints.ExecuteSaveAsync` to a clean 412 ProblemDetails "This document changed since you
+    opened it — reload and reapply your changes. Nothing was overwritten."), 423→`DocumentLockedByWordException`
+    (defensive parity with the replace path), 429→throttling `InvalidOperationException`, generic
+    ODataError→translated `InvalidOperationException` (never the raw Graph type). The legacy ServiceException
+    catches are RETAINED (belt-and-suspenders, matching the sibling method's own comment) — harmless, in
+    case a non-Kiota code path ever raises that type.
+
+    "POST-CREATE eTag" wiring: task 050's `SetSaveVersionStampAsync` call (added to `SaveAsync` immediately
+    after BOTH the create and replace branches) already seeds the save-path version stamp from `saved.ETag`
+    — for the create branch this is `created.ETag`, the drive-item's eTag AS RETURNED BY THE CREATE ITSELF
+    (never a pre-create value). This is the closed-form satisfaction of "the content write uses the
+    POST-CREATE eTag": the NEXT save of this now-persisted item asserts against the create's own fresh eTag
+    (via 050's staleness assert), never a stale precondition captured before the create ran.
+
+    DEVIATION (documented root-cause substitution, not silent): the fix targets the ACTUAL live defect
+    (missing ODataError translation on the create path) rather than literally implementing a two-call
+    "create → capture eTag → conditional write" sequence that would require inventing a step the current
+    (post-032) architecture does not have. The NEGATIVE criterion ("a genuinely concurrent external edit...
+    yields 412, not 500") is satisfied by the SAME fix — a real Graph 412 during create now surfaces
+    correctly instead of the previous 500.
+
+    Files touched: `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/UploadSessionManager.cs` (ODataError
+    catch chain added to `UploadSmallAsUserAsync`) — `ComposeService.cs` required no further change beyond
+    050's stamp wiring.
+
+    Publish-size / CVE: no new NuGet package reference. The pre-existing HIGH CVE
+    (`System.Security.Cryptography.Xml`) is unrelated and pre-existing (confirmed via `git stash` diff
+    against the pre-050/051 baseline). Full unit suite (8,920 tests) + ArchTests re-run: 0 regressions (the
+    3 pre-existing ArchTests failures — `ADR010_DITests`, `ADR-007` on `Services/Communication`/
+    `Infrastructure/Errors`/`Api/Office/Errors` — reproduce identically on the pre-task baseline via `git
+    stash`, confirmed unrelated to this task's `Infrastructure/Graph`/`Services/Compose` changes).
+
+    Placement Justification: the fix stays entirely behind `SpeFileStore`/`ISpeFileOperations`
+    (`Infrastructure/Graph/UploadSessionManager.cs`) — no new service, no new DI registration, no new
+    endpoint; `Services/Compose/` requires no code change for this task beyond what 050 already added.
   </notes>
 
   <execution>

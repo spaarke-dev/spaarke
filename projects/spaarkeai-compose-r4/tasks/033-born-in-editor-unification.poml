@@ -4,6 +4,16 @@
     <phase>3 Patch Engine</phase>
     <gate>blocked</gate>
     <status>not-started</status>
+    <amendment date="2026-07-22" by="orchestrator (table-op schema gap, §6.5)">
+      DEFERRED behind new task 037. The pre-implementation representability check found born-in-editor docs can
+      contain native OOXML tables (live `insertTable`; tested `ComposeContentModel.Table`/`ComposeDocumentRenderer`),
+      but the closed task-003 op schema has NO table-authoring op and the engine only refuses-across tables — so
+      "insert-everything op set onto an empty shadow package" cannot express a table (FR-09 unspecified this).
+      Rather than build a throwaway interim split, FR-09 is completed in task 037 (op-schema table-authoring
+      extension, owner Path B vs C) which this task now depends on. Born-in-editor stays on `ComposeDocumentRenderer`
+      (working, no regression) in the interim — a documented §6.5 Path-A exception. Analysis:
+      notes/task-033-table-operation-gap.md. When 037 lands, FR-09/033 completes (or folds into 037).
+    </amendment>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the BFF save path (`.cs`) + the client bridge (`.ts`); consolidates a parallel export path onto the unified model. FULL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -143,6 +153,8 @@
 
   <notes>
     No `&lt;justification&gt;` — this consolidates an existing parallel path into the unified model (no new surface). The unified model is the whole point of D5/FR-09: one byte-author, one capture path, whether or not a source `.docx` exists.
+
+    **BLOCKED 2026-07-22** at Step 0/1 (pre-implementation representability check) — the task's own `&lt;escalation&gt;` trigger fired. Task 030 (Patch Engine core) and 031 (structural ops) are both complete, so this is NOT a sequencing gap. It is a CLOSED-SCHEMA representability gap: born-in-editor documents can legitimately contain native OOXML tables today (`ComposeFormatToolbar.tsx`'s live `insertTable` command, `ComposeContentModel.Table`/`buildContentModel`/`ComposeDocumentRenderer` — all tested, shipped behavior), but the task-003 operation schema (`Services/Compose/Operations/ComposeOperation.cs`) is a CLOSED 10-member discriminated union (insertText/deleteRange/replaceRange/setMark/clearMark/splitParagraph/mergeParagraph/insertParagraph/deleteParagraph/setBlockAttr) with NO table-authoring primitive, and `ComposeShadowPatchEngine` treats tables strictly as pre-existing structure it refuses to cross — never as something it can author from an empty package. A born-in-editor doc containing a table therefore has no way to be expressed as an insert-everything op set. Full evidence + 3 resolution paths (A: implement the non-table majority case now + keep a documented, scoped ContentModel exception for table-containing born-in-editor saves [recommended]; B: extend the FR-11 op schema with a table-authoring op family, own task; C: remove table-insert from the born-in-editor surface, product decision) in `projects/spaarkeai-compose-r4/notes/task-033-table-operation-gap.md`. No code was changed under this task — `ComposeService.cs`, `docxBridge.ts`, `ComposeEditor.tsx`, `ComposeWorkspace.tsx`, and `compose-contracts.ts` are all untouched.
   </notes>
 
   <execution>

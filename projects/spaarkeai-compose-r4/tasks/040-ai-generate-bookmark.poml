@@ -3,7 +3,7 @@
     <title>Drift-proof AI anchoring — generate-window bookmark + resolve-on-return (FR-07, capture)</title>
     <phase>4 AI anchoring</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend + AI implementation modifying .ts/.tsx on the generate/apply path; subtle AI-correctness surface under concurrent edits; tags include frontend + ai + docx.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -173,6 +173,41 @@
     last resort) is task 041. Success Criterion 3 (AI drift-proof) is proven by the automated concurrent-edit
     ProseMirror test in task 042. Run `/conflict-check` before any BFF-touching PR (`Services/Compose/` +
     `Services/Ai/` overlap sibling projects).
+
+    ── COMPLETION (2026-07-22) ──
+    Implemented CAPTURE-half only; NO server/BFF files touched (envelope-only, ADR-039 honored — no new AI
+    dispatch endpoint, no AI-catalog row; dispatch stays on the shipped `Services/Ai/PublicContracts` route via
+    the existing `dispatchConsumer`). NO escalation needed — drift-proof anchoring did NOT require a new AI
+    dispatch surface.
+
+    Files:
+      - NEW  src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/useAiGenerateBookmark.ts
+             (request-scoped generate-window bookmark: native ProseMirror `SelectionBookmark` + tracked points,
+              rebased through concurrent edits via the SAME `tr.mapping.mapResult(pos,assoc)` primitive task
+              020/022's RebasedOperationLog uses; resolves the target paraId via `resolveRunAnchor` for model
+              context; `resolveOnReturn` validates the payload is JSON operations referencing paraId — REFUSES
+              free text (I-7), SURFACES a deleted-content bookmark for review (041 seam), never silent placement).
+      - NEW  .../src/widgets/hooks/useAiGenerateBookmark.test.tsx  (19 tests green — extract classifier, bookmark
+             drop + paraId context, REBASE-through-concurrent-edit drift proof, JSON-ops-referencing-paraId,
+             free-text refusal, deleted-content review seam, unknown-request; + toolbar wiring & ADR-021 dark-mode
+             render of the generate affordance).
+      - EDIT .../src/widgets/ComposeAiToolbar.tsx  (ADDITIVE opt-in `aiGenerateBookmark` prop: on a
+             `materializesInEditor` Generate click it drops the bookmark, adds `targetParaId` to the dispatch
+             slots as model context, and calls `resolveOnReturn` on the dispatch result. Absent controller ⇒
+             dispatch shape UNCHANGED — proven by an additive-safety test.)
+      - EDIT .../src/index.ts  (additive exports of the hook + its public types).
+
+    Justification (CLAUDE.md §11): the bookmark hook is a cohesive request-scoped anchor with its own
+    resolve-on-return lifecycle; it REUSES the existing ProseMirror Mapping (does not add a new position system)
+    and cannot fold into the op-log interceptor (user-edit capture) or the toolbar (a dispatch surface). Cost of
+    doing nothing = FR-07 / Success Criterion 3 unmet (returned ops land at the stale original offset).
+
+    Verify: client `npm run typecheck` — R4 files clean (only pre-existing `@spaarke/*` sibling-dist module
+    errors remain, environmental). `npx jest useAiGenerateBookmark` → 19/19 pass; `stepOperationInterceptor`
+    green; `usePendingRedline` runnable tests 31/31 (its ComposeEditor-render sub-block is blocked by the SAME
+    pre-existing `@spaarke/ui-components` dist→`@fluentui/react-icons` env issue, unrelated to this change).
+    Step 9.5 gates: adr-check → 0 violations (ADR-013/028/039/021, NFR-03, ADR-038 all compliant);
+    code-review → PASS, 0 critical/warning, 2 cosmetic suggestions.
   </notes>
 
   <execution>

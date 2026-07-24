@@ -7,12 +7,12 @@
 //   - real Heading1..6 styles (mammoth maps "heading N" style → hN on the next Load), inline w:b/w:i/w:u, native w:tbl
 //   - every emitted w:p (incl. table-cell paragraphs) carries a unique OOXML-valid w14:paraId (E2 substrate)
 //   - the rendered doc re-opens + round-trips through ParaIdPreParser (the load-time E2 pre-parse)
-//   - a subsequent tracked-change edit (ComposeParagraphRedlineSynthesizer) does NOT corrupt the numbering
+//   - a subsequent tracked-change edit (ComposeShadowPatchEngine) does NOT corrupt the numbering
 //   - a golden-file assertion pins the numbering.xml SHAPE (the single largest net-new authoring surface)
 //
 // Pure engine (ComposeContentModel in / byte[] out) — real .docx assertions via the Open XML SDK, no transport
 // mocks (ADR-038 B1), no DI/ctor tests (B3/B4). Domain-logic tests co-located with the sibling Compose
-// component tests (ParaIdPreParserTests, ComposeParagraphRedlineSynthesizerTests).
+// component tests (ParaIdPreParserTests, ComposeShadowPatchEngineTests).
 
 using System;
 using System.Collections.Generic;
@@ -24,6 +24,7 @@ using DocumentFormat.OpenXml.Validation;
 using DocumentFormat.OpenXml.Wordprocessing;
 using FluentAssertions;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Compose.Operations;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -358,18 +359,29 @@ public sealed class ComposeDocumentRendererTests
         var rendered = Renderer().SynthesizeDocument(ClauseTree(), "Jordan Avery");
         var numberingBefore = PartXml(rendered, d => d.MainDocumentPart!.NumberingDefinitionsPart!);
 
-        // Edit the middle heading's text in place (task 022 synthesizer), keyed by its paraId.
+        // Edit the middle heading's text in place (task 032 ComposeShadowPatchEngine), keyed by its paraId.
         string editedParaId;
         using (var doc = Open(rendered))
         {
             editedParaId = Paragraphs(doc)[1].ParagraphId!.Value!;
         }
 
-        var edited = new ComposeParagraphRedlineSynthesizer().SynthesizeRedline(
+        var edited = new ComposeShadowPatchEngine().Apply(
             rendered,
-            new[] { new ComposeEditedParagraph(editedParaId, "Confidential Information and Trade Secrets") },
-            "Jordan Avery",
-            DateTimeOffset.UtcNow);
+            new ComposeOperationLog
+            {
+                Operations = new ComposeOperation[]
+                {
+                    new InsertTextOperation
+                    {
+                        ParaId = editedParaId,
+                        At = new ComposeRunPoint(0, 0),
+                        Text = "Amended ",
+                    },
+                },
+            },
+            author: "Jordan Avery",
+            timestamp: DateTimeOffset.UtcNow);
 
         var numberingAfter = PartXml(edited, d => d.MainDocumentPart!.NumberingDefinitionsPart!);
         numberingAfter.Should().Be(numberingBefore, "the tracked-change edit rewrites run content only — numbering is instance-clean + style-linked at birth, so it is untouched");
