@@ -3,7 +3,7 @@
     <title>Applier spike on the CIPO doc + Patch-engine A/B (Docxodus vs OpenXML-SDK) (FR-04/FR-11 choice)</title>
     <phase>0 Gate</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The hardest R4 surface (offset→run split + w:ins/w:del at an interior paraId+offset) proven before the Phase-3 commit; decides the FR-04/FR-11 implementation engine and evaluates a candidate new dependency. High blast radius.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -154,6 +154,29 @@
     Critical path: 003 → 005 → 006. This spike + task 003 + task 004 are the three green lights the Phase-0
     gate (task 006) checks. The recommendation directly seeds task 030 (the production ComposeShadowPatchEngine).
     Keep the spike code isolated and clearly throwaway.
+
+    --- COMPLETION (2026-07-22) ---
+    RESULT: success. RECOMMENDATION = build-on-OpenXML-SDK (reject Docxodus).
+    Candidate B (build on DocumentFormat.OpenXml 3.5.1, already a BFF dep — ZERO new package) landed all three
+    interior edits on the CIPO doc by w14:paraId + runIndex + run-local offset with ZERO write-path text-search,
+    at 0 OpenXmlValidator (Office2019) errors:
+      - insertText " AMENDED" -> native w:ins, run split exactly at paraId 712269E5 run[0] offset 16
+      - deleteRange "asset information " -> native w:del/w:delText at paraId 410C9E5F run[2] [1,19)
+      - para-mark deletion probe -> w:pPr/w:rPr/w:del on paraId 5D98777E
+    Candidate A (Docxodus) REJECTED on FIT first, size second: its only redline surface is WmlComparer
+    (Compare/Consolidate/GetRevisions) — a WHOLE-DOCUMENT differ, not an offset applier; it has no
+    (paraId,runIndex,offset) surface to drive; R3's NFR-09 gate already proved WmlComparer STRIPS w14:paraId +
+    DROPS tables (BFF csproj lines 153-159), destroying invariant I-3. Size: isolated linux-x64 publish measured
+    +12.9 MB uncompressed (8.4 -> 22 MB), dominated by SkiaSharp native libSkiaSharp.so (11.15 MB linux-x64 /
+    18.4 MB musl) — the same native packages R3 removed; would threaten the 60 MB HARD STOP. Also 7.1.0 is
+    net10-ONLY; only 6.4.0 is net8-compatible.
+    Escalation: NONE fired as a blocker — Candidate B passes, so the "neither engine lands an interior edit" gate
+    (task 006 prerequisite) is CLEAR.
+    Decision doc: projects/spaarkeai-compose-r4/notes/patch-engine-ab-decision.md
+    Throwaway spike (NOT in Spaarke.sln, NOT wired to any save path; seeds task 030):
+    projects/spaarkeai-compose-r4/spike/ComposeApplierSpike/ (SpikeOpenXmlApplier.cs is the production nucleus).
+    Findings for task 030: intra-paragraph op drift needs anchor rebasing (ProseMirror Mapping); multi-run
+    deleteRange sweep still to implement; w:delText (EDGE-4) mandatory inside w:del.
   </notes>
 
   <execution>

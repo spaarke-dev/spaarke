@@ -2,8 +2,8 @@
   <metadata>
     <title>Opaque-atom node in the TipTap/ProseMirror schema (FR-02, client half)</title>
     <phase>2 Frontend capture</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New client node type in the editor schema (`.ts`/`.tsx`, tags include frontend); a mis-modeled atom drops fields/SDTs on save. FULL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -15,8 +15,8 @@
     <tags>frontend,fluent-ui,docx</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -150,6 +150,33 @@
     Render-only — no fetch, no save wiring. Client task (no BFF surface) — no publish-size / CVE gate. The
     interceptor (task 020) enforces non-editability at the step level; this task enforces it at the schema
     level (`atom: true`).
+
+    COMPLETED 2026-07-22. New file `src/client/shared/Spaarke.Compose.Components/src/widgets/opaqueAtomNode.ts`
+    defines TWO node types mirroring task 012's two server-emitted atom shapes: `ComposeBlockAtomNode`
+    (`group: 'block'`, parses the server's compose-atom div with data-atom-kind/data-atomid) and
+    `ComposeInlineAtomNode` (`group: 'inline'`, parses the server's compose-atom span with data-atom-kind, inherits
+    its containing paragraph's `data-paraid` via `closest()`). Both are `atom: true` leaves with no `content`
+    expression (structural non-editability — no interior cursor position). Registered additively in
+    `ComposeEditor.tsx` as `COMPOSE_R4_OPAQUE_ATOMS`; new `.compose-atom*` CSS classes added to `useStyles()`
+    (semantic tokens only, ADR-021). 17 new colocated Jest tests in `opaqueAtomNode.test.ts` (package uses
+    Jest, not Vitest — deviation noted). Full details, the paraId/atomId identity-model deviation (block
+    atoms use `atomId` not `paraId` — a documented, non-blocking resolution of a POML-vs-task-012-contract
+    naming mismatch), and quality-gate results: `notes/task-021-opaque-atom-node-decisions.md`.
+
+    Deviations from literal POML text (both documented, neither blocking): (1) "Vitest" → Jest (matches
+    package.json + all existing colocated tests); (2) "Placeholder NodeView" → `renderHTML` + token-CSS
+    (matches every existing Compose schema extension's pattern; no ReactNodeViewRenderer precedent exists
+    in this codebase). Step 9.7 (browser dark-mode check) not run — no `--chrome` session; covered instead
+    by a unit-level "no inline style/hex" assertion (ADR-021) and deferred to task 024 / a future --chrome
+    session per the Step 9.7 skip rule.
+
+    Verification: `npm install --legacy-peer-deps` (no changes); `npx jest opaqueAtomNode` 17/17 pass;
+    `npx jest` full suite 200 passed / 25 suites pre-existing-fail on missing `@spaarke/*` sibling `dist/`
+    builds (confirmed unrelated — none import this task's files); `npx tsc --noEmit` same pre-existing
+    `@spaarke/*` resolution errors only, zero errors in this task's files; `grep tiptap-pro package.json`
+    — none (NFR-03 confirmed). Quality gates: code-review 0 Critical / 0 Warning / 1 Suggestion (applied);
+    adr-check 0 Critical / 0 Warning (ADR-021 compliant; ADR-028/013/007/010 not applicable to this
+    render-only client node).
   </notes>
 
   <execution>

@@ -3,7 +3,7 @@
     <title>AI anchoring tests — concurrent-edit ProseMirror test (Success Criterion 3)</title>
     <phase>4 AI anchoring</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying + frontend/e2e-test task under ADR-021 dark-mode obligation; TEST-MODIFYING override applies (code-review + adr-check at Step 9.5 unconditionally); tags include frontend + testing + e2e-test.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -134,6 +134,30 @@
   <notes>
     Automated evidence for Success Criterion 3; the complementary evidence is CIPO operator UAT (task 062).
     No BFF surface changes here (client tests only), so no seam slice required for this task.
+
+    ── COMPLETION (2026-07-22) ──
+    NEW test file: src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/aiAnchoring.test.tsx
+    (9 tests). DEVIATION from the POML-listed `.ts` extension: named `.tsx` because the ADR-021 dark-mode
+    assertion renders `ComposeAiToolbar` via RTL, which requires JSX (a `.ts` file cannot contain JSX) —
+    documented here per the "state any deviation" step; not a scope or behavior change.
+
+    Deliberately did NOT duplicate what 040/041's own suites already prove:
+      - 040's `useAiGenerateBookmark.test.tsx` already asserts the BOOKMARK rebases through a concurrent
+        edit (position-level assertions) and (041 addition) that an 'operations' result reaches
+        `aiApplyValidation.validateAndApply`, plus a generic hand-built-item dark-mode render.
+      - 041's `useAiApplyValidation.test.ts` already proves the pure validator/applier/fuzzy-fallback unit
+        behavior in isolation, including the AUTO-band-never-auto-applies escalation guard.
+    This file adds the CROSS-CUTTING, END-TO-END proof Success Criterion 3 names: (1) a REAL concurrent
+    edit + a simulated AI-returned op anchored at the REBASED bookmark point lands on the actually-moved
+    text — asserted against the resulting DOCUMENT TEXT ("PREFIX The quick swift fox…"), not just a
+    resolved position, plus a CONTRAST test showing the stale (un-rebased) offset would have pointed at
+    the wrong text; (2) an unknown-paraId AND an out-of-range-offset case both refused end-to-end through
+    040+041 together (not applied, surfaced, document text unchanged — the NEGATIVE "no silent placement
+    anywhere" proof); (3) a dark-mode render of the review UI produced by a REAL `useAiApplyValidation`
+    controller's own output (not a stub), via a small `RefusedAnchorHost` test component.
+
+    Verify: `npx jest aiAnchoring` → 9/9 pass. `npm run typecheck` — R4 files clean (same pre-existing
+    `@spaarke/*` sibling-dist environmental errors as 040/041; unrelated). No escalation.
   </notes>
 
   <execution>

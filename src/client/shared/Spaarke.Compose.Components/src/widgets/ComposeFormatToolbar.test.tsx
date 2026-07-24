@@ -208,43 +208,38 @@ describe('ComposeFormatToolbar — Font dropdown (relocated character formatting
 });
 
 // ---------------------------------------------------------------------------
-// 3. Link add/edit (window.prompt flow preserved)
+// 3. Link — DISABLED in both modes (task 038; supersedes the old window.prompt flow).
+//    Hyperlinks are not representable in R4 (no mark op, no content-model href — R5 G5),
+//    so the control is present-but-disabled and fires neither the prompt nor a command.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Link add/edit (window.prompt preserved)', () => {
+describe('ComposeFormatToolbar — Link disabled in both modes (task 038)', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
 
-  it('prompts for a URL and applies a link when none is active', async () => {
+  it('the link button is present but DISABLED and does NOT open the URL prompt when clicked', async () => {
     const user = userEvent.setup();
-    jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
+    const promptSpy = jest.spyOn(window, 'prompt').mockReturnValue('https://example.test');
     const { controls } = renderFormatToolbar();
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
-    await user.click(screen.getByTestId('compose-format-link'));
-
-    expect(window.prompt).toHaveBeenCalled();
-    expect(controls.commands).toContain('setLink');
+    const link = screen.getByTestId('compose-format-link');
+    expect(link).toBeDisabled();
+    // Clicking a disabled control fires no prompt and no TipTap command.
+    await user.click(link);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(controls.commands).toHaveLength(0);
   });
 
-  it('shows "Remove link" and unsets the link when a link is already active', async () => {
+  it('the link button stays DISABLED even when a link mark is active (no "Remove link" command)', async () => {
     const user = userEvent.setup();
     const { controls } = renderFormatToolbar({ active: new Set(['link']), linkHref: 'https://old.test' });
     await user.click(screen.getByTestId('compose-format-font-menu'));
 
-    expect(screen.getByLabelText('Remove link')).toBeInTheDocument();
-    await user.click(screen.getByTestId('compose-format-link'));
-    expect(controls.commands).toContain('unsetLink');
-  });
-
-  it('cancelling the prompt (null) applies no command', async () => {
-    const user = userEvent.setup();
-    jest.spyOn(window, 'prompt').mockReturnValue(null);
-    const { controls } = renderFormatToolbar();
-    await user.click(screen.getByTestId('compose-format-font-menu'));
-
-    await user.click(screen.getByTestId('compose-format-link'));
+    const link = screen.getByTestId('compose-format-link');
+    expect(link).toBeDisabled();
+    await user.click(link);
     expect(controls.commands).toHaveLength(0);
   });
 });
@@ -273,29 +268,26 @@ describe('ComposeFormatToolbar — Paragraph dropdown (lists / blockquote / alig
 });
 
 // ---------------------------------------------------------------------------
-// 5. Word dropdown — Open-in-Word Web/Desktop + Push to Word wired
+// 5. Word dropdown — Open-in-Word Web/Desktop wired
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
-  it('opening Word reveals the three actions and each fires its handler', async () => {
+  it('opening Word reveals the Open-in-Word actions and each fires its handler', async () => {
     const user = userEvent.setup();
     const onOpenInWord = jest.fn();
     const onOpenInWordDesktop = jest.fn();
-    const onPushToWord = jest.fn();
-    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop, onPushToWord, canPushToWord: true } });
+    renderFormatToolbar({}, { props: { onOpenInWord, onOpenInWordDesktop } });
 
     await user.click(screen.getByTestId('compose-format-word-menu'));
 
     await user.click(screen.getByTestId('compose-format-open-word-web'));
     await user.click(screen.getByTestId('compose-format-open-word-desktop'));
-    await user.click(screen.getByTestId('compose-format-push-to-word'));
 
     expect(onOpenInWord).toHaveBeenCalledTimes(1);
     expect(onOpenInWordDesktop).toHaveBeenCalledTimes(1);
-    expect(onPushToWord).toHaveBeenCalledTimes(1);
   });
 
-  it('Open-in-Word items are disabled when wordActionsDisabled is set; Push is disabled without canPushToWord', async () => {
+  it('Open-in-Word items are disabled when wordActionsDisabled is set', async () => {
     const user = userEvent.setup();
     renderFormatToolbar(
       {},
@@ -303,9 +295,7 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
         props: {
           onOpenInWord: jest.fn(),
           onOpenInWordDesktop: jest.fn(),
-          onPushToWord: jest.fn(),
           wordActionsDisabled: true,
-          canPushToWord: false,
         },
       }
     );
@@ -313,7 +303,104 @@ describe('ComposeFormatToolbar — Word dropdown (host-bound handlers)', () => {
 
     expect(screen.getByTestId('compose-format-open-word-web')).toBeDisabled();
     expect(screen.getByTestId('compose-format-open-word-desktop')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-push-to-word')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5b. Table dropdown — Insert table INVERTED to born-in-editor-only (task 038,
+//     supersedes task 037: the renderer authors born-in-editor tables cleanly;
+//     the engine silently drops loaded-doc tables — so the polarity is flipped).
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Table insert INVERTED to born-in-editor-only (task 038)', () => {
+  it('Insert table is ENABLED by default (hasLoadedBaseline omitted ⇒ born-in-editor treatment ⇒ enabled)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar();
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // Regression guard: existing callers that never pass the prop keep table authoring.
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is ENABLED in BORN-IN-EDITOR mode (hasLoadedBaseline=false — renderer authors tables cleanly)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    expect(screen.getByTestId('compose-format-table-insert')).not.toBeDisabled();
+  });
+
+  it('Insert table is DISABLED on a LOADED doc (hasLoadedBaseline=true — engine has no table op, would silently drop)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-table-menu'));
+    // task 038 inverts task 037: a loaded/imported doc cannot have a NEW table inserted (SDL-3).
+    expect(screen.getByTestId('compose-format-table-insert')).toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — alignment /
+//     heading / list disabled on a LOADED doc, enabled born-in-editor; hyperlink
+//     disabled in BOTH modes. Maps to failure modes ET-1 (alignment), SDL-1/2
+//     (heading/list), SDL-4/5 (hyperlink).
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED doc (task 038)', () => {
+  it('on a LOADED doc, the heading dropdown is DISABLED (SDL-1)', () => {
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    // Rendered as a disabled, tooltip-bearing button (no openable menu) on a loaded doc.
+    expect(screen.getByTestId('compose-format-heading-menu')).toBeDisabled();
+  });
+
+  it('on a LOADED doc, the bullet + numbered list buttons are DISABLED (SDL-2)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    // The Paragraph trigger stays enabled (blockquote is still reachable) — open it, then assert.
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-bullet-list')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
+  });
+
+  it('on a LOADED doc, the alignment buttons are DISABLED (ET-1)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).toBeDisabled();
+  });
+
+  it('on a BORN-IN-EDITOR doc, heading / list / alignment are all ENABLED', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    // Heading renders as an openable menu trigger (not the disabled loaded-doc button).
+    expect(screen.getByTestId('compose-format-heading-menu')).not.toBeDisabled();
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+  });
+
+  it('the hyperlink button is DISABLED in BOTH modes (SDL-4/5 — links not representable in R4)', async () => {
+    const user = userEvent.setup();
+    // Born-in-editor.
+    const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-font-menu'));
+    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+    unmount();
+
+    // Loaded.
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-font-menu'));
+    expect(screen.getByTestId('compose-format-link')).toBeDisabled();
+  });
+
+  it('blockquote stays ENABLED on a loaded doc (not in the deferred set — the paste banner is its safety net)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-blockquote')).not.toBeDisabled();
   });
 });
 

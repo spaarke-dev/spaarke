@@ -2,8 +2,8 @@
   <metadata>
     <title>Opaque atoms for SDT/fields/complex objects in the projection (FR-02, server half)</title>
     <phase>1 Backend ingest</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF `.cs` (tags include bff-api); introduces a new projection node type on the ingest path affecting byte-preservation of non-renderable constructs — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -16,8 +16,8 @@
     <tags>bff-api,docx</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -143,6 +143,46 @@
     Server/projection half of FR-02; the client TipTap atom node is task 021. Shared-file task with 011
     (both touch `ComposeDocxProjectionBuilder.cs`) — sequence AFTER 011; `parallel-safe:false`.
     Through-the-wire byte-preservation proof lives in task 013.
+
+    COMPLETED 2026-07-22. `ComposeDocxProjectionBuilder` now renders SDT/content-controls, `w:fldSimple`,
+    `w:fldChar`/`w:instrText` field sequences, and `w:drawing`/`w:object` complex objects as opaque atoms
+    instead of being silently dropped or transparently descended. Inline atoms (fields, inline SDT atoms,
+    complex objects — nested inside a paragraph's own runs) carry the containing paragraph's `w14:paraId`
+    and are signaled via a new nullable `RunBoundary.AtomKind` in the offset-addressing table. Whole-construct
+    atoms (a block-level SDT whose declared type is genuinely non-text — date/dropdown/combo/picture/doc-part
+    gallery/equation/citation/bibliography/group, via `IsSpecialSdtControl`) mint their own id from the same
+    collision-checked pool paragraph ids use, tracked in a NEW `ComposeDocxProjection.BlockAtoms` list and
+    rendered with a distinct `data-atomid` attribute (never `data-paraid`) — so the pre-existing F-01
+    single-walk invariant ("every data-paraid has a ParaIdMap entry") stays intact.
+
+    Escalation-boundary decision (resolves the POML's own escalation trigger without a concrete corpus
+    construct forcing it — see `notes/task-012-opaque-atoms-decisions.md` §2): a plain/rich-text content
+    control (or one with no declared type, the OOXML default) keeps the PRE-EXISTING transparent-descend
+    behavior — wrapped paragraphs stay editable — because none of the 3 corpus docs have a body-level
+    SDT/field/complex-object to ground a different call, and treating every SDT as opaque would have silently
+    regressed real, currently-editable content. Only genuinely non-text SDT types become atoms.
+
+    Corpus-coverage gap (inherited from task 002): none of the 3 seed docs carry a body-level SDT/field/
+    drawing (verified by unzip+grep); the corpus's one real SDT+field (CIPO footer PAGE field) lives in
+    `word/footer2.xml`, a part this projection never walks — already byte-preserved trivially, no operation
+    can ever target it. 9 new unit tests cover every named construct via synthetic fixtures instead
+    (`ComposeDocxProjectionBuilderTests.cs`). Owner-supplied worst-offender doc (corpus-manifest §2 row 6)
+    still needed to ground a real corpus-level atom proof.
+
+    Verification: `dotnet build` green (0 new warnings); `dotnet test .../Compose` 511/511 green (+9 new,
+    zero regressions in the other 502); `ADR013_ComposeFacadeTests` + full ADR013 suite green;
+    `ADR007_GraphIsolationTests`'s one failure confirmed pre-existing (unrelated modules) via `git stash`.
+    Publish: 47.47 MB compressed incl. PDBs / 46.66 MB excl. — below the ~49.63/~45.87 MB cited baselines,
+    well under the 60 MB ceiling; zero new packages. CVE scan: one pre-existing HIGH advisory on
+    `System.Security.Cryptography.Xml` (transitive), confirmed pre-existing via `git stash` — no new
+    vulnerable package.
+
+    Deferred follow-up (non-blocking, noted in code-review): `ComposeDocxProjectionBuilder.cs` has grown to
+    993 lines (past the 500-line size guideline) across tasks 011+012 — candidate for a future partial-class
+    split (`ComposeDocxProjectionBuilder.Atoms.cs`) once Phase 1 ingest stabilizes; not attempted here to
+    avoid destabilizing the single-walk-invariant design mid-task.
+
+    Full design-decision writeup: `notes/task-012-opaque-atoms-decisions.md`.
   </notes>
 
   <execution>

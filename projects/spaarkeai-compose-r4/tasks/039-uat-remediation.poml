@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarkeai-compose-r4">
+  <metadata>
+    <title>UAT remediation — fix born-in-editor 2nd-save error (no-errors) + duplicate-records + UX polish</title>
+    <phase>6 Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Fixes a hard save error on the born-in-editor save path (data-path, no-errors bar) + touches BFF endpoint validation + client save orchestration. High blast radius; FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>BUG A is a subtle save-baseline lifecycle fix (born-in-editor create→replace transition); getting the discriminant + server acceptance right without regressing the tracked stored-doc path needs opus judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx save path + ComposeEndpoints.cs + ComposeFormatToolbar.tsx — the most-shared Compose surfaces; sequential.</parallel-reason>
+    <deps>032,036,038</deps>
+    <tags>bff-api,frontend,compose,data-integrity</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>Created 2026-07-23 from dev UAT rounds 1+2. Root-cause evidence in the conversation + notes/uat-feedback-2026-07-23.md. BUG A is a no-errors violation (must-fix); BUG B confirmed NOT data loss (no fix). Deferred items documented in projects/spaarkeai-compose-r5/README.md (G6-G10).</origin>
+    <justification>
+      Existing: ComposeWorkspace.tsx triggerSave already has both a create-on-save `{contentModel}` path (born-in-editor
+      first save) and a replace `{operationLog, baselineVersionId}` path. Extension: extend the replace path to send
+      `{contentModel}` for born-in-editor docs (mirror the create path), and extend the replace ENDPOINT validation to
+      accept `contentModel` — no new component. Cost-of-doing-nothing: a born-in-editor doc's 2nd in-session save throws
+      a hard 400/404 error (violates the R4 no-errors bar) and each save mints a duplicate `sprk_document` record.
+    </justification>
+  </metadata>
+
+  <prompt>
+    Fix the two UAT-surfaced issues and apply four UX polish items. Do NOT implement any deferred R5 feature
+    (versioning dropdown, transient-mount projection unification, external-change banner, etc. — those are R5, see
+    projects/spaarkeai-compose-r5/README.md G6-G10).
+
+    === BUG A (CRITICAL — the no-errors fix) ===
+    A born-in-editor (blank-page) doc: 1st save works (create-on-save → ComposeDocumentRenderer). The 2nd in-session
+    save FAILS ("Provide the retained-original 'content' bytes, or … 'baselineVersionId' …") because it takes the
+    op-log/replace path with NO valid baseline: `state.docxBytes` is null (born blank) and create-on-save returned the
+    drive-ITEM id as VersionId (not a real SPE version). Fix so born-in-editor docs re-author via `{contentModel}` on
+    EVERY in-session save (never entering the baseline-less op-log path):
+    - SERVER: `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs` — the replace-path ("Save") validation (~line
+      1139-1142) currently requires `content` OR `baselineVersionId`. Add acceptance of a non-empty `contentModel`
+      (e.g. `hasContentModel = body.ContentModel is { Blocks.Count: > 0 }`) to the OR so a contentModel save is a valid
+      dirty save. `ContentModel` is already mapped into the replace request (~line 1165) and `ComposeService`
+      `ResolveSaveBaselineAsync` already returns `SynthesizeDocument(...)` when `ContentModel` is non-null
+      (`ComposeService.cs:891-894`), skipping the reanchor/patch-engine blocks (both gated on `ContentModel is null`).
+      Confirm the replace branch then does `ReplaceFileContentAsUserAsync` on the EXISTING item (same speDriveItemId) —
+      i.e. it UPDATES, not creates.
+    - CLIENT: `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` `triggerSave` replace
+      branch (~line 1098-1120) — when the doc is born-in-editor (use the SAME discriminant as the create path's
+      `bornInEditorRender`, i.e. `!state.docxBytes`), send `{ contentModel: editorRef.current.buildContentModel() }`
+      (mirror the create-path spread ~line 1094-1096) INSTEAD of `operationLog`/`baselineVersionId`. Leave the loaded/
+      imported (docxBytes present) path exactly as-is (it still sends op-log + baseline → tracked changes; do NOT
+      regress REQ-2).
+    - RESULT must hold: (a) a born-in-editor doc's 2nd..Nth in-session saves succeed with NO error; (b) they UPDATE the
+      same `sprk_document`/SPE item (NO new duplicate record per save — the V1 born-blank fix); (c) born-in-editor edits
+      remain clean/untracked in-session (correct — no original to diff), and redlines still work after reopen-from-Document.
+    - ALSO verify the Assistant-upload flow: it mounts transient WITH `docxBytes` (uploaded bytes). Confirm whether its
+      repeated saves also mint duplicate records (UAT round 1 showed 8). If the same `!state.docxBytes` discriminant does
+      NOT cover it (because docxBytes is present), DO NOT force it here — instead confirm + DOCUMENT that the Assistant-
+      upload duplicate path is the transient-identity issue resolved structurally by R5 G6 (note it in
+      notes/uat-feedback-2026-07-23.md). Only born-in-editor (born-blank) duplicate prevention is in 039 scope.
+
+    === BUG B (NO code change — confirm + document) ===
+    "Redlines lost when Track Changes toggled off" is VISUAL ONLY (the toggle is a display-only decoration; imported/AI
+    redlines are real marks, nothing stripped on save). Do NOT change persistence. (Optional clarity is R5.) Just
+    re-confirm by reading `ComposeEditor.tsx` toggle + `TrackChangesExtension.ts` and state it in the report.
+
+    === UX polish (P1-P4) ===
+    P1: Make the Track Changes control an ICON-ONLY toggle (no text label) in `ComposeFormatToolbar.tsx`. Keep the
+        aria-label for accessibility; keep the pressed/active state.
+    P2: Rename the "Search for Document" CTA to "Open Document" (`ComposeEmptyState.tsx:291` + the handler/comment
+        references in `ComposeWorkspace.tsx`). Label/text only — do not change behavior.
+    P3: Make the Word menu a VERTICAL dropdown with labels "Open web" and "Open desktop" (the `onOpenInWord` /
+        `onOpenInWordDesktop` items).
+    P4: Confirm there is NO live "Push to Word" control that would hit the retired (036) endpoint. If a dead
+        push-to-Word menu item/button exists, remove it. If the only Word items are the Open-in-Web/Desktop handoff,
+        state that (nothing to remove).
+  </prompt>
+  <role>SPAARKE full-stack dev — Compose React client (TipTap save orchestration, Fluent v9 toolbar) + the BFF ComposeEndpoints/ComposeService save path. Understands the born-in-editor (renderer) vs loaded (op-log/engine) save split and REQ-1/REQ-2. Follows ADRs strictly.</role>
+  <goal>Born-in-editor docs save without error on every in-session save (no-errors bar restored) and update the same record (no duplicates for born-blank); loaded/imported docs still track (REQ-2 intact); P1-P4 polish applied; BUG B confirmed not-data-loss; Assistant-upload duplicate path documented as R5 G6. Build + tests + redeploy green.</goal>
+
+  <context>
+    <background>
+      Root-cause (2026-07-23): BUG A = born-in-editor 2nd save has no baseline (docxBytes null; create-on-save returns
+      item id as VersionId at ComposeService.cs:845). Server already renders contentModel on the replace path
+      (ResolveSaveBaselineAsync:891-894); only the endpoint validation blocks it. BUG B = display-only toggle
+      (TrackChangesExtension decoration). Deferred R5 items: projects/spaarkeai-compose-r5/README.md G6 (transient
+      unification — the full V1/T1 fix), G7 (versioning dropdown), G8 (external-change banner), G9 (comment scroll-sync),
+      G10 (profile re-run).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — replace-path validation (~1141): accept contentModel as a valid dirty save</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — triggerSave replace branch (~1098-1120): send contentModel for born-in-editor</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx — P1 icon-only track-changes; P3 vertical Word menu + labels; P4 push-to-Word check</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEmptyState.tsx — P2 "Open Document" label</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — ResolveSaveBaselineAsync (891-894), create-vs-replace, VersionId=saved.Id (845)</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/TrackChangesExtension.ts — BUG B display-only confirmation</file>
+      <file role="reference">projects/spaarkeai-compose-r5/README.md — deferred items (do NOT implement)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="038" status="complete">Zero-error guardrails + op-log preservation.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="no-errors / data-integrity">A born-in-editor doc's 2nd..Nth in-session save MUST succeed (no 400/404). MUST NOT regress the loaded/imported tracked-change path (REQ-2). MUST NOT introduce silent data loss.</constraint>
+    <constraint source="R5 boundary">Do NOT implement deferred features (versioning dropdown, transient-mount projection unification, external-change banner, comment scroll-sync, profile re-run). Scope is BUG A + P1-P4 only.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; icon-only toggle keeps aria-label; dark-mode test green.</constraint>
+    <constraint source="ADR-038 / NFR-06">Add a seam/behavior test proving the born-in-editor 2nd save succeeds + updates the same item (no create-on-save). No banned Mock&lt;HttpMessageHandler&gt;/DI/ctor tests.</constraint>
+    <constraint source="§10 BFF hygiene">Placement Justification; publish size delta (≤60, ~1-line server change → negligible); no new HIGH CVE; /conflict-check.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor">FULL rigor declaration. Re-read the 4 target files to confirm current line anchors (they shifted post-merge). Load the R5 README + uat notes.</step>
+    <step order="1" name="BUG A server">ComposeEndpoints.cs replace-path validation: accept a non-empty contentModel as a valid dirty save (add to the OR). Confirm the replace branch updates the existing item.</step>
+    <step order="2" name="BUG A client">ComposeWorkspace.tsx triggerSave: born-in-editor (`!state.docxBytes`) replace saves send `{contentModel}` (mirror the create path). Loaded path unchanged.</step>
+    <step order="3" name="P1-P4 polish">Icon-only track-changes toggle; "Open Document" label; vertical labeled Word menu; push-to-Word check/removal.</step>
+    <step order="4" name="Assistant-upload check + BUG B confirm">Determine if Assistant-upload (docxBytes present) also duplicates; if not covered by 039's discriminant, document as R5 G6 in the uat notes. Re-confirm BUG B display-only.</step>
+    <step order="5" name="Tests + build + size">Add the born-in-editor 2nd-save-succeeds-and-updates-same-item test + a client gating test for the polish. Build BFF (Release) + client; run Compose suite + the new test; publish size + CVE; /conflict-check. Report. (TASK-INDEX + redeploy are main-session — do NOT edit TASK-INDEX or deploy.)</step>
+  </steps>
+
+  <escalation>
+    <trigger>The born-in-editor contentModel replace save cannot update the same item without also changing create-vs-replace routing beyond a localized change — surface before expanding scope (may indicate G6/G7 entanglement).</trigger>
+    <trigger>Making the replace endpoint accept contentModel would let a LOADED doc silently bypass tracked changes — if so, gate the acceptance to the born-in-editor case and surface the risk.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">Server contentModel-accept on replace validation; client born-in-editor contentModel replace save; P1-P4 polish; born-in-editor 2nd-save test.</output>
+    <output type="report">Born-in-editor 2nd-save no-error + same-item proof; loaded-path-unchanged (REQ-2) confirmation; Assistant-upload duplicate disposition (fixed here or documented R5 G6); BUG B display-only confirmation; build/test/size/CVE; /conflict-check.</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A born-in-editor (blank) doc's 2nd..Nth in-session save succeeds with NO error (was 400/404) and UPDATES the same sprk_document/SPE item (no new duplicate record per save). Proven by a test.</criterion>
+    <criterion testable="true">The loaded/imported (docxBytes present) save path is UNCHANGED — still sends op-log + baseline → tracked changes (REQ-2 not regressed). Proven by the existing tracked-save test staying green.</criterion>
+    <criterion testable="true">P1 track-changes is an icon-only toggle (aria-label retained); P2 CTA reads "Open Document"; P3 Word menu is vertical with "Open web"/"Open desktop" labels; P4 no live push-to-Word control remains (removed or confirmed absent).</criterion>
+    <criterion testable="true">BUG B confirmed display-only (no persistence change made). Assistant-upload duplicate path either fixed or documented as R5 G6 in notes/uat-feedback-2026-07-23.md.</criterion>
+    <criterion testable="true">BFF + client build green; Compose suite + new test + dark-mode green; publish ≤60 MB; no new HIGH CVE; /conflict-check clean. No deferred R5 feature implemented (grep diff).</criterion>
+  </acceptance-criteria>
+
+  <notes>Created 2026-07-23 from dev UAT. BUG A restores the no-errors bar on create-from-blank. Full R5 deferrals in projects/spaarkeai-compose-r5/README.md.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

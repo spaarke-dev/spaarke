@@ -3,7 +3,7 @@
     <title>Phase-2 client capture tests (Vitest) — interceptor, atom node, rebased log</title>
     <phase>2 Frontend capture</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying task (tags include testing/e2e-test) — FULL unconditionally per root §8 TEST-MODIFYING override; covers the load-bearing capture surface.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -151,6 +151,59 @@
     Test coverage for the new client capture surface (no `&lt;justification&gt;` — tests for already-justified
     tasks 020/021/022). Colocated `*.test.ts` per repo convention. Client task (no BFF surface) — no
     publish-size / CVE gate. Success Criterion 2 (placement determinism), client side.
+
+    **Completed 2026-07-22.** Two of the three cross-cutting cases the POML calls out were found
+    ALREADY fully covered by the existing task-020/021/022 colocated suites — added nothing
+    duplicate:
+    - (a) rebase-across-concurrent-edits end-to-end → already covered by
+      `stepOperationInterceptor.test.ts`'s `RebasedOperationLog — rebase-across-concurrent-edits`
+      describe block ("rebases an earlier op's anchor so it still resolves to its intended
+      position after a later, earlier-positioned edit" — Edit A then Edit B earlier in the same
+      paragraph, asserted in `log.serialize()`'s `orderedOps`).
+    - (b) atom-is-non-editable negative case exercised through the editor schema → already covered
+      by `opaqueAtomNode.test.ts`'s `non-editability — typing inside an atom is a no-op` describe
+      block (real headless `Editor`, both block + inline atoms, `setTextSelection(atomPos+1)
+      .insertContent('X')` asserted as a structural no-op).
+
+    (c) — the ADR-021 dark-mode semantic-token assertion — was the one genuine gap and is the only
+    new file added: **`ComposeEditor.opaqueAtomTheme.test.ts`** (5 tests, all green). It targets
+    the color rules that actually make the R4 opaque-atom placeholders legible in dark mode —
+    `ComposeEditor.tsx`'s own `useStyles()` `.compose-atom*` Griffel blocks — since
+    `opaqueAtomNode.test.ts`'s existing "no inline hex/style" check only proves the ATOM NODE's own
+    `renderHTML()` is theme-independent by construction (it emits static classes only); the color
+    tokens live one layer up, in `ComposeEditor.tsx`.
+
+    **Deviation from the POML's literal approach (documented, not silent):** the standard repo
+    ADR-021 pattern (`ComposeToolbarPolish.test.tsx` §4 — mount the real `ComposeEditor` under
+    `FluentProvider theme={webDarkTheme}`) was attempted first and found NOT runnable in this
+    worktree: `ComposeEditor.tsx` transitively imports `@spaarke/auth` and (via
+    `ComposeAiToolbar.tsx`) `@spaarke/ui-components`; neither has a built `dist/` here, and
+    `@spaarke/ui-components` has no `node_modules` installed at all (verified: `npm run build` in
+    `Spaarke.Auth` fails on a missing `@azure/msal-browser` peer dep; `npm run build` in
+    `Spaarke.UI.Components` fails with dozens of "Cannot find module 'react'" — `node_modules`
+    itself is absent). This is the SAME pre-existing, documented gap root `CLAUDE.md` calls out
+    ("Pre-existing `@spaarke/*` sibling-dist ... errors are environmental — ignore") and this
+    package's own `jest.config.js` documents (`@spaarke/*` runtime deps need
+    `scripts/Build-AllClientComponents.ps1 -Component SharedLibs` run first) — confirmed NOT
+    specific to this task: `ComposeToolbarPolish.test.tsx` (pre-existing, unmodified) fails to even
+    load in this worktree with the identical `Cannot find module '@spaarke/auth'` /
+    `'@spaarke/ui-components'` errors. Rather than block task 024 on an unrelated environment-setup
+    gap, `ComposeEditor.opaqueAtomTheme.test.ts` verifies the SAME production rule TEXT at the
+    "unit level" the POML calls for: it reads `ComposeEditor.tsx`'s actual source, extracts each
+    `.compose-atom*` rule block by brace-depth, and asserts every color-bearing declaration
+    references `tokens.*` (never a hex/rgb literal or inline `style=`) — a real regression guard
+    against the exact ADR-021 failure mode, without depending on the broken module graph. A
+    full-mount variant (seeding atom content via the existing `initialHtml` prop) is the natural
+    follow-up once `Build-AllClientComponents.ps1` has been run in this worktree — flagged, not
+    silently dropped.
+
+    Verification: `npx jest ComposeEditor.opaqueAtomTheme opaqueAtomNode stepOperationInterceptor`
+    → 3 suites, 48 tests, all green. `npm run typecheck` shows only PRE-EXISTING `@spaarke/ai-
+    widgets` / `@spaarke/document-operations` sibling-dist errors in files this task did not touch
+    (`ComposeAiToolbar.tsx`, `ComposeToolbar.tsx`, `ComposeWorkspace.tsx`,
+    `useComposeWorkspaceReceivers.ts`, `types/compose-contracts.ts`) — zero errors in the new file.
+    This package has no `build:prod` script (that convention is PCF-specific per root CLAUDE.md
+    §12); `npm run build` (`tsc`) would surface the same pre-existing sibling-dist errors.
   </notes>
 
   <execution>

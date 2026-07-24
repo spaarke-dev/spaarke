@@ -23,36 +23,53 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// client-minted and absent from the baseline.
 /// </para>
 /// <para>
-/// <b>The fix.</b> At save time the client sends the ordered <c>{ index, paraId, text }</c> map it built
-/// from its LOAD-TIME snapshot (document order, reject-state text). This stamper walks the baseline's
-/// paragraphs in the SAME document order and, for each id-LESS paragraph, stamps the client's paraId
-/// IFF the baseline paragraph's text matches the snapshot text for that position (folded +
-/// whitespace-normalized — <see cref="ComposeTextFold.Normalize"/>). After this the baseline physically
-/// carries every id the editor uses, so the synthesizer + E2 anchoring resolve cleanly and the SAVED
-/// document is self-consistent for future round-trips.
+/// <b>The fix (save-time — <see cref="Stamp"/>).</b> At save time the client sends the ordered
+/// <c>{ index, paraId, text }</c> map it built from its LOAD-TIME snapshot (document order, reject-state
+/// text). This stamper walks the baseline's paragraphs in the SAME document order and, for each id-LESS
+/// paragraph, stamps the client's paraId IFF the baseline paragraph's text matches the snapshot text for
+/// that position (folded + whitespace-normalized — <see cref="ComposeTextFold.Normalize"/>). After this
+/// the baseline physically carries every id the editor uses, so the synthesizer + E2 anchoring resolve
+/// cleanly and the SAVED document is self-consistent for future round-trips.
 /// </para>
 /// <para>
-/// <b>Safety (never a wrong write).</b> (1) FILL-GAPS ONLY — a paragraph that already carries an id is
-/// never touched (an existing real id is authoritative). (2) TEXT-VERIFIED — a minted id is stamped only
-/// when the baseline paragraph at that position actually holds the text the client's snapshot attributes
-/// to that paraId, so a document-order divergence (e.g. mammoth merging paragraphs on an uploaded doc)
-/// can never stamp the id onto the wrong paragraph — it simply skips (leaving the pre-fix behavior, an
-/// honest synthesis error, for that paragraph rather than a silent corruption). (3) COUNT-GATED —
-/// if the baseline paragraph count differs from the map count the alignment is untrustworthy and NOTHING
-/// is stamped. (4) COLLISION-CHECKED — a candidate id already present anywhere in the part is skipped.
-/// (5) FAIL-OPEN — any parse/mutation error returns the baseline unchanged (the save proceeds exactly as
-/// before the fix).
+/// <b>The fix (ingest-time — <see cref="MintAndPersist"/>, FR-01 task 010).</b> R4 makes the retained
+/// package the authoritative model (I-1) and addresses every editable node by a stable <c>w14:paraId</c>
+/// (I-3) — so an id-less paragraph must not wait for a save round-trip to gain a durable id.
+/// <see cref="MintAndPersist"/> runs on Load: it reuses <see cref="ParaIdPreParser"/>'s document-order
+/// walk + collision-checked mint (a READ-ONLY pass, incl. table-cell / nested-table paragraphs) to decide
+/// WHICH paragraphs need an id and WHAT id each gets, then opens the SAME bytes editable and writes each
+/// minted id into the DOM (<c>w14:paraId</c> attribute) — never string-editing <c>document.xml</c>. A
+/// paragraph that already carries an id is never touched (idempotent): a document whose paragraphs are
+/// all already identified is returned byte-identical, with no re-open/re-save at all.
+/// </para>
+/// <para>
+/// <b>Safety (never a wrong write, either stamp).</b> (1) FILL-GAPS ONLY — a paragraph that already
+/// carries an id is never touched (an existing real id is authoritative). (2) <see cref="Stamp"/> is
+/// additionally TEXT-VERIFIED — a minted id is stamped only when the baseline paragraph at that position
+/// actually holds the text the client's snapshot attributes to that paraId, so a document-order
+/// divergence (e.g. mammoth merging paragraphs on an uploaded doc) can never stamp the id onto the wrong
+/// paragraph — it simply skips (leaving the pre-fix behavior, an honest synthesis error, for that
+/// paragraph rather than a silent corruption). (3) COUNT-GATED — if the baseline paragraph count differs
+/// from the map/parse count the alignment is untrustworthy and NOTHING is stamped. (4) COLLISION-CHECKED
+/// — a candidate id already present anywhere in the part is skipped. (5) FAIL-OPEN — any parse/mutation
+/// error returns the baseline unchanged (the caller proceeds exactly as before the fix).
 /// </para>
 /// <para>
 /// Pure OOXML, no I/O / AI / DI reach (ADR-013 / NFR-05); no package delta (DocumentFormat.OpenXml is
-/// already a BFF dep). Privacy (ADR-015 Tier 3): the map's text is document content — used in-memory for
-/// the equality check only, NEVER logged.
+/// already a BFF dep). Privacy (ADR-015 Tier 3): <see cref="Stamp"/>'s map text is document content —
+/// used in-memory for the equality check only, NEVER logged.
 /// </para>
 /// </remarks>
 public sealed class ComposeBaselineParaIdStamper
 {
     // The largest permitted w14:paraId (ST_LongHexNumber, 0 < x < 0x80000000) — mirrors ParaIdPreParser.
     private const uint MaxParaId = 0x80000000u;
+
+    // FR-01 (task 010): reuses ParaIdPreParser's proven document-order walk (incl. table-cell /
+    // nested-table paragraphs) + collision-checked mint for the ingest-time pass below, instead of
+    // re-implementing the traversal. Stateless/thread-safe (mirrors the class's own no-instance-state
+    // shape), so a default construction is functionally identical to the DI-registered singleton.
+    private readonly ParaIdPreParser _paraIdPreParser = new();
 
     /// <summary>
     /// Returns <paramref name="baseline"/> with the client's minted paraIds stamped onto its id-less
@@ -158,6 +175,118 @@ public sealed class ComposeBaselineParaIdStamper
         return buffer.ToArray();
     }
 
+    /// <summary>
+    /// FR-01 (task 010, ingest): mints a <c>w14:paraId</c> for every editable paragraph in
+    /// <paramref name="source"/> that lacks one and WRITES it into the retained package's DOM — so the id
+    /// is durable across a load → save → reload round-trip (I-1/I-3), not merely carried in a projection
+    /// map. Reuses <see cref="ParaIdPreParser"/> for the document-order walk (incl. table-cell /
+    /// nested-table paragraphs) and its collision-checked mint; a second pass over the SAME
+    /// <c>body.Descendants&lt;Paragraph&gt;()</c> order writes only the entries the parser flagged
+    /// <see cref="ParaIdMapEntry.IsMinted"/>. IDEMPOTENT: a document whose paragraphs already all carry
+    /// ids is returned byte-identical (<see cref="ComposeIngestParaIdResult.Mutated"/> = false) without
+    /// even opening the package editable — existing ids are never touched. FAIL-OPEN: an empty/unreadable
+    /// source, or a paragraph-count mismatch between the two passes (untrustworthy alignment — mirrors
+    /// <see cref="Stamp"/>'s count gate), returns the input bytes unchanged rather than risk a wrong write.
+    /// </summary>
+    public ComposeIngestParaIdResult MintAndPersist(ReadOnlyMemory<byte> source)
+    {
+        if (source.IsEmpty)
+        {
+            return new ComposeIngestParaIdResult(source.ToArray(), Array.Empty<ParaIdMapEntry>(), Mutated: false);
+        }
+
+        // Pass 1 (read-only): reuse ParaIdPreParser's proven document-order walk + collision-checked mint
+        // to decide which paragraphs need an id and what id each gets. IsMinted tells us exactly which
+        // indices require a physical write in pass 2 — existing ids are already correct and untouched.
+        ParaIdPreParseResult parsed;
+        try
+        {
+            parsed = _paraIdPreParser.Parse(source);
+        }
+        catch (InvalidOperationException)
+        {
+            // Not a readable docx — fail open (mirrors Stamp's OpenXml-exception fail-open contract).
+            return new ComposeIngestParaIdResult(source.ToArray(), Array.Empty<ParaIdMapEntry>(), Mutated: false);
+        }
+
+        if (parsed.Entries.Count == 0 || !parsed.Entries.Any(e => e.IsMinted))
+        {
+            // Idempotent: an empty body, or every paragraph already carries an id — return the source
+            // byte-identical. Never re-open/re-save the package for a no-op mutation.
+            return new ComposeIngestParaIdResult(source.ToArray(), parsed.Entries, Mutated: false);
+        }
+
+        // Pass 2 (mutate): open the SAME bytes editable and write the minted ids into the DOM. The walk
+        // is the identical body.Descendants<Paragraph>() traversal ParaIdPreParser used (deterministic,
+        // reader-aligned, incl. table cells / nested tables), so entry.Index lines up with
+        // paragraphs[entry.Index] — never string-editing document.xml.
+        using var buffer = new MemoryStream(source.Length + 4096);
+        buffer.Write(source.Span);
+        buffer.Position = 0;
+
+        WordprocessingDocument doc;
+        try
+        {
+            doc = WordprocessingDocument.Open(buffer, isEditable: true);
+        }
+        catch (Exception ex) when (ex is OpenXmlPackageException or FileFormatException or InvalidDataException or ArgumentOutOfRangeException)
+        {
+            // Unreachable in practice (pass 1 above already proved the bytes are readable) — defensive
+            // fail-open kept symmetric with Stamp's contract.
+            return new ComposeIngestParaIdResult(source.ToArray(), Array.Empty<ParaIdMapEntry>(), Mutated: false);
+        }
+
+        // NOTE (mirrors Stamp's structure): the OPC package is only fully flushed to `buffer` on
+        // WordprocessingDocument.Dispose() (Package.Close()) — Document.Save() alone flushes the
+        // main-document PART, not the package's ZIP central directory. So `buffer.ToArray()` MUST be
+        // read AFTER the `using (doc)` block ends, never inside it, or the returned bytes silently omit
+        // the write.
+        bool mutated;
+        using (doc)
+        {
+            var body = doc.MainDocumentPart?.Document?.Body;
+            if (body is null)
+            {
+                return new ComposeIngestParaIdResult(source.ToArray(), parsed.Entries, Mutated: false);
+            }
+
+            var paragraphs = body.Descendants<Paragraph>().ToList();
+            if (paragraphs.Count != parsed.Entries.Count)
+            {
+                // Alignment guard (mirrors Stamp's count gate): the two passes must see the same
+                // document. If not, do not risk a wrong-paragraph write — fail open.
+                return new ComposeIngestParaIdResult(source.ToArray(), Array.Empty<ParaIdMapEntry>(), Mutated: false);
+            }
+
+            mutated = false;
+            foreach (var entry in parsed.Entries)
+            {
+                if (!entry.IsMinted)
+                {
+                    continue; // fill-gaps only — never touch an existing (authoritative) id.
+                }
+
+                var paragraph = paragraphs[entry.Index];
+                if (!string.IsNullOrEmpty(paragraph.ParagraphId?.Value))
+                {
+                    continue; // belt-and-suspenders idempotency: already carries an id physically.
+                }
+
+                paragraph.ParagraphId = new HexBinaryValue(entry.ParaId);
+                mutated = true;
+            }
+
+            if (!mutated)
+            {
+                return new ComposeIngestParaIdResult(source.ToArray(), parsed.Entries, Mutated: false);
+            }
+
+            doc.MainDocumentPart!.Document.Save();
+        }
+
+        return new ComposeIngestParaIdResult(buffer.ToArray(), parsed.Entries, Mutated: true);
+    }
+
     /// <summary>True when the paragraph's settled text equals the client snapshot text under the shared
     /// fold + whitespace normalization. A null/empty snapshot text is treated as "no assertion" and does
     /// NOT authorize a stamp (return false) — we only stamp on a positive text match.</summary>
@@ -206,3 +335,13 @@ public sealed class ComposeBaselineParaIdStamper
 /// document content, in-memory only, never logged).
 /// </summary>
 public sealed record ComposeBaselineParaId(int Index, string ParaId, string? Text);
+
+/// <summary>
+/// FR-01 (task 010, ingest): result of <see cref="ComposeBaselineParaIdStamper.MintAndPersist"/>.
+/// <paramref name="Bytes"/> is the retained package — with every previously id-less paragraph now
+/// carrying a persisted <c>w14:paraId</c> — or the original input bytes unchanged when
+/// <paramref name="Mutated"/> is <c>false</c> (idempotent: nothing needed minting). <paramref name="ParaIdMap"/>
+/// is the complete document-order paraId map (existing ids verbatim + minted ids), the same shape
+/// <see cref="ParaIdPreParser"/> produces, so a caller need not re-parse <paramref name="Bytes"/> to learn it.
+/// </summary>
+public sealed record ComposeIngestParaIdResult(byte[] Bytes, IReadOnlyList<ParaIdMapEntry> ParaIdMap, bool Mutated);

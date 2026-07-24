@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -148,36 +149,11 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized);
 
-        // (9) POST /api/compose/document/{documentSpeId}/push-annotations — FR-24 (task 050):
-        // render accepted annotations into the .docx as native OOXML track-changes + comments,
-        // then persist to SPE with an If-Match ETag (optimistic concurrency).
-        group.MapPost("/document/{documentSpeId}/push-annotations", PushAnnotations)
-            .WithName("ComposePushAnnotations")
-            .WithSummary("Render accepted Compose annotations as native Word track-changes + comments and push to SPE with If-Match")
-            // SPE persistence → ai-persist (20/min), not the 5/min upload bucket.
-            .RequireRateLimiting("ai-persist")
-            .Produces<PushAnnotationsResponse>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status403Forbidden)
-            .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status412PreconditionFailed)
-            .Produces(StatusCodes.Status422UnprocessableEntity)
-            .Produces(StatusCodes.Status423Locked)
-            .Produces(StatusCodes.Status500InternalServerError);
-
-        // (9b) POST /api/compose/document/{documentSpeId}/push-preview — FR-28 (task 055):
-        // Tier-2c PRE-CONFIRM preview (comment/track-change counts + Word-vs-Compose split).
-        // Non-mutating — no SPE download, no write. The clean seam the future Policy v2 Tier 2c
-        // gate dialog calls; this task builds no dialog/rendering.
-        group.MapPost("/document/{documentSpeId}/push-preview", PushPreview)
-            .WithName("ComposePushPreview")
-            .WithSummary("Compute the Tier-2c push preview (comment/track-change counts + Word-vs-Compose split) without writing")
-            .RequireRateLimiting("ai-context")
-            .Produces<PushPreviewResponse>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status500InternalServerError);
+        // (9)/(9b) push-annotations + push-preview RETIRED (task 036, §6.5 Path B): the text-anchored
+        // push-to-Word WRITE surface (the last text-search byte-author, DocxAnnotationWriter) was retired
+        // entirely — R4 persists editor edits as native Word tracked-changes via ComposeShadowPatchEngine
+        // on the Save path, making the standalone shuttle redundant. The READ-direction pull-annotations (10)
+        // + reanchor (13) endpoints below are unaffected.
 
         // (10) POST /api/compose/document/{documentSpeId}/pull-annotations — FR-25 (task 051):
         // download the CURRENT SPE bytes and parse them for native w:comment/w:ins/w:del
@@ -348,177 +324,6 @@ public static class ComposeEndpoints
         return result.IsValid
             ? Results.Ok(result)
             : Results.Json(result, statusCode: StatusCodes.Status422UnprocessableEntity);
-    }
-
-    // FR-24 (task 050): render accepted annotations into the .docx as native OOXML track-changes +
-    // comments (delegated to the pure DocxAnnotationWriter via ComposeService.PushAnnotationsAsync)
-    // and persist to SPE with an If-Match ETag. Deterministic — no AI dispatch (ADR-039/ADR-013);
-    // SPE I/O stays behind the SpeFileStore facade (ADR-007). Concurrency conflicts surface as
-    // typed facade exceptions mapped to 412 (ETag moved) / 423 (open in Word).
-    private static async Task<IResult> PushAnnotations(
-        string documentSpeId,
-        [FromBody] PushAnnotationsBody? body,
-        IComposeService composeService,
-        ILoggerFactory loggerFactory,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
-
-        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
-        if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.IfMatch)) return BadRequest("ifMatch (load-time ETag) is required for optimistic concurrency.");
-        if (body.Annotations is null || body.Annotations.Count == 0) return BadRequest("annotations must contain at least one annotation.");
-
-        logger.LogInformation(
-            "Compose push-annotations: tenant={TenantId} drive={DriveId} item={DocumentSpeId} annotations={AnnotationCount} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.Annotations.Count, httpContext.TraceIdentifier);
-
-        try
-        {
-            var request = new PushAnnotationsRequest
-            {
-                DriveId = body.DriveId,
-                DocumentSpeId = documentSpeId,
-                TenantId = body.TenantId,
-                IfMatch = body.IfMatch,
-                Annotations = body.Annotations,
-                SessionId = body.SessionId,
-            };
-
-            var result = await composeService.PushAnnotationsAsync(request, httpContext, ct).ConfigureAwait(false);
-
-            return Results.Ok(new PushAnnotationsResponse(
-                DocumentSpeId: result.DocumentSpeId,
-                DriveId: result.DriveId,
-                VersionId: result.VersionId,
-                ETag: result.ETag,
-                Size: result.Size,
-                AnnotationCount: result.AnnotationCount,
-                CorrelationId: httpContext.TraceIdentifier,
-                Preview: result.Preview,
-                CompletionState: result.CompletionState));
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (DocxAnnotationException ex) when (ex.Kind == DocxAnnotationErrorKind.MalformedDocument)
-        {
-            logger.LogWarning(ex, "Compose push-annotations: malformed DOCX. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Malformed Document",
-                detail: "The stored document could not be read as a valid .docx; annotations were not applied.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
-        }
-        catch (DocxAnnotationException ex) when (ex.Kind == DocxAnnotationErrorKind.TargetNotFound)
-        {
-            logger.LogWarning(ex, "Compose push-annotations: annotation target not found. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "Annotation Target Not Found",
-                detail: ex.Message,
-                type: "https://tools.ietf.org/html/rfc4918#section-11.2");
-        }
-        catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
-        {
-            logger.LogWarning(ex, "Compose push-annotations: ETag precondition failed (412). TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status412PreconditionFailed,
-                title: "Document Changed",
-                detail: "This document changed since you loaded it (e.g. a Word autosave). Reload the latest " +
-                        "version to keep both sets of changes — nothing was overwritten.",
-                type: "https://tools.ietf.org/html/rfc7232#section-4.2");
-        }
-        catch (Sprk.Bff.Api.Infrastructure.Graph.DocumentLockedByWordException ex)
-        {
-            logger.LogWarning(ex, "Compose push-annotations: drive-item locked by Word (423). TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status423Locked,
-                title: "Document Open in Word",
-                detail: "Couldn't save — this document is open in Word for Web right now. Close it there, then " +
-                        "push your changes again. Your Compose changes are safe and still pending.",
-                type: "https://tools.ietf.org/html/rfc4918#section-11.3");
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
-        {
-            logger.LogWarning(ex, "Compose push-annotations: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Document Not Found",
-                detail: $"SPE drive-item '{documentSpeId}' was not found or could not be written.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
-        }
-        catch (UnauthorizedAccessException ex)
-        {
-            logger.LogWarning(ex, "Compose push-annotations: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status403Forbidden,
-                title: "Forbidden",
-                detail: "Caller lacks SPE ACL write permission for this drive-item.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Compose push-annotations: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "An unexpected error occurred while pushing annotations.");
-        }
-    }
-
-    // FR-28 (task 055): Tier-2c PRE-CONFIRM preview — deterministic comment/track-change counts +
-    // the Word-vs-Compose split for an annotation batch the caller is ABOUT to push. Non-mutating
-    // (no SPE download, no write, no ETag) — safe to call repeatedly while the user is still
-    // deciding accept/reject in the (not-yet-built) gate dialog. This route is the clean seam the
-    // future Policy v2 Tier 2c dialog calls; it renders no UI itself (ADR-013/ADR-039 — no AI
-    // dispatch either; pure deterministic categorization).
-    private static async Task<IResult> PushPreview(
-        string documentSpeId,
-        [FromBody] PushPreviewBody? body,
-        IComposeService composeService,
-        ILoggerFactory loggerFactory,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
-
-        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
-        if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
-        if (body.Annotations is null || body.Annotations.Count == 0) return BadRequest("annotations must contain at least one annotation.");
-
-        try
-        {
-            var request = new PreviewPushAnnotationsRequest
-            {
-                TenantId = body.TenantId,
-                Annotations = body.Annotations,
-                SessionId = body.SessionId,
-            };
-
-            var preview = await composeService.PreviewPushAnnotationsAsync(request, ct).ConfigureAwait(false);
-
-            return Results.Ok(new PushPreviewResponse(
-                Preview: preview,
-                CorrelationId: httpContext.TraceIdentifier));
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Compose push-preview: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "An unexpected error occurred while computing the push preview.");
-        }
     }
 
     // FR-25 (task 051): download the current SPE bytes and parse them (DocxAnnotationReader) for
@@ -1320,18 +1125,35 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
-        // R3 task 027: the client no longer authors .docx bytes for a dirty save. The replace path accepts
-        // EITHER the retained-original Content (clean save / same-session baseline fast-path) OR a
-        // dirty-loaded delta ({ baselineVersionId, editedParagraphs }) where the server re-fetches the
-        // load-time version as the baseline. One of the two MUST be resolvable.
+
+        // R4 FR-06 (task 032): a save carrying the retired paragraph-diff delta comes from a client build
+        // predating the operation-log cutover. Reject it with a ProblemDetails so a stale payload is a clean 400
+        // (never a 500, and never a silent edit-drop) — the client must refresh to send the op-log.
+        if (body.EditedParagraphs is { Count: > 0 })
+            return StaleSavePayload();
+
+        // The client authors no .docx bytes. The replace path resolves the patch BASELINE from EITHER the
+        // retained-original 'content' (clean save / same-session fast-path) OR 'baselineVersionId' (the server
+        // re-fetches the load-time version). A dirty save additionally carries 'operationLog' (applied onto the
+        // baseline by the engine). One of content / baselineVersionId MUST be resolvable.
+        //
+        // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR document (blank page /
+        // AI-draft — the client holds NO retained original bytes and there is no real SPE baseline version to
+        // delta onto) re-authors its whole content via 'contentModel' on EVERY in-session save. That is a valid
+        // dirty save: ResolveSaveBaselineAsync (ComposeService.cs) renders the .docx from ContentModel FIRST
+        // (mutually exclusive with content / baselineVersionId / operationLog), then the replace branch does
+        // ReplaceFileContentAsUserAsync on the EXISTING item — updating in place, never minting a duplicate. The
+        // CLIENT gates this: only a doc with no retained original (`!state.docxBytes`) sends contentModel; a
+        // loaded/imported doc still sends op-log + baseline → tracked changes (REQ-2 unchanged).
         var hasContent = body.Content is { Length: > 0 };
-        var hasDeltaBaseline = body.EditedParagraphs is { Count: > 0 } && !string.IsNullOrWhiteSpace(body.BaselineVersionId);
-        if (!hasContent && !hasDeltaBaseline)
-            return BadRequest("Provide the retained-original 'content' bytes, or 'editedParagraphs' + 'baselineVersionId' for a dirty save (the client no longer authors .docx bytes).");
+        var hasBaseline = !string.IsNullOrWhiteSpace(body.BaselineVersionId);
+        var hasContentModel = body.ContentModel is { Blocks.Count: > 0 };
+        if (!hasContent && !hasBaseline && !hasContentModel)
+            return BadRequest("Provide the retained-original 'content' bytes, 'baselineVersionId', or a born-in-editor 'contentModel', so the server can resolve the save baseline the operation log applies onto (the client authors no .docx bytes).");
 
         logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} edits={EditCount} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.EditedParagraphs?.Count ?? 0, httpContext.TraceIdentifier);
+            "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} ops={OpCount} comments={CommentCount} TraceId={TraceId}",
+            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.OperationLog?.Operations.Count ?? 0, body.Comments?.Count ?? 0, httpContext.TraceIdentifier);
 
         var request = new SaveComposeDocumentRequest
         {
@@ -1346,13 +1168,13 @@ public static class ComposeEndpoints
             TenantId = body.TenantId,
             DocumentRecordId = body.DocumentRecordId,
             DisplayName = body.DisplayName,
-            // R3 FR-01/FR-06 (task 027): the paraId-keyed dirty-edit delta + the load-time baseline version.
+            // R4 FR-06 (task 032): the op-log's base version + the ordered op-log the engine applies onto it.
             BaselineVersionId = body.BaselineVersionId,
-            EditedParagraphs = body.EditedParagraphs,
+            OperationLog = body.OperationLog,
+            Comments = body.Comments,
             ContentModel = body.ContentModel,
-            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
-            Annotations = body.Annotations,
-            // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before synthesis.
+            // C2 (UAT 2026-07-20): the client paraId map → stamp minted ids onto the baseline before the engine
+            // resolves each op's anchor.
             ParaIdMap = body.ParaIdMap,
         };
 
@@ -1380,6 +1202,11 @@ public static class ComposeEndpoints
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        // R4 FR-06 (task 032): reject the retired paragraph-diff delta shape (stale client) with a clean 400.
+        if (body.EditedParagraphs is { Count: > 0 })
+            return StaleSavePayload();
+
         // sessionId is OPTIONAL on the transient-create path (task 110): a Browse/local-file first
         // Save has no chat session. The FR-07 rebind is skipped server-side when it is absent; the
         // SPE create + sprk_document create + indexing all complete without one.
@@ -1410,8 +1237,11 @@ public static class ComposeEndpoints
             DisplayName = body.DisplayName,
             // R3 FR-01a (task 027): the born-in-editor content model the server RENDERS into high-fidelity bytes.
             ContentModel = body.ContentModel,
-            // UAT-R7 #2/#3/#4: pending redlines + comments the server re-applies as native OOXML.
-            Annotations = body.Annotations,
+            // R4 FR-06 (task 032): a browse-local (non-born-in-editor) create-on-save MAY carry an op-log +
+            // comments the engine applies onto the retained bytes; born-in-editor sends neither (the render is
+            // the whole document).
+            OperationLog = body.OperationLog,
+            Comments = body.Comments,
             // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
             // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
             ParaIdMap = body.ParaIdMap,
@@ -1446,7 +1276,8 @@ public static class ComposeEndpoints
                 ETag: result.ETag,
                 Size: result.Size,
                 WasPromotedThisSave: result.WasPromotedThisSave,
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                ReanchorSummary: result.ReanchorSummary));
         }
         catch (ArgumentException ex)
         {
@@ -1496,24 +1327,14 @@ public static class ComposeEndpoints
                         "Nothing was overwritten.",
                 type: "https://tools.ietf.org/html/rfc7232#section-4.2");
         }
-        catch (DocxAnnotationException ex)
+        catch (ComposePatchException ex)
         {
-            // UAT-R7 #2/#3/#4: a redline/comment batch could not be rendered onto the baseline.
-            // Malformed baseline → 400; a tracked-change target span not found in the baseline → 422
-            // (mirrors the push-annotations mapping). Nothing partially wrote — Annotate runs BEFORE
-            // the SPE write in ComposeService.SaveAsync.
-            logger.LogWarning(ex, "Compose save: annotation render failed ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
-            return ex.Kind == DocxAnnotationErrorKind.TargetNotFound
-                ? Results.Problem(
-                    statusCode: StatusCodes.Status422UnprocessableEntity,
-                    title: "Annotation Target Not Found",
-                    detail: "A tracked change could not be located in the document to save. Reload the document and reapply your changes.",
-                    type: "https://tools.ietf.org/html/rfc4918#section-11.2")
-                : Results.Problem(
-                    statusCode: StatusCodes.Status400BadRequest,
-                    title: "Invalid Document",
-                    detail: "The document could not be annotated for save (its content is not a readable .docx).",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            // R4 FR-06 (task 032): the Patch Engine refused the operation log / comments (unresolved
+            // paraId/anchor, unsupported schema version, opaque-atom or structural refusal). Mapped to a typed
+            // ProblemDetails per Kind — never an opaque 500. Nothing partially wrote — Apply throws before the
+            // SPE write in ComposeService.SaveAsync.
+            logger.LogWarning(ex, "Compose save: patch-engine refusal ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
+            return MapPatchException(ex, httpContext);
         }
         catch (Exception ex)
         {
@@ -1920,6 +1741,40 @@ public static class ComposeEndpoints
             title: "Bad Request",
             detail: detail,
             type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+
+    // R4 FR-06 (task 032): a stale/legacy SAVE payload (the retired paragraph-diff `editedParagraphs` shape)
+    // maps to a clean 400 ProblemDetails — NOT a 500, and NOT a silent edit-drop.
+    private static IResult StaleSavePayload() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Outdated Save Payload",
+            detail: "This save used the retired paragraph-diff format ('editedParagraphs'), which the server no " +
+                    "longer accepts. Refresh Compose to load the current build — it saves via the operation-log " +
+                    "contract ('operationLog'). Your changes were not lost; re-apply and save again.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+
+    // R4 FR-06 (task 032): map a ComposeShadowPatchEngine refusal to the right ProblemDetails status instead of
+    // an opaque 500. Nothing partially wrote — Apply throws before any bytes are returned / any SPE write runs.
+    private static IResult MapPatchException(ComposePatchException ex, HttpContext httpContext) =>
+        ex.Kind switch
+        {
+            ComposePatchErrorKind.MalformedDocument => Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid Document",
+                detail: "The document to save could not be read as a valid .docx; nothing was written.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1"),
+            ComposePatchErrorKind.UnsupportedSchemaVersion => Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Incompatible Save Contract",
+                detail: "The operation-log schema version does not match this server. Refresh Compose and save again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8"),
+            _ => Results.Problem(
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Change Could Not Be Applied",
+                detail: "A change could not be anchored in the document to save (its target moved or is not " +
+                        "editable). Reload the document and reapply your changes — nothing was overwritten.",
+                type: "https://tools.ietf.org/html/rfc4918#section-11.2"),
+        };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2014,20 +1869,26 @@ public sealed record SaveComposeDocumentBody(
     [property: JsonPropertyName("containerId")] string? ContainerId = null,
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
     [property: JsonPropertyName("displayName")] string? DisplayName = null,
-    /// <summary>Redline/comment save fidelity (UAT-R7 #2/#3/#4): accepted pending track-change
-    /// insertions/deletions + comments to materialize as native <c>w:ins</c>/<c>w:del</c>/
-    /// <c>w:comment</c> via <c>DocxAnnotationWriter</c> on top of the baseline <c>content</c> before
-    /// persisting (see <see cref="SaveComposeDocumentRequest.Annotations"/>). Absent/empty on a plain
-    /// no-redline Save — the baseline is then persisted unchanged. Same shape the push path uses.</summary>
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation>? Annotations = null,
-    /// <summary>R3 FR-06 (task 027): the LOAD-TIME SPE version id (from the Load response). Sent on a
-    /// dirty-loaded save when the client no longer holds the retained <see cref="Content"/> bytes so the
-    /// server re-fetches the load-time version as the delta baseline.</summary>
+    /// <summary>R3 FR-06 (task 027): the LOAD-TIME SPE version id (from the Load response) = the op-log's
+    /// BASE VERSION. Sent on a dirty-loaded save when the client no longer holds the retained
+    /// <see cref="Content"/> bytes so the server re-fetches the load-time version as the patch baseline.</summary>
     [property: JsonPropertyName("baselineVersionId")] string? BaselineVersionId = null,
-    /// <summary>R3 FR-01 (task 027): the editor paragraphs the user CHANGED, each keyed by its
-    /// <c>w14:paraId</c> with its new text. Drives the server-side tracked-change synthesizer onto the
-    /// resolved baseline — the client never authors the delta bytes.</summary>
-    [property: JsonPropertyName("editedParagraphs")] IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs = null,
+    /// <summary>R4 FR-06 (task 032, the write-path cutover): the client's ordered, rebased task-003 OPERATION
+    /// LOG for a dirty save. <see cref="IComposeService.SaveAsync"/> applies it via the single
+    /// <c>ComposeShadowPatchEngine</c> onto the resolved baseline (ID-anchored, no write-path text-search) —
+    /// REPLACES the retired <c>editedParagraphs</c> paragraph-diff payload.</summary>
+    [property: JsonPropertyName("operationLog")] ComposeOperationLog? OperationLog = null,
+    /// <summary>R4 FR-06 (task 032): optional durable <c>(paraId, range)</c>-anchored comments the engine emits
+    /// as native <c>w:comment</c> in the same pass — the text-search-free replacement for the save-path
+    /// <c>DocxAnnotation</c> comment payload. Session comments also persist via the FR-29 annotations endpoint;
+    /// native OOXML comment/track-change baking is otherwise the push-annotations surface (task 036).</summary>
+    [property: JsonPropertyName("comments")] IReadOnlyList<ComposeAnchoredComment>? Comments = null,
+    /// <summary>LEGACY (retired R3 dirty-save shape) — detection-only, deserialized as raw JSON so the endpoint
+    /// carries no dependency on the retired <c>ComposeEditedParagraph</c> type. A save that still carries this
+    /// paragraph-diff delta comes from a client build predating the task-032 operation-log cutover; the endpoint
+    /// rejects it with a ProblemDetails (refresh the client) rather than silently dropping the edits. Kept solely
+    /// so a stale payload is a clean 400, not a 500. Removed with the client in task 023.</summary>
+    [property: JsonPropertyName("editedParagraphs")] IReadOnlyList<System.Text.Json.JsonElement>? EditedParagraphs = null,
     /// <summary>R3 FR-01a (task 027): the paraId-keyed content model for a BORN-IN-EDITOR save (AI-drafted /
     /// blank / browse-local — no retained original). The server RENDERS the high-fidelity <c>.docx</c> from
     /// it (styles + style-linked multi-level numbering + tables + minted paraId). Mutually exclusive with
@@ -2045,48 +1906,6 @@ public sealed record PromoteComposeDocumentBody(
     [property: JsonPropertyName("sessionId")] string SessionId,
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("displayName")] string? DisplayName = null);
-
-/// <summary>Request body for <c>POST /api/compose/document/{id}/push-annotations</c> (FR-24).
-/// The Compose frontend assembles the accepted track-change insertions/deletions + comments into
-/// <see cref="DocxAnnotation"/> entries; <c>ifMatch</c> is the load-time ETag for optimistic
-/// concurrency (a blind overwrite is not offered on this path).</summary>
-public sealed record PushAnnotationsBody(
-    [property: JsonPropertyName("driveId")] string DriveId,
-    [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("ifMatch")] string IfMatch,
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
-    /// <summary>FR-28 (task 055, additive/optional): bound ChatSession id — enables the
-    /// Compose-only side of the response's <c>preview</c> split. See
-    /// <see cref="PushAnnotationsRequest.SessionId"/> remarks.</summary>
-    [property: JsonPropertyName("sessionId")] string? SessionId = null);
-
-/// <summary>Response shape for <c>POST /api/compose/document/{id}/push-annotations</c> (FR-24) —
-/// the new SPE version id + ETag the client uses as the next optimistic-concurrency token, plus
-/// (FR-28, task 055) the Tier-2c preview + per-step completion state as post-write evidence.</summary>
-public sealed record PushAnnotationsResponse(
-    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
-    [property: JsonPropertyName("driveId")] string? DriveId,
-    [property: JsonPropertyName("versionId")] string VersionId,
-    [property: JsonPropertyName("eTag")] string? ETag,
-    [property: JsonPropertyName("size")] long? Size,
-    [property: JsonPropertyName("annotationCount")] int AnnotationCount,
-    [property: JsonPropertyName("correlationId")] string CorrelationId,
-    [property: JsonPropertyName("preview")] ComposePushSavePreview? Preview = null,
-    [property: JsonPropertyName("completionState")] Sprk.Bff.Api.Services.Ai.PublicContracts.JobAwareCompletionState? CompletionState = null);
-
-/// <summary>Request body for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28, task 055)
-/// — the Tier-2c PRE-CONFIRM preview call. Non-mutating: no SPE download, no write. Safe to call
-/// repeatedly as the user adjusts accept/reject choices before confirming the gate dialog (not
-/// built by this task — see <see cref="IComposeService.PreviewPushAnnotationsAsync"/> remarks).</summary>
-public sealed record PushPreviewBody(
-    [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("annotations")] IReadOnlyList<DocxAnnotation> Annotations,
-    [property: JsonPropertyName("sessionId")] string? SessionId = null);
-
-/// <summary>Response shape for <c>POST /api/compose/document/{id}/push-preview</c> (FR-28).</summary>
-public sealed record PushPreviewResponse(
-    [property: JsonPropertyName("preview")] ComposePushSavePreview Preview,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>Response shape for <c>GET /api/compose/documents/{id}</c>. The three FR-29/FR-33
 /// collections (task 102, gaps 4.2/4.4) are projected from the (unchanged)
@@ -2160,7 +1979,12 @@ public sealed record SaveComposeDocumentResponse(
     [property: JsonPropertyName("eTag")] string? ETag,
     [property: JsonPropertyName("size")] long? Size,
     [property: JsonPropertyName("wasPromotedThisSave")] bool WasPromotedThisSave,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // FR-08 (task 050): populated ONLY when this save detected a stale base and re-anchored the operation
+    // log — AUTO applied; REVIEW/ORPHAN surfaced here so the client can present them. Null on every
+    // non-stale save (the common case). Optional/trailing so existing callers deserializing this response
+    // are unaffected.
+    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// FR-25 (task 051) — deterministic READ-DIRECTION parser that extracts every native Open XML
 /// comment (<c>&lt;w:comment&gt;</c> + <c>CommentRangeStart/End</c>) and tracked
 /// insertion/deletion (<c>&lt;w:ins&gt;</c> / <c>&lt;w:del&gt;</c>) from a <c>.docx</c> into a
-/// structured payload. This is the read counterpart of <see cref="DocxAnnotationWriter"/> (task
+/// structured payload. This is the read counterpart of <c>DocxAnnotationWriter</c> (task
 /// 050) — a Word-for-Web session (a real human editor, not "Spaarke AI") produces exactly this
 /// markup shape, and this reader recovers it with author/date fidelity so task 054's re-anchoring
 /// has an input to work against.

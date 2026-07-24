@@ -1,43 +1,51 @@
 /**
  * AttachmentList.tsx
  *
- * Renders one section per configured attachment source (`local | spe | related
- * | wizard`); enforces the project caps (150 attachments / 35 MB total hard,
- * 25 MB soft warning — design §5.6.4); shows a source badge + remove button
- * per item; renders forward-mode inclusion checkboxes when `mode === 'forward'`.
+ * A single collapsible "Attachments" section with a header toolbar (owner UAT
+ * round 3, 2026-07-22): a title + right-justified tools — add-from-computer,
+ * look-up-document, and an expand/collapse chevron. No per-source pills/labels.
+ *
+ * Rows: locally-picked FILES show no Attach/Link toggles; Document-backed items
+ * (a `documentId`, e.g. a looked-up `sprk_document`) show Attach and (when a
+ * `linkUrl` is resolvable) Link. Caps (150 attachments / 35 MB total hard, 25 MB
+ * soft warning — design §5.6.4) render as a single non-wrapping summary line.
  *
  * `local` file picking (task 042 / FR-20): each picked file is validated at
  * pick time against CHAT-ATTACHMENT-POLICY.md (25 MB binary cap + MIME
  * allow-list) via `validateLocalAttachmentFile`; a rejected file is NEVER added
- * to state and its reason is surfaced as a visible `role="alert"` error (not a
- * silent drop). Resolving an accepted `File` to a `sprk_document` GUID is done
- * by the composer's host-injected `onUploadLocalAttachment` (task 042) — the
- * item shows an "Uploading…" spinner (`resolvingIds`) until its `documentId`
- * resolves, then it flows into the outbound send payload
- * (`mapStateToSendRequest` filters on `documentId`) via the EXISTING send path.
- * When the host wires no resolver, local picks remain display-only (the
- * pre-task-042 behavior — excluded from the payload).
- *
- * REPLY / FORWARD attachment inclusion (task 104, D1/D2): for a source-carried
- * attachment (has a `documentId`) in reply/replyAll/forward mode, the row shows
- * two per-item toggles — "Attach" (thread the `documentId` into the send
- * request's `AttachmentDocumentIds`) and, when a `linkUrl` is resolvable, "Link"
- * (insert a hyperlink to the document into the body at send time). Forward
- * defaults Attach ON; replies default both OFF (the seeding lives in the reducer).
+ * to state and its reason is surfaced as a visible `role="alert"` error. An
+ * accepted `File` is resolved to a `sprk_document` GUID by the composer's
+ * host-injected `onUploadLocalAttachment` — the item shows an "Uploading…"
+ * spinner (`resolvingIds`) until its `documentId` resolves, then it flows into
+ * the outbound send payload (`mapStateToSendRequest` filters on `documentId`)
+ * via the EXISTING send path. When the host wires no resolver, local picks
+ * remain display-only (pre-task-042 behavior — excluded from the payload).
  */
 import * as React from 'react';
 import {
   Button,
   Text,
-  Badge,
   ProgressBar,
   Checkbox,
   Spinner,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
   makeStyles,
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
-import { DismissRegular, DocumentRegular, ArrowUploadRegular } from '@fluentui/react-icons';
+import {
+  DismissRegular,
+  DocumentRegular,
+  DocumentArrowUp20Regular,
+  SearchRegular,
+  ChevronDown20Regular,
+  ChevronUp20Regular,
+} from '@fluentui/react-icons';
 import {
   ATTACHMENT_MAX_COUNT,
   ATTACHMENT_MAX_TOTAL_BYTES,
@@ -45,22 +53,16 @@ import {
   validateLocalAttachmentFile,
 } from '../EmailComposer.reducer';
 import type {
-  EmailAttachmentSourceKind,
   EmailComposerMode,
   IAttachmentItem,
   IComposerAttachmentSource,
+  IRecordLookupTarget,
+  IPickedRecord,
 } from '../EmailComposer.types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const SOURCE_LABELS: Record<EmailAttachmentSourceKind, string> = {
-  local: 'From this device',
-  spe: 'From SharePoint',
-  related: 'Related documents',
-  wizard: 'Uploaded in this wizard',
-};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -85,8 +87,17 @@ export interface IAttachmentListProps {
   onAdd: (item: IAttachmentItem) => void;
   onRemove: (id: string) => void;
   onToggleSelected: (id: string) => void;
-  /** Toggle the body-link inclusion for a source attachment (task 104). */
+  /** Toggle the body-link inclusion for a Document-backed attachment (task 104). */
   onToggleLink?: (id: string) => void;
+  /**
+   * Record-lookup targets (owner UAT round 5). With {@link onLookupRecord}/{@link onRecordPicked},
+   * a search-icon menu of these entity types renders (RegardingResolver pattern).
+   */
+  recordCatalog?: IRecordLookupTarget[];
+  /** Host lookup for a chosen entity type (returns the picked record or null). */
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /** Called with a picked record so the composer can attach it (document) or link it (other). */
+  onRecordPicked?: (picked: IPickedRecord) => void;
   /**
    * Ids of locally-picked attachments currently being uploaded to a governed
    * Document (task 042 / FR-20). Rendered with an inline "Uploading…" spinner;
@@ -105,10 +116,22 @@ const useStyles = makeStyles({
   wrapper: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
   },
-  sectionTitle: {
-    color: tokens.colorNeutralForeground3,
+  headerRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  headerTitle: {
+    color: tokens.colorNeutralForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
   },
   row: {
     display: 'flex',
@@ -128,26 +151,39 @@ const useStyles = makeStyles({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
   },
-  summaryRow: {
+  rowSize: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
+  },
+  includeToggles: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+  },
+  // Single non-wrapping summary line, right-aligned (owner UAT round 4).
+  summaryRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: tokens.spacingHorizontalS,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+  },
+  summaryBar: {
+    flexShrink: 1,
+    minWidth: '60px',
+    maxWidth: '160px',
+  },
+  summaryText: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   },
   warnText: {
     color: tokens.colorPaletteYellowForeground1,
   },
   errorText: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  localPicker: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-  },
-  includeToggles: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
   },
 });
 
@@ -156,29 +192,45 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 export const AttachmentList: React.FC<IAttachmentListProps> = ({
-  mode,
   sources,
   items,
   onAdd,
   onRemove,
   onToggleSelected,
   onToggleLink,
+  recordCatalog,
+  onLookupRecord,
+  onRecordPicked,
   resolvingIds,
   readOnly,
   errorMessage,
 }) => {
   const styles = useStyles();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const [collapsed, setCollapsed] = React.useState(false);
   // Pick-time policy-rejection messages (CHAT-ATTACHMENT-POLICY 25 MB + MIME).
   // A rejected file is NEVER added to state; its reason is surfaced here so the
-  // user sees a visible error instead of a silent drop (FR-20 negative AC).
+  // user sees a visible error instead of a silent drop (task 042 / FR-20 negative AC).
   const [pickErrors, setPickErrors] = React.useState<string[]>([]);
 
-  // A source-carried attachment (has a Document id) in reply/replyAll/forward mode
-  // exposes the per-item include toggles (task 104). Locally-picked files (no
-  // documentId yet) and compose mode do not.
-  const showIncludeToggles = (item: IAttachmentItem): boolean =>
-    !readOnly && (mode === 'reply' || mode === 'forward') && !!item.documentId;
+  // Document-backed items (a resolved documentId) expose the Attach/Link toggles;
+  // locally-picked files never do (owner UAT round 3 #2).
+  const showIncludeToggles = (item: IAttachmentItem): boolean => !readOnly && !!item.documentId;
+
+  const showLocalAdd = !readOnly && sources.some(s => s.kind === 'local');
+  const showRecordLookup = !readOnly && !!recordCatalog?.length && !!onLookupRecord && !!onRecordPicked;
+
+  const handleLookup = React.useCallback(
+    async (entityType: string) => {
+      try {
+        const picked = await onLookupRecord?.(entityType);
+        if (picked) onRecordPicked?.(picked);
+      } catch (err) {
+        console.error('[AttachmentList] record lookup failed:', err);
+      }
+    },
+    [onLookupRecord, onRecordPicked]
+  );
 
   const includedItems = items.filter(a => a.selected !== false);
   const totalBytes = includedItems.reduce((sum, a) => sum + a.sizeBytes, 0);
@@ -196,7 +248,7 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
         // CHAT-ATTACHMENT-POLICY gate (25 MB binary cap + MIME allow-list),
         // enforced BEFORE the file enters composer state. A rejected file is
         // dropped from the pick and its reason collected for display — it is
-        // never added, never counted toward caps, and never sent (FR-20).
+        // never added, never counted toward caps, and never sent (task 042 / FR-20).
         const rejection = validateLocalAttachmentFile(file);
         if (rejection) {
           rejections.push(rejection.message);
@@ -216,121 +268,139 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
       }
       // Replace (not append) so the visible errors reflect only the latest pick.
       setPickErrors(rejections);
-      // Reset so re-selecting the same file fires onChange again.
-      e.target.value = '';
+      e.target.value = ''; // reset so re-selecting the same file fires onChange again
     },
     [onAdd]
   );
 
-  const bySource = React.useMemo(() => {
-    const map = new Map<EmailAttachmentSourceKind, IAttachmentItem[]>();
-    for (const item of items) {
-      const list = map.get(item.source) ?? [];
-      list.push(item);
-      map.set(item.source, list);
-    }
-    return map;
-  }, [items]);
-
   return (
     <div className={styles.wrapper} role="region" aria-label="Attachments">
-      {sources.map(source => {
-        const sectionItems = bySource.get(source.kind) ?? [];
-        if (sectionItems.length === 0 && source.kind !== 'local') return null;
-
-        return (
-          <div key={source.kind}>
-            <Text size={200} weight="semibold" className={styles.sectionTitle}>
-              {SOURCE_LABELS[source.kind]}
-            </Text>
-
-            {source.kind === 'local' && !readOnly && (
-              <div className={styles.localPicker}>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  hidden
-                  onChange={handleLocalFilesPicked}
-                  aria-label="Choose files from this device"
-                />
-                <Button
-                  appearance="secondary"
-                  size="small"
-                  icon={<ArrowUploadRegular />}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  Add files
-                </Button>
-              </div>
-            )}
-
-            {sectionItems.map(item => (
-              <div key={item.id} className={styles.row}>
-                <DocumentRegular aria-hidden="true" />
-                <Text size={200} className={styles.rowName} title={item.fileName}>
-                  {item.fileName}
-                </Text>
-                <Badge appearance="tint" size="small">
-                  {SOURCE_LABELS[item.source]}
-                </Badge>
-                <Text size={100}>{formatBytes(item.sizeBytes)}</Text>
-                {resolvingIds?.has(item.id) && <Spinner size="tiny" label="Uploading…" labelPosition="after" />}
-                {showIncludeToggles(item) && (
-                  <div className={styles.includeToggles}>
-                    <Checkbox
-                      label="Attach"
-                      checked={item.selected !== false}
-                      onChange={() => onToggleSelected(item.id)}
-                      aria-label={`Attach ${item.fileName} as a file`}
-                    />
-                    {item.linkUrl && (
-                      <Checkbox
-                        label="Link"
-                        checked={item.linkSelected === true}
-                        onChange={() => onToggleLink?.(item.id)}
-                        aria-label={`Insert a link to ${item.fileName} in the message body`}
-                      />
-                    )}
-                  </div>
-                )}
-                {!readOnly && (
-                  <Button
-                    appearance="subtle"
-                    size="small"
-                    icon={<DismissRegular fontSize={14} />}
-                    onClick={() => onRemove(item.id)}
-                    aria-label={`Remove ${item.fileName}`}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-        );
-      })}
-
-      {items.length > 0 && (
-        <div className={styles.summaryRow}>
-          <ProgressBar
-            value={Math.min(totalBytes / ATTACHMENT_MAX_TOTAL_BYTES, 1)}
-            color={overSize ? 'error' : nearSize ? 'warning' : 'success'}
-            aria-label="Attachment size used"
-          />
-          <Text
-            size={100}
-            className={mergeClasses(overSize ? styles.errorText : nearSize ? styles.warnText : undefined)}
-          >
-            {formatBytes(totalBytes)} / {formatBytes(ATTACHMENT_MAX_TOTAL_BYTES)} · {includedItems.length}/
-            {ATTACHMENT_MAX_COUNT} files
-          </Text>
-        </div>
-      )}
-
-      {(overCount || overSize) && (
-        <Text size={200} className={styles.errorText} role="alert">
-          {overCount && `Too many attachments (max ${ATTACHMENT_MAX_COUNT}). `}
-          {overSize && `Total attachment size exceeds ${formatBytes(ATTACHMENT_MAX_TOTAL_BYTES)}.`}
+      <div className={styles.headerRow}>
+        <Text size={200} className={styles.headerTitle}>
+          Attachments{items.length > 0 ? ` (${items.length})` : ''}
         </Text>
+        <div className={styles.headerActions}>
+          {showLocalAdd && (
+            <Tooltip content="Add files from your computer" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<DocumentArrowUp20Regular />}
+                aria-label="Add files from your computer"
+                onClick={() => fileInputRef.current?.click()}
+              />
+            </Tooltip>
+          )}
+          {showRecordLookup && (
+            <Menu positioning="below-end">
+              <MenuTrigger disableButtonEnhancement>
+                <Tooltip content="Look up a record — attach a document or link a record" relationship="label">
+                  <Button appearance="subtle" size="small" icon={<SearchRegular />} aria-label="Look up a record" />
+                </Tooltip>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {recordCatalog!.map(t => (
+                    <MenuItem key={t.logicalName} onClick={() => void handleLookup(t.logicalName)}>
+                      {t.displayName}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          )}
+          <Tooltip content={collapsed ? 'Expand attachments' : 'Collapse attachments'} relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={collapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+              aria-label={collapsed ? 'Expand attachments' : 'Collapse attachments'}
+              aria-expanded={!collapsed}
+              onClick={() => setCollapsed(c => !c)}
+            />
+          </Tooltip>
+        </div>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={handleLocalFilesPicked}
+        aria-label="Choose files from your computer"
+      />
+
+      {!collapsed && (
+        <>
+          {items.map(item => (
+            <div key={item.id} className={styles.row}>
+              <DocumentRegular aria-hidden="true" />
+              <Text size={200} className={styles.rowName} title={item.fileName}>
+                {item.fileName}
+              </Text>
+              <Text size={100} className={styles.rowSize}>
+                {formatBytes(item.sizeBytes)}
+              </Text>
+              {resolvingIds?.has(item.id) && <Spinner size="tiny" label="Uploading…" labelPosition="after" />}
+              {showIncludeToggles(item) && (
+                <div className={styles.includeToggles}>
+                  <Checkbox
+                    label="Attach"
+                    checked={item.selected !== false}
+                    onChange={() => onToggleSelected(item.id)}
+                    aria-label={`Attach ${item.fileName} as a file`}
+                  />
+                  {item.linkUrl && (
+                    <Checkbox
+                      label="Link"
+                      checked={item.linkSelected === true}
+                      onChange={() => onToggleLink?.(item.id)}
+                      aria-label={`Insert a link to ${item.fileName} in the message body`}
+                    />
+                  )}
+                </div>
+              )}
+              {!readOnly && (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<DismissRegular fontSize={14} />}
+                  onClick={() => onRemove(item.id)}
+                  aria-label={`Remove ${item.fileName}`}
+                />
+              )}
+            </div>
+          ))}
+
+          {items.length > 0 && (
+            <div className={styles.summaryRow}>
+              <ProgressBar
+                className={styles.summaryBar}
+                value={Math.min(totalBytes / ATTACHMENT_MAX_TOTAL_BYTES, 1)}
+                color={overSize ? 'error' : nearSize ? 'warning' : 'success'}
+                aria-label="Attachment size used"
+              />
+              <Text
+                size={100}
+                className={mergeClasses(
+                  styles.summaryText,
+                  overSize ? styles.errorText : nearSize ? styles.warnText : undefined
+                )}
+              >
+                {formatBytes(totalBytes)} / {formatBytes(ATTACHMENT_MAX_TOTAL_BYTES)} · {includedItems.length}/
+                {ATTACHMENT_MAX_COUNT} files
+              </Text>
+            </div>
+          )}
+
+          {(overCount || overSize) && (
+            <Text size={200} className={styles.errorText} role="alert">
+              {overCount && `Too many attachments (max ${ATTACHMENT_MAX_COUNT}). `}
+              {overSize && `Total attachment size exceeds ${formatBytes(ATTACHMENT_MAX_TOTAL_BYTES)}.`}
+            </Text>
+          )}
+        </>
       )}
 
       {pickErrors.length > 0 && (

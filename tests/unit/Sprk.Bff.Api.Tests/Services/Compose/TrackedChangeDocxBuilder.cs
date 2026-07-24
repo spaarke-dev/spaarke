@@ -1,3 +1,10 @@
+// TEST FIXTURE HELPER — relocated verbatim (renamed) from the RETIRED production
+// DocxAnnotationWriter (task 036, §6.5 Path B retired the text-anchored push-annotations WRITE
+// surface). This is NOT production code and is NOT a byte-author of the compose write path — it
+// exists ONLY so the READ-direction import/round-trip tests (DocxAnnotationReader + Load-imported
+// revisions/comments) can synthesize a .docx containing native w:ins/w:del/w:comment to parse.
+// I-5 (one production byte-author = ComposeShadowPatchEngine) and I-7 (no text-search in the
+// production write path) are unaffected — the text-search LocateTarget below lives in test code.
 using System.Globalization;
 using System.IO;
 using System.Text.Json.Serialization;
@@ -42,7 +49,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// EDGE-4 <c>w:del</c> text is <c>DeletedText</c> (<c>w:delText</c>), never <c>Text</c> (<c>w:t</c>).
 /// </para>
 /// </remarks>
-public sealed class DocxAnnotationWriter
+public sealed class TrackedChangeDocxBuilder
 {
     /// <summary>
     /// Renders <paramref name="annotations"/> onto <paramref name="sourceDocx"/> as native Open XML
@@ -60,7 +67,7 @@ public sealed class DocxAnnotationWriter
     /// <c>target_text</c> was not found in the document
     /// (<see cref="DocxAnnotationErrorKind.TargetNotFound"/>). Nothing is partially written — the
     /// throw happens before any bytes are returned.</exception>
-    public byte[] Annotate(byte[] sourceDocx, IReadOnlyList<DocxAnnotation> annotations)
+    public byte[] Annotate(byte[] sourceDocx, IReadOnlyList<TrackedChangeAnnotation> annotations)
     {
         if (sourceDocx is null || sourceDocx.Length == 0)
         {
@@ -115,7 +122,7 @@ public sealed class DocxAnnotationWriter
 
     /// <summary>
     /// Per-invocation mutable state + the OOXML mutation logic. Instantiated once per
-    /// <see cref="Annotate"/> call so <see cref="DocxAnnotationWriter"/> stays a thread-safe
+    /// <see cref="Annotate"/> call so <see cref="TrackedChangeDocxBuilder"/> stays a thread-safe
     /// stateless singleton.
     /// </summary>
     private sealed class AnnotationSession
@@ -132,7 +139,7 @@ public sealed class DocxAnnotationWriter
             _idCounter = SeedRevisionId(mainPart, body);
         }
 
-        public void Apply(IReadOnlyList<DocxAnnotation> annotations)
+        public void Apply(IReadOnlyList<TrackedChangeAnnotation> annotations)
         {
             // EDGE-1: comments are emitted BEFORE track changes. A comment anchors an existing
             // run range; if a deletion converted that range to <w:del> first, the comment anchor
@@ -162,7 +169,7 @@ public sealed class DocxAnnotationWriter
 
         // -- Comment ----------------------------------------------------------------------------
 
-        private void ApplyComment(DocxAnnotation annotation)
+        private void ApplyComment(TrackedChangeAnnotation annotation)
         {
             var (paragraph, matchStart, matchLength) = LocateTarget(annotation.TargetText!);
             var matched = IsolateRange(paragraph, matchStart, matchLength);
@@ -197,7 +204,7 @@ public sealed class DocxAnnotationWriter
 
         // -- Insertion --------------------------------------------------------------------------
 
-        private void ApplyInsertion(DocxAnnotation annotation)
+        private void ApplyInsertion(TrackedChangeAnnotation annotation)
         {
             // <w:ins> WRAPS normal runs (Spike 5 §3a). Author/Date/Id are attributes on the w:ins.
             var ins = new InsertedRun
@@ -235,7 +242,7 @@ public sealed class DocxAnnotationWriter
 
         // -- Deletion ---------------------------------------------------------------------------
 
-        private void ApplyDeletion(DocxAnnotation annotation)
+        private void ApplyDeletion(TrackedChangeAnnotation annotation)
         {
             var (paragraph, matchStart, matchLength) = LocateTarget(annotation.TargetText!);
             var matched = IsolateRange(paragraph, matchStart, matchLength);
@@ -602,13 +609,13 @@ public sealed class DocxAnnotationWriter
 
 /// <summary>
 /// One accepted Compose annotation to materialize as native Open XML markup by
-/// <see cref="DocxAnnotationWriter"/>. Reuses the read-direction <see cref="TrackChangeKind"/>
+/// <see cref="TrackedChangeDocxBuilder"/>. Reuses the read-direction <see cref="TrackChangeKind"/>
 /// vocabulary and the compose-disposition edit-payload field names (<c>target_text</c> /
 /// <c>new_text</c>, per <c>ComposeDraftPayload</c> / <c>ProposedEdit</c>) rather than inventing a
 /// parallel schema. BFF-authored + client-facing (the Compose frontend assembles accepted edits +
 /// comments), so JSON is camelCase per the <c>ComposeEndpoints</c> convention.
 /// </summary>
-public sealed record DocxAnnotation
+public sealed record TrackedChangeAnnotation
 {
     /// <summary>Which kind of native markup to emit: insertion (<c>w:ins</c>), deletion
     /// (<c>w:del</c>), or comment (<c>w:comment</c>).</summary>
@@ -697,32 +704,4 @@ public sealed record DocxAnnotation
             throw new ArgumentException("An annotation requires a non-empty author.");
         }
     }
-}
-
-/// <summary>The category of a <see cref="DocxAnnotationException"/>.</summary>
-public enum DocxAnnotationErrorKind
-{
-    /// <summary>The supplied bytes are not a readable DOCX package → HTTP 400.</summary>
-    MalformedDocument,
-
-    /// <summary>An annotation's <c>target_text</c> was not found in the document → HTTP 422.</summary>
-    TargetNotFound,
-}
-
-/// <summary>
-/// A structured, mappable failure from <see cref="DocxAnnotationWriter.Annotate"/>. Distinct from a
-/// bare exception so the endpoint can turn it into the right ProblemDetails status
-/// (<see cref="DocxAnnotationErrorKind.MalformedDocument"/> → 400,
-/// <see cref="DocxAnnotationErrorKind.TargetNotFound"/> → 422) instead of an opaque 500.
-/// </summary>
-public sealed class DocxAnnotationException : Exception
-{
-    public DocxAnnotationException(DocxAnnotationErrorKind kind, string message, Exception? inner = null)
-        : base(message, inner)
-    {
-        Kind = kind;
-    }
-
-    /// <summary>The failure category, used by the endpoint to select the ProblemDetails status.</summary>
-    public DocxAnnotationErrorKind Kind { get; }
 }

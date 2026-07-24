@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Compose.Operations;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -145,49 +146,6 @@ public interface IComposeService
     Task<PromoteComposeDocumentResult> PromoteIfEphemeralAsync(
         PromoteComposeDocumentRequest request,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// FR-24 push-annotations: download the current SPE bytes, render the accepted Compose
-    /// annotations into them as native Open XML track-changes + comments (via
-    /// <see cref="DocxAnnotationWriter"/>), and persist the result to SPE with optimistic
-    /// concurrency (<c>If-Match</c> ETag). Mirrors <see cref="SaveAsync"/>'s SPE-orchestration
-    /// role — the pure OOXML authoring is delegated to the writer, the SPE hop to the
-    /// <c>SpeFileStore</c> facade (ADR-007). No AI reach (ADR-013).
-    /// </summary>
-    /// <remarks>
-    /// The write uses the caller-supplied load-time ETag so a document changed under the caller
-    /// (e.g. a Word-for-Web autosave) is rejected, not overwritten. On rejection the facade throws
-    /// <see cref="Infrastructure.Graph.EtagPreconditionFailedException"/> (412, ETag moved) or
-    /// <see cref="Infrastructure.Graph.DocumentLockedByWordException"/> (423, open in Word); the
-    /// endpoint maps both to ProblemDetails. Nothing partially writes.
-    /// </remarks>
-    /// <param name="request">Push payload: SPE drive-item id + drive id + tenant id + load-time
-    /// ETag + the accepted annotations.</param>
-    /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A <see cref="PushAnnotationsResult"/> with the new SPE version id + ETag + size.</returns>
-    Task<PushAnnotationsResult> PushAnnotationsAsync(
-        PushAnnotationsRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview: computes the deterministic
-    /// <see cref="ComposePushSavePreview"/> (comment/track-change counts + the Word-vs-Compose
-    /// split) for an annotation batch the caller is ABOUT to push, WITHOUT touching SPE (no
-    /// download, no write — purely categorizes the supplied batch + an optional session-derived
-    /// Compose-only count). This is the data the future Policy v2 Tier 2c gate dialog renders
-    /// inside its ONE confirmation surface (design.md §2.4) BEFORE the user commits to
-    /// <see cref="PushAnnotationsAsync"/> — no UI is built here (clean seam; see the escalation
-    /// trigger in the owning task's POML for the gate-dialog + OutcomeCard rendering halves).
-    /// </summary>
-    /// <param name="request">Preview payload: tenant id + the annotation batch under
-    /// consideration + optional bound session id (for the Compose-only count).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The computed <see cref="ComposePushSavePreview"/>.</returns>
-    Task<ComposePushSavePreview> PreviewPushAnnotationsAsync(
-        PreviewPushAnnotationsRequest request,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -542,16 +500,31 @@ public sealed record SaveComposeDocumentRequest
     public string? BaselineVersionId { get; init; }
 
     /// <summary>
-    /// E1 (FR-01/FR-02, task 022, Option C — design §4.2): the editor paragraphs the user CHANGED, each
-    /// keyed by its <c>w14:paraId</c> (E2 splice key) with its new settled text. When non-empty,
-    /// <see cref="SaveAsync"/> drives <see cref="ComposeParagraphRedlineSynthesizer"/> to rewrite exactly
-    /// these paragraphs in the resolved baseline as native <c>w:ins</c>/<c>w:del</c> tracked changes (a
-    /// word-level diff old→new), preserving every untouched paragraph + all structure by construction —
-    /// the "delta onto the retained original" that replaces the R2 whole-document reconstruction. Null/empty
-    /// on a clean Save or a create-on-save (nothing to splice; the baseline persists as-is). An unmatched
-    /// paraId is a handled synthesis error (<c>ComposeRedlineException</c>), never a silent wrong write.
+    /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /
+    /// ADR-049): the ordered, rebased task-003 OPERATION LOG the client captured this dirty session
+    /// (<c>(paraId, runIndex, run-local-offset)</c>-anchored insertText/deleteRange/replaceRange/setMark/
+    /// clearMark + the four structural paragraph ops). When non-empty, <see cref="SaveAsync"/> applies it via
+    /// the single <see cref="ComposeShadowPatchEngine"/> onto the resolved baseline (the "base version" =
+    /// <see cref="Content"/> or the <see cref="BaselineVersionId"/> re-fetch) — surgical, ID-anchored, ZERO
+    /// write-path text-search (I-7), preserving every untouched paragraph + all structure by construction.
+    /// This REPLACES the retired <c>ComposeEditedParagraph</c> paragraph-diff payload + its
+    /// <c>ComposeParagraphRedlineSynthesizer</c>. Null/empty on a clean Save or a create-on-save (nothing to
+    /// apply; the baseline persists byte-identical). An op whose <c>w14:paraId</c>/anchor does not resolve is a
+    /// handled <see cref="ComposePatchException"/> (mapped to ProblemDetails), never a silent wrong write.
     /// </summary>
-    public IReadOnlyList<ComposeEditedParagraph>? EditedParagraphs { get; init; }
+    public ComposeOperationLog? OperationLog { get; init; }
+
+    /// <summary>
+    /// R4 FR-06 (task 032): durable, <c>(paraId, range)</c>-anchored comments to emit as native
+    /// <c>w:comment</c> via the <see cref="ComposeShadowPatchEngine"/> (its EDGE-1 comment-before-track-change
+    /// ordering) — the text-search-free (I-7) replacement for the save-path <see cref="DocxAnnotation"/>
+    /// comment payload the retired <c>DocxAnnotationWriter</c> path baked in. Applied together with
+    /// <see cref="OperationLog"/> in one engine pass. Null/empty → no comments baked on save (session comments
+    /// still persist as mutable UI state via <c>SaveComposeAnnotationsAsync</c> and bake to native OOXML via the
+    /// push-annotations path, both unchanged). The text-anchored push-annotations surface is retired/migrated by
+    /// task 036 (§6.5 Path-A boundary).
+    /// </summary>
+    public IReadOnlyList<ComposeAnchoredComment>? Comments { get; init; }
 
     /// <summary>
     /// E1 born-in-editor (FR-01a, task 026): the paraId-keyed editor CONTENT MODEL — the authoring source for
@@ -582,21 +555,6 @@ public sealed record SaveComposeDocumentRequest
     /// <summary>Optional display name used only on first-Save promotion (Path B initial
     /// row creation) and as the created drive-item's file name.</summary>
     public string? DisplayName { get; init; }
-
-    /// <summary>
-    /// Redline/comment save fidelity (spaarkeai-compose-r2 UAT-R7 #2/#3/#4): accepted-as-pending
-    /// track-change insertions/deletions + comments to materialize as NATIVE Word markup
-    /// (<c>w:ins</c>/<c>w:del</c>/<c>w:comment</c>) via <see cref="DocxAnnotationWriter"/> BEFORE
-    /// persisting. The client sends (a) <see cref="Content"/> as a clean BASELINE <c>.docx</c> — the
-    /// document with pending redlines reduced to their committed (reject-state) text and accepted
-    /// edits already baked in — and (b) this list; <see cref="IComposeService.SaveAsync"/> re-applies
-    /// them on top so the saved <c>.docx</c> carries real tracked changes + comments instead of the
-    /// flattened plain text the client <c>tipTapToDocxBytes</c> writer (which has no track-change
-    /// branch) would otherwise produce. Null/empty → the baseline is persisted byte-identical (a plain
-    /// no-redline Save is unchanged; FR-06a byte fidelity preserved). Same <see cref="DocxAnnotation"/>
-    /// shape the push-annotations path uses (reuse, not a parallel contract).
-    /// </summary>
-    public IReadOnlyList<DocxAnnotation>? Annotations { get; init; }
 
     /// <summary>
     /// C2 fix (UAT 2026-07-20): the client's ordered load-time paraId map — one entry per editor
@@ -644,6 +602,15 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }
+
+    /// <summary>
+    /// FR-08 (task 050): when this save detected a STALE base (the version stamp this service persisted
+    /// after its own last write no longer matched the live SPE eTag), the <see cref="AnnotationReanchorService"/>
+    /// band summary for the re-anchored operation log + comments — AUTO (exact paraId match) applied
+    /// through the Patch Engine; REVIEW/ORPHAN surfaced here for the client to present, never silently
+    /// applied and never silently dropped. Null on every non-stale save (the common case).
+    /// </summary>
+    public ReanchorSummary? ReanchorSummary { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>
@@ -696,98 +663,6 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
-}
-
-/// <summary>FR-24 push-annotations request payload.</summary>
-public sealed record PushAnnotationsRequest
-{
-    /// <summary>SPE drive (container) id. Required.</summary>
-    public required string DriveId { get; init; }
-
-    /// <summary>SPE drive-item id. Required.</summary>
-    public required string DocumentSpeId { get; init; }
-
-    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
-    public required string TenantId { get; init; }
-
-    /// <summary>Load-time ETag sent as <c>If-Match</c> for optimistic concurrency. Required — a
-    /// blind overwrite is not offered on this path (FR-24 / Spike 7 G-1).</summary>
-    public required string IfMatch { get; init; }
-
-    /// <summary>The accepted annotations (track-change insertions/deletions + comments) to
-    /// materialize as native Open XML markup. Required, non-empty.</summary>
-    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
-
-    /// <summary>
-    /// FR-28 (task 055, additive/optional): bound <c>ChatSession</c> id. When supplied, the
-    /// Tier-2c preview attached to <see cref="PushAnnotationsResult.Preview"/> reflects the
-    /// session's current <c>DefinedTermsTracking</c> (FR-29) count as the "stays in Compose only"
-    /// side of the split (see <see cref="ComposePushSavePreview.ComposeOnlyCount"/>). Null (the
-    /// R2 default until the client sends it) degrades gracefully to <c>ComposeOnlyCount</c> = 0 —
-    /// never a failure.
-    /// </summary>
-    public string? SessionId { get; init; }
-}
-
-/// <summary>
-/// FR-28 (task 055) — Tier-2c PRE-CONFIRM preview request payload. See
-/// <see cref="IComposeService.PreviewPushAnnotationsAsync"/>.
-/// </summary>
-public sealed record PreviewPushAnnotationsRequest
-{
-    /// <summary>Tenant id (multi-tenant isolation per ADR-015 Tier 3). Required.</summary>
-    public required string TenantId { get; init; }
-
-    /// <summary>The annotation batch under consideration for push. Required, non-empty.</summary>
-    public required IReadOnlyList<DocxAnnotation> Annotations { get; init; }
-
-    /// <summary>
-    /// Optional bound <c>ChatSession</c> id — see <see cref="PushAnnotationsRequest.SessionId"/>
-    /// remarks for the identical Compose-only-count semantics.
-    /// </summary>
-    public string? SessionId { get; init; }
-}
-
-/// <summary>FR-24 push-annotations outcome — new SPE version id + ETag + size. Standalone (not a
-/// <see cref="ComposeDocumentResult"/>): the push path is document-scoped and carries no
-/// ChatSession binding.</summary>
-public sealed record PushAnnotationsResult
-{
-    /// <summary>SPE drive-item id the annotations were written to.</summary>
-    public required string DocumentSpeId { get; init; }
-
-    /// <summary>SPE drive (container) id.</summary>
-    public string? DriveId { get; init; }
-
-    /// <summary>New SPE version id committed by the annotated write.</summary>
-    public required string VersionId { get; init; }
-
-    /// <summary>Updated ETag after the write (matches Graph's response ETag).</summary>
-    public string? ETag { get; init; }
-
-    /// <summary>New file size after the write.</summary>
-    public long? Size { get; init; }
-
-    /// <summary>Count of annotations materialized into the document.</summary>
-    public required int AnnotationCount { get; init; }
-
-    /// <summary>
-    /// FR-28 (task 055): the Tier-2c preview computed as post-write completion evidence — the
-    /// SAME payload shape a future pre-confirm gate-dialog call
-    /// (<see cref="IComposeService.PreviewPushAnnotationsAsync"/>) returns before the push, echoed
-    /// back here so the completion OutcomeCard can show what was actually applied. Always
-    /// populated by the current push path.
-    /// </summary>
-    public ComposePushSavePreview? Preview { get; init; }
-
-    /// <summary>
-    /// FR-28 per-step push/save projection over the existing job pipeline
-    /// (<see cref="JobAwareCompletionState"/>): the ordered steps <c>push → save → version</c>
-    /// with each step's state, shaped to feed a future job-aware OutcomeCard once the core
-    /// Phase A0 contract (HANDOFF §2/§3) is consumable by the UI. Null only for legacy callers
-    /// that predate FR-28 (always populated by the current push path).
-    /// </summary>
-    public JobAwareCompletionState? CompletionState { get; init; }
 }
 
 /// <summary>

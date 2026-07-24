@@ -88,9 +88,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private void SetupSpeReturns(byte[] docx)
@@ -136,11 +134,11 @@ public sealed class ComposeServiceLoadImportedCommentsTests
         var source = CreateDocx("The quick brown fox.", "The lazy dog sleeps.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick brown fox", CommentText = "Define this term.", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick brown fox", CommentText = "Agreed — see defined terms.", Author = "Sam Rivera", Date = When.AddMinutes(5) },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Jordan Ellis", Date = When.AddMinutes(10) },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick brown fox", CommentText = "Define this term.", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "quick brown fox", CommentText = "Agreed — see defined terms.", Author = "Sam Rivera", Date = When.AddMinutes(5) },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Jordan Ellis", Date = When.AddMinutes(10) },
         };
-        return new DocxAnnotationWriter().Annotate(source, annotations);
+        return new TrackedChangeDocxBuilder().Annotate(source, annotations);
     }
 
     [Fact]
@@ -221,10 +219,10 @@ public sealed class ComposeServiceLoadImportedCommentsTests
         var source = CreateDocx("The quick brown fox.", "The lazy dog sleeps.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Comment, TargetText = "lazy dog", CommentText = "Cut this sentence.", Author = "Sam Rivera", Date = When },
         };
-        SetupSpeReturns(new DocxAnnotationWriter().Annotate(source, annotations));
+        SetupSpeReturns(new TrackedChangeDocxBuilder().Annotate(source, annotations));
         var sut = CreateSut();
 
         var result = await sut.LoadAsync(

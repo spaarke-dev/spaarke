@@ -2,8 +2,8 @@
   <metadata>
     <title>Concurrency + import seam slices (NFR-06/08)</title>
     <phase>5 Concurrency + save</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING task adding through-the-wire seam slices under tests/integration/seam (tags include testing + integration-test); TEST-MODIFYING override applies (code-review + adr-check at Step 9.5 unconditionally).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -126,9 +126,79 @@
   </acceptance-criteria>
 
   <notes>
-    Seam-slice evidence (NFR-06/08, Success Criterion 4) for tasks 050/051/052/053. Runs after all four land
-    (parallel-safe true — separate test files). If `tests/integration/seam/Compose/` was already created by
-    task 034 (Phase-3 corpus proof), extend it rather than duplicating harness setup.
+    COMPLETED 2026-07-22. Step 0 survey of the EXISTING seam/regression coverage (per this task's own
+    "extensive pre-existing coverage — add only what's missing" instruction) found:
+      - `tests/integration/seam/Ai/ComposeParaIdReanchorSeamTests.cs` (R3 task 012, FR-11) proves the
+        STANDALONE `/reanchor-annotations` endpoint's paraId-primary + fuzzy fallback — a DIFFERENT code
+        path from task 050's in-SaveAsync re-anchor. Did NOT close behavior (1).
+      - `tests/integration/seam/Ai/ComposeImportedAnchorsSurviveSaveSeamTests.cs` (R3 task 052, FR-26)
+        ALREADY proves imported revisions/comments SURVIVE a real Load->dirty-edit-elsewhere->Save->Load
+        round trip byte-for-byte (incl. the separate comments.xml part) — closing behavior (4)'s server
+        half in full. "Accept/reject-able" has no BFF endpoint (a client/TipTap concept); its proof + the
+        "unresolvable imported anchor surfaces" negative are CLIENT-side only per task 053's own notes
+        (053 changed zero `.cs` files) — `importRoundTrip.test.tsx`
+        (`renderUnresolvedRevisionPlaceholders`). No new BFF file was created for behavior (4) — duplicating
+        ComposeImportedAnchorsSurviveSaveSeamTests would be scope creep per CLAUDE.md §11 (cost-of-doing-
+        nothing: none — the exact scenario is already proven).
+      - `ComposeCreateOnSaveEndpointContractTests.UploadThenCreateOnSave_TransientDraft_...`
+        (tests/integration/contract/Api/Ai/) already proves the POSITIVE create-on-save-then-content-write
+        path through the wire (behavior 2's positive half) — cited, not duplicated.
+      - `Def14_ComposeSaveLockedDocumentTests` already proved the 423 lock surfacing (both routes, both
+        layers) for behavior (3)'s positive half — cited, not duplicated.
+
+    GAPS FOUND AND CLOSED:
+      1. Behavior (1) — stale-base save RE-ANCHORS through `ComposeService.SaveAsync` itself (no eTag 500;
+         `SaveComposeDocumentResult.ReanchorSummary` on the wire) had ZERO seam coverage. NEW:
+         `tests/integration/seam/Compose/ConcurrencySaveSeamTests.cs`
+         `Save_StaleBase_ReanchorsAutoBand_NoETagFiveHundred_ThroughTheWire` — two sequential real `/save`
+         calls on the same drive-item; the second's live eTag (via `GetFileMetadataAsUserAsync`) diverges
+         from the version stamp the first call persisted (ADR-009 `IDistributedCache`), triggering
+         `ReanchorStaleSaveAsync`; asserts 200 OK (never 500), `reanchorSummary.autoCount==1`, and the
+         AUTO-band op actually landed (native `w:ins`) in the persisted bytes.
+      2. NEGATIVE for (1) — an un-re-anchorable op (paraId absent from both the retained baseline and the
+         freshly re-downloaded current bytes) had no seam proof it surfaces as ORPHAN rather than being
+         dropped or mis-applied. NEW: `Save_StaleBase_UnReanchorableOperation_SurfacesAsOrphan_...` — same
+         two-call harness; asserts 200 OK, `reanchorSummary.orphanCount==1`, `matchedParagraphIndex==-1`,
+         and the op's text never appears in the persisted document.
+      3. NEGATIVE for (3) — no seam test proved an UNRELATED (non-lock, non-precondition) failure during
+         the SPE write still surfaces as a generic 500 ProblemDetails, distinct from the 423/412 typed
+         copy. NEW: `Save_UnrelatedNonLockFailure_SurfacesGenericProblemDetails_NotMisclassifiedAsLock_...`
+         — throws a plain `InvalidOperationException`; asserts 500 + "Internal Server Error" title + the
+         body does NOT contain the 423/412 actionable copy (proves the typed catches don't swallow an
+         unrelated exception as a false negative).
+      4. NEGATIVE for (2) — task 051's own acceptance criteria names "a genuinely concurrent external edit
+         between create and content write yields a clean 412" but only the 423 (lock) variant existed for
+         the create-on-save route; no 412 (precondition) counterpart at either layer. EXTENDED (not
+         duplicated) `tests/integration/regression/Compose/Def14_ComposeSaveLockedDocumentTests.cs` with
+         `CreateOnSaveDocument_WhenSpeCreatePreconditionFailed_Returns412WithActionableCopy_NotOpaque500`
+         (route layer, mirrors the existing 423 create-on-save test) and
+         `UploadSmallAsUser_WhenGraphReturns412_ThrowsEtagPreconditionFailedException` (translation layer,
+         mirrors the existing 423 translation test) — reusing the file's own established fixture/pattern
+         (CLAUDE.md §11: no new fixture class for an already-solved bug class).
+
+    Component justification (CLAUDE.md §11) for the one NEW file
+    (`tests/integration/seam/Compose/ConcurrencySaveSeamTests.cs`): existing = grepped
+    tests/integration/{seam,regression}/**/*Compose*.cs + tests/integration/seam/Ai/*Compose*.cs — no
+    file exercises `ComposeService.SaveAsync`'s in-line stale-base re-anchor branch, the ORPHAN negative,
+    or the generic-5xx negative; extension = no, `ComposeParaIdReanchorSeamTests` targets a DIFFERENT
+    endpoint (`/reanchor-annotations`) and cannot be extended to cover the SaveAsync-embedded path;
+    cost-of-doing-nothing = NFR-08/Success-Criterion-4 (concurrency) ships unverified and the eTag-500
+    regression DEF-14 already once shipped could recur undetected on the re-anchor branch specifically.
+
+    Verification: `dotnet build src/server/api/Sprk.Bff.Api/` green (0 errors). `dotnet test
+    tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Compose"` — 552/552 green (0 failures;
+    +5 net new tests vs the pre-054 count: 3 in ConcurrencySaveSeamTests.cs + 2 in the extended Def14
+    file). Targeted re-run of just the touched/added test classes (11 tests) also green. Step 9.5 quality
+    gates (TEST-MODIFYING override, unconditional): code-review found no Critical/Warning issues — no
+    banned ADR-038 patterns (`Mock<HttpMessageHandler>`, DI-registration, ctor-null), no AI code smells;
+    adr-check found ADR-038/ADR-007/ADR-013 compliant (test-only change; mocks stay at the
+    `ISpeFileOperations`/`IGenericEntityService`/`IPostUploadIndexingEnqueuer` module boundaries the
+    existing `ComposeFidelitySeamFixture`/`Def14ComposeSaveFixture` already established — no new fixture
+    class). Publish size: TEST-ONLY change (zero `.cs` files under `src/` touched, zero new package
+    references) — publish size UNCHANGED from the current baseline.
+
+    Files changed: `tests/integration/seam/Compose/ConcurrencySaveSeamTests.cs` (new, 3 tests),
+    `tests/integration/regression/Compose/Def14_ComposeSaveLockedDocumentTests.cs` (extended, +2 tests).
   </notes>
 
   <execution>

@@ -1,8 +1,7 @@
-# Current Task State
+# Current Task State — Spaarke Compose R4
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-22 (pipeline init)
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarkeai-compose-r4`.
 
 ---
 
@@ -10,114 +9,36 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, no task started yet |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Say "continue" or "work on task 001" → invoke `task-execute` with `tasks/001-shadow-document-adr.poml` |
+| **Project** | spaarkeai-compose-r4 (Shadow Document Architecture — hard-replace of Compose save layer) |
+| **Progress** | **All code + verification COMPLETE. Stopped at the deploy boundary (owner-orchestrated).** |
+| **Status** | ⏸ **Autonomous run paused at deploy boundary** — remaining = 035/062 (deploy), 063 (gate, post-deploy), 090 (wrap-up) |
+| **Next Action** | OWNER orchestrates deploy: task 035 (dev) + task 062 (full R4 + CIPO UAT). Then 063 flagship gate + 090 wrap-up. |
 
-### Files Modified This Session
-- Project artifacts created by `/project-pipeline` (README, plan, CLAUDE.md, current-task, tasks/, TASK-INDEX)
+### What shipped this session (all committed on work/spaarkeai-compose-r4)
+- **036** (`bae44955b`) — RETIRED push-to-Word annotations (Path B); deleted `DocxAnnotationWriter` (last text-search byte-author). I-7 complete.
+- **037/033** — resolved **C-revised** (owner): born-in-editor stays on `ComposeDocumentRenderer` (clean-authoring, zero text-search — cited I-5 exception). Two byte-authors kept separate by design.
+- **038** (`a5368d5b5`) — **ZERO-ERROR guardrail pass**: unsupported edit-path controls disabled on loaded docs, table gating corrected, hyperlinks disabled, formatted-paste informs via banner, and the critical **op-log-preservation fix** (no rejected save can lose a batch).
+- **060** (`da1ab0e94`) — hard-replace core complete (write path fully on the engine; both legacy WRITERS gone). mammoth RETAINED for 3 transient docx mounts (Browse/upload/open-in-Compose) — §6.5 Path-A exception → R5 G6.
+- **061** (`0a9710cd1`) — acceptance evidence ALL GREEN: 28/28 corpus byte-diff, 515 server + 531 client tests, publish **46.11 MB** (−3.52 vs 49.63), no new HIGH CVE, ADR-013 NetArch green.
 
-### Critical Context
-R4 is a MISSION-CRITICAL hard-replace of the Compose save layer with a Shadow Document Architecture. **Phase 0 (tasks 001–006) is a proof gate** that MUST be green before any old-path deletion (023/032/060). Start at task 001.
+### 🔔 OWNER — the deploy boundary (the only thing left before wrap-up)
+1. **Task 035** — deploy patch-engine core to **dev** (verified at 46.11 MB; held for owner).
+2. **Task 062** — deploy full R4 + **CIPO operator UAT** (owner-orchestrated per user: "I need to help orchestrate the deploy").
+3. After deploy: **063** flagship gate (8 criteria — Criterion 7 "one byte-author" met with the two documented C-revised/mammoth exceptions), then **090** wrap-up (+ `/test-diet`).
 
----
+### Owner decisions on record (this session)
+- **036 → Path B (retire push-annotations).** **037 → C-revised (keep renderer, cite I-5 exception).** **060 → Path-A (retain mammoth for transient mounts → R5).**
+- **Scope boundary**: R4 = keep two authors separate, ship **error-free with documented functional limits**; editing-completeness deferred to **`projects/spaarkeai-compose-r5`** (gaps G1–G6, code-grounded + sized).
+- **KEY constraint honored**: no user-triggerable errors, no silent data loss (task 038 + the transient-mount limit is pre-existing/non-error).
 
-## Active Task (Full Details)
+## Deferred to R5 (`projects/spaarkeai-compose-r5/README.md`)
+G1 cross-session authored-doc clean lifecycle · G2 clean-apply mode · G3 setBlockAttr applier (headings/lists/alignment on edit path) · G4 table op (tracked) · G5 hyperlinks · G6 transient-mount projection unification (removes mammoth). None requires merging the two byte-authors.
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | none |
-| **Task File** | — (first task: `tasks/001-shadow-document-adr.poml`) |
-| **Title** | — |
-| **Phase** | Ready to start Phase 0 (Gate) |
-| **Status** | none |
-| **Started** | — |
+## Health
+- Every task build-verified + committed. Server Compose 515/515; client 531/531; 038 guardrails 64/64; corpus byte-diff 28/28. Publish 46.11 MB compressed (≤60). Only HIGH CVE = pre-existing `System.Security.Cryptography.Xml` transitive. ADR-007 arch failure = pre-existing Communication/Office (zero Compose types).
 
----
+## How to resume
+`/project-continue` or "where was I?". Deploy is owner-led — do NOT run 035/062 autonomously. After deploy, 063 → 090.
 
-## Progress
-
-### Completed Steps
-*No steps completed yet*
-
-### Current Step
-*No task started — project just initialized.*
-
-### Files Modified (All Task)
-*No files modified yet*
-
-### Decisions Made
-- 2026-07-22: Cutover = hard replace (owner-confirmed); Phase 0 proof gate is the pre-commit safety net.
-- 2026-07-22: D1–D5 locked; anchor = `(paraId, runIndex, run-local-offset)`.
-
----
-
-## Next Action
-
-**Next Step**: Start task 001 (Shadow-Document ADR) via `task-execute`.
-
-**Pre-conditions**:
-- On branch `work/spaarkeai-compose-r4` (already checked out).
-- Read `spec.md`, `design.md`, and `notes/as-built-inventory.md` before implementation tasks.
-
-**Key Context**:
-- Phase 0 gate (task 006) blocks all cutover/deletion tasks.
-- BFF=Y — every BFF task: Placement Justification + publish-size + seam slice + `/conflict-check`.
-
-**Expected Output**:
-- Task 001 produces the R4 Shadow-Document ADR (`.claude/adr/`) + the ADR-Tension Path-B amendment of the R3 paragraph-diff decision.
-
----
-
-## Blockers
-
-**Status**: None
-
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-07-22 (pipeline init)
-- Focus: Project initialized via `/project-pipeline`.
-
-### Key Learnings
-- `Services/Compose/` overlaps 4 sibling projects — `/conflict-check` before every BFF PR.
-- Consume `Services/Ai/PublicContracts/` seams; NO fork of `Services/Ai/`.
-
-### Handoff Notes
-*No handoff notes*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: spaarkeai-compose-r4
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-013: AI facade — no AI internals in `Services/Compose/`
-- ADR-007: no `Microsoft.Graph` above `SpeFileStore`
-- ADR-038: seam DoD; banned mock/DI/ctor tests
-- ADR-039/040: engine frozen; no new AI dispatch
-
-### Knowledge Files Loaded
-*Loaded per-task by task-execute from each POML's `<knowledge>` section.*
-
----
-
-## Recovery Instructions
-
-1. **Quick Recovery**: Read the "Quick Recovery" section above.
-2. **Load task file**: `tasks/{task-id}-*.poml`.
-3. **Load knowledge files**: From the task's `<knowledge>` section.
-4. **Resume**: From "Next Action".
-
-**Commands**: `/project-continue` · `/context-handoff` · "where was I?"
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+## Portfolio
+[Project #679](https://github.com/spaarke-dev/spaarke/issues/679) · Branch `work/spaarkeai-compose-r4`.

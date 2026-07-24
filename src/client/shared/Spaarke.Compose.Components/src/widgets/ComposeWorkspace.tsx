@@ -115,7 +115,6 @@ import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5).
 import {
-  useComposePushAnnotations,
   useComposePullAnnotations,
   useComposeCheckChanges,
   anchoredAnnotationsToPriorAnchors,
@@ -137,6 +136,10 @@ import type {
   ImportedRevision,
   ImportedComment,
 } from '../types/compose-contracts';
+// R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
+// `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
+// against, so both ends agree on the contract shape.
+import { COMPOSE_OPERATION_SCHEMA_VERSION } from '../types/compose-operations';
 
 // Re-export for consumers wiring the FR-29/FR-33 rehydrate state (annotations authoring UX is a
 // follow-up task; this workspace only receives + stores what LoadAsync's response carries).
@@ -316,7 +319,7 @@ export interface ComposeWorkspaceProps {
   /** Called when the user clicks Browse in the empty state. */
   onBrowseRequested?: () => void;
 
-  /** Called when the user clicks Search for Document in the empty state. */
+  /** Called when the user clicks the "Open Document" CTA (task 039 P2 label; formerly "Search for Document") in the empty state. */
   onSearchRequested?: () => void;
 
   /** Called once the workspace has mounted (LEGALWORKSPACE-EMBEDDED-MODE §6). */
@@ -797,14 +800,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [anchoredAnnotations, definedTermsTracking, state.status, state.sessionId, bffBaseUrl, tenantId]);
 
   // -------------------------------------------------------------------------
-  // Word round-trip shuttle (task 103) — push (3.1) / pull (3.4) / reanchor + poll (3.5)
+  // Word round-trip shuttle (task 103) — pull (3.4) / reanchor + poll (3.5)
   // -------------------------------------------------------------------------
-  // The push-annotations (050), pull-annotations (051), check-changes (053), and reanchor (054)
-  // endpoints + the 054 reanchor banner/panel were all BUILT but never CONNECTED. This block wires
-  // them: a "Push to Word" toolbar action (3.1), and a return-from-Word poll-on-focus that pulls the
-  // current native annotations (3.4) + re-anchors prior anchors (3.5) into the mounted banner/panel.
+  // The pull-annotations (051), check-changes (053), and reanchor (054) endpoints + the 054 reanchor
+  // banner/panel were all BUILT but never CONNECTED. This block wires them: a return-from-Word
+  // poll-on-focus that pulls the current native annotations (3.4) + re-anchors prior anchors (3.5)
+  // into the mounted banner/panel. (The "Push to Word" leg (3.1) has been retired.)
   const { summary: reanchorSummary, reanchor: runReanchor, reset: resetReanchor } = useComposeReanchor({ bffBaseUrl });
-  const { push: pushAnnotations, pushing: isPushingToWord } = useComposePushAnnotations({ bffBaseUrl });
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
 
@@ -823,41 +825,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     () => anchoredAnnotationsToDocxAnnotations(anchoredAnnotations),
     [anchoredAnnotations]
   );
-  const canPushToWord =
-    (state.status === 'loaded' || state.status === 'saving') &&
-    !!state.documentRef?.speDriveItemId &&
-    !!effectiveDriveId &&
-    !!state.etag &&
-    composeDocxAnnotations.length > 0;
-
-  const handlePushToWord = React.useCallback(async (): Promise<void> => {
-    if (!state.documentRef?.speDriveItemId || !effectiveDriveId || !state.etag) return;
-    // C3 fix (UAT 2026-07-20): Push-to-Word carried ONLY session comments/anchored annotations — it never
-    // read the pending AI redline marks, so redlines never pushed (comments did). Prepend them (same shape,
-    // mirrors triggerSave's `saveAnnotations` ordering) so a push writes w:ins/w:del too.
-    const redlineAnnotations = editorRef.current?.getRedlineAnnotations?.() ?? [];
-    const pushableAnnotations = [...redlineAnnotations, ...composeDocxAnnotations];
-    if (pushableAnnotations.length === 0) return;
-    try {
-      await pushAnnotations({
-        documentSpeId: state.documentRef.speDriveItemId,
-        driveId: effectiveDriveId,
-        tenantId,
-        ifMatch: state.etag,
-        annotations: pushableAnnotations,
-      });
-    } catch {
-      // The hook surfaces a user-safe error; a push failure must not crash the editing session.
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    state.documentRef?.speDriveItemId,
-    state.etag,
-    effectiveDriveId,
-    tenantId,
-    composeDocxAnnotations,
-    pushAnnotations,
-  ]);
 
   // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
   // check-changes; when the document changed, PULL the current native annotations (3.4) and
@@ -1020,6 +987,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // passthrough of the RETAINED original; never a reconstruction).
       const editorIsDirty = editorRef.current.isDirty();
 
+      // R4 FR-06 (task 032, the write-path cutover; task 023 retired the paragraph-diff export this replaced):
+      // a dirty save of a LOADED doc sends the ordered, rebased task-003 OPERATION LOG (ID-anchored
+      // (paraId, runIndex, run-local-offset) ops) the server applies via ComposeShadowPatchEngine — the ONLY
+      // dirty-save capture path. Read ONCE here (serializing resets the log + the editor dirty flag). Ops whose
+      // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
+      // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
+      // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
+      const opLogSnapshot =
+        !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
+      const operationLog = opLogSnapshot
+        ? {
+            schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,
+            operations: opLogSnapshot.orderedOps
+              .filter(entry => !entry.deletedContentFlag)
+              .map(entry => entry.operation),
+          }
+        : undefined;
+
       // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
       // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
       // synthesizer resolves (a redline accept / edit on an originally-id-less paragraph, or ANY paragraph
@@ -1029,24 +1014,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
       const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
 
-      // Save-robustness fix (UAT round-4): pending AI/user REDLINES are NO LONGER sent as text-searched
-      // annotations. `DocxAnnotationWriter.LocateTarget` re-locates each target in the raw OOXML by text,
-      // which 422s whenever the target spans a `<w:tab/>`/`<w:br/>` (tab-laid-out list items) or drifts —
-      // the recurring "a tracked change could not be located" error. Redlines now persist through the
-      // POSITION-based path instead: `collectEditedParagraphs` emits each changed paragraph's ACCEPT-STATE
-      // text (pending redline applied) keyed by paraId, and the server synthesizer diffs it against the
-      // retained original to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only COMMENTS still
-      // ride the annotation path (no position-based comment synthesis exists; a comment anchors a user
-      // SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search remains for Push-to-Word.
+      // Save-robustness fix (UAT round-4; superseded by task 032's op-log cutover): pending AI/user REDLINES
+      // are NO LONGER sent as text-searched annotations. `DocxAnnotationWriter.LocateTarget` re-locates each
+      // target in the raw OOXML by text, which 422s whenever the target spans a `<w:tab/>`/`<w:br/>`
+      // (tab-laid-out list items) or drifts — the recurring "a tracked change could not be located" error.
+      // Redlines now persist through the ID-ANCHORED op-log instead: the interceptor captures the underlying
+      // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored operations, and
+      // ComposeShadowPatchEngine applies them to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only
+      // COMMENTS still ride the annotation path (no op-anchored comment synthesis exists yet — task 036; a
+      // comment anchors a user SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search
+      // remains for Push-to-Word.
       const redlineAnnotations: DocxAnnotationInput[] = [];
-      // Save-robustness fix (UAT round-4, 2026-07-21): the anchored-annotation → DocxAnnotation mapping
-      // (`composeDocxAnnotations`) also emits Insertion/Deletion REDLINES (an AI `insertion-suggestion` /
-      // `deletion-suggestion` becomes a text-searched track-change), not only comments. Those AI redlines
-      // are ALREADY persisted through the POSITION-based path — the materialized redline mark rides the
-      // paragraph's accept-state text in `collectEditedParagraphs` → the server synthesizer emits w:ins/w:del
-      // by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a tracked change
-      // could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic run at that
-      // location) — exactly why an AI edit saved at the document start but failed at an interior location.
+      // Save-robustness fix (UAT round-4, 2026-07-21; superseded by task 032's op-log cutover): the
+      // anchored-annotation → DocxAnnotation mapping (`composeDocxAnnotations`) also emits Insertion/Deletion
+      // REDLINES (an AI `insertion-suggestion` / `deletion-suggestion` becomes a text-searched track-change),
+      // not only comments. Those AI redlines are ALREADY persisted through the ID-anchored op-log above —
+      // the materialized redline mark rides the granular ops ComposeShadowPatchEngine applies to emit
+      // w:ins/w:del by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a
+      // tracked change could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic
+      // run at that location) — exactly why an AI edit saved at the document start but failed at an interior
+      // location.
       // Keep ONLY Comments on the save annotation path (they have no position-based representation; a comment
       // anchors a user selection, which rarely spans a tab). This completes the round-4b redline exclusion —
       // the `redlineMarksToDocxAnnotations` source was already zeroed above; this was the SECOND source.
@@ -1109,6 +1096,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             : { content: encodeRetained(state.docxBytes!) }),
         };
       } else {
+        // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
+        // holds NO retained original bytes (`!state.docxBytes`, the SAME discriminant the create path's
+        // `bornInEditorRender` uses) and its create-on-save returned the drive-ITEM id as VersionId — there is
+        // no real SPE baseline version to re-fetch. So on EVERY in-session replace save it RE-AUTHORS via
+        // `contentModel` (mirroring the create path), never entering the baseline-less op-log path that 400s.
+        // The server renders the .docx and ReplaceFileContentAsUserAsync's it onto the EXISTING item (same
+        // speDriveItemId) — updating in place, no duplicate record. A LOADED/imported doc (docxBytes present)
+        // keeps the op-log + baseline path below EXACTLY as-is → tracked changes (REQ-2 not regressed).
+        const bornInEditor = !state.docxBytes;
         requestBody = {
           // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
           // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
@@ -1119,14 +1115,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
           annotations: saveAnnotations,
-          // The load-time version id lets the server re-fetch the baseline even without the client bytes.
-          baselineVersionId: state.versionId ?? undefined,
-          // Same-session fast-path: still holding the retained original → send it (byte-identical).
-          content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
-          // Dirty → the paraId-keyed edited-paragraph delta the server synthesizes onto the baseline.
-          editedParagraphs: editorIsDirty ? editorRef.current.collectEditedParagraphs() : undefined,
-          // C2: the baseline paraId map so the server can stamp minted ids before synthesizing the delta.
+          // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
+          // (harmless on the born-in-editor branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
+          ...(bornInEditor
+            ? // Born-in-editor: re-author the whole document server-side from the content model. No baseline /
+              // op-log — the doc was authored in the editor, there is nothing to diff onto.
+              { contentModel: editorRef.current.buildContentModel() }
+            : {
+                // Loaded/imported dirty save (UNCHANGED — REQ-2). The load-time version id = the op-log's BASE
+                // VERSION; lets the server re-fetch the baseline even without the client bytes.
+                baselineVersionId: state.versionId ?? undefined,
+                // Same-session fast-path: still holding the retained original → send it (byte-identical).
+                content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+                // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch
+                // Engine onto the resolved baseline (undefined on a clean save → baseline persists byte-identical).
+                operationLog,
+              }),
         };
       }
 
@@ -1206,6 +1211,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // next edit. ComposeEditor's internal dirtyRef also resets on the
       // next load; here we mirror that for post-save.
       setIsDirty(false);
+
+      // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
+      // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
+      // read (that was the data-loss bug — a 422 emptied the log BEFORE the POST, so a retry re-sent an
+      // empty log and lost every valid text edit in the batch); this post-200 commit is what finally drops
+      // the batch, and ONLY on success. A rejected save returned at the `!response.ok` guard above, so it
+      // never reaches here — the op-log + dirty flag survive for a retry that re-sends the same edits.
+      // Called AFTER setIsDirty(false) so `commitSaved`'s onDirtyChange (true iff concurrent edits arrived
+      // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
+      // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
+      // each save (buildContentModel), so it needs no op-log commit.
+      if (operationLog) {
+        editorRef.current?.commitSaved?.();
+      }
 
       // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
       // let the host write any chosen parent association (associate() no-ops on "none"). The
@@ -2320,18 +2339,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               onOpenInWordDesktop={() => {
                 void openInWordFlushed('desktop');
               }}
-              // gap 3.1 — only offer Push-to-Word for a persisted document (a transient
-              // draft has no SPE drive-item to write native annotations into yet).
-              onPushToWord={
-                state.documentRef?.speDriveItemId
-                  ? () => {
-                      void handlePushToWord();
-                    }
-                  : undefined
-              }
               wordActionsDisabled={wordActionsDisabled}
-              canPushToWord={canPushToWord}
-              isPushingToWord={isPushingToWord}
               onSave={() => {
                 void triggerSave();
               }}

@@ -3,7 +3,7 @@
     <title>Shadow-Document Architecture ADR + R3 paragraph-diff amendment (ADR Tension Path B)</title>
     <phase>0 Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural — this is the founding ADR every downstream R4 task cites (invariants I-1…I-7, decisions D1–D5, the single anchor coordinate, the one Patch Engine); it also formalizes the ADR-Tension Path-B amendment that supersedes the R3 paragraph-diff project decision. High blast radius.</rigor-reason>
     <model-tier>opus</model-tier>

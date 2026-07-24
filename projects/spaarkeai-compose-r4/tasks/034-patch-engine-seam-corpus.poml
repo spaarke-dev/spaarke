@@ -2,8 +2,8 @@
   <metadata>
     <title>Patch-engine seam slices + corpus round-trip proof (NFR-01/02)</title>
     <phase>3 Patch Engine</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `tests/**`, tags include `testing`/`integration-test` — TEST-MODIFYING override forces FULL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -15,8 +15,8 @@
     <tags>bff-api,testing,integration-test</tags>
     <estimated-effort>1-2 days</estimated-effort>
     <assigned>unassigned</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-22</started>
+    <completed>2026-07-22</completed>
   </metadata>
 
   <prompt>
@@ -127,6 +127,48 @@
 
   <notes>
     No `&lt;justification&gt;` — test coverage, not new production surface. This is the NFR-01/02 acceptance evidence for the Patch Engine and feeds task 006's / task 061's corpus proof. `parallel-safe:true` — separate test code, no production-file contention.
+
+    COMPLETED 2026-07-22. Two new files under `tests/integration/seam/Compose/`:
+    - `ComposePatchEngineSaveSeamTests.cs` — through-the-wire `WebApplicationFactory` slices driving
+      the REAL `POST /api/compose/documents/{id}/save` op-log route (task 032). Reuses
+      `ComposeFidelitySeamFixture` (tests/integration/seam/Ai/), `ComposeCorpusFixtureLocator` +
+      `ComposeOoxmlPackagePartComparer` (task 004) — extends coverage to non-empty operation logs
+      rather than duplicating the existing no-op-save proof. 6 `[Theory]` slices x 3 corpus docs
+      (incl. CIPO) = 18 cases: interior insertText (redline) placement determinism + zero-drift on
+      other paragraphs; anchored comment placement determinism; split/merge/insert/delete paragraph
+      round-trip (task 031's four structural ops); plus 1 `[Fact]` negative case — an unknown paraId
+      is refused as a typed 422 ProblemDetails (`ComposePatchErrorKind.ParagraphNotFound` →
+      "Change Could Not Be Applied"), with `SpeMock.Verify(..., Times.Never)` proving nothing was
+      partially written.
+    - `ComposeWritePathTextSearchAuditTests.cs` — the required CODE AUDIT: 2 source-text tests
+      confirming zero `.IndexOf(`/`.Contains(`/`.StartsWith(`/`.EndsWith(` usage in
+      `ComposeShadowPatchEngine.cs` (whole file) and in `ComposeService.cs`'s `SaveAsync` +
+      `ResolveSaveBaselineAsync` slice, plus confirmation the save path never invokes the retired
+      `DocxAnnotationWriter` (`_annotationWriter` — wired only to push-annotations, task 036 scope).
+
+    Deviation from the corpus-track-changes-clean note: NO synthetic doc was needed — all 3 seed
+    corpus docs (flat, single-section, table-free per corpus-manifest.md §1) supplied addressable
+    plain paragraphs for every case including the four structural ops. The one corpus gap
+    (a pre-existing tracked change to reconcile against, for `TrackedChangeReconciliationUnsupported`)
+    is out of this task's scope — that boundary has no corpus doc and is covered at the unit level
+    only (`ComposeShadowPatchEngineTests.cs`, task 030).
+
+    One fix during authoring: the anchored-comment test's byte-preservation assertion initially
+    expected ALL non-document.xml parts untouched, but adding a comment legitimately CREATES
+    `word/comments.xml` (none of the 3 seed docs carry one) — the assertion was corrected to exclude
+    that one legitimately-new part from the "untouched" bucket while still requiring every OTHER part
+    (styles, numbering, headers/footers, theme, media) stay byte-identical.
+
+    VERIFY: `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors (pre-existing warnings only).
+    `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Compose"` — 545/545 green
+    (no regressions). New tests specifically: 21/21 green (18 theory cases + 1 negative Fact + 2 audit
+    Facts). Publish size: 47 MB compressed (test-only change — unchanged from baseline, no BFF
+    production code touched). Quality gates (Step 9.5, TEST-MODIFYING override — mandatory per root
+    CLAUDE.md §8): code-review self-review found 0 Critical/Warning, 1 Suggestion (4 bare
+    `persisted.Should().NotBeNull()` assertions missing a `because` message — fixed to match the
+    file's own established messaging convention); adr-check found 0 violations (ADR-038 banned
+    patterns absent — grep-verified; no `Microsoft.Graph`/AI-internal injection; no new interfaces;
+    BFF Hygiene §10 does not trigger — test-only files, no `src/server/api/Sprk.Bff.Api/**` change).
   </notes>
 
   <execution>

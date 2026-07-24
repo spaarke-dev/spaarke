@@ -116,17 +116,30 @@ import {
   docxToTipTapHtml,
   stampParaIds,
   captureParaIdSnapshot,
-  collectEditedParagraphs,
   buildContentModel,
   buildBaselineParaIdMap,
 } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
-import { applyImportedRevisions } from './importedRevisions';
+// R4 FR-03/FR-06 (task 020/022/032) — the step→operation interceptor + its rebased
+// operation log. A headless, read-only ProseMirror plugin captures transaction steps
+// as task-003 operations anchored `(paraId, runIndex, run-local-offset)`; the
+// RebasedOperationLog keeps them ordered + rebased across the dirty session. Task 032
+// (the write-path cutover) wires the log PRODUCTION here (supplying the classifier
+// callbacks) and exposes `serializeOperationLog()` on the handle so `triggerSave` sends
+// the op-log the server applies via ComposeShadowPatchEngine. Capture only — no fetch,
+// no doc mutation.
+import {
+  RebasedOperationLog,
+  createRebasedOperationLogPlugin,
+  type ComposeOperationLogSnapshot,
+} from './stepOperationInterceptor';
+import { Extension } from '@tiptap/core';
+import { COMPOSE_R4_OPAQUE_ATOMS } from './opaqueAtomNode';
+import { applyImportedRevisions, renderUnresolvedRevisionPlaceholders } from './importedRevisions';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
-  ComposeEditedParagraph,
   ComposeBaselineParaId,
   ComposeContentModel,
   ImportedRevision,
@@ -257,6 +270,10 @@ const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
 // Registered additively below alongside the LOCKED Spike #1 list (never mutated).
 
+// R4 FR-02 opaque-atom node types (task 021) — factored into `./opaqueAtomNode` as pure headless
+// schema pieces (see that module's header). Registered additively below (never mutates the locked
+// list). Renders the task-012 server projection's non-editable SDT/field/object placeholders.
+
 // ---------------------------------------------------------------------------
 // Constants — selection debounce
 // ---------------------------------------------------------------------------
@@ -275,6 +292,17 @@ const FLOW2_MIN_CHARS = 10;
  * documentation: "CAP: ≤2000 characters." Dispatchers truncate at source.
  */
 const SELECTION_TEXT_CAP = 2000;
+
+/**
+ * task 038 (spaarkeai-compose-r4 zero-error guardrails) — the user-visible, non-blocking notice shown
+ * when a step the closed op set cannot yet carry is DEFERRED (a structural/unrepresentable step or a
+ * refused opaque-atom edit). It exists to catch formatted/linked PASTE, which bypasses the toolbar
+ * gate (change 1/2) and would otherwise be silently dropped. The SAVE STILL SUCCEEDS for the
+ * representable edits — this banner only informs, it never blocks. The deferred features are
+ * implemented in projects/spaarkeai-compose-r5 (G3 heading/list/alignment, G4 tables, G5 hyperlinks).
+ */
+const DEFERRED_FORMAT_NOTICE =
+  "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied. Your text edits are still saved.";
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -495,14 +523,8 @@ export interface ComposeEditorProps {
   onOpenInWord?: () => void;
   /** Open the current document in the Word desktop app. */
   onOpenInWordDesktop?: () => void;
-  /** Render accepted annotations into the .docx as native Word track-changes + comments. */
-  onPushToWord?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
   wordActionsDisabled?: boolean;
-  /** True when there is something to push (persisted doc + ≥1 accepted annotation). */
-  canPushToWord?: boolean;
-  /** True while a push-to-Word is in flight. */
-  isPushingToWord?: boolean;
   /** Save handler (create-on-save first Save, or update). Renders the Save button when set. */
   onSave?: () => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
@@ -523,13 +545,29 @@ export interface ComposeEditorProps {
  */
 export interface ComposeEditorHandle {
   /**
-   * R3 FR-01 (task 027): the paragraphs the user CHANGED since load, each keyed by its `w14:paraId`
-   * with its new REJECT-STATE settled text (pending AI redlines excluded — those ride
-   * {@link getRedlineAnnotations}). The host sends these on a dirty save of a LOADED doc; the server
-   * synthesizes the tracked-change delta onto the retained original. Resets the dirty flag. The client
-   * NEVER authors `.docx` bytes — this replaced the removed `serialize()`.
+   * R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 OPERATION LOG snapshot
+   * ({@link ComposeOperationLogSnapshot}) captured this dirty session — the ID-anchored
+   * (`paraId, runIndex, run-local-offset`) op stream the host sends on a dirty save of a LOADED doc, which
+   * the server applies via `ComposeShadowPatchEngine`. This is the ONLY dirty-save capture path — it
+   * replaced the retired paragraph-diff export `collectEditedParagraphs` (R3 FR-01, removed task 023).
+   *
+   * task 038 (zero-error guardrails): this is now NON-DESTRUCTIVE — it reads the log WITHOUT resetting it
+   * or clearing the dirty flag, so a rejected (422) save leaves the document dirty with its op-log intact
+   * and a retry re-sends the same edits (no batch loss). The host clears the persisted batch ONLY after a
+   * confirmed 200 by calling {@link commitSaved}. Ops flagged `deletedContentFlag` (their anchor landed in
+   * later-deleted content) are surfaced in the snapshot; the host excludes them from what it applies
+   * (never-silently-drop).
    */
-  collectEditedParagraphs(): ComposeEditedParagraph[];
+  serializeOperationLog(): ComposeOperationLogSnapshot;
+
+  /**
+   * task 038 (zero-error guardrails): commit the batch returned by the most recent
+   * {@link serializeOperationLog} AFTER the save POST confirmed (HTTP 200). Drops exactly that batch from
+   * the op-log while PRESERVING any edits made during the in-flight save, then recomputes the dirty flag
+   * from whatever remains. The host MUST call this only on a 200 for a save that sent an op-log; a failed
+   * save never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   */
+  commitSaved(): void;
 
   /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
@@ -778,6 +816,35 @@ const useStyles = makeStyles({
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
     },
+    // R4 FR-02 opaque-atom placeholders (task 021) — non-editable SDT/field/object placeholders
+    // (`composeBlockAtom` / `composeInlineAtom`, opaqueAtomNode.ts). Semantic tokens only (ADR-021:
+    // no hardcoded hex; theme-adaptive in both light and dark). `userSelect: 'none'` is layout/
+    // interaction only (not a color rule) — the placeholder is inspectable/selectable as a whole
+    // ProseMirror node, but its label text is not itself a text-editing target.
+    '& .compose-atom': {
+      color: tokens.colorNeutralForeground2,
+      backgroundColor: tokens.colorNeutralBackground3,
+      border: `1px dashed ${tokens.colorNeutralStroke1}`,
+      borderRadius: tokens.borderRadiusSmall,
+      fontStyle: 'italic',
+      userSelect: 'none',
+      cursor: 'default',
+    },
+    '& .compose-atom-block': {
+      display: 'block',
+      padding: tokens.spacingVerticalXS,
+      margin: `${tokens.spacingVerticalXS} 0`,
+      textAlign: 'center',
+    },
+    '& .compose-atom-inline': {
+      display: 'inline-block',
+      padding: `0 ${tokens.spacingHorizontalXXS}`,
+    },
+    '& .ProseMirror-selectednode.compose-atom': {
+      outlineWidth: '2px',
+      outlineStyle: 'solid',
+      outlineColor: tokens.colorBrandStroke1,
+    },
     // FR-35 Doc Q&A ephemeral highlight (task 072) — a ProseMirror view
     // decoration, NOT a doc Mark (never serializes to DOCX). Semantic tokens
     // only (ADR-021 dark-mode-correct).
@@ -810,6 +877,28 @@ const useStyles = makeStyles({
     flex: 1,
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
+  },
+  // task 038 (spaarkeai-compose-r4 zero-error guardrails) — the NON-BLOCKING, dismissible sticky notice
+  // shown when a deferred/unrepresentable/refused step is seen (most importantly formatted/linked PASTE).
+  // Calm + informative (a warning tone, NOT an error/blocker). Sticky so it stays visible above the
+  // scrolling body until dismissed. Semantic tokens only (ADR-021 dark-mode-correct; no hardcoded hex).
+  deferralNotice: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorStatusWarningBackground1,
+    color: tokens.colorStatusWarningForeground1,
+    borderBottom: `1px solid ${tokens.colorStatusWarningBorder1}`,
+  },
+  deferralNoticeText: {
+    flex: 1,
+    minWidth: 0,
   },
   // Wave 6 (DEF-G) — reference-only state for a non-docx file that reached the
   // editor. Calm + informative (NOT an error / not a blank editor). Semantic
@@ -1194,10 +1283,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       enqueueComposeAction,
       onOpenInWord,
       onOpenInWordDesktop,
-      onPushToWord,
       wordActionsDisabled,
-      canPushToWord,
-      isPushingToWord,
       onSave,
       canSave,
       isSaving,
@@ -1209,16 +1295,75 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+
+    // task 038 (spaarkeai-compose-r4 zero-error guardrails): a NON-BLOCKING, dismissible sticky notice
+    // surfaced when a deferred/unrepresentable/refused step is seen (most importantly formatted or linked
+    // PASTE, which bypasses the toolbar gate). Declared BEFORE the op-log init below so the op-log's
+    // classifier callbacks can close over the stable `setDeferralNotice` setter. Non-null ⇒ the banner
+    // is shown; the save path is unaffected (informs only, never blocks).
+    const [deferralNotice, setDeferralNotice] = React.useState<string | null>(null);
     // R3 FR-01 (task 027): the LOAD-TIME `{ paraId → reject-state text }` snapshot, captured right after
-    // stampParaIds (and after a born-in-editor seed). `collectEditedParagraphs()` diffs the live doc
-    // against it to find the dirty paragraphs the server deltas onto the retained original.
+    // stampParaIds (and after a born-in-editor seed). Feeds `getBaselineParaIdMap()` (the C2 minted-id
+    // stamp) and the live Track Changes decoration baseline; the retired paragraph-diff export that used
+    // to diff against it (`collectEditedParagraphs`) was removed in task 023.
     const paraIdSnapshotRef = React.useRef<Map<string, string>>(new Map());
+
+    // R4 FR-06 (task 032, the write-path cutover): the per-dirty-session ordered, rebased task-003 OPERATION
+    // LOG (task 022). Instantiated ONCE (lazy) and driven by the rebased-op-log ProseMirror plugin below; the
+    // classifier callbacks surface refused/deferred/unrepresentable steps (never silently dropped, per the
+    // interceptor's discipline). `serializeOperationLog()` on the handle reads it at save time; the load effect
+    // + serialize both `reset()` it (a fresh document / a completed save must not carry stale ops).
+    const opLogRef = React.useRef<RebasedOperationLog | null>(null);
+    // task 038: the op-log high-water mark captured by `serializeOperationLog()` so a later
+    // `commitSaved()` (invoked ONLY after a confirmed 200) drops exactly the persisted batch while
+    // preserving any edits made during the in-flight save. `-Infinity` before the first serialize.
+    const committedBoundaryRef = React.useRef<number>(Number.NEGATIVE_INFINITY);
+    if (opLogRef.current === null) {
+      opLogRef.current = new RebasedOperationLog({
+        onStructuralStep: (_step, reason) => {
+          // A block-boundary step the four structural ops cannot cleanly carry (forward-merge, multi-paragraph
+          // rewrite, list wrap/unwrap). Recognized, not mis-mapped — surfaced for diagnosis (never dropped).
+          // eslint-disable-next-line no-console
+          console.debug('[ComposeEditor] op-log: deferred structural step', reason);
+          // task 038: inform the user (non-blocking). Catches formatted/linked PASTE that slips past the
+          // disabled toolbar controls. The representable text edits in this batch still save.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
+        },
+        onUnrepresentableStep: (_step, reason) => {
+          // A step whose shape the closed op set genuinely cannot represent (e.g. a mark outside the closed
+          // ComposeMarkType set) — the escalation seam (root §6/§6.5). Surfaced, never silently dropped.
+          // eslint-disable-next-line no-console
+          console.warn('[ComposeEditor] op-log: unrepresentable step (surfaced, not applied)', reason);
+          // task 038: same non-blocking notice — a pasted hyperlink/mark outside the closed set lands here.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
+        },
+        onRefusedAtomEdit: () => {
+          // An edit whose range entered an opaque atom (field/content-control) — refused by contract (FR-02).
+          // eslint-disable-next-line no-console
+          console.debug('[ComposeEditor] op-log: refused opaque-atom edit');
+          // task 038: inform the user that the edit over a protected field/content-control was not applied.
+          setDeferralNotice(DEFERRED_FORMAT_NOTICE);
+        },
+      });
+    }
+    // A headless TipTap extension that registers the rebased-op-log ProseMirror plugin (drives
+    // `recordTransaction` per doc-changing transaction). Built ONCE (the log instance is stable in the ref).
+    const opLogExtension = React.useMemo(
+      () =>
+        Extension.create({
+          name: 'composeRebasedOpLog',
+          addProseMirrorPlugins() {
+            return [createRebasedOperationLogPlugin(opLogRef.current!)];
+          },
+        }),
+      []
+    );
 
     // Item 4 (UAT round-4): live Track Changes decoration overlay. The extension is configured ONCE
     // (stable options) — `getBaseline` reads the load-time snapshot ref live, so the redline tracks
     // edits without re-registering the plugin. Enabled state is driven via a transaction meta (below),
     // NOT via re-configuring the extension. See TrackChangesExtension.ts for the decoration-not-mark
-    // design rationale (edits stay real content → persist via the existing collectEditedParagraphs path).
+    // design rationale (edits stay real content → persist via the step-interceptor operation-log path).
     const trackChangesExtension = React.useMemo(
       () =>
         TrackChangesExtension.configure({
@@ -1374,6 +1519,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
+        ...COMPOSE_R4_OPAQUE_ATOMS,
+        opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
+                        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
+                        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
@@ -1470,6 +1619,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // Born-in-editor seed: capture a snapshot so an edit-then-save can still diff (though a born-in-
           // editor save normally sends the full content model, not edited-paragraph deltas).
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+          opLogRef.current?.reset(); // R4 FR-06 (task 032): the seed is not a user edit — start the log empty.
           dirtyRef.current = false;
           onDirtyChange?.(true);
           return;
@@ -1477,6 +1627,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // Reset to empty paragraph if cleared.
         editor.commands.setContent('<p></p>');
         paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        opLogRef.current?.reset();
         dirtyRef.current = false;
         onDirtyChange?.(false);
         return;
@@ -1518,6 +1669,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // editable doc over a non-empty retained baseline — render the reference-only "Open in Word" state.
         if (!projection.canEdit || projection.status === 'failed') {
           editor.commands.setContent('<p></p>');
+          opLogRef.current?.reset(); // R4 FR-06 (task 032): no user edits on a reference-only mount.
           dirtyRef.current = false;
           setReferenceOnly({ fileName: documentRef?.fileName });
           onDirtyChange?.(false);
@@ -1526,20 +1678,37 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         editor.commands.setContent(projection.html);
         // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot mirror the mammoth
         // path below (applied AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers).
-        applyImportedRevisions(editor, importedRevisions);
+        const projectionRevisionResult = applyImportedRevisions(editor, importedRevisions);
         applyImportedCommentAnchors(editor, importedComments);
+        // FR-10 / I-7 (task 053): a revision whose paraId is unresolvable (Word regenerated it on an
+        // external save AND the fuzzy fallback also missed) MUST surface for review, never be silently
+        // dropped. Appended AFTER the resolved revisions/comments are placed (never during — an earlier
+        // placeholder must not pollute a later revision's fuzzy-anchor search) and BEFORE the paraId
+        // snapshot/op-log reset below, so it folds into the load-time baseline like every other import mark.
+        renderUnresolvedRevisionPlaceholders(editor, projectionRevisionResult.unresolvedItems);
         paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+        // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced — the load is NOT a
+        // user edit; the op-log must start empty, aligned to this load-time reject-state baseline.
+        opLogRef.current?.reset();
         dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
         onDirtyChange?.(isTransientMount);
         // Surface Partial fidelity gaps via the existing banner (codes only — no document content, ADR-015).
+        const projectionImportWarnings: Array<{ type: string; message: string }> = [];
         if (projection.status === 'partial' && projection.warnings.length > 0) {
-          onImportWarnings?.([
-            {
-              type: 'warning',
-              message:
-                'Some formatting may not display fully in Compose — open in Word to review the complete document.',
-            },
-          ]);
+          projectionImportWarnings.push({
+            type: 'warning',
+            message:
+              'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+          });
+        }
+        if (projectionRevisionResult.unresolvedItems.length > 0) {
+          projectionImportWarnings.push({
+            type: 'warning',
+            message: `${projectionRevisionResult.unresolvedItems.length} imported revision(s) could not be automatically placed — see the review marker(s) at the end of the document.`,
+          });
+        }
+        if (projectionImportWarnings.length > 0) {
+          onImportWarnings?.(projectionImportWarnings);
         }
         return;
       }
@@ -1562,7 +1731,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // load-time reject-state baseline (an untouched imported revision then reads as NOT edited on the
           // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
           // and the dirty flag is reset just below, so this render is not a user edit.
-          applyImportedRevisions(editor, importedRevisions);
+          const mammothRevisionResult = applyImportedRevisions(editor, importedRevisions);
           // FR-25 (task 051, import round-trip): anchor each imported comment thread's root span with the
           // visible commentAnchor mark (the SAME mark a user's own "create thread" gesture applies), keyed
           // by the same thread id `initialCommentThreads` (above) used to seed the FR-23 panel. Applied
@@ -1570,9 +1739,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
           // reject-state baseline, not read as a user edit on the next save.
           applyImportedCommentAnchors(editor, importedComments);
-          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the diff baseline for
-          // collectEditedParagraphs. Captured AFTER the stamp so every block carries its server paraId.
+          // FR-10 / I-7 (task 053): surface any revision that could not be anchored (see the projection
+          // branch above for the full rationale) — appended once, after the resolved revisions/comments,
+          // and folded into the load-time baseline below (never a user edit).
+          renderUnresolvedRevisionPlaceholders(editor, mammothRevisionResult.unresolvedItems);
+          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the baseline the C2
+          // minted-id map + the live Track Changes decoration diff against. Captured AFTER the stamp so
+          // every block carries its server paraId.
           paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
+          // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced (the load is not a
+          // user edit) so the op-log starts empty, aligned to this load-time reject-state baseline.
+          opLogRef.current?.reset();
           dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
           onDirtyChange?.(isTransientMount);
           // Privacy: messages are Tier 1 safe (configuration metadata).
@@ -1581,7 +1758,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             // eslint-disable-next-line no-console
             console.info(`[ComposeEditor] mammoth surfaced ${messages.length} warning(s) on import`);
           }
-          onImportWarnings?.(messages);
+          const combinedImportWarnings = [...messages];
+          if (mammothRevisionResult.unresolvedItems.length > 0) {
+            combinedImportWarnings.push({
+              type: 'warning',
+              message: `${mammothRevisionResult.unresolvedItems.length} imported revision(s) could not be automatically placed — see the review marker(s) at the end of the document.`,
+            });
+          }
+          onImportWarnings?.(combinedImportWarnings);
         })
         .catch(err => {
           // eslint-disable-next-line no-console
@@ -1711,17 +1895,30 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useImperativeHandle(
       ref,
       (): ComposeEditorHandle => ({
-        // R3 FR-01 (task 027): the paraId-keyed dirty-paragraph deltas (reject-state text) for a loaded
-        // doc. The server synthesizes the tracked change onto the retained original — the client authors
-        // no bytes. Resets the dirty flag (host collects then saves; the doc is clean after).
-        collectEditedParagraphs: () => {
+        // R4 FR-06 (task 032, the write-path cutover): the ordered, rebased task-003 operation-log snapshot
+        // the host sends on a dirty save of a LOADED doc (the server applies it via ComposeShadowPatchEngine).
+        // This is the ONLY dirty-save capture path (task 023 removed the retired paragraph-diff export
+        // `collectEditedParagraphs`).
+        // task 038 (zero-error guardrails): NON-DESTRUCTIVE — reads the log WITHOUT resetting it or clearing
+        // the dirty flag. It records the current high-water mark so `commitSaved()` can later drop exactly
+        // this batch (after a confirmed 200) while preserving concurrent edits. A rejected save leaves the
+        // log + dirty intact so a retry re-sends the same edits (no batch loss).
+        serializeOperationLog: () => {
           if (!editor) {
-            throw new Error('ComposeEditor: cannot collect edited paragraphs — editor not mounted');
+            throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
           }
-          const edited = collectEditedParagraphs(editor, paraIdSnapshotRef.current);
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
-          return edited;
+          committedBoundaryRef.current = opLogRef.current!.nextSeq;
+          return opLogRef.current!.serialize(editor.state.doc);
+        },
+        // task 038 (zero-error guardrails): clear the just-persisted op-log batch + recompute the dirty flag
+        // AFTER the save POST confirmed (200). Preserves any edits appended during the in-flight save; a
+        // failed save never calls this, so the batch survives for a retry.
+        commitSaved: () => {
+          if (!opLogRef.current) return;
+          opLogRef.current.commitSaved(committedBoundaryRef.current);
+          const stillDirty = opLogRef.current.size > 0;
+          dirtyRef.current = stillDirty;
+          onDirtyChange?.(stillDirty);
         },
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
@@ -1834,18 +2031,43 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         <ComposeFormatToolbar
           editor={editor}
           disabled={isImporting}
+          // task 037 (owner Path C — IMPORT-ONLY tables): a from-scratch born-in-editor draft
+          // (blank / AI-draft via `initialHtml`) mounts with NO retained original (`docxBytes`
+          // null, no server `projection`) — disable NEW table authoring there. A loaded/imported
+          // doc (uploaded `.docx`, opened template, or stored-doc projection) keeps full tables.
+          hasLoadedBaseline={docxBytes !== null || projection != null}
           onOpenInWord={onOpenInWord}
           onOpenInWordDesktop={onOpenInWordDesktop}
-          onPushToWord={onPushToWord}
           wordActionsDisabled={wordActionsDisabled}
-          canPushToWord={canPushToWord}
-          isPushingToWord={isPushingToWord}
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
         />
+        {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
+            deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
+            past the disabled toolbar controls). Informs only; the representable edits still save. */}
+        {deferralNotice ? (
+          <div
+            className={styles.deferralNotice}
+            role="status"
+            aria-live="polite"
+            data-testid="compose-deferral-notice"
+          >
+            <Text size={200} className={styles.deferralNoticeText}>
+              {deferralNotice}
+            </Text>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Dismiss16Regular />}
+              aria-label="Dismiss notice"
+              onClick={() => setDeferralNotice(null)}
+              data-testid="compose-deferral-notice-dismiss"
+            />
+          </div>
+        ) : null}
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
             inside the editor (see editorProps.handleKeyDown above) and dismissed

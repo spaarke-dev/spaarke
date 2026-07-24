@@ -86,9 +86,7 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,
-        new DocxAnnotationWriter(),
-        _indexing.Object,
+        _dataverse.Object,        _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private void SetupSpeReturns(byte[] docx)
@@ -133,10 +131,10 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
         var source = CreateDocx("The quick brown fox.", "The lazy dog sleeps.");
         var annotations = new[]
         {
-            new DocxAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
-            new DocxAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Insertion, TargetText = "fox", NewText = " (Vulpes vulpes)", Author = "Jordan Ellis", Date = When },
+            new TrackedChangeAnnotation { Kind = TrackChangeKind.Deletion, TargetText = "lazy ", Author = "Jordan Ellis", Date = When },
         };
-        return new DocxAnnotationWriter().Annotate(source, annotations);
+        return new TrackedChangeDocxBuilder().Annotate(source, annotations);
     }
 
     [Fact]

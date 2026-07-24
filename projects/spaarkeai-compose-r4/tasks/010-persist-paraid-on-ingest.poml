@@ -3,7 +3,7 @@
     <title>Persist w14:paraId into the retained package on ingest (FR-01)</title>
     <phase>1 Backend ingest</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF `.cs` (tags include bff-api), touches the ingest write path (retained package bytes), carries a seam DoD (ADR-038) — code-review + adr-check MUST run at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -135,6 +135,57 @@
     Extends a KEEP-list asset — no `&lt;justification&gt;` block (modify-only, not new surface). The through-the-wire
     proof that persisted ids survive ingest lives in task 013's seam slice. Coordinate the `Services/Compose/`
     cutover with `spaarkeai-compose-r3` (deployed base).
+
+    COMPLETED (2026-07-22). Added `ComposeBaselineParaIdStamper.MintAndPersist(ReadOnlyMemory&lt;byte&gt; source)` —
+    reuses `ParaIdPreParser.Parse` (read-only pass) to decide which paragraphs need a mint, then opens the SAME
+    bytes editable and writes each minted id into the DOM (`w14:paraId` attribute), never string-editing
+    `document.xml`. Idempotent by construction: when `ParaIdPreParser` finds no paragraph needing a mint the method
+    returns before ever opening the package editable. Wired into `ComposeService.LoadAsync` immediately after the
+    SPE download, BEFORE `ComposeDocxProjectionBuilder.Build` runs — so the returned `Content` bytes (the same
+    bytes SaveAsync's fast path echoes back as the baseline) already carry persisted ids, and the projection
+    builder's own map is naturally consistent (it finds ids already present). Did NOT touch
+    `ComposeDocxProjectionBuilder.cs` / `ComposeDocxProjection.cs` (task 011 ownership, avoided per instruction).
+
+    Self-caught bug during verification: the first cut read `buffer.ToArray()` *inside* the `using (doc)` block —
+    before `WordprocessingDocument.Dispose()` flushes the OPC package's ZIP central directory — so the minted ids
+    never actually reached the returned bytes. Fixed to match `Stamp()`'s proven structure (return
+    `buffer.ToArray()` only after the `using` block closes). Caught by the new unit tests, not by inspection alone.
+
+    Acceptance criteria verified:
+    - Every editable paragraph across all 3 corpus fixtures resolves to a unique, non-empty paraId PHYSICALLY
+      present in the returned bytes (test: `MintAndPersist_AcrossTheFidelityCorpus_...`, + `LoadAsync` wiring proof
+      `LoadAsync_ForFormattedDocument_PersistsMintedParaIdsIntoTheReturnedContentBytes`).
+    - Round-trip: applying `MintAndPersist` a second time to its own output is a no-op, ids byte-identical
+      (`MintAndPersist_AppliedASecondTimeToItsOwnOutput_...`).
+    - Negative/idempotency: a document whose paragraphs already all carry ids is returned byte-identical, never
+      re-minted (`MintAndPersist_DocumentWhereEveryParagraphAlreadyHasAnId_...`).
+    - DOM mutation only (OpenXml `ParagraphId` assignment), never string-edit.
+    - Tier-1 NetArchTest (`ADR013_ComposeFacadeTests`) green; no `Microsoft.Graph` type (grep-verified, 0 matches).
+
+    One PRE-EXISTING test's assertion updated (not a new behavior, a correctly-reasoned consequence of this task):
+    `ComposeServiceLoadParaIdTests.LoadAsync_ForFormattedDocument_ProjectsCompleteParaIdMapOntoResponse` previously
+    asserted `IsMinted == true` for id-less paragraphs in the response's `ParaIdMap`. Because minting now happens
+    at ingest BEFORE the projection builder runs, the builder's own `IsMinted` flag reads `false` for those
+    paragraphs (it finds ids already physically present). The still-load-bearing invariant — unique, persisted,
+    non-empty ids — is unchanged and covered by the other assertions in that same test plus the new byte-level
+    test. Updated inline with a comment explaining the semantic shift.
+
+    Files changed: `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs`,
+    `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs`,
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeBaselineParaIdStamperTests.cs`,
+    `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceLoadParaIdTests.cs`.
+
+    Build: green (0 errors). Full `Services/Compose` unit suite: 293/293 passed. Seam suite (incl. the no-op
+    round-trip byte-diff harness, unaffected since it exercises Save not Load): 3/3 passed. Publish size: 47.47 MB
+    compressed incl. PDBs (measured via `dotnet publish -c Release` + `Compress-Archive`), vs the task-prompt-cited
+    ~46.11 MB baseline — delta +1.36 MB, well under the +5 MB single-task-delta justification threshold and the
+    55/60 MB escalation/hard-ceiling. Caveat: this worktree had task 011 (a parallel agent) concurrently modifying
+    `ComposeDocxProjectionBuilder.cs`/`ComposeDocxProjection.cs` in the same publish output, so the delta is not
+    cleanly attributable to this task's diff alone (no new `&lt;PackageReference&gt;` was added by this task —
+    confirmed via `git diff --stat` on the `.csproj`, empty). CVE scan: one PRE-EXISTING HIGH-severity advisory on
+    `System.Security.Cryptography.Xml` 8.0.3 (transitive) — not introduced by this task (no csproj change).
+    Quality gates: code-review (APPROVED, 0 Critical/Warning, 1 non-blocking Suggestion) and adr-check (0
+    violations, 0 warnings) both passed this session.
   </notes>
 
   <execution>

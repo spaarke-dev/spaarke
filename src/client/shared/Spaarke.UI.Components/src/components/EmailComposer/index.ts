@@ -72,6 +72,8 @@ export type {
   EmailAttachmentSourceKind,
   IComposerAttachmentSource,
   IAttachmentItem,
+  IRecordLookupTarget,
+  IPickedRecord,
   IWizardContext,
   IRecipient,
   ValidationErrorCode,

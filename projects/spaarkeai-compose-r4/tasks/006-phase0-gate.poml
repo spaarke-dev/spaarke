@@ -3,7 +3,7 @@
     <title>Phase 0 GATE — schema + harness + applier spike green ⇒ authorize cutover (HARD go/no-go)</title>
     <phase>0 Gate</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The hard-replace safety-net gate (NFR-08): a go/no-go judgment that authorizes irreversible old-path deletion (tasks 023, 032, 060). A wrong GREEN removes the safety net. Highest-consequence gate in the project.</rigor-reason>
     <model-tier>opus</model-tier>

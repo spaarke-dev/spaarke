@@ -3,7 +3,7 @@
     <title>Rebased operation log per dirty session (FR-03) — ProseMirror Mapping</title>
     <phase>2 Frontend capture</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends the capture core (`.ts`, tags include frontend); position-mapping correctness across concurrent edits is load-bearing for every downstream patch. FULL per root §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

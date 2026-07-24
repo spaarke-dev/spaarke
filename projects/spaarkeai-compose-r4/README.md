@@ -6,7 +6,7 @@
 > **Branch**: `work/spaarkeai-compose-r4`
 > **Codename**: Spaarke Compose R4 (MISSION CRITICAL — rip-and-replace)
 
-> **Portfolio**: _not yet registered_ — run `/devops-project-register` to attach a Project Issue, or leave unregistered.
+> **Portfolio**: [Project #679](https://github.com/spaarke-dev/spaarke/issues/679) · Parent [Epic #421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board (Project #2)](https://github.com/users/spaarke-dev/projects/2) · Status: Active/Planning · Registered 2026-07-22
 
 ---
 
