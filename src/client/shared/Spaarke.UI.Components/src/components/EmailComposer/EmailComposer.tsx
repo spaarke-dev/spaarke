@@ -24,7 +24,7 @@
 import * as React from 'react';
 import { forwardRef, useImperativeHandle } from 'react';
 import {
-  Field,
+  Button,
   Input,
   Link,
   MessageBar,
@@ -34,6 +34,7 @@ import {
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
+import { Dismiss20Regular } from '@fluentui/react-icons';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
 
@@ -44,13 +45,13 @@ import type {
   IEmailComposerHandle,
   IEmailComposerProps,
   IComposerAttachmentSource,
+  IPickedRecord,
   IValidationResult,
 } from './EmailComposer.types';
 
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
-import { SendModeRadio } from './subcomponents/SendModeRadio';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
 
@@ -81,6 +82,15 @@ function isSafeHref(url: string): boolean {
   return !/^\s*(javascript|data|vbscript):/i.test(url);
 }
 
+/** Escape a plain string for safe interpolation into HTML (record-link label/href). */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 // ---------------------------------------------------------------------------
 // Styles — three mount variants (design §5.10). Layout density/chrome only;
 // all share the same Fluent semantic tokens (dark mode passes through the
@@ -90,6 +100,13 @@ function isSafeHref(url: string): boolean {
 const useStyles = makeStyles({
   // Shared across all mounts.
   base: {
+    // border-box so `width:100%` + padding fits the host container (the PCF/Dataverse
+    // host has no global border-box reset; without this the padded page mount overflowed
+    // its modal and got clipped on the left — owner UAT round 5).
+    boxSizing: 'border-box',
+    width: '100%',
+    maxWidth: '100%',
+    overflowX: 'hidden',
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
@@ -110,8 +127,19 @@ const useStyles = makeStyles({
   },
   header: {
     display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  bccToggleRow: {
+    display: 'flex',
+    justifyContent: 'flex-end',
   },
   liveRegion: {
     position: 'absolute',
@@ -121,27 +149,35 @@ const useStyles = makeStyles({
     clip: 'rect(0 0 0 0)',
   },
 
-  // `page` — full-width first-class entity-form chrome (replaces the OOB
-  // sprk_communication form; the highest-value visual deliverable per §5.10).
+  // Extra breathing room between the recipients block (Bcc line) and Subject (#1).
+  subjectSpacer: {
+    marginTop: tokens.spacingVerticalS,
+  },
+
+  // `page` — fills the full host container (owner UAT round 4: the composer must fill
+  // the modal, not shrink-to-content and center). `height: 100%` + the flex layout
+  // gives pinned header / fields / flex-grow message editor (its own shared scroll) /
+  // pinned footer. NO margin:auto / maxWidth — those made the composer collapse to
+  // content width inside the flex dialog body.
   page: {
-    maxWidth: '960px',
-    marginLeft: 'auto',
-    marginRight: 'auto',
-    paddingTop: tokens.spacingVerticalXXL,
-    paddingBottom: tokens.spacingVerticalXXL,
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    paddingTop: tokens.spacingVerticalL,
+    paddingBottom: tokens.spacingVerticalL,
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
   },
 
-  // `dialog` — bounded width; R6-4 (UAT 2026-07-21): widened 600 → 760 to match the standard
-  // Spaarke email surface (the 960px page composer) more closely without going full-page.
+  // `dialog` — fills the host dialog width + height for the pinned layout.
   dialog: {
+    height: '100%',
+    minHeight: 0,
     width: '100%',
-    maxWidth: '760px',
     paddingTop: tokens.spacingVerticalM,
     paddingBottom: tokens.spacingVerticalM,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalL,
   },
 
   // `inline` — no chrome; fills the wizard step container; wizard owns
@@ -171,29 +207,39 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   );
   const showSendModeRadio = props.sendMode === undefined;
 
-  // ── Re-derive state when mode/sourceRecord/communicationId change on an
-  //    already-mounted instance (host swaps props rather than remounting) ──
-  // Also moves focus to the section heading on transition (NFR-03 "focus
-  // management on mode transitions") — screen-reader + keyboard users get an
-  // announcement + a sane focus target instead of losing their place when the
-  // host flips e.g. view → reply on the same mounted instance.
-  const rootRef = React.useRef<HTMLDivElement>(null);
-  const initKeyRef = React.useRef(`${props.mode}:${props.communicationId ?? ''}`);
-  React.useEffect(() => {
-    const key = `${props.mode}:${props.communicationId ?? ''}`;
-    if (key !== initKeyRef.current) {
-      initKeyRef.current = key;
-      dispatch({ type: 'RESET', state: initialState(props) });
-      rootRef.current?.focus();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.mode, props.communicationId, props.sourceRecord]);
+  // Bcc is hidden by default (owner UAT mockup 2026-07-22 shows To/Cc only); a small
+  // "Bcc" toggle reveals it, and it auto-reveals when the field already carries values.
+  const [showBccToggle, setShowBccToggle] = React.useState(false);
+  const bccVisible = showBccToggle || state.bcc.length > 0;
 
-  // ── onStateChange (inline mount — wizard polls this for Next/Send gating) ──
-  React.useEffect(() => {
-    props.onStateChange?.(state);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
+  // (Attach/Link per row); any other record type is inserted as a link in the message body.
+  const handleRecordPicked = React.useCallback((picked: IPickedRecord) => {
+    if (picked.entityType === 'sprk_document') {
+      dispatch({
+        type: 'ADD_ATTACHMENT',
+        item: {
+          id: `doc:${picked.id}`,
+          source: 'related',
+          fileName: picked.name,
+          sizeBytes: picked.sizeBytes ?? 0,
+          documentId: picked.id,
+          linkUrl: picked.url,
+          selected: true,
+          linkSelected: false,
+        },
+      });
+      return;
+    }
+    if (!picked.url || !isSafeHref(picked.url)) return;
+    const cur = stateRef.current;
+    const label = picked.name || 'record';
+    const nextBody =
+      cur.bodyFormat === 'HTML'
+        ? `${cur.body}<p><a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a></p>`
+        : `${cur.body}${cur.body ? '\n' : ''}${label}: ${picked.url}`;
+    dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
+  }, []);
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -247,6 +293,30 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     },
     [onUploadLocalAttachment]
   );
+
+  // ── Re-derive state when mode/sourceRecord/communicationId change on an
+  //    already-mounted instance (host swaps props rather than remounting) ──
+  // Also moves focus to the section heading on transition (NFR-03 "focus
+  // management on mode transitions") — screen-reader + keyboard users get an
+  // announcement + a sane focus target instead of losing their place when the
+  // host flips e.g. view → reply on the same mounted instance.
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const initKeyRef = React.useRef(`${props.mode}:${props.communicationId ?? ''}`);
+  React.useEffect(() => {
+    const key = `${props.mode}:${props.communicationId ?? ''}`;
+    if (key !== initKeyRef.current) {
+      initKeyRef.current = key;
+      dispatch({ type: 'RESET', state: initialState(props) });
+      rootRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.mode, props.communicationId, props.sourceRecord]);
+
+  // ── onStateChange (inline mount — wizard polls this for Next/Send gating) ──
+  React.useEffect(() => {
+    props.onStateChange?.(state);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // ── Imperative handle ──────────────────────────────────────────────────
   const validate = React.useCallback((): IValidationResult => {
@@ -332,31 +402,10 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   // ── Render ──────────────────────────────────────────────────────────────
   const mountClass = props.mount === 'page' ? styles.page : props.mount === 'dialog' ? styles.dialog : styles.inline;
+  const isChromed = props.mount !== 'inline';
 
-  return (
-    <div
-      ref={rootRef}
-      tabIndex={-1}
-      className={mergeClasses(styles.base, mountClass, props.className)}
-      role="region"
-      aria-label="Email composer"
-    >
-      {props.mount !== 'inline' && (
-        <div className={styles.header}>
-          <Text as="h2" size={600} weight="semibold">
-            {state.mode === 'view'
-              ? 'Email'
-              : state.mode === 'reply'
-                ? 'Reply'
-                : state.mode === 'forward'
-                  ? 'Forward'
-                  : state.mode === 'draft'
-                    ? 'Edit Draft'
-                    : 'New Email'}
-          </Text>
-        </div>
-      )}
-
+  const middle = (
+    <>
       {showAssociations && state.associations.length > 0 && (
         <div className={styles.section} role="region" aria-label="Linked records">
           <AssociationChips associations={state.associations} />
@@ -407,30 +456,59 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
         />
-        <RecipientField
-          label="Bcc"
-          disabled={state.readOnly}
-          value={state.bcc}
-          onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
-          onSearch={props.onSearchRecipients}
-        />
+        {bccVisible ? (
+          <RecipientField
+            label="Bcc"
+            disabled={state.readOnly}
+            value={state.bcc}
+            onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
+            onSearch={props.onSearchRecipients}
+          />
+        ) : (
+          !state.readOnly && (
+            <div className={styles.bccToggleRow}>
+              <Button appearance="subtle" size="small" onClick={() => setShowBccToggle(true)}>
+                Bcc
+              </Button>
+            </div>
+          )
+        )}
       </div>
 
-      <div className={styles.section} role="region" aria-label="Subject">
-        <Field label="Subject" required validationState={fieldErrors.subject ? 'error' : 'none'}>
-          <Input
-            value={state.subject}
-            onChange={e => dispatch({ type: 'SET_FIELD', field: 'subject', value: e.target.value })}
-            placeholder="Subject"
-            aria-label="Subject"
-            disabled={state.readOnly}
-          />
-        </Field>
+      <div className={mergeClasses(styles.section, styles.subjectSpacer)} role="region" aria-label="Subject">
+        <Input
+          value={state.subject}
+          onChange={e => dispatch({ type: 'SET_FIELD', field: 'subject', value: e.target.value })}
+          placeholder="Add a subject"
+          aria-label="Subject"
+          disabled={state.readOnly}
+          appearance="underline"
+        />
         {fieldErrors.subject && (
           <Text size={200} role="alert" style={{ color: tokens.colorPaletteRedForeground1 }}>
             {fieldErrors.subject}
           </Text>
         )}
+      </div>
+
+      {/* Attachments sit ABOVE the body (owner UAT mockup 2026-07-22): Add files +
+          Related documents (with per-item Attach/Link) precede the message editor. */}
+      <div className={styles.section} role="region" aria-label="Attachments">
+        <AttachmentList
+          mode={state.mode}
+          sources={attachmentSources}
+          items={state.attachments}
+          onAdd={handleAddAttachment}
+          onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
+          onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
+          onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
+          recordCatalog={props.recordLookupCatalog}
+          onLookupRecord={props.onLookupRecord}
+          onRecordPicked={handleRecordPicked}
+          resolvingIds={resolvingIds}
+          readOnly={state.readOnly}
+          errorMessage={[fieldErrors.attachments, uploadError].filter(Boolean).join(' ') || undefined}
+        />
       </div>
 
       <BodyEditor
@@ -443,29 +521,48 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         errorMessage={fieldErrors.body}
         minHeight={props.mount === 'dialog' ? 200 : 220}
       />
+    </>
+  );
 
-      <div className={styles.section} role="region" aria-label="Attachments">
-        <AttachmentList
-          mode={state.mode}
-          sources={attachmentSources}
-          items={state.attachments}
-          onAdd={handleAddAttachment}
-          onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
-          onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
-          onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
-          resolvingIds={resolvingIds}
-          readOnly={state.readOnly}
-          errorMessage={[fieldErrors.attachments, uploadError].filter(Boolean).join(' ') || undefined}
-        />
-      </div>
-
-      {showSendModeRadio && !state.readOnly && (
-        <SendModeRadio
-          value={state.sendMode}
-          onChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
-          disabled={state.readOnly}
-        />
+  return (
+    <div
+      ref={rootRef}
+      tabIndex={-1}
+      className={mergeClasses(styles.base, mountClass, props.className)}
+      role="region"
+      aria-label="Email composer"
+    >
+      {isChromed && (
+        <div className={styles.header}>
+          <Text as="h2" size={600} weight="semibold">
+            {state.mode === 'view'
+              ? 'Email'
+              : state.mode === 'reply'
+                ? 'Reply'
+                : state.mode === 'forward'
+                  ? 'Forward'
+                  : state.mode === 'draft'
+                    ? 'Edit Draft'
+                    : 'New Email'}
+          </Text>
+          {props.onCancel && (
+            <div className={styles.headerActions}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                aria-label="Close dialog"
+                onClick={() => props.onCancel?.()}
+              />
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Fields + message flow directly in the flex column: the message editor
+          (BodyEditor, flex-grow) fills the remaining space and owns the single scroll
+          region via the shared RichTextEditor (owner UAT round 4). */}
+      {middle}
 
       <ComposerActionBar
         mount={props.mount}
@@ -474,6 +571,9 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         isSavingDraft={state.isSavingDraft}
         canSend={canSend}
         isDraftRecord={props.isDraftRecord}
+        sendMode={state.sendMode}
+        showSendModeChoice={showSendModeRadio && !state.readOnly}
+        onSendModeChange={value => dispatch({ type: 'SET_SEND_MODE', value })}
         onSend={() => {
           send().catch(() => {
             /* onError callback already notified; swallow here so the button

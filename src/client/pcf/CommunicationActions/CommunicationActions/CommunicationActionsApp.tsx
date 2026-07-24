@@ -44,6 +44,8 @@ import {
   type ISendEmailPageProps,
   type EmailComposerMode,
   type IAttachmentItem,
+  type IRecordLookupTarget,
+  type IPickedRecord,
   searchUsersAndContacts,
   createXrmDataService,
 } from '@spaarke/ui-components';
@@ -62,6 +64,22 @@ const SendEmailPageR16 = SendEmailPage as unknown as React.ComponentType<ISendEm
 
 // sprk_communicationtype = Email (task-002 verified) — the only interactive channel.
 const COMMUNICATION_TYPE_EMAIL = 100000000;
+
+// Record-lookup targets for the composer's "look up a record" tool (owner UAT round 5,
+// RegardingResolver set). Document first (the primary attach case); the rest are linked.
+const RECORD_LOOKUP_CATALOG: IRecordLookupTarget[] = [
+  { logicalName: 'sprk_document', displayName: 'Document' },
+  { logicalName: 'sprk_matter', displayName: 'Matter' },
+  { logicalName: 'sprk_project', displayName: 'Project' },
+  { logicalName: 'sprk_event', displayName: 'Event' },
+  { logicalName: 'sprk_communication', displayName: 'Communication' },
+  { logicalName: 'sprk_workassignment', displayName: 'Work Assignment' },
+  { logicalName: 'sprk_invoice', displayName: 'Invoice' },
+  { logicalName: 'sprk_budget', displayName: 'Budget' },
+  { logicalName: 'sprk_analysis', displayName: 'Analysis' },
+  { logicalName: 'sprk_organization', displayName: 'Organization' },
+  { logicalName: 'contact', displayName: 'Contact' },
+];
 
 // "Create from this email" flows. Target-entity mapping + the modal launch itself
 // live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
@@ -125,8 +143,23 @@ const useStyles = makeStyles({
   // Suggested-by-engine create icons get a subtle brand tint (the icon-only ✨ cue).
   suggestedIcon: { color: tokens.colorBrandForeground1 },
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBottom: tokens.spacingVerticalXS },
-  dialogSurface: { maxWidth: '900px', width: '90vw', height: '85vh', padding: 0 },
-  dialogBody: { height: '100%', display: 'block' },
+  // Standard Spaarke mid-size modal rectangle (owner UAT 2026-07-22): 720px × 70vh — matches the
+  // shared SendEmailDialog (Assistant / FilePreview / SummarizeFiles). Surface owns the bounded
+  // height + flex column; dialogBody is the scroll region so the composer content scrolls while the
+  // modal stays a clean rectangle (was 900px × 85vh).
+  dialogSurface: {
+    // Landscape mid-size rectangle (owner UAT 2026-07-22 #1): 720px read as portrait; widen.
+    maxWidth: '1040px',
+    width: '92vw',
+    height: '72vh',
+    padding: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  // The composer owns the scroll region (pinned header/footer + scrollable body, owner
+  // UAT round 3), so the dialog body fills the fixed surface and never scrolls itself.
+  dialogBody: { minHeight: 0, flexGrow: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   versionText: {
     fontSize: tokens.fontSizeBase100,
     color: tokens.colorNeutralForeground4,
@@ -303,6 +336,33 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     [dataService]
   );
 
+  // Record lookup (owner UAT round 5): the attachments search icon opens a menu of these
+  // entity types (RegardingResolver pattern). A Document pick attaches; any other record is
+  // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
+  const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
+    type XrmLike = {
+      Utility?: { lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string }>> };
+    };
+    const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
+    const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+    if (!xrm?.Utility?.lookupObjects) return null;
+    const results = await xrm.Utility.lookupObjects({
+      entityTypes: [entityType],
+      defaultEntityType: entityType,
+      allowMultiSelect: false,
+    });
+    if (!results || results.length === 0) return null;
+    const picked = results[0];
+    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const base = resolveDataverseUrl();
+    return {
+      entityType,
+      id,
+      name: picked.name,
+      url: base ? `${base}/main.aspx?pagetype=entityrecord&etn=${entityType}&id=${id}` : undefined,
+    };
+  }, []);
+
   // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
   // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
   // the OOB `navigateTo` dialog can later be swapped for a custom Fluent dialog
@@ -360,6 +420,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       authenticatedFetch,
       bffBaseUrl,
       onSearchRecipients: handleSearchRecipients,
+      recordLookupCatalog: RECORD_LOOKUP_CATALOG,
+      onLookupRecord: handleLookupRecord,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -369,7 +431,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, sourceAttachments]);
+  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, handleLookupRecord, sourceAttachments]);
 
   if (authError) {
     return (
@@ -514,7 +576,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         </div>
       )}
 
-      <Dialog open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
+      {/* modalType="alert" disables light-dismiss (backdrop-click + Escape). Required so the
+          native Xrm.Utility.lookupObjects record-lookup pane — which renders OUTSIDE this dialog's
+          DOM — does NOT trigger a focus-loss dismiss that auto-closes the composer (UAT round 6).
+          All intentional closes route through the composer's own X / Cancel / Send → onClose/onSent. */}
+      <Dialog modalType="alert" open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
         <DialogSurface className={s.dialogSurface}>
           <DialogBody className={s.dialogBody}>{composerProps && <SendEmailPageR16 {...composerProps} />}</DialogBody>
         </DialogSurface>

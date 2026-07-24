@@ -19,7 +19,6 @@
 import * as React from 'react';
 import {
   Input,
-  Field,
   Tag,
   TagGroup,
   Spinner,
@@ -110,11 +109,59 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
   },
-  tagGroup: {
+  // Inline "To [ input ]" row (owner UAT mockup 2026-07-22): a boxed label on the
+  // left, an underline input filling the rest — the Outlook-style recipient row.
+  inlineRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  labelBox: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '44px',
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase300,
+  },
+  // The right-hand cell: a bordered box holding the resolved chips AND the text
+  // input, wrapping together (owner UAT 2026-07-22 #2 — a selected recipient enters
+  // the field as a chip, not a list below it).
+  fieldBox: {
+    flexGrow: 1,
+    minWidth: 0,
     display: 'flex',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    borderBottomWidth: tokens.strokeWidthThin,
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke1,
+  },
+  chipInput: {
+    flexGrow: 1,
+    minWidth: '140px',
+    backgroundColor: 'transparent',
+    // Strip the Fluent Input's own border/focus-underline so it reads as a bare text
+    // field inside `fieldBox` (which owns the underline).
+    ...shorthands.border('0'),
+    '::after': {
+      borderBottomWidth: 0,
+    },
+  },
+  // `display: contents` so the chips flow as direct flex children of `fieldBox`
+  // and wrap inline with the text input, rather than as a block below it.
+  tagGroup: {
+    display: 'contents',
   },
   tagInvalid: {
     ...shorthands.borderColor(tokens.colorPaletteRedBorder2),
@@ -172,11 +219,6 @@ const useStyles = makeStyles({
   },
   requiredMark: {
     color: tokens.colorPaletteRedForeground1,
-  },
-  labelRow: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -336,51 +378,47 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const renderLabel = (): React.ReactElement => (
-    <span className={styles.labelRow}>
-      {label}
-      {required && (
-        <span aria-hidden="true" className={styles.requiredMark}>
-          {' *'}
-        </span>
-      )}
-    </span>
-  );
-
   return (
     <div className={styles.wrapper} ref={wrapperRef} role="group" aria-label={label}>
-      <Field label={renderLabel()} required={required} validationState={errorMessage ? 'error' : 'none'}>
-        <Input
-          value={draft}
-          onChange={handleInputChange}
-          onKeyDown={handleKeyDown}
-          onBlur={handleBlur}
-          placeholder={placeholder ?? `Add ${label.toLowerCase()} — separate with ; or ,`}
-          aria-label={label}
-          disabled={disabled}
-          autoComplete="off"
-        />
-      </Field>
-
-      {value.length > 0 && (
-        <TagGroup
-          className={styles.tagGroup}
-          aria-label={`${label} recipients`}
-          onDismiss={(_, data) => handleRemove(String(data.value))}
-        >
-          {value.map(r => (
-            <Tag
-              key={r.email}
-              value={r.email}
-              dismissible={!disabled}
-              className={mergeClasses(!EMAIL_RE.test(r.email) ? styles.tagInvalid : undefined)}
-              appearance={r.resolved ? 'filled' : 'outline'}
+      <div className={styles.inlineRow}>
+        <span className={styles.labelBox} aria-hidden="true">
+          {label}
+          {required && <span className={styles.requiredMark}>{' *'}</span>}
+        </span>
+        <div className={styles.fieldBox}>
+          {value.length > 0 && (
+            <TagGroup
+              className={styles.tagGroup}
+              aria-label={`${label} recipients`}
+              onDismiss={(_, data) => handleRemove(String(data.value))}
             >
-              {r.displayName ? `${r.displayName} (${r.email})` : r.email}
-            </Tag>
-          ))}
-        </TagGroup>
-      )}
+              {value.map(r => (
+                <Tag
+                  key={r.email}
+                  value={r.email}
+                  dismissible={!disabled}
+                  size="small"
+                  className={mergeClasses(!EMAIL_RE.test(r.email) ? styles.tagInvalid : undefined)}
+                  appearance={r.resolved ? 'filled' : 'outline'}
+                >
+                  {r.displayName ? `${r.displayName} (${r.email})` : r.email}
+                </Tag>
+              ))}
+            </TagGroup>
+          )}
+          <Input
+            className={styles.chipInput}
+            value={draft}
+            onChange={handleInputChange}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
+            placeholder={value.length > 0 ? '' : (placeholder ?? `Add ${label.toLowerCase()} — separate with ; or ,`)}
+            aria-label={label}
+            disabled={disabled}
+            autoComplete="off"
+          />
+        </div>
+      </div>
 
       {loading && <Spinner size="tiny" label="Searching..." />}
 

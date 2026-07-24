@@ -39,13 +39,32 @@ export interface ISendEmailDialogRegarding {
   name?: string;
 }
 
-// R6-4 (UAT 2026-07-21): Fluent's default DialogSurface caps at ~600px, which made the Assistant's
-// email modal read smaller than the standard Spaarke email surface. Widen to 760px to match the
-// engine's `dialog` mount cap (there is no shared modal-width token — see MODAL-DECISION-CRITERIA).
+// Standard Spaarke mid-size modal rectangle (owner UAT 2026-07-22): 720px × 70vh — the recurring
+// mid-size across ~6 Spaarke dialogs (QuickStartModal, daily-update email dialog, ContainerTypeConfig).
+// Distinct from the two MODAL-DECISION-CRITERIA layouts (OOB 85%×85% / content-driven preview): the
+// canonical compose/read surface is a fixed mid-size rectangle, not full-height. The surface owns the
+// bounded height; `body` fills it and scrolls internally so the composer content (attachments + body)
+// scrolls while the dialog stays a clean rectangle.
 const useDialogStyles = makeStyles({
   surface: {
-    maxWidth: '760px',
+    // Landscape mid-size rectangle (owner UAT 2026-07-22 #1): the 720px width read as
+    // portrait — widen so the composer is a wider-than-tall rectangle like the mockup.
+    maxWidth: '1040px',
     width: '92vw',
+    height: '72vh',
+    display: 'flex',
+    flexDirection: 'column',
+    // Surface itself never scrolls — the body owns the scroll region below.
+    overflow: 'hidden',
+  },
+  body: {
+    display: 'flex',
+    flexDirection: 'column',
+    // The composer now owns the scroll region (pinned header/footer + scrollable body,
+    // owner UAT round 3), so the dialog body itself never scrolls.
+    minHeight: 0,
+    flexGrow: 1,
+    overflow: 'hidden',
   },
 });
 
@@ -142,7 +161,7 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       }}
     >
       <DialogSurface className={dialogStyles.surface}>
-        <DialogBody>
+        <DialogBody className={dialogStyles.body}>
           <EmailComposer
             {...composerProps}
             associations={mergedAssociations}
