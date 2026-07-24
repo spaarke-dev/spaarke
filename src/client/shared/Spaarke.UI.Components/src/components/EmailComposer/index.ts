@@ -61,6 +61,7 @@ export {
   ATTACHMENT_MAX_TOTAL_BYTES,
   ATTACHMENT_WARN_TOTAL_BYTES,
   DEFAULT_MAX_RECIPIENTS,
+  validateLocalAttachmentFile,
 } from './EmailComposer.reducer';
 export type { IValidateOptions } from './EmailComposer.reducer';
 

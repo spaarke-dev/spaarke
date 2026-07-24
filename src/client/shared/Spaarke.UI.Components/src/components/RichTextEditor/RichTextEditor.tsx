@@ -75,6 +75,12 @@ export interface IRichTextEditorProps {
   minHeight?: number;
   /** Maximum height in pixels (scrolls beyond) */
   maxHeight?: number;
+  /**
+   * Optional host controls rendered at the trailing end of the formatting toolbar,
+   * after a divider (context-agnostic — the editor just renders the node). Ignored
+   * when `hideToolbar` is set.
+   */
+  toolbarSlot?: React.ReactNode;
 }
 
 export interface RichTextEditorRef {
@@ -341,6 +347,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
     hideToolbar = false,
     minHeight = 200,
     maxHeight,
+    toolbarSlot,
   } = props;
 
   const styles = useStyles();
@@ -514,7 +521,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, IRichTextEditorProps
   return (
     <div className={containerClass}>
       <LexicalComposer initialConfig={initialConfig}>
-        {!hideToolbar && <ToolbarPlugin isDarkMode={isDarkMode} />}
+        {!hideToolbar && <ToolbarPlugin isDarkMode={isDarkMode} toolbarSlot={toolbarSlot} />}
         <div className={styles.editorContainer} style={editorStyle}>
           <RichTextPlugin
             contentEditable={<ContentEditable className={styles.contentEditable} />}

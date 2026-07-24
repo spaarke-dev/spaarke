@@ -46,6 +46,7 @@ import {
   type IAttachmentItem,
   type IRecordLookupTarget,
   type IPickedRecord,
+  type IRecipient,
   searchUsersAndContacts,
   createXrmDataService,
 } from '@spaarke/ui-components';
@@ -80,6 +81,12 @@ const RECORD_LOOKUP_CATALOG: IRecordLookupTarget[] = [
   { logicalName: 'sprk_organization', displayName: 'Organization' },
   { logicalName: 'contact', displayName: 'Contact' },
 ];
+
+// Entity types the connector's "add a relationship" picker offers — the regarding-able
+// records (a Document is an attachment, not a regarding relationship, so it's excluded).
+const REGARDING_ENTITY_TYPES = RECORD_LOOKUP_CATALOG.filter(c => c.logicalName !== 'sprk_document').map(
+  c => c.logicalName
+);
 
 // "Create from this email" flows. Target-entity mapping + the modal launch itself
 // live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
@@ -363,6 +370,77 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     };
   }, []);
 
+  // Advanced recipient lookup (owner UAT 2026-07-24): clicking a To/Cc/Bcc label box opens the
+  // OOB people picker over contact + systemuser; the picked record's primary email is resolved
+  // (contact → emailaddress1, user → internalemailaddress) into a chip. Multi-select supported.
+  const handleLookupRecipients = React.useCallback(
+    async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
+      type XrmLike = {
+        Utility?: {
+          lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
+        };
+      };
+      const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
+      const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+      if (!xrm?.Utility?.lookupObjects) return null;
+      const results = await xrm.Utility.lookupObjects({
+        entityTypes: ['contact', 'systemuser'],
+        allowMultiSelect: true,
+      });
+      if (!results || results.length === 0) return null;
+      const EMAIL_FIELD: Record<string, string> = { contact: 'emailaddress1', systemuser: 'internalemailaddress' };
+      const recipients: IRecipient[] = [];
+      for (const p of results) {
+        const field = EMAIL_FIELD[p.entityType];
+        if (!field) continue;
+        const id = String(p.id).replace(/[{}]/g, '');
+        try {
+          const rec = await context.webAPI.retrieveRecord(p.entityType, id, `?$select=${field}`);
+          const email = rec?.[field];
+          if (typeof email === 'string' && email.includes('@')) {
+            recipients.push({
+              email,
+              displayName: p.name,
+              resolved: true,
+              sourceId: id,
+              entityType: p.entityType as 'contact' | 'systemuser',
+            });
+          }
+        } catch (err) {
+          console.warn('[CommunicationActions] recipient email resolve failed:', err);
+        }
+      }
+      return recipients.length > 0 ? recipients : null;
+    },
+    [context.webAPI]
+  );
+
+  // Connector toolbar icon → add a relationship (owner UAT 2026-07-24, Option B). Runs the OOB
+  // lookup across the regarding-able entity types (same as the Connections PCF "Link another")
+  // and returns the picked record; the composer shows it in "Related to" and it is written onto
+  // the communication when the email is SENT (the send payload carries `associations`).
+  const handleAddRelationship = React.useCallback(async (): Promise<IPickedRecord | null> => {
+    type XrmLike = {
+      Utility?: {
+        lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
+      };
+    };
+    const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
+    const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+    if (!xrm?.Utility?.lookupObjects) return null;
+    const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
+    const picked = results?.[0];
+    if (!picked?.id || !picked?.entityType) return null;
+    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const base = resolveDataverseUrl();
+    return {
+      entityType: picked.entityType,
+      id,
+      name: picked.name,
+      url: base ? `${base}/main.aspx?pagetype=entityrecord&etn=${picked.entityType}&id=${id}` : undefined,
+    };
+  }, []);
+
   // Launch a "create from this email" form (Event / To Do / Invoice) as an in-app
   // MODAL (UAT R3 C11-3). All three route through the single `launchCreate` seam so
   // the OOB `navigateTo` dialog can later be swapped for a custom Fluent dialog
@@ -420,8 +498,10 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       authenticatedFetch,
       bffBaseUrl,
       onSearchRecipients: handleSearchRecipients,
+      onLookupRecipients: handleLookupRecipients,
       recordLookupCatalog: RECORD_LOOKUP_CATALOG,
       onLookupRecord: handleLookupRecord,
+      onAddRelationship: handleAddRelationship,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -431,7 +511,17 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       onClose: () => setComposerMode(null),
       ...deriveComposerFields(composerMode, prefill),
     };
-  }, [composerMode, prefill, communicationId, bffBaseUrl, handleSearchRecipients, handleLookupRecord, sourceAttachments]);
+  }, [
+    composerMode,
+    prefill,
+    communicationId,
+    bffBaseUrl,
+    handleSearchRecipients,
+    handleLookupRecipients,
+    handleLookupRecord,
+    handleAddRelationship,
+    sourceAttachments,
+  ]);
 
   if (authError) {
     return (

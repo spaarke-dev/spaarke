@@ -15,7 +15,13 @@
 import * as React from 'react';
 
 import { EmailComposer } from '../EmailComposer';
-import type { EmailComposerMode, IAttachmentItem, IRecordLookupTarget, IPickedRecord } from '../EmailComposer.types';
+import type {
+  EmailComposerMode,
+  IAttachmentItem,
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
+} from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation } from '../../../services/communicationApi';
 import type { ILookupItem } from '../../../types/LookupTypes';
@@ -44,12 +50,23 @@ export interface ISendEmailPageProps {
    */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   /**
+   * Advanced OOB recipient lookup (owner UAT 2026-07-24) — clicking a To/Cc/Bcc label box
+   * opens the host people picker and appends resolved recipients. Optional/additive.
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  /**
    * Record-lookup targets + host lookup for the attachments "look up a record" tool
    * (owner UAT round 5, RegardingResolver pattern). Forwarded to the engine. A document
    * pick attaches; any other record type is linked in the body. Optional/additive.
    */
   recordLookupCatalog?: IRecordLookupTarget[];
   onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add-a-relationship (owner UAT 2026-07-24, connector toolbar icon). The host runs the OOB
+   * lookup across the regarding catalog and writes the association; the picked record shows in
+   * "Related to". Optional/additive.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;
