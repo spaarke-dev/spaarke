@@ -11,6 +11,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
@@ -98,6 +99,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -204,6 +206,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var result = await sut.QueryCommunicationsAsync(
@@ -253,6 +256,7 @@ public class CommunicationWorkspaceReadSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var result = await sut.QueryCommunicationsAsync(
@@ -298,10 +302,14 @@ public class CommunicationWorkspaceReadSeamTests
                 $"{nameof(CommunicationAccessFilter)} must depend on nothing but its logger — internal-only + privilege are read directly off the message entity, never resolved via a membership/grant lookup ({banned})");
         }
 
-        // The read service's dependency shape is exactly the 4 collaborators the access-model-decision note
-        // prescribes (impersonated query, the shared 2-rule filter, the caller resolver, a logger) — no more,
-        // no fewer. A 5th dependency creeping in is exactly the shape a reintroduced union path would take.
-        readServiceParamTypeNames.Should().HaveCount(4);
+        // The read service's dependency shape is the access-model-decision collaborators (impersonated query, the
+        // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
+        // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true (5 total).
+        // The banned-seam guard above is the durable protection against a resurrected union path; the identity
+        // resolver is explicitly the ONLY sanctioned addition.
+        readServiceParamTypeNames.Should().HaveCount(5);
+        readServiceParamTypeNames.Should().Contain("ISystemUserIdentityResolver",
+            "the #675 fix injects the authoritative per-caller internal/external resolver (not a membership/grant union)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════

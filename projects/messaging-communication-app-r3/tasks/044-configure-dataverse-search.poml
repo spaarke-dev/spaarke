@@ -4,7 +4,7 @@
     <title>Configure Dataverse Search to index sprk_communication (security-trimmed)</title>
     <phase>5 Release-gated must-haves</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Environment/org search configuration; no application code. Deterministic config task.</rigor-reason>
     <model-tier>sonnet</model-tier>

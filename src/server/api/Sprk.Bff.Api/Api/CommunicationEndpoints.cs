@@ -87,6 +87,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
+        // POST /api/communications/threads — create a NEW named, record-anchored thread (R3 UAT 2026-07-23
+        // item 9). Distinct from POST /threads/direct (participant-based 1:1): this anchors to an ADR-024
+        // regarding record (no participant), owner = the server-resolved caller (so the empty thread is
+        // visible in the caller's all-mode list). Distinct route: POST verb + literal /threads segment, no
+        // route param — no collision with GET /threads (list), POST /threads/direct, or /threads/{id}/*.
+        group.MapPost("/threads", CreateRecordThreadAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateRecordThread")
+            .WithDescription("Create a new named, record-anchored thread (item 9): owner = server-resolved caller, denormalized ADR-024 regarding pointer, Record-Anchored type. 403 on unresolved caller; 400 on missing regarding.")
+            .Produces<CreateRecordThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // GET /threads/{threadId}/messages — the polling timeline's thread-read (task 050 / FR-11). Returns the
         // caller's READABLE sprk_communication rows in the thread, impersonated (Dataverse row-level security) +
         // the shared internal-only/privilege filter (task 042). Optional ?since=<iso> for incremental polls;
@@ -140,6 +153,19 @@ public static class CommunicationEndpoints
             .WithName("RenameThread")
             .WithDescription("Rename a communication thread (FR-17): sets sprk_name + flips sprk_nameisautoderived to Edited so the auto re-derive never overwrites it. Caller resolved server-side; 403 if the caller cannot see the thread; 400 on a blank name. No Dataverse plugin — this BFF write is the only marker-flip path.")
             .Produces<RenameThreadResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
+        // PATCH /api/communications/threads/{threadId}/pin — pin/unpin a thread (task 041 / FR-24). Pin only — no
+        // archive/mute/tag equivalent. Same authorization shape as rename: the caller is resolved server-side and
+        // authorized AGAINST the thread by an impersonated visibility check (403 if the caller cannot see it —
+        // ADR-028 / NFR-01). Sets sprk_ispinned (task 040 schema) in one write via IThreadResolver.SetPinnedAsync.
+        // Distinct route: PATCH verb + literal /pin segment, no collision with the rename POST or any GET route.
+        group.MapPatch("/threads/{threadId:guid}/pin", SetThreadPinnedAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("SetThreadPinned")
+            .WithDescription("Pin/unpin a communication thread (FR-24): sets sprk_ispinned. Caller resolved server-side; 403 if the caller cannot see the thread. No Dataverse plugin — this BFF write is the only pin-state write path.")
+            .Produces<SetThreadPinnedResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
@@ -283,6 +309,50 @@ public static class CommunicationEndpoints
             CallerSystemUserId = callerId,
             OtherParticipantSystemUserId = request.OtherParticipantSystemUserId,
         });
+    }
+
+    /// <summary>
+    /// Creates a NEW named, record-anchored thread (R3 UAT 2026-07-23 item 9). Resolves the caller
+    /// server-side (never client-supplied — the caller becomes the owner so the new thread is visible in
+    /// their all-mode list) and delegates the create to <see cref="IThreadResolver.CreateRecordThreadAsync"/>.
+    /// Unlike POST /threads/direct this is NOT participant-based — it anchors to an ADR-024 regarding record.
+    /// </summary>
+    private static async Task<IResult> CreateRecordThreadAsync(
+        CreateRecordThreadRequest request,
+        IThreadResolver threadResolver,
+        ICallerSystemUserResolver callerResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var resolution = await callerResolver.ResolveAsync(context.User, ct);
+        if (!resolution.IsResolved || !Guid.TryParse(resolution.SystemUserId, out var callerId) || callerId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "SENDER_NOT_RESOLVED",
+                title: "Sender Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; cannot create a thread.",
+                statusCode: 403);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingRecordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: "regardingEntityType and a non-empty regardingRecordId are required.",
+                statusCode: 400);
+        }
+
+        var threadId = await threadResolver.CreateRecordThreadAsync(
+            callerId,
+            request.Name,
+            new RecordThreadAnchor(
+                request.RegardingEntityType,
+                request.RegardingRecordId.ToString(),
+                request.RegardingRecordName),
+            ct);
+
+        return TypedResults.Ok(new CreateRecordThreadResponse { ThreadId = threadId });
     }
 
     /// <summary>
@@ -594,6 +664,37 @@ public static class CommunicationEndpoints
 
         var persisted = await threadResolver.RenameThreadAsync(threadId, name, ct);
         return TypedResults.Ok(new RenameThreadResponse { ThreadId = threadId, Name = persisted });
+    }
+
+    /// <summary>
+    /// Pin/unpin a communication thread (task 041 / FR-24). Authorizes the server-resolved caller AGAINST the
+    /// thread via the SAME impersonated visibility check as rename (403 if the caller cannot see the thread — never
+    /// pin/unpin an inaccessible thread), then sets <c>sprk_ispinned</c> via
+    /// <see cref="IThreadResolver.SetPinnedAsync"/>. Returns the persisted pinned state. NO Dataverse plugin — this
+    /// BFF write is the only pin-state write path.
+    /// </summary>
+    private static async Task<IResult> SetThreadPinnedAsync(
+        Guid threadId,
+        SetThreadPinnedRequest request,
+        CommunicationThreadReadService readService,
+        IThreadResolver threadResolver,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // Authorize the caller against the thread (impersonated visibility). ResolveCallerOrThrowAsync inside
+        // throws a 403 for an unresolved caller (fail closed); zero visible rows → the caller cannot see it → 403.
+        var canSee = await readService.CanCallerSeeThreadAsync(threadId, context.User, ct);
+        if (!canSee)
+        {
+            throw new SdapProblemException(
+                code: "THREAD_PIN_FORBIDDEN",
+                title: "Forbidden",
+                detail: "The thread does not exist or is not visible to the caller.",
+                statusCode: 403);
+        }
+
+        var persisted = await threadResolver.SetPinnedAsync(threadId, request.Pinned, ct);
+        return TypedResults.Ok(new SetThreadPinnedResponse { ThreadId = threadId, IsPinned = persisted });
     }
 
     /// <summary>

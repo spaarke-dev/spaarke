@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Investigate + fix message send 401 "Denied by the resource provider" (ACS/BFF env-auth)</title>
+    <phase>7 UAT hardening</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Backend/env auth diagnosis on the send path; may touch BFF ACS wiring; correctness-sensitive.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/ACS/OBO diagnosis across BFF + environment; higher-judgment root-cause work.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Backend/BFF + diagnosis; does not edit the shared conversation UI (061/062 surfaces).</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, backend</tags>
+    <github-issue>https://github.com/spaarke-dev/spaarke/issues/676</github-issue>
+  </metadata>
+  <prompt>The conversation compose bar send fails with 401 "Denied by the resource provider" (ACS resource token denied) — see notes/uat-feedback-phase4-2026-07-21.md §C. Diagnose the root cause on the send path (client → BFF sendCommunication → ACS). Determine whether it is a CODE bug (fix it) or a spaarkedev1 ENVIRONMENT/config issue — ACS connection, managed identity, ACS resource scope/token, or a missing/misconfigured messaging endpoint (escalate with exact remediation if env).</prompt>
+  <role>SPAARKE platform developer. Expert in Azure Communication Services, OBO/managed-identity auth, and the Spaarke BFF.</role>
+  <goal>Root-cause the send 401 and either fix it in code (BFF/ACS wiring) or produce an exact, verified environment-remediation for the operator; a message send from the conversation succeeds (or the precise blocking env-config is identified).</goal>
+  <context>
+    <background>The ACS Message send branch (communicationType 'message', ADR-046) flows sendTimelineMessage → sendCommunication → BFF → ACS. The 401 "Denied by the resource provider" comes from the ACS resource, i.e. the token presented to ACS is denied. Look at the BFF's ACS client/token acquisition (managed identity vs connection string), the ACS resource role assignment, and whether spaarkedev1's BFF is configured for ACS messaging at all.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/** (send path + ACS client)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-045">Do NOT introduce a second send path; fix the existing one.</constraint>
+    <constraint source="ADR-028">Auth via the sanctioned OBO/managed-identity path; no token snapshots.</constraint>
+    <constraint source="no-secrets">Never print/commit secrets or connection strings.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Reproduce/trace the 401: identify exactly which call to ACS is denied and what identity/token it uses (managed identity vs connection string vs OBO).</step>
+    <step order="2">Check the BFF ACS configuration in spaarkedev1 (endpoint, identity, role assignment) vs the code's expectation. Determine code-bug vs env-config.</step>
+    <step order="3">If code bug: fix it (BFF build 0 errors; add/adjust tests; verify publish ≤60 MB + 0 new HIGH CVE if BFF changed). If env-config: produce exact remediation steps (e.g. assign the BFF managed identity the ACS role, set the ACS connection) and escalate.</step>
+    <step order="4">Document root cause + fix/remediation in projects/messaging-communication-app-r3/notes/task-060-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If the 401 is an environment/config issue (missing ACS role assignment, connection, or the BFF not deployed/configured for ACS in spaarkedev1) rather than a code bug, STOP and escalate with the exact remediation — do not fabricate ACS credentials or add a bypass.</trigger>
+  </escalation>
+  <acceptance-criteria>
+    <criterion testable="true">Root cause of the 401 is identified with evidence (which call, which identity, why denied).</criterion>
+    <criterion testable="true">Either a code fix lands (send succeeds; BFF build/tests green) OR an exact, verified environment remediation is documented + escalated.</criterion>
+    <criterion testable="true">No second send path; no secrets committed.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

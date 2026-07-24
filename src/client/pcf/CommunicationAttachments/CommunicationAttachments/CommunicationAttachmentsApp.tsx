@@ -291,10 +291,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   // `message/rfc822` via the same `/preview-url` embed as any other file, so email
   // messages open the same in-modal `RichFilePreviewDialog`). Rows without a
   // documentId can't preview and are excluded to keep every index resolvable.
-  const navItems = React.useMemo(
-    () => items.filter(i => !!i.documentId),
-    [items]
-  );
+  const navItems = React.useMemo(() => items.filter(i => !!i.documentId), [items]);
   const previewIndex = React.useMemo(
     () => (previewItem ? navItems.findIndex(i => i.documentId === previewItem.documentId) : -1),
     [navItems, previewItem]
@@ -307,17 +304,14 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
     [navItems]
   );
 
-  const handleRowActivate = React.useCallback(
-    (item: IAttachmentItem): void => {
-      if (!item.documentId) return;
-      // Every attachment with a resolvable document — including `.eml`/`.msg` —
-      // opens the shared in-modal `RichFilePreviewDialog` (UAT R4 B12-4). The
-      // modal still exposes open-in-desktop/web affordances for anything the
-      // embed viewer can't render, so there is no forced external-open path.
-      setPreviewItem(item);
-    },
-    []
-  );
+  const handleRowActivate = React.useCallback((item: IAttachmentItem): void => {
+    if (!item.documentId) return;
+    // Every attachment with a resolvable document — including `.eml`/`.msg` —
+    // opens the shared in-modal `RichFilePreviewDialog` (UAT R4 B12-4). The
+    // modal still exposes open-in-desktop/web affordances for anything the
+    // embed viewer can't render, so there is no forced external-open path.
+    setPreviewItem(item);
+  }, []);
 
   const openDocumentRecord = React.useCallback((documentId: string): void => {
     const xrm = getXrm();

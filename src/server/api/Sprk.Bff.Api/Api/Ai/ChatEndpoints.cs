@@ -2869,17 +2869,22 @@ public static class ChatEndpoints
         "attach a document",
         "attach a file",
         "please upload",
-        "please provide",
-        "please share",
+        // UAT 2026-07-22: the bare "please provide" / "please share" / "you can provide" /
+        // "you need to provide" / "please send" keywords were OVERBROAD — they matched
+        // non-document replies (e.g. a create-task clarification: "could you please provide
+        // some details"), firing the document/matter action chips in the wrong context. The
+        // document-SPECIFIC variants below ("provide a/the document", "share a/the document",
+        // "send me the document/file") already cover the genuine document-missing cases, so the
+        // bare forms are removed / tightened to require a document|file object.
         "no document",
         "no file",
         "don't have a document",
         "don't have access to a document",
-        "haven't provided",
-        "haven't shared",
+        "haven't provided a document",
+        "haven't shared a document",
         "you need to upload",
-        "you need to provide",
-        "you need to share",
+        "you need to provide a document",
+        "you need to share a document",
         "to analyze a document",
         "to review a document",
         "to compare documents",
@@ -2887,8 +2892,7 @@ public static class ChatEndpoints
         "could not find a document",
         "couldn't find a document",
         "you can upload",
-        "you can provide",
-        "please send",
+        "you can provide a document",
         "send me the document",
         "send me the file",
         "i need a document",

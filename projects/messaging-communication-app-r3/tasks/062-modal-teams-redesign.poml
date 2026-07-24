@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Conversation modal + shared components — Teams-style redesign (9 UAT items)</title>
+    <phase>7 UAT hardening</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared ConversationWorkspace/ConversationView/MessageBubble (.tsx) consumed by PCF + widget + code page; broad blast radius.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-surface shared-component redesign (layout + toolbar + message blocks) affecting all conversation hosts; higher blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns the shared conversation components; does not edit the PCF preview chrome (061) or the BFF (060). But it IS the shared surface — 061 consumes its pill/block styling.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <github-issue>https://github.com/spaarke-dev/spaarke/issues/678</github-issue>
+  </metadata>
+  <prompt>Redesign the conversation modal + shared conversation components toward the Teams layout per notes/uat-feedback-phase4-2026-07-21.md §B (Teams screenshot is the target). Changes land in the shared ConversationWorkspace/ConversationView/MessageBubble/EmailInFlowBlock so all hosts (PCF modal, SpaarkeAi widget, code page) inherit them. Keep it a custom Fluent v9 Dialog (our modal, not OOB) — the modal shell is the host's ConversationModal; adjust the shared content it renders.</prompt>
+  <role>SPAARKE platform developer. Expert in Fluent v9 + the Spaarke shared conversation components.</role>
+  <goal>The conversation content matches the Teams-style target: title "Messages", thread pane without a text filter, '+' create control, contrast side pane, a chat-area icon toolbar (Email/Message/Unread filters + search→text filter), a circle-down-arrow jump-to-latest affordance instead of a visible scrollbar, and Teams-style message blocks (type pill + name + date/time above the bubble; light-gray for others / light-blue for the current user). The 'x' sits upper-right on the host modal.</goal>
+  <context>
+    <background>The modal hosts the shared ConversationWorkspace (thread list + ConversationView). UAT items (§B): (1) 'x' upper-right (host ConversationModal in the 030 PCF); (2) modal title "Messages"; (3) Teams-like layout; (4) remove the "Filter threads" text input from the thread pane; (5) '+ New' → '+'; (6) subtle contrast background on the thread/side pane vs the message pane; (7) chat-area toolbar: Email icon-only filter, Message icon-only filter, Unread icon filter, search icon that reveals a text filter of messages (replaces the current Email/Message ToggleButtons + "All messages" word dropdown); (8) no right-side scrollbar — a circle down-arrow jump-to-latest; (9) message blocks Teams-style: type pill + name + date/time ABOVE the bubble, light-gray bubble for others, light-blue for the current user.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationWorkspace/** (thread pane, + control, side-pane contrast)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/** (toolbar, message blocks, jump-to-latest)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/ConversationView/subcomponents/MessageBubble.tsx, EmailInFlowBlock.tsx (Teams blocks + pills)</file>
+      <file>src/client/pcf/CommunicationConversationPanel/CommunicationConversationPanel/ConversationModal.tsx (x upper-right, title)</file>
+      <file>notes/uat-feedback-phase4-2026-07-21.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; the light-gray/light-blue bubble colors use semantic tokens so dark mode adapts. No hardcoded colors.</constraint>
+    <constraint source="NFR-06">Do NOT fork the shared components or create a second conversation UI. Preserve existing behavior (compose/send, filters, scrollToMessage, privacy markers from 043, attachments from 042, forward, pin).</constraint>
+    <constraint source="NFR-05">Toolbar icon filters + search + jump-to-latest keyboard-operable + labeled; the icon filters keep aria-pressed state; search input has a label.</constraint>
+    <constraint source="ADR-012">Components stay context-agnostic; the modal 'x' + title are host (ConversationModal) concerns.</constraint>
+    <constraint source="MODAL-DECISION-CRITERIA">Keep the custom Fluent v9 Dialog; do NOT switch to an OOB modal.</constraint>
+  </constraints>
+  <steps mode="directional">
+    <step order="1">Read notes/uat-feedback-phase4-2026-07-21.md §B + the current ConversationWorkspace/ConversationView/MessageBubble. Confirm what to preserve (043 markers, 042 attachments, filters, forward, scrollToMessage, pin).</step>
+    <step order="2">Thread pane: remove the text filter, change '+ New' to '+', add subtle contrast background vs the message pane.</step>
+    <step order="3">Chat-area toolbar: replace the Email/Message toggles + word dropdown with an icon toolbar (Email/Message/Unread icon filters + a search icon that reveals a message text filter). Keep the underlying filter semantics (additive) intact.</step>
+    <step order="4">Message blocks: move the type pill + name + date/time ABOVE the bubble (Teams-style); light-gray bubble for others, light-blue for the current user (semantic tokens). Keep privacy markers + attachment affordances rendering.</step>
+    <step order="5">Replace the visible scrollbar reliance with a circle-down-arrow jump-to-latest affordance (keep auto-scroll behavior).</step>
+    <step order="6">Host modal (ConversationModal in the PCF): 'x' upper-right, title "Messages".</step>
+    <step order="7">Update/extend component tests for the toolbar, message-block layout, and preserved behaviors. Scoped tsc (2 known pre-existing errors OK) + jest changed-area + prettier. Notes in task-062-notes.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If a Teams-layout change would break a preserved behavior (compose/send, privacy markers, attachments, forward, pin, scrollToMessage) or force a second conversation component, STOP and escalate rather than forking.</trigger>
+  </escalation>
+  <acceptance-criteria>
+    <criterion testable="true">Thread pane has no text filter, uses '+' (not '+ New'), and has a subtle contrast background vs the message pane.</criterion>
+    <criterion testable="true">Chat-area icon toolbar provides Email/Message/Unread filters + a search that text-filters messages; filter semantics preserved; all keyboard-operable + labeled.</criterion>
+    <criterion testable="true">Message blocks render Teams-style (pill+name+time above bubble; gray others / blue self, semantic tokens) with privacy markers + attachment affordances intact.</criterion>
+    <criterion testable="true">A circle-down-arrow jump-to-latest replaces reliance on a visible scrollbar; auto-scroll behavior preserved.</criterion>
+    <criterion testable="true">Host modal shows 'x' upper-right + title "Messages". No fork/second component (NFR-06); dark mode adapts; changed-area jest + tsc clean.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

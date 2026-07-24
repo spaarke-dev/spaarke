@@ -90,7 +90,7 @@ Each producer owns its judgment and writes to Layer B. Fan-out targeting derives
 
 ## 4. How to extend
 
-**Add a producer** (a new source of an existing kind, or a reserved kind going active): ground + gate the signal → `OutboxService.WriteAsync` (store) → best-effort `SignalRDeliveryService.PingUserAsync` (hint). Register the ping via the ADR-032 null-object; the write is unconditional. Fan-out from record security and **test the negative-access case**. Gate the change on a `tests/integration/seam/**` vertical-slice test (ADR-038 DoD).
+**Add a producer** (a new source of an existing kind, or a reserved kind going active): ground + gate the signal → `OutboxService.WriteAsync` (store) → best-effort `SignalRDeliveryService.PingUserAsync` (hint). Register the ping via the ADR-032 null-object; the write is unconditional. Fan-out from record security and **test the negative-access case**. Gate the change on a `tests/integration/seam/**` vertical-slice test (ADR-038 DoD). **Be idempotent**: a producer that runs on a repeatable trigger (e.g. a briefing that re-renders on every load/refresh) MUST dedupe before writing — read `OutboxService.GetPendingAsync` (already undismissed + unexpired) and skip a candidate whose `(owner, kind, regardingRecordId)` already has a live row, so re-runs don't accumulate duplicate outbox rows. A dismissed or expired row correctly re-proposes. (`DailyBriefingSuggestionProducer` is the reference — UAT 2026-07-22.)
 
 **Add a consumer** (a new client surface): call `getNotificationsClient().registerHandler(kind, cb)` on the ONE host client, then `start()`. Treat live pushes as signal-only (re-fetch via `/pending`); act only after re-grounding through the BFF. Do NOT open a second SignalR connection or a second negotiate.
 

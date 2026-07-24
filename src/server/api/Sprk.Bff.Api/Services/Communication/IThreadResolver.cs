@@ -73,7 +73,35 @@ public interface IThreadResolver
     /// propagates to the caller (the rename endpoint) rather than being swallowed. A blank name is rejected.
     /// </summary>
     Task<string> RenameThreadAsync(Guid threadId, string name, CancellationToken ct = default);
+
+    /// <summary>
+    /// FR-24 pin/unpin (task 041): sets <c>sprk_ispinned</c> in a single write. Mirrors
+    /// <see cref="RenameThreadAsync"/>'s shape — a user action, NOT best-effort (a write failure propagates to the
+    /// caller, i.e. the pin endpoint, rather than being swallowed like <see cref="ReDeriveThreadNameAsync"/>). This
+    /// BFF write is the ONLY pin-state write path — no Dataverse plugin. Returns the persisted value (echoed by the
+    /// endpoint).
+    /// </summary>
+    Task<bool> SetPinnedAsync(Guid threadId, bool pinned, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a NEW named, record-anchored thread (R3 UAT 2026-07-23 item 9) OWNED by
+    /// <paramref name="ownerSystemUserId"/> and anchored to <paramref name="regarding"/> (the denormalized
+    /// <c>sprk_regardingrecord*</c> pointer — REUSE of the ADR-024 regarding family, not a second mechanism;
+    /// <c>sprk_threadtype</c> = Record-Anchored). When <paramref name="name"/> is blank the name derives from
+    /// the record name (marker Auto → re-derives on a later regarding change); a provided name is stamped
+    /// Edited (<c>sprk_nameisautoderived=false</c>) so the auto re-derive never overwrites it. Owner = caller
+    /// so the new (empty) thread is immediately visible in the caller's all-mode thread list. User action —
+    /// NOT best-effort: a write failure propagates to the endpoint. Returns the new thread id.
+    /// </summary>
+    Task<Guid> CreateRecordThreadAsync(
+        Guid ownerSystemUserId, string? name, RecordThreadAnchor regarding, CancellationToken ct = default);
 }
+
+/// <summary>
+/// The ADR-024 regarding record a new record-anchored thread is created against (item 9). Mirrors the
+/// denormalized <c>sprk_regardingrecord*</c> pointer the resolver already stamps at thread create.
+/// </summary>
+public sealed record RecordThreadAnchor(string EntityType, string RecordId, string? RecordName);
 
 /// <summary>
 /// Channel-neutral input to <see cref="IThreadResolver.ResolveAndAssignThreadAsync"/>. The resolver

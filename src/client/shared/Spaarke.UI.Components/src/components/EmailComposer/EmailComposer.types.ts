@@ -271,6 +271,7 @@ export type EmailComposerAction =
   | { type: 'SET_MODE'; mode: EmailComposerMode; patch?: Partial<EmailComposerState> }
   | { type: 'ADD_ATTACHMENT'; item: IAttachmentItem }
   | { type: 'REMOVE_ATTACHMENT'; id: string }
+  | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
@@ -353,6 +354,22 @@ export interface IEmailComposerProps {
    * when `sourceRecord` is supplied (that path derives attachments from the record).
    */
   initialAttachments?: IAttachmentItem[];
+
+  /**
+   * Resolve a locally-picked file to a governed `sprk_document` (task 042 /
+   * FR-20 attach-on-compose). The engine is context-agnostic (ADR-012) and
+   * owns no upload transport — the HOST injects this, wired to its EXISTING
+   * Document-upload surface (e.g. `POST /api/documents`); it is NOT a new send
+   * or upload path in the send engine (ADR-045). When provided, a local pick
+   * that passes the CHAT-ATTACHMENT-POLICY 25 MB + MIME gate is uploaded and
+   * the returned `documentId` is patched onto the attachment so it flows into
+   * the existing `sendCommunication()` `attachmentDocumentIds`. When OMITTED,
+   * local picks remain display-only (the pre-task-042 behavior — back-compat)
+   * and are excluded from the send payload until resolved. Rejection (throw)
+   * removes the item and surfaces an inline error; it never blocks the send of
+   * the already-resolved attachments.
+   */
+  onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string }>;
 
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */

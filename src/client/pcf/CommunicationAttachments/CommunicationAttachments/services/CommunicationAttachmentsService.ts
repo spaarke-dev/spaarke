@@ -118,10 +118,7 @@ export class CommunicationAttachmentsService {
       `&$filter=_sprk_communication_value eq ${id}` +
       `&$orderby=createdon asc`;
 
-    const result = await this.webApi.retrieveMultipleRecords<IAttachmentRecord>(
-      'sprk_communicationattachment',
-      query
-    );
+    const result = await this.webApi.retrieveMultipleRecords<IAttachmentRecord>('sprk_communicationattachment', query);
     const projected = (result.entities ?? []).map(projectAttachmentRecord);
     const files = filterFileAttachments(projected);
     await this.enrichUploadStatus(files);

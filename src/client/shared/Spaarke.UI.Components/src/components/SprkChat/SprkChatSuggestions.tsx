@@ -147,8 +147,14 @@ export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ sugge
       data-testid="sprkchat-suggestions"
     >
       {displaySuggestions.map((suggestion, index) => {
-        const displayText = truncateText(suggestion, MAX_TEXT_LENGTH);
-        const isTruncated = suggestion.length > MAX_TEXT_LENGTH;
+        // Action chips arrive as "[action:<id>] <label>" (AIPU-058). Strip the routing
+        // prefix for DISPLAY ONLY — the RAW string (prefix intact) is still passed to
+        // onSelect so the parent's handleSuggestionSelect can detect the action id and
+        // route the click. Without this the raw "[action:upload] Upload File" leaked to
+        // the chip label (UAT 2026-07-22).
+        const label = suggestion.replace(/^\[action:[^\]]+\]\s*/i, '');
+        const displayText = truncateText(label, MAX_TEXT_LENGTH);
+        const isTruncated = label.length > MAX_TEXT_LENGTH;
 
         return (
           <InteractionTag
@@ -160,8 +166,8 @@ export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ sugge
           >
             <InteractionTagPrimary
               role="button"
-              aria-label={isTruncated ? suggestion : undefined}
-              title={isTruncated ? suggestion : undefined}
+              aria-label={isTruncated ? label : undefined}
+              title={isTruncated ? label : undefined}
               onClick={() => onSelect(suggestion)}
               data-suggestion-chip=""
               data-testid={`suggestion-chip-${index}`}

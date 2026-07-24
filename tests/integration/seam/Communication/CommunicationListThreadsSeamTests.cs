@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.Communication;
@@ -49,6 +50,7 @@ public class CommunicationListThreadsSeamTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            Mock.Of<ISystemUserIdentityResolver>(), // #675: default IsExternalAsync ⇒ false (internal caller) — preserves pre-fix behavior
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -314,11 +316,21 @@ public class CommunicationListThreadsSeamTests
                 $"ListThreadsAsync must not take a membership/grant union dependency ({banned}) — reads are impersonation-only");
         }
 
-        // The read service's overall dependency shape stays exactly the 4 collaborators the access-model-decision
-        // note prescribes (impersonated query, the shared 2-rule filter, the caller resolver, a logger) — a 5th
-        // creeping in is the shape a reintroduced union path would take.
-        typeof(CommunicationThreadReadService).GetConstructors().Single().GetParameters()
-            .Should().HaveCount(4);
+        // The read service's dependency shape is the access-model-decision collaborators (impersonated query, the
+        // shared 2-rule filter, the caller resolver, a logger) PLUS the #675/ISS-006 ISystemUserIdentityResolver —
+        // the sanctioned per-caller internal/external source that replaced the hardcoded IsInternalUser:true (5 total).
+        // The substantive guard is that NONE of the banned membership/grant UNION seam types creep into the ctor — a
+        // reintroduced union path would show up as one of those, not as the identity resolver.
+        var ctorParamTypeNames = typeof(CommunicationThreadReadService).GetConstructors().Single()
+            .GetParameters().Select(p => p.ParameterType.Name).ToList();
+        ctorParamTypeNames.Should().HaveCount(5);
+        foreach (var banned in bannedSeamTypeNames)
+        {
+            ctorParamTypeNames.Should().NotContain(banned,
+                $"the read service must not take a membership/grant union dependency ({banned}) — reads are impersonation-only");
+        }
+        ctorParamTypeNames.Should().Contain("ISystemUserIdentityResolver",
+            "the #675 fix injects the authoritative per-caller internal/external resolver");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════════

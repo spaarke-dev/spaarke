@@ -24,9 +24,13 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 ///     confirm-worthy by its DECLARED reason (<c>HighPriority</c> or <c>Monitor</c> — why the collector
 ///     surfaced it). This producer introduces NO second/bespoke scoring decider.</item>
 /// </list>
-/// Only a candidate that passes BOTH gates yields exactly one <c>kind=suggestion</c> outbox row (task 013
+/// A third check — <b>IDEMPOTENCY by regarding record</b> (UAT 2026-07-22) — then skips any candidate that
+/// already has a live (undismissed, unexpired) suggestion for the same <c>(owner, regardingRecordId)</c>, so
+/// re-rendering the briefing (on load / refresh / any re-fetch) does NOT accumulate duplicate rows. A
+/// dismissed or expired suggestion correctly re-proposes.
+/// Only a candidate that passes all three checks yields exactly one <c>kind=suggestion</c> outbox row (task 013
 /// <see cref="SuggestionEnvelope"/>) written EXPLICITLY via the task-012 outbox service, followed by a
-/// best-effort Layer-C ping (task 020, outbox-before-ping). A candidate that fails EITHER gate produces
+/// best-effort Layer-C ping (task 020, outbox-before-ping). A candidate that fails any check produces
 /// ZERO rows and the no-action decision is logged (mirrors the FR-12 no-match/below-threshold precedent).
 /// </summary>
 /// <remarks>
@@ -94,6 +98,19 @@ public sealed class DailyBriefingSuggestionProducer
                 return 0;
             }
 
+            // IDEMPOTENCY (UAT 2026-07-22): the briefing re-renders on load/refresh, and without this a fresh
+            // suggestion row was written on EVERY render → the pending stack ballooned (same card 3×, 9× …).
+            // De-duplicate by the regarding record: skip a candidate when an undismissed + unexpired suggestion
+            // for the SAME (owner, regardingRecordId) already exists. GetPendingAsync already filters to
+            // undismissed + unexpired rows, so a dismissed/expired suggestion correctly re-proposes. A read
+            // failure here throws to the outer catch → 0 rows this run (safe: no duplication; next run retries).
+            var pending = await _outbox.GetPendingAsync(systemUserId, ct).ConfigureAwait(false);
+            var alreadySuggested = new HashSet<string>(
+                pending
+                    .Where(r => r.Kind == NotificationKind.Suggestion && !string.IsNullOrWhiteSpace(r.RegardingRecordId))
+                    .Select(r => r.RegardingRecordId!),
+                StringComparer.OrdinalIgnoreCase);
+
             var written = 0;
             foreach (var item in highPriorityItems)
             {
@@ -123,7 +140,19 @@ public sealed class DailyBriefingSuggestionProducer
                     continue;
                 }
 
-                // Grounded + gated → write exactly one kind=suggestion row (outbox FIRST), then best-effort ping.
+                // Gate 3 — IDEMPOTENCY: a live (undismissed, unexpired) suggestion for this regarding record
+                // already exists (from a prior render this run OR an earlier render) → no duplicate row.
+                var recordKey = recordId.ToString();
+                if (!alreadySuggested.Add(recordKey))
+                {
+                    _logger.LogInformation(
+                        "[suggestion] candidate for {EntityType}:{EntityId} already has a live suggestion for owner {SystemUserId} — no duplicate row (idempotency).",
+                        item.EntityType, recordId, systemUserId);
+                    continue;
+                }
+
+                // Grounded + gated + not-already-suggested → write exactly one kind=suggestion row
+                // (outbox FIRST), then best-effort ping.
                 var envelope = BuildEnvelope(item, recordId);
 
                 var outboxRowId = await _outbox.WriteAsync(

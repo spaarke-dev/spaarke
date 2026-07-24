@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
@@ -42,17 +43,26 @@ public class CommunicationThreadReadServiceTests
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new(MockBehavior.Strict);
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
+    // #675 / ISS-006: the read service now depends on the shared identity resolver for the per-caller
+    // internal/external bit. The default fixture models an INTERNAL caller (IsExternalAsync ⇒ false) so the
+    // pre-fix behavior (every R1/R3 timeline caller is internal) is preserved; the external-caller drop is a
+    // dedicated negative test in the privilege/privacy seam suite.
+    private readonly Mock<ISystemUserIdentityResolver> _identity = new();
 
     private CommunicationThreadReadService Sut()
     {
         _resolver
             .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(CallerSystemUserResolution.Resolved(CallerSystemUserId.ToString("D")));
+        _identity
+            .Setup(i => i.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
 
         return new CommunicationThreadReadService(
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
     }
 
@@ -152,6 +162,75 @@ public class CommunicationThreadReadServiceTests
 
         result.Messages.Should().ContainSingle();
         result.Messages[0].Privilege.Should().Be(PrivilegePrivileged);
+    }
+
+    // ─────────────────────────── thread-read: FR-21 privilege/privacy markers ───────────────────────────
+
+    [Fact]
+    public async Task ReadThreadAsync_RowWithMarkers_ProjectsInternalOnlyPrivateAndPrivilege()
+    {
+        // FR-21: the three markers ride the SAME access-filtered row. An INTERNAL caller permitted to see an
+        // internal-only + private + privileged message gets all three markers on the DTO — they are display
+        // metadata that never gated the read (ADR-015 / access-model decision 2026-07-16).
+        var messageId = Guid.NewGuid();
+        SetupMessages(MessageRow(messageId, body: "sensitive", internalOnly: true, isPrivate: true,
+            privilege: PrivilegePrivileged));
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var msg = (await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None))
+            .Messages.Single();
+
+        msg.IsInternalOnly.Should().BeTrue();
+        msg.IsPrivate.Should().BeTrue();
+        msg.Privilege.Should().Be(PrivilegePrivileged);
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_RowMissingMarkerColumns_DefaultsMarkersToFalseNeverThrows()
+    {
+        // A VISIBLE row whose marker columns are absent must default to false (a display default) — never throw,
+        // never guess "restricted". The internal-only ACCESS gate is the shared filter's fail-closed job, not this
+        // display label.
+        var row = new Dictionary<string, JsonElement>
+        {
+            ["sprk_communicationid"] = El(Guid.NewGuid().ToString()),
+            ["createdon"] = El("2026-07-16T12:00:00Z"),
+            ["sprk_body"] = El("no marker columns present"),
+            // sprk_isinternalonly / sprk_isprivate / sprk_privilegeclassification intentionally absent
+        };
+        SetupMessages(row);
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var msg = (await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None))
+            .Messages.Single();
+
+        msg.IsInternalOnly.Should().BeFalse();
+        msg.IsPrivate.Should().BeFalse();
+        msg.Privilege.Should().Be(PrivilegeNone);
+    }
+
+    [Fact]
+    public async Task ReadThreadAsync_Recipients_AreTheProjectedToSet_AndTheReadNeverSelectsBcc()
+    {
+        // Recipient display = the permitted row's sprk_to, server-access-bound: the row (and thus its recipients)
+        // is only returned because it passed impersonation + the shared filter — not a client-inferred/union list.
+        // The read MUST NEVER select sprk_bcc — BCC cannot leak by construction (NFR-01).
+        string? select = null;
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => select = odata)
+              .ReturnsAsync(new[] { MessageRow(Guid.NewGuid(), to: "bob@x.com; carol@x.com") });
+        SetupAttachments();
+        SetupThreadName(null);
+
+        var msg = (await Sut().ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None))
+            .Messages.Single();
+
+        msg.To.Should().BeEquivalentTo(new[] { "bob@x.com", "carol@x.com" });
+        select.Should().NotBeNull();
+        select!.Should().Contain("sprk_to")
+            .And.NotContain("sprk_bcc", "BCC must never be selected or returned (NFR-01 over-disclosure)");
     }
 
     // ─────────────────────────── thread-read: current DTO shape (task 001 characterization baseline) ───────
@@ -318,6 +397,7 @@ public class CommunicationThreadReadServiceTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var act = () => sut.ReadThreadAsync(ThreadId, Caller(), since: null, top: null, CancellationToken.None);
@@ -367,6 +447,7 @@ public class CommunicationThreadReadServiceTests
             _query.Object,
             new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
             _resolver.Object,
+            _identity.Object,
             Mock.Of<ILogger<CommunicationThreadReadService>>());
 
         var act = () => sut.GetUnreadCountAsync(ThreadId, Caller(), since: null, CancellationToken.None);
@@ -380,7 +461,7 @@ public class CommunicationThreadReadServiceTests
         Guid id, string? body = null, int? bodyFormat = null, int? type = null,
         string? from = null, string? inReplyTo = null, bool internalOnly = false, int privilege = PrivilegeNone,
         int? direction = null, Guid? sentBy = null, string? sentByName = null,
-        string? subject = null, string? to = null)
+        string? subject = null, string? to = null, bool isPrivate = false)
     {
         var row = new Dictionary<string, JsonElement>
         {
@@ -388,6 +469,7 @@ public class CommunicationThreadReadServiceTests
             ["createdon"] = El("2026-07-16T12:00:00Z"),
             ["sprk_isinternalonly"] = El(internalOnly),
             ["sprk_privilegeclassification"] = El(privilege),
+            ["sprk_isprivate"] = El(isPrivate),
         };
         if (body is not null) row["sprk_body"] = El(body);
         if (bodyFormat is not null) row["sprk_bodyformat"] = El(bodyFormat.Value);

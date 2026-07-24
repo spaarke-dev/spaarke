@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="messaging-communication-app-r3">
+  <metadata>
+    <title>Redeploy all conversation surfaces with Phase 5 + UAT changes (spaarkedev1)</title>
+    <phase>7 UAT hardening</phase>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy/orchestration; prescriptive; no new source logic.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate — after 060/061/062 (and reflects Phase 5 shared-component changes).</parallel-reason>
+    <deps>061, 062</deps>
+    <tags>deploy, pcf, dataverse</tags>
+  </metadata>
+  <prompt>Rebuild + redeploy all four conversation surfaces to spaarkedev1 so they carry the Phase 5 (043 markers, 042 attachments, 041 pin) + Phase 7 UAT changes: the CommunicationConversationPanel PCF (bump to v1.1.0, pack + hand the zip path to the operator to upload), the two code pages (sprk_communicationconversationpage.html, sprk_communicationspage.html via Web API PATCH + PublishXml), the onLoad script, and the SpaarkeAi app (Deploy-SpaarkeAi.ps1). These currently-deployed artifacts predate Phase 5 and are stale.</prompt>
+  <role>SPAARKE platform developer. Expert in PCF + code-page deploy.</role>
+  <goal>All four surfaces in spaarkedev1 reflect current source: PCF v1.1.0 (footer shows it), both code pages + onLoad, and SpaarkeAi — deployed/handed-off, with the operator's form-wiring unchanged.</goal>
+  <constraints>
+    <constraint source="PCF-build">npm run build:prod; bump manifest + CONTROL_VERSION to 1.1.0; no apostrophes in description-key.</constraint>
+    <constraint source="code-page-deploy">Clear Vite cache before build; Web API create/PATCH + single PublishXml (az token to spaarkedev1).</constraint>
+    <constraint source="hot-path">SpaarkeAi is a hot-path — coordinate/worktree-sync before the SpaarkeAi rebuild so it ships the merged shared state.</constraint>
+  </constraints>
+  <steps mode="prescriptive">
+    <step order="1">Worktree-sync + confirm 060/061/062 merged. Rebuild the PCF (build:prod, v1.1.0), pack the solution zip, hand the operator the full zip path.</step>
+    <step order="2">Rebuild + Web-API-redeploy sprk_communicationconversationpage.html + sprk_communicationspage.html + the onLoad script; PublishXml.</step>
+    <step order="3">Rebuild + Deploy-SpaarkeAi.ps1 for the SpaarkeAi app.</step>
+    <step order="4">Report deployed versions/ids; note operator upload of the PCF zip + form re-verification. Document in task-063-notes.md.</step>
+  </steps>
+  <acceptance-criteria>
+    <criterion testable="true">PCF v1.1.0 packed; zip path handed to operator.</criterion>
+    <criterion testable="true">Both code pages + onLoad script redeployed + published to spaarkedev1.</criterion>
+    <criterion testable="true">SpaarkeAi redeployed; all surfaces carry the current shared components.</criterion>
+  </acceptance-criteria>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -59,10 +59,27 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens } from '@fluentui/react-components';
+import {
+  makeStyles,
+  tokens,
+  Button,
+  Toast,
+  ToastTitle,
+  ToastBody,
+  Toaster,
+  useId,
+  useToastController,
+} from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { ConversationWorkspace, ConversationView, getCurrentUserId } from '@spaarke/ui-components';
+import {
+  ConversationWorkspace,
+  ConversationView,
+  getCurrentUserId,
+  createXrmNavigationService,
+} from '@spaarke/ui-components';
 import type { IConversationRendererProps } from '@spaarke/ui-components';
+import { useCommunicationArrivals, type ArrivalEvent } from './useCommunicationArrivals';
+import { getCommunicationArrivalsSubscribe } from './communicationArrivalsSeam';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles — `makeStyles` at module scope (ADR-021: Fluent v9 semantic tokens
@@ -79,9 +96,31 @@ const useStyles = makeStyles({
     height: '100%',
     width: '100%',
     minWidth: 0,
-    minHeight: 0,
+    // Fill the workspace container (round 3 item 1 / round 4). The SectionPanel
+    // card + WorkspaceShell row are content-driven (deliberately NOT height:100%
+    // — see WorkspaceShell.styles.ts), so a widget must declare its own height
+    // floor to claim the tab. This mirrors the established full-height widget
+    // pattern (SmartTodo's `calc(100vh - 200px)`): a floor that reaches the
+    // bottom of the tab (app header + tab bar + section header ≈ 200px chrome).
+    // `height:100%` still wins when the host DOES constrain height (bounded tile).
+    minHeight: 'calc(100vh - 200px)',
     overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
+  },
+  // FR-22 awareness count (round 3 item 3) — rendered as the ThreadList header
+  // accessory instead of a separate bar; clickable to mark-as-seen (reset).
+  awarenessAccessory: {
+    minWidth: 0,
+    color: tokens.colorBrandForeground1,
+    fontSize: tokens.fontSizeBase200,
+  },
+  // Body wrapper so the two-pane conversation shell fills the whole widget.
+  body: {
+    display: 'flex',
+    flexGrow: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflow: 'hidden',
   },
 });
 
@@ -109,6 +148,35 @@ export interface CommunicationsWorkspaceWidgetProps {
 export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidgetProps> = () => {
   const styles = useStyles();
 
+  // ── FR-22 new-communication awareness (task 045) — AWARENESS ONLY (NFR-03) ──
+  // Consume the notification-spine `communication-arrived` kind → unread badge + toast. Content is
+  // NOT fetched from the signal; the two-pane shell below keeps loading messages via its own ~5s
+  // `ConversationView` poll (unchanged). The toaster surfaces each arrival; the badge counts unseen ones.
+  const toasterId = useId('communications-awareness-toaster');
+  const { dispatchToast } = useToastController(toasterId);
+
+  const handleArrival = React.useCallback(
+    (_event: ArrivalEvent) => {
+      // Signal-only: we raise an awareness toast; we do NOT read `_event.envelope` for content (NFR-03).
+      dispatchToast(
+        <Toast>
+          <ToastTitle>New communication</ToastTitle>
+          <ToastBody>A new message arrived. It will appear in your conversations shortly.</ToastBody>
+        </Toast>,
+        { intent: 'info' }
+      );
+    },
+    [dispatchToast]
+  );
+
+  // Register-only injection: the host wires `setCommunicationArrivalsSubscribe(...)` once at bootstrap, bound
+  // to its ONE shared @spaarke/notifications client. If it never did, `subscribe` is undefined and awareness
+  // is simply off — this widget never constructs its own client (one-connection invariant, ADR-047).
+  const { unreadCount, reset } = useCommunicationArrivals({
+    subscribe: getCommunicationArrivalsSubscribe(),
+    onArrival: handleArrival,
+  });
+
   // Current-user identity (FR-02/FR-18 mine/others bubble alignment) — the
   // established Xrm-host-context mechanism (root CLAUDE.md §11: no second
   // identity mechanism). Falls back to '' when no Xrm host context is
@@ -117,32 +185,67 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   // a safe degrade, never a crash.
   const currentUserSystemUserId = React.useMemo(() => getCurrentUserId() ?? '', []);
 
+  // Record-lookup service for the shell's built-in New-conversation modal (item
+  // 9 — name + associate-to-record picker). Reuses the shared Xrm-backed
+  // navigation adapter (`createXrmNavigationService` → `Xrm.Utility.lookupObjects`,
+  // the SAME wizard-associate record picker used across Spaarke; NO second
+  // mechanism, root CLAUDE.md §11).
+  const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
   // Right-pane renderer seam (see ConversationWorkspace.tsx module header
   // "Renderer seam") — wires the REAL `<ConversationView>` in, mounted (not
-  // re-implemented) per root CLAUDE.md §11.
+  // re-implemented) per root CLAUDE.md §11. Forwards the shell's
+  // `onMarkThreadRead` (item 5c) so the message-toolbar tool clears the list badge.
   const renderConversation = React.useCallback(
-    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl }: IConversationRendererProps) => (
+    ({ threadId, authenticatedFetch: fetchFn, bffBaseUrl, onMarkThreadRead }: IConversationRendererProps) => (
       <ConversationView
         threadId={threadId}
         authenticatedFetch={fetchFn}
         bffBaseUrl={bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
+        onMarkThreadRead={onMarkThreadRead}
       />
     ),
     [currentUserSystemUserId]
   );
 
+  // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —
+  // replaces the separate awareness bar + duplicative circle badge. Clickable to
+  // mark-as-seen (reset). Only present when there are unseen arrivals.
+  const threadsHeaderAccessory =
+    unreadCount > 0 ? (
+      <Button
+        appearance="transparent"
+        size="small"
+        className={styles.awarenessAccessory}
+        onClick={reset}
+        title="Mark as seen"
+      >
+        {unreadCount} new communication{unreadCount === 1 ? '' : 's'}
+      </Button>
+    ) : undefined;
+
   return (
     <div className={styles.root}>
-      {/* Record-less / workspace mode: no `regarding` prop — the all-mode
-          thread list (FR-16) includes every thread the caller may see,
-          including record-less Direct threads. `bffBaseUrl` is intentionally
-          omitted: the free-function `authenticatedFetch` (imported above)
-          already resolves relative URLs against the host's configured BFF
-          base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
-          `resolveUrl` — the same behavior every other production
-          `authenticatedFetch`-importing surface in this codebase relies on). */}
-      <ConversationWorkspace authenticatedFetch={authenticatedFetch} renderConversation={renderConversation} />
+      {/* Awareness toaster — raises an info toast per consumed `communication-arrived` (signal-only). */}
+      <Toaster toasterId={toasterId} position="top-end" />
+
+      <div className={styles.body}>
+        {/* Record-less / workspace mode: no `regarding` prop — the all-mode
+            thread list (FR-16) includes every thread the caller may see,
+            including record-less Direct threads. `bffBaseUrl` is intentionally
+            omitted: the free-function `authenticatedFetch` (imported above)
+            already resolves relative URLs against the host's configured BFF
+            base URL internally (see `@spaarke/auth`'s `authenticatedFetch.ts`
+            `resolveUrl` — the same behavior every other production
+            `authenticatedFetch`-importing surface in this codebase relies on). */}
+        <ConversationWorkspace
+          authenticatedFetch={authenticatedFetch}
+          renderConversation={renderConversation}
+          navigationService={navigationService}
+          threadsHeaderAccessory={threadsHeaderAccessory}
+        />
+      </div>
     </div>
   );
 };

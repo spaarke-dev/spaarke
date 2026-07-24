@@ -41,6 +41,7 @@ import { sendCommunication, SendCommunicationError } from '../../services/commun
 import { emailComposerReducer, initialState, validateState, mapStateToSendRequest } from './EmailComposer.reducer';
 import type {
   EmailComposerState,
+  IAttachmentItem,
   IEmailComposerHandle,
   IEmailComposerProps,
   IComposerAttachmentSource,
@@ -239,6 +240,59 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         : `${cur.body}${cur.body ? '\n' : ''}${label}: ${picked.url}`;
     dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
   }, []);
+
+  // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
+  // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
+  // gate in AttachmentList) is uploaded to a governed sprk_document via the
+  // host-injected `onUploadLocalAttachment`, then patched with its `documentId`
+  // so it flows into the EXISTING send path (ADR-045 — no new send/upload path).
+  // Absent resolver → local picks stay display-only (pre-task-042 behavior).
+  const [resolvingIds, setResolvingIds] = React.useState<ReadonlySet<string>>(() => new Set());
+  const [uploadError, setUploadError] = React.useState<string | undefined>();
+  const mountedRef = React.useRef(true);
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const onUploadLocalAttachment = props.onUploadLocalAttachment;
+  const handleAddAttachment = React.useCallback(
+    (item: IAttachmentItem) => {
+      dispatch({ type: 'ADD_ATTACHMENT', item });
+      if (item.source !== 'local' || !item.file || !onUploadLocalAttachment) return;
+      const file = item.file;
+      setUploadError(undefined);
+      setResolvingIds(prev => new Set(prev).add(item.id));
+      onUploadLocalAttachment(file)
+        .then(res => {
+          if (!mountedRef.current) return;
+          dispatch({
+            type: 'RESOLVE_ATTACHMENT_DOCUMENT',
+            id: item.id,
+            documentId: res.documentId,
+            driveItemId: res.driveItemId,
+          });
+        })
+        .catch((err: unknown) => {
+          if (!mountedRef.current) return;
+          // Upload failed → drop the unsendable item and surface a visible
+          // error. Never blocks sending the already-resolved attachments.
+          dispatch({ type: 'REMOVE_ATTACHMENT', id: item.id });
+          setUploadError(`Could not attach ${item.fileName}: ${err instanceof Error ? err.message : 'upload failed'}.`);
+        })
+        .finally(() => {
+          if (!mountedRef.current) return;
+          setResolvingIds(prev => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
+        });
+    },
+    [onUploadLocalAttachment]
+  );
 
   // ── Re-derive state when mode/sourceRecord/communicationId change on an
   //    already-mounted instance (host swaps props rather than remounting) ──
@@ -444,15 +498,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           mode={state.mode}
           sources={attachmentSources}
           items={state.attachments}
-          onAdd={item => dispatch({ type: 'ADD_ATTACHMENT', item })}
+          onAdd={handleAddAttachment}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
           recordCatalog={props.recordLookupCatalog}
           onLookupRecord={props.onLookupRecord}
           onRecordPicked={handleRecordPicked}
+          resolvingIds={resolvingIds}
           readOnly={state.readOnly}
-          errorMessage={fieldErrors.attachments}
+          errorMessage={[fieldErrors.attachments, uploadError].filter(Boolean).join(' ') || undefined}
         />
       </div>
 

@@ -178,7 +178,11 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
   // toggles filter each independently.
   const emailBlock = () => screen.queryByRole('group', { name: /^Email: invoice memo/ });
 
-  it('both toggles on shows both types; disabling Message hides message-type bubbles', async () => {
+  // R3 UAT 2026-07-23 item 10: SOLO channel filter. Default shows all; clicking
+  // Message solos chats, clicking Email solos emails, clicking the active one
+  // returns to all. (The former additive both-on toggles + the Unread facet were
+  // removed in item 11.)
+  it('default shows both types; clicking "Show only messages" solos chats (hides emails)', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
@@ -186,37 +190,28 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     expect(screen.getByRole('article')).toBeInTheDocument();
     expect(screen.getByText('quick chat')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show only messages' }));
+    await waitFor(() => expect(emailBlock()).not.toBeInTheDocument());
+    expect(screen.getByText('quick chat')).toBeInTheDocument();
+
+    // Clicking the active filter again returns to "all".
+    await userEvent.click(screen.getByRole('button', { name: 'Show only messages' }));
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    expect(screen.getByRole('article')).toBeInTheDocument();
+  });
+
+  it('clicking "Show only emails" solos emails (hides chats)', async () => {
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: 'Show only emails' }));
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
     expect(emailBlock()).toBeInTheDocument();
     expect(screen.queryByRole('article')).not.toBeInTheDocument();
   });
 
-  it('disabling Email hides email-type blocks', async () => {
-    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
-    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
-
-    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Show email messages' }));
-    await waitFor(() => expect(emailBlock()).not.toBeInTheDocument());
-    expect(screen.getByText('quick chat')).toBeInTheDocument();
-  });
-
-  it('shows a distinct "no messages match filters" state when all types are disabled (≠ thread-empty)', async () => {
-    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
-    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
-
-    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
-    await userEvent.click(screen.getByRole('button', { name: 'Show email messages' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
-
-    expect(await screen.findByText('No messages match the current filters.')).toBeInTheDocument();
-    expect(screen.queryByText('No messages yet.')).not.toBeInTheDocument();
-    expect(screen.queryAllByRole('article')).toHaveLength(0);
-    expect(emailBlock()).not.toBeInTheDocument();
-  });
-
-  it('filtering is presentational — toggling a filter does NOT re-fetch, and clearing restores the full set', async () => {
+  it('soloing is presentational — it does NOT re-fetch, and un-soloing restores the full set', async () => {
     const { fetchMock, store } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
@@ -224,28 +219,32 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     expect(screen.getByText('quick chat')).toBeInTheDocument();
     const readsAfterLoad = store.reads;
 
-    await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Show only emails' }));
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
     // No re-fetch: the read count is unchanged by filtering.
     expect(store.reads).toBe(readsAfterLoad);
 
-    // Clearing the filter restores the full set from the SAME already-loaded state.
-    await userEvent.click(screen.getByRole('button', { name: 'Show chat messages' }));
+    // Un-soloing restores the full set from the SAME already-loaded state.
+    await userEvent.click(screen.getByRole('button', { name: 'Show only emails' }));
     await waitFor(() => expect(screen.getByText('quick chat')).toBeInTheDocument());
     expect(emailBlock()).toBeInTheDocument();
     expect(store.reads).toBe(readsAfterLoad);
   });
 
-  it('the word dropdown narrows to matching items (additive with the type toggles)', async () => {
+  it('the search box (revealed by the search icon) narrows to matching items (additive with the solo filter)', async () => {
     const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
     await waitFor(() => expect(emailBlock()).toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole('combobox', { name: 'Filter by word' }));
-    // 'invoice' is drawn from the email's underlying body ('invoice details'),
-    // which the word filter still matches even though the block doesn't render it.
-    await userEvent.click(await screen.findByRole('option', { name: 'invoice' }));
+    // The text filter is hidden until the search icon is clicked (task 062 / §B7).
+    expect(screen.queryByRole('textbox', { name: 'Filter messages by text' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Search messages' }));
+
+    // 'invoice' matches the email's underlying body ('invoice details') + subject
+    // ('invoice memo'), which the word facet still matches even though the block
+    // doesn't render the body; 'quick chat' does not match.
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Filter messages by text' }), 'invoice');
 
     await waitFor(() => expect(screen.queryByText('quick chat')).not.toBeInTheDocument());
     expect(emailBlock()).toBeInTheDocument();
@@ -256,7 +255,16 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
     renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
 
     expect(await screen.findByText('No messages yet.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Show email messages' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show only emails' })).not.toBeInTheDocument();
+  });
+
+  it('the Unread-only + Mark-as-read icons are removed (item 11)', async () => {
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await waitFor(() => expect(emailBlock()).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Show unread messages only' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark conversation as read' })).not.toBeInTheDocument();
   });
 
   it('renders the filter bar under dark mode via the host FluentProvider (ADR-021)', async () => {
@@ -265,6 +273,36 @@ describe('ConversationView — in-conversation filters (FR-09)', () => {
       { authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] },
       webDarkTheme
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Show email messages' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Show only emails' })).toBeInTheDocument());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Message toolbar changes (R3 UAT 2026-07-22): Send icon-only (item 6),
+// Refresh relocated into the toolbar (item 7), Mark-as-read tool (item 5c).
+// ---------------------------------------------------------------------------
+
+describe('ConversationView — message toolbar (R3 UAT 2026-07-22)', () => {
+  it('Send is icon-only (no visible "Send" text) and Refresh is a toolbar tool', async () => {
+    const { fetchMock } = buildFetch([EMAIL_MSG, CHAT_MSG]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    await waitFor(() => expect(screen.getByRole('article')).toBeInTheDocument());
+
+    // Send: reachable by accessible name (aria-label), but renders no "Send" text label (item 6).
+    const send = screen.getByRole('button', { name: 'Send message' });
+    expect(send).toHaveTextContent('');
+    // Refresh: present as a toolbar tool (item 7 — moved out of the compose row).
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeInTheDocument();
+  });
+
+  it('Refresh is available even when the thread is empty', async () => {
+    const { fetchMock } = buildFetch([]);
+    renderView({ authenticatedFetch: fetchMock as unknown as ConversationViewProps['authenticatedFetch'] });
+
+    expect(await screen.findByText('No messages yet.')).toBeInTheDocument();
+    // The filter toggles stay hidden (nothing to filter), but Refresh persists.
+    expect(screen.getByRole('button', { name: 'Refresh conversation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show only emails' })).not.toBeInTheDocument();
   });
 });

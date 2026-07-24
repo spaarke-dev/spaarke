@@ -17,14 +17,15 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { ConversationWorkspace } from '../ConversationWorkspace';
 import type { ConversationWorkspaceProps, IConversationRendererProps } from '../ConversationWorkspace';
+import type { INavigationService } from '../../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
 // Fetch fixtures
 // ---------------------------------------------------------------------------
 
 const ALL_THREADS = [
-  { threadId: 't1', name: 'Acme Matter', threadType: 100000000, createdOn: '2026-07-19T12:00:00Z' },
-  { threadId: 't2', name: 'Direct: Alice', threadType: 100000001, createdOn: '2026-07-18T09:00:00Z' },
+  { threadId: 't1', name: 'Acme Matter', threadType: 100000000, createdOn: '2026-07-19T12:00:00Z', isPinned: false },
+  { threadId: 't2', name: 'Direct: Alice', threadType: 100000001, createdOn: '2026-07-18T09:00:00Z', isPinned: false },
 ];
 
 const REGARDING_RESULT = {
@@ -49,6 +50,8 @@ interface IMockFetchOptions {
   allThreads?: typeof ALL_THREADS;
   regardingResult?: typeof REGARDING_RESULT;
   unreadByThread?: Record<string, number>;
+  /** task 041: when true, every PATCH .../pin request resolves 500 (rollback test). */
+  pinShouldFail?: boolean;
 }
 
 function makeAuthenticatedFetch(options: IMockFetchOptions = {}) {
@@ -56,9 +59,18 @@ function makeAuthenticatedFetch(options: IMockFetchOptions = {}) {
   const regardingResult = options.regardingResult ?? REGARDING_RESULT;
   const unreadByThread = options.unreadByThread ?? {};
 
-  return jest.fn(async (url: string) => {
+  return jest.fn(async (url: string, init?: RequestInit) => {
     if (url.includes('/by-regarding/')) {
       return jsonResponse(regardingResult);
+    }
+    const pinMatch = url.match(/\/threads\/([^/]+)\/pin$/);
+    if (pinMatch && init?.method === 'PATCH') {
+      if (options.pinShouldFail) {
+        return jsonResponse({ title: 'Server error', detail: 'Write failed' }, 500);
+      }
+      const threadId = pinMatch[1];
+      const body = JSON.parse((init.body as string) ?? '{}') as { pinned: boolean };
+      return jsonResponse({ threadId, isPinned: body.pinned });
     }
     const unreadMatch = url.match(/\/threads\/([^/]+)\/unread-count/);
     if (unreadMatch) {
@@ -125,38 +137,74 @@ describe('ConversationWorkspace — thread list content (FR-10)', () => {
     renderWorkspace({ authenticatedFetch });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText('3 new messages')).toBeInTheDocument());
+    // R3 UAT 2026-07-22 item 5b: the "N new messages" text row + inline
+    // "Mark as read" button were replaced by a compact unread dot (the
+    // mark-as-read action moved to the message toolbar, item 5c). The dot
+    // carries the count in its accessible name.
+    await waitFor(() => expect(screen.getByLabelText('3 unread messages')).toBeInTheDocument());
+    expect(screen.queryByText('3 new messages')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /mark as read/i })).not.toBeInTheDocument();
   });
 
-  it('the word filter narrows the list (all mode, server-side search)', async () => {
+  it('has NO thread-list text filter (task 062 / §B4 — removed in the Teams-style redesign)', async () => {
     renderWorkspace();
 
     await waitFor(() => expect(screen.getByText('Direct: Alice')).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText('Filter threads'), { target: { value: 'Direct' } });
-
-    await waitFor(() => expect(screen.queryByText('Acme Matter')).not.toBeInTheDocument(), { timeout: 2000 });
-    expect(screen.getByText('Direct: Alice')).toBeInTheDocument();
+    // The "Filter threads" input was removed; the full access-filtered set shows.
+    expect(screen.queryByPlaceholderText('Filter threads')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /filter threads/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Acme Matter')).toBeInTheDocument();
   });
 
-  it('the word filter narrows the list (record mode, client-side over the already-loaded set)', async () => {
-    renderWorkspace({ regarding: { entityType: 'sprk_matter', id: 'rec1' } });
-
-    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
-
-    fireEvent.change(screen.getByPlaceholderText('Filter threads'), { target: { value: 'zzz-no-match' } });
-
-    await waitFor(() => expect(screen.getByText('No threads match your filter.')).toBeInTheDocument());
-  });
-
-  it('the ＋ New button invokes onCreateThread', async () => {
+  it('the icon-only ＋ (create) button invokes onCreateThread', async () => {
     const onCreateThread = jest.fn();
     renderWorkspace({ onCreateThread });
 
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // Icon-only now (task 062 / §B5) — identified by its "New thread" aria-label.
     fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
 
     expect(onCreateThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the built-in New-conversation modal when a navigationService is supplied (item 5a / item 9)', async () => {
+    const navigationService = { openLookup: jest.fn().mockResolvedValue([]) } as unknown as INavigationService;
+    renderWorkspace({ navigationService });
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // No modal until the ＋ is clicked.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New thread' }));
+
+    // The shell owns the create surface: NewThreadModal opens in-place.
+    expect(await screen.findByRole('dialog', { name: /New conversation/i })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Thread-pane header + collapse (R3 UAT 2026-07-23 items 3/5/8)
+// ---------------------------------------------------------------------------
+
+describe('ConversationWorkspace — thread pane header + collapse', () => {
+  it('renders a "Threads" title and collapses/expands the pane on the header affordance', async () => {
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+    // Title present (item 5); create ＋ present (item 8).
+    expect(screen.getByText('Threads')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New thread' })).toBeInTheDocument();
+
+    // Collapse (item 3) — the thread list content disappears, a re-expand rail appears.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse threads pane' }));
+    await waitFor(() => expect(screen.queryByText('Acme Matter')).not.toBeInTheDocument());
+    const expandRail = screen.getByRole('button', { name: 'Expand threads pane' });
+    expect(expandRail).toBeInTheDocument();
+
+    // Expand — the thread list returns.
+    fireEvent.click(expandRail);
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
   });
 });
 
@@ -250,5 +298,98 @@ describe('ConversationWorkspace — dark mode (ADR-021)', () => {
     renderWorkspace({}, webDarkTheme);
     await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
     expect(screen.getByText('Direct: Alice')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pin/unpin (task 041, FR-24)
+// ---------------------------------------------------------------------------
+
+describe('ConversationWorkspace — pin/unpin (task 041, FR-24)', () => {
+  it('reflects the persisted pin state on load (survives a reload) and sorts the pinned thread to the top', async () => {
+    // t2 arrives from the server already pinned (isPinned:true) — simulates a fresh mount after a page reload,
+    // NOT an in-session optimistic update. t1 (createdon-desc's natural first row) is unpinned.
+    const allThreads = [ALL_THREADS[0], { ...ALL_THREADS[1], isPinned: true }];
+    renderWorkspace({ authenticatedFetch: makeAuthenticatedFetch({ allThreads }) });
+
+    await waitFor(() => expect(screen.getByText('Direct: Alice')).toBeInTheDocument());
+
+    const pinnedButton = screen.getByRole('button', { name: 'Unpin Direct: Alice' });
+    const unpinnedButton = screen.getByRole('button', { name: 'Pin Acme Matter' });
+    expect(pinnedButton).toHaveAttribute('aria-pressed', 'true');
+    expect(unpinnedButton).toHaveAttribute('aria-pressed', 'false');
+
+    // Sorted to the top: the pinned thread's listitem precedes the unpinned one in DOM order, even though the
+    // server returned t1 (unpinned) first.
+    const items = screen.getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('Direct: Alice');
+    expect(items[1]).toHaveTextContent('Acme Matter');
+  });
+
+  it('pinning a thread optimistically sets aria-pressed and PATCHes the pin field', async () => {
+    const authenticatedFetch = makeAuthenticatedFetch();
+    renderWorkspace({ authenticatedFetch });
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+
+    const pinButton = screen.getByRole('button', { name: 'Pin Acme Matter' });
+    fireEvent.click(pinButton);
+
+    // Optimistic — flips immediately, before the PATCH resolves.
+    expect(screen.getByRole('button', { name: 'Unpin Acme Matter' })).toHaveAttribute('aria-pressed', 'true');
+
+    await waitFor(() =>
+      expect(
+        authenticatedFetch.mock.calls.some(
+          ([u, init]) => /\/threads\/t1\/pin$/.test(u) && (init as RequestInit)?.method === 'PATCH'
+        )
+      ).toBe(true)
+    );
+    const [, init] = authenticatedFetch.mock.calls.find(([u]) => /\/threads\/t1\/pin$/.test(u))!;
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ pinned: true });
+  });
+
+  it('unpinning clears the pinned marker and PATCHes pinned:false', async () => {
+    const allThreads = [{ ...ALL_THREADS[0], isPinned: true }, ALL_THREADS[1]];
+    const authenticatedFetch = makeAuthenticatedFetch({ allThreads });
+    renderWorkspace({ authenticatedFetch });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unpin Acme Matter' })).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Acme Matter' }));
+
+    expect(screen.getByRole('button', { name: 'Pin Acme Matter' })).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => {
+      const call = authenticatedFetch.mock.calls.find(([u]) => /\/threads\/t1\/pin$/.test(u));
+      expect(call).toBeDefined();
+      expect(JSON.parse((call![1] as RequestInit).body as string)).toEqual({ pinned: false });
+    });
+  });
+
+  it('rolls back the optimistic pin state when the PATCH fails', async () => {
+    const authenticatedFetch = makeAuthenticatedFetch({ pinShouldFail: true });
+    const onError = jest.fn();
+    renderWorkspace({ authenticatedFetch, onError });
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Acme Matter' }));
+
+    // Optimistic flip happens immediately...
+    expect(screen.getByRole('button', { name: 'Unpin Acme Matter' })).toHaveAttribute('aria-pressed', 'true');
+
+    // ...then rolls back once the PATCH rejects.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Pin Acme Matter' })).toHaveAttribute('aria-pressed', 'false')
+    );
+    expect(onError).toHaveBeenCalled();
+  });
+
+  it('never renders an archive/mute/tag control (FR-24 is pin-only)', async () => {
+    renderWorkspace();
+    await waitFor(() => expect(screen.getByText('Acme Matter')).toBeInTheDocument());
+
+    const buttons = screen.getAllByRole('button');
+    const forbidden = buttons.filter(b =>
+      /archive|mute|tag/i.test(b.getAttribute('aria-label') ?? b.textContent ?? '')
+    );
+    expect(forbidden).toHaveLength(0);
   });
 });

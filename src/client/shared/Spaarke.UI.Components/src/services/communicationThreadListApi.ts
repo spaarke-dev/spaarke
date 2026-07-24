@@ -70,6 +70,13 @@ export interface IThreadListItemDto {
   /** `sprk_threadtype`: Record-Anchored = 100000000, Direct 1:1 = 100000001. */
   threadType: number | null;
   createdOn: string | null;
+  /**
+   * `sprk_ispinned` (R3 task 040/041, FR-24). The BFF already normalizes a pre-existing thread's `null` reading
+   * (task 040's schema `DefaultValue` does not backfill existing rows — see `CommunicationThreadReadService`'s
+   * `IsPinned` doc comment) to `false`, so this is a plain boolean here — never `null`/`undefined` on the wire.
+   * Callers should still treat it defensively as falsy (`!!row.isPinned`) rather than assume strict presence.
+   */
+  isPinned: boolean;
 }
 
 /** Mirrors `ThreadListResult` (`GET /api/communications/threads` response). */
@@ -220,7 +227,7 @@ export async function listThreads(
 interface IRegardingReadResultForListDto {
   entityType: string;
   recordId: string;
-  threads: Array<{ threadId: string; name: string | null }>;
+  threads: Array<{ threadId: string; name: string | null; isPinned?: boolean }>;
   threadCount: number;
 }
 
@@ -265,6 +272,9 @@ export async function listThreadsByRegarding(
     name: t.name,
     threadType: null,
     createdOn: null,
+    // Task 041 / FR-24: the by-regarding thread shape now also carries isPinned (see ThreadReadResult on the BFF).
+    // Defensive `!!` — never trust the wire value is strictly boolean/present (null-as-unpinned, task 040 caveat).
+    isPinned: !!t.isPinned,
   }));
 
   return {
@@ -388,4 +398,115 @@ export async function startDirectThread(
   }
 
   return (await response.json()) as IStartDirectThreadResultDto;
+}
+
+// ---------------------------------------------------------------------------
+// createRecordThread — POST /api/communications/threads (R3 UAT 2026-07-23 item 9)
+// ---------------------------------------------------------------------------
+//
+// Create a NEW named, record-anchored thread. Unlike startDirectThread (participant-based 1:1), this
+// anchors to an ADR-024 regarding record (no participant); the caller is resolved server-side and becomes
+// the thread owner (so the new empty thread is immediately visible in the caller's all-mode list). Mirrors
+// the BFF DTOs field-for-field (camelCase, ASP.NET STJ).
+// ---------------------------------------------------------------------------
+
+/** Mirrors `CreateRecordThreadRequest`. */
+export interface ICreateRecordThreadRequestDto {
+  /** Optional thread name; blank → derived from the record name server-side. */
+  name?: string;
+  /** The regarding record's logical entity name (one of the 11 ADR-024 families). */
+  regardingEntityType: string;
+  /** The regarding record's id (GUID). */
+  regardingRecordId: string;
+  /** Optional regarding record display name. */
+  regardingRecordName?: string;
+}
+
+/** Mirrors `CreateRecordThreadResponse`. */
+export interface ICreateRecordThreadResultDto {
+  /** The new record-anchored thread's `sprk_communicationthreadid`. */
+  threadId: string;
+}
+
+/**
+ * Creates a new named, record-anchored thread (`POST /api/communications/threads`). Throws
+ * {@link CommunicationThreadListError} on any non-2xx response (parsed ProblemDetails per ADR-019),
+ * exactly like the other write wrappers in this module.
+ */
+export async function createRecordThread(
+  request: ICreateRecordThreadRequestDto,
+  client: IThreadListApiClientOptions
+): Promise<ICreateRecordThreadResultDto> {
+  if (!request.regardingEntityType || !request.regardingRecordId) {
+    throw new Error('createRecordThread: regardingEntityType and regardingRecordId are required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('createRecordThread: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, '/api/communications/threads');
+  const response = await client.authenticatedFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: request.name,
+      regardingEntityType: request.regardingEntityType,
+      regardingRecordId: request.regardingRecordId,
+      regardingRecordName: request.regardingRecordName,
+    }),
+  });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+
+  return (await response.json()) as ICreateRecordThreadResultDto;
+}
+
+// ---------------------------------------------------------------------------
+// setThreadPinned — PATCH /api/communications/threads/{threadId}/pin (task 041 / FR-24)
+// ---------------------------------------------------------------------------
+//
+// Pin/unpin a thread. Persists sprk_ispinned (the task-040 field) via the SAME authenticatedFetch/BFF path every
+// other write in this module uses (ADR-028) — pin-only, no archive/mute/tag equivalent. `<ConversationWorkspace />`
+// calls this optimistically and rolls back its local state on a thrown CommunicationThreadListError.
+// ---------------------------------------------------------------------------
+
+/** Mirrors `SetThreadPinnedResponse` — the persisted pinned state (echoed for optimistic-UI reconciliation). */
+export interface ISetThreadPinnedResultDto {
+  /** The pinned/unpinned thread's `sprk_communicationthreadid`. */
+  threadId: string;
+  /** The persisted `sprk_ispinned` value. */
+  isPinned: boolean;
+}
+
+/**
+ * Pins or unpins a thread (`PATCH /api/communications/threads/{threadId}/pin`). Throws
+ * {@link CommunicationThreadListError} on any non-2xx response (parsed ProblemDetails per ADR-019) — including a
+ * 403 when the caller cannot see the thread — exactly like the read/write wrappers above.
+ */
+export async function setThreadPinned(
+  threadId: string,
+  pinned: boolean,
+  client: IThreadListApiClientOptions
+): Promise<ISetThreadPinnedResultDto> {
+  if (!threadId) {
+    throw new Error('setThreadPinned: threadId is required.');
+  }
+  if (!client.authenticatedFetch) {
+    throw new Error('setThreadPinned: authenticatedFetch is required.');
+  }
+
+  const url = resolveUrl(client.bffBaseUrl, `/api/communications/threads/${encodeURIComponent(threadId)}/pin`);
+  const response = await client.authenticatedFetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pinned }),
+  });
+
+  if (!response.ok) {
+    throw await CommunicationThreadListError.fromResponse(response);
+  }
+
+  return (await response.json()) as ISetThreadPinnedResultDto;
 }

@@ -358,11 +358,40 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   // Xrm.organizationSettings.tenantId is unreliable in Code Page contexts;
   // the customer-set env var is the source of truth.
   const envTenantId = envVars.get(ENV_VAR_NAMES.TENANT_ID);
-  const resolvedTenantId = envTenantId && envTenantId.trim() ? envTenantId.trim() : xrmTenantId;
+  let resolvedTenantId = envTenantId && envTenantId.trim() ? envTenantId.trim() : xrmTenantId;
+  let tenantSource = envTenantId && envTenantId.trim() ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
+
+  const normalizedBffUrl = normalizeUrl(bffBaseUrl);
+
+  // 3b. Last-resort tenant fallback: the BFF's anonymous /api/config/client endpoint (backed by the BFF's
+  // AzureAd:TenantId app setting). This fires ONLY when neither the sprk_TenantId env var NOR Xrm yielded a
+  // tenant — the exact failure a deeply-nested Code Page iframe hits (Xrm.organizationSettings.tenantId is
+  // empty there, and if sprk_TenantId also has no value record the tenant is empty). An empty tenant makes the
+  // MSAL authority fall back to /organizations, which breaks ssoSilent in an iframe and forces an interactive
+  // popup loop (messaging-r3 2026-07-22). The BFF host is already known, so this needs no extra config and no
+  // token (the endpoint is anonymous). Non-fatal: a failure just leaves the tenant empty as before.
+  if (!resolvedTenantId) {
+    try {
+      const cfgResp = await fetch(`${normalizedBffUrl}/api/config/client`, {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+      });
+      if (cfgResp.ok) {
+        const cfg = (await cfgResp.json()) as { tenantId?: string };
+        const bffTenant = cfg.tenantId?.trim();
+        if (bffTenant && bffTenant !== 'common' && bffTenant !== 'organizations') {
+          resolvedTenantId = bffTenant;
+          tenantSource = 'bff-config';
+        }
+      }
+    } catch (err) {
+      console.warn('[Spaarke.RuntimeConfig] /api/config/client tenant fallback failed (non-fatal):', err);
+    }
+  }
 
   // 4. Build config — normalize URL and construct OAuth scope
   const config: IRuntimeConfig = {
-    bffBaseUrl: normalizeUrl(bffBaseUrl),
+    bffBaseUrl: normalizedBffUrl,
     bffOAuthScope: `api://${bffAppId}/user_impersonation`,
     msalClientId,
     tenantId: resolvedTenantId,
@@ -372,8 +401,6 @@ export async function resolveRuntimeConfig(): Promise<IRuntimeConfig> {
   cachedConfig = config;
   cacheTimestamp = Date.now();
   saveToLocalStorage(config);
-
-  const tenantSource = envTenantId && envTenantId.trim() ? 'env-var' : xrmTenantId ? 'xrm-fallback' : 'none';
   console.log(
     `[Spaarke.RuntimeConfig] Resolved: bffBaseUrl=${config.bffBaseUrl}, ` +
       `scope=api://${bffAppId.substring(0, 8)}..., clientId=${msalClientId.substring(0, 8)}..., ` +

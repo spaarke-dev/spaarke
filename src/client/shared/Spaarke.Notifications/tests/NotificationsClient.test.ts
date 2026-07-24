@@ -41,7 +41,7 @@ describe('NotificationsClient', () => {
 
   it('dispatches a live signal to the handler registered for its kind', async () => {
     let onSignal: ((s: { outboxRowId: string; kind: string }) => void) | undefined;
-    mockedConnectSignalR.mockImplementation(async (cb) => {
+    mockedConnectSignalR.mockImplementation(async cb => {
       onSignal = cb;
       return makeFakeConnection();
     });

@@ -3,7 +3,7 @@
   <metadata>
     <title>Project wrap-up (gates, test-diet, deferrals, README→Complete, sync)</title>
     <phase>7: Wrap-up</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>054</dependencies>
     <blocks>none</blocks>

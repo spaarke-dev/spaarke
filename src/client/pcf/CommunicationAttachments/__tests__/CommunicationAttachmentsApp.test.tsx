@@ -105,9 +105,24 @@ describe('CommunicationAttachmentsApp', () => {
     // set. Per B12-4 the `.eml` row now participates in the nav sequence too;
     // only inline images / rows without a documentId are excluded.
     const files = [
-      { sprk_communicationattachmentid: '1', sprk_name: 'Report.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-1' },
-      { sprk_communicationattachmentid: '2', sprk_name: 'Memo.pdf', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-4' },
-      { sprk_communicationattachmentid: '3', sprk_name: 'Thread.eml', sprk_attachmenttype: AttachmentType.File, [DOC]: 'doc-3' },
+      {
+        sprk_communicationattachmentid: '1',
+        sprk_name: 'Report.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-1',
+      },
+      {
+        sprk_communicationattachmentid: '2',
+        sprk_name: 'Memo.pdf',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-4',
+      },
+      {
+        sprk_communicationattachmentid: '3',
+        sprk_name: 'Thread.eml',
+        sprk_attachmenttype: AttachmentType.File,
+        [DOC]: 'doc-3',
+      },
     ];
     renderApp(makeContext(files));
     fireEvent.click(await screen.findByText('Report.pdf'));

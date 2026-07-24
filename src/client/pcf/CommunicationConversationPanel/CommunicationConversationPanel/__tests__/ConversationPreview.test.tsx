@@ -56,6 +56,7 @@ function renderPreview(overrides?: Partial<React.ComponentProps<typeof Conversat
         model={makeModel()}
         version="1.0.0"
         showVersionFooter={true}
+        title="MESSAGES"
         onOpen={onOpen}
         {...overrides}
       />
@@ -108,5 +109,57 @@ describe('ConversationPreview — FR-13 preview UI', () => {
   it('renders the version footer when enabled', () => {
     renderPreview();
     expect(screen.getByText('v1.0.0')).toBeInTheDocument();
+  });
+
+  // UAT §A item 1: configurable Title property.
+  it('renders the default MESSAGES title', () => {
+    renderPreview();
+    expect(screen.getByText('MESSAGES')).toBeInTheDocument();
+  });
+
+  it('renders a custom title when provided', () => {
+    renderPreview({ title: 'Custom Header' });
+    expect(screen.getByText('Custom Header')).toBeInTheDocument();
+    expect(screen.queryByText('MESSAGES')).not.toBeInTheDocument();
+  });
+
+  // UAT §A item 3: gray-circle count, right-aligned; "New" to its left when unread.
+  it('renders the per-thread message count and no "New" label when not flagged unread', () => {
+    renderPreview();
+    expect(screen.getByText('2')).toBeInTheDocument(); // default-thread count
+    expect(screen.queryByText('New')).not.toBeInTheDocument();
+  });
+
+  it('renders "New" to the left of the count for threads in newThreadIds', () => {
+    renderPreview({ newThreadIds: new Set(['default-thread']) });
+    expect(screen.getByText('New')).toBeInTheDocument();
+    // the thread button's accessible name carries both the count and "new" status
+    expect(screen.getByRole('button', { name: /Default Thread, 2 messages, new/i })).toBeInTheDocument();
+  });
+
+  // UAT §A item 5: icon-only open affordance (no "Open" label).
+  it('renders the open affordance as icon-only (no visible "Open" text)', () => {
+    renderPreview();
+    const openButton = screen.getByRole('button', { name: /Open conversations in full view/i });
+    expect(openButton).toBeInTheDocument();
+    expect(within(openButton).queryByText('Open')).not.toBeInTheDocument();
+  });
+
+  // UAT §A item 7: channel pill on the left, text-only, colored by channel.
+  it('renders a text-only "Email" pill for email-channel messages', () => {
+    renderPreview();
+    // Both seeded messages are email-channel (see tm() helper above).
+    expect(screen.getAllByText('Email').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Message')).not.toBeInTheDocument();
+  });
+
+  // UAT §A item 8: sender name + date/time received.
+  it('renders a date/time label alongside the sender name', () => {
+    renderPreview();
+    // tm() seeds sentOn: '2026-01-01T10:00:00Z' for both seeded messages, so
+    // both rows render a matching label. Match the time portion only — the
+    // date portion can roll to the adjacent day depending on the test
+    // runner's timezone, so anchor on the locale-stable "H:MM AM/PM" shape.
+    expect(screen.getAllByText(/\d{1,2}:\d{2}\s?(AM|PM)/i).length).toBeGreaterThan(0);
   });
 });

@@ -1,8 +1,8 @@
 # Spaarke AI Assistant Enhancements R1 — "Follow-Through"
 
-> **Portfolio**: [Project #649](https://github.com/spaarke-dev/spaarke/issues/649) · Parent [Epic #421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board (Project #2)](https://github.com/users/spaarke-dev/projects/2) · Type: AI · Status: Active (Planning)
+> **Portfolio**: [Project #649](https://github.com/spaarke-dev/spaarke/issues/649) · Parent [Epic #421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board (Project #2)](https://github.com/users/spaarke-dev/projects/2) · Type: AI · Status: **Complete**
 
-> **Status**: Planning complete — artifacts generated; **task decomposition pending** (run `/task-create` in a fresh session).
+> **Status**: ✅ **COMPLETE (2026-07-23)** — all 25 tasks done; deployed + smoke-verified to dev; eval gate green (92/92); /test-diet clean (`notes/test-diet-report.md`); deferrals filed ([#684](https://github.com/spaarke-dev/spaarke/issues/684); R1.5 delivered via `spaarke-notification-spine-r1`). Owner UAT of the final batch (suggestions/dismiss/"add a task"/membership) remains open but does not gate close-out. All 7 graduation criteria met (below).
 > **Branch / worktree**: `work/spaarkeai-assistant-enhancements-r1` · `C:/code_files/spaarke-wt-spaarkeai-assistant-enhancements-r1`
 > **Created**: 2026-07-15
 > **Owner**: Ralph Schroeder
@@ -25,15 +25,15 @@ Repositions the Spaarke Assistant from a reactive "ask-me-anything" text box int
 
 - **R1.5 — full proactive-push capability**: server-initiated push (Azure SignalR + durable outbox + Daily-Briefing producer) so the Assistant surfaces grounded work while the user is idle. Architected as a general notification spine. See [`design.md`](design.md) §14.1a/§14.1b/§12.5/§15.4.
 
-## Graduation criteria (R1 done when)
+## Graduation criteria (R1 done when) — ✅ ALL MET (2026-07-23)
 
-1. "Create a matter / to-do / event" each produce the **right entity** via a pre-seeded wizard, no dead-end (UAT UC-1…UC-3 replay green).
-2. Closed-set fields (practice area, matter type) resolve via the constrained-field resolver; a nonsensical pair cannot commit.
-3. No fabricated action claims (UC-5 regression); a delete does not tear down unrelated tabs (UC-4 no-regress).
-4. `sprk_risk` gates as designed (Always Confirm → suggestion-that-launches; Confirm When Uncertain fires on low-confidence dispatch).
-5. A profiled user's turn carries the stated profile within the amended token budget; byte-stability + golden-utterance eval baselines green; `AgentToolFilterContext` carries no profile/memory-derived members (preference≠permission).
-6. Tool drop-down (Quick Start + My Assistant) present; My Assistant writes the profile + seeds memory. SNS cards render post-dispatch.
-7. Publish-size ≤60 MB; no new HIGH CVE.
+1. ✅ "Create a matter / to-do / event" each produce the **right entity** via a pre-seeded wizard, no dead-end — tasks 002/012/013/014 (surface-launch create-matter/task/todo/event/project; smart pre-seed via the 010 resolver enrichment).
+2. ✅ Closed-set fields resolve via the constrained-field resolver; a nonsensical pair cannot commit — task 010; **proven in the 051 eval** (`IncoherentPracticeAreaMatterType_CannotCommit…`: CREATE-MATTER@v1 emits independent string LABELS, allowstools=false).
+3. ✅ No fabricated action claims; a delete does not tear down unrelated tabs — task 020 (ack-gated truthfulness + no-collateral-teardown).
+4. ✅ `sprk_risk` gates as designed (Always Confirm → suggestion-that-launches; Confirm-When-Uncertain reads the single-turn signal) — tasks 021/022 (dispatch-spine seam-tested).
+5. ✅ Profiled turn carries the stated profile within the amended token budget; byte-stability + golden-utterance eval green; `AgentToolFilterContext` carries no profile/memory member (preference≠permission) — tasks 030/031/032; **operationally proven in the 051 eval** (`ProfileInjection_DoesNotFlip…`, in the merge gate).
+6. ✅ Tool drop-down (Quick Start + My Assistant) present; My Assistant writes the profile + seeds memory; SNS cards render post-dispatch — tasks 040/041/042/043.
+7. ✅ Publish-size ≤60 MB; no new HIGH CVE — task 053 (48.80 MB compressed incl PDBs; R1 added zero packages; the one pre-existing HIGH Kiota CVE was remediated repo-wide to 1.22.0).
 
 ## Key artifacts
 
