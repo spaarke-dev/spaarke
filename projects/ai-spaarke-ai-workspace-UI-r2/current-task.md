@@ -1,36 +1,41 @@
 # Current Task — AI SpaarkeAi Workspace UI R2
 
-> **Purpose**: Active-task state tracker for context recovery after compaction or session switch. Reset when a task completes.
-> **Loaded automatically** at task-execute Step 0 (context recovery).
+> **Last Updated**: 2026-07-02 (by context-handoff)
+> **Status**: ✅ **PROJECT COMPLETE — see follow-on project**
 
 ## Active task
 
-**Task 001** — Audit existing `sprk_gridconfiguration` records for workspace widgets
+**None** — project is COMPLETE. All 14 tasks shipped; both PRs merged to master; deployed to spaarkedev1.
 
-- **File**: [`tasks/001-audit-existing-config-records.poml`](tasks/001-audit-existing-config-records.poml)
-- **Rigor**: STANDARD (Dataverse-only + docs; per TASK-INDEX.md rigor row)
-- **Status**: in-progress
-- **Started**: 2026-07-01
-- **Current step**: Step 1 of 5 — cross-reference section registration files to identify configId values
+## Follow-on work
 
-## Next action
+The DataGrid framework issues discovered during this project's UAT are captured in:
 
-Execute Step 1: read `src/solutions/LegalWorkspace/src/sections/*.registration.ts` to list configId values for the 5 workspace widgets.
+**➡️ [`projects/spaarke-dataset-grid-framework-r2/`](../spaarke-dataset-grid-framework-r2/)**
 
-## Recovery instructions (if resuming after compaction)
+That project's `current-task.md` has the detailed handoff + next steps (`/design-to-spec` → `/project-pipeline` → task execution).
 
-1. Read this file, [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md), and this project's [CLAUDE.md](CLAUDE.md).
-2. Active task above says Task 001. Load [`tasks/001-audit-existing-config-records.poml`](tasks/001-audit-existing-config-records.poml).
-3. Resume from "Current step".
+## What shipped
 
-## Session log (updated by task-execute)
+| Deliverable | Where |
+|---|---|
+| Layout 1 unification (85%×85% via `Xrm.Navigation.navigateTo`) | [PR #530](https://github.com/spaarke-dev/spaarke/pull/530) — merged 2026-07-01 |
+| Communications workspace widget (section + direct widget + config record) | PR #530 |
+| SmartTodoModal iframe retirement | PR #530 |
+| 5 doc surface updates | PR #530 |
+| 4 System Workspace Layouts + DataGrid follow-up (tactical fix + guide expansion + R2 project brief) | [PR #531](https://github.com/spaarke-dev/spaarke/pull/531) — merged 2026-07-02 |
+| Portfolio pointer + Complete status | [PR #533](https://github.com/spaarke-dev/spaarke/pull/533) — open (small doc-only) |
+| GitHub Project Issue + 9 fields synced | [Issue #532](https://github.com/spaarke-dev/spaarke/issues/532) — Status=Completed |
 
-- 2026-07-01 — Task 001 started; STANDARD rigor declared; project session initiated for full task-execute chain per `/task-execute for project/ai-spaarke-ai-workspace-UI-r2 run tasks in parallel where possible`.
+## Recovery instructions
 
-## Files touched this session
+If someone resumes this worktree looking for R2 work: **it's done**. Do not restart; instead:
 
-_(populating as work progresses)_
+1. Check that `PR #533` is merged (portfolio pointer)
+2. Continue with the follow-on project at [`projects/spaarke-dataset-grid-framework-r2/`](../spaarke-dataset-grid-framework-r2/)
+3. That project's `current-task.md` has the detailed next steps
 
-## Decisions log
+## Session log
 
-- 2026-07-01 — Parallelism plan: 011+012 parallel after 010; all other tasks strictly serial per TASK-INDEX.md dependency graph; PR-merge tasks (004, 013, 024) pause for user approval before pushing to master.
+- 2026-07-01 — R2 project shipped end-to-end (Phase 1+2+3 + wrap-up) via PR #530 + PR #531
+- 2026-07-02 — Post-merge UAT surfaced DataGrid follow-on issues → captured in `spaarke-dataset-grid-framework-r2` project brief; portfolio backfill via /devops-project-register
