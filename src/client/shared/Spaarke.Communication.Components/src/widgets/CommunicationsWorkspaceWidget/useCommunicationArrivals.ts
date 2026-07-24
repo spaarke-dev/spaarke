@@ -82,6 +82,12 @@ export function useCommunicationArrivals(options: UseCommunicationArrivalsOption
   // result, or a test fake). A null/undefined seam means the host never wired the spine → awareness OFF.
   const subscribeRef = React.useRef(subscribe);
 
+  // Defence-in-depth vs issue #688: the poll-fallback path can re-deliver a still-pending row (the pending
+  // endpoint returns undismissed rows every tick). The @spaarke/notifications client dedups at its dispatch
+  // boundary, but this consumer guards independently so a duplicate outboxRowId can never re-toast or
+  // double-count the unread badge, regardless of host client wiring.
+  const seenRowIdsRef = React.useRef<Set<string>>(new Set());
+
   React.useEffect(() => {
     const doSubscribe = subscribeRef.current;
     if (!doSubscribe) {
@@ -96,6 +102,12 @@ export function useCommunicationArrivals(options: UseCommunicationArrivalsOption
       // Register ONLY — the host owns the connection lifecycle (start/stop). Unmount just unregisters this
       // consumer; it never stops the shared connection (which would break every other consumer, e.g. suggestions).
       unregister = doSubscribe(event => {
+        // Duplicate delivery of the same outbox row (poll-fallback re-tick, live-then-poll overlap) is
+        // suppressed — one toast + one badge increment per row (issue #688).
+        if (seenRowIdsRef.current.has(event.outboxRowId)) {
+          return;
+        }
+        seenRowIdsRef.current.add(event.outboxRowId);
         // AWARENESS ONLY (NFR-03): bump the unread counter + notify the host (toast). NEVER fetch content here.
         setUnreadCount(n => n + 1);
         onArrivalRef.current?.(event);
