@@ -374,6 +374,23 @@ public sealed class ThreadResolver : IThreadResolver
             ? name!.Trim()
             : (!string.IsNullOrWhiteSpace(regarding.RecordName) ? regarding.RecordName!.Trim() : "Conversation");
 
+        var entityType = regarding.EntityType.Trim();
+
+        // The new thread must be findable by the by-regarding read, which filters on the TYPED ADR-024
+        // regarding LOOKUP (RegardingFieldMap: e.g. sprk_matter → sprk_regardingmatter), NOT a text field.
+        // NOTE: sprk_communicationthread has NO 'sprk_regardingrecordtype' text attribute — it carries the
+        // per-family typed lookups (+ a sprk_regardingrecordtype_ref lookup) alongside the denormalized
+        // sprk_regardingrecordid / sprk_regardingrecordname / sprk_regardingrecordurl text/url fields. Writing
+        // the non-existent 'sprk_regardingrecordtype' is what raised the create-time InvalidOperationException
+        // (RB: R3 UAT 2026-07-24). REUSE of RegardingFieldMap — not a second regarding mechanism.
+        var regardingField = RegardingFieldMap.FieldFor(entityType);
+        if (regardingField is null)
+            throw new ArgumentException(
+                $"'{entityType}' is not a supported regarding entity type (ADR-024 family).", nameof(regarding));
+        if (!Guid.TryParse(regarding.RecordId.Trim(), out var regardingId) || regardingId == Guid.Empty)
+            throw new ArgumentException(
+                "A valid regarding record id (GUID) is required to create a record-anchored thread.", nameof(regarding));
+
         var thread = new DataverseEntity("sprk_communicationthread")
         {
             ["sprk_name"] = TruncateTo(resolvedName, 200),
@@ -384,9 +401,10 @@ public sealed class ThreadResolver : IThreadResolver
             // Owner = caller so the new (empty) thread is visible in the caller's all-mode list (mirrors
             // DirectThreadAccessService's explicit ownerid on create).
             ["ownerid"] = new EntityReference("systemuser", ownerSystemUserId),
-            // Denormalized ADR-024 pointer — REUSE, not a second regarding mechanism (same fields
-            // CreateThreadAsync / FindOrCreateDefaultThreadAsync populate + the by-regarding read queries).
-            ["sprk_regardingrecordtype"] = TruncateTo(regarding.EntityType.Trim(), 100),
+            // TYPED regarding lookup — the exact field the by-regarding read filters on, so the new thread
+            // shows in the record-scoped conversation list.
+            [regardingField] = new EntityReference(entityType, regardingId),
+            // Denormalized display pointer (this text attribute DOES exist on the thread).
             ["sprk_regardingrecordid"] = TruncateTo(regarding.RecordId.Trim(), 100),
         };
         if (!string.IsNullOrWhiteSpace(regarding.RecordName))
