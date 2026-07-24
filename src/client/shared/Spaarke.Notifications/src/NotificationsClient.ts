@@ -2,7 +2,7 @@ import type { HubConnection } from '@microsoft/signalr';
 import { connectSignalR } from './negotiate';
 import { KindRouter, type NotificationHandler } from './kindRouter';
 import { startPollFallback, type PollFallbackHandle } from './pollFallback';
-import type { NotificationKind } from './types';
+import type { NotificationEvent, NotificationKind } from './types';
 
 export type NotificationsConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'polling' | 'stopped';
 
@@ -36,6 +36,17 @@ export class NotificationsClient {
   private connection: HubConnection | undefined;
   private pollHandle: PollFallbackHandle | undefined;
   private state: NotificationsConnectionState = 'idle';
+  /**
+   * outboxRowIds already dispatched by THIS client instance (issue #688). The pending
+   * endpoint returns every still-undismissed row on every poll tick (the poll never marks
+   * rows delivered), and the poll loop restarts on each live→poll transition — so without
+   * client-lifetime dedup the same row re-fires its handlers every ~30s (repeating toasts).
+   * Keyed here at the dispatch boundary, not inside the poll loop, so it also suppresses
+   * the live-then-poll duplicate (a row pushed live but still pending server-side) and
+   * survives poll restarts. Cleared on stop(): a restarted client re-delivers still-pending
+   * rows once, which is the intended next-load semantic (FR-06).
+   */
+  private seenOutboxRowIds = new Set<string>();
   /**
    * True while an intentional `stop()` is in flight. Guards the `onclose` handler below:
    * `HubConnection.stop()` itself triggers `onclose` internally, and without this guard
@@ -76,9 +87,10 @@ export class NotificationsClient {
 
     try {
       const connection = await connectSignalR(signal => {
-        this.router.dispatch({
+        this.dispatchOnce({
           outboxRowId: signal.outboxRowId,
-          kind: signal.kind,
+          // Kind validity is checked downstream by KindRouter.dispatch (same contract as pollFallback).
+          kind: signal.kind as NotificationEvent['kind'],
           envelope: undefined, // live push is signal-only (NFR-02/03) — no envelope on the wire
           source: 'live',
         });
@@ -126,7 +138,17 @@ export class NotificationsClient {
     // bypassed (e.g. a future SignalR SDK change reorders callback timing).
     this.stopPolling();
     this.router.clear();
+    this.seenOutboxRowIds = new Set<string>();
     this.setState('stopped');
+  }
+
+  /** Routes an event to handlers at most ONCE per outboxRowId per client lifetime (issue #688). */
+  private dispatchOnce(event: NotificationEvent): void {
+    if (this.seenOutboxRowIds.has(event.outboxRowId)) {
+      return;
+    }
+    this.seenOutboxRowIds.add(event.outboxRowId);
+    this.router.dispatch(event);
   }
 
   private startPolling(): void {
@@ -136,7 +158,7 @@ export class NotificationsClient {
     this.pollHandle = startPollFallback({
       intervalMs: this.options.pollIntervalMs,
       maxBackoffMs: this.options.pollMaxBackoffMs,
-      onEvent: event => this.router.dispatch(event),
+      onEvent: event => this.dispatchOnce(event),
       onError: err => {
         // eslint-disable-next-line no-console
         console.warn('[@spaarke/notifications] Poll-fallback tick failed (non-fatal; will retry with backoff):', err);
