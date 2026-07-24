@@ -5,15 +5,18 @@
  * A `kind=suggestion` outbox row (task 050 producer) is delivered to the host
  * via the task-021 `@spaarke/notifications` subscriber, re-grounded through the
  * BFF (`GET /api/notifications/pending`, task 022), and rendered here as a
- * compact, bordered card. It is a SIBLING of `ConsumerChips.tsx`, NOT an
- * extension: a suggestion arrives asynchronously from the Layer-C spine,
- * independent of an active chat-session dispatch turn.
+ * lightweight ROW inside the host's suggestion panel. It is a SIBLING of
+ * `ConsumerChips.tsx`, NOT an extension: a suggestion arrives asynchronously from
+ * the Layer-C spine, independent of an active chat-session dispatch turn.
  *
- * Layout (UAT 2026-07-22): the card is a container with TWO controls — a main
- * clickable region (click → open the regarding record) and a small dismiss 'x'
- * (like a tab close). They are SIBLINGS, never nested buttons. The former "open"
- * arrow (→) affordance was removed — the whole message is clickable, so the arrow
- * was redundant. The hover highlight lives ONLY on the clickable main region.
+ * Layout (UAT 2026-07-24): the row is borderless — its visual container is the
+ * panel in `useSuggestionCards` (one bordered panel, hairline row dividers) rather
+ * than 5 stacked boxes. Two controls: a main clickable region (click → open the
+ * regarding record) and a small dismiss 'x' that reveals on row hover/focus (like a
+ * tab close). They are SIBLINGS, never nested buttons. The former per-row lightbulb
+ * icon + the always-on brand-blue box/shadow were removed (they made the stack read
+ * as a cluttered wall); the single suggestion glyph now lives once on the panel header.
+ * The hover highlight is a SOFT NEUTRAL on the clickable main region only.
  *
  * ADR-021: Fluent UI v9 design tokens ONLY — no hardcoded colors. Correct in both
  * light and dark themes purely through semantic token resolution.
@@ -23,7 +26,7 @@
 
 import * as React from "react";
 import { Button, makeStyles, shorthands, tokens } from "@fluentui/react-components";
-import { LightbulbFilamentRegular, DismissRegular } from "@fluentui/react-icons";
+import { DismissRegular } from "@fluentui/react-icons";
 
 /**
  * The DISPLAY fields a suggestion card renders. A structural subset of the
@@ -33,7 +36,7 @@ import { LightbulbFilamentRegular, DismissRegular } from "@fluentui/react-icons"
 export interface SuggestionCardModel {
   /** Stable identity — drives the test id and the React key. */
   readonly suggestionId: string;
-  /** Short display title (e.g. "Review Acme v. Beta"). */
+  /** Short display title (e.g. "Acme v. Beta"). The host strips any redundant leading verb. */
   readonly title: string;
   /** OPTIONAL access-checked excerpt (usually absent — the producer omits it conservatively). */
   readonly snippet?: string;
@@ -42,52 +45,53 @@ export interface SuggestionCardModel {
 }
 
 const useStyles = makeStyles({
-  // Bordered card container — a flex row holding the clickable main region + the
-  // dismiss 'x'. Tokens only, so dark mode adapts automatically. NO hover on the
-  // container itself (UAT 2026-07-22): the hover highlight belongs to the clickable
-  // main region, not the whole card / not the dismiss control.
+  // Borderless row. The visual container (border + radius) is the panel in
+  // useSuggestionCards; each suggestion is a light row, not a boxed card (UAT
+  // 2026-07-24). The dismiss 'x' is hidden until the row is hovered/focused.
   card: {
     display: "flex",
     alignItems: "center",
     columnGap: tokens.spacingHorizontalXS,
     width: "100%",
     minWidth: 0,
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.border("1px", "solid", tokens.colorBrandStroke2),
-    boxShadow: tokens.shadow2,
+    ":hover [data-suggestion-dismiss]": { opacity: 1 },
+    ":focus-within [data-suggestion-dismiss]": { opacity: 1 },
   },
-  // The clickable "open the record" region — fills the row; brand-accented; the
-  // hover/pressed highlight lives here (this is the affordance the user clicks).
+  // The clickable "open the record" region — fills the row. Neutral text with a
+  // SOFT NEUTRAL hover (not the old brand-blue wall). The hover/pressed highlight
+  // lives here (this is the affordance the user clicks).
   main: {
     flexGrow: 1,
     minWidth: 0,
     justifyContent: "flex-start",
-    color: tokens.colorBrandForeground2,
+    color: tokens.colorNeutralForeground1,
     backgroundColor: "transparent",
+    borderRadius: tokens.borderRadiusMedium,
     ...shorthands.border("none"),
-    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalM),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
     ":hover": {
-      backgroundColor: tokens.colorBrandBackground2Hover,
-      color: tokens.colorBrandForeground2Hover,
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      color: tokens.colorNeutralForeground1,
     },
     ":hover:active": {
-      backgroundColor: tokens.colorBrandBackground2Pressed,
-      color: tokens.colorBrandForeground2Pressed,
+      backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
     ":disabled": {
       backgroundColor: "transparent",
       color: tokens.colorNeutralForegroundDisabled,
     },
   },
-  // The small dismiss 'x' — a subtle brand-colored icon button (mirrors the tab
-  // close affordance). Not the primary action, so it stays quiet until hovered.
+  // The small dismiss 'x' — quiet by default (revealed on row hover/focus via the
+  // container rule above), muted neutral, colors up on its own hover. Mirrors a tab
+  // close, not a primary action.
   dismiss: {
     minWidth: "auto",
-    color: tokens.colorBrandForeground2,
+    opacity: 0,
+    color: tokens.colorNeutralForeground3,
     ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalXS),
     ...shorthands.margin("0", tokens.spacingHorizontalXS, "0", "0"),
-    ":hover": { color: tokens.colorBrandForeground2Hover },
+    ":hover": { color: tokens.colorNeutralForeground1 },
+    ":focus": { opacity: 1 },
     ":disabled": { color: tokens.colorNeutralForegroundDisabled },
   },
   // Text column — title over an optional muted snippet. Ellipsize so a long
@@ -127,9 +131,10 @@ export interface SuggestionCardProps {
 }
 
 /**
- * A single proactive-suggestion card. Stateless — the host (`useSuggestionCards`)
- * owns the list, the pre-mount expiry filter, and both the re-fetch-before-dispatch
- * click flow and the dismiss flow. This component ONLY renders + reports the clicks.
+ * A single proactive-suggestion row. Stateless — the host (`useSuggestionCards`)
+ * owns the list, the panel chrome, the pre-mount expiry filter, and both the
+ * re-fetch-before-dispatch click flow and the dismiss flow. This component ONLY
+ * renders + reports the clicks.
  */
 export function SuggestionCard(props: SuggestionCardProps): React.JSX.Element {
   const { suggestion, disabled, onAction, onDismiss } = props;
@@ -149,11 +154,7 @@ export function SuggestionCard(props: SuggestionCardProps): React.JSX.Element {
         data-suggestion-id={suggestion.suggestionId}
       >
         <span className={styles.text}>
-          <span className={styles.title}>
-            <LightbulbFilamentRegular aria-hidden />
-            {" "}
-            {suggestion.title}
-          </span>
+          <span className={styles.title}>{suggestion.title}</span>
           {suggestion.snippet ? (
             <span className={styles.snippet}>{suggestion.snippet}</span>
           ) : null}
@@ -168,6 +169,7 @@ export function SuggestionCard(props: SuggestionCardProps): React.JSX.Element {
         onClick={onDismiss}
         aria-label={`Dismiss suggestion: ${suggestion.title}`}
         data-testid={`suggestion-dismiss-${suggestion.suggestionId}`}
+        data-suggestion-dismiss=""
       />
     </div>
   );
