@@ -1,16 +1,32 @@
 # Current Task State — email-communication-solution-r4
 
-> **Last Updated**: 2026-07-23 (context-handoff — EmailComposer redesign arc through UAT round 5 / PCF v1.3.9; NOT merged, NOT deployed)
+> **Last Updated**: 2026-07-24 (context-handoff — composer UAT arc v1.3.10→v1.3.14 MERGED to master @ `85126811c`; v1.3.14 imported by owner)
 > **Recovery**: Read "Quick Recovery" first.
 
-## Quick Recovery (READ THIS FIRST) — 2026-07-23
+## Quick Recovery (READ THIS FIRST) — 2026-07-24
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **EmailComposer full redesign to match owner mockup** (FR-21 "same form everywhere"), driven by 5 rounds of owner UAT screenshots. All on branch `work/email-communication-solution-r4`, **committed, NOT pushed/merged/deployed**. |
-| **Latest artifact** | **CommunicationActions PCF v1.3.9** ZIP: `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.3.9.zip` (bundle sha `5a3dc1117a97`; version verified in all 5 locations + inside the ZIP). Owner imports it (unmanaged → Publish All → hard refresh; footer must read v1.3.9). v1.3.8 = same code, v1.3.9 = fresh rebuild to bust Dataverse control cache. |
-| **Status** | Awaiting owner import + visual confirm of v1.3.9 (fill-fix + record-lookup). |
-| **Next Action** | On owner confirm the composer is right: (1) run `code-review` + `adr-check` on the shared-lib EmailComposer redesign; (2) then the **wizard full-match restyle** (8 wizard email surfaces via shared `EmailStep`, owner chose "full match: chips + rich text"); (3) then owner-directed **merge + deploy**. If owner reports a visual issue, iterate on the composer + rebuild the PCF (bump version, all 5 places, fresh build:prod, sha-verify — per `/pcf-deploy`). |
+| **Active work** | EmailComposer redesign + reply/forward behavior, driven by owner UAT (rounds 6→10). **All MERGED to master** and worktree fully synced. |
+| **Git state** | branch `work/email-communication-solution-r4` == `origin/master` == main-repo master == **`85126811c`**; 0 ahead / 0 behind / clean. Everything pushed + merged. |
+| **Latest PCF** | **CommunicationActions v1.3.14** — **imported by owner** (confirmed). ZIP: `src/client/pcf/CommunicationActions/Solution/bin/CommunicationActionsSolution_v1.3.14.zip` (bundle sha `30a1867e4d13`). |
+| **Deploy state** | v1.3.14 PCF **imported**. BFF deployed at the `a58c0b5cc`-era (no BFF code changed since; master advanced only in TS shared libs). SpaarkeAi code page deployed at `a58c0b5cc` — master since advanced (notification-spine TS changes flow to SpaarkeAi via aliased source) → **could be rebuilt/redeployed from `85126811c` if those matter**. Other PCFs (CommunicationConversationPanel v1.5.0) owner-imported earlier. |
+| **Next Action** | Await owner UAT of v1.3.14 (reply/forward quoted original + inherited "Related to"). **Still owed**: `code-review` + `adr-check` on the composer redesign (long-standing). Optional: re-deploy BFF + SpaarkeAi from new master; fast-forward the other active worktrees (compose-r4, messaging-r3) which are now behind master. |
+
+### Composer UAT arc — rounds 6→10 (all merged to master; PCF v1.3.10 → v1.3.14)
+- **v1.3.10** `f018b6741` — UAT r6: `Dialog modalType="alert"` stops the composer auto-closing when the OOB record-lookup pane takes focus.
+- **v1.3.11** `ab0ff19fe` — UAT r7: `modalType="non-modal"` (no backdrop scrim) so the OOB lookup pane is clickable. *(Fluent modal/alert = browser top-layer, can't go below; non-modal honors z-index. Owner: sub-15" overlap is WON'T-FIX — see memory `ui-resolution-support-baseline`.)*
+- **v1.3.12** `c76f9016e` — UAT r8: forward-mode "add record" now inserts into the body. Root cause = shared `RichTextEditor` `InitialContentPlugin` initialized content ONCE; made it **properly controlled** (re-syncs on external value change, skips typing echoes). Also confirmed the send-502 was a transient post-deploy cold-start (App Insights: zero send exceptions).
+- **v1.3.13** `05e9c3d38` — UAT r9 (9-item redesign): actions moved INTO the RTF toolbar via new **`RichTextEditor.toolbarSlot`** (context-agnostic, additive) — paperclip menu (Add files / Link documents) + divider + record-search (Document excluded) + **connector** (`Connector20Regular`); record link inserts **at cursor**; Attachments now display-only + **default collapsed**; new **"Related to"** collapsible section (AssociationChips); section labels → Segoe 14px semibold +4px; To/Cc/Bcc **label box** opens OOB people picker (contact+systemuser) additively; connector `onAddRelationship` = OOB lookup across regarding types (**Option B** — persists via the send `associations` payload, correct since the composer creates a NEW communication). Reducer: new `ADD_ASSOCIATION`. `TimelineComposeBox` migrated to the display-only AttachmentList.
+- **v1.3.14** `5c7e678d4` — UAT r10: reply/reply-all/forward **load the quoted original** (From/Sent/Subject header + `<blockquote>`; no `<hr>` — editor has no HR node); reply/reply-all leave 2 blank lines above; **inherit the parent's filed "Related to"** (PCF reads each `sprk_regarding*` lookup + annotations → composer `associations` → written to child on send).
+
+### Verification (each round)
+- Shared-lib: **209 EmailComposer/RichTextEditor jest green + tsc 0 errors**; PCF `composerPrefill` **6 green**. Every PCF ZIP: version in all 5 locations + embedded bundle SHA verified. 3 pre-existing `TimelineComposeBox` recipient-test failures are UNRELATED (stale since a prior BodyEditor toggle redesign; fail on committed baseline).
+
+### Blast radius now on master (watch at deploy)
+- Shared `RichTextEditor` (`toolbarSlot` + controlled-sync) + EmailComposer redesign flow to **SpaarkeAi, code pages, TimelineComposeBox** on their next build. All additive/verified, but worth a light regression glance when those surfaces redeploy.
+
+### Prior arc detail (v1.3.4 → v1.3.9, UAT rounds 1→5) — superseded by the above, kept below for history
 
 ### Composer redesign — commit trail (all on worktree branch, NOT merged)
 - `d94781eaa` provenance quote-escape (items 1-3 deferred batch: item 2 done; 1 & 3 already done) + `35cc41127` checkpoint.
