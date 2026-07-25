@@ -132,6 +132,28 @@ describe('useCommunicationArrivals (FR-22 / SC-10)', () => {
     expect(screen.getByTestId('unread').textContent).toBe('1'); // still 1 — content poll never bumps the badge
   });
 
+  it('consumes a duplicate outboxRowId only ONCE — no repeat toast, no badge overcount (issue #688)', () => {
+    const spine = makeFakeSubscribe();
+    const onArrival = jest.fn();
+
+    render(<Harness subscribe={spine.subscribe} onArrival={onArrival} contentFetch={jest.fn()} />);
+
+    // Poll-fallback re-delivers the same still-pending row every tick (the pending endpoint
+    // returns undismissed rows each time) — simulate three deliveries of the same row.
+    const row: ArrivalEvent = { outboxRowId: 'outbox-dup', kind: 'communication-arrived', source: 'poll' };
+    act(() => spine.fire(row));
+    act(() => spine.fire(row));
+    act(() => spine.fire(row));
+
+    expect(screen.getByTestId('unread').textContent).toBe('1');
+    expect(onArrival).toHaveBeenCalledTimes(1);
+
+    // A genuinely new row still comes through.
+    act(() => spine.fire(liveArrival()));
+    expect(screen.getByTestId('unread').textContent).toBe('2');
+    expect(onArrival).toHaveBeenCalledTimes(2);
+  });
+
   it('reset() clears the unread counter', () => {
     const spine = makeFakeSubscribe();
 

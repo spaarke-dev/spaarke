@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-22 (task 052 ✅ COMPLETE — suggestion action = open record modal; ALL Phase 5 done).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` (synced to master `f8e04ecdc`, batching master-merge per owner). **Phases 1–5 COMPLETE**. **Only 090 (wrap-up, main-session) remains.**
+> **Last Updated**: 2026-07-24 (context-handoff — ALL Phase 1–5 ON MASTER; UAT idempotency fix shipped; only 090 remains).
+> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` = **origin/master = `3d46f02cb`** (0 ahead, 0 behind, working tree CLEAN — everything merged). **Phases 1–5 COMPLETE + on master.** **Only 090 (wrap-up, main-session) remains.** NOT deployed (owner's other project handles BFF deploy).
 
 ---
 
@@ -9,10 +9,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **090 — Project wrap-up, Phase 6 — NOT STARTED** (deps ALL✅). Prior: 024✅ 025✅ 040✅ 041✅ 042✅ 050✅ 051✅ **052✅**. Phase 5 COMPLETE. |
-| **Step** | Begin task 090 (`tasks/090-*.poml`, opus/high, **main-session** — .claude/ + ADR-047 full). Includes `/test-diet` (Step 11 gate) + ADR-047 full version + doc-drift + cleanup. |
-| **Status** | 024/025 on master; **040+041+042+050+051+052 committed on branch** (synced to master f8e04ecdc; batching master-merge per owner). |
-| **Next Action** | **"work on task 090"** (wrap-up, main-session). Then master-merge the batched Phase-3/4/5 commits (025/040/041/042/050/051/052 + checkpoints) per owner. |
+| **Task** | **090 — Project wrap-up, Phase 6 — NOT STARTED** (deps ALL✅). All prior tasks 024–052 ✅ + on master. Phase 5 COMPLETE. |
+| **Step** | Begin task 090 (`tasks/090-project-wrap-up.poml`, opus/high, **main-session** — writes to `.claude/`). Scope: **promote ADR-047 Proposed→Accepted** (gate met: Layers A–D shipped + seam tests green + producer end-to-end) + **write ADR-047 full version** (`docs/adr/ADR-047-*.md`) + doc-drift audit + repo-cleanup. NOTE: `/test-diet` + `/code-review` ALREADY RUN this session (both clean — reports in notes/). |
+| **Status** | **Everything merged to master `3d46f02cb`, clean.** Phase 1–5 done. Sibling `spaarkeai-assistant-enhancements-r1` layered UAT polish on top (also on master — see below). |
+| **Next Action** | **"work on task 090"** (wrap-up, main-session). No master-merge needed — branch already = master. |
+
+### Session since 052 (2026-07-22 → 07-24) — what happened
+- **Merged all Phase 3/4/5 to master** (was batched; now `3d46f02cb`). Clean FF each time; integrated ~15+ commits of sibling-project work with 0 conflicts.
+- **Documentation shipped** (on master): `docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md` (component model, 4 layers, flows, how-to-extend incl. idempotency rule), `docs/guides/NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md` (end-user + tiered admin runbook: 3 hard reqs → Tier 0 poll-only → Tier 1 real-time → Tier 2 comms; verified config keys), `notes/handoffs/CROSS-PROJECT-CONSUMPTION-REPORT.md` (per-project actions; messaging-r3 task 045 UNBLOCKED).
+- **`/code-review`** (051+052): CLEAN — 0 critical/warning, 3 verified-safe suggestions.
+- **`/test-diet`**: 72 .NET tests all MAINTAIN, **0 scaffolding** — nothing to delete. Report: `notes/test-diet-report.md`.
+- **🔧 UAT CRITICAL FIX (commit `6afdddef6`)** — **idempotent suggestion producer**: `DailyBriefingSuggestionProducer.ProduceAsync` was writing a fresh outbox row on EVERY briefing re-render → duplicate cards piled up. FIX: read `OutboxService.GetPendingAsync` (undismissed+unexpired) and skip a candidate whose `(owner, kind, regardingRecordId)` already has a live row; also dedupes within a run. Dismissed/expired correctly re-propose. 3 new seam tests + 5 existing preserved (harness gained a `RetrieveMultipleAsync` interpreting-fake); 8/8 producer + 73 DailyBriefing tests green.
+- **Sibling `spaarkeai-assistant-enhancements-r1` UAT polish (on master, NOT my work)**: collapsed suggestions into a **"You have N new notifications" banner** (collapsed-by-default) + a **notification dismiss** control → NEW BFF endpoint `POST /api/notifications/{outboxRowId}/dismiss` (owner-scoped, ADR-028, 404 on not-owned) + `f69566597` dispatch-dedup per outboxRowId (#688, stop repeating comms toasts). This changed `useSuggestionCards.tsx`/`SuggestionCard.tsx` (now carry a `dismiss` dep + banner) — reflected in their tests. **090 doc-drift should fold these into the architecture doc + user guide.**
+- **⚠️ Stale dev rows**: the idempotency fix only prevents NEW dupes; the ~9 duplicate `sprk_notificationoutbox` suggestion rows already in dev persist until dismissed/deleted (offered the owner a cleanup query — not yet done). **NOT deployed** — the fix goes live when the owner's other project redeploys the BFF (`deploy-bff-api.yml`).
 
 ### 052 result (Phase 5, Wave 17 — ✅ DONE 2026-07-22) — REFRAMED by owner decision
 - **Owner decision (§6.5)**: the POML's "dispatch-parity proof" premise was BLOCKED (SuggestionEnvelope carries no bindingId; daily-briefing "review" nudges map to no capability binding; interim 051 dispatchBinding wiring would 400). Escalated → **owner directed: acting on a suggestion OPENS the regarding record in a MODAL (navigation, not dispatch)**. This clears the escalation trigger (navigation ≠ second dispatch pipeline) and supersedes the POML criteria.
