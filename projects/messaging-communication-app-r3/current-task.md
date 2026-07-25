@@ -1,6 +1,6 @@
 # Current Task State — messaging-communication-app-r3
 
-> **Last Updated**: 2026-07-23 (by context-handoff)
+> **Last Updated**: 2026-07-25 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" first. This file is self-contained — resume from it alone.
 
 ---
@@ -9,56 +9,71 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | UAT iteration on the Communications conversation UI (widget + `sprk_communicationconversationpage` modal code page + `CommunicationConversationPanel` PCF). Direct UAT loop, NOT a POML task. |
-| **Status** | **4 UAT rounds implemented, merged to master, and deployed.** Working tree clean, 0 behind master, HEAD `706b0a302`. |
-| **Next Action** | **Await the user's next UAT feedback.** Two items are best-effort and flagged for re-UAT (see "Watch on re-UAT"). Also: the user manually uploads the **PCF v1.5.0 zip** (path below) — code pages + BFF are already deployed by me. |
-| **Branch** | `work/messaging-communication-app-r3` — synced with master. |
-| **Deploy** | Code pages (SpaarkeAi + conversationpage) + BFF: I deploy directly. **PCF: I build + hand the zip; the user uploads to Dataverse.** |
+| **Active work** | UAT iteration on the Communications conversation UI (widget + `sprk_communicationconversationpage` modal code page + `CommunicationConversationPanel` PCF) + backend thread-creation bug fixes. Direct UAT loop, NOT a POML task. |
+| **Status** | Round 5 UAT + create-thread-500 fix: **committed, pushed, merged to master, BFF DEPLOYED.** Auto-threading fix: **committed locally (`60f3ea0fd`), NOT pushed, NOT deployed — deploy DEFERRED by operator until other project work merges.** |
+| **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`60f3ea0fd`**. Working tree clean. |
+| **Next Action** | **Await operator go-ahead to deploy the auto-threading fix.** When given: push branch → merge master (pick up the other projects' work) → rebuild BFF → `Deploy-BffApi.ps1` → smoke. See "Deferred deploy" below. |
+| **Deploy** | BFF + code pages: I deploy directly (`Deploy-BffApi.ps1`, `Deploy-WebResourceInline.ps1`, `Deploy-SpaarkeAi.ps1`). **PCF: I build + hand the zip; operator uploads to Dataverse.** |
 
-### Critical Context (3 sentences)
-The conversation UI is three surfaces sharing `@spaarke/ui-components` components (`ConversationWorkspace`, `ConversationView`, `ThreadList`, `NewThreadModal`) — a fix in the shared lib reaches the widget, the modal code page, AND the PCF. Item 9 (rounds 2+) added a **new BFF endpoint** `POST /api/communications/threads` (create named, record-anchored thread; no participant) + a redesigned `NewThreadModal` (name + `AssociateToStep` record picker + plain-text message). Deploy cadence per round: shared-lib change → rebuild `Spaarke.UI.Components` dist → rebuild+deploy the 2 Vite code pages (`Deploy-WebResourceInline.ps1` for conversationpage, `Deploy-SpaarkeAi.ps1` for SpaarkeAi) → bump+`build:prod` the PCF → hand zip.
-
-### 📦 Current PCF zip for the user to upload (v1.5.0)
-```
-C:\code_files\spaarke-wt-messaging-communication-app-r3\src\client\pcf\CommunicationConversationPanel\Solution\bin\CommunicationConversationPanelSolution_v1.5.0.zip
-```
-
-### Watch on re-UAT (best-effort, may need follow-up)
-1. **PCF modal centering** — fixed via `ReactDOM.createPortal(modal, document.body)` + re-wrapped `FluentProvider` in `ConversationModal.tsx` (escapes the Dataverse form's transformed ancestor that broke Fluent's `position:fixed`). If STILL top-anchored after v1.5.0 import, add an explicit viewport-fixed wrapper.
-2. **Widget full-container fill** — widget root `minHeight: calc(100vh - 200px)` (the workspace `SectionPanel` card + `WorkspaceShell` row are deliberately content-driven, so a widget must set its own floor; matches SmartTodo's pattern). If it overshoots/undershoots the tab, the `200px` chrome constant is the single knob.
+### Critical Context (4 sentences)
+The conversation UI is three surfaces sharing `@spaarke/ui-components` (`ConversationWorkspace`, `ConversationView`, `ThreadList`, `NewThreadModal`) — a shared-lib fix reaches the widget, the modal code page, AND the PCF. The ＋ New Thread button calls **`POST /api/communications/threads`** → `ThreadResolver.CreateRecordThreadAsync`. This session fixed a create-thread **500** (deployed) and then a **systemic auto-threading bug** (committed, NOT deployed) — both had the same root cause: code wrote/read/queried a **non-existent `sprk_regardingrecordtype` text field**; the real anchor is the **typed per-family lookup** (`sprk_regardingmatter`…, via `RegardingFieldMap`) which is what the by-regarding read filters on (`_sprk_regardingmatter_value`). The operator wants the BFF deploy held until a couple of other in-flight projects merge to master.
 
 ---
 
-## Full State (Detailed)
+## What is deployed vs committed vs pending
 
-### Deployed surfaces (spaarkedev1)
-- **BFF** (`spaarke-bff-dev`): `POST /api/communications/threads` create-thread endpoint live (deployed round 2). No BFF change in rounds 3–4.
-- **conversationpage** code page (`sprk_communicationconversationpage.html`, id `4529e3ae-…`): published through round 4.
-- **SpaarkeAi** code page (`sprk_spaarkeai`, id `5206a442-…`): published through round 4.
-- **PCF** `CommunicationConversationPanel`: built to **v1.5.0**; zip handed to user each round (they upload). Current = v1.5.0.
+| Item | Committed | Pushed | Merged to master | **Deployed** |
+|------|-----------|--------|------------------|--------------|
+| Round 5 UAT (widget fill, modal polish, PCF v1.6.0 centering) | ✅ `a6ce2b088` | ✅ | ✅ (in master before this session) | ✅ code pages; **PCF v1.6.0 = operator uploads** |
+| Create-record-thread **500** fix (`ThreadResolver.CreateRecordThreadAsync`) | ✅ `1a8d8fc36` | ✅ | ✅ (via merge) | ✅ **BFF deployed** (commit `ccd1202c0`, 47.49 MB) |
+| Notification-spine **dedup** fix (operator merged to master) | `f69566597` (#688) | — | ✅ | ✅ (rode along in the same BFF deploy) |
+| **Auto-threading** record-anchoring fix (5 sites) | ✅ **`60f3ea0fd`** | ❌ **not pushed** | ❌ | ❌ **DEFERRED** |
 
-### UAT rounds shipped (all merged + deployed)
-- **Round 1 (2026-07-22, PR #683):** auth popup-loop fix, by-regarding 500 fix, FR-22 notification awareness (task 045), first 7-item widget/modal UAT batch.
-- **Round 2 (PR #685):** 7-item batch + **item 9 create-thread endpoint + NewThreadModal redesign** (name + AssociateToStep + plain message; `ThreadResolver.CreateRecordThreadAsync`; 4 contract tests). PCF v1.2.0→1.3.0.
-- **Round 3 (PR #686):** 16 items — 33/67 pane, ResizeObserver, Threads header (icon + count accessory + collapse-on-row), toolbar toggle colors, modal 1040×72vh, PCF v1.3.0→1.4.0.
-- **Round 4 (PR #687, HEAD 706b0a302):** 16 items — ThreadList `width:100%`, widget `calc(100vh-200px)`, hidden scrollbars, toolbar `appearance="primary"` active icons, New Thread modal sections/footer/textarea, PCF portal-to-body centering + `+` wiring, PCF v1.4.0→1.5.0.
+**The live BFF** (`spaarke-bff-dev`) is at the `ccd1202c0` state: create-thread-500 fixed + dedup fixed. The auto-threading fix is one commit ahead, local only.
 
-### Key architecture facts (for the next change)
-- **Shared components** live in `src/client/shared/Spaarke.UI.Components/src/components/` — `ConversationWorkspace/` (owns the resizable/collapsible two-pane layout via `useThreadPaneLayout.ts` + reused `PanelSplitter`), `ConversationView/` (right pane: bubbles + toolbar + compose), `ConversationWorkspace/subcomponents/ThreadList.tsx` (left pane), `NewThreadModal/`.
-- **Consumers read the built `dist`** (`@spaarke/ui-components` `main`/`types` = `dist/…`), EXCEPT SpaarkeAi which aliases to `src`. So after any shared-lib edit: `npm run build` in `Spaarke.UI.Components` BEFORE typechecking/building consumers. conversationpage reads `dist`; SpaarkeAi reads `src`; the PCF reads `dist`.
-- **PCF is React 16.14** (ADR-022) — shared components must stay React-16-safe (`useThreadPaneLayout` uses only `useState/useRef/useEffect/useCallback` + `ResizeObserver`).
-- **Modal centering:** NO shared modal shell exists; it's plain Fluent `Dialog`/`DialogSurface` (centers in code pages; top-anchors in PCF due to transformed ancestor → the round-4 portal-to-body fix).
-- **Widget fill:** `SectionPanel.card` + `WorkspaceShell.row` are content-driven (no `height:100%`; row has NO `minHeight:0` — deliberate, see `WorkspaceShell.styles.ts`). Widgets fill via an explicit height floor.
-- **Item 9 create model:** thread `sprk_communicationthread` carries a denormalized regarding pointer (`sprk_regardingrecordtype/id/name`), `sprk_threadtype` (RecordAnchored=100000000), owner = caller. Reuses `IThreadResolver`/`IGenericEntityService`/`ICallerSystemUserResolver` — no new DI/package (§10 satisfied; publish 47.48 MB).
+---
 
-### Tests (all green)
-- `@spaarke/ui-components`: 93 conversation tests (`ConversationView`/`ConversationWorkspace`/`ThreadList`/`NewThreadModal`/`EmailInFlow`).
-- `@spaarke/communication-components`: 9/9 (widget).
-- BFF: 46 Communication tests incl. 4 new create-thread contract tests (`tests/integration/contract/Api/Communication/CommunicationCreateRecordThreadContractTests.cs`).
+## The three fixes this session (detail)
 
-### Pending (operator-coordinated, unchanged across rounds)
-- Spine runtime config for LIVE communication badges: Azure SignalR (Tier 1) + `systemuser.sprk_isexternal` backfill (Tier 2) per `spaarke-wt-spaarke-notification-spine-r1` guide. Not required for the UI/UAT work.
+### 1. Round 5 UAT (shipped + deployed) — `a6ce2b088`
+- **Widget vertical fill**: `src/solutions/LegalWorkspace/src/sections/communications.registration.ts` had `contentSizing:"clamped"` + `defaultHeight:"480px"` (old dense-DataGrid config) → capped the conversation shell at 480px. Switched to the **grow** pattern (dropped `clamped`, `defaultHeight:"560px"`) so the widget's `calc(100vh - 200px)` floor fills the tab (same as SmartTodo). The "missing scroll arrow" was a downstream symptom.
+- **New Thread modal**: added padding between title and first section; added `variant="compact"` to shared `AssociateToStep` (heading→field-label size, no subtitle/skip-hint). Wizard callers untouched.
+- **PCF Messages modal top-anchoring**: the round-4 portal-to-body did NOT hold (Fluent already portals to body; a `transform` on an app-shell ancestor defeats `position:fixed`). Rewrote `ConversationModal.tsx` to a **full-viewport `position:fixed; inset:0` flex-centered overlay** (dropped the Fluent `<Dialog>` envelope; copied the `DocumentRelationshipViewer` `RelationshipViewerModal` pattern) + Esc/backdrop dismiss. PCF bumped **1.5.0 → 1.6.0** (5 files).
+- 📦 **PCF zip for operator upload**: `src/client/pcf/CommunicationConversationPanel/Solution/bin/CommunicationConversationPanelSolution_v1.6.0.zip`
 
-### Notes files
-- `notes/uat-feedback-comm-widget-2026-07-22.md`, `…-07-23.md` — earlier round feedback + resolutions.
-- Round 4 feedback was implemented directly (no separate notes file); the PR #687 body + this file capture it.
+### 2. Create-record-thread 500 (shipped + deployed) — `1a8d8fc36`
+- `CreateRecordThreadAsync` wrote the non-existent `sprk_regardingrecordtype` text attr → Dataverse fault → `InvalidOperationException` (masked by `DataverseServiceClientImpl.CreateAsync`'s catch-and-wrap). Confirmed via App Insights (App ID `6a76b012-46d9-412f-b4ab-4905658a9559`) + live table metadata.
+- Fix: set the **typed lookup** via `RegardingFieldMap.FieldFor(entityType)` + keep `sprk_regardingrecordid`/`name`; drop the bogus attr; validate family + GUID. Contract test updated (it had encoded the bug) — 4/4 pass.
+
+### 3. Auto-threading record-anchoring (committed, NOT deployed) — `60f3ea0fd`
+Same non-existent-field root cause, but across the whole threading engine (all under non-fatal try/catch, so it failed **silently** — record-anchored/default threads never worked; only record-less did). Fixed 6 sites in `src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs`:
+1. `CreateThreadAsync` — write typed lookup (not text-type).
+2. `FindOrCreateDefaultThreadAsync` — write typed lookup for Tier-2 (default thread now shows under its record); keep `sprk_regardingrecordid`.
+3. `FindDefaultThreadAsync` — idempotency query keys on `sprk_regardingrecordid` (unique GUID); dropped the condition on the non-existent field (it threw → always "not found").
+4. `ReDeriveThreadNameAsync` — read typed lookups; **master detected via `sprk_isdefaultthread` + `sprk_threadtype==Direct`** (was: `regardingrecordtype=="systemuser"`).
+5. `ReadRegardingAnchorAsync` (message) — dropped the broken lookup-read-as-string; use the typed lookups (message's `sprk_regardingrecordtype` IS a lookup, so reading it `<string>` was null/`InvalidCastException`).
+6. Added `SetTypedRegardingLookup` + `ReadTypedRegardingAnchorFromThread` helpers.
+- **Verified**: BFF builds clean; **55 tests pass** — `ThreadResolverTests` (unit) + `ThreadResolverSeamTests` + `CommunicationWorkspaceReadSeamTests` (seam) + `CommunicationCreateRecordThreadContractTests`. The tests that encoded the old assumption were rewritten into regression guards (assert typed lookup written + `sprk_regardingrecordtype` absent).
+- **Behavior change (intended)**: inbound messages that resolve a regarding now correctly land in a per-record thread and appear under that record.
+- **Operator rejected the schema alternative** (add/rename the field): the code writes/reads it as text but it's a lookup, and the by-regarding read filters on the typed lookup regardless — so a schema change couldn't replace the code fix. Schema left untouched.
+
+---
+
+## Deferred deploy — exact steps when operator says go
+1. `git push origin work/messaging-communication-app-r3` (pushes `60f3ea0fd`).
+2. `git fetch origin && git merge origin/master --no-edit` (pick up the other projects' work; resolve any conflicts in `Services/Communication/**`).
+3. `dotnet build src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -c Release` (verify clean post-merge).
+4. `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` (hash-verify + health check; publish ≤60 MB, baseline ~47.5 MB).
+5. Smoke: `POST /api/communications/threads` (no auth) → **401** (route live), `/healthz` → 200. Operator re-tests the ＋ New Thread button in UAT.
+
+---
+
+## Pending / flagged (not blocking)
+- **5 pre-existing read-path test failures** — `CommunicationThreadReadServiceTests` / `CommunicationByRegardingReadTests` / `CommunicationFilteredQueryTests` fail on `SentByName` / `sprk_sentbyname` enrichment. **Confirmed via `git stash` they fail WITHOUT my change** — they came in with the master merge (dedup / another recent change), NOT this work. Separate issue; operator not yet decided whether to fix.
+- **PCF v1.6.0** — operator uploads the zip manually (path above); watch modal centering on re-UAT (if still top-anchored, the overlay approach would need a deeper look, but it's the repo's proven transform-robust pattern).
+- **Spine runtime config** (unchanged, operator-coordinated) — Azure SignalR + `sprk_isexternal` backfill for live badges; not required for UI/threading work.
+
+---
+
+## Session note (worktree cleanup — informational, not project state)
+This session also did a repo-wide worktree audit + cleanup in the MAIN repo (`C:/code_files/spaarke`): closed ~14 stale worktrees (pre-July clean/orphan-free + Bucket B docs-only + 2 superseded `fix/*` + `dataset-grid-framework-r2` whose branch was deleted since it shipped via #537). Pushed at-risk actives (`email-r4`, `assistant-r1` branch `work/assistant-notif-ui-polish`) for backup. One leftover locked dir remains: `spaarke-wt-customer-provisioning-orchestration-r1` (de-registered; a process holds the folder — `rm -rf` once freed). None of this touches this project's branch.
