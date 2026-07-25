@@ -151,7 +151,9 @@ public sealed class ThreadResolver : IThreadResolver
         if (anchor is not null)
         {
             thread["sprk_regardingrecordid"] = TruncateTo(anchor.RecordId, 100);
-            thread["sprk_regardingrecordtype"] = TruncateTo(anchor.RecordType, 100);
+            // TYPED ADR-024 regarding lookup — the field the by-regarding read filters on. The thread has NO
+            // 'sprk_regardingrecordtype' text attribute (RB R3 UAT 2026-07-24); the typed lookup carries the anchor.
+            SetTypedRegardingLookup(thread, anchor.RecordType, anchor.RecordId);
             if (!string.IsNullOrWhiteSpace(anchor.RecordName))
                 thread["sprk_regardingrecordname"] = TruncateTo(anchor.RecordName, 400);
             if (!string.IsNullOrWhiteSpace(anchor.RecordUrl))
@@ -247,17 +249,22 @@ public sealed class ThreadResolver : IThreadResolver
     {
         try
         {
-            var columns = new[]
+            var columns = new List<string>
             {
-                "sprk_name", NameIsAutoDerivedField,
-                "sprk_regardingrecordtype", "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl",
+                "sprk_name", NameIsAutoDerivedField, "sprk_threadtype", DefaultThreadMarkerField,
+                "sprk_regardingrecordname", "sprk_regardingrecordurl",
             };
-            var thread = await _entityService.RetrieveAsync("sprk_communicationthread", threadId, columns, ct);
+            columns.AddRange(RegardingFieldMap.AllRegardingFields);
+            var thread = await _entityService.RetrieveAsync(
+                "sprk_communicationthread", threadId, columns.ToArray(), ct);
 
-            var recordType = thread.GetAttributeValue<string>("sprk_regardingrecordtype");
-
-            // Master-thread guard — MUST NOT attempt to resolve "systemuser" as a regarding record (070 flag).
-            if (string.Equals(recordType, MasterThreadOwnerKeyType, StringComparison.OrdinalIgnoreCase))
+            // Master-thread guard — the Tier-3 per-user master is a DEFAULT thread of type Direct (keyed on the
+            // owning user, not a resolvable record); its "Messages" name must never re-derive. Detected via the
+            // default marker + threadtype now that there is no 'sprk_regardingrecordtype' text attribute to key on
+            // (RB R3 UAT 2026-07-24).
+            var isDefault = thread.GetAttributeValue<bool?>(DefaultThreadMarkerField) ?? false;
+            var threadTypeValue = thread.GetAttributeValue<OptionSetValue>("sprk_threadtype")?.Value;
+            if (isDefault && threadTypeValue == ThreadTypeDirect)
             {
                 _logger.LogDebug(
                     "Skipping name re-derive for per-user master thread {ThreadId} — regarding key is the owning user, not a resolvable record",
@@ -275,12 +282,8 @@ public sealed class ThreadResolver : IThreadResolver
                 return;
             }
 
-            var recordId = thread.GetAttributeValue<string>("sprk_regardingrecordid");
-            var recordName = thread.GetAttributeValue<string>("sprk_regardingrecordname");
-            var recordUrl = thread.GetAttributeValue<string>("sprk_regardingrecordurl");
-            var anchor = !string.IsNullOrWhiteSpace(recordType) && !string.IsNullOrWhiteSpace(recordId)
-                ? new RegardingAnchor(recordId, recordType, recordName, recordUrl)
-                : null;
+            // Anchor from the TYPED ADR-024 lookups (authoritative) + the denormalized display name/url.
+            var anchor = ReadTypedRegardingAnchorFromThread(thread);
 
             string newName;
             if (anchor is not null)
@@ -307,7 +310,7 @@ public sealed class ThreadResolver : IThreadResolver
                 ct);
             _logger.LogInformation(
                 "Re-derived thread name {ThreadId}: {NewName} (regarding: {RecordType}:{RecordId})",
-                threadId, newName, recordType, recordId);
+                threadId, newName, anchor?.RecordType, anchor?.RecordId);
         }
         catch (Exception ex)
         {
@@ -515,7 +518,7 @@ public sealed class ThreadResolver : IThreadResolver
     private async Task<Guid> FindOrCreateDefaultThreadAsync(
         string keyType, string keyId, RegardingAnchor? anchor, CancellationToken ct)
     {
-        if (await FindDefaultThreadAsync(keyType, keyId, ct) is { } existing)
+        if (await FindDefaultThreadAsync(keyId, ct) is { } existing)
             return existing;
 
         var thread = new DataverseEntity("sprk_communicationthread")
@@ -529,10 +532,16 @@ public sealed class ThreadResolver : IThreadResolver
             // FR-07 (task 071) — same Auto stamp as a normal CREATE; a default/master thread's name still
             // re-derives (subject to the ReDeriveThreadNameAsync master-thread guard for Tier 3) until edited.
             [NameIsAutoDerivedField] = true,
-            // Denormalized regarding pointer doubles as the idempotency key (queried above before create).
-            ["sprk_regardingrecordtype"] = TruncateTo(keyType, 100),
+            // Denormalized GUID pointer doubles as the idempotency key (queried by FindDefaultThreadAsync before
+            // create). keyId is a record GUID (Tier 2) or the owning-user GUID (Tier 3 master) — globally unique,
+            // so it is a sufficient key on its own (no 'sprk_regardingrecordtype' — that text attr does not exist
+            // on the thread; RB R3 UAT 2026-07-24).
             ["sprk_regardingrecordid"] = TruncateTo(keyId, 100),
         };
+
+        // Tier 2 (per-record default) — set the TYPED ADR-024 lookup so this record's default thread appears in
+        // the by-regarding conversation list. No-op for the Tier-3 master (keyType "systemuser" is not a family).
+        SetTypedRegardingLookup(thread, keyType, keyId);
 
         // Copy the regarding display fields only for a real record anchor (Tier 2) — REUSE of the ADR-024
         // regarding family, identical to CreateThreadAsync. The Tier-3 master carries no display name/url.
@@ -552,7 +561,7 @@ public sealed class ThreadResolver : IThreadResolver
     /// or null when none exists yet (→ lazy create). The idempotency query that keeps Tier 2/Tier 3 to at
     /// most one thread per record / per user.
     /// </summary>
-    private async Task<Guid?> FindDefaultThreadAsync(string keyType, string keyId, CancellationToken ct)
+    private async Task<Guid?> FindDefaultThreadAsync(string keyId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_communicationthread")
         {
@@ -560,10 +569,13 @@ public sealed class ThreadResolver : IThreadResolver
             TopCount = 1,
             Criteria =
             {
+                // keyId (a record GUID for Tier 2, the owning-user GUID for Tier 3) is globally unique, so the
+                // marker + GUID pointer are a sufficient idempotency key. The former
+                // 'sprk_regardingrecordtype == keyType' condition filtered on a non-existent thread attribute
+                // (the query threw → always "not found" → duplicate/failed creates). RB R3 UAT 2026-07-24.
                 Conditions =
                 {
                     new ConditionExpression(DefaultThreadMarkerField, ConditionOperator.Equal, true),
-                    new ConditionExpression("sprk_regardingrecordtype", ConditionOperator.Equal, keyType),
                     new ConditionExpression("sprk_regardingrecordid", ConditionOperator.Equal, keyId),
                 },
             },
@@ -594,33 +606,28 @@ public sealed class ThreadResolver : IThreadResolver
     {
         var columns = new List<string>
         {
-            "sprk_regardingrecordid", "sprk_regardingrecordtype", "sprk_regardingrecordname", "sprk_regardingrecordurl",
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl",
         };
         columns.AddRange(RegardingFieldMap.AllRegardingFields);
 
         var comm = await _entityService.RetrieveAsync("sprk_communication", communicationId, columns.ToArray(), ct);
 
-        var recordType = comm.GetAttributeValue<string>("sprk_regardingrecordtype");
-        var recordId = comm.GetAttributeValue<string>("sprk_regardingrecordid");
-        if (!string.IsNullOrWhiteSpace(recordType) && !string.IsNullOrWhiteSpace(recordId))
-        {
-            return new RegardingAnchor(
-                recordId,
-                recordType,
-                comm.GetAttributeValue<string>("sprk_regardingrecordname"),
-                comm.GetAttributeValue<string>("sprk_regardingrecordurl"));
-        }
-
-        // Fall back to the first typed regarding lookup present (ADR-024 priority order).
+        // The record TYPE + specific record come from the TYPED ADR-024 lookup (RegardingFieldMap) — the
+        // authoritative relational anchor, in ADR-024 priority order — plus the message's denormalized display
+        // name/url. NOTE: sprk_regardingrecordtype on the MESSAGE is a LOOKUP to sprk_recordtype_ref (a
+        // record-type reference), NOT a text type-name; reading it as a string was invalid (null, or an
+        // InvalidCastException when populated). The typed lookups are the source of truth. RB R3 UAT 2026-07-24.
+        var recordName = comm.GetAttributeValue<string>("sprk_regardingrecordname");
+        var recordUrl = comm.GetAttributeValue<string>("sprk_regardingrecordurl");
         foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
         {
-            if (comm.GetAttributeValue<EntityReference>(field) is { } er)
+            if (comm.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
             {
                 return new RegardingAnchor(
                     er.Id.ToString(),
                     string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName,
-                    er.Name,
-                    RecordUrl: null);
+                    string.IsNullOrWhiteSpace(recordName) ? er.Name : recordName,
+                    recordUrl);
             }
         }
 
@@ -660,6 +667,45 @@ public sealed class ThreadResolver : IThreadResolver
 
     private static string TruncateTo(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Sets the TYPED ADR-024 regarding lookup on a thread entity (RegardingFieldMap: sprk_matter →
+    /// sprk_regardingmatter) — the field the by-regarding read filters on (<c>_sprk_regardingmatter_value</c>).
+    /// Best-effort / non-throwing: a no-op when the type is not an ADR-024 family (e.g. the Tier-3 master's
+    /// "systemuser" key) or the id is not a GUID. There is NO <c>sprk_regardingrecordtype</c> text attribute on
+    /// <c>sprk_communicationthread</c> — the thread carries the typed lookups (+ a <c>sprk_regardingrecordtype_ref</c>
+    /// lookup) + denormalized <c>sprk_regardingrecordid/name/url</c>. RB R3 UAT 2026-07-24.
+    /// </summary>
+    private static void SetTypedRegardingLookup(DataverseEntity thread, string? recordType, string? recordId)
+    {
+        if (string.IsNullOrWhiteSpace(recordType) || string.IsNullOrWhiteSpace(recordId)) return;
+        if (RegardingFieldMap.FieldFor(recordType) is not { } field) return;
+        if (!Guid.TryParse(recordId, out var id) || id == Guid.Empty) return;
+        thread[field] = new EntityReference(recordType, id);
+    }
+
+    /// <summary>
+    /// Reads a thread's regarding anchor from its TYPED ADR-024 lookups (the authoritative anchor, ADR-024
+    /// priority order per RegardingFieldMap) + its denormalized display name/url. Mirrors the message-side
+    /// <see cref="ReadRegardingAnchorAsync"/> fallback. Returns null for a record-less/master thread.
+    /// </summary>
+    private static RegardingAnchor? ReadTypedRegardingAnchorFromThread(DataverseEntity thread)
+    {
+        var recordName = thread.GetAttributeValue<string>("sprk_regardingrecordname");
+        var recordUrl = thread.GetAttributeValue<string>("sprk_regardingrecordurl");
+        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        {
+            if (thread.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
+            {
+                return new RegardingAnchor(
+                    er.Id.ToString(),
+                    string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName,
+                    string.IsNullOrWhiteSpace(recordName) ? er.Name : recordName,
+                    recordUrl);
+            }
+        }
+        return null;
+    }
 
     private sealed record RegardingAnchor(string RecordId, string RecordType, string? RecordName, string? RecordUrl);
 }
