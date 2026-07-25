@@ -159,6 +159,13 @@ function renderPane() {
 const contents = () => injectedMessages.map((m) => m.content);
 const uploadCalls = () => authenticatedFetchMock.mock.calls.filter(([u]) => String(u).includes('/documents'));
 
+// UAT 2026-07-24: the PROSE "added to our conversation" affordance leads the ceremony so the user
+// knows the Compose-uploaded file is now available in the Assistant (mirror of the reverse-direction
+// "opened in Compose" message). Kept in sync with buildComposeAttachedToAssistantMessage.
+const PROSE_FOR_BRIEF =
+  "I've added **browse-brief.docx** to our conversation. You can now ask me to summarize, " +
+  "review, or answer questions about it here — or keep editing it in the Compose tab.";
+
 beforeEach(() => {
   injectedMessages.length = 0;
   authenticatedFetchMock.mockClear();
@@ -188,6 +195,13 @@ describe('manual Browse ingest ceremony — first register brings the file to As
 
     // The bytes were uploaded as a ChatSessionFile (context-only upload).
     expect(uploadCalls()).toHaveLength(1);
+
+    // (0) UAT 2026-07-24: the PROSE "added to our conversation" affordance is injected, and LEADS
+    //     the two collapsed status entries so the user sees a clear "it's in the Assistant now" line.
+    expect(contents()).toContain(PROSE_FOR_BRIEF);
+    expect(contents().indexOf(PROSE_FOR_BRIEF)).toBeLessThan(
+      contents().indexOf('I have your file: browse-brief.docx')
+    );
 
     // (1) The "I have your file" loaded message was injected.
     expect(contents()).toContain('I have your file: browse-brief.docx');
@@ -238,6 +252,7 @@ describe('manual Browse ingest ceremony — idempotency (once per newly-loaded f
 
     // The upload deduped (one ChatSessionFile), and so did the ceremony.
     expect(uploadCalls()).toHaveLength(1);
+    expect(contents().filter((c) => c === PROSE_FOR_BRIEF)).toHaveLength(1);
     expect(contents().filter((c) => c === 'I have your file: browse-brief.docx')).toHaveLength(1);
     expect(runEventSpy).toHaveBeenCalledTimes(1);
   });
@@ -256,6 +271,7 @@ describe('manual Browse ingest ceremony — idempotency (once per newly-loaded f
     });
 
     expect(contents()).not.toContain('I have your file: withdrawn.docx');
+    expect(contents().some((c) => c.includes('added **withdrawn.docx**'))).toBe(false);
     expect(runEventSpy).not.toHaveBeenCalled();
   });
 });

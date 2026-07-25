@@ -85,7 +85,7 @@ import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession"
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown, toDisplayList } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
-import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, makeFileStatusMessage } from "./summarizeRouting";
+import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
 import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
@@ -117,6 +117,7 @@ export {
   FILE_CONFIRMATION_MAX_NAMES,
   routeSummarizeIntent,
   buildFileConfirmationMessage,
+  buildComposeAttachedToAssistantMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
   makeComposeEditControlsMessage,
@@ -1291,6 +1292,13 @@ export function ConversationPane(): React.JSX.Element {
           // still can't double-emit.
           if (visible !== false && !composeIngestCeremonyFiredRef.current.has(sessionFileId)) {
             composeIngestCeremonyFiredRef.current.add(sessionFileId);
+            // UAT 2026-07-24: a file opened/uploaded in the Compose widget IS now a ChatSessionFile
+            // (this upload added it) — the Assistant can act on it — but the user only saw the two
+            // collapsed "File attached"/"File classified" entries and thought it was NOT attached in
+            // the Assistant. Lead with a PROSE affordance telling the user the file is now available
+            // here — the mirror of the Assistant→Compose "opened in Compose" message. Emitted FIRST so
+            // it sits above the two collapsed status entries (matches the reverse-direction ceremony).
+            injection.enqueue(makeLocalAssistantMessage(buildComposeAttachedToAssistantMessage(name)));
             const confirmation = buildFileConfirmationMessage([name]);
             if (confirmation !== null) {
               // P1-5: compact, collapsed-by-default file entry (was a full chat bubble).
