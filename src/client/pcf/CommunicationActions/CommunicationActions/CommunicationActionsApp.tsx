@@ -47,6 +47,7 @@ import {
   type IRecordLookupTarget,
   type IPickedRecord,
   type IRecipient,
+  type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
 } from '@spaarke/ui-components';
@@ -87,6 +88,22 @@ const RECORD_LOOKUP_CATALOG: IRecordLookupTarget[] = [
 const REGARDING_ENTITY_TYPES = RECORD_LOOKUP_CATALOG.filter(c => c.logicalName !== 'sprk_document').map(
   c => c.logicalName
 );
+
+// The `sprk_communication` denormalized regarding lookups (field → target entity), used to
+// read a parent's filed associations so reply/reply-all/forward INHERIT them into the child
+// (owner UAT 2026-07-24). These are the COMMUNICATION regarding columns (NOT the sprk_todo
+// TODO_REGARDING_CATALOG names) — mirrors CommunicationConnections' ENTITY_TO_SLOT.
+const COMMUNICATION_REGARDING_FIELDS: { field: string; entityType: string }[] = [
+  { field: 'sprk_regardingmatter', entityType: 'sprk_matter' },
+  { field: 'sprk_regardingproject', entityType: 'sprk_project' },
+  { field: 'sprk_regardingorganization', entityType: 'sprk_organization' },
+  { field: 'sprk_regardingaccount', entityType: 'account' },
+  { field: 'sprk_regardingperson', entityType: 'contact' },
+  { field: 'sprk_regardinginvoice', entityType: 'sprk_invoice' },
+  { field: 'sprk_regardingservicerequest', entityType: 'sprk_servicerequest' },
+  { field: 'sprk_regardingevent', entityType: 'sprk_event' },
+  { field: 'sprk_regardingworkassignment', entityType: 'sprk_workassignment' },
+];
 
 // "Create from this email" flows. Target-entity mapping + the modal launch itself
 // live in the `launchCreate` seam (CreateKind imported above) so OOB↔custom is
@@ -218,6 +235,8 @@ interface IRecordPrefill {
   cc: string;
   subject: string;
   body: string;
+  /** Formatted sent/created date for the quoted-thread header (owner UAT 2026-07-24). */
+  sent?: string;
 }
 
 export interface ICommunicationActionsAppProps {
@@ -250,6 +269,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // Source-communication attachment documents, offered for inclusion on reply/forward
   // (task 104). Enumerated once from the record via the shared attachment data model.
   const [sourceAttachments, setSourceAttachments] = React.useState<IAttachmentItem[]>([]);
+  // Parent communication's filed associations — inherited into reply/reply-all/forward so the
+  // child "Related to" carries them (owner UAT 2026-07-24). Written onto the child on send.
+  const [parentAssociations, setParentAssociations] = React.useState<ICommunicationAssociation[]>([]);
   // Which "create from this email" actions the engine flagged (from the provenance
   // signals) — drives the subtle ✨ brand tint on the icon-only create buttons.
   const [suggestedCreates, setSuggestedCreates] = React.useState<Set<CreateKind>>(new Set());
@@ -294,19 +316,41 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     let cancelled = false;
     void (async () => {
       try {
+        const regardingSelect = COMMUNICATION_REGARDING_FIELDS.map(m => m.field).join(',');
         const rec = await context.webAPI.retrieveRecord(
           'sprk_communication',
           communicationId,
-          '?$select=sprk_from,sprk_to,sprk_cc,sprk_subject,sprk_body,sprk_associationprovenance'
+          `?$select=sprk_from,sprk_to,sprk_cc,sprk_subject,sprk_body,sprk_associationprovenance,createdon,${regardingSelect}`
         );
         if (cancelled) return;
+        const recAny = rec as Record<string, unknown>;
         setPrefill({
           from: (rec.sprk_from as string) ?? '',
           to: (rec.sprk_to as string) ?? '',
           cc: (rec.sprk_cc as string) ?? '',
           subject: (rec.sprk_subject as string) ?? '',
           body: (rec.sprk_body as string) ?? '',
+          sent: (recAny['createdon@OData.Community.Display.V1.FormattedValue'] as string) ?? '',
         });
+        // Inherit the parent's filed regarding associations (owner UAT 2026-07-24) — read each
+        // populated denormalized lookup + its formatted name/logical-name annotations.
+        const base = resolveDataverseUrl();
+        const inherited: ICommunicationAssociation[] = [];
+        for (const m of COMMUNICATION_REGARDING_FIELDS) {
+          const val = recAny[`_${m.field}_value`];
+          if (typeof val !== 'string' || val.length === 0) continue;
+          const entityId = val.replace(/[{}]/g, '').toLowerCase();
+          const entityType =
+            (recAny[`_${m.field}_value@Microsoft.Dynamics.CRM.lookuplogicalname`] as string) ?? m.entityType;
+          const entityName = recAny[`_${m.field}_value@OData.Community.Display.V1.FormattedValue`] as string | undefined;
+          inherited.push({
+            entityType,
+            entityId,
+            entityName,
+            entityUrl: base ? `${base}/main.aspx?pagetype=entityrecord&etn=${entityType}&id=${entityId}` : undefined,
+          });
+        }
+        setParentAssociations(inherited);
         setSuggestedCreates(deriveSuggestedCreates(rec.sprk_associationprovenance as string | null));
       } catch (err) {
         console.warn('[CommunicationActions] prefill retrieve failed:', err);
@@ -502,6 +546,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       recordLookupCatalog: RECORD_LOOKUP_CATALOG,
       onLookupRecord: handleLookupRecord,
       onAddRelationship: handleAddRelationship,
+      // Reply / Reply All / Forward inherit the parent's filed associations (owner UAT 2026-07-24);
+      // '+ New' (compose) starts with none.
+      associations: composerMode === 'compose' ? undefined : parentAssociations,
       initialAttachments: carryAttachments && carryAttachments.length > 0 ? carryAttachments : undefined,
       onSent: () => {
         setComposerMode(null);
@@ -521,6 +568,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     handleLookupRecord,
     handleAddRelationship,
     sourceAttachments,
+    parentAssociations,
   ]);
 
   if (authError) {
