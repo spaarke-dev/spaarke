@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Seed NDA standard into RAG index + verify NFR-06 grounding tenant pin</title>
+    <phase>1 Platform Enablers</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Data seeding + configuration verification; no BFF/PCF code change; uses existing ingest pipeline.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs an existing ingest script + a config verification with a clear contract; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches RAG index + a knowledge .md source; independent of 011's client work.</parallel-reason>
+    <deps>001</deps>
+    <tags>ai, azure-search, embeddings, config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Seed the Spaarke NDA-standard baseline (Parts A–C) into the existing `spaarke-rag-references` index as a new
+    stable source, and verify the NFR-06 grounding tenant pin: reference docs are seeded under tenantId="system"
+    while retrieval filters on the execution context.TenantId — confirm NDA-REVIEW will retrieve non-zero chunks,
+    or fix the mismatch.
+  </prompt>
+
+  <role>
+    SPAARKE AI engineer. Expert in the Azure AI Search RAG pipeline, the add-reference-to-index ingest flow, and
+    ReferenceRetrievalService grounding.
+  </role>
+
+  <goal>
+    The baseline NDA standard is indexed in `spaarke-rag-references` under a new stable source ID (e.g. KNW-011,
+    documentType: legal); an integration check confirms NDA-REVIEW's execution tenant retrieves the seeded chunks
+    (NFR-06 pin verified, not assumed).
+  </goal>
+
+  <context>
+    <background>
+      The index `spaarke-rag-references` is populated (93 docs; KNW-002 NDA checklist already indexed). The
+      baseline standard lives at notes/spaarke-nda-standard-baseline.md (v0.1, 16-clause rubric). Critical gotcha
+      (spec NFR-06): existing reference docs were seeded with tenantId="system", but retrieval filters on the
+      execution context.TenantId — if NDA-REVIEW runs under a real tenant, it retrieves ZERO golden chunks. Also
+      filter on documentType (not the pre-rename `domain`).
+    </background>
+    <relevant-files>
+      <file>projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md</file>
+      <file>scripts/ai-search/Add-ReferenceToIndex.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    </relevant-files>
+    <dependencies>001 (governance gate). Feeds 020 (NDA-REVIEW grounding), 021 (standard summary), 052 (pin integration test).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">Verify the tenant pin empirically. Do NOT assume grounding works — retrieval MUST return the seeded standard chunks under the tenant NDA-REVIEW actually executes with. If tenantId="system" won't match, document the resolution (seed under the execution tenant, or align retrieval filter) before closing.</constraint>
+    <constraint source="ADR-015">Reuse the existing ingest pipeline + catalog record contract (sprk_analysisknowledges RagIndex); do not build a parallel indexer.</constraint>
+    <constraint source="project">Use a NEW stable source ID to avoid KNW numbering collision; set documentType: legal. Follow the .md metadata-header contract expected by Add-ReferenceToIndex.ps1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-governance.md</file>
+      <file>.claude/patterns/ai/indexing-pipeline.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/skills/add-reference-to-index/SKILL.md</file>
+      <file>docs/architecture/rag-architecture.md</file>
+      <file>knowledge/azure-ai-search/</file>
+    </files>
+    <patterns>
+      <pattern name="Reference ingest" location="scripts/ai-search/Add-ReferenceToIndex.ps1">
+        Author the .md with the required metadata header, run the script to create the catalog record + chunk/embed/upload.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Prepare the NDA-standard source .md (Parts A–C from the baseline) with the required metadata header (new source ID, documentType: legal).</step>
+    <step order="2">Run Add-ReferenceToIndex.ps1 to ingest it into `spaarke-rag-references`; confirm the catalog record + chunks exist.</step>
+    <step order="3">Inspect ReferenceRetrievalService's tenant filter and how AiAnalysisNodeExecutor passes context.TenantId.</step>
+    <step order="4">Determine the tenant NDA-REVIEW executes under; empirically confirm retrieval returns the seeded chunks under that tenant.</step>
+    <step order="5">If mismatch: document + apply the resolution (seed under execution tenant OR align the filter); re-verify.</step>
+    <step order="6">Confirm retrieval filters on documentType (not domain).</step>
+    <step order="7">Update TASK-INDEX.md: mark 012 ✅; record the tenant-pin resolution in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If resolving the tenant pin would require changing multi-tenant isolation semantics in ReferenceRetrievalService, STOP and escalate (security-adjacent) rather than broadening the tenant filter.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run PowerShell ingest + Azure Search queries.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/notes/ (tenant-pin resolution record)</output>
+    <output type="config">spaarke-rag-references index (new NDA-standard source)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The NDA-standard baseline is retrievable from `spaarke-rag-references` under a new stable source ID with documentType: legal.</criterion>
+    <criterion testable="true">Given NDA-REVIEW's execution tenant, when grounding runs, then retrieval returns the seeded standard chunks (non-zero) — verified empirically.</criterion>
+    <criterion testable="true">The tenant-pin resolution (match confirmed, or fix applied) is documented in notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Highest-priority verify in the project — a silent tenant mismatch yields an ungrounded review that looks fine
+    but cites nothing. Task 052 promotes this to a standing integration test.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute checklist.</protocol>
+  </execution>
+</task>

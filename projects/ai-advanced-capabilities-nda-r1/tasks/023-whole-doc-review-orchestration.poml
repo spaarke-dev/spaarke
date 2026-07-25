@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Whole-doc review orchestration — Action run → disposition fan-out (card + comments)</title>
+    <phase>2 NDA Review Capability</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF orchestration on the dispatch spine; ledgering; fan-out to two client dispositions; ADR-039/043 judgment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Orchestration design decision (single prompted Action vs coded workflow) under the ADR-039 composite rule; cross-cutting on the execution spine.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Central BFF orchestration that 030/031/041 fan out from; sequential after 020.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Orchestrate the whole-document NDA review: run NDA-REVIEW once, ledger the result (ADR-040), then fan out to
+    two dispositions — the concise cited summary (Assistant + in-Compose panel) and the advisory comments payload.
+    Prefer a single prompted Action + disposition fan-out; add a coded NdaReviewWorkflow ONLY if orchestration
+    genuinely demands it (ADR-039 composite rule).
+  </prompt>
+
+  <role>
+    SPAARKE BFF developer. Expert in the ADR-043 execution spine, ADR-040 ledger, ADR-037 multinode composition,
+    and the Services/Ai dispatch orchestrator. Follow ADR-013 facade + CLAUDE.md §10.
+  </role>
+
+  <goal>
+    A single NDA-REVIEW run produces a ledgered result that yields both the concise summary payload and the
+    advisory-comments payload the client consumes; the orchestration is the minimum viable shape (no gratuitous
+    coded workflow) and passes seam tests.
+  </goal>
+
+  <context>
+    <background>
+      Reuse-first: the review is a whole-doc prompted Action (task 020), NOT compose-compare-to-playbook. Output is
+      ledgered store-before-render (ADR-040). The client materializes comments via a lightweight event path
+      (task 031) rather than a new routable server disposition. DailyBriefingNarrator + CodedWorkflowRegistry are
+      the coded-workflow precedent IF (and only if) a single Action can't express the fan-out.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+      <file>tests/integration/seam/</file>
+    </relevant-files>
+    <dependencies>020 (NDA-REVIEW Action). Feeds 030/031/041.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Prefer a single prompted Action; only compose a coded workflow if the composite rule requires it. Advisory-tier output rules from task 001 apply.</constraint>
+    <constraint source="ADR-040">Ledger the result before any client render (store-before-render). The summary and comments payloads derive from the ledgered output, not a second model call.</constraint>
+    <constraint source="ADR-013">Any new BFF AI code sits behind the PublicContracts facade.</constraint>
+    <constraint source="CLAUDE.md-10">State Placement Justification (this belongs in BFF — orchestration of an existing capability). Run publish-size check ≤60 MB; report diff. No new NuGet expected. Add/extend seam tests per ADR-038.</constraint>
+    <constraint source="project">Do NOT make a second LLM call to produce comments vs summary — both derive from the one ledgered {overallRisk, flaggedSections[]} result.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
+      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Coded workflow precedent" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs">
+        Reference ONLY if a single Action cannot express the fan-out; otherwise keep it a prompted Action + disposition fan-out.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace how an Action result is ledgered and dispatched to client dispositions today.</step>
+    <step order="2">Implement the fan-out: from the one ledgered result, derive the concise summary payload and the advisory-comments payload.</step>
+    <step order="3">Decide single-Action vs coded workflow; document the decision (§11 justification) and only add code if required.</step>
+    <step order="4">Add seam tests (tests/integration/seam) proving one run → both payloads, ledgered before render.</step>
+    <step order="5">Run build + tests; run publish-size check; report diff.</step>
+    <step order="6">Update TASK-INDEX.md: mark 023 ✅; record Placement Justification + size in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a single prompted Action cannot express the required fan-out and a coded workflow is needed, surface the §11 justification + ADR-039 composite reasoning and confirm before adding the coded path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (orchestration/fan-out)</output>
+    <output type="test">tests/integration/seam/ (one-run→two-payloads)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given one NDA-REVIEW run, when it completes, then both the summary payload and the advisory-comments payload derive from the single ledgered result (no second LLM call).</criterion>
+    <criterion testable="true">The result is ledgered before any client render (store-before-render verified in a seam test).</criterion>
+    <criterion testable="true">If a coded workflow was added, a §11 justification + ADR-039 composite rationale is documented; otherwise it remains a prompted Action.</criterion>
+    <criterion testable="true">`dotnet publish -c Release` ≤60 MB; diff reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The hinge of Phase 3/4: tasks 030 (panel), 031 (comments event), 041 (summary page) all consume this
+    orchestration's payloads.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL). Enforce §10 size gate.</protocol>
+  </execution>
+</task>

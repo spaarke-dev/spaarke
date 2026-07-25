@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Golden-utterance dispatch eval — NDA card + NL intent routing</title>
+    <phase>5 Eval &amp; Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dispatch eval cases (ADR-039 gate); test-adjacent config; guards routing correctness.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Authoring dispatch eval cases against a known golden-utterance harness with a clear reference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dispatch eval cases; independent of 050/052.</parallel-reason>
+    <deps>022</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add golden-utterance dispatch eval cases (the ADR-039 dispatch gate) covering the "Review an NDA" card click
+    and the natural-language "review this NDA" intent, asserting each routes to the nda-review/default binding via
+    the execution spine.
+  </prompt>
+
+  <role>
+    SPAARKE AI eval engineer. Expert in the golden-utterance dispatch eval and the ADR-039/043 closed-catalog
+    routing.
+  </role>
+
+  <goal>
+    Dispatch eval cases exist and pass: the NDA card and NL intent both route to NDA-REVIEW; off-target utterances
+    do not mis-route.
+  </goal>
+
+  <context>
+    <background>
+      ADR-039 requires golden-utterance dispatch cases for new entry paths. Task 022 wires the card + classification;
+      this proves routing stays correct (Click + Text entry paths) and doesn't mis-fire.
+    </background>
+    <relevant-files>
+      <file>tests/eval/ (dispatch golden utterances)</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+    </relevant-files>
+    <dependencies>022 (bindings + card + classification wired).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">New entry paths require golden-utterance dispatch coverage; include a negative case (an off-target utterance that must NOT route to NDA-REVIEW).</constraint>
+    <constraint source="project">Cover both the Click path (card) and the Text path (NL intent).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/constraints/ai.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate the golden-utterance dispatch eval harness + existing cases.</step>
+    <step order="2">Add cases: NDA card click → nda-review/default; "review this NDA" NL → nda-review/default; an off-target utterance → NOT NDA-REVIEW.</step>
+    <step order="3">Run the eval; confirm green.</step>
+    <step order="4">Update TASK-INDEX.md: mark 051 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run the dispatch eval.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/eval/ (NDA dispatch golden utterances)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the NDA card click, when dispatched, then it routes to nda-review/default.</criterion>
+    <criterion testable="true">Given the NL intent "review this NDA", when dispatched, then it routes to nda-review/default.</criterion>
+    <criterion testable="true">Given an off-target utterance, when dispatched, then it does NOT route to NDA-REVIEW (negative case).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The dispatch-side companion to 050's output-quality eval. Both must be green for graduation.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute checklist.</protocol>
+  </execution>
+</task>

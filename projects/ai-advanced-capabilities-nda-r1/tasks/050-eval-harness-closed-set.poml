@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Eval harness + closed set — advisory-quality rubric + citation accuracy</title>
+    <phase>5 Eval &amp; Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Eval config + metrics authoring; new files with explicit acceptance rubric; TEST-adjacent.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Eval config + metric script authoring against a specified rubric with a clear reference; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Eval assets; independent of 051/052 (different files).</parallel-reason>
+    <deps>020</deps>
+    <tags>ai, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the NDA advisory eval: a closed set of 6 NDAs plus negative/authorization cases, an advisory-quality
+    rubric (NFR-01 — output ≥ a strong general LLM), and a citation-accuracy metric. This is how we prove the north
+    star empirically and guard it against regression.
+  </prompt>
+
+  <role>
+    SPAARKE AI eval engineer. Expert in the legal-eval-config harness and citation/quality metrics.
+  </role>
+
+  <goal>
+    A runnable eval (legal-eval-config.yaml with the 6 NDAs + negative/authorization cases + advisory rubric) plus
+    metrics/citation_accuracy.py; running it reports advisory-quality and citation-accuracy scores against the bar.
+  </goal>
+
+  <context>
+    <background>
+      spec NFR-01: advisory quality ≥ strong general LLM on the closed set; every factual finding cites its NDA
+      section; unverifiable claims declined. Negative cases: non-NDA declines, unreadable errors, unauthorized
+      refused. This harness grades task 020's Action quality.
+    </background>
+    <relevant-files>
+      <file>tests/eval/ (legal-eval-config.yaml)</file>
+      <file>tests/eval/metrics/citation_accuracy.py</file>
+      <file>infra/dataverse/actions/nda-review.action.json</file>
+    </relevant-files>
+    <dependencies>020 (NDA-REVIEW Action to evaluate).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">The rubric must operationalize "≥ strong general LLM": define comparison + pass threshold, not a vibe check.</constraint>
+    <constraint source="project">Closed set includes negative + authorization cases (non-NDA declines; unreadable input errors; unauthorized user refused) — the acceptance set is exhaustive, not just happy-path NDAs.</constraint>
+    <constraint source="ADR-038">Eval is an observation harness; it reports scores. Do not conflate with the unit/seam pyramid.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Assemble the 6-NDA closed set + negative/authorization cases.</step>
+    <step order="2">Author legal-eval-config.yaml with cases + expected signals (risk level, required citations, decline behavior).</step>
+    <step order="3">Implement metrics/citation_accuracy.py (does each finding's citation resolve to a real section?).</step>
+    <step order="4">Define the advisory-quality rubric operationalizing NFR-01 (comparison + threshold).</step>
+    <step order="5">Run the eval against NDA-REVIEW; record baseline scores.</step>
+    <step order="6">Update TASK-INDEX.md: mark 050 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run the eval harness + python metric.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/eval/legal-eval-config.yaml</output>
+    <output type="test">tests/eval/metrics/citation_accuracy.py</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Running the eval reports an advisory-quality score against the NFR-01 bar and a citation-accuracy score.</criterion>
+    <criterion testable="true">The closed set includes the 6 NDAs AND negative/authorization cases (non-NDA decline, unreadable error, unauthorized refused).</criterion>
+    <criterion testable="true">citation_accuracy.py flags any finding whose citation does not resolve to a real NDA section.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the graduation instrument for the north star. Keep the rubric concrete so "better than ChatGPT" is
+    measurable, not asserted.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute checklist.</protocol>
+  </execution>
+</task>

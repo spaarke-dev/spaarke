@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Runtime model picker — Assistant tier control → sprk_modeltieroverride</title>
+    <phase>1 Platform Enablers</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies SpaarkeAi client .tsx + a Binding override path; frontend + AI wiring.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard client wiring against the resolver from task 010 with a clear contract; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Client + Binding override path; independent of 012's RAG seeding. Both depend on 010's resolver but touch different files.</parallel-reason>
+    <deps>010</deps>
+    <tags>frontend, react, fluent-ui, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a runtime model-tier picker in the SpaarkeAi Assistant so a user can select the advisory model tier for a
+    run; the selection flows through sprk_modeltieroverride into the same tier→deployment resolver from task 010.
+  </prompt>
+
+  <role>
+    SPAARKE Code Page developer. Expert in React 18, Fluent UI v9 (ADR-021), and the SpaarkeAi Assistant surface.
+  </role>
+
+  <goal>
+    A Fluent v9 tier control in the Assistant sets sprk_modeltieroverride on the run; when set, execution uses the
+    overridden tier's deployment; when unset, it falls back to the Action's sprk_modeltier. Dark-mode compliant.
+  </goal>
+
+  <context>
+    <background>
+      Runtime model selection is explicitly in r1 (spec FR-04b). The Binding override field sprk_modeltieroverride
+      already exists; EffectiveModelTier composes Action tier + override. This task surfaces the control and wires
+      the override to the resolver landed in task 010.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+    </relevant-files>
+    <dependencies>010 (tier→deployment resolver must exist for the override to route).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">All colors use Fluent UI v9 semantic tokens; the picker must adapt to dark mode (no hardcoded white/black).</constraint>
+    <constraint source="ADR-016">The override rides sprk_modeltieroverride and resolves through the single tier→deployment resolver; no second routing mechanism.</constraint>
+    <constraint source="project">When override is unset, behavior is identical to today (Action's own tier). The control is additive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-016-rate-limits-model-tier.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 control authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Use makeStyles + semantic tokens; mirror an existing Assistant control for placement and theming.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate the Assistant run-invocation path and where a Binding override could be attached.</step>
+    <step order="2">Add a Fluent v9 tier picker (Fast/Standard/Reasoning) near the Assistant input; default = unset (use Action tier).</step>
+    <step order="3">Wire the selection to set sprk_modeltieroverride on the run request.</step>
+    <step order="4">Verify override routes through the task-010 resolver end-to-end (Reasoning override → Reasoning deployment).</step>
+    <step order="5">Run the UI tests defined below; update TASK-INDEX.md: mark 011 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the SpaarkeAi code page.</tool>
+    <tool name="terminal">Run commands.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (tier picker)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the picker set to Reasoning, when a run executes, then sprk_modeltieroverride=Reasoning and the Reasoning deployment is used.</criterion>
+    <criterion testable="true">Given the picker unset, when a run executes, then the Action's own sprk_modeltier governs (no behavior change).</criterion>
+    <criterion testable="true">The picker renders correctly in dark mode using Fluent v9 semantic tokens.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Tier picker renders">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Open the SpaarkeAi Assistant</step>
+        <step>Verify the model-tier picker is visible near the input</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Picker renders without console errors; options Fast/Standard/Reasoning present.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Verify picker background/text/icons adapt (no white in dark mode)</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Additive control; the override composition (EffectiveModelTier) already exists server-side. Keep the default
+    behavior identical to pre-picker.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

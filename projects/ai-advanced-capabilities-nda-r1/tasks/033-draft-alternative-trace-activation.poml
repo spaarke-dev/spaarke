@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Draft Alternative activation — resolve bindingId stub + execution trace</title>
+    <phase>3 Compose Review Experience</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Activates the embedded Draft Alternative tool (resolve bindingId:'' stub) + trace flow; frontend + binding wiring.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Resolving a known binding stub + activating an existing toolbar action with a clear contract; mechanical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeAiToolbar shared with other Compose client tasks; sequential after 022.</parallel-reason>
+    <deps>022</deps>
+    <tags>frontend, react, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Activate the embedded Compose "Draft Alternative" tool for user-driven per-section rewrites: resolve the
+    compose-draft-alternative bindingId:'' stub to the real binding, and ensure the execution-trace flow works so
+    the user can select a flagged section and generate a standards-based alternative. Redlines are user-driven per
+    section — NOT AI batch-applied.
+  </prompt>
+
+  <role>
+    SPAARKE Compose client developer. Expert in ComposeAiToolbar, the single-edit compose-draft-alternative action,
+    and the execution-trace flow.
+  </role>
+
+  <goal>
+    Selecting a flagged clause and invoking "Draft Alternative" runs compose-draft-alternative (bound, not stubbed)
+    and returns a standards-based rewrite the user can apply per section; the execution trace surfaces.
+  </goal>
+
+  <context>
+    <background>
+      compose-draft-alternative is a built single-edit rewrite tool wired in ComposeAiToolbar.tsx (~:324) but with
+      bindingId:''. The user flow (north star): go to each highlighted section → select → Draft Alternative using
+      firm standards → apply → save. Redlines are user-driven, comments-first — the batch synthesizer concern is moot.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/ (ComposeAiToolbar.tsx)</file>
+      <file>infra/dataverse/actions/compose-draft-alternative.action.json</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+    </relevant-files>
+    <dependencies>022 (bindings seeded; the draft-alternative binding GUID resolvable).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Draft Alternative is a single-edit action in the closed catalog; bind it to the real binding GUID (no empty bindingId).</constraint>
+    <constraint source="project">Rewrites are user-invoked per section; the tool does NOT auto-apply across the document. The alternative uses firm standards (the seeded standard / draft-alternative Action's grounding).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Toolbar action binding" location="src/client/shared/Spaarke.Compose.Components/src/ (ComposeAiToolbar.tsx)">
+        Resolve the bindingId from the seeded compose-draft-alternative binding (task 022) instead of the '' stub.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Locate the compose-draft-alternative invocation in ComposeAiToolbar and the bindingId:'' stub.</step>
+    <step order="2">Resolve the real binding GUID (from task 022's seed) and wire it in.</step>
+    <step order="3">Verify the execution-trace flow surfaces during a rewrite.</step>
+    <step order="4">Manually verify: select a flagged clause → Draft Alternative → standards-based rewrite returned → user applies it.</step>
+    <step order="5">Run UI tests; update TASK-INDEX.md: mark 033 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build the shared Compose lib + code page.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/ (ComposeAiToolbar binding resolution)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a selected flagged clause, when the user invokes Draft Alternative, then compose-draft-alternative runs against its real binding (no empty bindingId) and returns a standards-based rewrite.</criterion>
+    <criterion testable="true">The rewrite is applied per section by the user; the tool does not auto-apply across the document.</criterion>
+    <criterion testable="true">The execution trace surfaces during the rewrite.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Draft Alternative per section">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Run NDA-REVIEW; open Compose; select a flagged clause</step>
+        <step>Invoke Draft Alternative; verify a standards-based rewrite is returned</step>
+        <step>Apply it; check console for errors</step>
+      </steps>
+      <expected>Rewrite returned + applied per section; no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Closes the review→revise loop. Keep it user-driven per section per the confirmed flow.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

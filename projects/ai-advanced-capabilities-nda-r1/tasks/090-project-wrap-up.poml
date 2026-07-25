@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Project wrap-up — quality gates, cleanup, test-diet, docs, lessons</title>
+    <phase>6 Deploy &amp; Wrap-up</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Final quality gates (code-review + adr-check) across project code; repo cleanup; test-diet; doc closeout.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs closeout skills against a completed project; mechanical orchestration, no design authoring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final task; depends on all prior; sequential.</parallel-reason>
+    <deps>060,061</deps>
+    <tags>documentation, testing, ci-cd</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out the project: run final quality gates (code-review + adr-check) and fix criticals, run repo-cleanup,
+    run /test-diet (project-close gate), update README + PLAN to Complete, document lessons learned, and verify all
+    tasks are marked complete.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer performing project closeout. Follow CLAUDE.md §7 (completion) + the project-close
+    test-diet gate.
+  </role>
+
+  <goal>
+    The project is verifiably complete: no critical code-review/adr-check issues; repo cleaned; test-diet report
+    produced; README/PLAN marked Complete; lessons captured; TASK-INDEX all ✅.
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task. The project-close test-diet gate reconciles tests added/modified against the ADR-038
+      build-vs-maintain classifier; it emits git rm/mv commands (read-only). Lessons go to notes/lessons-learned.md.
+    </background>
+    <relevant-files>
+      <file>projects/ai-advanced-capabilities-nda-r1/README.md</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/PLAN.md</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/notes/lessons-learned.md</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+    <dependencies>060 (deploy), 061 (UI tests).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-7">Run /test-diet BEFORE marking the project complete; the wrap-up PR must cite the test-diet report or document the skip rationale.</constraint>
+    <constraint source="ADR-038">test-diet reconciles project tests against the build-vs-maintain classifier; it is read-only (emits git rm/mv for the reviewer).</constraint>
+    <constraint source="project">Fix any critical code-review/adr-check issues before declaring complete. Confirm the ADR-039 amendment (task 001) merged before the advisory-tier code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review on project code; fix critical issues.</step>
+    <step order="2">Run /adr-check on project code; resolve violations (or formalize path-A exceptions per §6.5).</step>
+    <step order="3">Run /repo-cleanup projects/ai-advanced-capabilities-nda-r1; approve removals; archive handoffs.</step>
+    <step order="4">Run /test-diet; capture the report at notes/test-diet-report.md.</step>
+    <step order="5">Update README.md (Status Complete, criteria checked, changelog) + PLAN.md (Complete, milestones ✅).</step>
+    <step order="6">Append lessons to notes/lessons-learned.md (corrections + confirmed non-obvious approaches).</step>
+    <step order="7">Verify all tasks ✅ in TASK-INDEX.md; reset current-task.md to none.</step>
+    <step order="8">Update TASK-INDEX.md: mark 090 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run closeout skills + git.</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/README.md</output>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/ai-advanced-capabilities-nda-r1/notes/lessons-learned.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review + adr-check show no unresolved critical issues (or documented §6.5 path-A exceptions).</criterion>
+    <criterion testable="true">/test-diet has run and notes/test-diet-report.md exists.</criterion>
+    <criterion testable="true">README + PLAN are marked Complete; all graduation criteria checked.</criterion>
+    <criterion testable="true">All tasks are ✅ in TASK-INDEX.md; current-task.md reset to none.</criterion>
+    <criterion testable="true">The ADR-039 amendment (task 001) is confirmed merged before advisory-tier code.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mandatory closeout per CLAUDE.md §7. Do not mark the project complete until the test-diet gate has run.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; prescriptive; run project-close gates.</protocol>
+  </execution>
+</task>

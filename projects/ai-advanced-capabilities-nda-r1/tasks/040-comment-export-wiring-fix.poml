@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Comment-export wiring fix — client sends ComposeAnchoredComment; server bakes w:comment</title>
+    <phase>4 Export &amp; Persistence</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield fix spanning client save payload + server OOXML comment baking; export correctness; critical path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped brownfield fix with a known root cause (wrong field/shape) and a tested server side; Sonnet xhigh fits.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches client save + shares ComposeShadowPatchEngine with 041; sequential after 031.</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, frontend, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Fix the comment-export wiring so exported/saved DOCX retains the advisory comments as native Word comments.
+    Today the client sends comments in the wrong field (annotations) and wrong shape (DocxAnnotationInput,
+    text-anchored), while the server reads `comments` as ComposeAnchoredComment via ApplyComment — so session
+    comments are silently dropped. Map threads → ComposeAnchoredComment (resolve CommentAnchorMark span → paraId +
+    run range) and send them in `comments`. Highlights = comments-as-highlight (no separate highlight mark).
+  </prompt>
+
+  <role>
+    SPAARKE Compose developer (full stack). Expert in the ComposeShadowPatchEngine ApplyComment path,
+    ComposeAnchoredComment (paraId + run range), DocxAnnotationReader round-trip, and the client save payload.
+  </role>
+
+  <goal>
+    A saved/exported Compose DOCX contains native w:comment entries for the advisory comments on the correct
+    clause ranges; reopening round-trips them back in via DocxAnnotationReader; the stale DocxAnnotationInput path
+    is removed for this flow.
+  </goal>
+
+  <context>
+    <background>
+      Server side WORKS + is tested: ComposeShadowPatchEngine.ApplyComment (~:664) bakes native w:comment from
+      ComposeAnchoredComment (paraId + run range, record ~:1358); DocxAnnotationReader round-trips comments on
+      reopen. The GAP is client-side: save sends `annotations` (DocxAnnotationInput) but the server body reads
+      `comments` (ComposeAnchoredComment). DocxAnnotationWriter.cs is RETIRED — use ComposeShadowPatchEngine /
+      ComposeDocumentRenderer. Decision (spec FR-17): comments-as-highlight; no standalone persistent highlight mark in r1.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>tests/integration/seam/ (comment round-trip)</file>
+    </relevant-files>
+    <dependencies>031 (advisory comment threads exist to export).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Comments are baked as native OOXML w:comment via ComposeShadowPatchEngine.ApplyComment from ComposeAnchoredComment (paraId + run range). Do NOT resurrect DocxAnnotationWriter.</constraint>
+    <constraint source="CLAUDE.md-10">Server-touching: state Placement Justification; run publish-size ≤60 MB; report diff. The server path already exists — this is a wiring fix, not new surface.</constraint>
+    <constraint source="project">Map each comment thread → ComposeAnchoredComment by resolving its CommentAnchorMark span to paraId + run range; send in the `comments` field. Remove the stale annotations/DocxAnnotationInput send for this flow. Highlights are represented by the commented range (comments-as-highlight) — no separate highlight mark.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="ApplyComment (server)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Already bakes native w:comment from ComposeAnchoredComment; the client just needs to send the right shape in the right field.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm the server save-body contract reads `comments` as ComposeAnchoredComment and ApplyComment path is exercised.</step>
+    <step order="2">On the client, map comment threads → ComposeAnchoredComment: resolve each CommentAnchorMark span → paraId + run range.</step>
+    <step order="3">Send them in the `comments` field; remove the stale annotations/DocxAnnotationInput send for this flow.</step>
+    <step order="4">Add/extend a seam test: save → DOCX contains w:comment on the right range → reopen round-trips via DocxAnnotationReader.</step>
+    <step order="5">Run build + tests + publish-size check; report diff.</step>
+    <step order="6">Update TASK-INDEX.md: mark 040 ✅; record Placement Justification + size in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If resolving CommentAnchorMark spans to paraId + run range is not reliably possible client-side, STOP and escalate — moving the mapping server-side is an architecture decision, not a silent workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF.</tool>
+    <tool name="npm">Build the Compose client.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (save payload)</output>
+    <output type="test">tests/integration/seam/ (comment export round-trip)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given advisory comments in a session, when the user saves/exports, then the DOCX contains native w:comment entries on the correct clause ranges.</criterion>
+    <criterion testable="true">Reopening the exported DOCX round-trips the comments back in via DocxAnnotationReader.</criterion>
+    <criterion testable="true">The client sends ComposeAnchoredComment in `comments`; the stale annotations/DocxAnnotationInput send is removed for this flow.</criterion>
+    <criterion testable="true">`dotnet publish -c Release` ≤60 MB; diff reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Critical path terminus (…→031→040). No DocxAnnotationWriter — retired. Highlights covered by the commented range.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL). Enforce §10 size gate.</protocol>
+  </execution>
+</task>
