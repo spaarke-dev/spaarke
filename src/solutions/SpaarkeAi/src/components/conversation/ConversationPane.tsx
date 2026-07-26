@@ -59,7 +59,6 @@ import { useConsumerChips } from "./useConsumerChips";
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
 import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
-import { SuggestionCard } from "./SuggestionCard";
 import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
@@ -90,7 +89,7 @@ import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip } from "./localActionChips";
 import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
@@ -416,6 +415,14 @@ export function ConversationPane(): React.JSX.Element {
     fileId: string;
     fileName: string;
   } | null>(null);
+  // ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): render-free mirror of ndaReviewFile so
+  // the stable-`[]`-deps `getAppendedLocalChips` callback (below) can read the current NDA state when
+  // `acceptChips` builds the Suggested-Next-Steps strip. Kept in sync at render (auto-tracks set AND
+  // every clear site) and set synchronously in handleNdaClassified so it is already populated if the
+  // classification and the chips frame land in the same tick (the pipeline order — promote → classify →
+  // chips — normally sets it a frame earlier, but this makes the append race-free either way).
+  const ndaReviewFileRef = React.useRef<{ fileId: string; fileName: string } | null>(null);
+  ndaReviewFileRef.current = ndaReviewFile;
   const handleNdaClassified = React.useCallback((data: EventClassificationData): void => {
     const docType = typeof data.docType === "string" ? data.docType.trim().toLowerCase() : "";
     // Negative case (task 022 acceptance criterion 3): any docType other than "nda" — including
@@ -424,7 +431,9 @@ export function ConversationPane(): React.JSX.Element {
     // Kick off the deferred capability-discovery fetch NOW (well before the user reads the
     // card and clicks it) so ndaReviewBindingId is resolved by dispatch time.
     setNdaReviewCapabilityNeeded(true);
-    setNdaReviewFile({ fileId: data.fileId, fileName: data.fileName ?? "the document" });
+    const file = { fileId: data.fileId, fileName: data.fileName ?? "the document" };
+    ndaReviewFileRef.current = file; // same-tick guarantee for getAppendedLocalChips (see ref note above)
+    setNdaReviewFile(file);
   }, []);
 
   // Stable-ref indirection keeps eventBatch → chips composition acyclic.
@@ -507,8 +516,14 @@ export function ConversationPane(): React.JSX.Element {
     onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
+    // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
+    // just-classified NDA) when the classifier flagged the upload, replacing the old top-of-pane
+    // notification card. Both read refs so this stays a stable `[]`-deps callback.
     getAppendedLocalChips: React.useCallback(
-      () => (promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      () => [
+        ...(ndaReviewFileRef.current ? [buildNdaReviewChip()] : []),
+        ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      ],
       []
     ),
     // R5-9: remember the last drafted correspondence so "Send as email" can seed the modal.
@@ -1139,11 +1154,16 @@ export function ConversationPane(): React.JSX.Element {
           // R5-1: same on-demand open-in-Compose the files tray used to trigger.
           handleReviseInCompose();
           return;
+        case LOCAL_CHIP.ndaReview:
+          // nda-r1 follow-up (UAT 2026-07-26): the "Review an NDA" Suggested-Next-Steps card runs the
+          // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
+          handleReviewNda();
+          return;
         default:
           return;
       }
     },
-    [handleDocAction, injection, handleReviseInCompose]
+    [handleDocAction, injection, handleReviseInCompose, handleReviewNda]
   );
   localChipActionRef.current = handleLocalChipAction;
 
@@ -1943,26 +1963,11 @@ export function ConversationPane(): React.JSX.Element {
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
 
-        {/* task 022 — "Review an NDA" action CARD (ASSISTANT-UI-ELEMENT-CRITERIA: a persistent
-            act-on item, not tied to the current turn, → Card, not a chip). Reuses the existing
-            stateless SuggestionCard presentational component (clickable region + dismiss 'x',
-            Fluent v9 tokens, dark-mode safe) rather than a new card component (CLAUDE.md §11).
-            Renders only when the ONE existing classifier (chat-classify) flagged the most
-            recently uploaded file as an NDA — a non-NDA upload renders nothing here (negative
-            case, task 022 acceptance criterion 3). */}
-        {ndaReviewFile && (
-          <SuggestionCard
-            suggestion={{
-              suggestionId: `nda-review:${ndaReviewFile.fileId}`,
-              title: "Review an NDA",
-              snippet: ndaReviewFile.fileName,
-              actionHint: "nda-review",
-            }}
-            disabled={chips.dispatching}
-            onAction={handleReviewNda}
-            onDismiss={() => setNdaReviewFile(null)}
-          />
-        )}
+        {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
+            notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps
+            strip as an in-line card, alongside "Summarize this file / Revise document". See
+            getAppendedLocalChips + LOCAL_CHIP.ndaReview → handleReviewNda. Rendered only when the
+            classifier flagged the upload as an NDA (host gates on ndaReviewFileRef). */}
 
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (

@@ -732,6 +732,38 @@ public class OpenAiClient : IOpenAiClient
     /// <returns>The raw JSON string response conforming to the schema.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
     /// <exception cref="InvalidOperationException">Thrown when response is empty.</exception>
+    /// <summary>
+    /// Resolves the temperature value to send on a structured completion, or <c>null</c> to OMIT the
+    /// <c>temperature</c> parameter from the request entirely.
+    /// </summary>
+    /// <remarks>
+    /// ai-advanced-capabilities-nda-r1 follow-up (post-UAT). Reasoning-tier deployments (o-series / gpt-5)
+    /// REJECT any non-default temperature — the Azure OpenAI API returns 400
+    /// <c>"Only the default (1) value is supported"</c> when <c>temperature</c> is present at all, even at
+    /// <c>0.0</c>. So for the configured <see cref="DocumentIntelligenceOptions.ReasoningModel"/> the
+    /// request must omit the parameter (this returns <c>null</c>); every other model keeps the
+    /// deterministic-structured default (<c>0.0</c> when the caller passes nothing). This is a
+    /// config-grounded, deployment-name signal (ADR-039: tier→deployment mapping is config, not catalog)
+    /// so it covers every caller of this client, not just the ActionRunner path. Extracted as an
+    /// <c>internal static</c> pure function so the decision is unit-testable without a live Azure call
+    /// (the actual on-the-wire omission is only verifiable end-to-end).
+    /// </remarks>
+    internal static float? ResolveEffectiveTemperature(
+        string deploymentName,
+        string? reasoningModel,
+        float? requestedTemperature)
+    {
+        if (!string.IsNullOrWhiteSpace(reasoningModel)
+            && string.Equals(deploymentName, reasoningModel, StringComparison.OrdinalIgnoreCase))
+        {
+            return null; // reasoning model — omit temperature
+        }
+
+        // Wave B-G9c1 (B6): non-reasoning structured output defaults to 0.0 for determinism,
+        // matching GetStructuredCompletionAsync<T> / StreamStructuredCompletionAsync.
+        return requestedTemperature ?? 0.0f;
+    }
+
     public async Task<string> GetStructuredCompletionRawAsync(
         string prompt,
         BinaryData jsonSchema,
@@ -743,13 +775,12 @@ public class OpenAiClient : IOpenAiClient
     {
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
-        // Wave B-G9c1 (B6) fix: default to 0.0f for deterministic structured output,
-        // matching sibling structured methods (GetStructuredCompletionAsync<T>,
-        // StreamStructuredCompletionAsync) which both hardcode Temperature=0.
         // Callers (typically the 8 tool handlers that resolve a per-action override
         // from sprk_analysisaction.sprk_temperature) pass an explicit value when
-        // non-deterministic output is desired.
-        var effectiveTemperature = temperature ?? 0.0f;
+        // non-deterministic output is desired. Reasoning-tier deployments (gpt-5 / o-series) must
+        // OMIT temperature — ResolveEffectiveTemperature returns null for the configured
+        // ReasoningModel so the property is left unset below (a 0.0 would 400 the request).
+        var effectiveTemperature = ResolveEffectiveTemperature(deploymentName, _options.ReasoningModel, temperature);
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -759,8 +790,12 @@ public class OpenAiClient : IOpenAiClient
                 jsonSchema,
                 jsonSchemaIsStrict: true),
             MaxOutputTokenCount = effectiveMaxTokens,
-            Temperature = effectiveTemperature
         };
+
+        if (effectiveTemperature.HasValue)
+        {
+            chatOptions.Temperature = effectiveTemperature.Value;
+        }
 
         var messages = new List<ChatMessage>
         {
