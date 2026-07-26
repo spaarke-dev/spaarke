@@ -58,14 +58,16 @@ const SAMPLE_FINDINGS: NdaReviewFindingSummary[] = [
     sectionRef: 'Section 4.2, para 2 (p. 3)',
     quotedText: 'Confidential Information means any information marked confidential.',
     riskLevel: 'High',
-    explanation: 'The definition is gated on marking, narrower than the standard, which also covers oral/unmarked disclosures.',
+    explanation:
+      'The definition is gated on marking, narrower than the standard, which also covers oral/unmarked disclosures.',
     standardRef: 'B3 - Definition of Confidential Information',
   },
   {
     sectionRef: 'Section 8.1 (p. 5)',
     quotedText: 'This Agreement shall remain in effect indefinitely.',
     riskLevel: 'Medium',
-    explanation: 'An indefinite term for ordinary non-trade-secret information exceeds the standard 3-5 year survival period.',
+    explanation:
+      'An indefinite term for ordinary non-trade-secret information exceeds the standard 3-5 year survival period.',
     standardRef: 'B8 - Term & confidentiality period',
   },
 ];
