@@ -26,7 +26,7 @@
 | 042 | SPE save + versioning verification (test) | 4 | ✅ | 023 | STANDARD | sonnet | high | D |
 | 050 | Eval harness + closed set | 5 | ✅ | 020 | STANDARD | sonnet | high | E |
 | 051 | Golden-utterance dispatch eval | 5 | ✅ | 022 | STANDARD | sonnet | high | E |
-| 052 | Grounding tenant-pin integration test | 5 | 🔲 | 012 | STANDARD | sonnet | high | E |
+| 052 | Grounding tenant-pin integration test | 5 | ✅ | 012 | STANDARD | sonnet | high | E |
 | 060 | Deploy (BFF/code-page/Dataverse/index) | 6 | 🔲 | all impl+eval | FULL | sonnet | high | — |
 | 061 | UI tests end-to-end | 6 | 🔲 | 060 | STANDARD | sonnet | high | — |
 | 090 | Project wrap-up | 6 | 🔲 | 060,061 | FULL | sonnet | high | — |
