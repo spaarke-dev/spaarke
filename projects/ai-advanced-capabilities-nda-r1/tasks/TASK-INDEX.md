@@ -14,11 +14,11 @@
 | 012 | Seed NDA standard + grounding pin | 1 | 🔄 | 001 | STANDARD | sonnet | high | A |
 | 013 | Reasoning deployment provisioning | 1 | ⛔ | 010 | STANDARD | sonnet | high | A |
 | 020 | NDA-REVIEW Action (advisory, Reasoning) | 2 | 🔄 | 001,010,012 | FULL | opus | high | — |
-| 021 | NDA-STANDARD-SUMMARY Action (UC3) | 2 | 🔲 | 012,020 | STANDARD | sonnet | high | B |
-| 022 | Bindings + Review-NDA card + classification | 2 | 🔲 | 020 | FULL | sonnet | high | — |
-| 023 | Whole-doc review orchestration (fan-out) | 2 | 🔲 | 020 | FULL | opus | high | — |
+| 021 | NDA-STANDARD-SUMMARY Action (UC3) | 2 | ✅ | 012,020 | STANDARD | sonnet | high | B |
+| 022 | Bindings + Review-NDA card + classification | 2 | ✅ | 020 | FULL | sonnet | high | — |
+| 023 | Whole-doc review orchestration (fan-out) | 2 | ✅ | 020 | FULL | opus | high | — |
 | 030 | Review-summary docked panel | 3 | 🔲 | 023 | FULL | sonnet | high | C |
-| 031 | Advisory-comments event + receiver | 3 | 🔲 | 023 | FULL | sonnet | xhigh | C |
+| 031 | Advisory-comments event + receiver | 3 | ✅ | 023 | FULL | sonnet | xhigh | C |
 | 032 | Right-gutter comment layout | 3 | 🔲 | 031 | FULL | sonnet | xhigh | — |
 | 033 | Draft Alternative + trace activation | 3 | 🔲 | 022 | FULL | sonnet | high | — |
 | 040 | Comment-export wiring fix | 4 | 🔲 | 031 | FULL | sonnet | xhigh | — |

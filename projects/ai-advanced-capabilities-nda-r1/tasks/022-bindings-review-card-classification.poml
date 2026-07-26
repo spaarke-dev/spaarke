@@ -4,7 +4,7 @@
     <title>Bindings + "Review an NDA" card + NDA classification/routing</title>
     <phase>2 NDA Review Capability</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Wires Bindings + Assistant classification + card routing across Dataverse seed + client; drives the entry path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -122,6 +122,25 @@
   <notes>
     Entry path for the whole flow. Keep surface identity in the code registry (one entry). Task 051 adds
     golden-utterance dispatch eval for this card + NL intent.
+
+    COMPLETED (2026-07-26): fully DATA-DRIVEN + client-only — ZERO BFF code touched (chat-classify /
+    CLS-CHAT@v1 was reused as-is; its toolDescription already documents "nda" as a supported docType
+    label). Binding rows nda-review/default + nda-standard-summary/default added to
+    infra/dataverse/sprk_playbookconsumer-rows.json (disposition=Informational per task 023's fan-out
+    design). Card resolves its bindingId via the EXISTING GET /api/ai/capabilities capability-discovery
+    read (useCapabilityDiscovery — same seam ConversationPane already uses for
+    compose-revise-document/compose-draft-document/compose-summarize) — zero hardcoded GUID, portable
+    across environments, matches the useComposeToolbarActivation precedent. Classification is a
+    UI-presentation branch on chat-classify's existing docType output (event_classification SSE),
+    forwarded via a new optional useEventBatch.onClassified callback — not a second intent-detection
+    mechanism. Card is the existing stateless SuggestionCard component (reuse, CLAUDE.md §11). Click
+    handler reuses mountFileInCompose (existing) to open the file in Compose + chips.dispatchBinding
+    (existing Click-path seam) to run NDA-REVIEW scoped via slots.fileIds. Added ONE
+    surfaceLaunchRegistry entry (nda-review → workspace-tab/compose) per the task's explicit
+    instruction, for TEXT-path readiness — the CLICK path uses mountFileInCompose directly since the
+    registry's static widgetData can't carry a per-click file id. Live Dataverse seeding
+    (Seed-PlaybookConsumers.ps1) is env-blocked in this session (no live credentials) — data-file
+    changes are ready to seed. See notes/task-022-bindings-review-card-classification.md for full detail.
   </notes>
 
   <execution>

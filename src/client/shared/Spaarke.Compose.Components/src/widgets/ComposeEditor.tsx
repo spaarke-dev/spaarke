@@ -101,8 +101,14 @@ import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
-import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
+import {
+  usePendingRedline,
+  resolveTargetSpans,
+  type MaterializeStatus,
+  type ConfidenceBand,
+} from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
+import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
@@ -541,6 +547,39 @@ export interface ComposeEditorProps {
 }
 
 /**
+ * One flagged clause to materialize as an advisory comment (ai-advanced-capabilities-nda-r1 task
+ * 031). A deliberately PLAIN structural type — decoupled from the PaneEventBus event shape
+ * (`ComposeAdvisoryCommentItem` in `@spaarke/ai-widgets`), mirroring {@link
+ * ComposeEditorHandle.highlightCitedSpan}'s primitive-args convention so ComposeEditor's public
+ * surface never depends on the bus's event union.
+ */
+export interface AdvisoryCommentInput {
+  /** Verbatim quoted NDA clause excerpt — the `resolveTargetSpans('strict')` anchor target. Tier-3. */
+  targetText: string;
+  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3. */
+  explanation: string;
+}
+
+/**
+ * A flagged range that could not be resolved to a unique span (FR-19 "do not guess" — reported,
+ * never silently dropped). `kind` mirrors {@link ResolveResult}'s failure kinds.
+ */
+export interface AdvisoryCommentFailure {
+  /** The unresolved target text (truncated by the caller for display; carried verbatim here). */
+  targetText: string;
+  /** `not_found` — zero matches; `ambiguous` — more than one match (do not guess which). */
+  kind: 'not_found' | 'ambiguous';
+}
+
+/** Outcome of {@link ComposeEditorHandle.placeAdvisoryComments}. */
+export interface AdvisoryCommentPlacementResult {
+  /** Count of comments successfully anchored + created. */
+  placed: number;
+  /** Ranges that could not be resolved to a unique span — never silently dropped. */
+  failed: AdvisoryCommentFailure[];
+}
+
+/**
  * Imperative handle exposed by ComposeEditor — host calls these via ref.
  */
 export interface ComposeEditorHandle {
@@ -692,6 +731,33 @@ export interface ComposeEditorHandle {
 
   /** Clear the active Doc Q&A ephemeral highlight immediately (no-op if none active). */
   clearCitedHighlight(): void;
+
+  /**
+   * NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031). For each flagged
+   * clause, resolves `targetText` against the CURRENT document via `resolveTargetSpans('strict')`
+   * — the SAME anchoring primitive {@link highlightCitedSpan} uses — and, on a unique match,
+   * creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`) carrying
+   * `explanation` as the thread's text. Uses a DEDICATED `useComposeCommentThreads` instance
+   * (author `'AI Advisory Review'`), separate from the session Comments panel's own instance —
+   * both apply the SAME `commentAnchor` mark to the document, so both are visible as
+   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both
+   * authors. Ranges that fail strict resolution (`not_found` / `ambiguous`) are reported via the
+   * result's `failed` list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns
+   * every item as `not_found`) if the editor is unmounted.
+   */
+  placeAdvisoryComments(items: readonly AdvisoryCommentInput[]): AdvisoryCommentPlacementResult;
+
+  /**
+   * The advisory comment threads placed via {@link placeAdvisoryComments} so far, in creation
+   * order. READ SURFACE ONLY — deliberately NOT wired into {@link getCommentThreadAnnotations},
+   * which maps only the session Comments panel's OWN thread instance to `w:comment` save
+   * annotations. Persisting advisory comments through Save/export (mapping these threads to
+   * `DocxAnnotationInput[]`, mirroring `composeSessionCommentThreadsToDocxAnnotations`) is
+   * explicitly OUT of scope here — it is task 040's stated job ("Comment-export wiring fix",
+   * depends on this task). This getter exists so 040 has a discoverable read surface instead of
+   * needing to find the separate `useComposeCommentThreads` instance in this file.
+   */
+  getAdvisoryCommentThreads(): readonly ComposeCommentThreadModel[];
 }
 
 // ---------------------------------------------------------------------------
@@ -1834,6 +1900,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
+    // ----- NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) -----------
+    // A DEDICATED useComposeCommentThreads instance (author 'AI Advisory Review'), separate from
+    // ComposeCommentThread's own panel instance below — see placeAdvisoryComments' JSDoc on
+    // ComposeEditorHandle for why the two stay independent.
+    const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
+
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
     // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
@@ -1968,8 +2040,45 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         rejectPendingRedline: ledgerRef => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
+        // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031): resolve each
+        // flagged clause via the SAME resolveTargetSpans('strict') anchoring highlightCitedSpan
+        // uses, then createThread (the dedicated `advisoryComments` instance above) instead of an
+        // ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
+        // silently dropped.
+        placeAdvisoryComments: items => {
+          if (!editor) {
+            return { placed: 0, failed: items.map(item => ({ targetText: item.targetText, kind: 'not_found' as const })) };
+          }
+          let placed = 0;
+          const failed: AdvisoryCommentFailure[] = [];
+          for (const item of items) {
+            const resolved = resolveTargetSpans(editor, item.targetText, 'strict');
+            if (!resolved.ok) {
+              failed.push({ targetText: item.targetText, kind: resolved.kind });
+              continue;
+            }
+            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0]);
+            if (threadId) {
+              placed += 1;
+            } else {
+              // createThread returns null only for a collapsed range/empty text — resolveTargetSpans
+              // already guaranteed a non-collapsed span, so this is defensive, not expected.
+              failed.push({ targetText: item.targetText, kind: 'not_found' });
+            }
+          }
+          return { placed, failed };
+        },
+        // Read surface for task 040 (comment-export wiring) — see the handle JSDoc.
+        getAdvisoryCommentThreads: () => advisoryComments.threads,
       }),
-      [editor, redline, qaHighlight]
+      // NOTE: `advisoryComments.createThread` (a `React.useCallback` memoized on `[editor, author]`
+      // inside useComposeCommentThreads), NOT the whole `advisoryComments` object — that hook
+      // returns a fresh object literal every render (unlike `redline`/`qaHighlight`, which memoize
+      // via `React.useMemo`), so depending on it directly would rebuild this handle every render.
+      // `advisoryComments.threads` (read by getAdvisoryCommentThreads) is intentionally included so
+      // the handle refreshes when new threads are added — it changes only on an actual createThread
+      // call (React state), not every render.
+      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads]
     );
 
     // ----- Render ---------------------------------------------------------

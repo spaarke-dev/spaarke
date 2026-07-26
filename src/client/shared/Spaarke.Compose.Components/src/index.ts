@@ -25,6 +25,11 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
+  // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
+  AdvisoryCommentInput,
+  AdvisoryCommentFailure,
+  AdvisoryCommentPlacementResult,
 } from './widgets/ComposeEditor';
 export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';

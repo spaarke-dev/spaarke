@@ -1503,6 +1503,29 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       if (!event.qaSourceText) return;
       editorRef.current?.highlightCitedSpan(event.qaSourceText, event.qaSectionLabel);
     },
+    // ai-advanced-capabilities-nda-r1 task 031 — NDA-REVIEW advisory comments. A
+    // client-derived projection of the SAME ledgered NDA-REVIEW result the review-summary
+    // panel renders (ADR-040); materializes one PERSISTENT comment thread per flagged
+    // clause via ComposeEditorHandle.placeAdvisoryComments (createThread +
+    // resolveTargetSpans('strict') reused, not reimplemented). Ranges that fail strict
+    // resolution are reported via console.warn — never silently dropped (FR-19 "do not
+    // guess"); a user-visible count is a natural addition once the review-summary panel
+    // exists to host it.
+    onAdvisoryComments: event => {
+      const items = event.advisoryComments ?? [];
+      if (items.length === 0) return;
+      const result = editorRef.current?.placeAdvisoryComments(
+        items.map(item => ({ targetText: item.targetText, explanation: item.explanation }))
+      );
+      if (result && result.failed.length > 0) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[ComposeWorkspace] ${result.failed.length} of ${items.length} advisory comment(s) could not be anchored ` +
+            '(strict resolution failed):',
+          result.failed
+        );
+      }
+    },
   });
 
   // DEF-12 — publish the editor's redline-accept into the cross-pane bridge so the Assistant

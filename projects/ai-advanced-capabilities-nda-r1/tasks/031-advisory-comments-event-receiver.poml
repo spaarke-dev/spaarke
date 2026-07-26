@@ -4,7 +4,7 @@
     <title>Advisory-comments event + receiver — materialize AI comments in the Compose doc</title>
     <phase>3 Compose Review Experience</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield ProseMirror/Tiptap comment materialization via PaneEventBus + receiver reusing existing hooks; on the critical path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -118,6 +118,24 @@
 
   <notes>
     Critical path (001→010→020→023→031→040). Anchoring reuse is the key to correctness — do not reinvent it.
+
+    COMPLETED 2026-07-26. Event + receiver: `compose_advisory_comments` added as an additive
+    WorkspacePaneEvent discriminant (PaneEventTypes.ts) carrying `advisoryComments[]` (targetText/
+    explanation/sectionRef/riskLevel/standardRef). Receiver wired in useComposeWorkspaceReceivers.ts
+    (onAdvisoryComments), mirroring onQaHighlight exactly. Materialization: ComposeEditor.tsx gained
+    `placeAdvisoryComments()` on ComposeEditorHandle — reuses resolveTargetSpans('strict') +
+    a dedicated useComposeCommentThreads(editor, 'AI Advisory Review') instance's createThread (no
+    anchoring reimplementation); failed resolutions (not_found/ambiguous) are returned, never
+    dropped. ComposeWorkspace wires the receiver to the handle + console.warns on failures (a
+    user-visible surface awaits the review-summary panel, task 030). Emission: new hook
+    `useNdaReviewAdvisoryCommentsBridge.ts` in SpaarkeAi's conversation folder, wired into
+    ConversationPane's existing `dispatchComposeAction` informational-result branch (structural
+    shape-detection on `{overallRisk, flaggedSections[]}`, mirroring composeResultFormat.ts's
+    convention) — a client-derived projection of the SAME terminal chunk already rendered as prose;
+    no second model call, no new server disposition. 15 new tests added (2 ComposeEditor-level,
+    13 bridge-level) alongside the existing 532; all green. Full client build chain (ai-widgets →
+    compose-components → SpaarkeAi) typechecks + builds clean. UI-tests step (live NDA-REVIEW run +
+    visual verification) is env-blocked (no live org in this session) — flagged, not faked.
   </notes>
 
   <execution>

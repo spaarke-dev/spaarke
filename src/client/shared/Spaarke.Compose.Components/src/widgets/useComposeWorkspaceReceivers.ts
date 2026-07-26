@@ -16,6 +16,13 @@
  *     document asks the editor to ephemerally highlight the cited source span.
  *     NOT a Flow-5 edit — no document mutation, no ledger entry; the editor
  *     resolves + renders a transient decoration only.
+ *   - `compose_advisory_comments` (Assistant → Workspace; ai-advanced-capabilities-nda-r1
+ *     task 031): a CLIENT-DERIVED projection of the ledgered NDA-REVIEW result's
+ *     `flaggedSections[]` (ADR-040 — no second server disposition, no new model
+ *     call). Mirrors `compose_qa_highlight`'s shape, but PLACES a PERSISTENT
+ *     comment thread (via `ComposeEditorHandle.placeAdvisoryComments`, which
+ *     reuses `resolveTargetSpans('strict')` + `useComposeCommentThreads.createThread`)
+ *     instead of an ephemeral highlight.
  *
  * WHY a hook (Component Justification §11 / folding task 070): the receiver logic
  * used to be an inline `usePaneEvent('workspace', …)` subscription in
@@ -60,6 +67,13 @@ export interface ComposeWorkspaceReceiverHandlers {
    * omit it; the event is silently dropped rather than throwing.
    */
   onQaHighlight?: (event: WorkspacePaneEvent) => void;
+  /**
+   * NDA-REVIEW advisory comments (task 031) — materialize a comment thread per
+   * flagged clause. Optional: hosts that do not wire it (e.g. an older
+   * ComposeWorkspace snapshot) may omit it; the event is silently dropped
+   * rather than throwing, mirroring {@link onQaHighlight}'s optionality.
+   */
+  onAdvisoryComments?: (event: WorkspacePaneEvent) => void;
 }
 
 /**
@@ -68,7 +82,7 @@ export interface ComposeWorkspaceReceiverHandlers {
  * tab_change, …) are ignored — additive-discriminant contract (ADR-030).
  */
 export function useComposeWorkspaceReceivers(handlers: ComposeWorkspaceReceiverHandlers): void {
-  const { onContextInsert, onAssistantInsert, onQaHighlight } = handlers;
+  const { onContextInsert, onAssistantInsert, onQaHighlight, onAdvisoryComments } = handlers;
 
   usePaneEvent('workspace', (event: WorkspacePaneEvent): void => {
     if (event.type === 'compose_context_insert') {
@@ -81,6 +95,10 @@ export function useComposeWorkspaceReceivers(handlers: ComposeWorkspaceReceiverH
     }
     if (event.type === 'compose_qa_highlight') {
       onQaHighlight?.(event);
+      return;
+    }
+    if (event.type === 'compose_advisory_comments') {
+      onAdvisoryComments?.(event);
     }
   });
 }

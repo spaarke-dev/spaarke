@@ -2,12 +2,23 @@
 
 **Mode**: autonomous wave execution (owner-authorized 2026-07-25). Waves in parallel via subagents; gates after each wave; branch-only (no master merge); env-coupled steps flagged, never faked.
 
-**Active**: Wave 3 — 023 (opus orchestration) + 021 (summary) + gate011, parallel. 022 HELD until 023 commits (both touch BFF dispatch).
+**Active**: Wave 3 — 023 (opus orchestration) + gate011, parallel. 021 (summary) ✅ complete this pass. 022 HELD until 023 commits (both touch BFF dispatch).
 **Status**: in-progress
 
 ## Committed so far (PR #689)
 001✅ · 010✅(gated) · 012🔄 · 013⛔ext · 020🔄(jps PASS) · 011🔄(dispatch-spine, seam tests pass)
 Latest HEAD: 06317bbbc. Publish 47.49 MB.
+022✅ — Bindings (nda-review/default, nda-standard-summary/default) + "Review an NDA" card +
+classification wiring. Zero BFF touched (reused chat-classify + capability-discovery endpoint as-is).
+Client build + typecheck pass (0 surface-owned errors); 19 SpaarkeAi Jest suites / 104 tests green;
+surfaceLaunchRegistry test added. See notes/task-022-bindings-review-card-classification.md.
+NOT YET COMMITTED to git (uncommitted, pending Wave 4 gate/commit per project convention — a parallel
+process is concurrently landing 031 in this same worktree; verify no file overlap before committing).
+
+## gate011 fixes — APPLY AFTER 023 COMMITS (023 is editing SessionDispatchOrchestrator.cs — do NOT race)
+- **[Medium] SessionDispatchOrchestrator ~:550 cache-staleness**: compose against FRESH `action.ModelTier`, drop the cached `binding.ActionModelTier` fallback → `request.ModelTierOverride ?? binding.ModelTierOverride ?? action.ModelTier`. (Stale binding tier could silently substitute in the 5-min TTL window on the no-override path.) One-line fix.
+- **[Low] ModelTierOverrideDispatchSeamTests:15** doc comment wrong (Routing/Scope are mocked, not real) — correct comment.
+- **[Low ADR-016 MIS-CITATION]** ~6 files (010/011 code comments: ModelTierDeploymentResolver, SessionDispatchOrchestrator:547, ChatEndpoints; + design.md:265, spec.md:87,147) cite ADR-016 for the "single tier→deployment surface / deferred-enhancement" rule. ADR-016 is Cost/Rate-limit/Backpressure — says nothing about tiers. Fix: cite **ADR-039** (single dispatch surface) for the single-mechanism claim; keep ADR-016 ONLY for the budget linkage. (No ADR governs tier resolution — it was established de novo. Accuracy matters — this is the project's whole point.)
 
 ## Follow-ons surfaced (backlog)
 - sprk_outputdeterminism Dataverse column + BFF read-path (make ADR-039 mode=data; today prompt-enforced). 
@@ -19,6 +30,7 @@ Latest HEAD: 06317bbbc. Publish 47.49 MB.
 - [x] 001 — ADR-039 amendment (Output Determinism Modes; grounding mode-independent; strengthened). ✅ SIGNED OFF.
 - [x] 010 — model-tier last-mile. ✅ Gated CLEAN (commit 9c9696ab3). Publish 47.49 MB. 4 Low follow-ups deferred to 090.
 - [~] 012 — KNW-011 source authored + tenant-pin analysis (commit 9c9696ab3). 🔄 live ingest env-blocked; tenant-pin ESCALATION pending owner.
+- [x] 021 — NDA-STANDARD-SUMMARY Action (UC3), STANDARD rigor. New Action (§11 reuse test failed for compose-explain-clause/compose-summarize-word-changes): `infra/dataverse/actions/nda-standard-summary.action.json` + input/output schema mirrors. Fast tier, outputDeterminism=advisory, closed contract {overview, sections[]}. jps-validate PASS (adapted mirror-first mode, same as 020). NOT YET COMMITTED — uncommitted new files pending Wave 3 gate/commit. Live sample-run env-blocked + shares nda-review's NFR-06 tenant-pin gate.
 
 ## Running (subagents)
 - 011 runtime picker (client) · 013 Reasoning provisioning (config+runbook; Azure env-blocked) · 020 NDA-REVIEW Action (opus, critical path)
