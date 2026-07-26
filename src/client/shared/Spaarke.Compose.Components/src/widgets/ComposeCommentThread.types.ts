@@ -217,9 +217,21 @@ export function composeSessionCommentThreadsToAnchoredComments(
       end: { runIndex: end.runIndex, offset: end.offset },
     };
 
-    result.push({ paraId: start.paraId, range, commentText: thread.text, author: thread.author, date: thread.timestamp });
+    result.push({
+      paraId: start.paraId,
+      range,
+      commentText: thread.text,
+      author: thread.author,
+      date: thread.timestamp,
+    });
     for (const reply of thread.replies) {
-      result.push({ paraId: start.paraId, range, commentText: reply.text, author: reply.author, date: reply.timestamp });
+      result.push({
+        paraId: start.paraId,
+        range,
+        commentText: reply.text,
+        author: reply.author,
+        date: reply.timestamp,
+      });
     }
   }
   return result;

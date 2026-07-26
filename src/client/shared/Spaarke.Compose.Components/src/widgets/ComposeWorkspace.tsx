@@ -118,7 +118,11 @@ import { ComposeReanchorConflictPanel } from './ComposeReanchorConflictPanel';
 import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5).
-import { useComposePullAnnotations, useComposeCheckChanges, anchoredAnnotationsToPriorAnchors } from './useComposeWordShuttle';
+import {
+  useComposePullAnnotations,
+  useComposeCheckChanges,
+  anchoredAnnotationsToPriorAnchors,
+} from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
