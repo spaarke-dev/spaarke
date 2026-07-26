@@ -1,44 +1,30 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-**Active task**: 001 — ADR-039 advisory-tier amendment (MERGE GATE)
-**Task file**: tasks/001-adr-039-advisory-tier-amendment.poml
-**Phase**: 0 Governance Gate
+**Mode**: autonomous wave execution (owner-authorized 2026-07-25). Waves in parallel via subagents; gates after each wave; branch-only (no master merge); env-coupled steps flagged, never faked.
+
+**Active wave**: Wave 1 — tasks **010** (model-tier last-mile) + **012** (RAG seed + tenant pin), in parallel.
 **Status**: in-progress
-**Started**: 2026-07-25
 
-## Rigor
-- **Level**: FULL · **Model tier**: opus @ high (session on Opus 4.8 ✅) · **Step mode**: prescriptive
-- **Reason**: ADR amendment (governance), merge gate, high blast radius.
-- **Governance posture**: Path-B amendment — draft + adr-check, then PRESENT for human review; do NOT treat as merged autonomously (CLAUDE.md §6/§6.5).
+## Completed
+- [x] 001 — ADR-039 amendment (Output Determinism Modes; grounding mode-independent; strengthened per owner). ✅ SIGNED OFF. On PR #689.
 
-## Knowledge loaded
-- `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md` (concise — real filename; POML guessed a short name)
-- `docs/adr/ADR-039-grounded-execution-closed-catalogs.md` (full)
-- `.claude/adr/INDEX.md` (039 row), `.claude/CHANGELOG.md` (format + convention)
+## Wave plan (deps-driven)
+- Wave 1 (parallel): 010, 012 — deps: 001 ✅
+- Wave 2 (parallel): 011, 013 — deps: 010
+- Wave 3: 020 (opus) — deps: 001,010,012 → then 022, 023 (opus), 021
+- Wave 4 (parallel): 030, 031 — deps: 023; then 032 (after 031), 033 (after 022)
+- Wave 5: 040 (after 031), 041 (after 023), 042 (after 023)
+- Wave 6 (parallel): 050, 051, 052 — evals
+- Wave 7: 060 deploy, 061 UI, 090 wrap-up (env-coupled / final review)
 
-## Amendment approach (decided)
-Refine grounded-execution invariant (a) with a declared **output determinism mode** in catalog data:
-- `fact` (default, deterministic — extractive/verbatim-cited, unchanged prior behavior)
-- `advisory` (probabilistic — reasoning/synthesis depth + Reasoning tier permitted, STILL prompt-controlled + schema-validated + citation-required for factual claims + decline-if-unverifiable + not-authoritative disclaimer + all other ADR-039 invariants hold).
-Principle-level (a property of output, in DATA) — names no mechanism. Consistent with "behavior is data" + "risk is catalog-declared data".
+## Env-coupled (implement code/config; flag live steps)
+- 012 live ingest + tenant-pin empirical check (Azure AI Search creds)
+- 013 Reasoning deployment provisioning (Azure)
+- 020 live model calls · 060 deploy · 061 UI tests on live org
+- Live verification acceptance criteria across the above → reported as blocked-pending-environment.
 
-## Completed steps
-- [x] Step 0.5 rigor declaration
-- [x] Step 1 load task POML
-- [x] Step 4/5 loaded ADR-039 (both), INDEX, CHANGELOG
-- [ ] Step 8.2 amend concise ADR-039
-- [ ] Step 8.3 amend full ADR-039
-- [ ] Step 8.4 update both ADR INDEX rows + CHANGELOG
-- [ ] Step 8.5 adr-check
-- [ ] Step 9/9.5 acceptance + gates
-- [ ] PRESENT for human review (do not merge autonomously)
-
-## Files modified this session
-- (pending)
+## Gates (mandatory, per wave)
+dotnet build (BFF) / npm build (client) → code-review + adr-check (Step 9.5) → commit to branch → next wave.
 
 ## Next action
-Author the amendment section in `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md`.
-
-## Notes
-- Real ADR filename is `ADR-039-grounded-execution-closed-catalogs.md` (POML/PLAN used a shortened guess) — deviation noted; using the real files.
-- Advisory NDA output already lives under invariant (a); the amendment sanctions reasoning *depth* within (a), not a new ungrounded lane.
+Awaiting Wave 1 subagents (010, 012). On completion: build + gates + commit, then launch Wave 2 (011, 013).

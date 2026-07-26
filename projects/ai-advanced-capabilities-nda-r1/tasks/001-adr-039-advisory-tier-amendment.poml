@@ -4,7 +4,7 @@
     <title>ADR-039 amendment — deterministic (fact) vs advisory (probabilistic) grounding tiers</title>
     <phase>0 Governance Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>ADR amendment (architecture/governance change); merge gate blocking all advisory-tier tasks; high blast radius across dispatch.</rigor-reason>
     <model-tier>opus</model-tier>

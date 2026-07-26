@@ -8,7 +8,7 @@
 
 | ID | Title | Phase | Status | Deps | Rigor | Tier | Effort | Parallel |
 |----|-------|-------|--------|------|-------|------|--------|----------|
-| 001 | ADR-039 advisory-tier amendment (MERGE GATE) | 0 | 🔲 | none | FULL | opus | high | — (.claude/) |
+| 001 | ADR-039 advisory-tier amendment (MERGE GATE) | 0 | ✅ | none | FULL | opus | high | — (.claude/) |
 | 010 | Model-tier last-mile | 1 | 🔲 | 001 | FULL | sonnet | xhigh | — |
 | 011 | Runtime model picker | 1 | 🔲 | 010 | FULL | sonnet | high | A |
 | 012 | Seed NDA standard + grounding pin | 1 | 🔲 | 001 | STANDARD | sonnet | high | A |
