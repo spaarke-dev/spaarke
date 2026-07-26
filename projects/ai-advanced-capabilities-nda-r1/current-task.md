@@ -1,82 +1,53 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-**Mode**: autonomous wave execution (owner-authorized 2026-07-25). Parallel subagents per wave; build + code-review + adr-check gates each wave; branch-only (no master merge); env-coupled steps flagged never faked. PR #689.
+> **Last Updated**: 2026-07-26 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Project is BUILT + MERGED + DEPLOYED + ENABLED on GPT-5 in spaarkedev1. Two follow-ups remain (below).
 
-**Status**: in-progress · **HEAD**: a7bd05316
+---
 
-## Done + committed (gated)
-- 001 ✅ ADR-039 amendment (Output Determinism Modes; grounding mode-independent; strengthened + signed off)
-- 010 ✅ model-tier last-mile (gate CLEAN) · 011 ✅ runtime picker + override composition (gate CLEAN + cache-staleness/ADR-016 fixes applied)
-- 012 🔄 KNW-011 source + tenant-pin analysis (live ingest env-blocked)
-- 013 ⛔ Reasoning provisioning (config+runbook; Azure external; recommends GPT-5)
-- 020 🔄 NDA-REVIEW Action (jps PASS; live run env-blocked) · 021 ✅ standard-summary Action (jps PASS)
-- 022 ✅ bindings + card + classification (gate CLEAN) · 023 ✅ whole-doc fan-out (gate CLEAN, zero prod code)
-- 030 ✅ review-summary panel · 031 ✅ advisory-comments event/receiver (gate CLEAN) · 041 ✅ Summary-Page DOCX · 042 ✅ SPE-versioning test (gate CLEAN)
-- 033 ✅ Draft Alternative + trace activation — VERIFICATION-ONLY, zero prod files changed: the
-  bindingId-resolution + trace-surfacing mechanism was already shipped by prior merged
-  compose-r2/r4 work (useComposeToolbarActivation, wired in both Compose mount hosts; Binding
-  row already seeded live; ContextPaneController auto-opens Execution Trace on any Compose tab).
-  38 relevant tests + tsc --noEmit verified clean. See notes/task-033-draft-alternative-trace-activation.md.
-- 051 ✅ Golden-utterance dispatch eval (gate CLEAN) — net-new eval family (nda-review-eval-cases.json
-  + NdaReviewDispatchEvalTests.cs), joined to the existing Category=GoldenUtteranceEval merge gate
-  (same pattern as AssistantEnhancementsR1EvalTests.cs — did NOT touch the shared
-  golden-utterances.json). 6 cases: Click (card), 3x Text NL paraphrase, required negative
-  (off-target), bonus disambiguation vs nda-standard-summary. `dotnet test --filter
-  "Category=GoldenUtteranceEval"` → 101 total (9 new), 0 failed. Not env-blocked — fully
-  mechanical/offline (Dataverse-stubbed), matching every sibling family's established
-  "live" vocabulary in this suite.
-- 032 ✅ right-gutter comment layout (gate CLEAN) — new `ComposeCommentGutter.tsx`: right-rail
-  Fluent v9 cards per advisory thread, live position via exported `findCommentAnchorRange`
-  (task 040's primitive, never stale `anchorText`) + `coordsAtPos`, pure unit-tested
-  collision/stacking (`layoutCommentGutterCards`), reflow on transaction/scroll/resize.
-  Code-review caught + fixed a real bug: first-paint height estimate (96px) never got
-  re-measured past mount — added a requestAnimationFrame follow-up pass + regression test.
-  Metadata passthrough done: riskLevel/sectionRef/standardRef now flow
-  PaneEventTypes→ComposeWorkspace→placeAdvisoryComments→createThread→gutter risk badge
-  (previously dropped); overallRisk now rides the compose_advisory_comments wire
-  (useNdaReviewAdvisoryCommentsBridge dispatches the already-typed-but-dropped field),
-  NdaReviewSummaryPanel prefers it over the derived fallback. adr-check CLEAN
-  (ADR-049/021/030/012/039/040). Builds clean (AI.Widgets, Compose.Components, SpaarkeAi
-  surface-gate 0 new errors); 559/559 Compose.Components + 647/656 SpaarkeAi tests green
-  (9 pre-existing unrelated AiSessionProvider e2e failures, already logged below).
-- 040 ✅ comment-export wiring fix (gate CLEAN) — root cause: client sent `annotations`
-  (DocxAnnotationInput, text-anchored); `SaveComposeDocumentBody` never deserialized that property
-  (server only reads `comments`/ComposeAnchoredComment) — every comment silently dropped. Added
-  `ComposeAnchoredComment` client type (compose-operations.ts) + `getAnchoredComments()` on
-  ComposeEditorHandle (replaces `getCommentThreadAnnotations`), combining BOTH the session Comments
-  panel threads AND 031's `getAdvisoryCommentThreads()` — resolved via the EXISTING `resolveRunAnchor`
-  (paraId/runIndex/offset) primitive, no new anchoring mechanism. ComposeWorkspace.tsx sends
-  `comments: anchoredComments`; the dead `annotations` field path fully removed. New seam test
-  `ComposeImportedAnchorsSurviveSaveSeamTests.Save_NewAnchoredComment_ThenReload_RoundTripsViaDocxAnnotationReader`
-  proves save→native w:comment→reload round-trip. 526 server + 547 client Compose tests green;
-  publish 51.29 MB (delta 0.00 — no server production code touched). Discovered-but-out-of-scope:
-  DEF-11/DEF-13 AI-review-flag comments (FR-29 AnchoredAnnotation store) still don't export (separate
-  data source, textPattern-anchored) — stale comments corrected, tracked as follow-on below.
+## Quick Recovery (READ THIS FIRST)
 
-## Remaining
-- 050 eval harness+rubric · 052 tenant-pin integration test (gated on tenant-pin fix)
-- 060 deploy (env-blocked) · 061 UI tests (env-blocked) · 090 wrap-up
+| Field | Value |
+|-------|-------|
+| **State** | NDA advisory vertical LIVE in spaarkedev1 (code deployed, Dataverse wired, RAG grounded, GPT-5 provisioned) |
+| **PR #689** | ✅ MERGED to master (merge commit `751532d7e`) — the 22-task NDA vertical |
+| **PR #690** | OPEN — CI Git-LFS fix (`work/ci-lfs-fix-r1`). Check it greened the Compose seam tests + merge. |
+| **Current branch** | `work/ci-lfs-fix-r1` (= master + the CI-LFS yaml change) |
+| **Next Action** | (a) Smoke-test the live NDA flow in spaarkedev1; (b) do the TWO FOLLOW-UPS below; (c) check/merge PR #690 |
 
-## 🔔 Owner decision outstanding
-- **Tenant-pin OR-clause fix** (`tenantId eq '{t}' or eq 'system'`, idiom already in repo). Security-adjacent. Gates LIVE grounding + task 052. Recommended: approve.
+### The TWO FOLLOW-UPS to do when we continue
+1. **BFF code fix — Reasoning-tier request shape (small PR)**
+   - **Omit temperature generically for the Reasoning tier.** GPT-5 (and all o-series reasoning models) REJECT any non-default temperature (`"Only the default (1) value is supported"`). Today `ActionRunner.cs:130` passes `(float?)action.Temperature` through; I worked around it by CLEARING the Action's temperature in Dataverse (per-Action), but the RIGHT fix is: in `ActionRunner` (or `ModelTierDeploymentResolver`/the OpenAI client), when `EffectiveModelTier == Reasoning`, force `temperature = null` so ANY reasoning Action works without manual per-Action clearing.
+   - **Verify/fix `max_completion_tokens` vs `max_tokens`.** GPT-5 requires `max_completion_tokens` (rejects `max_tokens`). Confirm the BFF's `IOpenAiClient.GetStructuredCompletionRawAsync` sends the reasoning-correct token param (the Azure SDK may handle it; a live nda-review run is the definitive test). If it sends `max_tokens`, that's a one-line client fix.
+   - Files: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs` (temp omission), the `IOpenAiClient` impl (token param). Add a seam test. Ship as a small follow-up PR.
+2. **`nda-standard-summary` (UC3) Action + binding** (deferred)
+   - Same reuse pattern as nda-review: find/reuse an existing summary-style `sprk_analysisaction` (or create), set its prompt/schema/Fast tier from `infra/dataverse/actions/nda-standard-summary.action.json`, then create a `sprk_playbookconsumer` binding `consumerType=nda-standard-summary`, surfaces=`assistant`, disposition=informational, `sprk_Action@odata.bind` → that Action's GUID.
+   - Lower priority (secondary UC3 "explain the firm standard" capability).
 
-## Follow-ons backlog (for 090 / deploy)
-- sprk_outputdeterminism Dataverse column + BFF read-path (make ADR-039 mode=data; today prompt-enforced)
-- ReasoningModel token-leak guard (resolver fallback if `#{...}#` unresolved) — deploy gate 060
-- Definitive compressed publish-size measure at 060 (subagents' §10 method ≈51.29 MB, under 60)
-- DEF-11/DEF-13 AI-review-flag comments (FR-29 AnchoredAnnotation store, `textPattern`-anchored) do
-  not export as native `w:comment` on Save — separate data source from task 040's session/advisory
-  comment-thread fix; would need the same paraId+range resolution treatment (likely via
-  `resolveTargetSpans('strict')` at save time) if this is wanted before deploy
-- born-in-editor (blank/AI-draft) create-on-save skips `comments` application server-side entirely
-  (`ComposeService.SaveAsync` only applies comments when `ContentModel is null`) — not exercised by
-  NDA-REVIEW (always a loaded doc), but a real gap if Compose ever wants comments on a blank doc's
-  first save
-- 010 low items: resolver doc, Binding.cs:120 comment, Fast-tier test, config validation
-- Worst-case 50-finding output vs ADR-040 128KB inline ledger cap → blob/SPE offload (050/060)
-- Pre-existing unrelated test failures to note at 090: Services.Communication.* (5), three-pane-compose-coordination e2e (AiSessionProvider)
+### Critical Context
+The 22-task project is complete + merged + deployed. GPT-5 works; the only compat issue found (temperature=0.3) is fixed on the Action. Everything below "Live-env state" is operational config/data changes made THIS session that are NOT in git (they're env state, intentionally).
 
-## Next action
-033 ✅, 051 ✅, 040 ✅, 032 ✅ done (through this pass). Check 050's status before assuming it's still
-in-flight (another wave agent may have landed it concurrently — see TASK-INDEX.md for current state).
-Hold 052 (tenant-pin decision). Then deploy/wrap-up (env-blocked → report + runbooks).
+---
+
+## Full State (Detailed)
+
+### What shipped (PR #689, merged `751532d7e`)
+22 tasks: ADR-039 amendment (advisory-tier + grounding-mode-independent, strengthened) · model-tier resolver + runtime picker · NDA-REVIEW Action (advisory, Reasoning) · standard-summary Action · bindings/card/classification · whole-doc fan-out · Compose UX (summary panel, advisory-comments event/receiver, right-gutter, Draft Alternative) · comment-export fix · Summary-Page DOCX writer · SPE-versioning test · eval harness + dispatch eval + tenant-pin test · OR-clause tenant-pin fix · de-embed standard (RAG = source of truth). All waves build+code-review+adr-check gated.
+
+### Live-env state (spaarkedev1 / Azure — NOT in git; operational)
+- **BFF** deployed → `spaarke-bff-dev` (rg-spaarke-dev), hash-verified, healthy. App setting `DocumentIntelligence__ReasoningModel=gpt-5-reasoning`.
+- **Code page** deployed → `sprk_spaarkeai` web resource in spaarkedev1 (published).
+- **Action** `sprk_analysisaction` id `34c9ecf2-cb10-f111-8342-7ced8d1dc988` — REUSED the old "ACT-002 / NDA Analysis" stub → now code=`nda-review`, name=`NDA Review`, modeltier=Reasoning(100000002), **temperature=null** (GPT-5 compat), our advisory prompt + `{overallRisk, flaggedSections[]}` schema.
+- **Binding** `sprk_playbookconsumer` — new `NDA Review`, consumerType=`nda-review`, enabled, surfaces=`assistant,compose`, disposition=informational, `sprk_Action` lookup → the Action GUID above.
+- **RAG** — KNW-011 (firm NDA standard) ingested into `spaarke-rag-references` (8 chunks, 3072-dim, tenantId="system"). OR-clause tenant fix deployed → retrievable under any tenant.
+- **Azure OpenAI** — `gpt-5-reasoning` deployment on `spaarke-openai-dev` (rg `spe-infrastructure-westus2`, region eastus): model gpt-5 2025-08-07, GlobalStandard, cap 10, Succeeded. Smoke-tested online. (Note: `Deploy-SpaarkeAi.ps1`, `Deploy-BffApi.ps1`, `Add-ReferenceToIndex.ps1` all use `az` tokens — auth is present in the main session.)
+
+### Key facts for next session
+- Dataverse write mechanism here: `az` token + Web API (Dataverse MCP is NOT surfaced in headless sessions; ToolSearch finds none). Binding→Action link = `sprk_Action@odata.bind` lookup (resolved from actionCode), NOT code-matching.
+- Routing cache (`ConsumerRoutingService`) has ~5-min TTL — new binding may take up to 5 min to appear in capability-discovery.
+- Since the standard was de-embedded from the prompt, RAG grounding (KNW-011) is load-bearing: no grounding → the review correctly DECLINES (does not hallucinate).
+
+### Backlog (from the build, non-blocking)
+- `sprk_outputdeterminism` Dataverse column + BFF read-path (make ADR-039 "mode = data" real; today prompt-enforced).
+- Pre-existing test reds to triage: `Services.Communication.*` (5), `three-pane-compose-coordination` e2e (AiSessionProvider), and the Compose LFS-corpus seam tests (fixed by PR #690's `lfs:true`).
+- `docs/adr/INDEX.md` was stale (reconciled during the build); the broader ADR-016 mis-citation was corrected repo-wide.
