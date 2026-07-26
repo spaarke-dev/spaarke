@@ -114,9 +114,7 @@ describe('ComposeEditor.placeAdvisoryComments — NDA-REVIEW advisory comments (
     const editorSurface = screen.getByRole('textbox');
     const anchorSpans = editorSurface.querySelectorAll('span[data-comment-id]');
     expect(anchorSpans.length).toBe(1);
-    expect(anchorSpans[0].textContent).toBe(
-      'The receiving party shall retain confidential information indefinitely.'
-    );
+    expect(anchorSpans[0].textContent).toBe('The receiving party shall retain confidential information indefinitely.');
 
     // task 040 read surface: the placed thread's explanation is discoverable via
     // getAdvisoryCommentThreads() (a separate instance from the session Comments panel's own
@@ -136,9 +134,7 @@ describe('ComposeEditor.placeAdvisoryComments — NDA-REVIEW advisory comments (
     renderEditor(ref, { speDriveItemId: 'drive-item-nda-2', fileName: 'NDA2.docx' });
 
     // Calling with an empty item list is a legitimate no-op regardless of mount timing.
-    const result = ref.current
-      ? ref.current.placeAdvisoryComments([])
-      : { placed: 0, failed: [] };
+    const result = ref.current ? ref.current.placeAdvisoryComments([]) : { placed: 0, failed: [] };
     expect(result.placed).toBe(0);
     expect(result.failed).toHaveLength(0);
   });

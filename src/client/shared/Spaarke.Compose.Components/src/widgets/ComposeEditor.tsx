@@ -2047,7 +2047,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // silently dropped.
         placeAdvisoryComments: items => {
           if (!editor) {
-            return { placed: 0, failed: items.map(item => ({ targetText: item.targetText, kind: 'not_found' as const })) };
+            return {
+              placed: 0,
+              failed: items.map(item => ({ targetText: item.targetText, kind: 'not_found' as const })),
+            };
           }
           let placed = 0;
           const failed: AdvisoryCommentFailure[] = [];
