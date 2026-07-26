@@ -4,7 +4,7 @@
     <title>Whole-doc review orchestration — Action run → disposition fan-out (card + comments)</title>
     <phase>2 NDA Review Capability</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF orchestration on the dispatch spine; ledgering; fan-out to two client dispositions; ADR-039/043 judgment.</rigor-reason>
     <model-tier>opus</model-tier>
