@@ -733,28 +733,38 @@ public class OpenAiClient : IOpenAiClient
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
     /// <exception cref="InvalidOperationException">Thrown when response is empty.</exception>
     /// <summary>
+    /// True when <paramref name="deploymentName"/> is the configured Reasoning-tier deployment
+    /// (<see cref="DocumentIntelligenceOptions.ReasoningModel"/>). Reasoning models (o-series / gpt-5)
+    /// require a distinct request shape — see <see cref="ResolveEffectiveTemperature"/> and the
+    /// max-output-tokens handling in <see cref="GetStructuredCompletionRawAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ai-advanced-capabilities-nda-r1 follow-up (post-UAT). A config-grounded, deployment-name signal
+    /// (ADR-039: tier→deployment mapping is config, not catalog) so it covers every caller of this client,
+    /// not just the ActionRunner path. <c>internal static</c> + pure so the decision is unit-testable
+    /// without a live Azure call (the actual on-the-wire omission is only verifiable end-to-end).
+    /// </remarks>
+    internal static bool IsReasoningDeployment(string deploymentName, string? reasoningModel) =>
+        !string.IsNullOrWhiteSpace(reasoningModel)
+        && string.Equals(deploymentName, reasoningModel, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Resolves the temperature value to send on a structured completion, or <c>null</c> to OMIT the
     /// <c>temperature</c> parameter from the request entirely.
     /// </summary>
     /// <remarks>
-    /// ai-advanced-capabilities-nda-r1 follow-up (post-UAT). Reasoning-tier deployments (o-series / gpt-5)
-    /// REJECT any non-default temperature — the Azure OpenAI API returns 400
-    /// <c>"Only the default (1) value is supported"</c> when <c>temperature</c> is present at all, even at
-    /// <c>0.0</c>. So for the configured <see cref="DocumentIntelligenceOptions.ReasoningModel"/> the
-    /// request must omit the parameter (this returns <c>null</c>); every other model keeps the
-    /// deterministic-structured default (<c>0.0</c> when the caller passes nothing). This is a
-    /// config-grounded, deployment-name signal (ADR-039: tier→deployment mapping is config, not catalog)
-    /// so it covers every caller of this client, not just the ActionRunner path. Extracted as an
-    /// <c>internal static</c> pure function so the decision is unit-testable without a live Azure call
-    /// (the actual on-the-wire omission is only verifiable end-to-end).
+    /// Reasoning-tier deployments (o-series / gpt-5) REJECT any non-default temperature — the Azure OpenAI
+    /// API returns 400 <c>"Only the default (1) value is supported"</c> when <c>temperature</c> is present
+    /// at all, even at <c>0.0</c>. So for the configured reasoning model the request must omit the
+    /// parameter (this returns <c>null</c>); every other model keeps the deterministic-structured default
+    /// (<c>0.0</c> when the caller passes nothing).
     /// </remarks>
     internal static float? ResolveEffectiveTemperature(
         string deploymentName,
         string? reasoningModel,
         float? requestedTemperature)
     {
-        if (!string.IsNullOrWhiteSpace(reasoningModel)
-            && string.Equals(deploymentName, reasoningModel, StringComparison.OrdinalIgnoreCase))
+        if (IsReasoningDeployment(deploymentName, reasoningModel))
         {
             return null; // reasoning model — omit temperature
         }
@@ -775,11 +785,10 @@ public class OpenAiClient : IOpenAiClient
     {
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
-        // Callers (typically the 8 tool handlers that resolve a per-action override
-        // from sprk_analysisaction.sprk_temperature) pass an explicit value when
-        // non-deterministic output is desired. Reasoning-tier deployments (gpt-5 / o-series) must
-        // OMIT temperature — ResolveEffectiveTemperature returns null for the configured
-        // ReasoningModel so the property is left unset below (a 0.0 would 400 the request).
+        var isReasoning = IsReasoningDeployment(deploymentName, _options.ReasoningModel);
+        // Callers (typically the 8 tool handlers that resolve a per-action override from
+        // sprk_analysisaction.sprk_temperature) pass an explicit value when non-deterministic output is
+        // desired. Reasoning-tier deployments (gpt-5 / o-series) omit it (ResolveEffectiveTemperature → null).
         var effectiveTemperature = ResolveEffectiveTemperature(deploymentName, _options.ReasoningModel, temperature);
         var chatClient = _client.GetChatClient(deploymentName);
 
@@ -789,9 +798,20 @@ public class OpenAiClient : IOpenAiClient
                 schemaName,
                 jsonSchema,
                 jsonSchemaIsStrict: true),
-            MaxOutputTokenCount = effectiveMaxTokens,
         };
 
+        // Reasoning models (gpt-5 / o-series) reject BOTH knobs, so the request must OMIT each:
+        //  - temperature: any value (even 0.0) → 400 "Only the default (1) value is supported".
+        //  - max tokens: the OpenAI/Azure SDK serializes ChatCompletionOptions.MaxOutputTokenCount as
+        //    `max_tokens` (verified live at api-version 2025-04-01-preview), which these models 400 with
+        //    "Unsupported parameter: 'max_tokens' ... use 'max_completion_tokens' instead". There is no
+        //    SDK surface here that emits max_completion_tokens, so we omit the cap entirely — the model
+        //    uses its own default max_completion_tokens and the strict output schema bounds the JSON body.
+        //    (This was the actual live "Sorry — I couldn't run that action" on the NDA Review path.)
+        if (!isReasoning)
+        {
+            chatOptions.MaxOutputTokenCount = effectiveMaxTokens;
+        }
         if (effectiveTemperature.HasValue)
         {
             chatOptions.Temperature = effectiveTemperature.Value;

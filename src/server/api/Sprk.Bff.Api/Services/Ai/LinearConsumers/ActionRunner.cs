@@ -48,21 +48,6 @@ public sealed class ActionRunner : IActionRunner
     /// </remarks>
     internal const int MaxOutputTokensCeiling = 4000;
 
-    /// <summary>
-    /// Output-token ceiling for Reasoning-tier (o-series / gpt-5) structured completions.
-    /// </summary>
-    /// <remarks>
-    /// ai-advanced-capabilities-nda-r1 follow-up (post-UAT). Reasoning models count their internal
-    /// reasoning tokens against <c>max_completion_tokens</c> (the SDK's <c>MaxOutputTokenCount</c>), so
-    /// the 4000-token ceiling that suffices for non-reasoning structured output can be entirely consumed
-    /// by reasoning before the JSON body is emitted — truncating the constrained-decoding output
-    /// mid-object into a parse failure (surfaced to the user as "couldn't run that action"). The reasoning
-    /// ceiling carries headroom for reasoning + the output body. Actual billed output is still bounded by
-    /// each Action's output schema (ADR-039: the tier alone selects the ceiling — no per-consumer config
-    /// side channel). Tunable if advisory outputs ever approach the cap.
-    /// </remarks>
-    internal const int MaxReasoningOutputTokensCeiling = 16000;
-
     public ActionRunner(
         IOpenAiClient openAi,
         PromptSchemaRenderer promptRenderer,
@@ -143,14 +128,6 @@ public sealed class ActionRunner : IActionRunner
         var jsonSchema = BinaryData.FromString(action.OutputSchemaJson);
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
-        // ai-advanced-capabilities-nda-r1 follow-up: Reasoning-tier completions need a higher output-token
-        // ceiling because reasoning tokens count toward max_completion_tokens (see
-        // MaxReasoningOutputTokensCeiling remarks). Keyed off the Action's declared tier (intent), not the
-        // resolved deployment — the two-signal split matches OpenAiClient, where temperature omission keys
-        // off the concrete reasoning deployment name.
-        var maxOutputTokens = action.ModelTier == AiModelTier.Reasoning
-            ? MaxReasoningOutputTokensCeiling
-            : MaxOutputTokensCeiling;
 
         // NFR-07: identifiers + counts only — never slice content. Records that the resolved context
         // envelope flows to the executor (ADR-043: the completion consumes context-via-envelope).
@@ -173,7 +150,7 @@ public sealed class ActionRunner : IActionRunner
             jsonSchema,
             schemaName,
             model: deploymentName,
-            maxOutputTokens: maxOutputTokens,
+            maxOutputTokens: MaxOutputTokensCeiling,
             temperature: temperature,
             cancellationToken: cancellationToken);
 
