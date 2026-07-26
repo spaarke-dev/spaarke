@@ -3,10 +3,10 @@
 > ## ⭐ Post-UAT follow-ups (2026-07-26) — DONE + DEPLOYED to spaarkedev1
 > Branch **`work/ai-nda-r1-followups`** (off master 751532d7e; pushed; NOT yet merged/PR'd). Commit `968810b6b`.
 >
-> **1. BFF reasoning-tier request shape (UAT #3 "can't run that action" root cause) — FIXED + DEPLOYED.**
-> - `OpenAiClient.GetStructuredCompletionRawAsync` now OMITS `temperature` for the configured ReasoningModel deployment (`ResolveEffectiveTemperature`). The old `temperature ?? 0.0f` floor sent 0.0 to gpt-5, which 400s ("Only the default (1) value is supported") — this defeated the per-Action sprk_temperature=null workaround and WAS the live "couldn't run that action". `max_completion_tokens` was already correct (OpenAI SDK 2.8.0 `MaxOutputTokenCount`→`max_completion_tokens`).
-> - `ActionRunner` uses a 16000 output-token ceiling for Reasoning tier (reasoning tokens count toward `max_completion_tokens`; 4000 could truncate the JSON → parse failure).
-> - +8 unit tests (GetStructuredCompletionRawAsyncTemperatureTests). BFF built + deployed to spaarke-bff-dev (hash-verified, healthy). §10 publish: 47.50 MB compressed (< 60 MB; ~0 delta, no new deps).
+> **1. BFF reasoning-tier request shape (UAT #3 "can't run that action" root cause) — FIXED + DEPLOYED (2 rounds).**
+> - **Round 1 (temperature) was correct but NOT the blocker.** `OpenAiClient` now OMITS `temperature` for the ReasoningModel deployment (`ResolveEffectiveTemperature`) — gpt-5 400s on any temperature incl. 0.0.
+> - **Round 2 (the ACTUAL root cause), found via App Insights:** the live 400 was `"Unsupported parameter: 'max_tokens' ... use 'max_completion_tokens' instead"`. The OpenAI/Azure SDK (OpenAI 2.8.0 / Azure.AI.OpenAI 2.8.0-beta.1) serializes `ChatCompletionOptions.MaxOutputTokenCount` as `max_tokens` **even at api-version 2025-04-01-preview** (confirmed from the request URL in dependency telemetry), and gpt-5/o-series reject it *before* temperature is evaluated. Fix: `OpenAiClient` OMITS `MaxOutputTokenCount` entirely for reasoning (no SDK surface here emits `max_completion_tokens`; the model uses its default and the strict schema bounds the body). Both omissions centralized behind `IsReasoningDeployment`. Reverted the moot ActionRunner 16000 ceiling.
+> - +15 unit tests. BFF built + deployed to spaarke-bff-dev twice (hash-verified, healthy). §10 publish: 47.50 MB (< 60 MB). **Verified via App Insights that the deployed code ran (`temp=(null)`, deployment=gpt-5-reasoning) — deploy was live; the max_tokens 400 was the true block.**
 >
 > **2. "Review an NDA" card placement (UAT #2) — FIXED + DEPLOYED.** Moved from the top-of-pane notification (`SuggestionCard`, read as "hidden") into the Suggested-Next-Steps strip as an in-line local chip `local:nda-review` (mirrors the existing `local:revise-in-compose` pattern) → same mount-in-Compose + dispatch flow (`handleReviewNda`). SpaarkeAi code page rebuilt (clean cache; `local:nda-review` verified in bundle) + deployed to `sprk_spaarkeai` (published).
 >
@@ -14,7 +14,9 @@
 >
 > **⚠️ Finding — Binding mirror is STALE vs live (13 drifts).** `Seed-PlaybookConsumers.ps1 -DiffOnly` shows the live `sprk_playbookconsumer` table has evolved past the committed mirror `infra/dataverse/sprk_playbookconsumer-rows.json` (chat-summarize/create-matter/create-task/draft-correspondence chipTransitions+disposition+toolDescription, nda-review toolDescription). I did NOT run the full seeder (would REVERT live drift) — used a surgical single-row upsert for UC3 instead. **Owner action:** reconcile deliberately, then `-Export` + commit to re-baseline the mirror.
 >
-> **Next when we continue:** (a) smoke-test the live NDA flow in spaarkedev1 (review runs on gpt-5 now; card in the follow-on row; UC3 "explain the standard"); (b) PR/merge `work/ai-nda-r1-followups` → master; (c) check/merge PR #690 (CI-LFS); (d) reconcile the binding mirror.
+> **⚠️ Master-merge (2026-07-26):** origin/master advanced to `e31fa0902` (assistant-r1 "lighter proactive-suggestion UI" — SuggestionCard.tsx + useSuggestionCards.tsx). My earlier code-page deploy (from a base predating it) had CLOBBERED that fix on the live web resource. Merged origin/master into `work/ai-nda-r1-followups` (clean — disjoint files), rebuilt + REDEPLOYED both BFF and code page so all three fixes coexist live. **Lesson: always `git fetch origin` + merge master before rebuilding/redeploying the code page — a code-page deploy ships the whole bundle and silently reverts any master fix not in your tree.**
+>
+> **Next when we continue:** (a) smoke-test the live NDA flow in spaarkedev1 (review runs on gpt-5 now; card in follow-on row; UC3 "explain the standard"); (b) PR/merge `work/ai-nda-r1-followups` → master; (c) check/merge PR #690 (CI-LFS); (d) reconcile the binding mirror.
 
 ---
 
