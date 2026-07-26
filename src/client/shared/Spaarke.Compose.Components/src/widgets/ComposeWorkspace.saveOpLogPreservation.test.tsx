@@ -178,7 +178,7 @@ jest.mock('./ComposeEditor', () => {
           }),
           commitSaved: commitSavedMock,
           getBaselineParaIdMap: () => [],
-          getCommentThreadAnnotations: () => [],
+          getAnchoredComments: () => [],
           getRedlineAnnotations: () => [],
           hasPendingRedlines: () => false,
           buildContentModel: () => ({ paragraphs: [] }),

@@ -4,7 +4,7 @@
     <title>Draft Alternative activation — resolve bindingId stub + execution trace</title>
     <phase>3 Compose Review Experience</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Activates the embedded Draft Alternative tool (resolve bindingId:'' stub) + trace flow; frontend + binding wiring.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,6 +103,53 @@
 
   <notes>
     Closes the review→revise loop. Keep it user-driven per section per the confirmed flow.
+
+    COMPLETION FINDING (2026-07-26): investigation found the entire bindingId-resolution +
+    trace-surfacing mechanism this task asks for was ALREADY SHIPPED by the prior merged
+    `spaarkeai-compose-r2`/`compose-r4` projects (tasks 042/047/048/064) — before this
+    project's task 022 dependency even landed. No production file needed a change.
+    Verified (not assumed):
+      - `useComposeToolbarActivation` (useComposeToolbarActivation.ts) fetches
+        `GET /api/ai/capabilities?surface=compose` and calls
+        `registerComposeAiToolbarAction({...match, bindingId})` for any returned capability
+        whose `consumerType` matches a DEFAULT_ACTIONS `id` — this is the IDENTICAL
+        capability-discovery, no-hardcoded-GUID mechanism task 022 used
+        (`useCapabilityDiscovery`), just the compose-package-local sibling of it. It is
+        already wired into BOTH known Compose mount hosts: `ComposeDirectWidget.tsx`
+        (SpaarkeAi direct-widget door, used by the NDA `mountFileInCompose` open path) and
+        `composeEditor.registration.ts` (LegalWorkspace layout-door). `ComposeAiToolbar.tsx`'s
+        `bindingId: ''` in `DEFAULT_ACTIONS` is BY DESIGN (the file's own "PHASE-4 STUB
+        BOUNDARY" doc) — the registry overwrite is the resolution mechanism, so hardcoding a
+        GUID there would be a regression, not a fix.
+      - The Binding row (`consumerType: "compose-draft-alternative"`, disposition
+        100000006/compose, `surfaces: "workspace,compose"`, non-empty `toolDescription`) is
+        NOT missing — already present in `infra/dataverse/sprk_playbookconsumer-rows.json`,
+        exported from the LIVE `spaarkedev1` environment (`$exported: 2026-07-07`). It passes
+        `ListTextProjectableBindingsAsync`'s toolDescription filter and the surface filter, so
+        `GET /api/ai/capabilities?surface=compose` returns it and the activation hook
+        registers it automatically.
+      - Execution trace: `ContextPaneController` auto-opens Execution Trace
+        (`ComposeTraceHost` → `ExecutionTraceWidget`, ADR-040 ledger-backed) whenever ANY
+        Compose tab becomes active (`widgetType==='compose'` OR `layoutName==='Compose'`) —
+        not gated to a specific action, so it surfaces for any rewrite dispatched from an
+        already-open Compose tab. Covered by
+        `ContextPaneController.compose-trace-autoopen.test.tsx` (4 tests, passing).
+      - Per-section, not batch: `compose-draft-alternative` is `materializesInEditor: true`
+        (DEF-09) — one clause selection → one `target_text`/`new_text` structured edit →
+        one pending track-change the user accepts/rejects; it dispatches to the editor's
+        DOCUMENT session (not the chat session) so the redline-materialize read coincides
+        with the write. Forcing-tested end-to-end in
+        `ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx` (2 tests,
+        passing, REAL dispatch + session-keyed ledger, not mocked away).
+    Verification run this task: `tsc --noEmit` (Spaarke.Compose.Components) clean;
+    `useComposeToolbarActivation.test.tsx` + `ComposeAiToolbar.test.tsx` +
+    `ComposeWorkspace.redline-from-ledger.test.tsx` = 28/28 passing;
+    `ConversationPane.compose-draft-alternative-session-routing.e2e.test.tsx` +
+    `ContextPaneController.compose-trace-autoopen.test.tsx` + `ComposeTraceHost.reachable.test.tsx`
+    = 10/10 passing. Full detail: `projects/ai-advanced-capabilities-nda-r1/notes/task-033-draft-alternative-trace-activation.md`.
+    Manual live UI verification (select clause → Draft Alternative → rewrite → apply, in a
+    deployed NDA-REVIEW org) is env-blocked in this session (no live org/credentials) — not
+    faked, per task instruction.
   </notes>
 
   <execution>

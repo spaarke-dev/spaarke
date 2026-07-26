@@ -93,7 +93,7 @@ import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar'
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
-  composeSessionCommentThreadsToDocxAnnotations,
+  composeSessionCommentThreadsToAnchoredComments,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
 import { InsertionMark } from './marks/InsertionMark';
@@ -150,6 +150,8 @@ import type {
   ComposeContentModel,
   ImportedRevision,
   ImportedComment,
+  // Task 040 (comment-export wiring fix)
+  ComposeAnchoredComment,
 } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
@@ -636,14 +638,19 @@ export interface ComposeEditorHandle {
   hasPendingRedlines(): boolean;
 
   /**
-   * Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's NEW (session-authored) threads
-   * mapped to {@link DocxAnnotationInput}[] (`w:comment`) via `composeCommentThreadsToDocxAnnotations`.
-   * The host appends these to the save `annotations` list so panel comments persist as native Word
-   * comments (previously they lived only in React state and vanished on reload). IMPORTED threads
-   * (seeded from the retained original's own `w:comment`s) are EXCLUDED — they already ride the
-   * retained baseline, so re-emitting them would duplicate. Empty when no session comments exist.
+   * Task 040 (comment-export wiring fix): BOTH the FR-23 session Comments panel's own thread
+   * instance AND the NDA-REVIEW advisory thread instance ({@link getAdvisoryCommentThreads}, task
+   * 031), mapped to {@link ComposeAnchoredComment}[] via
+   * `composeSessionCommentThreadsToAnchoredComments` — each thread's LIVE `commentAnchor` mark span
+   * resolved to a durable `(paraId, run-local range)` (D2), no text-search (I-7). The host sends the
+   * result in the Save request's `comments` field; `ComposeShadowPatchEngine.ApplyComment` bakes each
+   * as a native `w:comment` (ADR-049). IMPORTED session threads (seeded from the retained original's
+   * own `w:comment`s) are EXCLUDED — they already ride the retained baseline, so re-emitting them
+   * would duplicate. REPLACES the retired {@link getCommentThreadAnnotations} (`DocxAnnotationInput`,
+   * text-anchored via the stale `annotations` save field, which the server never deserialized — every
+   * comment sent that way was silently dropped). Empty when no session/advisory comments exist.
    */
-  getCommentThreadAnnotations(): DocxAnnotationInput[];
+  getAnchoredComments(): ComposeAnchoredComment[];
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -749,13 +756,11 @@ export interface ComposeEditorHandle {
 
   /**
    * The advisory comment threads placed via {@link placeAdvisoryComments} so far, in creation
-   * order. READ SURFACE ONLY — deliberately NOT wired into {@link getCommentThreadAnnotations},
-   * which maps only the session Comments panel's OWN thread instance to `w:comment` save
-   * annotations. Persisting advisory comments through Save/export (mapping these threads to
-   * `DocxAnnotationInput[]`, mirroring `composeSessionCommentThreadsToDocxAnnotations`) is
-   * explicitly OUT of scope here — it is task 040's stated job ("Comment-export wiring fix",
-   * depends on this task). This getter exists so 040 has a discoverable read surface instead of
-   * needing to find the separate `useComposeCommentThreads` instance in this file.
+   * order. READ SURFACE task 031 exposed for task 040 to consume — {@link getAnchoredComments} now
+   * maps these threads (alongside the session Comments panel's own thread instance) to native
+   * `w:comment` save output. Kept as its own getter (rather than folded silently into
+   * {@link getAnchoredComments}) so a caller can still inspect/count the advisory threads on their
+   * own, independent of the export mapping.
    */
   getAdvisoryCommentThreads(): readonly ComposeCommentThreadModel[];
 }
@@ -1489,10 +1494,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // Item 5b (UAT round-4, FR-23): the comment-thread panel owns its thread state (survives
     // open/close). To PERSIST panel comments on save, the panel reports its live threads up via
-    // `onThreadsChanged` into this ref; the imperative `getCommentThreadAnnotations()` maps the
+    // `onThreadsChanged` into this ref; the imperative `getAnchoredComments()` (task 040) maps the
     // SESSION-authored ones (excluding imported threads, which ride the retained original) to
-    // `w:comment` annotations. A ref (not state) keeps this off the render path — save reads the
-    // latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
+    // `w:comment`-baking `ComposeAnchoredComment`s. A ref (not state) keeps this off the render path
+    // — save reads the latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
     const commentThreadsRef = React.useRef<readonly ComposeCommentThreadModel[]>(initialCommentThreads);
     const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
       commentThreadsRef.current = threads;
@@ -2009,14 +2014,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         getRedlineAnnotations: () =>
           editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
-        // Item 5b (UAT round-4, FR-23): panel comments → `w:comment` annotations, EXCLUDING imported
-        // threads (they already ride the retained-original baseline; re-emitting would duplicate). The
-        // imported id set is the load-time `initialCommentThreads` (seeded from the doc's own comments).
-        getCommentThreadAnnotations: () =>
-          composeSessionCommentThreadsToDocxAnnotations(
-            commentThreadsRef.current,
-            new Set(initialCommentThreads.map(t => t.id))
-          ),
+        // Task 040 (comment-export wiring fix): BOTH the session Comments panel's own thread
+        // instance (commentThreadsRef, excluding IMPORTED threads — they already ride the
+        // retained-original baseline) AND the NDA-REVIEW advisory thread instance
+        // (advisoryComments.threads) resolve their live commentAnchor mark span to a durable
+        // (paraId, run-local range) — no text-search (I-7). The imported id set is the load-time
+        // `initialCommentThreads` (seeded from the doc's own comments); advisory threads have no
+        // imported counterpart, so nothing is excluded for that instance.
+        getAnchoredComments: () => {
+          if (!editor) return [];
+          const importedIds = new Set(initialCommentThreads.map(t => t.id));
+          return [
+            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, commentThreadsRef.current, importedIds),
+            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, advisoryComments.threads, new Set()),
+          ];
+        },
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.

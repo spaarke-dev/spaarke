@@ -118,14 +118,7 @@ import { ComposeReanchorConflictPanel } from './ComposeReanchorConflictPanel';
 import { useComposeReanchor } from './useComposeReanchor';
 import type { ReanchorResolutionDecision } from './ComposeReanchor.types';
 // Word round-trip shuttle client callers (task 103 — gaps 3.1 / 3.4 / poll half of 3.5).
-import {
-  useComposePullAnnotations,
-  useComposeCheckChanges,
-  anchoredAnnotationsToPriorAnchors,
-  anchoredAnnotationsToDocxAnnotations,
-  DocxTrackChangeKind,
-  type DocxAnnotationInput,
-} from './useComposeWordShuttle';
+import { useComposePullAnnotations, useComposeCheckChanges, anchoredAnnotationsToPriorAnchors } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
@@ -139,6 +132,8 @@ import type {
   ParaIdMapEntry,
   ImportedRevision,
   ImportedComment,
+  // ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
+  ComposeAnchoredComment,
 } from '../types/compose-contracts';
 // R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
@@ -824,12 +819,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [reanchorPanelOpen, setReanchorPanelOpen] = React.useState(false);
   const [pulledAnnotationCount, setPulledAnnotationCount] = React.useState(0);
 
-  // gap 3.1 — the accepted annotations rendered as native Word track-changes + comments.
-  const composeDocxAnnotations = React.useMemo(
-    () => anchoredAnnotationsToDocxAnnotations(anchoredAnnotations),
-    [anchoredAnnotations]
-  );
-
   // gaps 3.4/3.5 — return-from-Word: on window focus (the user came back from Word), poll
   // check-changes; when the document changed, PULL the current native annotations (3.4) and
   // RE-ANCHOR prior anchors (3.5). The poll fallback needs no webhook secrets (owner task 056 /
@@ -1017,47 +1006,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // present (see ComposeService), so sending it on a clean/born-in-editor save is harmless.
       const paraIdMap = editorRef.current.getBaselineParaIdMap?.() ?? [];
 
-      // Save-robustness fix (UAT round-4; superseded by task 032's op-log cutover): pending AI/user REDLINES
-      // are NO LONGER sent as text-searched annotations. `DocxAnnotationWriter.LocateTarget` re-locates each
-      // target in the raw OOXML by text, which 422s whenever the target spans a `<w:tab/>`/`<w:br/>`
-      // (tab-laid-out list items) or drifts — the recurring "a tracked change could not be located" error.
-      // Redlines now persist through the ID-ANCHORED op-log instead: the interceptor captures the underlying
-      // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored operations, and
-      // ComposeShadowPatchEngine applies them to emit `w:ins`/`w:del` — no text search, so it cannot 422. Only
-      // COMMENTS still ride the annotation path (no op-anchored comment synthesis exists yet — task 036; a
-      // comment anchors a user SELECTION, which rarely spans a tab). The DocxAnnotationWriter text-search
-      // remains for Push-to-Word.
-      const redlineAnnotations: DocxAnnotationInput[] = [];
-      // Save-robustness fix (UAT round-4, 2026-07-21; superseded by task 032's op-log cutover): the
-      // anchored-annotation → DocxAnnotation mapping (`composeDocxAnnotations`) also emits Insertion/Deletion
-      // REDLINES (an AI `insertion-suggestion` / `deletion-suggestion` becomes a text-searched track-change),
-      // not only comments. Those AI redlines are ALREADY persisted through the ID-anchored op-log above —
-      // the materialized redline mark rides the granular ops ComposeShadowPatchEngine applies to emit
-      // w:ins/w:del by paraId. Sending them AGAIN as text-searched annotations is redundant and 422s ("a
-      // tracked change could not be located") wherever the target text drifts (a tab/`<w:br/>`/typographic
-      // run at that location) — exactly why an AI edit saved at the document start but failed at an interior
-      // location.
-      // Keep ONLY Comments on the save annotation path (they have no position-based representation; a comment
-      // anchors a user selection, which rarely spans a tab). This completes the round-4b redline exclusion —
-      // the `redlineMarksToDocxAnnotations` source was already zeroed above; this was the SECOND source.
-      // (The push-to-Word path at `pushableAnnotations` intentionally keeps redlines — that IS the native
-      // Word track-change writer's job.)
-      const commentAnnotations = composeDocxAnnotations.filter(a => a.kind === DocxTrackChangeKind.Comment);
-      // Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's SESSION-authored comments →
-      // native `w:comment` annotations (imported threads excluded inside the handle). Previously these
-      // lived only in React state and vanished on reload; now they persist on save. `?.()` guards an
-      // older editor build without the handle.
-      const commentThreadAnnotations =
-        typeof editorRef.current.getCommentThreadAnnotations === 'function'
-          ? editorRef.current.getCommentThreadAnnotations()
-          : [];
-      // Redlines first, then comments — DocxAnnotationWriter emits comments before track-changes (EDGE-1),
-      // so concat order only affects the ins/del sequence the bridge already ordered correctly.
-      const saveAnnotations: DocxAnnotationInput[] = [
-        ...redlineAnnotations,
-        ...commentAnnotations,
-        ...commentThreadAnnotations,
-      ];
+      // Task 040 (comment-export wiring fix): pending AI/user REDLINES persist through the
+      // ID-ANCHORED op-log (`operationLog` below) — the interceptor captures the underlying
+      // `insertText`/`deleteRange`/`replaceRange` steps as granular, paraId+offset-anchored
+      // operations, and `ComposeShadowPatchEngine` applies them to emit `w:ins`/`w:del`. Comments
+      // (BOTH the FR-23 session Comments-panel threads AND the NDA-REVIEW advisory threads, task
+      // 031's `getAdvisoryCommentThreads()`) ride a SEPARATE, paraId+run-range-anchored path:
+      // `ComposeEditorHandle.getAnchoredComments()` resolves each thread's live `commentAnchor` mark
+      // span to a durable `(paraId, run-local range)` (D2) and returns `ComposeAnchoredComment[]`,
+      // sent below in the `comments` field — `ComposeShadowPatchEngine.ApplyComment` bakes each as a
+      // native `w:comment` (ADR-049). This REPLACES the retired `annotations` field
+      // (`DocxAnnotationInput`, text-anchored via `targetText`): the server's `SaveComposeDocumentBody`
+      // never deserialized an `annotations` property, so every comment previously sent that way was
+      // silently dropped (session comments AND advisory comments alike). `?.()` guards an older
+      // editor build without the handle.
+      const anchoredComments: ComposeAnchoredComment[] =
+        typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
 
       // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
       // iterate (not spread) to avoid a call-stack overflow on large documents.
@@ -1080,7 +1044,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
       //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
       //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
-      // AI redlines/comments ride `annotations` in every case.
+      // Task 040: session + advisory comments ride `comments` (ComposeAnchoredComment[]) in every case;
+      // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
       let requestBody: Record<string, unknown>;
       if (isTransientCreate) {
         // A born-in-editor create-on-save: an AI-draft/blank/EDITED mount RENDERS from the content model;
@@ -1091,7 +1056,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           tenantId,
           sessionId: state.sessionId,
           displayName: state.documentRef.fileName ?? null,
-          annotations: saveAnnotations,
+          comments: anchoredComments,
           // C2: the baseline paraId map (harmless on the born-in-editor path — the server skips the stamp there).
           paraIdMap,
           ...(bornInEditorRender
@@ -1117,7 +1082,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           sessionId: state.sessionId,
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
-          annotations: saveAnnotations,
+          comments: anchoredComments,
           // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
           // (harmless on the born-in-editor branch — the server skips the stamp when ContentModel is present).
           paraIdMap,
@@ -1254,7 +1219,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     effectiveDriveId,
     tenantId,
     onCreateOnSaveComplete,
-    composeDocxAnnotations,
   ]);
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
@@ -1326,11 +1290,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   );
 
   // DEF-11 — register a whole-document revision's REVIEW FLAGS (`flag-risks` intent → payload.comments)
-  // as anchored `comment` AnchoredAnnotations. Same pipeline as DEF-13's edit-reason comment: each flag
-  // flows through `anchoredAnnotations` (persisted by the gap-4.3 effect) → `anchoredAnnotationsToDocxAnnotations`
-  // → PushAnnotations → `DocxAnnotationWriter` (a real `w:comment` anchored to `target_text` on Save/Push).
-  // No accept/reject (flags carry no edit). Deduped by the ledger key + index so a re-materialize
-  // (refresh / duplicate signal) never appends duplicates.
+  // as anchored `comment` AnchoredAnnotations, persisted via the FR-29 session-annotations endpoint
+  // (gap-4.3 effect) so they survive a reopen and show in the annotations sidebar. No accept/reject
+  // (flags carry no edit). Deduped by the ledger key + index so a re-materialize (refresh / duplicate
+  // signal) never appends duplicates.
+  // NOTE (task 040, comment-export wiring fix): these flags do NOT currently export as native
+  // `w:comment`s on Save/export — the retired `annotations`→PushAnnotations→DocxAnnotationWriter path
+  // this comment used to describe was never wired to Save (`SaveComposeDocumentBody` has no
+  // `annotations` property) and PushAnnotations itself is no longer called (Push-to-Word was
+  // retired). Task 040 wires the FR-23 session Comments-panel threads + NDA-REVIEW advisory threads
+  // (paraId+range-anchored `ComposeAnchoredComment`s) into the Save `comments` field; these
+  // `textPattern`-anchored AI-review flags are a SEPARATE data source (the FR-29 AnchoredAnnotation
+  // store) and are out of that task's scope — tracked as a follow-on, not fixed here.
   const registerAiReviewComments = React.useCallback(
     (
       comments: Array<{ target_text?: string; comment?: string }>,
@@ -1424,14 +1395,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         setLastMaterializedKey(target.key);
         setComposeDraftError(null);
 
-        // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change.
-        // The rationale becomes a real Word `w:comment` on Save/Push: it flows through the EXISTING
-        // annotations pipeline — `anchoredAnnotations` (persisted by the gap-4.3 effect) →
-        // `anchoredAnnotationsToDocxAnnotations` → PushAnnotations → `DocxAnnotationWriter` (which
-        // already emits `w:comment` anchored to `targetText`). No parallel machinery. Anchored to the
-        // edit's `target_text` (the redline range); skipped for an insertion-style draft with no
-        // target (no span to anchor a comment to) or an empty rationale. Deduped by the ledger key so
-        // a refresh/duplicate materialize never appends a second copy.
+        // DEF-13 — register the AI edit's REASON as an anchored COMMENT annotation on the change,
+        // persisted via the FR-29 session-annotations endpoint (gap-4.3 effect) — see the task-040
+        // NOTE on `registerAiReviewComments` above: this rationale does NOT currently export as a
+        // native `w:comment` on Save (that PushAnnotations/DocxAnnotationWriter path is retired/never
+        // wired to Save); tracked as a follow-on, out of task 040's scope. Anchored to the edit's
+        // `target_text` (the redline range); skipped for an insertion-style draft with no target (no
+        // span to anchor a comment to) or an empty rationale. Deduped by the ledger key so a
+        // refresh/duplicate materialize never appends a second copy.
         // DEF-11: a whole-document revision's REVIEW FLAGS become anchored comments (flag-risks intent).
         // A single-edit draft instead contributes its rationale as ONE anchored comment (DEF-13).
         if (commentList && commentList.length > 0) {

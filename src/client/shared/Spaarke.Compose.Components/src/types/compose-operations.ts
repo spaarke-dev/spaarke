@@ -253,6 +253,34 @@ export interface ComposeOperationLog {
 }
 
 /**
+ * A durable, `(paraId, run-local range)`-anchored comment (D2) — the CLIENT mirror of the server
+ * `ComposeAnchoredComment` record (`Sprk.Bff.Api.Services.Compose.ComposeShadowPatchEngine`). Sent
+ * in the Save request's `comments` field; `ComposeShadowPatchEngine.ApplyComment` bakes each one as a
+ * native `w:comment` (ADR-049). Unlike the retired `DocxAnnotationInput` comment shape
+ * (`useComposeWordShuttle.ts`, text-anchored via `targetText`), this anchors by
+ * `(paraId, runIndex, run-local-offset)` — NO write-path text-search (I-7). Field-for-field mirror;
+ * a change here is a breaking change to the server record and vice-versa.
+ *
+ * @see ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
+ * @see ../widgets/ComposeCommentThread.types.ts — `composeSessionCommentThreadsToAnchoredComments`,
+ *      the mapper that resolves a comment thread's live `commentAnchor` mark span to this shape.
+ */
+export interface ComposeAnchoredComment {
+  /** The `w14:paraId` of the paragraph the comment anchors to. */
+  paraId: string;
+  /** The run-local range the comment brackets (intra-paragraph). */
+  range: ComposeRunRange;
+  /** The comment body. */
+  commentText: string;
+  /** Comment author (surfaces as Word's attribution). */
+  author: string;
+  /** Optional author initials for the balloon; the server derives them from `author` when omitted. */
+  initials?: string;
+  /** ISO-8601 comment timestamp (serialized into the `w:date` attribute). */
+  date: string;
+}
+
+/**
  * Runtime guard: `true` when `value` is a well-formed {@link ComposeOperation} — a known
  * closed-set `type` discriminator plus a non-empty `paraId`. This is the client half of
  * "both ends validate against the same schema": before applying an op log (esp. one built

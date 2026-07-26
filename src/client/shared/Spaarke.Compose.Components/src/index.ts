@@ -296,6 +296,8 @@ export type {
   SetBlockAttrOperation,
   ComposeOperation,
   ComposeOperationLog,
+  // ai-advanced-capabilities-nda-r1 task 040 — comment-export wiring fix
+  ComposeAnchoredComment,
 } from './types/compose-operations';
 
 // -------------------------------------------------------------------------

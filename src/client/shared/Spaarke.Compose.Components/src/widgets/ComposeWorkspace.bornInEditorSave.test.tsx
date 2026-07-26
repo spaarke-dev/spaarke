@@ -143,7 +143,7 @@ jest.mock('./ComposeEditor', () => {
           serializeOperationLog: () => ({ orderedOps: [], baseVersion: null }),
           commitSaved: jest.fn(),
           getBaselineParaIdMap: () => [],
-          getCommentThreadAnnotations: () => [],
+          getAnchoredComments: () => [],
           getRedlineAnnotations: () => [],
           hasPendingRedlines: () => false,
           buildContentModel: () => CONTENT_MODEL,

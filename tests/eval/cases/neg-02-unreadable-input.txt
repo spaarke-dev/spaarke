@@ -1,0 +1,5 @@
+%PDF-EXTRACTION-FAILURE%
+\x00\x00\xEF\xBF\xBD\xEF\xBF\xBD\x0C\x0C\x0C ÿ Ð Ð¾ÐºÑƒÐ¼ÐµÐ½Ñ‚ Ð½Ðµ Ñ€Ð°ÑÐ¿Ð¾Ð·Ð½Ð°Ð½ ï¿½ï¿½ï¿½ ###
+q¯¿½;;;;;;garbled-ocr-stream;;;;;;¯¿½q ¤¤¤¤ 000000000 111111 ///// \\\\\ ;;;;
+[unrecoverable glyph run] [unrecoverable glyph run] [unrecoverable glyph run] ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+%%EOF-TRUNCATED-STREAM-CORRUPT%%

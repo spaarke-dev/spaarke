@@ -3,8 +3,8 @@
   <metadata>
     <title>Comment-export wiring fix — client sends ComposeAnchoredComment; server bakes w:comment</title>
     <phase>4 Export &amp; Persistence</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>clean</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield fix spanning client save payload + server OOXML comment baking; export correctness; critical path.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -106,6 +106,39 @@
 
   <notes>
     Critical path terminus (…→031→040). No DocxAnnotationWriter — retired. Highlights covered by the commented range.
+
+    COMPLETED. Root cause confirmed: client sent `annotations` (DocxAnnotationInput, text-anchored)
+    which `SaveComposeDocumentBody` (ComposeEndpoints.cs) never deserialized (no such property) — every
+    comment was silently dropped. Server-side `comments` (ComposeAnchoredComment[]) -&gt; ApplyComment
+    already worked and was already tested (ComposePatchEngineSaveSeamTests.cs pre-existing).
+
+    Client fix: added `ComposeAnchoredComment` type (compose-operations.ts, re-exported via
+    compose-contracts.ts + index.ts) mirroring the server record. Added
+    `composeSessionCommentThreadsToAnchoredComments(doc, threads, importedIds)` in
+    ComposeCommentThread.types.ts — resolves each thread's live `commentAnchor` mark span (via a new
+    `findCommentAnchorRange` walk) to paraId+run-range via the EXISTING `resolveRunAnchor` primitive
+    (stepOperationInterceptor.ts, the same D2 anchor the op-log capture path uses) — no new anchoring
+    mechanism. ComposeEditor's handle: replaced `getCommentThreadAnnotations(): DocxAnnotationInput[]`
+    with `getAnchoredComments(): ComposeAnchoredComment[]`, which combines BOTH the session Comments
+    panel's own thread instance AND task 031's `getAdvisoryCommentThreads()` advisory instance.
+    ComposeWorkspace.tsx: removed the dead `annotations`/`saveAnnotations`/`commentAnnotations`/
+    `redlineAnnotations`/`composeDocxAnnotations` code path entirely; sends `comments: anchoredComments`
+    in both requestBody branches (create-on-save + replace-save).
+
+    Discovered-but-out-of-scope gaps (documented inline, not fixed): (1) DEF-11/DEF-13 AI-review-flag
+    comments (the FR-29 `AnchoredAnnotation` store, `textPattern`-anchored) are a SEPARATE data source
+    that ALSO doesn't export to native `w:comment` today (their code comments claimed a PushAnnotations
+    path that's retired/never wired to Save) — corrected the stale comments, left the gap as a follow-on;
+    (2) a born-in-editor (blank/AI-draft) create-on-save skips `comments` application server-side
+    entirely (`ComposeService.SaveAsync`: comments only apply when `ContentModel is null`) — pre-existing,
+    not exercised by the NDA-REVIEW flow (always a loaded document), not fixed here.
+
+    Seam test added: `ComposeImportedAnchorsSurviveSaveSeamTests.Save_NewAnchoredComment_ThenReload_RoundTripsViaDocxAnnotationReader`
+    (tests/integration/seam/Ai/) — proves Save-with-`comments` -&gt; native w:comment at the resolved
+    paraId (byte-level) -&gt; Reload recovers it via `LoadComposeDocumentResponse.ImportedComments`
+    (DocxAnnotationReader). Builds green (BFF, test project, Compose client tsc); 526 server Compose
+    tests + 547 client Compose tests pass. Publish size 51.29 MB compressed (delta 0.00 MB — no server
+    production code touched).
   </notes>
 
   <execution>

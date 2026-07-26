@@ -332,6 +332,171 @@ public sealed class ComposeImportedAnchorsSurviveSaveSeamTests : IClassFixture<C
             "the dirty edit to paragraph 2 is present in the reopened document");
     }
 
+    // Task 040 (ai-advanced-capabilities-nda-r1, comment-export wiring fix) — the sibling of the
+    // FR-26 imported-anchor-survival test above, but for a comment ADDED DURING THIS SESSION via the
+    // Save request's `comments` field (ComposeAnchoredComment: paraId + run-local range), not one
+    // pre-existing in the original document. Proves the FULL round trip the client-side fix
+    // (ComposeWorkspace.tsx's `getAnchoredComments()` wiring / ComposeCommentThread.types.ts's
+    // `composeSessionCommentThreadsToAnchoredComments`) depends on: Save with `comments` -> the engine
+    // bakes a native w:comment at the resolved paraId (ComposeShadowPatchEngine.ApplyComment) ->
+    // Reload recovers it via DocxAnnotationReader, projected onto
+    // LoadComposeDocumentResponse.ImportedComments (task 052's wire projection) exactly like a
+    // human-authored Word comment would be. Reuses this file's fixture/helper conventions verbatim
+    // (CLAUDE.md §11 — extend, don't duplicate): same ComposeFidelitySeamFixture, same
+    // Load->Save->Reload wiring shape, same `CreateDocx` builder (a plain doc this time — no
+    // TrackedChangeDocxBuilder annotation, since the comment under test is FRESHLY authored by the
+    // save, not imported).
+    [Fact]
+    public async Task Save_NewAnchoredComment_ThenReload_RoundTripsViaDocxAnnotationReader()
+    {
+        _fixture.ResetBoundaries();
+
+        const string para0Text = "The receiving party shall keep this confidential.";
+        const string para1Text = "The lazy dog sleeps soundly today.";
+        const string para2Text = "This clause shall survive independent review by counsel.";
+        var original = CreateDocx(para0Text, para1Text, para2Text);
+
+        const string speId = "spe-item-040-new-comment";
+        const string driveId = "drive-040-new-comment";
+        const string tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        // ── Phase 1: LOAD (through the real GET route) — a plain document with NO pre-existing marks. ──
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: original.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(original));
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-1");
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var firstLoadResponse = await client.GetAsync(
+            $"/api/compose/documents/{speId}?driveId={driveId}&tenantId={tenant}");
+        firstLoadResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the real Load route resolves the plain fixture bytes through the SPE facade boundary");
+
+        var firstLoad = await firstLoadResponse.Content.ReadFromJsonAsync<LoadComposeDocumentResponse>();
+        firstLoad.Should().NotBeNull();
+        firstLoad!.ImportedComments.Should().BeEmpty("the plain fixture carries no pre-existing comments");
+
+        var para1Id = firstLoad.ParaIdMap.Single(e => e.Index == 1).ParaId;
+        var sessionId = firstLoad.SessionId;
+        sessionId.Should().NotBeNullOrWhiteSpace();
+
+        // ── Phase 2: SAVE with a NEW `comments` entry anchored to paragraph 1 — the exact wire shape
+        //    task 040's client wiring sends (ComposeAnchoredComment: paraId + run-local range), no
+        //    operationLog (a clean, comment-only save; EDGE-1 — comments apply before any op). ────────
+        _fixture.ResetBoundaries();
+
+        var existingDocumentId = Guid.NewGuid();
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: original.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", existingDocumentId));
+
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        const string commentBody = "Flag: this retention term deviates from the standard 3-year cap.";
+        var saveResponse = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            comments = new object[]
+            {
+                new
+                {
+                    paraId = para1Id,
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                    commentText = commentBody,
+                    author = "AI Advisory Review",
+                    date = When,
+                },
+            },
+        });
+
+        var saveBody = await saveResponse.Content.ReadAsStringAsync();
+        saveResponse.StatusCode.Should().Be(HttpStatusCode.OK, saveBody);
+        persisted.Should().NotBeNull("the SPE facade boundary captured the bytes ComposeService actually persisted");
+
+        // ── Byte-level: the native w:comment landed at paragraph 1, exactly the resolved paraId. ──────
+        using (var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false))
+        {
+            var editedPara = patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+                .Single(p => string.Equals(p.ParagraphId?.Value, para1Id, StringComparison.OrdinalIgnoreCase));
+            editedPara.Descendants<CommentRangeStart>().Should().NotBeEmpty(
+                "paragraph 1 must carry the comment range start after the save");
+            var commentsPart = patchedDoc.MainDocumentPart!.WordprocessingCommentsPart;
+            commentsPart.Should().NotBeNull("a native w:comment part must exist after the comment save");
+            commentsPart!.Comments!.Descendants<Comment>()
+                .SelectMany(c => c.Descendants<DocumentFormat.OpenXml.Wordprocessing.Text>())
+                .Select(t => t.Text)
+                .Should().Contain(t => t.Contains("retention term deviates", StringComparison.Ordinal),
+                    "the comment body must be emitted natively");
+        }
+
+        // ── Phase 3: RELOAD — the freshly-saved comment must round-trip back in via
+        //    DocxAnnotationReader, projected the SAME way an imported (pre-existing) comment is
+        //    (task 040 acceptance criterion: "reopening the exported DOCX round-trips the comments
+        //    back in via DocxAnnotationReader"). ──────────────────────────────────────────────────────
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: speId, Name: "plain.docx", ParentId: null, Size: persisted!.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2-etag\"", IsFolder: false, WebUrl: null, DriveId: driveId));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(persisted!));
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("v-load-2");
+
+        var secondLoadResponse = await client.GetAsync(
+            $"/api/compose/documents/{speId}?driveId={driveId}&tenantId={tenant}&sessionId={sessionId}");
+        secondLoadResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the real Load route re-reads the JUST-PERSISTED bytes (the round trip under test)");
+
+        var secondLoad = await secondLoadResponse.Content.ReadFromJsonAsync<LoadComposeDocumentResponse>();
+        secondLoad.Should().NotBeNull();
+
+        secondLoad!.ImportedComments.Should().ContainSingle(
+            "the comment added via this session's Save `comments` field must round-trip back in on reload, exactly like a human-authored Word comment");
+        var reloadedComment = secondLoad.ImportedComments[0];
+        reloadedComment.ParaId.Should().Be(para1Id,
+            "the comment re-anchors to the SAME w14:paraId it was saved onto");
+        reloadedComment.CommentText.Should().Be(commentBody, "the comment body text is untouched by the round trip");
+        reloadedComment.Author.Should().Be("AI Advisory Review");
+    }
+
     // ── fixture construction + OOXML helpers ────────────────────────────────────────────────────
 
     /// <summary>The fixture's REAL, physically-authored <c>w14:paraId</c> values (deterministic — NOT
