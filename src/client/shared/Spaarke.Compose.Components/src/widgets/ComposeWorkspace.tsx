@@ -1461,6 +1461,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
   const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
   const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
+  // task 032 (right-gutter comment layout) — the Action's own server-asserted overallRisk, now
+  // threaded across the `compose_advisory_comments` event's `overallRisk` field (see
+  // useNdaReviewAdvisoryCommentsBridge.ts). `undefined` until the first review completes, or for an
+  // older emitter that hasn't wired the field — NdaReviewSummaryPanel falls back to deriving it.
+  const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
 
   useComposeWorkspaceReceivers({
     // Flow 3 — Context → Workspace: insert the precedent/library clause into the
@@ -1502,8 +1507,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     onAdvisoryComments: event => {
       const items = event.advisoryComments ?? [];
       if (items.length === 0) return;
+      // task 032 (right-gutter comment layout, gate022031 follow-on): thread sectionRef/riskLevel/
+      // standardRef through to placeAdvisoryComments so the created threads carry the metadata the
+      // right-rail gutter card renders as a risk badge + citation. Previously only targetText/
+      // explanation crossed this call, dropping the rest even though the event already carried them.
       const result = editorRef.current?.placeAdvisoryComments(
-        items.map(item => ({ targetText: item.targetText, explanation: item.explanation }))
+        items.map(item => ({
+          targetText: item.targetText,
+          explanation: item.explanation,
+          sectionRef: item.sectionRef,
+          riskLevel: item.riskLevel,
+          standardRef: item.standardRef,
+        }))
       );
       if (result && result.failed.length > 0) {
         // eslint-disable-next-line no-console
@@ -1528,6 +1543,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
+      setReviewSummaryOverallRisk(event.overallRisk);
       setReviewSummaryOpen(true);
     },
   });
@@ -2323,8 +2339,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
           {/* ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07, single
               surface — NO separate Analysis widget). Mirrors the ComposeCommentThread/
-              ComposeFindReplace docked-panel convention; renders overallRisk (derived) + the cited
-              flagged-section findings from the SAME ledgered NDA-REVIEW result task 031
+              ComposeFindReplace docked-panel convention; renders overallRisk (the real, server-
+              asserted field — task 032 — falling back to a client-side derivation when absent) + the
+              cited flagged-section findings from the SAME ledgered NDA-REVIEW result task 031
               materializes as in-document advisory Comments. Auto-opens when a review completes;
               dismissible via its own close button (re-opens on the next review). */}
           <NdaReviewSummaryPanel
@@ -2332,6 +2349,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             onClose={() => setReviewSummaryOpen(false)}
             findings={reviewSummaryFindings}
             placementFailureCount={reviewSummaryFailedCount}
+            overallRisk={reviewSummaryOverallRisk}
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}

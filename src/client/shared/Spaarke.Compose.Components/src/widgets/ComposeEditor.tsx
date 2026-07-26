@@ -96,6 +96,7 @@ import {
   composeSessionCommentThreadsToAnchoredComments,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
+import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
@@ -560,6 +561,18 @@ export interface AdvisoryCommentInput {
   targetText: string;
   /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3. */
   explanation: string;
+  /**
+   * task 032 (right-gutter comment layout) — optional metadata passed through to the created
+   * thread's {@link ComposeCommentThreadModel} (via `useComposeCommentThreads.createThread`'s
+   * metadata parameter) so the right-rail gutter card can render a risk badge + citation. Structural
+   * mirror of `ComposeAdvisoryCommentItem`'s own optional fields (`@spaarke/ai-widgets`).
+   */
+  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
+  sectionRef?: string;
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
+  riskLevel?: string;
+  /** Optional standard/playbook reference the flag cites. */
+  standardRef?: string;
 }
 
 /**
@@ -1055,6 +1068,13 @@ const useStyles = makeStyles({
     right: tokens.spacingHorizontalM,
     zIndex: 2,
     boxShadow: tokens.shadow16,
+  },
+  // task 032 (right-gutter comment layout) — reserves room for the right-rail comment gutter so its
+  // cards sit in true margin space alongside the document rather than overlapping body text. Applied
+  // ONLY while there is at least one advisory-comment thread to place (see the render section below);
+  // an editor with no advisory comments keeps its full-width `editorSurface` padding.
+  editorSurfaceWithGutter: {
+    paddingRight: `calc(${COMMENT_GUTTER_WIDTH_PX}px + ${tokens.spacingHorizontalL})`,
   },
   // FR-22 (task 043) — floating "Styles" pane toggle, pinned top-LEFT of the editor scroll region
   // (the top-right corner is taken by `commentsToggleFab`). Semantic tokens only (ADR-021
@@ -2072,7 +2092,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               failed.push({ targetText: item.targetText, kind: resolved.kind });
               continue;
             }
-            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0]);
+            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0], {
+              riskLevel: item.riskLevel,
+              sectionRef: item.sectionRef,
+              standardRef: item.standardRef,
+            });
             if (threadId) {
               placed += 1;
             } else {
@@ -2433,9 +2457,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             The FAB is a sibling of the scroller (not inside it) so it stays pinned
             at the bottom instead of scrolling away with the content. */}
         <div className={styles.editorScrollWrap}>
-          <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
+          <div
+            ref={editorScrollRef}
+            className={mergeClasses(
+              styles.editorSurface,
+              advisoryComments.threads.length > 0 ? styles.editorSurfaceWithGutter : undefined
+            )}
+            data-testid="compose-editor-surface"
+          >
             <EditorContent editor={editor} />
           </div>
+          {/* task 032 (right-gutter comment layout, FR-16) — NDA-REVIEW advisory comment cards,
+              vertically aligned to their live anchor position (coordsAtPos), right of the document.
+              Renders nothing while there are no advisory comment threads. */}
+          <ComposeCommentGutter editor={editor} threads={advisoryComments.threads} scrollContainerRef={editorScrollRef} />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
             <Button

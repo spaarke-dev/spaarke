@@ -122,21 +122,42 @@ export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 // -------------------------------------------------------------------------
 export { ComposeCommentThread } from './widgets/ComposeCommentThread';
 export type { ComposeCommentThreadProps, ComposeCommentPendingRange } from './widgets/ComposeCommentThread';
-export { composeCommentThreadsToDocxAnnotations } from './widgets/ComposeCommentThread.types';
+export { composeCommentThreadsToDocxAnnotations, findCommentAnchorRange } from './widgets/ComposeCommentThread.types';
 export type {
   ComposeCommentAuthorStamp,
   ComposeCommentReply,
   ComposeCommentThreadModel,
 } from './widgets/ComposeCommentThread.types';
 export { useComposeCommentThreads } from './widgets/hooks/useComposeCommentThreads';
-export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './widgets/hooks/useComposeCommentThreads';
+export type {
+  UseComposeCommentThreadsResult,
+  ComposeCommentRange,
+  ComposeCommentThreadMetadata,
+} from './widgets/hooks/useComposeCommentThreads';
+
+// -------------------------------------------------------------------------
+// Right-gutter comment layout (ai-advanced-capabilities-nda-r1 task 032, FR-16) — right-rail cards
+// vertically aligned to each thread's LIVE anchor position (coordsAtPos), replacing/superseding the
+// docked-list-only presentation for the NDA-REVIEW advisory-comment flow. Mounted inside ComposeEditor.
+// -------------------------------------------------------------------------
+export {
+  ComposeCommentGutter,
+  layoutCommentGutterCards,
+  COMMENT_GUTTER_WIDTH_PX,
+} from './widgets/ComposeCommentGutter';
+export type { ComposeCommentGutterProps } from './widgets/ComposeCommentGutter';
 
 // -------------------------------------------------------------------------
 // Review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030, FR-07) — the fuller
 // advisory digest (overallRisk + cited flagged-section findings) rendered inside Compose. Single
 // surface: no separate Analysis widget consumes this — mounted directly by ComposeWorkspace.
 // -------------------------------------------------------------------------
-export { NdaReviewSummaryPanel, deriveOverallRisk, NDA_REVIEW_DISCLAIMER_TEXT } from './widgets/NdaReviewSummaryPanel';
+export {
+  NdaReviewSummaryPanel,
+  deriveOverallRisk,
+  riskBadgeColor,
+  NDA_REVIEW_DISCLAIMER_TEXT,
+} from './widgets/NdaReviewSummaryPanel';
 export type { NdaReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/NdaReviewSummaryPanel';
 
 // -------------------------------------------------------------------------

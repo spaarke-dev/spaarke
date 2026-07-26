@@ -140,6 +140,10 @@ export function useNdaReviewAdvisoryCommentsBridge(
       dispatch('workspace', {
         type: 'compose_advisory_comments',
         advisoryComments,
+        // task 032 (right-gutter comment layout): thread the Action's own server-asserted
+        // `overallRisk` across the wire — this field was already typed on `NdaReviewResult` above but
+        // previously dropped here, forcing `NdaReviewSummaryPanel` to derive it client-side.
+        overallRisk: result.overallRisk,
         sessionId: getSessionId() ?? undefined,
         timestamp: new Date().toISOString(),
       });

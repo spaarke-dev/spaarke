@@ -890,6 +890,16 @@ export interface WorkspacePaneEvent {
    * quoted excerpt + explanation) — see {@link ComposeAdvisoryCommentItem}.
    */
   advisoryComments?: ComposeAdvisoryCommentItem[];
+
+  /**
+   * task 032 (right-gutter comment layout) — the NDA-REVIEW Action's own top-level `overallRisk`
+   * string (the ledgered result's `{overallRisk, flaggedSections[]}` contract, task 020), carried
+   * verbatim alongside `advisoryComments` when `type === 'compose_advisory_comments'`. Coarse
+   * qualitative signal only (NEVER a numeric score, per ADR-039). Optional — an older emitter that
+   * hasn't wired this field simply omits it; the review-summary panel falls back to deriving it from
+   * `advisoryComments[].riskLevel` in that case (see `NdaReviewSummaryPanel.tsx`).
+   */
+  overallRisk?: string;
 }
 
 // ---------------------------------------------------------------------------

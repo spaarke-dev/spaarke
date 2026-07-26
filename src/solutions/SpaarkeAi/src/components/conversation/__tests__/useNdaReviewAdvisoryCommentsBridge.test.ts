@@ -55,6 +55,9 @@ describe('useNdaReviewAdvisoryCommentsBridge — shape detection + projection (t
     expect(event).toMatchObject({
       type: 'compose_advisory_comments',
       sessionId: 'sess-1',
+      // task 032 (right-gutter comment layout): the Action's own top-level overallRisk now rides the
+      // wire verbatim (previously typed on NdaReviewResult but dropped at dispatch time).
+      overallRisk: 'medium',
       advisoryComments: [
         {
           targetText: 'The receiving party shall retain confidential information indefinitely.',

@@ -81,6 +81,21 @@ export interface ComposeCommentThreadModel extends ComposeCommentAuthorStamp {
   resolved: boolean;
   /** Ordered replies — always rendered FLAT (see {@link ComposeCommentReply.parentReplyId}). */
   replies: ComposeCommentReply[];
+  /**
+   * task 032 (right-gutter comment layout) — optional NDA-REVIEW advisory metadata, carried through
+   * from {@link ../ComposeEditor.AdvisoryCommentInput} via `placeAdvisoryComments` →
+   * `useComposeCommentThreads.createThread`'s metadata parameter, so the right-rail gutter card can
+   * render a risk badge + section/standard citation without a side lookup. UI-ONLY — never written to
+   * native `w:comment` on save (the docx export functions below read only `author`/`text`/`timestamp`,
+   * so these fields are silently ignored there, by design). Absent for session (non-advisory) Comments
+   * panel threads, which never pass metadata to `createThread`.
+   */
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
+  riskLevel?: string;
+  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
+  sectionRef?: string;
+  /** Optional standard/playbook reference the flag cites. */
+  standardRef?: string;
 }
 
 /**
@@ -155,8 +170,14 @@ const COMMENT_ANCHOR_MARK_NAME = 'commentAnchor';
  * later edit deleted the anchored text. The caller treats a `null` result as "this thread's anchor no
  * longer exists," never guessing a replacement span (mirrors the op-log capture path's own
  * never-mis-map discipline in `stepOperationInterceptor.ts`).
+ *
+ * Exported (task 032, right-gutter comment layout): this is the SAME live-position-resolution
+ * primitive {@link composeSessionCommentThreadsToAnchoredComments} already uses for save-time export —
+ * `ComposeCommentGutter.tsx` reuses it verbatim to resolve each thread's CURRENT anchor span before
+ * calling `editor.view.coordsAtPos(span.from)` for its Y placement, rather than trusting the thread's
+ * stale, creation-time `anchorText` (ADR-049 "live position" constraint). No second implementation.
  */
-function findCommentAnchorRange(doc: PMNode, commentId: string): { from: number; to: number } | null {
+export function findCommentAnchorRange(doc: PMNode, commentId: string): { from: number; to: number } | null {
   let from: number | null = null;
   let to: number | null = null;
   doc.descendants((node, pos) => {

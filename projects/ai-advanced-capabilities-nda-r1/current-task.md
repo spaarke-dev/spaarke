@@ -25,6 +25,20 @@
   "Category=GoldenUtteranceEval"` → 101 total (9 new), 0 failed. Not env-blocked — fully
   mechanical/offline (Dataverse-stubbed), matching every sibling family's established
   "live" vocabulary in this suite.
+- 032 ✅ right-gutter comment layout (gate CLEAN) — new `ComposeCommentGutter.tsx`: right-rail
+  Fluent v9 cards per advisory thread, live position via exported `findCommentAnchorRange`
+  (task 040's primitive, never stale `anchorText`) + `coordsAtPos`, pure unit-tested
+  collision/stacking (`layoutCommentGutterCards`), reflow on transaction/scroll/resize.
+  Code-review caught + fixed a real bug: first-paint height estimate (96px) never got
+  re-measured past mount — added a requestAnimationFrame follow-up pass + regression test.
+  Metadata passthrough done: riskLevel/sectionRef/standardRef now flow
+  PaneEventTypes→ComposeWorkspace→placeAdvisoryComments→createThread→gutter risk badge
+  (previously dropped); overallRisk now rides the compose_advisory_comments wire
+  (useNdaReviewAdvisoryCommentsBridge dispatches the already-typed-but-dropped field),
+  NdaReviewSummaryPanel prefers it over the derived fallback. adr-check CLEAN
+  (ADR-049/021/030/012/039/040). Builds clean (AI.Widgets, Compose.Components, SpaarkeAi
+  surface-gate 0 new errors); 559/559 Compose.Components + 647/656 SpaarkeAi tests green
+  (9 pre-existing unrelated AiSessionProvider e2e failures, already logged below).
 - 040 ✅ comment-export wiring fix (gate CLEAN) — root cause: client sent `annotations`
   (DocxAnnotationInput, text-anchored); `SaveComposeDocumentBody` never deserialized that property
   (server only reads `comments`/ComposeAnchoredComment) — every comment silently dropped. Added
@@ -40,7 +54,6 @@
   data source, textPattern-anchored) — stale comments corrected, tracked as follow-on below.
 
 ## Remaining
-- 032 right-gutter layout (040 ✅ unblocks it — shares ComposeWorkspace; thread riskLevel/sectionRef through per gate022031 note)
 - 050 eval harness+rubric · 052 tenant-pin integration test (gated on tenant-pin fix)
 - 060 deploy (env-blocked) · 061 UI tests (env-blocked) · 090 wrap-up
 
@@ -50,7 +63,6 @@
 ## Follow-ons backlog (for 090 / deploy)
 - sprk_outputdeterminism Dataverse column + BFF read-path (make ADR-039 mode=data; today prompt-enforced)
 - ReasoningModel token-leak guard (resolver fallback if `#{...}#` unresolved) — deploy gate 060
-- overallRisk not on the compose_advisory_comments wire (030 derives client-side) — thread real field via PaneEventTypes
 - Definitive compressed publish-size measure at 060 (subagents' §10 method ≈51.29 MB, under 60)
 - DEF-11/DEF-13 AI-review-flag comments (FR-29 AnchoredAnnotation store, `textPattern`-anchored) do
   not export as native `w:comment` on Save — separate data source from task 040's session/advisory
@@ -65,7 +77,6 @@
 - Pre-existing unrelated test failures to note at 090: Services.Communication.* (5), three-pane-compose-coordination e2e (AiSessionProvider)
 
 ## Next action
-033 ✅, 051 ✅, 040 ✅ done (this pass). 032 is now unblocked (040 done) — next candidate. Check 050's
-status before assuming it's still in-flight (another wave agent may have landed it concurrently — see
-TASK-INDEX.md for current state). Hold 052 (tenant-pin decision). Then deploy/wrap-up (env-blocked →
-report + runbooks).
+033 ✅, 051 ✅, 040 ✅, 032 ✅ done (through this pass). Check 050's status before assuming it's still
+in-flight (another wave agent may have landed it concurrently — see TASK-INDEX.md for current state).
+Hold 052 (tenant-pin decision). Then deploy/wrap-up (env-blocked → report + runbooks).

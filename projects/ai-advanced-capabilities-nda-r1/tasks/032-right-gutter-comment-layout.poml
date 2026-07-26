@@ -3,8 +3,8 @@
   <metadata>
     <title>Right-gutter comment layout aligned to edits (ProseMirror coordsAtPos)</title>
     <phase>3 Compose Review Experience</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>clean</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield ProseMirror positioning: right-rail column, live-pos resolution, collision/stacking; moderate net-new UI.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,6 +116,33 @@
   <notes>
     Visual anchor: mirror TrackChangesExtension's positioning; the "clean and modern" bar is met by matching the
     existing Compose comment/edit styling, not a new house style.
+
+    COMPLETED (gate CLEAN). New `ComposeCommentGutter.tsx` (+ test) renders one Fluent v9 card per advisory-comment
+    thread in a right-rail column mounted inside `editorScrollWrap`. Live-position resolution reuses (exports)
+    `findCommentAnchorRange` from `ComposeCommentThread.types.ts` (task 040's primitive) — never reads the thread's
+    stale `anchorText`. Y placement via `editor.view.coordsAtPos(span.from)`, wrapped in try/catch (DOM measurement
+    can legitimately fail on a not-yet-painted view). Collision/stacking is a pure, unit-tested greedy pass
+    (`layoutCommentGutterCards`) using measured card heights, with a code-review-caught-and-fixed bug: the FIRST
+    paint estimates unmeasured heights at DEFAULT_CARD_HEIGHT_PX (96px); a follow-up `requestAnimationFrame` pass
+    now re-measures + re-stacks once cards mount, so the estimate never silently persists (regression test added).
+    Reflow wired to editor transactions, scroll, and window resize. `editorSurface` gets a `paddingRight` reserve
+    (`editorSurfaceWithGutter`) so cards sit in true margin space, not overlapping body text.
+
+    Metadata passthrough (gate022031 follow-ons): (a) `riskLevel`/`sectionRef`/`standardRef` now flow
+    PaneEventTypes.ComposeAdvisoryCommentItem -> ComposeWorkspace.onAdvisoryComments -> AdvisoryCommentInput ->
+    useComposeCommentThreads.createThread's new optional metadata param -> ComposeCommentThreadModel -> the
+    gutter card's risk badge + citation (previously only {targetText, explanation} crossed the placeAdvisoryComments
+    call). (b) the Action's real `overallRisk` field now rides the `compose_advisory_comments` wire
+    (useNdaReviewAdvisoryCommentsBridge.ts dispatches `result.overallRisk`, which was already typed but previously
+    dropped); NdaReviewSummaryPanel now prefers it over the client-derived `deriveOverallRisk` fallback.
+
+    Build/tests: Spaarke.AI.Widgets (typecheck+build clean), Spaarke.Compose.Components (typecheck+build clean,
+    559/559 tests green), SpaarkeAi (surface-gate typecheck 0 new errors, 647/656 tests green — the 9 failures are
+    the pre-existing, unrelated three-pane-compose-coordination.e2e AiSessionProvider gap already logged in
+    current-task.md). Self-gates: code-review found + fixed one real timing bug (collision math using a stale
+    height estimate past first paint); adr-check CLEAN (ADR-049/021/030/012/039/040 — no BFF touched, no new AI
+    dispatch). UI test (browser, --chrome) is env-blocked per project convention — not faked; see acceptance
+    self-check below.
   </notes>
 
   <execution>

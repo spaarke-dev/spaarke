@@ -22,18 +22,17 @@
  * output field (a per-run disclaimer would be ungrounded free-form text, breaking the closed
  * `{overallRisk, flaggedSections[]}` output contract tasks 020/030/031/041 share).
  *
- * OVERALL RISK — derivation note: the `compose_advisory_comments` event (task 031,
- * `PaneEventTypes.ts` `WorkspacePaneEvent.advisoryComments`) carries one entry per flagged section
- * but NOT the Action's top-level `overallRisk` field verbatim (that field never crossed the wire —
- * 031's bridge only projects `flaggedSections[]`). Rather than omit the "overall risk" the spec
- * requires (FR-07 / C7), this panel DERIVES it client-side as the maximum severity among the
- * rendered findings' `riskLevel` — the SAME rule the Action's own rubric uses to compute it
- * server-side ("Derive overallRisk from the flagged findings — it is at least as severe as the most
- * severe finding", `nda-review.action.json` systemPrompt). The banner is labelled "Overall risk
- * (from findings)" so it is never mistaken for a distinct server-asserted value. A follow-on to
- * thread the Action's own `overallRisk` string across the same event (making this derivation
- * unnecessary) is a natural next step once a project owns `PaneEventTypes.ts` again — out of this
- * task's file scope (Compose.Components client only).
+ * OVERALL RISK — task 032 (right-gutter comment layout) threaded the Action's own `overallRisk`
+ * string across the wire (the `compose_advisory_comments` event now carries it —
+ * `useNdaReviewAdvisoryCommentsBridge.ts` reads `result.overallRisk`, which it already typed but
+ * previously dropped when dispatching). This panel now PREFERS the real, server-asserted
+ * `overallRisk` prop when present; it falls back to deriving the max severity among the rendered
+ * findings' `riskLevel` (the SAME rule the Action's own rubric uses server-side — "Derive overallRisk
+ * from the flagged findings — it is at least as severe as the most severe finding",
+ * `nda-review.action.json` systemPrompt) only when the real field is unavailable (an older event
+ * payload, or a caller that hasn't wired the field). The banner label distinguishes the two: "Overall
+ * risk" for the real field, "Overall risk (from findings)" for the derived fallback — never conflating
+ * a derived value with a server-asserted one.
  *
  * Component justification (CLAUDE.md §11):
  *   - Existing: `ComposeCommentThread`/`ComposeFindReplace` are the only docked panels in Compose;
@@ -151,8 +150,13 @@ function isRiskSeverity(value: string | undefined): value is RiskSeverity {
   return value !== undefined && (RISK_SEVERITY_ORDER as readonly string[]).includes(value);
 }
 
-/** Maps a riskLevel/overallRisk string to the Fluent v9 semantic Badge color (ADR-021 — no hex). */
-function riskBadgeColor(risk: string | undefined): 'success' | 'warning' | 'severe' | 'danger' | 'subtle' {
+/**
+ * Maps a riskLevel/overallRisk string to the Fluent v9 semantic Badge color (ADR-021 — no hex).
+ * Exported (task 032, right-gutter comment layout) — `ComposeCommentGutter.tsx` reuses this SAME
+ * mapping for its per-card risk badge rather than re-deriving the severity→color rule a second time
+ * (CLAUDE.md §11 reuse-first).
+ */
+export function riskBadgeColor(risk: string | undefined): 'success' | 'warning' | 'severe' | 'danger' | 'subtle' {
   switch (risk) {
     case 'Low':
       return 'success';
@@ -218,15 +222,24 @@ export interface NdaReviewSummaryPanelProps {
    * criterion).
    */
   placementFailureCount?: number;
+  /**
+   * task 032 — the NDA-REVIEW Action's own server-asserted `overallRisk` (from the
+   * `compose_advisory_comments` event's `overallRisk` field). When present, PREFERRED over the
+   * client-derived {@link deriveOverallRisk} fallback — see the file header's derivation note.
+   */
+  overallRisk?: string;
 }
 
 export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.JSX.Element | null {
-  const { open, onClose, findings, placementFailureCount } = props;
+  const { open, onClose, findings, placementFailureCount, overallRisk: serverOverallRisk } = props;
   const styles = useStyles();
 
   if (!open) return null;
 
-  const overallRisk = deriveOverallRisk(findings);
+  // task 032: prefer the real, server-asserted field; fall back to the client-side derivation only
+  // when it's unavailable (see the file header's OVERALL RISK note).
+  const overallRisk = serverOverallRisk ?? deriveOverallRisk(findings);
+  const overallRiskIsDerived = serverOverallRisk === undefined;
 
   return (
     <div
@@ -256,7 +269,7 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
 
       <div className={styles.overallRow}>
         <Text weight="semibold" size={300}>
-          Overall risk (from findings):
+          {overallRiskIsDerived ? 'Overall risk (from findings):' : 'Overall risk:'}
         </Text>
         {overallRisk ? (
           <Badge appearance="tint" color={riskBadgeColor(overallRisk)} data-testid="nda-review-summary-overall-risk">
