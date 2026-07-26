@@ -53,7 +53,7 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
       <file>.claude/constraints/ai.md</file>
     </files>

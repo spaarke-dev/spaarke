@@ -63,9 +63,9 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-040-session-ledger.md</file>
-      <file>.claude/adr/ADR-016-rate-limits-model-tier.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
       <file>.claude/constraints/ai.md</file>
       <file>.claude/patterns/ai/analysis-scopes.md</file>
       <file>.claude/skills/jps-action-create/SKILL.md</file>

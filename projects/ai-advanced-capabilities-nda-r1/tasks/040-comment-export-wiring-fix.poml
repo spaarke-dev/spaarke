@@ -63,7 +63,7 @@
   <knowledge>
     <files>
       <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
-      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>

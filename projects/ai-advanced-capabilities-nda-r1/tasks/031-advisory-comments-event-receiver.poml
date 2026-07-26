@@ -62,7 +62,7 @@
       <file>.claude/adr/ADR-030-pane-event-bus.md</file>
       <file>.claude/adr/ADR-040-session-ledger.md</file>
       <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
-      <file>.claude/adr/ADR-033-doc-stream-sse.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
       <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
     </files>
     <patterns>

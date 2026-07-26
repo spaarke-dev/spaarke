@@ -45,8 +45,8 @@
       ADR Tensions section (ADR-039 → Path B).
     </background>
     <relevant-files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
-      <file>docs/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/INDEX.md</file>
       <file>.claude/CHANGELOG.md</file>
       <file>projects/ai-advanced-capabilities-nda-r1/spec.md</file>
@@ -62,8 +62,8 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
-      <file>docs/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-040-session-ledger.md</file>
       <file>.claude/constraints/ai.md</file>
       <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
@@ -79,7 +79,7 @@
   <steps mode="prescriptive">
     <step order="1">Read both ADR-039 versions and the spec.md ADR Tensions section to capture the exact MUST/MUST NOT rules the advisory path challenges.</step>
     <step order="2">Draft the amendment: a named "Advisory (probabilistic) tier" alongside the existing "Deterministic (fact) tier", with a decision rule for which tier an Action runs under, and the advisory tier's non-negotiables (citation-required, decline-if-unverifiable, not-legal-advice, ledger-still-applies).</step>
-    <step order="3">Apply the amendment to the full `docs/adr/ADR-039-grounded-execution.md` (rationale + examples) and the concise `.claude/adr/ADR-039-grounded-execution.md` (MUST/MUST NOT only).</step>
+    <step order="3">Apply the amendment to the full `docs/adr/ADR-039-grounded-execution-closed-catalogs.md` (rationale + examples) and the concise `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md` (MUST/MUST NOT only).</step>
     <step order="4">Update `.claude/adr/INDEX.md` if the ADR summary line changed; add a dated entry to `.claude/CHANGELOG.md`.</step>
     <step order="5">Run adr-check against the amended ADR to confirm internal consistency.</step>
     <step order="6">Update TASK-INDEX.md: mark 001 ✅ completed.</step>
@@ -95,8 +95,8 @@
   </tools>
 
   <outputs>
-    <output type="docs">.claude/adr/ADR-039-grounded-execution.md</output>
-    <output type="docs">docs/adr/ADR-039-grounded-execution.md</output>
+    <output type="docs">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</output>
+    <output type="docs">docs/adr/ADR-039-grounded-execution-closed-catalogs.md</output>
     <output type="docs">.claude/CHANGELOG.md</output>
   </outputs>
 

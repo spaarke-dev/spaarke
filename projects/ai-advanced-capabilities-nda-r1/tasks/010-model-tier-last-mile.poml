@@ -62,8 +62,8 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-016-rate-limits-model-tier.md</file>
-      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>.claude/constraints/ai.md</file>

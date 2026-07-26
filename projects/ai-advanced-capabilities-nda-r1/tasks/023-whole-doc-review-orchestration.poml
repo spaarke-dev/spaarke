@@ -62,11 +62,11 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-040-session-ledger.md</file>
       <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
       <file>.claude/adr/ADR-037-multinode-output-composition.md</file>
-      <file>.claude/adr/ADR-013-ai-facade.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>.claude/patterns/ai/node-executor-authoring.md</file>
       <file>docs/adr/ADR-038-testing-strategy.md</file>

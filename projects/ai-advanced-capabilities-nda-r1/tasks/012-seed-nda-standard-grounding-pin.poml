@@ -61,7 +61,7 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-015-ai-governance.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
       <file>.claude/patterns/ai/indexing-pipeline.md</file>
       <file>.claude/patterns/ai/node-executor-authoring.md</file>
       <file>.claude/skills/add-reference-to-index/SKILL.md</file>

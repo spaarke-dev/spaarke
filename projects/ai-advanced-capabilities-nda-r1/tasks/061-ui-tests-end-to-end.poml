@@ -53,7 +53,7 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
       <file>.claude/skills/ui-test/SKILL.md</file>
     </files>
   </knowledge>

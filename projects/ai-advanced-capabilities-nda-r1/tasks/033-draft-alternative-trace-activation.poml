@@ -56,7 +56,7 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
       <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
     </files>

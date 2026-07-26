@@ -59,7 +59,7 @@
   <knowledge>
     <files>
       <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
-      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
       <file>.claude/adr/ADR-030-pane-event-bus.md</file>
       <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
       <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>

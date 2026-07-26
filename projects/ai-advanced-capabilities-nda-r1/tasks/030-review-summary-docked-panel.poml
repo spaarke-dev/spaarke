@@ -57,8 +57,8 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-021-fluent-v9.md</file>
-      <file>.claude/adr/ADR-012-shared-lib.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
       <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
       <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
       <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
