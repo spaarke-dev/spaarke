@@ -149,6 +149,22 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     surface: 'my-tasks-list',
     title: 'My Tasks',
   },
+  // ai-advanced-capabilities-nda-r1 task 022: the `nda-review` capability's surface identity —
+  // opens the registered `compose` workspace widget (the SAME widget type every other
+  // Compose-tab open in SpaarkeAi already dispatches, e.g. ConversationPane.mountFileInCompose /
+  // handleWelcomeCompose). The `nda-review` Binding is Informational (not SurfaceLaunch — task
+  // 023's fan-out design keeps the review a single-run/two-view capability), so the CLICK-path
+  // "Review an NDA" card does not route through this registry today (it needs a per-click
+  // DYNAMIC file id, which the registry's static `widgetData` cannot carry — it calls
+  // `mountFileInCompose` directly instead). This entry is still authored here — "ready either
+  // way" per the `create-matter`/`create-task` precedent above — so a FUTURE TEXT/agent-path
+  // `surface_launch` dispatch for `nda-review` resolves the SAME "compose" surface identity from
+  // this ONE place (ADR-039 §2 — surface identity stays in code, never duplicated).
+  'nda-review': {
+    kind: 'workspace-tab',
+    surface: 'compose',
+    title: 'Compose',
+  },
 };
 
 /**

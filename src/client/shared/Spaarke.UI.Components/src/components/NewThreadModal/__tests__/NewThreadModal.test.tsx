@@ -153,7 +153,7 @@ describe('NewThreadModal — create a record-anchored thread', () => {
 
     // Drive the record picker (default type = Matter → Select Record → resolves to the fixed record).
     fireEvent.click(screen.getByRole('button', { name: /select record/i }));
-    await waitFor(() => expect((nav.openLookup as jest.Mock)).toHaveBeenCalled());
+    await waitFor(() => expect(nav.openLookup as jest.Mock).toHaveBeenCalled());
 
     clickCreate();
 

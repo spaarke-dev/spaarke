@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Schemas;
@@ -25,6 +27,7 @@ public sealed class ActionRunner : IActionRunner
     private readonly IOpenAiClient _openAi;
     private readonly PromptSchemaRenderer _promptRenderer;
     private readonly ILogger<ActionRunner> _logger;
+    private readonly DocumentIntelligenceOptions _modelOptions;
 
     private const string PlaceholderExtractedText = "{{document.extractedText}}";
 
@@ -48,11 +51,16 @@ public sealed class ActionRunner : IActionRunner
     public ActionRunner(
         IOpenAiClient openAi,
         PromptSchemaRenderer promptRenderer,
-        ILogger<ActionRunner> logger)
+        ILogger<ActionRunner> logger,
+        IOptions<DocumentIntelligenceOptions>? modelOptions = null)
     {
         _openAi = openAi;
         _promptRenderer = promptRenderer;
         _logger = logger;
+        // ai-advanced-capabilities-nda-r1 task 010: optional with a default-constructed fallback so the
+        // 3-arg constructor call sites already in the seam-test suite (which do not exercise model-tier
+        // resolution) keep compiling unchanged; production DI always resolves the real bound options.
+        _modelOptions = modelOptions?.Value ?? new DocumentIntelligenceOptions();
     }
 
     /// <summary>
@@ -101,6 +109,13 @@ public sealed class ActionRunner : IActionRunner
                 $"linear consumers require a constrained-decoding schema.");
         }
 
+        // ai-advanced-capabilities-nda-r1 task 010: resolve the Action's model tier to a concrete
+        // deployment name — the last-mile completion of the previously dead-ended AiModelTier vocabulary
+        // (ADR-016: catalog stores intent, code/config stores the deployment mapping). Mirrors the
+        // Temperature plumbing below (action column → local variable → GetStructuredCompletionRawAsync
+        // argument), just for `model` instead of `temperature`.
+        var deploymentName = ModelTierDeploymentResolver.Resolve(action.ModelTier, _modelOptions);
+
         var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand);
         // D6 / PE-D8(b) (F-1/F-2/F-7 envelope-convergence task): render the bound envelope's grounding
         // context into the dispatched capability's prompt — the SAME BoundInputs the dispatch path already
@@ -118,22 +133,23 @@ public sealed class ActionRunner : IActionRunner
         // envelope flows to the executor (ADR-043: the completion consumes context-via-envelope).
         _logger.LogInformation(
             "Linear run: consumer={ConsumerType} action={ActionName} operandChannel={OperandChannel} " +
-            "operandKind={OperandKind} promptLen={PromptLen} temp={Temperature} context=[{ContextSummary}]",
+            "operandKind={OperandKind} promptLen={PromptLen} temp={Temperature} modelTier={ModelTier} " +
+            "deployment={Deployment} context=[{ContextSummary}]",
             context.ConsumerType, action.Name, inputs.Operand.Channel, inputs.Operand.Kind,
-            prompt.Length, temperature,
+            prompt.Length, temperature, action.ModelTier, deploymentName,
             ContextEnvelopeReferenceConsumer.RenderPresenceSummary(inputs.Context));
 
-        // FR-P3-01 (task 040): the per-consumer ModelDeployments/MaxOutputTokens config
-        // maps were retired with the LinearConsumers appsettings block. Model intent lives
-        // on the catalog (Binding.EffectiveModelTier / Action model tier); tier→deployment
-        // mapping is a deferred enhancement per ADR-016 — the platform default deployment
-        // applies. The output cap is the fixed executor ceiling (see
+        // FR-P3-01 (task 040): the per-consumer ModelDeployments/MaxOutputTokens config map was retired
+        // with the LinearConsumers appsettings block. Model intent lives on the catalog
+        // (Binding.EffectiveModelTier / Action.ModelTier); tier→deployment mapping is resolved just
+        // above via ModelTierDeploymentResolver (task 010 — completes the ADR-016 deferred enhancement
+        // this comment used to describe). The output cap is still the fixed executor ceiling (see
         // MaxOutputTokensCeiling remarks — replaces the live per-consumer env override).
         var rawJson = await _openAi.GetStructuredCompletionRawAsync(
             prompt,
             jsonSchema,
             schemaName,
-            model: null,
+            model: deploymentName,
             maxOutputTokens: MaxOutputTokensCeiling,
             temperature: temperature,
             cancellationToken: cancellationToken);

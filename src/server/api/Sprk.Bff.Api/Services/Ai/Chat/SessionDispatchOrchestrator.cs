@@ -540,12 +540,29 @@ public class SessionDispatchOrchestrator
             // was written (e.g. the session vanished from the store mid-turn).
             session = boundInputs.UpdatedSession ?? session;
 
+            // ai-advanced-capabilities-nda-r1 task 011 (corrected by the task-011 quality-gate fix bundle):
+            // compose the per-request tier override (if any) OVER the resolved Binding's STORED override,
+            // falling back to the freshly-fetched `action.ModelTier` (from `_scopeResolver.GetActionAsync`
+            // just above) rather than the Binding's own `EffectiveModelTier`/`ActionModelTier`. The Binding
+            // comes from ConsumerRoutingService, which caches with a TTL (up to 5 min) — its `ActionModelTier`
+            // snapshot can go stale relative to the Action row fetched fresh on THIS request. Using
+            // `binding.ModelTierOverride` (the Binding's own maker-set override, not derived from the
+            // Action) avoids that staleness while preserving the same precedence: request override, then
+            // Binding override, then the Action's own (fresh) default tier. Substituting onto a COPY of
+            // `action` keeps ModelTierDeploymentResolver (inside ActionRunner) the ONE resolver — no second
+            // routing mechanism (ADR-039). When both overrides are unset this is a no-op (`effectiveAction`
+            // reference-equals `action`'s values) — byte-identical to pre-task-011 behavior.
+            var effectiveModelTier = request.ModelTierOverride ?? binding.ModelTierOverride ?? action.ModelTier;
+            var effectiveAction = effectiveModelTier != action.ModelTier
+                ? action with { ModelTier = effectiveModelTier }
+                : action;
+
             output = default;
             string? llmError = null;
             try
             {
                 output = await _actionRunner
-                    .RunAsync(action, boundInputs, runContext, cancellationToken)
+                    .RunAsync(effectiveAction, boundInputs, runContext, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -1140,6 +1157,19 @@ public class SessionDispatchOrchestrator
 /// uncertainty handling; a firing numeric/multi-call producer is a documented follow-on that drops in
 /// behind this seam without a spine change. Default <c>false</c> = confident (backward-compatible).
 /// </param>
+/// <param name="ModelTierOverride">
+/// ai-advanced-capabilities-nda-r1 task 011: per-run tier override selected by the Assistant's runtime
+/// model-tier picker. Composes with (does not replace) the ONE tier→deployment resolver
+/// (<see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/>, task 010; single
+/// dispatch surface, no second routing mechanism — ADR-039): when set, it wins over the resolved Binding's
+/// own <see cref="Binding.ModelTierOverride"/>, which in turn wins over the freshly-fetched Action's
+/// default tier (NOT the Binding's cached <see cref="Binding.EffectiveModelTier"/>/<see cref="Binding.ActionModelTier"/>
+/// snapshot — ConsumerRoutingService caches the Binding with a TTL, so falling back to the Action row
+/// fetched on this request avoids a stale-tier substitution; corrected by the task-011 quality-gate fix
+/// bundle). This ephemeral per-request value is never persisted to the <c>sprk_playbookconsumer</c> row.
+/// Default <c>null</c> = no override; behavior is byte-identical to pre-task-011 (the Action's own tier
+/// governs).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
@@ -1147,7 +1177,8 @@ public sealed record SessionDispatchRequest(
     JsonElement? Args,
     string? CorrelationId = null,
     string? ActingUserEmail = null,
-    bool DispatchUncertain = false);
+    bool DispatchUncertain = false,
+    AiModelTier? ModelTierOverride = null);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:

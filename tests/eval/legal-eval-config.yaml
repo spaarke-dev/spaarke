@@ -1,0 +1,258 @@
+# NDA-REVIEW Advisory-Quality + Citation-Accuracy Evaluation Configuration
+# Grades task 020's NDA-REVIEW Action (infra/dataverse/actions/nda-review.action.json) against the
+# closed set authored in tests/eval/cases/, per project ai-advanced-capabilities-nda-r1 task 050.
+#
+# Follows the repo's existing promptflow eval-config convention
+# (infrastructure/ai-foundry/evaluation/legal-eval-config.yaml -- a DIFFERENT, general-purpose
+# legal-analysis eval for case/statute citation formatting) but is scoped specifically to the
+# NDA-REVIEW closed set + the ADR-039 advisory-mode grounding invariants (verbatim quote + real
+# B1-B16 clause per finding), not general legal-citation-format checking.
+#
+# ADR-038: this is an OBSERVATION harness. It reports advisory-quality and citation-accuracy
+# scores; it is NOT part of the .NET unit/seam pyramid and does not gate via the 7 KEEP-path
+# mechanism. It is its own graduation instrument for the project's north star (spec NFR-01).
+# ADR-014/ADR-015: no real client NDAs -- all 9 cases below are synthetic, jurisdiction-neutral,
+# with fictitious party names. Eval results (once live-run) are retained per the same 90-day /
+# no-content-logging discipline as infrastructure/ai-foundry/evaluation/legal-eval-config.yaml.
+$schema: https://azuremlschemas.azureedge.net/promptflow/latest/Evaluation.schema.json
+
+name: nda-review-advisory-eval
+display_name: "NDA-REVIEW Advisory Quality + Citation Accuracy Evaluation"
+description: >
+  Evaluates task 020's NDA-REVIEW Action against a closed set of 6 synthetic NDAs with documented,
+  planted deviations from the Spaarke NDA standard (B1-B16), plus 3 negative/authorization cases
+  (non-NDA decline, unreadable input, unauthorized caller). Operationalizes spec NFR-01
+  ("advisory quality >= a strong general LLM") as a concrete planted-issue coverage + citation
+  -accuracy + hallucination-guard + risk-band-accuracy rubric -- see `rubric` below.
+
+# The action under test (for traceability -- this eval is NOT wired to invoke it automatically;
+# see "Running the live eval" in README.md for the exact env-blocked run command).
+target_action:
+  actionCode: nda-review
+  source: infra/dataverse/actions/nda-review.action.json
+  modelTier: Reasoning
+  outputDeterminism: advisory
+
+# The closed set (spec + POML constraint: exhaustive, not just happy-path). Each `nda` case
+# carries plantedIssues -- deviations the authors deliberately wrote into the synthetic NDA text,
+# each traceable to a real B-clause + an expected severity floor. Each `negative` case has no
+# planted issues; it exists to catch over-eager / under-gated behavior instead.
+cases:
+  - caseId: NDA-01
+    type: nda
+    documentPath: cases/nda-01-clean-mutual.md
+    description: "Clean, standard mutual NDA -- compliant with nearly every B-clause. The baseline negative control: a strong reviewer should find nothing material."
+    plantedIssues: []  # deliberately none counted -- see "expected" note below
+    expected:
+      overallRiskBand: Low
+      maxFindings: 1  # tolerate at most one trivial B16 drafting nit (entity-name comma/format variance); zero is also acceptable
+      minHighOrCriticalFindings: 0
+
+  - caseId: NDA-02
+    type: nda
+    documentPath: cases/nda-02-narrow-ci-oneway.md
+    description: "Marking-only Confidential Information definition -- no oral/unmarked protection."
+    plantedIssues:
+      - standardRef: B3
+        severityFloor: High
+        description: "CI definition gated on written 'marked Confidential' (or a follow-up marked writing for oral disclosures) -- no catch-all for unmarked/oral information."
+    expected:
+      overallRiskBand: High
+      minHighOrCriticalFindings: 1
+
+  - caseId: NDA-03
+    type: nda
+    documentPath: cases/nda-03-hidden-restrictive-covenant.md
+    description: "Non-solicit covenant smuggled into the Miscellaneous section; no injunctive-relief remedy."
+    plantedIssues:
+      - standardRef: B11
+        severityFloor: High
+        description: "2-year employee/customer non-solicit hidden in Section 10 (Miscellaneous), never called out as a restrictive covenant."
+      - standardRef: B13
+        severityFloor: Medium
+        description: "Remedies section (Section 11) omits any injunctive/equitable-relief provision -- 'all remedies available at law or in equity' only."
+    expected:
+      overallRiskBand: High
+      minHighOrCriticalFindings: 1
+
+  - caseId: NDA-04
+    type: nda
+    documentPath: cases/nda-04-short-term-broad-residuals.md
+    description: "Confidentiality period too short for sensitive info; broad residuals clause sweeping in trade secrets."
+    plantedIssues:
+      - standardRef: B8
+        severityFloor: High
+        description: "Confidentiality obligations terminate just 6 months after a 1-year term -- too short for sensitive information, no distinct trade-secret survival."
+      - standardRef: B10
+        severityFloor: High
+        description: "Unaided-memory residual-knowledge clause explicitly includes 'any trade secrets of Discloser' with no restriction or accounting."
+    expected:
+      overallRiskBand: High
+      minHighOrCriticalFindings: 2
+
+  - caseId: NDA-05
+    type: nda
+    documentPath: cases/nda-05-drafting-errors.md
+    description: "Drafting-integrity errors (inconsistent defined term, broken cross-reference) plus a missing backup/legal-hold carve-out."
+    plantedIssues:
+      - standardRef: B16
+        severityFloor: Low
+        description: "Inconsistent defined term: preamble defines 'the Disclosing Party' but Section 2 and 5 refer to 'Discloser' / 'the Discloser', never defined."
+      - standardRef: B16
+        severityFloor: Low
+        description: "Broken cross-reference: Section 5 cites 'as set forth in Section 9 above' but the Agreement has only 8 sections."
+      - standardRef: B9
+        severityFloor: Medium
+        description: "Return/destruction clause (Section 6) has no carve-out for backup, archival, or legal-hold copies."
+    expected:
+      overallRiskBand: Medium
+      minHighOrCriticalFindings: 0
+
+  - caseId: NDA-06
+    type: nda
+    documentPath: cases/nda-06-critical-landmine.md
+    description: "Strict liability standard of care + automatic injunction/broad indemnity + asymmetric dispute resolution + hidden non-compete -- combined, a sign-blocking NDA."
+    plantedIssues:
+      - standardRef: B5
+        severityFloor: High
+        description: "Recipient 'strictly liable ... regardless of the degree of care exercised or the presence or absence of fault' -- exceeds the own-information/reasonable-care standard."
+      - standardRef: B13
+        severityFloor: High
+        description: "Automatic injunctive relief with no requirement to prove irreparable harm, post bond, or give notice, plus unlimited indemnification of legal fees."
+      - standardRef: B15
+        severityFloor: Medium
+        description: "Governing law and forum selected unilaterally by Discloser 'in its sole discretion at the time any dispute arises' -- asymmetric dispute process."
+      - standardRef: B11
+        severityFloor: High
+        description: "3-year non-compete hidden in the Miscellaneous section."
+    expected:
+      overallRiskBand: Critical
+      minHighOrCriticalFindings: 3
+
+  # --- Negative / authorization cases (POML constraint: exhaustive, not just happy-path) ---
+
+  - caseId: NEG-01-non-nda
+    type: negative-non-nda
+    documentPath: cases/neg-01-non-nda-lease.md
+    description: "A residential lease agreement -- not an NDA at all. No B-clause has anything to attach to."
+    plantedIssues: []
+    expected:
+      overallRiskBand: Low
+      maxFindings: 0
+      minHighOrCriticalFindings: 0
+      decline: true
+      note: >
+        ASPIRATIONAL / known-gap case: nda-review.action.json's systemPrompt has no explicit
+        "this is not an NDA -- decline" instruction (it only says decline UNGROUNDED findings).
+        A capable model applying the B1-B16 rubric literally to a non-NDA document could flag
+        many "missing clause" findings (no CI definition, no carve-outs, etc.) that are technically
+        grounded (the clauses really are absent) but conceptually wrong (this was never meant to be
+        an NDA). The rubric's hallucination_guard dimension (below) is the mechanical backstop:
+        any High/Critical finding on this case is a hard rubric FAIL, forcing this gap to surface
+        rather than silently pass. See README.md "Known limitation" for the recommended follow-on
+        (an explicit document-type gate), out of scope for this eval-authoring task.
+
+  - caseId: NEG-02-unreadable
+    type: negative-unreadable
+    documentPath: cases/neg-02-unreadable-input.txt
+    description: "Garbled/OCR-failure text simulating a failed extraction upstream of the Action."
+    plantedIssues: []
+    expected:
+      pipelineErrorAcceptable: true  # ideal: upstream text-extraction rejects before the Action runs
+      overallRiskBand: Low            # if it DOES reach the Action, expect no fabricated analysis
+      maxFindings: 0
+      minHighOrCriticalFindings: 0
+
+  - caseId: NEG-03-unauthorized
+    type: negative-authorization
+    documentPath: cases/neg-03-unauthorized-user.md  # descriptor only -- not fed as documentText
+    description: "Caller lacking the AI-analysis entitlement attempts to invoke nda-review."
+    plantedIssues: []
+    expected:
+      httpStatus: [401, 403]
+      actionExecuted: false
+      azureOpenAiCallMade: false
+      note: >
+        Not graded by metrics/citation_accuracy.py (no documentText / no LLM output exists for
+        this case). Declared here for closed-set completeness per the task's exhaustiveness
+        constraint; a live assertion belongs in tests/integration/auth/** (ADR-038 KEEP path),
+        out of scope for this eval-authoring task.
+
+# Evaluation metrics to compute (promptflow custom-metric convention, matches
+# infrastructure/ai-foundry/evaluation/legal-eval-config.yaml's citation_accuracy entry).
+metrics:
+  - name: citation_accuracy
+    description: >
+      For every flaggedSections[] finding: is quotedText a verbatim (whitespace-normalized)
+      excerpt of the source documentText, AND does standardRef resolve to a real B1-B16 clause?
+      Score = passing findings / total findings per case (1.0 vacuously for zero-finding cases).
+    type: custom
+    script: metrics/citation_accuracy.py
+    threshold: 0.95  # rubric.dimensions.citation_accuracy below; stricter than the general legal
+                      # eval's 0.80 because every NDA-REVIEW finding is machine-checkable exactly
+                      # (verbatim substring + closed B1-B16 enum), unlike free-form case citations.
+
+# Advisory-quality rubric -- operationalizes spec NFR-01 ("advisory quality >= a strong general
+# LLM") as a CONCRETE comparison + pass threshold, per this task's binding constraint
+# ("the rubric must operationalize ... not a vibe check").
+rubric:
+  name: nda-review-advisory-quality
+  nfr: NFR-01
+  comparison_baseline: >
+    Strong-general-LLM proxy: the planted issues authored into NDA-02..NDA-06 (12 total) are
+    exactly the deviations from the Spaarke NDA standard that a competent legal reviewer -- or a
+    frontier general-purpose LLM (Claude/ChatGPT-class) given the same standard and the same
+    document -- would be expected to flag; each is a real, citable B-clause departure, not an
+    edge-case technicality. NDA-REVIEW's recall against this planted-issue ground truth is the
+    empirical, reproducible proxy for "at least as good as a strong general LLM would do against
+    the same standard," substituting for a live side-by-side run (env-blocked in this repo -- no
+    Azure OpenAI credentials). Once Azure OpenAI access is available, supplement this proxy with an
+    actual side-by-side run (same 6 NDAs + same standard prompt fed to a general-purpose frontier
+    model) and compare planted-issue coverage head-to-head; this config's `cases:` section is
+    reusable verbatim for that comparison run.
+  overall_pass_condition: "ALL FOUR dimension thresholds below hold simultaneously."
+  dimensions:
+    - name: planted_issue_coverage
+      definition: >
+        A planted issue is CAUGHT if flaggedSections contains an entry whose standardRef matches
+        the planted B-clause AND whose riskLevel is >= the planted severityFloor
+        (Low < Medium < High < Critical). Coverage = caught / 12 (the total planted issues across
+        NDA-02..NDA-06; NDA-01's optional drafting nit is not counted -- it is the clean baseline).
+      threshold: ">= 0.90 (>= 11 of 12 planted issues caught)"
+    - name: citation_accuracy
+      definition: "See the `metrics.citation_accuracy` entry above -- computed by metrics/citation_accuracy.py across all 6 NDA cases' findings."
+      threshold: ">= 0.95"
+    - name: hallucination_guard
+      definition: "On NEG-01 (non-NDA lease), zero High or Critical findings are permitted."
+      threshold: "0 tolerance -- any single High/Critical finding on NEG-01 is an automatic rubric FAIL"
+    - name: overall_risk_band_accuracy
+      definition: >
+        Predicted overallRisk is within +/-1 severity step of the documented expected band
+        (Low < Medium < High < Critical) for the 6 NDA cases (e.g. NDA-06 expected Critical; High
+        or Critical both pass, Medium or below fails).
+      threshold: ">= 0.83 (>= 5 of 6 NDAs within one step)"
+
+# Aggregation settings (matches infra ai-foundry convention).
+aggregation:
+  method: mean
+  include_variance: true
+  include_range: true
+
+# Alert thresholds -- same posture as the general legal eval (ADR-014/015 evidence base).
+alerts:
+  on_threshold_breach: true
+  on_regression:
+    enabled: true
+    percentage: 5
+
+# Data governance (ADR-014, ADR-015).
+data_governance:
+  results_workspace: sprkspaarkedev-aif-proj
+  retention_days: 90
+  log_content: false
+  synthetic_data_only: true  # all 9 cases are fictitious parties/terms -- no real client NDAs
+
+# Baseline comparison -- enable after the first live run establishes a baseline (env-blocked today).
+baseline:
+  path: baselines/nda-review-v1-baseline.json
+  compare_enabled: false

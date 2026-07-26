@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Grounding tenant-pin integration test (NFR-06)</title>
+    <phase>5 Eval &amp; Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Integration test guarding a known failure mode (tenant-pin returns zero chunks); TEST-MODIFYING → gates apply.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Integration test authoring against the verified pin from task 012 with a clear assertion contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Integration test; independent of 050/051.</parallel-reason>
+    <deps>012</deps>
+    <tags>testing, integration-test, ai</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Promote the NFR-06 tenant-pin verification from task 012 into a standing integration test: assert that under
+    NDA-REVIEW's execution tenant, grounding retrieval returns non-zero chunks from the seeded NDA standard — so a
+    future tenant/filter change that silently zeroes grounding fails CI instead of shipping.
+  </prompt>
+
+  <role>
+    SPAARKE AI test engineer. Expert in ReferenceRetrievalService grounding + the Azure AI Search tenant filter.
+  </role>
+
+  <goal>
+    An integration test asserts non-zero grounding chunks for the NDA standard under the execution tenant; it fails
+    if the tenant pin regresses.
+  </goal>
+
+  <context>
+    <background>
+      NFR-06: reference docs seeded tenantId="system"; retrieval filters context.TenantId. Task 012 verified/fixed
+      the pin; this test makes it durable. Filter on documentType (post-rename), not domain.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+      <file>tests/integration/ (grounding tenant-pin)</file>
+    </relevant-files>
+    <dependencies>012 (pin verified/fixed + standard seeded).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">The test asserts non-zero retrieved chunks for the seeded NDA standard under the execution tenant; a zero result is a hard failure.</constraint>
+    <constraint source="ADR-038">KEEP-path integration test; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Author an integration test that runs grounding retrieval for the NDA standard under NDA-REVIEW's execution tenant.</step>
+    <step order="2">Assert the result is non-zero and includes a chunk from the seeded standard source.</step>
+    <step order="3">Confirm the test fails if the tenant filter or source tenant is changed to a mismatch.</step>
+    <step order="4">Run the test; update TASK-INDEX.md: mark 052 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run integration tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/ (grounding tenant-pin, NFR-06)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given NDA-REVIEW's execution tenant, when grounding runs, then retrieval returns non-zero chunks including the seeded NDA standard.</criterion>
+    <criterion testable="true">Given a simulated tenant/filter mismatch, when the test runs, then it fails (regression guard proven).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Durable guard for the project's highest-risk silent failure mode.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; TEST-MODIFYING rigor → Step 9.5 gates apply.</protocol>
+  </execution>
+</task>

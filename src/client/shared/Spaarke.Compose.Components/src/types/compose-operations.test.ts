@@ -28,11 +28,37 @@ import { COMPOSE_OPERATION_SCHEMA_VERSION as VERSION_VIA_CONTRACTS } from './com
 /** A canonical op log exercising ALL TEN op types + the structural-op second-paragraph references. */
 function buildCanonicalLog(): ComposeOperationLog {
   const operations: ComposeOperation[] = [
-    { type: 'insertText', paraId: '0A1B2C3D', at: { runIndex: 0, offset: 5 }, text: 'hello', marks: ['Bold', 'Italic'] },
-    { type: 'deleteRange', paraId: '0A1B2C3D', range: { start: { runIndex: 0, offset: 2 }, end: { runIndex: 1, offset: 4 } } },
-    { type: 'replaceRange', paraId: '1122AABB', range: { start: { runIndex: 0, offset: 0 }, end: { runIndex: 0, offset: 3 } }, text: 'world', marks: ['Underline'] },
-    { type: 'setMark', paraId: '1122AABB', range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 6 } }, mark: 'Bold' },
-    { type: 'clearMark', paraId: '1122AABB', range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 6 } }, mark: 'Italic' },
+    {
+      type: 'insertText',
+      paraId: '0A1B2C3D',
+      at: { runIndex: 0, offset: 5 },
+      text: 'hello',
+      marks: ['Bold', 'Italic'],
+    },
+    {
+      type: 'deleteRange',
+      paraId: '0A1B2C3D',
+      range: { start: { runIndex: 0, offset: 2 }, end: { runIndex: 1, offset: 4 } },
+    },
+    {
+      type: 'replaceRange',
+      paraId: '1122AABB',
+      range: { start: { runIndex: 0, offset: 0 }, end: { runIndex: 0, offset: 3 } },
+      text: 'world',
+      marks: ['Underline'],
+    },
+    {
+      type: 'setMark',
+      paraId: '1122AABB',
+      range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 6 } },
+      mark: 'Bold',
+    },
+    {
+      type: 'clearMark',
+      paraId: '1122AABB',
+      range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 6 } },
+      mark: 'Italic',
+    },
     { type: 'splitParagraph', paraId: 'DEADBEEF', at: { runIndex: 1, offset: 2 }, newParaId: 'CAFEF00D' },
     { type: 'mergeParagraph', paraId: 'CAFEF00D', targetParaId: 'DEADBEEF' },
     { type: 'insertParagraph', paraId: 'DEADBEEF', newParaId: '0BADF00D', position: 'After' },
@@ -108,7 +134,10 @@ describe('compose-operations schema (FR-11)', () => {
     it('rejects a log whose operations array contains an invalid op', () => {
       const badLog = {
         schemaVersion: 'compose-ops-v1',
-        operations: [{ type: 'insertText', paraId: 'ABC' }, { type: 'nope', paraId: 'ABC' }],
+        operations: [
+          { type: 'insertText', paraId: 'ABC' },
+          { type: 'nope', paraId: 'ABC' },
+        ],
       };
       expect(isComposeOperationLog(badLog)).toBe(false);
     });

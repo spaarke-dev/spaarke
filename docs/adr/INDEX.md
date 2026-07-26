@@ -2,7 +2,7 @@
 
 > **Purpose**: Documents architectural decisions for the Spaarke platform
 > **Audience**: Developers, architects, AI coding agents
-> **Last Updated**: 2026-02-23
+> **Last Updated**: 2026-07-25 (ai-advanced-capabilities-nda-r1 task 001 — reconciled index against `docs/adr/` files: added 11 missing rows 031/032/033/039/040/041/042/043/044/046/047; fixed the mislabeled ADR-030 row + broken link)
 
 ## About ADRs
 
@@ -38,12 +38,23 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-026](ADR-026-full-page-custom-page-standard.md) | Full-Page Custom Page Standard | Frontend | Accepted |
 | [ADR-027](ADR-027-subscription-isolation-and-dataverse-solution-management.md) | Subscription Isolation & Dataverse Solution Management | Operations | Proposed |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF Publish Hygiene (framework-dependent linux-x64, sourcemap exclusion, transitive CVE overrides, size baseline) | Backend / Operations | Accepted |
-| [ADR-030](ADR-030-bff-nullobject-kill-switch.md) | BFF Null-Object Kill-Switch Pattern (P1/P2/P3 patterns; `FeatureDisabledException` → 503 ProblemDetails; closes RB-T028 cluster) | Backend / API | Accepted |
+| [ADR-030](ADR-030-pane-event-bus.md) | PaneEventBus — Typed Multi-Subscriber Cross-Pane Communication (typed channel for cross-pane/widget messaging, e.g. `widget_load`; the bus advisory/compose events ride) | AI / Frontend | Accepted |
+| [ADR-031](ADR-031-stage-lifecycle.md) | Stage Lifecycle Pattern (Pane / Code Page Shell) | Frontend | Accepted |
+| [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | BFF Null-Object Kill-Switch Pattern (conditional service consumed by an unconditional endpoint → Null-Object in the else-branch, P1/P2/P3; `FeatureDisabledException` → 503 ProblemDetails; closes RB-T028 cluster) | Backend / API | Accepted |
+| [ADR-033](ADR-033-streaming-chat-tool-side-channel.md) | Streaming Chat Tool Side-Channel (doc-stream SSE side-channel for streaming compose edits/redlines to the client) | AI / BFF / FE | Accepted |
 | [ADR-034](ADR-034-user-record-membership.md) | User-Record Membership Resolution Pattern (discovery-based `MembershipResolverService` + 6-path identity normalization + Phase 2 junction table `sprk_userentityassociation` + Service Bus topic `sprk-membership-changes`; `LookupUserMembership` playbook node ActionType=52; closes A1/D5 root cause from R2 UAT) | Backend / AI / Dataverse | Accepted (R3 Part 1, 2026-06-21) |
 | [ADR-036](ADR-036-background-job-infrastructure.md) | Background-Job Infrastructure (Spaarke.Scheduling — shared lib + `IScheduledJob` contract + `ScheduledJobHost` + Cronos cron parsing + `sprk_backgroundjob*` Dataverse entities + `/api/admin/jobs/*` admin surface; two reference consumers: `MembershipReconciliationJob` + migrated `PlaybookSchedulerJob`) | Backend / Scheduling | Accepted (R3 Part 2, 2026-06-21) |
 | [ADR-037](ADR-037-multinode-output-composition.md) | Multi-Node Output Composition (NodeType.DeliverComposite + ActionType.DeliverComposite=42; per-section SSE streaming; FE widget rework to sections-by-name; reduces 5 brittle coordination points to 2) | AI / BFF / FE | Accepted (chat-routing-redesign-r1 Phase 5R Wave 5-C, 2026-06-25) |
 | [ADR-038](ADR-038-testing-strategy.md) | Testing Strategy — Integration-heavy pyramid, 6 KEEP path categories as MUST rules (auth/regression/data-mutation/tenant/contract/domain), coverage as observation never gate, ban Mock&lt;HttpMessageHandler&gt; + DI-registration + ctor null-check tests, TimeProvider over Stopwatch. **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries — unrelated frontend scope).** | Testing / Backend | Accepted (ci-cd-unit-test-remediation-r1 Phase 1 Stream B, 2026-06-26) |
+| [ADR-039](ADR-039-grounded-execution-closed-catalogs.md) | Grounded Execution & Closed Catalogs (ONE dispatch protocol — Event/Click/Text; TWO closed catalogs — Actions+Bindings, Tools; every output grounded; control-flow-is-code, behavior-is-data). **Amended 2026-07-25**: Output Determinism Modes — `fact` (default, deterministic) vs `advisory` (probabilistic, reasoning depth + Reasoning tier, still prompt-controlled + schema-validated + source-cited) refining invariant (a) | AI | Accepted (2026-07-05; amended 2026-07-25) |
+| [ADR-040](ADR-040-session-ledger.md) | Session Ledger — append-only addressable typed per-session ledger over the 3-tier store; **storage precedes rendering** (store-before-render); disposition is the only rendering contract; no second session store | AI | Accepted (2026-07-05) |
+| [ADR-041](ADR-041-judgment-confirmation-completion-policy.md) | Judgment, Confirmation & Completion Policy — resourcefulness (reads free / writes gated) + confirmation-as-deterministic (risk-tier × origin × completeness; risk is catalog data, never runtime LLM judgment) + completion/OutcomeCard composed after the ledger write | AI | Proposed |
+| [ADR-042](ADR-042-memory-architecture-governance.md) | Memory Architecture & Governance — Record + User memory scopes; per-fact docs with deterministic id upsert-by-(Type,Key) supersession; governance envelope (provenance/retention TTL); `memory-items` container partitioned by subject (never tenantId) | AI | Proposed |
+| [ADR-043](ADR-043-ai-capability-execution-spine.md) | AI Capability Execution Spine — three execution surfaces converging at one disposition→ledger→OutcomeCard layer; converge the two completion engines onto ONE input model (ContextBinder → ContextEnvelope); single-source DispositionRoutability registry; vertical-slice `tests/integration/seam/**` = definition-of-done | AI / BFF | Proposed |
+| [ADR-044](ADR-044-dataverse-guid-canonicalization.md) | Dataverse GUID Canonicalization at System Boundaries — canonicalize every Dataverse GUID to bare-lowercase at every boundary (`@odata.bind`, AI Search key/filter, Xrm ingestion) via the shared `cleanGuid`; codifies FAILURE-MODES AP-3 (case→AI Search) + AP-6 (braces→`@odata.bind`) | Dataverse / Integration | Accepted |
 | [ADR-045](ADR-045-communication-architecture.md) | Communication Architecture — canonical `<EmailComposer/>` send (1 engine + 3 wrappers + `sendCommunication()`) + Association Engine over a normalized envelope (8 targets; deterministic-first rungs 0–3 then semantic 4 + AI 5; confidence + provenance) + direction-agnostic `ICommunicationEnrichmentService` (both directions, adds outbound RAG) + channel seams (email impl only); auto-file ON deterministic ≥0.85 (ADR-018 kill-switch; AI rungs never auto-file); org target `sprk_organization`; retires OOB-`email`/SSS. Supersedes the never-written R3 "ADR-033" plan | Communication / BFF / FE | Accepted (email-communication-solution-r4, 2026-07-14) |
+| [ADR-046](ADR-046-acs-messaging-channel.md) | ACS Messaging Channel — Transport, First-Class Threads, Inbound Ingestor Seam (ACS Chat as transport + `sprk_communication` type=Message; server-side token minting; `ICommunicationChannelIngestor` seam completing ADR-045's inbound leg; first-class `sprk_communicationthread`; R1 = server plumbing + polling MDA UI, no client ACS SDK) | Communication | Accepted (messaging-communication-app-r1, 2026-07-16) |
+| [ADR-047](ADR-047-notification-action-spine.md) | Notification & Action Spine — ONE server-initiated **typed-signal → grounded-action → delivery** spine (Layers A–D) collapsing the email-r4/messaging-r3/assistant-r1 push forks; Azure SignalR Serverless + poll fallback; six commitments (typed signals · shared domain actions · per-source policy · SSE-as-presentation · outbox-before-ping · dumb-transport) | Communication / BFF / FE | Proposed |
 | [ADR-048](ADR-048-communication-participant-index.md) | Communication Participant Index — message-grain `sprk_communicationparticipant` junction (parent = `sprk_communication`; thread participation derived by rollup, no thread-grain rows) making participants queryable where `;`-joined `sprk_from/to/cc` TEXT cannot; identity = two typed nullable lookups `sprk_systemuser` XOR `sprk_contact` (**ADR-034 path-C comply-with-intent** — 2 targets not 6, so typed lookups honor the tuple's intent + add FK integrity & DataGrid chip auto-derivation, not an amendment, not polymorphic, no text-name matching); unresolved external rows first-class (`sprk_isresolved=false` + `sprk_addresstext`); `sprk_role` {From/To/Cc/Bcc}; populated by reusing `ParticipantCorrelationRung` (no new resolver/AI/SDK), best-effort + idempotent; powers `participant=` (FR-02) via the R1 impersonation + 2-rule filter. ADR-047 reserved for notification-spine (not claimed) | Communication / BFF / Data | Accepted (messaging-communication-app-r2, 2026-07-19) |
 
 ## ADRs by Domain
@@ -68,7 +79,8 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-017](ADR-017-async-job-status-and-persistence.md) | Job status persistence |
 | [ADR-019](ADR-019-api-errors-and-problemdetails.md) | ProblemDetails for errors |
 | [ADR-029](ADR-029-bff-publish-hygiene.md) | BFF publish hygiene: framework-dependent linux-x64, sourcemap exclusion, surgical transitive CVE overrides, size baseline ratchet |
-| [ADR-030](ADR-030-bff-nullobject-kill-switch.md) | BFF Null-Object kill-switch pattern: conditional service consumed by unconditional endpoint → Null-Object in else-branch (P1/P2/P3); `FeatureDisabledException` → 503 ProblemDetails per ADR-018/019 |
+| [ADR-032](ADR-032-bff-nullobject-kill-switch.md) | BFF Null-Object kill-switch pattern: conditional service consumed by unconditional endpoint → Null-Object in else-branch (P1/P2/P3); `FeatureDisabledException` → 503 ProblemDetails per ADR-018/019 |
+| [ADR-043](ADR-043-ai-capability-execution-spine.md) | AI capability execution spine: three surfaces → one disposition→ledger→OutcomeCard layer; ContextBinder→ContextEnvelope; seam test = DoD |
 
 ### AI Features
 
@@ -77,7 +89,15 @@ Architecture Decision Records capture important architectural decisions made dur
 | [ADR-013](ADR-013-ai-architecture.md) | AI Tool Framework architecture |
 | [ADR-014](ADR-014-ai-caching-and-reuse-policy.md) | AI response caching |
 | [ADR-015](ADR-015-ai-data-governance.md) | AI data handling rules |
-| [ADR-016](ADR-016-ai-cost-rate-limit-and-backpressure.md) | AI cost controls |
+| [ADR-016](ADR-016-ai-cost-rate-limit-and-backpressure.md) | AI cost controls, rate limits, model-tier selection |
+| [ADR-033](ADR-033-streaming-chat-tool-side-channel.md) | Streaming chat tool side-channel (doc-stream SSE) |
+| [ADR-037](ADR-037-multinode-output-composition.md) | Multi-node output composition; per-section SSE streaming keyed by section name |
+| [ADR-039](ADR-039-grounded-execution-closed-catalogs.md) | Grounded execution & closed catalogs; ONE dispatch protocol; **amended 2026-07-25** — `fact` vs `advisory` output determinism modes |
+| [ADR-040](ADR-040-session-ledger.md) | Session ledger; store-before-render; disposition = only rendering contract |
+| [ADR-041](ADR-041-judgment-confirmation-completion-policy.md) | Judgment/confirmation/completion; confirmation-as-deterministic; OutcomeCard |
+| [ADR-042](ADR-042-memory-architecture-governance.md) | Memory architecture & governance; Record + User scopes; per-fact upsert |
+| [ADR-043](ADR-043-ai-capability-execution-spine.md) | AI capability execution spine; ContextBinder→ContextEnvelope; DispositionRoutability registry |
+| [ADR-030](ADR-030-pane-event-bus.md) | PaneEventBus — typed cross-pane/widget channel (`widget_load`, advisory/compose events) |
 
 ### Security
 
@@ -99,6 +119,16 @@ Architecture Decision Records capture important architectural decisions made dur
 | ADR | Summary |
 |-----|---------|
 | [ADR-002](ADR-002-no-heavy-plugins.md) | Thin plugins, no HTTP calls |
+| [ADR-044](ADR-044-dataverse-guid-canonicalization.md) | Canonicalize Dataverse GUIDs to bare-lowercase at every boundary (`@odata.bind`, AI Search, Xrm) via `cleanGuid` |
+
+### Communication
+
+| ADR | Summary |
+|-----|---------|
+| [ADR-045](ADR-045-communication-architecture.md) | Canonical `<EmailComposer/>` send + Association Engine (normalized envelope; deterministic-first rungs then semantic + AI); auto-file ON deterministic ≥0.85 |
+| [ADR-046](ADR-046-acs-messaging-channel.md) | ACS Messaging Channel — transport + `sprk_communication` (Message) + `ICommunicationChannelIngestor` seam + first-class threads |
+| [ADR-047](ADR-047-notification-action-spine.md) | Notification & Action Spine — one typed-signal → grounded-action → delivery spine (SignalR Serverless + poll fallback; outbox-before-ping) |
+| [ADR-048](ADR-048-communication-participant-index.md) | Communication Participant Index — message-grain junction; typed `sprk_systemuser` XOR `sprk_contact` lookups; powers `participant=` |
 
 ### Operations
 

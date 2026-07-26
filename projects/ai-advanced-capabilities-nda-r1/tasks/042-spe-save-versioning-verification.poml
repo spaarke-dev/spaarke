@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>SPE save + versioning verification (test only)</title>
+    <phase>4 Export &amp; Persistence</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Test-only; asserts existing inherited behavior; tags include testing/integration-test (TEST-MODIFYING → gates apply).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test authoring against an existing, known save→SPE path; no new production code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Test-only; independent of 041's writer (different files).</parallel-reason>
+    <deps>023</deps>
+    <tags>testing, integration-test, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Verify (test only) that the inherited Compose save creates a new SharePoint Embedded version: assert
+    ComposeService.SaveAsync → SpeFileStore produces a new driveItem version and that prior versions remain
+    addressable. No new production code — this confirms free inherited behavior (spec FR-15).
+  </prompt>
+
+  <role>
+    SPAARKE BFF test engineer. Expert in the ComposeService.SaveAsync → SpeFileStore path and SharePoint driveItem
+    version history. Follow ADR-007 + ADR-038.
+  </role>
+
+  <goal>
+    A seam/integration test asserts that saving a Compose document creates a new SPE version and that priors are
+    still retrievable; the Redis save-stamp concurrency mechanism is noted (not a gap).
+  </goal>
+
+  <context>
+    <background>
+      spec FR-15: SPE save + versioning is inherited free — ComposeWorkspace save → /api/compose/documents/{id}/save
+      → ComposeService.SaveAsync → SpeFileStore (ADR-007); real driveItem version history
+      (GetCurrentVersionIdAsUserAsync, DownloadFileVersionAsUserAsync). Every save = new version. Caveat: no Graph
+      If-Match; concurrency handled via Compose Redis save-stamp + re-anchoring (a different mechanism, not a gap).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>tests/integration/seam/ (SPE version-on-save)</file>
+    </relevant-files>
+    <dependencies>023 (a reviewed document to save). Verifies existing behavior.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Storage goes through SpeFileStore; the test asserts version creation via the existing driveItem version APIs.</constraint>
+    <constraint source="ADR-038">KEEP-path seam test; no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null tests.</constraint>
+    <constraint source="project">Test-only. Do NOT add production code. Note the Redis save-stamp concurrency mechanism in the test comments so it isn't misread as a missing If-Match gap.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace ComposeService.SaveAsync → SpeFileStore version creation.</step>
+    <step order="2">Author a seam test: save a document twice → two versions exist → prior version downloadable.</step>
+    <step order="3">Note the Redis save-stamp concurrency mechanism in comments.</step>
+    <step order="4">Run the test; update TASK-INDEX.md: mark 042 ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ (SPE version-on-save)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Compose document, when saved twice, then two SPE versions exist and the prior version is retrievable.</criterion>
+    <criterion testable="true">The test is a KEEP-path seam test (no banned mock patterns).</criterion>
+    <criterion testable="true">No production code was added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Confirms the "save to SPE incl. version" requirement with zero new code — guards against a future regression.
+
+    COMPLETED 2026-07-26. New KEEP-path seam test:
+    tests/integration/seam/Compose/SpeSaveVersioningSeamTests.cs
+    (test: Save_TwiceOnSameDocument_CreatesTwoDistinctSpeVersions_AndPriorVersionStaysDownloadable_ThroughTheWire).
+    Reuses the existing ComposeFidelitySeamFixture (task 024/034) — no new fixture class. Real
+    ComposeService/ComposeEndpoints through WebApplicationFactory; mock ONLY at the
+    ISpeFileOperations module boundary (ADR-038). Asserts: (1) two real saves through
+    POST /api/compose/documents/{id}/save each invoke ReplaceFileContentAsUserAsync and mint a
+    distinct version id + ETag (never overwriting a prior slot); (2) a third save naming the
+    FIRST save's versionId as BaselineVersionId resolves via ComposeService's own
+    ResolveSaveBaselineAsync → DownloadFileVersionAsUserAsync and persists the FIRST version's
+    bytes (not the second/current), proving the prior version is genuinely retrievable through
+    production code, not just retained in the test's own bookkeeping. Redis save-stamp
+    concurrency mechanism (FR-08) explicitly NOT re-tested here — noted in file header as a
+    distinct mechanism already covered by ConcurrencySaveSeamTests.cs; deliberately left
+    GetFileMetadataAsUserAsync unconfigured (Loose ⇒ null) so that staleness/re-anchor branch
+    never fires in this file. No production code changed. Build + test: PASS (1/1). Quality
+    gates (code-review + adr-check, Step 9.5, TEST-MODIFYING override): both clean, 0
+    Critical/Warning findings.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute; TEST-MODIFYING rigor → Step 9.5 gates apply.</protocol>
+  </execution>
+</task>

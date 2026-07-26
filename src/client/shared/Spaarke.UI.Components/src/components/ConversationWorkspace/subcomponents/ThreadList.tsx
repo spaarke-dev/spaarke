@@ -320,12 +320,7 @@ export const ThreadList: React.FC<IThreadListProps> = ({
             collapses the pane when `onCollapse` is wired (no separate chevron);
             otherwise a static label. */}
         {onCollapse ? (
-          <button
-            type="button"
-            className={styles.headerTitle}
-            aria-label="Collapse threads pane"
-            onClick={onCollapse}
-          >
+          <button type="button" className={styles.headerTitle} aria-label="Collapse threads pane" onClick={onCollapse}>
             <CommentMultipleRegular className={styles.titleIcon} />
             <span>Threads</span>
           </button>

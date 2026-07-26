@@ -62,7 +62,14 @@ const DATE = '2026-07-19T09:30:00.000Z';
  * R3 paraId + R4 opaque atoms) — no CommentAnchorMark-less / atom-less shortcut. */
 function mountDoc(content: string): Editor {
   return new Editor({
-    extensions: [StarterKit, InsertionMark, DeletionMark, CommentAnchorMark, ...COMPOSE_R3_PARAID, ...COMPOSE_R4_OPAQUE_ATOMS],
+    extensions: [
+      StarterKit,
+      InsertionMark,
+      DeletionMark,
+      CommentAnchorMark,
+      ...COMPOSE_R3_PARAID,
+      ...COMPOSE_R4_OPAQUE_ATOMS,
+    ],
     content,
   });
 }
@@ -104,7 +111,14 @@ describe('FR-10 import round trip — a doc redlined externally in Word opens wi
 
     const revisions: ImportedRevision[] = [
       revision({ kind: 'insertion', id: 'r1', text: ' jumps', anchorText: 'The quick brown fox.', paraId: 'AAAA0001' }),
-      revision({ kind: 'deletion', id: 'r2', text: 'lazy ', anchorText: 'The dog sleeps.', paragraphHint: 1, paraId: 'BBBB0002' }),
+      revision({
+        kind: 'deletion',
+        id: 'r2',
+        text: 'lazy ',
+        anchorText: 'The dog sleeps.',
+        paragraphHint: 1,
+        paraId: 'BBBB0002',
+      }),
     ];
     const comments: ImportedComment[] = [
       comment({ id: 'c1', commentText: 'Define this term.', anchorText: 'quick brown fox', paraId: 'AAAA0001' }),
@@ -139,7 +153,14 @@ describe('FR-10 import round trip — a doc redlined externally in Word opens wi
 
     applyImportedRevisions(editor, [
       revision({ kind: 'insertion', id: 'r1', text: ' jumps', anchorText: 'The quick brown fox.', paraId: 'AAAA0001' }),
-      revision({ kind: 'deletion', id: 'r2', text: 'lazy ', anchorText: 'The dog sleeps.', paragraphHint: 1, paraId: 'BBBB0002' }),
+      revision({
+        kind: 'deletion',
+        id: 'r2',
+        text: 'lazy ',
+        anchorText: 'The dog sleeps.',
+        paragraphHint: 1,
+        paraId: 'BBBB0002',
+      }),
     ]);
 
     const { result } = renderHook(() => usePendingRedline(editor));

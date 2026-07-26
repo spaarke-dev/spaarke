@@ -25,6 +25,11 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
+  // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
+  AdvisoryCommentInput,
+  AdvisoryCommentFailure,
+  AdvisoryCommentPlacementResult,
 } from './widgets/ComposeEditor';
 export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
 export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
@@ -117,14 +122,43 @@ export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 // -------------------------------------------------------------------------
 export { ComposeCommentThread } from './widgets/ComposeCommentThread';
 export type { ComposeCommentThreadProps, ComposeCommentPendingRange } from './widgets/ComposeCommentThread';
-export { composeCommentThreadsToDocxAnnotations } from './widgets/ComposeCommentThread.types';
+export { composeCommentThreadsToDocxAnnotations, findCommentAnchorRange } from './widgets/ComposeCommentThread.types';
 export type {
   ComposeCommentAuthorStamp,
   ComposeCommentReply,
   ComposeCommentThreadModel,
 } from './widgets/ComposeCommentThread.types';
 export { useComposeCommentThreads } from './widgets/hooks/useComposeCommentThreads';
-export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './widgets/hooks/useComposeCommentThreads';
+export type {
+  UseComposeCommentThreadsResult,
+  ComposeCommentRange,
+  ComposeCommentThreadMetadata,
+} from './widgets/hooks/useComposeCommentThreads';
+
+// -------------------------------------------------------------------------
+// Right-gutter comment layout (ai-advanced-capabilities-nda-r1 task 032, FR-16) — right-rail cards
+// vertically aligned to each thread's LIVE anchor position (coordsAtPos), replacing/superseding the
+// docked-list-only presentation for the NDA-REVIEW advisory-comment flow. Mounted inside ComposeEditor.
+// -------------------------------------------------------------------------
+export {
+  ComposeCommentGutter,
+  layoutCommentGutterCards,
+  COMMENT_GUTTER_WIDTH_PX,
+} from './widgets/ComposeCommentGutter';
+export type { ComposeCommentGutterProps } from './widgets/ComposeCommentGutter';
+
+// -------------------------------------------------------------------------
+// Review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030, FR-07) — the fuller
+// advisory digest (overallRisk + cited flagged-section findings) rendered inside Compose. Single
+// surface: no separate Analysis widget consumes this — mounted directly by ComposeWorkspace.
+// -------------------------------------------------------------------------
+export {
+  NdaReviewSummaryPanel,
+  deriveOverallRisk,
+  riskBadgeColor,
+  NDA_REVIEW_DISCLAIMER_TEXT,
+} from './widgets/NdaReviewSummaryPanel';
+export type { NdaReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/NdaReviewSummaryPanel';
 
 // -------------------------------------------------------------------------
 // Return-from-Word re-anchoring (FR-27 / task 054)
@@ -283,6 +317,8 @@ export type {
   SetBlockAttrOperation,
   ComposeOperation,
   ComposeOperationLog,
+  // ai-advanced-capabilities-nda-r1 task 040 — comment-export wiring fix
+  ComposeAnchoredComment,
 } from './types/compose-operations';
 
 // -------------------------------------------------------------------------
@@ -333,10 +369,5 @@ export type { ApplyImportedCommentAnchorsResult } from './widgets/importedCommen
 // R4 task 023: `collectEditedParagraphs` (the paragraph-diff export) is REMOVED — dirty-save capture
 // routes only through the step interceptor's operation log (`serializeOperationLog` on the editor
 // handle); `buildContentModel` (the born-in-editor full-render path) is unchanged here (task 033).
-export {
-  docxToTipTapHtml,
-  stampParaIds,
-  captureParaIdSnapshot,
-  buildContentModel,
-} from './utils/docxBridge';
+export { docxToTipTapHtml, stampParaIds, captureParaIdSnapshot, buildContentModel } from './utils/docxBridge';
 export type { MammothConversionResult, TipTapNode } from './utils/docxBridge';

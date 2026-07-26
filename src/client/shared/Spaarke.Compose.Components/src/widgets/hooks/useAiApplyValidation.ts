@@ -68,7 +68,12 @@ import type { Editor } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import { PARAID_NODE_TYPES } from '../paraIdExtension';
 import { runsOfBlock } from '../stepOperationInterceptor';
-import type { ComposeOperation, ComposeRunPoint, ComposeRunRange, ComposeMarkType } from '../../types/compose-operations';
+import type {
+  ComposeOperation,
+  ComposeRunPoint,
+  ComposeRunRange,
+  ComposeMarkType,
+} from '../../types/compose-operations';
 import type { AiGenerateOperationsResult } from './useAiGenerateBookmark';
 import type { PriorAnchorInput, ReanchorBand, ReanchorSummary } from '../ComposeReanchor.types';
 
@@ -77,11 +82,7 @@ import type { PriorAnchorInput, ReanchorBand, ReanchorSummary } from '../Compose
 // ---------------------------------------------------------------------------
 
 /** Why a returned operation's anchor failed structural validation against the live document. */
-export type AnchorValidationReason =
-  | 'unknown-paraId'
-  | 'unknown-target-paraId'
-  | 'out-of-range'
-  | 'atom-interior';
+export type AnchorValidationReason = 'unknown-paraId' | 'unknown-target-paraId' | 'out-of-range' | 'atom-interior';
 
 export type AnchorValidationResult =
   | { readonly valid: true }
@@ -166,9 +167,7 @@ export function validateComposeOperationAnchor(doc: PMNode, op: ComposeOperation
     case 'splitParagraph':
       return validatePoint(target.node, op.at);
     case 'mergeParagraph':
-      return findParaIdNode(doc, op.targetParaId)
-        ? { valid: true }
-        : { valid: false, reason: 'unknown-target-paraId' };
+      return findParaIdNode(doc, op.targetParaId) ? { valid: true } : { valid: false, reason: 'unknown-target-paraId' };
     case 'insertParagraph':
     case 'deleteParagraph':
     case 'setBlockAttr':
@@ -232,7 +231,10 @@ export function applyValidatedComposeOperation(editor: Editor, op: ComposeOperat
       if (op.text.length === 0) return true; // nothing to insert — a legitimate no-op
       const pos = resolvePointPosition(doc, op.paraId, op.at);
       if (pos === null) return false;
-      return editor.chain().insertContentAt(pos, { type: 'text', text: op.text, marks: tiptapMarksFor(op.marks) }).run();
+      return editor
+        .chain()
+        .insertContentAt(pos, { type: 'text', text: op.text, marks: tiptapMarksFor(op.marks) })
+        .run();
     }
     case 'deleteRange': {
       const from = resolvePointPosition(doc, op.paraId, op.range.start);
@@ -375,7 +377,12 @@ export function useAiApplyValidation(
             paragraphHint: -1,
             paraId: op.paraId,
           };
-          const summary = await reanchor!({ documentSpeId: documentSpeId!, driveId: driveId!, tenantId: tenantId!, priorAnchors: [priorAnchor] });
+          const summary = await reanchor!({
+            documentSpeId: documentSpeId!,
+            driveId: driveId!,
+            tenantId: tenantId!,
+            priorAnchors: [priorAnchor],
+          });
           const annotation = summary.annotations[0];
           if (annotation) {
             fuzzy = {

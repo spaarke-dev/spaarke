@@ -90,9 +90,7 @@ describe('ADR-021 — ComposeEditor opaque-atom (.compose-atom*) styles use sema
     expect(() => extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'compose-atom')).not.toThrow();
     expect(() => extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'compose-atom-block')).not.toThrow();
     expect(() => extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'compose-atom-inline')).not.toThrow();
-    expect(() =>
-      extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'ProseMirror-selectednode.compose-atom')
-    ).not.toThrow();
+    expect(() => extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'ProseMirror-selectednode.compose-atom')).not.toThrow();
   });
 
   it('the base .compose-atom rule carries color/background/border via tokens.* — no hex/rgb literal, no inline style', () => {
@@ -114,7 +112,7 @@ describe('ADR-021 — ComposeEditor opaque-atom (.compose-atom*) styles use sema
     expect(block).toMatch(/outlineColor:\s*tokens\./);
   });
 
-  it('the block/inline layout variants declare no color of their own (layout-only — they inherit .compose-atom\'s token colors, so there is nothing to leak)', () => {
+  it("the block/inline layout variants declare no color of their own (layout-only — they inherit .compose-atom's token colors, so there is nothing to leak)", () => {
     const blockVariant = extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'compose-atom-block');
     const inlineVariant = extractStyleBlock(COMPOSE_EDITOR_SOURCE, 'compose-atom-inline');
     for (const block of [blockVariant, inlineVariant]) {

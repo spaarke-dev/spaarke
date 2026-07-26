@@ -112,11 +112,7 @@ function isSafeHref(url: string): boolean {
 
 /** Escape a plain string for safe interpolation into HTML (record-link label/href). */
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // ---------------------------------------------------------------------------
@@ -306,10 +302,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     const label = picked.name || 'record';
     if (cur.bodyFormat === 'HTML' && bodyEditorRef.current) {
       // Insert at the caret; the editor's onChange propagates the new HTML into state.body.
-      bodyEditorRef.current.insertAtCursor(
-        `<a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a>`,
-        'html'
-      );
+      bodyEditorRef.current.insertAtCursor(`<a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a>`, 'html');
       return;
     }
     const nextBody =
@@ -322,30 +315,33 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   // Local-file pick (paperclip → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
   // rejected files are dropped and surfaced (never silently). Moved out of AttachmentList when
   // the add controls hoisted to the RTF toolbar (owner UAT 2026-07-24).
-  const handleLocalFilesPicked = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    const rejections: string[] = [];
-    for (let i = 0; i < files.length; i += 1) {
-      const file = files[i];
-      const rejection = validateLocalAttachmentFile(file);
-      if (rejection) {
-        rejections.push(rejection.message);
-        continue;
+  const handleLocalFilesPicked = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files) return;
+      const rejections: string[] = [];
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i];
+        const rejection = validateLocalAttachmentFile(file);
+        if (rejection) {
+          rejections.push(rejection.message);
+          continue;
+        }
+        handleAddAttachmentRef.current?.({
+          id: `local:${file.name}:${file.size}:${i}:${state.attachments.length}`,
+          source: 'local',
+          fileName: file.name,
+          sizeBytes: file.size,
+          mimeType: file.type || undefined,
+          file,
+          selected: true,
+        });
       }
-      handleAddAttachmentRef.current?.({
-        id: `local:${file.name}:${file.size}:${i}:${state.attachments.length}`,
-        source: 'local',
-        fileName: file.name,
-        sizeBytes: file.size,
-        mimeType: file.type || undefined,
-        file,
-        selected: true,
-      });
-    }
-    setPickErrors(rejections);
-    e.target.value = ''; // reset so re-selecting the same file fires onChange again
-  }, [state.attachments.length]);
+      setPickErrors(rejections);
+      e.target.value = ''; // reset so re-selecting the same file fires onChange again
+    },
+    [state.attachments.length]
+  );
 
   // Connector toolbar icon → add a relationship (owner UAT 2026-07-24, Option B). The host
   // runs the OOB lookup + writes the association; we reflect the picked record in "Related to".
@@ -494,7 +490,11 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
         {showConnector && (
           <Tooltip content="Relate this email to a record" relationship="label">
-            <ToolbarButton icon={<Connector20Regular />} aria-label="Add relationship" onClick={handleAddRelationship} />
+            <ToolbarButton
+              icon={<Connector20Regular />}
+              aria-label="Add relationship"
+              onClick={handleAddRelationship}
+            />
           </Tooltip>
         )}
       </div>

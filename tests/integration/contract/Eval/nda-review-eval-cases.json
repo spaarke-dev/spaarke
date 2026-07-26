@@ -1,0 +1,96 @@
+{
+  "$comment": "ai-advanced-capabilities-nda-r1 task 051 (ADR-039 golden-utterance dispatch gate) — the NDA-review dispatch-eval family, joined to the SAME Category=GoldenUtteranceEval merge gate via NdaReviewDispatchEvalTests.cs (identical net-new-family pattern as the Assistant-Enhancements-R1 / Resourcefulness / Origin-classification families in this same directory — no shared golden-utterances.json edit, no CI-YAML change; the trait IS the registration). Covers the two ADR-039-required entry paths for the task-022 nda-review Binding: the Click path ('Review an NDA' Assistant card, wired in ConversationPane.tsx) and the Text path (the classification-triggered card's sibling: 'review this NDA' NL phrasing, discoverable via the Binding's own sprk_tooldescription per GET /api/ai/capabilities?surface=assistant), PLUS the required negative case (an off-target utterance must NOT route to nda-review) and a disambiguation case against the sibling nda-standard-summary Binding (task 022's own follow-on note for task 051). catalogStatus vocabulary: 'mirrored' = a row in infra/dataverse/sprk_playbookconsumer-rows.json (both nda-review and nda-standard-summary are seed-ready per task 022 but NOT yet seeded live on spaarkedev1 in this session — Seed-PlaybookConsumers.ps1 is env-blocked; neither is a ConsumerTypes.All constant, so 'existing' would be dishonest). ucId: UC-A-1 (document intelligence) — the closest §3 canonical family; NDA review is a whole-document advisory analysis sibling of chat-summarize, and this project introduces no new UC id.",
+  "schemaVersion": "nda-review-eval@v1",
+  "cases": [
+    {
+      "caseId": "NDA-001",
+      "family": "nda-review-click",
+      "ucId": "UC-A-1",
+      "channel": "click",
+      "utterance": "[Review an NDA] Assistant card click after NDA classification",
+      "notes": "task 022 Click path: chips.dispatchBinding(ndaReviewBindingId, { slots: { fileIds: [fileId] } }) — the SAME shared Click-path dispatch seam every consumer chip uses, resolved BY the Binding id (GetBindingByIdAsync — the exact read SessionDispatchOrchestrator performs, mirrors GU-038's chip-target resolution).",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-review",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
+      }
+    },
+    {
+      "caseId": "NDA-002",
+      "family": "nda-review-text",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "review this NDA",
+      "notes": "verbatim phrasing quoted in the nda-review Binding's own sprk_tooldescription (the projection opt-in for ListTextProjectableBindingsAsync) — the primary TEXT-path trigger.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-review",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
+      }
+    },
+    {
+      "caseId": "NDA-003",
+      "family": "nda-review-text",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "check this NDA against our standard",
+      "notes": "paraphrase quoted verbatim in the nda-review Binding's sprk_tooldescription.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-review",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
+      }
+    },
+    {
+      "caseId": "NDA-004",
+      "family": "nda-review-text",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "what's risky in this NDA",
+      "notes": "paraphrase quoted verbatim in the nda-review Binding's sprk_tooldescription.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-review",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
+      }
+    },
+    {
+      "caseId": "NDA-005",
+      "family": "off-target",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "summarize my emails",
+      "notes": "ADR-039-required negative case: an off-target utterance unrelated to NDA review (no uploaded/attached NDA referenced, no 'review/check/assess/flag risks' verb) must NOT route to nda-review. No positive consumerType is asserted here (mirrors the golden-utterances.json refusal-family convention of a null consumerType) — the mechanical proof is the lexical-exclusion grounding in NdaReviewDispatchEvalTests (nda-review's toolDescription carries no 'email' cue), not a live-model claim about what it DOES dispatch to.",
+      "expected": {
+        "outcomeClass": "excluded",
+        "consumerType": null,
+        "notConsumerType": "nda-review",
+        "catalogStatus": null
+      }
+    },
+    {
+      "caseId": "NDA-006",
+      "family": "nda-review-vs-standard-summary",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "what does our NDA standard say about confidentiality",
+      "notes": "disambiguation case (task 022's own follow-on note for task 051): this utterance references the FIRM'S standard in the abstract, NOT an uploaded/attached agreement, so it must select the sibling nda-standard-summary Binding, never nda-review. Grounded against the two Bindings' own authored disambiguation cues: nda-standard-summary's sprk_tooldescription explicitly says 'Does not review ... any uploaded document ... for reviewing an actual NDA ... use the NDA Review capability instead'; nda-review's sprk_tooldescription requires 'an NDA they uploaded or attached'.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "nda-standard-summary",
+        "consumerCode": "default",
+        "notConsumerType": "nda-review",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 022 (infra/dataverse/sprk_playbookconsumer-rows.json)"
+      }
+    }
+  ]
+}

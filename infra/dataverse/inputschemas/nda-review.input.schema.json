@@ -1,0 +1,19 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for nda-review (ai-advanced-capabilities-nda-r1 task 020). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate; server twin OpenAiFunctionSchemaValidator). MIRROR-FIRST from the document/session context: documentText is the WHOLE uploaded NDA's current text — the Compose surface / agent loop supplies it from the open document (Wave-2 session doc text), exactly as compose-revise-document sources documentText. The Spaarke NDA standard (KNW-011) is GROUNDING supplied by the retrieval layer, NOT a maker-provided input field. Property-level \"required\": true is FORBIDDEN (use the object-level required array). Custom keyword ledger_resolution is maker metadata (OpenAI-tolerated unknown keyword). No actionId here — assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "$comment-grounding": "NFR-06 tenant pin: the standard is retrieved from spaarke-rag-references (KNW-011) seeded tenantId='system'; ReferenceRetrievalService currently filters on the execution tenant with no 'system' fallback, so live grounding depends on the path-B fix escalated in projects/ai-advanced-capabilities-nda-r1/notes/tenant-pin-analysis.md. This Action is authored correctly regardless; live grounding is gated on that fix.",
+  "actionCode": "nda-review",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["documentText"],
+    "properties": {
+      "documentText": {
+        "type": "string",
+        "description": "The WHOLE uploaded NDA's current text to review (the open Compose document / session doc text). The agent loop / Compose surface supplies it from the open document, not from Dataverse. Every quotedText the review emits must be a verbatim substring of this field. The Spaarke NDA standard is supplied separately by the retrieval/grounding layer (KNW-011), not here.",
+        "maxLength": 60000,
+        "elicitation_prompt": "Which NDA should I review? Open or attach the agreement first.",
+        "ledger_resolution": "compose.documentText — the current open Compose document text (Wave-2 session doc text) dispatched for whole-document review. The firm NDA standard (KNW-011) is supplied by the retrieval layer at dispatch time (not a maker-provided field)."
+      }
+    }
+  }
+}

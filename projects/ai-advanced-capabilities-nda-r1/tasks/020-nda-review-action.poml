@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>NDA-REVIEW Action — advisory whole-doc JPS on the Reasoning tier</title>
+    <phase>2 NDA Review Capability</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core advisory-quality artifact (north star); JPS Action authoring + output schema + tier assignment; drives all downstream review UX.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The advisory prompt IS the north-star quality lever; authoring it (relaxed-determinism, cited, structured output over grounded standard) is high-judgment design work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundational Action that 021/022/023/050/051 depend on; author before fan-out.</parallel-reason>
+    <deps>001,010,012</deps>
+    <tags>ai, azure-openai, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author the NDA-REVIEW Action: a whole-document advisory JPS that produces a structured
+    {overallRisk, flaggedSections[]} output, runs under the advisory (probabilistic) tier from the ADR-039
+    amendment, on the Reasoning model tier, grounded on the seeded NDA standard. Every flagged section must carry
+    a page/section/paragraph citation and an advisory explanation. This is the north-star artifact: it must beat a
+    strong general LLM while staying accurate and cited.
+  </prompt>
+
+  <role>
+    SPAARKE AI capability author. Expert in JPS (JSON Prompt Schema) Actions, the compare-to-playbook Action shape,
+    advisory-tier prompting, and RAG grounding over the NDA standard.
+  </role>
+
+  <goal>
+    A validated NDA-REVIEW Action JSON (prompt + input/output schemas) exists, tagged Reasoning tier + advisory
+    disposition, that emits {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, explanation, standardRef}]}
+    grounded on the seeded standard; jps-validate passes.
+  </goal>
+
+  <context>
+    <background>
+      compose-compare-to-playbook is single-clause, disposition=informational, temperature 0.2, output
+      {matches[], overallRisk} — the seed to COPY and widen to whole-doc advisory. The advisory tier (task 001)
+      relaxes verbatim determinism but still requires citations and decline-if-unverifiable. Grounding source =
+      the standard seeded in task 012. Baseline rubric = notes/spaarke-nda-standard-baseline.md (16 clauses).
+    </background>
+    <relevant-files>
+      <file>infra/dataverse/actions/compose-compare-to-playbook.action.json</file>
+      <file>infra/dataverse/actions/ (new: nda-review.action.json + schemas)</file>
+      <file>projects/ai-advanced-capabilities-nda-r1/notes/spaarke-nda-standard-baseline.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs</file>
+    </relevant-files>
+    <dependencies>001 (advisory tier), 010 (Reasoning routing), 012 (grounding source seeded + pin verified).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Runs under the advisory tier defined in task 001: relaxed determinism BUT every factual claim (a flagged term, a standard deviation) MUST cite the NDA section AND the standard clause; unverifiable claims are declined, not invented.</constraint>
+    <constraint source="ADR-040">Action output is ledgered (store-before-render) before any client render.</constraint>
+    <constraint source="ADR-016">sprk_modeltier=Reasoning; the Action must route to the Reasoning deployment via the task-010 resolver.</constraint>
+    <constraint source="project">Output schema is a CLOSED contract: {overallRisk, flaggedSections[]} with each flagged section carrying sectionRef (page/section/paragraph), quotedText, riskLevel, explanation (advisory), standardRef. Do not add fields the downstream UI/export don't consume.</constraint>
+    <constraint source="project">Not-legal-advice framing is embedded in the prompt/output. High/Critical risk levels are the signal the UI uses to flag attorney review.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/analysis-scopes.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="compare-to-playbook Action" location="infra/dataverse/actions/compose-compare-to-playbook.action.json">
+        Copy the Action skeleton; widen scope from single-clause to whole-doc; change disposition + tier; expand output schema.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Study compose-compare-to-playbook.action.json + schemas and the SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN doc.</step>
+    <step order="2">Author the NDA-REVIEW prompt: whole-doc advisory analysis grounded on the seeded standard; instruct citation-per-claim + decline-if-unverifiable + not-legal-advice; embed baseline Parts A–B.</step>
+    <step order="3">Define input schema (mirror-first from the document/session context) and the closed output schema {overallRisk, flaggedSections[]}.</step>
+    <step order="4">Set sprk_modeltier=Reasoning and the advisory-tier temperature; tag the advisory disposition.</step>
+    <step order="5">Run jps-validate; iterate until clean.</step>
+    <step order="6">Sanity-run against 1–2 sample NDAs; confirm citations resolve to real sections and grounding chunks were retrieved.</step>
+    <step order="7">Update TASK-INDEX.md: mark 020 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If achieving north-star quality appears to require piercing the advisory-tier citation/decline rules from task 001, STOP and escalate (CLAUDE.md §6.5) — do not silently relax the amendment's guardrails.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run jps-validate + sample executions.</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/actions/nda-review.action.json (+ input/output schemas)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">jps-validate passes on the NDA-REVIEW Action and its schemas.</criterion>
+    <criterion testable="true">Given a sample NDA, when NDA-REVIEW runs, then output conforms to {overallRisk, flaggedSections[]} and each flagged section carries a sectionRef + standardRef.</criterion>
+    <criterion testable="true">Every factual finding cites its NDA section; a planted unverifiable claim is declined, not fabricated.</criterion>
+    <criterion testable="true">The run routes to the Reasoning deployment and retrieves non-zero grounding chunks from the seeded standard.</criterion>
+    <criterion testable="true">The output includes a not-legal-advice framing and uses High/Critical risk levels for attorney-review-worthy items.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Advisory quality here is graded in task 050's rubric (NFR-01). Keep the output schema closed — tasks 030/031/041
+    consume exactly these fields.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL).</protocol>
+  </execution>
+</task>

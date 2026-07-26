@@ -29,6 +29,9 @@
  * @see projects/spaarkeai-compose-r3/spec.md FR-23, FR-25, FR-26
  */
 import { DocxTrackChangeKind, type DocxAnnotationInput } from './useComposeWordShuttle';
+import { resolveRunAnchor } from './stepOperationInterceptor';
+import type { Node as PMNode } from '@tiptap/pm/model';
+import type { ComposeAnchoredComment } from '../types/compose-operations';
 
 /** Author + timestamp stamp shared by a thread's root comment and every reply. */
 export interface ComposeCommentAuthorStamp {
@@ -78,6 +81,21 @@ export interface ComposeCommentThreadModel extends ComposeCommentAuthorStamp {
   resolved: boolean;
   /** Ordered replies — always rendered FLAT (see {@link ComposeCommentReply.parentReplyId}). */
   replies: ComposeCommentReply[];
+  /**
+   * task 032 (right-gutter comment layout) — optional NDA-REVIEW advisory metadata, carried through
+   * from {@link ../ComposeEditor.AdvisoryCommentInput} via `placeAdvisoryComments` →
+   * `useComposeCommentThreads.createThread`'s metadata parameter, so the right-rail gutter card can
+   * render a risk badge + section/standard citation without a side lookup. UI-ONLY — never written to
+   * native `w:comment` on save (the docx export functions below read only `author`/`text`/`timestamp`,
+   * so these fields are silently ignored there, by design). Absent for session (non-advisory) Comments
+   * panel threads, which never pass metadata to `createThread`.
+   */
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
+  riskLevel?: string;
+  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
+  sectionRef?: string;
+  /** Optional standard/playbook reference the flag cites. */
+  standardRef?: string;
 }
 
 /**
@@ -134,4 +152,108 @@ export function composeSessionCommentThreadsToDocxAnnotations(
   importedThreadIds: ReadonlySet<string>
 ): DocxAnnotationInput[] {
   return composeCommentThreadsToDocxAnnotations(threads.filter(t => !importedThreadIds.has(t.id)));
+}
+
+// ---------------------------------------------------------------------------
+// ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
+// ---------------------------------------------------------------------------
+
+/** The `commentAnchor` mark name (mirrors `./marks/CommentAnchorMark.ts` and
+ * `./hooks/useComposeCommentThreads.ts`'s `COMMENT_ANCHOR_MARK` — kept as its own local constant to
+ * avoid a needless import of the mark module here). */
+const COMMENT_ANCHOR_MARK_NAME = 'commentAnchor';
+
+/**
+ * Locate the CURRENT ProseMirror range of a `commentAnchor` mark by its `commentId` attribute,
+ * spanning every text node carrying it (a mark can render as several adjacent text nodes when other
+ * marks split them). Returns `null` when the mark is no longer present anywhere in `doc` — e.g. a
+ * later edit deleted the anchored text. The caller treats a `null` result as "this thread's anchor no
+ * longer exists," never guessing a replacement span (mirrors the op-log capture path's own
+ * never-mis-map discipline in `stepOperationInterceptor.ts`).
+ *
+ * Exported (task 032, right-gutter comment layout): this is the SAME live-position-resolution
+ * primitive {@link composeSessionCommentThreadsToAnchoredComments} already uses for save-time export —
+ * `ComposeCommentGutter.tsx` reuses it verbatim to resolve each thread's CURRENT anchor span before
+ * calling `editor.view.coordsAtPos(span.from)` for its Y placement, rather than trusting the thread's
+ * stale, creation-time `anchorText` (ADR-049 "live position" constraint). No second implementation.
+ */
+export function findCommentAnchorRange(doc: PMNode, commentId: string): { from: number; to: number } | null {
+  let from: number | null = null;
+  let to: number | null = null;
+  doc.descendants((node, pos) => {
+    if (!node.isText) return true;
+    const hasMark = node.marks.some(
+      m => m.type.name === COMMENT_ANCHOR_MARK_NAME && (m.attrs as { commentId?: string }).commentId === commentId
+    );
+    if (hasMark) {
+      const nodeFrom = pos;
+      const nodeTo = pos + node.nodeSize;
+      from = from === null ? nodeFrom : Math.min(from, nodeFrom);
+      to = to === null ? nodeTo : Math.max(to, nodeTo);
+    }
+    return true;
+  });
+  return from === null || to === null ? null : { from, to };
+}
+
+/**
+ * Maps threads to durable `(paraId, run-local range)`-anchored {@link ComposeAnchoredComment}s by
+ * resolving each thread's LIVE `commentAnchor` mark span against `doc` via {@link resolveRunAnchor} —
+ * the SAME D2 anchor primitive `stepOperationInterceptor.ts`'s op-log capture path uses. No
+ * write-path text-search (I-7). REPLACES {@link composeSessionCommentThreadsToDocxAnnotations} for the
+ * Save flow: that function's `DocxAnnotationInput`/`targetText` shape rode the now-retired `annotations`
+ * save field, which the server's `SaveComposeDocumentBody` never deserialized (every comment sent that
+ * way was silently dropped) — `comments` (this shape) is what `ComposeService.SaveAsync` actually reads
+ * and `ComposeShadowPatchEngine.ApplyComment` bakes as a native `w:comment` (ADR-049).
+ *
+ * A thread contributes NO comment (never guessed/mis-anchored) when:
+ *  - its id is in `importedThreadIds` (it already rides the retained-original baseline — re-emitting
+ *    would duplicate it), OR
+ *  - its anchor mark is no longer present in `doc` (a later edit removed the anchored text), OR
+ *  - its resolved span crosses a paragraph boundary (`ComposeRunRange` is intra-paragraph only, per D2/
+ *    I-4) — mirrors `classifyMarkStep`'s cross-paragraph refusal for the same-shaped op case.
+ *
+ * A thread's root comment + every reply each become their OWN `ComposeAnchoredComment`, all anchored to
+ * the SAME resolved range — the same multi-comment-on-one-span representation
+ * {@link composeCommentThreadsToDocxAnnotations} already uses for the legacy shape.
+ */
+export function composeSessionCommentThreadsToAnchoredComments(
+  doc: PMNode,
+  threads: readonly ComposeCommentThreadModel[],
+  importedThreadIds: ReadonlySet<string>
+): ComposeAnchoredComment[] {
+  const result: ComposeAnchoredComment[] = [];
+  for (const thread of threads) {
+    if (importedThreadIds.has(thread.id)) continue;
+
+    const span = findCommentAnchorRange(doc, thread.id);
+    if (!span) continue;
+
+    const start = resolveRunAnchor(doc, span.from);
+    const end = resolveRunAnchor(doc, span.to);
+    if (!start || !end || start.paraId !== end.paraId) continue;
+
+    const range = {
+      start: { runIndex: start.runIndex, offset: start.offset },
+      end: { runIndex: end.runIndex, offset: end.offset },
+    };
+
+    result.push({
+      paraId: start.paraId,
+      range,
+      commentText: thread.text,
+      author: thread.author,
+      date: thread.timestamp,
+    });
+    for (const reply of thread.replies) {
+      result.push({
+        paraId: start.paraId,
+        range,
+        commentText: reply.text,
+        author: reply.author,
+        date: reply.timestamp,
+      });
+    }
+  }
+  return result;
 }

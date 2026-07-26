@@ -33,7 +33,12 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// Constraints:
 /// <list type="bullet">
 ///   <item>MUST query spaarke-rag-references ONLY — never the customer document index.</item>
-///   <item>MUST include tenantId filter on all queries (security).</item>
+///   <item>MUST include tenantId filter on all queries (security): every query filters on
+///     <c>(tenantId eq {caller's tenant} or tenantId eq "system")</c>. The <c>"system"</c>
+///     value is the ONLY shared/cross-tenant sentinel this filter admits — it identifies the
+///     org-wide golden-reference documents (KNW-001..KNW-011) that every tenant is meant to
+///     retrieve (NFR-06). No other tenant value is ever OR'd in; a document seeded under a
+///     genuine other tenant's real GUID remains excluded, exactly as tenant isolation requires.</item>
 ///   <item>ADR-010: Registered as concrete singleton in AiModule.cs.</item>
 ///   <item>ADR-009: Redis result caching with 10-minute TTL (session-scoped).</item>
 /// </list>
@@ -288,8 +293,22 @@ public sealed partial class ReferenceRetrievalService
         // Build OData filter expression
         var filters = new List<string>();
 
-        // ALWAYS filter by tenant for security
-        filters.Add($"tenantId eq '{EscapeFilterValue(options.TenantId)}'");
+        // ALWAYS filter by tenant for security — the caller's tenant OR the shared "system"
+        // sentinel. spaarke-rag-references is the ONLY index this service queries, and every
+        // golden reference document in it (KNW-001..KNW-011) is seeded tenantId="system" by
+        // design (org-wide, tenant-agnostic reference content — see
+        // KnowledgeDocumentSchemaMapper's "mirroring the original golden-reference convention"
+        // comment). Without this OR-clause, an unconditional tenantId eq '{options.TenantId}'
+        // filter excludes every golden reference for any real caller tenant, silently zeroing
+        // grounding (NFR-06; see projects/ai-advanced-capabilities-nda-r1/notes/tenant-pin-analysis.md).
+        // "system" is the ONLY shared/cross-tenant value this filter ever admits — it is the
+        // same sentinel already used elsewhere in this codebase for org-wide AI resources
+        // (SystemCacheKeys.SystemTenantSentinel, reused here rather than re-declaring the
+        // literal). This does NOT weaken isolation for customer document indexes
+        // (spaarke-files-index / spaarke-records-index) — those are untouched and have no
+        // "system"-tenant documents; a document seeded under a genuine OTHER tenant's real
+        // GUID is still excluded here exactly as before.
+        filters.Add($"(tenantId eq '{EscapeFilterValue(options.TenantId)}' or tenantId eq '{SystemCacheKeys.SystemTenantSentinel}')");
 
         // Optional: filter by knowledge source IDs
         if (options.KnowledgeSourceIds is { Count: > 0 })

@@ -160,7 +160,10 @@ jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
     ComposeEditor: ReactLib.forwardRef(
-      (props: { onSave?: () => void; canSave?: boolean; onDirtyChange?: (d: boolean) => void }, ref: React.Ref<unknown>) => {
+      (
+        props: { onSave?: () => void; canSave?: boolean; onDirtyChange?: (d: boolean) => void },
+        ref: React.Ref<unknown>
+      ) => {
         editorProps.current = props;
         // The real editor reports dirty via onDirtyChange once the user edits; simulate a single edit on
         // mount so the workspace's Save becomes enabled (canSave) and the op-log dirty-save path is taken.
@@ -175,7 +178,7 @@ jest.mock('./ComposeEditor', () => {
           }),
           commitSaved: commitSavedMock,
           getBaselineParaIdMap: () => [],
-          getCommentThreadAnnotations: () => [],
+          getAnchoredComments: () => [],
           getRedlineAnnotations: () => [],
           hasPendingRedlines: () => false,
           buildContentModel: () => ({ paragraphs: [] }),

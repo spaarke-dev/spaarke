@@ -21,12 +21,7 @@ import TableCell from '@tiptap/extension-table-cell';
 import { COMPOSE_R3_PARAID } from '../widgets/paraIdExtension';
 import { InsertionMark } from '../widgets/marks/InsertionMark';
 import { DeletionMark } from '../widgets/marks/DeletionMark';
-import {
-  stampParaIds,
-  captureParaIdSnapshot,
-  buildContentModel,
-  buildBaselineParaIdMap,
-} from './docxBridge';
+import { stampParaIds, captureParaIdSnapshot, buildContentModel, buildBaselineParaIdMap } from './docxBridge';
 import type { ParaIdMapEntry } from '../types/compose-contracts';
 
 function makeEditor(content = '<p></p>'): Editor {
@@ -47,7 +42,7 @@ function makeEditor(content = '<p></p>'): Editor {
 }
 
 describe('captureParaIdSnapshot (FR-01) — reject-state text per paraId', () => {
-  it('captures each paragraph\'s current settled text keyed by paraId, in document order', () => {
+  it("captures each paragraph's current settled text keyed by paraId, in document order", () => {
     const editor = makeEditor();
     editor.commands.setContent('<p>First clause.</p><p>Second clause.</p><p>Third clause.</p>');
     const map: ParaIdMapEntry[] = [

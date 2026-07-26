@@ -113,10 +113,7 @@ export interface AiGenerateUnknownResult {
   readonly requestId: string;
 }
 
-export type AiGenerateReturnResult =
-  | AiGenerateOperationsResult
-  | AiGenerateRefusedResult
-  | AiGenerateUnknownResult;
+export type AiGenerateReturnResult = AiGenerateOperationsResult | AiGenerateRefusedResult | AiGenerateUnknownResult;
 
 /** Options for {@link useAiGenerateBookmark} — the escalation/surface seams (root §6/§6.5). */
 export interface UseAiGenerateBookmarkOptions {
@@ -348,7 +345,11 @@ export function useAiGenerateBookmark(
         requestId,
         operations,
         resolved: resolved
-          ? { paraId: resolved.paraId, point: { runIndex: resolved.runIndex, offset: resolved.offset }, pos: entry.start.pos }
+          ? {
+              paraId: resolved.paraId,
+              point: { runIndex: resolved.runIndex, offset: resolved.offset },
+              pos: entry.start.pos,
+            }
           : null,
         review,
       };
