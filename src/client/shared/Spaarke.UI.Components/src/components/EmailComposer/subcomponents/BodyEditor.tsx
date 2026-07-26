@@ -22,6 +22,7 @@ import * as React from 'react';
 import { Tooltip, Button, Textarea, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
 import { TextFont20Regular, TextT20Regular } from '@fluentui/react-icons';
 import { RichTextEditor } from '../../RichTextEditor';
+import type { RichTextEditorRef } from '../../RichTextEditor';
 import type { EmailComposerBodyFormat } from '../EmailComposer.types';
 
 /**
@@ -54,6 +55,8 @@ export interface IBodyEditorProps {
   required?: boolean;
   errorMessage?: string;
   minHeight?: number;
+  /** Host controls rendered at the end of the RTF toolbar (HTML mode only). */
+  toolbarSlot?: React.ReactNode;
 }
 
 // ---------------------------------------------------------------------------
@@ -109,15 +112,10 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const BodyEditor: React.FC<IBodyEditorProps> = ({
-  value,
-  format,
-  onChange,
-  onFormatChange,
-  readOnly,
-  errorMessage,
-  minHeight = 200,
-}) => {
+export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(function BodyEditor(
+  { value, format, onChange, onFormatChange, readOnly, errorMessage, minHeight = 200, toolbarSlot },
+  ref
+) {
   const styles = useStyles();
 
   return (
@@ -154,11 +152,13 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
         {format === 'HTML' ? (
           <div className={styles.editorFill}>
             <RichTextEditor
+              ref={ref}
               value={value}
               onChange={onChange}
               readOnly={readOnly}
               minHeight={minHeight}
               placeholder="Compose your message..."
+              toolbarSlot={toolbarSlot}
             />
           </div>
         ) : (
@@ -181,6 +181,6 @@ export const BodyEditor: React.FC<IBodyEditorProps> = ({
       )}
     </div>
   );
-};
+});
 
 BodyEditor.displayName = 'BodyEditor';

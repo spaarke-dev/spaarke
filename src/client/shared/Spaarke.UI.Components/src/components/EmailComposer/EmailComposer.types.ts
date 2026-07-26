@@ -274,6 +274,7 @@ export type EmailComposerAction =
   | { type: 'RESOLVE_ATTACHMENT_DOCUMENT'; id: string; documentId: string; driveItemId?: string }
   | { type: 'TOGGLE_ATTACHMENT_SELECTED'; id: string }
   | { type: 'TOGGLE_ATTACHMENT_LINK'; id: string }
+  | { type: 'ADD_ASSOCIATION'; association: ICommunicationAssociation }
   | { type: 'SET_VALIDATION_ERRORS'; result: IValidationResult }
   | { type: 'BEGIN_SEND' }
   | { type: 'END_SEND' }
@@ -374,6 +375,13 @@ export interface IEmailComposerProps {
   // — Recipient directory lookup (RecipientField) —
   /** Mirrors `searchUsersAndContacts(dataService, query)` shape, pre-bound by the host. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced recipient lookup (owner UAT 2026-07-24): clicking a field's To/Cc/Bcc label box
+   * opens the host's OOB people picker (`Xrm.Utility.lookupObjects` over contact + systemuser)
+   * and resolves the picked record(s) to email address(es). Additive to the typeahead — the
+   * user can still type. Returns the recipients to append (or empty/null if cancelled).
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
 
   /**
    * Record-lookup targets for the attachments "look up a record" tool (owner UAT round 5).
@@ -388,6 +396,14 @@ export interface IEmailComposerProps {
    * Context-agnostic (ADR-012): the host owns the Xrm bridge + the record URL.
    */
   onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add a relationship to the communication (owner UAT 2026-07-24, connector toolbar icon).
+   * The host runs `Xrm.Utility.lookupObjects` across the regarding catalog and WRITES the
+   * association (Option B: same `applyRegardingSelection` path the CommunicationConnections
+   * "Link another" uses), then returns the picked record so the composer shows it in the
+   * "Related to" section. Context-agnostic (ADR-012): the host owns the Xrm bridge + write.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
 
   // — Send-side behavior —
   sendMode?: CommunicationSendMode;

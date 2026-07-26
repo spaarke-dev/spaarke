@@ -493,6 +493,13 @@ export function emailComposerReducer(state: EmailComposerState, action: EmailCom
     case 'ADD_ATTACHMENT':
       return { ...state, attachments: [...state.attachments, action.item], isDirty: true };
 
+    case 'ADD_ASSOCIATION': {
+      // Dedup by entityType+entityId — the connector may re-pick an already-linked record.
+      const key = `${action.association.entityType}:${action.association.entityId}`.toLowerCase();
+      if (state.associations.some(a => `${a.entityType}:${a.entityId}`.toLowerCase() === key)) return state;
+      return { ...state, associations: [...state.associations, action.association], isDirty: true };
+    }
+
     case 'REMOVE_ATTACHMENT':
       return { ...state, attachments: state.attachments.filter(a => a.id !== action.id), isDirty: true };
 

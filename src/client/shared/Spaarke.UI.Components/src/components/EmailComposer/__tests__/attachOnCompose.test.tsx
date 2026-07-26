@@ -13,7 +13,6 @@
 import * as React from 'react';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import { AttachmentList } from '../subcomponents/AttachmentList';
 import { EmailComposer } from '../EmailComposer';
 import {
   validateLocalAttachmentFile,
@@ -125,49 +124,51 @@ describe('RESOLVE_ATTACHMENT_DOCUMENT + mapStateToSendRequest', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. AttachmentList pick-time rejection is VISIBLE and not added
+// 4. Composer pick-time rejection is VISIBLE and not added (FR-20 negative)
+//    The local-file picker + policy gate now live in EmailComposer (owner UAT
+//    2026-07-24 — AttachmentList is display-only); the hidden input carries the
+//    aria-label "Choose files from your computer".
 // ---------------------------------------------------------------------------
 
-describe('AttachmentList — local pick rejection is visible (FR-20 negative)', () => {
-  function renderList() {
-    const onAdd = jest.fn();
+describe('EmailComposer — local pick rejection is visible (FR-20 negative)', () => {
+  function renderComposer() {
+    const ref = React.createRef<import('../EmailComposer.types').IEmailComposerHandle>();
     const utils = renderWithProviders(
-      <AttachmentList
+      <EmailComposer
+        ref={ref}
         mode="compose"
-        sources={[{ kind: 'local' }]}
-        items={[]}
-        onAdd={onAdd}
-        onRemove={jest.fn()}
-        onToggleSelected={jest.fn()}
+        mount="page"
+        authenticatedFetch={noopFetch as unknown as IEmailComposerProps['authenticatedFetch']}
+        attachmentSources={[{ kind: 'local' }]}
       />
     );
     const input = utils.container.querySelector('input[type="file"]') as HTMLInputElement;
-    return { onAdd, input };
+    return { ref, input };
   }
 
-  it('rejects an oversize file with a visible error and never calls onAdd', () => {
-    const { onAdd, input } = renderList();
+  it('rejects an oversize file with a visible error and never adds it', () => {
+    const { ref, input } = renderComposer();
     const big = fileOfSize('big.pdf', ATTACHMENT_MAX_FILE_BYTES + 1, PDF);
     fireEvent.change(input, { target: { files: [big] } });
     expect(screen.getByRole('alert')).toHaveTextContent(/exceeds the 25 MB per-file limit/);
-    expect(onAdd).not.toHaveBeenCalled();
+    expect(ref.current?.getState().attachments ?? []).toHaveLength(0);
   });
 
-  it('rejects a disallowed-MIME file with a visible error and never calls onAdd', () => {
-    const { onAdd, input } = renderList();
+  it('rejects a disallowed-MIME file with a visible error and never adds it', () => {
+    const { ref, input } = renderComposer();
     const bad = fileOfSize('evil.exe', 1024, 'application/x-msdownload');
     fireEvent.change(input, { target: { files: [bad] } });
     expect(screen.getByRole('alert')).toHaveTextContent(/unsupported type/i);
-    expect(onAdd).not.toHaveBeenCalled();
+    expect(ref.current?.getState().attachments ?? []).toHaveLength(0);
   });
 
-  it('accepts an allowed file within the cap (calls onAdd, no error)', () => {
-    const { onAdd, input } = renderList();
+  it('accepts an allowed file within the cap (adds it, no error)', () => {
+    const { ref, input } = renderComposer();
     const ok = fileOfSize('ok.pdf', 2 * MB, PDF);
     fireEvent.change(input, { target: { files: [ok] } });
-    expect(onAdd).toHaveBeenCalledTimes(1);
-    expect(onAdd.mock.calls[0][0]).toMatchObject({ source: 'local', fileName: 'ok.pdf', mimeType: PDF });
-    expect(screen.queryByRole('alert')).toBeNull();
+    const atts = ref.current?.getState().attachments ?? [];
+    expect(atts).toHaveLength(1);
+    expect(atts[0]).toMatchObject({ source: 'local', fileName: 'ok.pdf', mimeType: PDF });
   });
 });
 

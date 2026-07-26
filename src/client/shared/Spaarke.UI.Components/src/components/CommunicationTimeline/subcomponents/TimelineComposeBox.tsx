@@ -35,14 +35,10 @@
  * pick land as a typed junction row instead of an unresolved-address row.
  */
 import * as React from 'react';
-import { Button, Field, Input, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
-import { RecipientField, BodyEditor, AttachmentList } from '../../EmailComposer';
-import type {
-  IRecipient,
-  IAttachmentItem,
-  EmailComposerBodyFormat,
-  IComposerAttachmentSource,
-} from '../../EmailComposer';
+import { Button, Field, Input, Spinner, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
+import { Attach20Regular } from '@fluentui/react-icons';
+import { RecipientField, BodyEditor, AttachmentList, validateLocalAttachmentFile } from '../../EmailComposer';
+import type { IRecipient, IAttachmentItem, EmailComposerBodyFormat } from '../../EmailComposer';
 import type { ILookupItem } from '../../../types/LookupTypes';
 import type { CommunicationTimelinePrefill } from '../CommunicationTimeline.types';
 
@@ -78,8 +74,6 @@ export interface ITimelineComposeBoxProps {
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   disabled?: boolean;
 }
-
-const ATTACHMENT_SOURCES: IComposerAttachmentSource[] = [{ kind: 'local' }];
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -136,6 +130,35 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
   const [bodyFormat, setBodyFormat] = React.useState<EmailComposerBodyFormat>(prefill?.bodyFormat ?? 'HTML');
   const [attachments, setAttachments] = React.useState<IAttachmentItem[]>([]);
   const [error, setError] = React.useState<string | undefined>();
+  // Local-file picker (owner UAT 2026-07-24: AttachmentList is now display-only — each host
+  // owns its add affordance). CHAT-ATTACHMENT-POLICY gate before an item enters state.
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const handlePickFiles = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const rejections: string[] = [];
+    const added: IAttachmentItem[] = [];
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      const rejection = validateLocalAttachmentFile(file);
+      if (rejection) {
+        rejections.push(rejection.message);
+        continue;
+      }
+      added.push({
+        id: `local:${file.name}:${file.size}:${i}`,
+        source: 'local',
+        fileName: file.name,
+        sizeBytes: file.size,
+        mimeType: file.type || undefined,
+        file,
+        selected: true,
+      });
+    }
+    if (added.length > 0) setAttachments(prev => [...prev, ...added]);
+    setError(rejections.length > 0 ? rejections.join(' ') : undefined);
+    e.target.value = '';
+  }, []);
 
   // Re-seed the draft when the host pushes a new prefill (task 063 quoting) — without unmounting.
   const prefillSubject = prefill?.subject;
@@ -241,11 +264,30 @@ export const TimelineComposeBox: React.FC<ITimelineComposeBoxProps> = ({
         readOnly={disabled || isSending}
         minHeight={120}
       />
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={handlePickFiles}
+        aria-label="Choose files from your computer"
+      />
+      {!(disabled || isSending) && (
+        <div>
+          <Tooltip content="Attach files from your computer" relationship="label">
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Attach20Regular />}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              Attach files
+            </Button>
+          </Tooltip>
+        </div>
+      )}
       <AttachmentList
-        mode="compose"
-        sources={ATTACHMENT_SOURCES}
         items={attachments}
-        onAdd={item => setAttachments(prev => [...prev, item])}
         onRemove={id => setAttachments(prev => prev.filter(a => a.id !== id))}
         onToggleSelected={id =>
           setAttachments(prev => prev.map(a => (a.id === id ? { ...a, selected: a.selected === false } : a)))

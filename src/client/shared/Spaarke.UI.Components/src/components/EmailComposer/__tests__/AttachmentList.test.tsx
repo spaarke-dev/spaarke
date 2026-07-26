@@ -43,6 +43,10 @@ function item(
   return { id, source: kind, fileName: `${id}.pdf`, sizeBytes, documentId: `doc-${id}`, ...extra };
 }
 
+// AttachmentList is now display-only + collapsible (owner UAT 2026-07-24): the add/link
+// controls moved to the RichTextEditor toolbar (tested via EmailComposer). `mode`/`sources`
+// are accepted here for call-site compatibility but no longer affect the component. Render
+// with `defaultExpanded` so the item rows + caps are visible without a click.
 function renderList(opts: {
   mode?: EmailComposerMode;
   items: IAttachmentItem[];
@@ -51,23 +55,19 @@ function renderList(opts: {
   onToggleSelected?: (id: string) => void;
   onToggleLink?: (id: string) => void;
 }) {
-  const onAdd = jest.fn();
   const onRemove = opts.onRemove ?? jest.fn();
   const onToggleSelected = opts.onToggleSelected ?? jest.fn();
   const onToggleLink = opts.onToggleLink ?? jest.fn();
-  const sources = opts.sources ?? [{ kind: 'related' }];
   const result = renderWithProviders(
     <AttachmentList
-      mode={opts.mode ?? 'compose'}
-      sources={sources}
       items={opts.items}
-      onAdd={onAdd}
       onRemove={onRemove}
       onToggleSelected={onToggleSelected}
       onToggleLink={onToggleLink}
+      defaultExpanded
     />
   );
-  return { ...result, onAdd, onRemove, onToggleSelected, onToggleLink };
+  return { ...result, onRemove, onToggleSelected, onToggleLink };
 }
 
 describe('AttachmentList — hard caps', () => {

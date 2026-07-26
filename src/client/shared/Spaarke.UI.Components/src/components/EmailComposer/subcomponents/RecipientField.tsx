@@ -95,6 +95,12 @@ export interface IRecipientFieldProps {
   onChange: (recipients: IRecipient[]) => void;
   /** Directory search — host binds `searchUsersAndContacts(dataService, query)`. */
   onSearch?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced OOB people lookup (owner UAT 2026-07-24). When supplied, the To/Cc/Bcc label
+   * box becomes a button that opens the host's OOB picker and appends the resolved
+   * recipient(s). Additive to the typeahead — the user can still type free-text.
+   */
+  onLookup?: () => Promise<IRecipient[] | null>;
   /** Field-level validation error message (from `IValidationResult`), if any. */
   errorMessage?: string;
 }
@@ -131,6 +137,14 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground2,
     fontSize: tokens.fontSizeBase300,
+  },
+  // When an OOB lookup is wired, the label box acts as a button (owner UAT 2026-07-24).
+  labelBoxClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      color: tokens.colorNeutralForeground1,
+    },
   },
   // The right-hand cell: a bordered box holding the resolved chips AND the text
   // input, wrapping together (owner UAT 2026-07-22 #2 — a selected recipient enters
@@ -234,6 +248,7 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   value,
   onChange,
   onSearch,
+  onLookup,
   errorMessage,
 }) => {
   const styles = useStyles();
@@ -340,6 +355,19 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
     [value, onChange]
   );
 
+  // Advanced OOB people lookup (owner UAT 2026-07-24) — dedup by email against the current set.
+  const handleLookup = React.useCallback(() => {
+    if (!onLookup || disabled) return;
+    void onLookup()
+      .then(picked => {
+        if (!picked || picked.length === 0) return;
+        const existing = new Set(value.map(r => r.email.toLowerCase()));
+        const added = picked.filter(r => r.email && !existing.has(r.email.toLowerCase()));
+        if (added.length > 0) onChange([...value, ...added]);
+      })
+      .catch(err => console.warn('[RecipientField] lookup failed:', label, err));
+  }, [onLookup, disabled, value, onChange, label]);
+
   // Debounced directory search over the live draft.
   React.useEffect(() => {
     if (!onSearch) return;
@@ -381,10 +409,30 @@ export const RecipientField: React.FC<IRecipientFieldProps> = ({
   return (
     <div className={styles.wrapper} ref={wrapperRef} role="group" aria-label={label}>
       <div className={styles.inlineRow}>
-        <span className={styles.labelBox} aria-hidden="true">
-          {label}
-          {required && <span className={styles.requiredMark}>{' *'}</span>}
-        </span>
+        {onLookup ? (
+          <span
+            className={mergeClasses(styles.labelBox, styles.labelBoxClickable)}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            aria-label={`Look up ${label} recipients`}
+            title={`Look up ${label} recipients`}
+            onClick={handleLookup}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleLookup();
+              }
+            }}
+          >
+            {label}
+            {required && <span className={styles.requiredMark}>{' *'}</span>}
+          </span>
+        ) : (
+          <span className={styles.labelBox} aria-hidden="true">
+            {label}
+            {required && <span className={styles.requiredMark}>{' *'}</span>}
+          </span>
+        )}
         <div className={styles.fieldBox}>
           {value.length > 0 && (
             <TagGroup

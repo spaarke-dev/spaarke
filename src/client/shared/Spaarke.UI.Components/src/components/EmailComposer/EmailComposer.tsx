@@ -30,15 +30,37 @@ import {
   MessageBar,
   MessageBarBody,
   Text,
+  Tooltip,
+  ToolbarButton,
+  ToolbarDivider,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
   makeStyles,
   tokens,
   mergeClasses,
 } from '@fluentui/react-components';
-import { Dismiss20Regular } from '@fluentui/react-icons';
+import {
+  Dismiss20Regular,
+  Attach20Regular,
+  SearchRegular,
+  Connector20Regular,
+  ChevronDown20Regular,
+  ChevronUp20Regular,
+} from '@fluentui/react-icons';
 
 import { sendCommunication, SendCommunicationError } from '../../services/communicationApi';
+import type { ICommunicationAssociation } from '../../services/communicationApi';
 
-import { emailComposerReducer, initialState, validateState, mapStateToSendRequest } from './EmailComposer.reducer';
+import {
+  emailComposerReducer,
+  initialState,
+  validateState,
+  mapStateToSendRequest,
+  validateLocalAttachmentFile,
+} from './EmailComposer.reducer';
 import type {
   EmailComposerState,
   IAttachmentItem,
@@ -48,12 +70,18 @@ import type {
   IPickedRecord,
   IValidationResult,
 } from './EmailComposer.types';
+import type { RichTextEditorRef } from '../RichTextEditor';
 
 import { RecipientField } from './subcomponents/RecipientField';
 import { BodyEditor } from './subcomponents/BodyEditor';
 import { AttachmentList } from './subcomponents/AttachmentList';
 import { AssociationChips } from './subcomponents/AssociationChips';
 import { ComposerActionBar } from './subcomponents/ComposerActionBar';
+
+// The Dataverse logical name for a governed Document — the paperclip's "Link documents"
+// picks this type and ATTACHES it, so it's intentionally excluded from the record-search
+// catalog (which inserts a body LINK for every other type). Owner UAT 2026-07-24.
+const DOCUMENT_LOGICAL_NAME = 'sprk_document';
 
 // ---------------------------------------------------------------------------
 // Attachment source defaults
@@ -141,6 +169,32 @@ const useStyles = makeStyles({
     display: 'flex',
     justifyContent: 'flex-end',
   },
+  // Collapsible section (Attachments, Related to) — a clickable header row (label + chevron)
+  // over the section body. Owner UAT 2026-07-24.
+  collapsibleHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    cursor: 'pointer',
+    // +4px padding over the section header (owner UAT 2026-07-24).
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+  },
+  // Section label — standard Segoe UI 14px semibold, neutral foreground 1 (UI-DESIGN-STANDARDS
+  // section-header spec; owner UAT 2026-07-24). Token-only so both themes resolve (ADR-021).
+  sectionLabel: {
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // Trailing controls placed into the RichTextEditor toolbar slot (paperclip / search /
+  // connector). Kept visually grouped at the toolbar's trailing end.
+  toolbarSlot: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '2px',
+  },
   liveRegion: {
     position: 'absolute',
     width: '1px',
@@ -212,10 +266,26 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
   const [showBccToggle, setShowBccToggle] = React.useState(false);
   const bccVisible = showBccToggle || state.bcc.length > 0;
 
+  // Imperative handle to the HTML body editor — used to insert a record link AT THE CURSOR
+  // (owner UAT 2026-07-24) rather than appending to the end. Null in plain-text mode.
+  const bodyEditorRef = React.useRef<RichTextEditorRef>(null);
+  // Local-file picker input (trigger lives in the RTF toolbar's paperclip menu, owner UAT
+  // 2026-07-24). Pick-time policy rejections surface here.
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Late-bound handle to handleAddAttachment (defined below) so the file-pick callback,
+  // declared earlier, can invoke it without a temporal-dead-zone reference.
+  const handleAddAttachmentRef = React.useRef<((item: IAttachmentItem) => void) | null>(null);
+  const [pickErrors, setPickErrors] = React.useState<string[]>([]);
+  // Related-to section defaults expanded (shows what the email is associated to); Attachments
+  // defaults collapsed (owner UAT 2026-07-24 — the latter is owned by AttachmentList).
+  const [relatedCollapsed, setRelatedCollapsed] = React.useState(false);
+
   // Record lookup (owner UAT round 5, RegardingResolver pattern): a document pick attaches
-  // (Attach/Link per row); any other record type is inserted as a link in the message body.
+  // (Attach/Link per row); any other record type is inserted as a link in the message body
+  // AT THE CURSOR (owner UAT 2026-07-24 — HTML mode via the editor's insertAtCursor; plain
+  // text appends since the textarea has no cursor handle here).
   const handleRecordPicked = React.useCallback((picked: IPickedRecord) => {
-    if (picked.entityType === 'sprk_document') {
+    if (picked.entityType === DOCUMENT_LOGICAL_NAME) {
       dispatch({
         type: 'ADD_ATTACHMENT',
         item: {
@@ -234,12 +304,68 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     if (!picked.url || !isSafeHref(picked.url)) return;
     const cur = stateRef.current;
     const label = picked.name || 'record';
+    if (cur.bodyFormat === 'HTML' && bodyEditorRef.current) {
+      // Insert at the caret; the editor's onChange propagates the new HTML into state.body.
+      bodyEditorRef.current.insertAtCursor(
+        `<a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a>`,
+        'html'
+      );
+      return;
+    }
     const nextBody =
       cur.bodyFormat === 'HTML'
         ? `${cur.body}<p><a href="${escapeHtml(picked.url)}">${escapeHtml(label)}</a></p>`
         : `${cur.body}${cur.body ? '\n' : ''}${label}: ${picked.url}`;
     dispatch({ type: 'SET_FIELD', field: 'body', value: nextBody });
   }, []);
+
+  // Local-file pick (paperclip → "Add files"). CHAT-ATTACHMENT-POLICY gate BEFORE state entry;
+  // rejected files are dropped and surfaced (never silently). Moved out of AttachmentList when
+  // the add controls hoisted to the RTF toolbar (owner UAT 2026-07-24).
+  const handleLocalFilesPicked = React.useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    const rejections: string[] = [];
+    for (let i = 0; i < files.length; i += 1) {
+      const file = files[i];
+      const rejection = validateLocalAttachmentFile(file);
+      if (rejection) {
+        rejections.push(rejection.message);
+        continue;
+      }
+      handleAddAttachmentRef.current?.({
+        id: `local:${file.name}:${file.size}:${i}:${state.attachments.length}`,
+        source: 'local',
+        fileName: file.name,
+        sizeBytes: file.size,
+        mimeType: file.type || undefined,
+        file,
+        selected: true,
+      });
+    }
+    setPickErrors(rejections);
+    e.target.value = ''; // reset so re-selecting the same file fires onChange again
+  }, [state.attachments.length]);
+
+  // Connector toolbar icon → add a relationship (owner UAT 2026-07-24, Option B). The host
+  // runs the OOB lookup + writes the association; we reflect the picked record in "Related to".
+  const onAddRelationship = props.onAddRelationship;
+  const handleAddRelationship = React.useCallback(() => {
+    if (!onAddRelationship) return;
+    setRelatedCollapsed(false);
+    void onAddRelationship()
+      .then(picked => {
+        if (!picked) return;
+        const association: ICommunicationAssociation = {
+          entityType: picked.entityType,
+          entityId: picked.id,
+          entityName: picked.name,
+          entityUrl: picked.url,
+        };
+        dispatch({ type: 'ADD_ASSOCIATION', association });
+      })
+      .catch(err => console.warn('[EmailComposer] add relationship failed:', err));
+  }, [onAddRelationship]);
 
   // ── Attach-on-compose: local-file → Document resolution (task 042 / FR-20) ──
   // A picked local file (already passed the CHAT-ATTACHMENT-POLICY 25 MB + MIME
@@ -293,6 +419,86 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
     },
     [onUploadLocalAttachment]
   );
+  handleAddAttachmentRef.current = handleAddAttachment;
+
+  // ── RTF toolbar slot (owner UAT 2026-07-24) ────────────────────────────────
+  // The attachment / record-lookup / connector actions live INLINE in the RichTextEditor
+  // toolbar (a divider precedes them; see ToolbarPlugin). Built here so they have access to
+  // dispatch, the file input, the editor ref (insert-at-cursor), and the host callbacks.
+  const canAddLocal = !state.readOnly && attachmentSources.some(s => s.kind === 'local');
+  const canLinkDocument = !state.readOnly && !!props.onLookupRecord;
+  // Record search excludes Document (owner UAT 2026-07-24): documents are attached via the
+  // paperclip's "Link documents"; every other catalog type inserts a body link.
+  const recordSearchCatalog = React.useMemo(
+    () => (props.recordLookupCatalog ?? []).filter(t => t.logicalName !== DOCUMENT_LOGICAL_NAME),
+    [props.recordLookupCatalog]
+  );
+  const showRecordSearch = !state.readOnly && recordSearchCatalog.length > 0 && !!props.onLookupRecord;
+  const showConnector = !state.readOnly && !!props.onAddRelationship;
+
+  const runDocumentLink = React.useCallback(() => {
+    if (!props.onLookupRecord) return;
+    void props.onLookupRecord(DOCUMENT_LOGICAL_NAME).then(picked => {
+      if (picked) handleRecordPicked(picked);
+    });
+  }, [props.onLookupRecord, handleRecordPicked]);
+
+  const runRecordSearch = React.useCallback(
+    (logicalName: string) => {
+      if (!props.onLookupRecord) return;
+      void props.onLookupRecord(logicalName).then(picked => {
+        if (picked) handleRecordPicked(picked);
+      });
+    },
+    [props.onLookupRecord, handleRecordPicked]
+  );
+
+  const toolbarSlot =
+    canAddLocal || canLinkDocument || showRecordSearch || showConnector ? (
+      <div className={styles.toolbarSlot}>
+        {(canAddLocal || canLinkDocument) && (
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Attach files or link a document" relationship="label">
+                <ToolbarButton icon={<Attach20Regular />} aria-label="Attach" />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {canAddLocal && <MenuItem onClick={() => fileInputRef.current?.click()}>Add files</MenuItem>}
+                {canLinkDocument && <MenuItem onClick={runDocumentLink}>Link documents</MenuItem>}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        )}
+        {showRecordSearch && (
+          <>
+            <ToolbarDivider />
+            <Menu positioning="below-end">
+              <MenuTrigger disableButtonEnhancement>
+                <Tooltip content="Insert a link to a record" relationship="label">
+                  <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
+                </Tooltip>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {recordSearchCatalog.map(t => (
+                    <MenuItem key={t.logicalName} onClick={() => runRecordSearch(t.logicalName)}>
+                      {t.displayName}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+          </>
+        )}
+        {showConnector && (
+          <Tooltip content="Relate this email to a record" relationship="label">
+            <ToolbarButton icon={<Connector20Regular />} aria-label="Add relationship" onClick={handleAddRelationship} />
+          </Tooltip>
+        )}
+      </div>
+    ) : undefined;
 
   // ── Re-derive state when mode/sourceRecord/communicationId change on an
   //    already-mounted instance (host swaps props rather than remounting) ──
@@ -406,12 +612,6 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
   const middle = (
     <>
-      {showAssociations && state.associations.length > 0 && (
-        <div className={styles.section} role="region" aria-label="Linked records">
-          <AssociationChips associations={state.associations} />
-        </div>
-      )}
-
       {/* R3 task 020 (FR-07): optional record-link affordance when opened from a
           conversation. Presentational only — semantic tokens, no hardcoded color.
           Unsafe-scheme urls degrade to a non-clickable label (isSafeHref). */}
@@ -447,6 +647,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.to}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'to', value: recipients })}
           onSearch={props.onSearchRecipients}
+          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('to') : undefined}
           errorMessage={fieldErrors.to}
         />
         <RecipientField
@@ -455,6 +656,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           value={state.cc}
           onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'cc', value: recipients })}
           onSearch={props.onSearchRecipients}
+          onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('cc') : undefined}
         />
         {bccVisible ? (
           <RecipientField
@@ -463,6 +665,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
             value={state.bcc}
             onChange={recipients => dispatch({ type: 'SET_RECIPIENTS', field: 'bcc', value: recipients })}
             onSearch={props.onSearchRecipients}
+            onLookup={props.onLookupRecipients ? () => props.onLookupRecipients!('bcc') : undefined}
           />
         ) : (
           !state.readOnly && (
@@ -491,27 +694,66 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         )}
       </div>
 
-      {/* Attachments sit ABOVE the body (owner UAT mockup 2026-07-22): Add files +
-          Related documents (with per-item Attach/Link) precede the message editor. */}
+      {/* Hidden local-file input — triggered by the RTF toolbar's paperclip "Add files"
+          (owner UAT 2026-07-24). */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        hidden
+        onChange={handleLocalFilesPicked}
+        aria-label="Choose files from your computer"
+      />
+
+      {/* Attachments — display-only collapsible list, DEFAULT COLLAPSED (owner UAT 2026-07-24);
+          the add/link controls now live in the RTF toolbar. */}
       <div className={styles.section} role="region" aria-label="Attachments">
         <AttachmentList
-          mode={state.mode}
-          sources={attachmentSources}
           items={state.attachments}
-          onAdd={handleAddAttachment}
           onRemove={id => dispatch({ type: 'REMOVE_ATTACHMENT', id })}
           onToggleSelected={id => dispatch({ type: 'TOGGLE_ATTACHMENT_SELECTED', id })}
           onToggleLink={id => dispatch({ type: 'TOGGLE_ATTACHMENT_LINK', id })}
-          recordCatalog={props.recordLookupCatalog}
-          onLookupRecord={props.onLookupRecord}
-          onRecordPicked={handleRecordPicked}
           resolvingIds={resolvingIds}
           readOnly={state.readOnly}
-          errorMessage={[fieldErrors.attachments, uploadError].filter(Boolean).join(' ') || undefined}
+          errorMessage={[fieldErrors.attachments, uploadError, ...pickErrors].filter(Boolean).join(' ') || undefined}
         />
       </div>
 
+      {/* Related to — what this email is associated to (owner UAT 2026-07-24). Collapsible;
+          the connector toolbar icon adds a new relationship (Option B). */}
+      {showAssociations && (
+        <div className={styles.section} role="region" aria-label="Related to">
+          <div
+            className={styles.collapsibleHeader}
+            role="button"
+            tabIndex={0}
+            aria-expanded={!relatedCollapsed}
+            onClick={() => setRelatedCollapsed(c => !c)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setRelatedCollapsed(c => !c);
+              }
+            }}
+          >
+            <Text className={styles.sectionLabel}>
+              Related to{state.associations.length > 0 ? ` (${state.associations.length})` : ''}
+            </Text>
+            {relatedCollapsed ? <ChevronDown20Regular /> : <ChevronUp20Regular />}
+          </div>
+          {!relatedCollapsed &&
+            (state.associations.length > 0 ? (
+              <AssociationChips associations={state.associations} />
+            ) : (
+              <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                Not related to any record yet.
+              </Text>
+            ))}
+        </div>
+      )}
+
       <BodyEditor
+        ref={bodyEditorRef}
         value={state.body}
         format={state.bodyFormat}
         onChange={value => dispatch({ type: 'SET_FIELD', field: 'body', value })}
@@ -520,6 +762,7 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
         required={!props.allowEmptyBody}
         errorMessage={fieldErrors.body}
         minHeight={props.mount === 'dialog' ? 200 : 220}
+        toolbarSlot={toolbarSlot}
       />
     </>
   );

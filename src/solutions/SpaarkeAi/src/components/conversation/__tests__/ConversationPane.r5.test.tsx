@@ -136,6 +136,7 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 import {
   ConversationPane,
   buildFileConfirmationMessage,
+  buildComposeAttachedToAssistantMessage,
   buildMultiFileSummarizeInterjection,
   makeLocalAssistantMessage,
   makeSavedToDmsMessage,
@@ -262,6 +263,22 @@ describe('makeSavedToDmsMessage (FIX #7a)', () => {
     const msg = makeSavedToDmsMessage(undefined, 'doc-9');
     expect(msg.content).toBe("Saved 'your document' to the DMS.");
     expect(msg.metadata?.savedPreview?.documentId).toBe('doc-9');
+  });
+});
+
+describe('buildComposeAttachedToAssistantMessage (Compose→Assistant ingest, UAT 2026-07-24)', () => {
+  it('names the file and tells the user it is now available in the Assistant', () => {
+    const body = buildComposeAttachedToAssistantMessage('Brief.docx');
+    expect(body).toContain('**Brief.docx**');
+    expect(body).toContain('added');
+    expect(body).toContain('our conversation');
+    // Points at BOTH surfaces so the user knows it is usable here AND still editable in Compose.
+    expect(body.toLowerCase()).toContain('compose');
+  });
+
+  it('falls back to a generic name when the filename is missing/blank', () => {
+    expect(buildComposeAttachedToAssistantMessage(undefined)).toContain('**your document**');
+    expect(buildComposeAttachedToAssistantMessage('   ')).toContain('**your document**');
   });
 });
 
