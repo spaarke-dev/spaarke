@@ -136,12 +136,32 @@ const useStyles = makeStyles({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
+  // The expanded suggestions render as light rows inside ONE bordered panel (UAT
+  // 2026-07-24) — not 5 stacked boxes. A hairline divider separates rows; the panel
+  // owns the border/radius so each SuggestionCard stays borderless. Tokens only (ADR-021).
   cardList: {
     display: "flex",
     flexDirection: "column",
-    rowGap: tokens.spacingVerticalS,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border("1px", "solid", tokens.colorNeutralStroke2),
+    ...shorthands.overflow("hidden"),
+    "> *:not(:first-child)": {
+      ...shorthands.borderTop("1px", "solid", tokens.colorNeutralStroke2),
+    },
   },
 });
+
+/**
+ * Strip a redundant leading verb ("Review "/"Review: ") from a suggestion title for
+ * DISPLAY — every Daily-Briefing suggestion currently arrives titled "Review X", so the
+ * verb repeated down the stack is noise (UAT 2026-07-24). The action (open) is implied by
+ * clicking. This is a presentation-only trim; the fuller fix is at the producer
+ * (DailyBriefingSuggestionProducer) so the envelope carries the clean subject.
+ */
+function displaySuggestionTitle(title: string): string {
+  return title.replace(/^\s*review[:\-–—]?\s+/i, "").trim() || title;
+}
 
 export interface SuggestionCardsDeps {
   /**
@@ -339,7 +359,7 @@ export function useSuggestionCards(deps: SuggestionCardsDeps): SuggestionCardsCo
                 key={s.outboxRowId}
                 suggestion={{
                   suggestionId: s.envelope.suggestionId,
-                  title: s.envelope.title,
+                  title: displaySuggestionTitle(s.envelope.title),
                   snippet: s.envelope.snippet,
                   actionHint: s.envelope.actionHint,
                 }}
