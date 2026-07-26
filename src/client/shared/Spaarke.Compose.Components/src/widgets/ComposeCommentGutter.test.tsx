@@ -93,7 +93,9 @@ describe('layoutCommentGutterCards', () => {
 // 2. ComposeCommentGutter — UI over a real editor
 // ---------------------------------------------------------------------------
 
-function makeEditor(content = '<p>The receiving party shall retain confidential information indefinitely.</p>'): Editor {
+function makeEditor(
+  content = '<p>The receiving party shall retain confidential information indefinitely.</p>'
+): Editor {
   return new Editor({
     extensions: [StarterKit, CommentAnchorMark],
     content,
@@ -129,7 +131,9 @@ describe('ComposeCommentGutter', () => {
     const liveSpan = findCommentAnchorRange(editor.state.doc, 'thread-1');
     expect(liveSpan).not.toBeNull();
 
-    const coordsSpy = jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 120, bottom: 140, left: 0, right: 0 });
+    const coordsSpy = jest
+      .spyOn(editor.view, 'coordsAtPos')
+      .mockReturnValue({ top: 120, bottom: 140, left: 0, right: 0 });
 
     const scrollContainerRef = React.createRef<HTMLDivElement>();
     render(
@@ -175,7 +179,9 @@ describe('ComposeCommentGutter', () => {
       applyCommentAnchor(editor, 'thread-2', 21, 30);
       jest
         .spyOn(editor.view, 'coordsAtPos')
-        .mockImplementation((pos: number) => (pos < 20 ? { top: 0, bottom: 0, left: 0, right: 0 } : { top: 10, bottom: 10, left: 0, right: 0 }));
+        .mockImplementation((pos: number) =>
+          pos < 20 ? { top: 0, bottom: 0, left: 0, right: 0 } : { top: 10, bottom: 10, left: 0, right: 0 }
+        );
 
       const scrollContainerRef = React.createRef<HTMLDivElement>();
       render(
@@ -254,7 +260,9 @@ describe('ComposeCommentGutter', () => {
       <FluentProvider theme={webLightTheme}>
         <ComposeCommentGutter
           editor={editor}
-          threads={[makeThread({ id: 'thread-plain', riskLevel: undefined, sectionRef: undefined, standardRef: undefined })]}
+          threads={[
+            makeThread({ id: 'thread-plain', riskLevel: undefined, sectionRef: undefined, standardRef: undefined }),
+          ]}
           scrollContainerRef={scrollContainerRef}
         />
       </FluentProvider>

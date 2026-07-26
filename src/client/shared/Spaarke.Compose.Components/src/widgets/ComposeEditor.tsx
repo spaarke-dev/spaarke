@@ -2470,7 +2470,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           {/* task 032 (right-gutter comment layout, FR-16) — NDA-REVIEW advisory comment cards,
               vertically aligned to their live anchor position (coordsAtPos), right of the document.
               Renders nothing while there are no advisory comment threads. */}
-          <ComposeCommentGutter editor={editor} threads={advisoryComments.threads} scrollContainerRef={editorScrollRef} />
+          <ComposeCommentGutter
+            editor={editor}
+            threads={advisoryComments.threads}
+            scrollContainerRef={editorScrollRef}
+          />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
             <Button
