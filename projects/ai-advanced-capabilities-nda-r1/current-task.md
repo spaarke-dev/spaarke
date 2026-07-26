@@ -1,8 +1,26 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
+> ## ⭐ Post-UAT follow-ups (2026-07-26) — DONE + DEPLOYED to spaarkedev1
+> Branch **`work/ai-nda-r1-followups`** (off master 751532d7e; pushed; NOT yet merged/PR'd). Commit `968810b6b`.
+>
+> **1. BFF reasoning-tier request shape (UAT #3 "can't run that action" root cause) — FIXED + DEPLOYED.**
+> - `OpenAiClient.GetStructuredCompletionRawAsync` now OMITS `temperature` for the configured ReasoningModel deployment (`ResolveEffectiveTemperature`). The old `temperature ?? 0.0f` floor sent 0.0 to gpt-5, which 400s ("Only the default (1) value is supported") — this defeated the per-Action sprk_temperature=null workaround and WAS the live "couldn't run that action". `max_completion_tokens` was already correct (OpenAI SDK 2.8.0 `MaxOutputTokenCount`→`max_completion_tokens`).
+> - `ActionRunner` uses a 16000 output-token ceiling for Reasoning tier (reasoning tokens count toward `max_completion_tokens`; 4000 could truncate the JSON → parse failure).
+> - +8 unit tests (GetStructuredCompletionRawAsyncTemperatureTests). BFF built + deployed to spaarke-bff-dev (hash-verified, healthy). §10 publish: 47.50 MB compressed (< 60 MB; ~0 delta, no new deps).
+>
+> **2. "Review an NDA" card placement (UAT #2) — FIXED + DEPLOYED.** Moved from the top-of-pane notification (`SuggestionCard`, read as "hidden") into the Suggested-Next-Steps strip as an in-line local chip `local:nda-review` (mirrors the existing `local:revise-in-compose` pattern) → same mount-in-Compose + dispatch flow (`handleReviewNda`). SpaarkeAi code page rebuilt (clean cache; `local:nda-review` verified in bundle) + deployed to `sprk_spaarkeai` (published).
+>
+> **3. UC3 `nda-standard-summary` (deferred follow-up) — DONE (live).** Created Action `sprk_analysisaction` id `27bef356-3889-f111-8077-7ced8ddc4a05` (Fast tier=100000000, temp 0.3, `sprk_allowsknowledge=true` for KNW-011 grounding, closed `{overview, sections[]}` schema) + surgically upserted the binding (mirror already had the row): consumerType=`nda-standard-summary`, enabled, surfaces=`assistant`, disposition=Informational, `sprk_Action`→that Action. Verified via read-back. (Routing cache ~5-min TTL — may take up to 5 min to appear in capability discovery.)
+>
+> **⚠️ Finding — Binding mirror is STALE vs live (13 drifts).** `Seed-PlaybookConsumers.ps1 -DiffOnly` shows the live `sprk_playbookconsumer` table has evolved past the committed mirror `infra/dataverse/sprk_playbookconsumer-rows.json` (chat-summarize/create-matter/create-task/draft-correspondence chipTransitions+disposition+toolDescription, nda-review toolDescription). I did NOT run the full seeder (would REVERT live drift) — used a surgical single-row upsert for UC3 instead. **Owner action:** reconcile deliberately, then `-Export` + commit to re-baseline the mirror.
+>
+> **Next when we continue:** (a) smoke-test the live NDA flow in spaarkedev1 (review runs on gpt-5 now; card in the follow-on row; UC3 "explain the standard"); (b) PR/merge `work/ai-nda-r1-followups` → master; (c) check/merge PR #690 (CI-LFS); (d) reconcile the binding mirror.
+
+---
+
 **Mode**: autonomous wave execution (owner-authorized 2026-07-25). Parallel subagents per wave; build + code-review + adr-check gates each wave; branch-only (no master merge); env-coupled steps flagged never faked. PR #689.
 
-**Status**: in-progress · **HEAD**: a7bd05316
+**Status**: implementation complete + deployed + post-UAT follow-ups deployed · **HEAD**: 968810b6b (branch work/ai-nda-r1-followups)
 
 ## Done + committed (gated)
 - 001 ✅ ADR-039 amendment (Output Determinism Modes; grounding mode-independent; strengthened + signed off)
