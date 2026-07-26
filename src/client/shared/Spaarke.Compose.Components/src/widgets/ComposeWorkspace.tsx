@@ -59,6 +59,10 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { ComposeBannerStack } from './ComposeBannerStack';
+// ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07). Mirrors the
+// ComposeCommentThread/ComposeFindReplace docked-panel convention; mounted below alongside the
+// SAME `compose_advisory_comments` data task 031's onAdvisoryComments handler already receives.
+import { NdaReviewSummaryPanel, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
 import {
   ComposeEditor,
   type ComposeEditorHandle,
@@ -1474,6 +1478,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `useComposeWorkspaceReceivers` hook (zero `as any`; discriminants enumerated
   // on the shared-lib bus union).
   // -------------------------------------------------------------------------
+  // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel state (FR-07). Captures
+  // the SAME `advisoryComments` projection 031's onAdvisoryComments handler below already receives,
+  // for the docked NdaReviewSummaryPanel (ADR-040 — one ledgered NDA-REVIEW result, two renderings,
+  // never a second server read). Additive to 031's existing handler — see the capture lines inside
+  // it further down; no existing line there is altered.
+  const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
+  const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
+  const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
+
   useComposeWorkspaceReceivers({
     // Flow 3 — Context → Workspace: insert the precedent/library clause into the
     // editor at cursor as a pending insertion (the editor's materialize seam).
@@ -1525,6 +1538,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           result.failed
         );
       }
+      // ai-advanced-capabilities-nda-r1 task 030 — additive capture for the review-summary docked
+      // panel (does not alter the placement logic above). Field rename: the event's `targetText`
+      // (031's own field, matching ComposeEditorHandle.placeAdvisoryComments' input shape) becomes
+      // the panel's `quotedText` (matching the NDA-REVIEW schema's own field name — see
+      // NdaReviewSummaryPanel.tsx's file header for why the panel keeps the schema's vocabulary).
+      setReviewSummaryFindings(
+        items.map(item => ({
+          sectionRef: item.sectionRef,
+          quotedText: item.targetText,
+          riskLevel: item.riskLevel,
+          explanation: item.explanation,
+          standardRef: item.standardRef,
+        }))
+      );
+      setReviewSummaryFailedCount(result?.failed.length ?? 0);
+      setReviewSummaryOpen(true);
     },
   });
 
@@ -2315,6 +2344,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its
             // success signal (saveSuccessToken) but no longer carries the preview link.
+          />
+
+          {/* ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07, single
+              surface — NO separate Analysis widget). Mirrors the ComposeCommentThread/
+              ComposeFindReplace docked-panel convention; renders overallRisk (derived) + the cited
+              flagged-section findings from the SAME ledgered NDA-REVIEW result task 031
+              materializes as in-document advisory Comments. Auto-opens when a review completes;
+              dismissible via its own close button (re-opens on the next review). */}
+          <NdaReviewSummaryPanel
+            open={reviewSummaryOpen && reviewSummaryFindings.length > 0}
+            onClose={() => setReviewSummaryOpen(false)}
+            findings={reviewSummaryFindings}
+            placementFailureCount={reviewSummaryFailedCount}
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}

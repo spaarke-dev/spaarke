@@ -17,13 +17,13 @@
 | 021 | NDA-STANDARD-SUMMARY Action (UC3) | 2 | ✅ | 012,020 | STANDARD | sonnet | high | B |
 | 022 | Bindings + Review-NDA card + classification | 2 | ✅ | 020 | FULL | sonnet | high | — |
 | 023 | Whole-doc review orchestration (fan-out) | 2 | ✅ | 020 | FULL | opus | high | — |
-| 030 | Review-summary docked panel | 3 | 🔲 | 023 | FULL | sonnet | high | C |
+| 030 | Review-summary docked panel | 3 | ✅ | 023 | FULL | sonnet | high | C |
 | 031 | Advisory-comments event + receiver | 3 | ✅ | 023 | FULL | sonnet | xhigh | C |
 | 032 | Right-gutter comment layout | 3 | 🔲 | 031 | FULL | sonnet | xhigh | — |
 | 033 | Draft Alternative + trace activation | 3 | 🔲 | 022 | FULL | sonnet | high | — |
 | 040 | Comment-export wiring fix | 4 | 🔲 | 031 | FULL | sonnet | xhigh | — |
-| 041 | Summary-Page DOCX writer | 4 | 🔲 | 023 | FULL | sonnet | xhigh | D |
-| 042 | SPE save + versioning verification (test) | 4 | 🔲 | 023 | STANDARD | sonnet | high | D |
+| 041 | Summary-Page DOCX writer | 4 | ✅ | 023 | FULL | sonnet | xhigh | D |
+| 042 | SPE save + versioning verification (test) | 4 | ✅ | 023 | STANDARD | sonnet | high | D |
 | 050 | Eval harness + closed set | 5 | 🔲 | 020 | STANDARD | sonnet | high | E |
 | 051 | Golden-utterance dispatch eval | 5 | 🔲 | 022 | STANDARD | sonnet | high | E |
 | 052 | Grounding tenant-pin integration test | 5 | 🔲 | 012 | STANDARD | sonnet | high | E |

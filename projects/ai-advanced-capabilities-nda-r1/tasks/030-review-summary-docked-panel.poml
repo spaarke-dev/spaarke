@@ -4,7 +4,7 @@
     <title>Review-summary docked panel in Compose (single surface)</title>
     <phase>3 Compose Review Experience</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Fluent v9 panel component in Compose client (.tsx); frontend feature.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -113,6 +113,34 @@
 
   <notes>
     Single-surface decision: this panel replaces the earlier NdaAnalysisWidget idea. Keep it concise + cited.
+
+    COMPLETED (2026-07-26). Built `NdaReviewSummaryPanel.tsx` (+ `.test.tsx`, 13 tests) mirroring
+    ComposeCommentThread's docked-panel convention exactly (makeStyles + semantic tokens, header +
+    close button, scrollable list). Mounted in `ComposeWorkspace.tsx` (NOT `ComposeEditor.tsx`,
+    where ComposeCommentThread/ComposeFindReplace actually dock — the POML's relevant-files
+    assumption was slightly off; directional-mode deviation, noted here) as a sibling banner-style
+    panel right after `ComposeBannerStack`, auto-opening on the SAME `compose_advisory_comments`
+    event 031's `onAdvisoryComments` receiver already handles (3 additive lines inside that existing
+    handler + 3 new `useState` hooks — 031's existing lines untouched).
+
+    DEVIATION — overallRisk: the `compose_advisory_comments` event carries `flaggedSections[]`
+    projections but NOT the Action's top-level `overallRisk` string (031's bridge never threads it).
+    Hard-rule file scope for this task is Compose.Components only (no `PaneEventTypes.ts` edit), so
+    the panel DERIVES overallRisk client-side as the max severity among rendered findings — the same
+    rule the Action's own rubric uses server-side. Labelled "Overall risk (from findings)" in the UI
+    to avoid overclaiming server-parity. Follow-on: thread the real `overallRisk` field through
+    `PaneEventTypes.ts`/the bridge hook once a project owns that file again, then drop the derivation.
+
+    Exports added to `src/index.ts`: `NdaReviewSummaryPanel`, `deriveOverallRisk`,
+    `NDA_REVIEW_DISCLAIMER_TEXT`, `NdaReviewSummaryPanelProps`, `NdaReviewFindingSummary`.
+
+    Build: `npm run typecheck` + `npm run build` both clean. Full package Jest suite: 547/547 passing
+    (incl. new 13 + all 55 ComposeWorkspace tests, confirming no regression from the additive wiring).
+    `npm run lint` fails repo-wide on a pre-existing ESLint v9/`.eslintrc` config mismatch — NOT
+    introduced by this task (confirmed by running it against the whole package, not just these files).
+
+    Env-blocked: the two `<ui-tests>` (live org render + dark-mode toggle in a real Dataverse session)
+    were NOT run — no live/deployed environment available in this session. Not faked.
   </notes>
 
   <execution>

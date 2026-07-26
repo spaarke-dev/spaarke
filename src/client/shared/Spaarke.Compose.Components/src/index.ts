@@ -132,6 +132,14 @@ export { useComposeCommentThreads } from './widgets/hooks/useComposeCommentThrea
 export type { UseComposeCommentThreadsResult, ComposeCommentRange } from './widgets/hooks/useComposeCommentThreads';
 
 // -------------------------------------------------------------------------
+// Review-summary docked panel (ai-advanced-capabilities-nda-r1 task 030, FR-07) — the fuller
+// advisory digest (overallRisk + cited flagged-section findings) rendered inside Compose. Single
+// surface: no separate Analysis widget consumes this — mounted directly by ComposeWorkspace.
+// -------------------------------------------------------------------------
+export { NdaReviewSummaryPanel, deriveOverallRisk, NDA_REVIEW_DISCLAIMER_TEXT } from './widgets/NdaReviewSummaryPanel';
+export type { NdaReviewSummaryPanelProps, NdaReviewFindingSummary } from './widgets/NdaReviewSummaryPanel';
+
+// -------------------------------------------------------------------------
 // Return-from-Word re-anchoring (FR-27 / task 054)
 // -------------------------------------------------------------------------
 export { ComposeReanchorBanner } from './widgets/ComposeReanchorBanner';

@@ -4,7 +4,7 @@
     <title>SPE save + versioning verification (test only)</title>
     <phase>4 Export &amp; Persistence</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Test-only; asserts existing inherited behavior; tags include testing/integration-test (TEST-MODIFYING → gates apply).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,6 +85,25 @@
 
   <notes>
     Confirms the "save to SPE incl. version" requirement with zero new code — guards against a future regression.
+
+    COMPLETED 2026-07-26. New KEEP-path seam test:
+    tests/integration/seam/Compose/SpeSaveVersioningSeamTests.cs
+    (test: Save_TwiceOnSameDocument_CreatesTwoDistinctSpeVersions_AndPriorVersionStaysDownloadable_ThroughTheWire).
+    Reuses the existing ComposeFidelitySeamFixture (task 024/034) — no new fixture class. Real
+    ComposeService/ComposeEndpoints through WebApplicationFactory; mock ONLY at the
+    ISpeFileOperations module boundary (ADR-038). Asserts: (1) two real saves through
+    POST /api/compose/documents/{id}/save each invoke ReplaceFileContentAsUserAsync and mint a
+    distinct version id + ETag (never overwriting a prior slot); (2) a third save naming the
+    FIRST save's versionId as BaselineVersionId resolves via ComposeService's own
+    ResolveSaveBaselineAsync → DownloadFileVersionAsUserAsync and persists the FIRST version's
+    bytes (not the second/current), proving the prior version is genuinely retrievable through
+    production code, not just retained in the test's own bookkeeping. Redis save-stamp
+    concurrency mechanism (FR-08) explicitly NOT re-tested here — noted in file header as a
+    distinct mechanism already covered by ConcurrencySaveSeamTests.cs; deliberately left
+    GetFileMetadataAsUserAsync unconfigured (Loose ⇒ null) so that staleness/re-anchor branch
+    never fires in this file. No production code changed. Build + test: PASS (1/1). Quality
+    gates (code-review + adr-check, Step 9.5, TEST-MODIFYING override): both clean, 0
+    Critical/Warning findings.
   </notes>
 
   <execution>

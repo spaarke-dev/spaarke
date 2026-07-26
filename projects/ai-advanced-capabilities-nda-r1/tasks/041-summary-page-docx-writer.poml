@@ -3,8 +3,8 @@
   <metadata>
     <title>Summary-Page DOCX writer — TL;DR + flagged overview + recommendations</title>
     <phase>4 Export &amp; Persistence</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>clear</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New server-side OOXML section-insert in ComposeShadowPatchEngine/ComposeDocumentRenderer; export correctness.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,6 +95,19 @@
 
   <notes>
     Works with 040 (comment baking) to produce the fully-annotated export. Keep the page concise.
+
+    COMPLETED (Sonnet-5, FULL rigor). New `ComposeSummaryPageGenerator` (pure, deterministic content-model
+    builder from the ledgered `{overallRisk, flaggedSections[]}` — no second LLM call) + new
+    `ComposeDocumentRenderer.AppendSection(byte[], IReadOnlyList&lt;ComposeBlock&gt;)` (page-break + non-tracked
+    paragraphs appended at the true document end, trailing sectPr preserved as last body child, fresh
+    paraIds minted). Deliberately NOT a ComposeShadowPatchEngine operation (would emit unwanted tracked
+    w:ins). Wired via new optional `SaveComposeDocumentRequest.SummaryPage` consumed in
+    `ComposeService.SaveAsync`. No new package; DocxAnnotationWriter stays retired. Seam test
+    `tests/integration/seam/Compose/ComposeSummaryPageSeamTests.cs` (8/8 pass, real compose-corpus fixtures).
+    Build PASS; full Compose seam suite 52/52 PASS. Publish 51.29 MB compressed vs 47.49 MB last-recorded
+    baseline (+3.80 MB — worktree carries other uncommitted parallel-wave work; this task's own 2 files add
+    only a few KB). Well under the 60 MB ceiling. See
+    `projects/ai-advanced-capabilities-nda-r1/notes/task-041-summary-page-docx-writer.md` for full detail.
   </notes>
 
   <execution>
