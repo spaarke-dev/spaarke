@@ -93,11 +93,14 @@ public class DocumentIntelligenceOptions
     /// analysis, e.g. NDA-REVIEW). Null until an o-series deployment is provisioned.
     /// </summary>
     /// <remarks>
-    /// Added by <c>ai-advanced-capabilities-nda-r1</c> task 010. Provisioning the actual Azure OpenAI
-    /// o-series deployment is task 013 of the same project ("Reasoning deployment") — until that lands,
+    /// Added by <c>ai-advanced-capabilities-nda-r1</c> task 010. Bound from the <c>#{AI_REASONING_MODEL}#</c>
+    /// template token (task 013 — see <c>appsettings.tokens.md</c> and
+    /// <c>projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md</c> for the
+    /// provisioning runbook + recommended model, currently <c>gpt-5</c>). Until an actual reasoning-class
+    /// Azure OpenAI deployment is provisioned and the token/App Setting is set,
     /// <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/> falls back to
-    /// <see cref="StandardModel"/> when this is null/empty, so a Reasoning-tagged Action still executes
-    /// (no hard failure) rather than 404ing against an undeployed model.
+    /// <see cref="StandardModel"/> when this is null/empty/whitespace, so a Reasoning-tagged Action still
+    /// executes (no hard failure) rather than 404ing against an undeployed model.
     /// </remarks>
     public string? ReasoningModel { get; set; }
 
