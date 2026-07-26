@@ -1,5 +1,10 @@
 # ADR-039: Grounded Execution & Closed Catalogs (Concise)
 
+> **Amended 2026-07-25** (`ai-advanced-capabilities-nda-r1` task 001, CLAUDE.md §6.5 Path B):
+> added **Output Determinism Modes** (`fact` vs `advisory`) refining grounded-execution
+> invariant (a). See the "Amendment (2026-07-25)" section below. No prior MUST/MUST NOT
+> weakened; the advisory mode adds obligations, it does not remove any.
+>
 > **Status**: Accepted (2026-07-05) — promoted Proposed → Accepted at migration
 > P1 per the stated condition, by `spaarke-ai-architecture-redesign-r1` task 026
 > (FR-P1-07). P1 evidence: chat-summarize via catalog (task 020), ledger
@@ -72,6 +77,49 @@ Spaarke AI has exactly **one dispatch protocol** (three entry paths) over
   ADR-037 amendment 2026-07-05).
 - **MUST NOT** expose maker-authored control flow (graphs, rule interpreters,
   "config tables with rules").
+
+## Amendment (2026-07-25) — Output Determinism Modes (`fact` vs `advisory`)
+
+> Path-B amendment by `ai-advanced-capabilities-nda-r1` task 001. Demand-pull: the first
+> analysis/advisory vertical (NDA review) needs Claude/ChatGPT-level advisory reasoning depth
+> that the *default* deterministic reading of invariant (a) discouraged. This refines invariant
+> (a); it does not add a fourth output category, a new entry path, or a new mechanism.
+
+**Refinement of grounded-execution invariant (a).** A cataloged capability's output (invariant
+(a)) has a declared **output determinism mode**, carried as catalog **data** on the Action
+(default `fact` when unstated). The mode governs the *determinism of expression and synthesis*,
+never the *accuracy or auditability of facts*.
+
+- **`fact` (deterministic — default, unchanged)**: the capability's correctness is a factual
+  claim about source material. Output is extractive / low-temperature, cites the exact source
+  span for every claim, and performs no synthesis or recommendation beyond what the source
+  states. This is the prior behavior and remains the default.
+- **`advisory` (probabilistic)**: the capability's value is expert reasoning, synthesis,
+  comparison, or recommendation over grounded source material (e.g. "review this NDA against our
+  standard and advise"). The advisory mode PERMITS generative reasoning depth and a
+  higher-capability / higher-temperature deployment (ADR-016 Reasoning tier), while remaining
+  fully inside invariant (a): prompt-controlled, schema-validated, source-cited for every
+  factual claim. `advisory` is a mode *of* (a), not an escape from it.
+
+### ✅ MUST (advisory mode)
+- **MUST** declare the mode as catalog data on the Action (`output_determinism: advisory`;
+  default `fact`). The mode is DATA, never runtime LLM self-judgment — consistent with
+  "risk is catalog-declared data" (ADR-041) and "behavior is data" (invariant #4).
+- **MUST** cite the source span and/or grounding reference for every FACTUAL claim; a claim it
+  cannot ground it MUST decline or mark explicitly as unverified — never fabricate.
+- **MUST** carry a not-authoritative / advisory disclaimer in its output contract (for legal
+  advisory: "not legal advice"), and surface high-risk findings for human review.
+- **MUST** remain subject to EVERY other ADR-039 invariant — closed catalog, one of the three
+  entry paths, budgets (ADR-016), the ONE confirmation gate on side effects (ADR-041),
+  ledger store-before-render (ADR-040), and golden-utterance eval coverage.
+
+### ❌ MUST NOT (advisory mode)
+- **MUST NOT** use `advisory` to emit output untethered from a cataloged capability's prompt
+  control — invariant #3's "free-form completion has no code path" still holds.
+- **MUST NOT** relax citation or grounding obligations for FACTUAL claims. Advisory relaxes the
+  determinism of *reasoning/expression*, never the accuracy or auditability of *facts*.
+- **MUST NOT** apply `advisory` to a capability whose output is consumed as authoritative fact by
+  downstream deterministic logic — those stay `fact`.
 
 ## Integration
 ADR-013 (facade boundary; capability-invocation verb) · ADR-040 (ledger) ·

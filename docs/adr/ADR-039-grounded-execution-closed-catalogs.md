@@ -1,6 +1,6 @@
 # ADR-039: Grounded Execution & Closed Catalogs
 
-- **Status**: **Accepted** (2026-07-05) — proposed 2026-07-05; accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`); promoted Proposed → Accepted at migration phase P1 per this ADR's stated condition ("moves to Accepted when migration phase P1 ships") by `spaarke-ai-architecture-redesign-r1` task 026 (FR-P1-07). See "Acceptance evidence (P1)" below.
+- **Status**: **Accepted** (2026-07-05; **amended 2026-07-25**) — proposed 2026-07-05; accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`); promoted Proposed → Accepted at migration phase P1 per this ADR's stated condition ("moves to Accepted when migration phase P1 ships") by `spaarke-ai-architecture-redesign-r1` task 026 (FR-P1-07). See "Acceptance evidence (P1)" below. **Amendment 2026-07-25** (`ai-advanced-capabilities-nda-r1` task 001, CLAUDE.md §6.5 Path B): added **Output Determinism Modes** (`fact` vs `advisory`) refining invariant (a) — see "Amendment (2026-07-25)" below.
 - **Deciders**: Operator + `spaarke-ai-code-audit-r1` convergence review (2026-07-05)
 - **Concise version**: [`.claude/adr/ADR-039-grounded-execution-closed-catalogs.md`](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) (the operational MUST/MUST-NOT surface — binding)
 
@@ -47,6 +47,67 @@ Dispatcher-deletion of the remaining legacy chat text-path mechanisms is P2 scop
 - Positive: the eleventh mechanism becomes an ADR violation caught at review; routing improvements become maker data edits + eval cases; audit trail (ledger tool chains, ADR-040) covers every probabilistic decision; refusal telemetry gives makers a backlog signal.
 - Negative / accepted: no calibrated per-Binding confidence dial on the text path (overlay exception E-4 REJECTED by operator — risk classes + ask-when-uncertain + side-effect gating deliver D1's intent; the dial survives only on Event-path classify steps where a real classifier confidence exists). Dispatch decisions on the text path are model-judgment-with-audit rather than replayable scores — mitigated by the eval suite.
 - Enforcement: code review + adr-check flag any new intent-matching code, any routing config outside the Binding table, and any tool-name-list gating. The golden-utterance suite is a KEEP-class test asset (ADR-038 `tests/integration/contract/**`).
+
+## Amendment (2026-07-25) — Output Determinism Modes (`fact` vs `advisory`)
+
+- **Amended by**: `ai-advanced-capabilities-nda-r1` task 001 (CLAUDE.md §6.5 Path B — ADR amendment).
+- **Deciders**: Operator + `ai-advanced-capabilities-nda-r1`.
+
+### Context
+
+The `ai-advanced-capabilities-*` program's first analysis/advisory vertical (NDA review) has an
+explicit north star: deliver **Claude/ChatGPT-level reasoning and generative advisory output** —
+better than a strong general LLM used online — for interactive, human-verified advisory tasks. A
+naive reading of grounded-execution invariant (a) plus the "no free-form completion" MUST NOT
+discouraged the reasoning/synthesis depth such advisory output requires: reviewers read invariant
+(a) as *extractive-and-verbatim-only*. That reading is stricter than the invariant actually needs
+to be. Invariant (a) requires output to be **prompt-controlled and schema-validated** — it never
+required output to be *non-synthesizing*. The liability posture that motivates ADR-039 is about
+**ungrounded** output (fabricated facts, uncited claims), not about **reasoned** output over
+grounded facts.
+
+### Decision
+
+Refine invariant (a): a cataloged capability declares an **output determinism mode** in catalog
+data — `fact` (default) or `advisory`. This governs the *determinism of expression and synthesis*,
+never the *accuracy or auditability of facts*.
+
+- **`fact` (deterministic, default, unchanged)** — correctness is a factual claim about source
+  material; extractive, low-temperature, source-span-cited, no synthesis beyond the source.
+- **`advisory` (probabilistic)** — value is expert reasoning/synthesis/recommendation over
+  *grounded* source material; permits generative depth and a Reasoning-tier deployment (ADR-016)
+  while remaining inside invariant (a) — prompt-controlled, schema-validated, and source-cited for
+  every factual claim, with a not-authoritative disclaimer and human-review surfacing for
+  high-risk findings. The full MUST/MUST NOT surface is in the concise version and is binding.
+
+The mode is **DATA** on the Action (not runtime LLM self-judgment) — the same discipline as
+"risk is catalog-declared data" (ADR-041) and "behavior is data, control flow is code"
+(invariant #4). No new entry path, no new output category (still one of (a)/(b)/(c)/(d)), no new
+mechanism. Every other ADR-039 invariant — closed catalog, three entry paths, budgets, the ONE
+confirmation gate, ledger store-before-render, golden-utterance eval coverage — continues to hold
+unchanged for advisory capabilities.
+
+### Why principle-level (consistent with this ADR's philosophy)
+
+This ADR deliberately constrains *properties that must always be true*, not the classes that
+implement them (Context §11). The amendment adds a declared *property of the output* (its
+determinism mode) as catalog data — it names no model, class, temperature, or dispatcher. It is a
+refinement of an existing invariant, not a bolt-on mechanism, and therefore does not risk the
+"mechanism-shaped ADRs rot" failure the original ADR was written to avoid.
+
+### Consequences
+
+- Positive: a sanctioned lane for high-value advisory verticals (NDA review, and the analysis/
+  advisory pattern generally) without weakening grounding, citation, audit, or the closed catalog.
+  The distinction between "the facts are wrong/uncited" (always a violation) and "the reasoning is
+  synthetic" (permitted in advisory mode) is now explicit at review time.
+- Negative / accepted: advisory-mode output is model-judgment-with-audit for its *reasoning*
+  (mitigated by citation-required-for-facts + decline-if-unverifiable + the advisory-quality eval
+  rubric + human-in-the-loop). Advisory mode MUST NOT be applied to capabilities whose output is
+  consumed as authoritative fact by downstream deterministic logic.
+- Enforcement: code review + adr-check verify (1) `output_determinism` is declared data (not
+  inferred), (2) advisory capabilities still cite every factual claim and carry the disclaimer,
+  (3) advisory mode is not used to smuggle free-form completion untethered from a capability.
 
 ## References
 
