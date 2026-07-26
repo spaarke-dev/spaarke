@@ -119,6 +119,8 @@ COPILOT_SSO_PROVIDER_APP_ID=auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb
 COPILOT_AGENT_APP_ID=<set per environment>
 ```
 
+- **`DocumentIntelligence:FastModel` / `StandardModel` / `ReasoningModel`** — model-tier deployment routing (ADR-016; wired end-to-end by `ai-advanced-capabilities-nda-r1` task 010). Not new tokens: `FastModel`/`StandardModel` reuse `#{AI_SUMMARIZE_MODEL}#` so existing environments see no behavior/cost change. `ReasoningModel` has no token yet (literal `null` in the template) — set `DocumentIntelligence__ReasoningModel` directly in Azure App Settings once an o-series deployment is provisioned (task 013).
+
 ## Notes
 
 - **`#{COPILOT_SSO_PROVIDER_APP_ID}#`** — Was hardcoded as `auth-3e04ab58-8450-44d6-b95b-daca16b6cbdb` in `appsettings.template.json` line 226 prior to task 047. This identifier is the Teams Developer Portal SSO bridge app ID owned by Microsoft. The same value is used by all current Spaarke deployments; the placeholder exists to enable cross-tenant re-pointing if Microsoft ships a successor provider app or per-deployment requirements differ. If `COPILOT_SSO_PROVIDER_APP_ID` is unset in CI/CD, use the default value shown above.

@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -205,6 +206,50 @@ public sealed class ContextBinderActionRunnerSeamTests
             "## Input\n\n{\n  \"selectionText\": \"Liability is capped.\"\n}\n");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // (v) ai-advanced-capabilities-nda-r1 task 010 — model-tier last-mile. Proves
+    //     ActionRunner no longer hardcodes model:null: the Action's sprk_modeltier
+    //     resolves to the CONFIGURED deployment for that tier via
+    //     ModelTierDeploymentResolver, and an unspecified tier defaults to Standard.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DispatchAsync_ActionWithReasoningTier_ResolvesToConfiguredReasoningDeployment()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeInputSchema);
+        h.GivenFlatTextAction("ROLE: Explain the selected clause.", tier: AiModelTier.Reasoning);
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "Liability is capped." });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastModel.Should().Be(
+            Harness.ReasoningDeploymentName,
+            "an Action with sprk_modeltier=Reasoning MUST execute against the configured Reasoning " +
+            "deployment (not gpt-4o-mini) — the model:null hardcode this task removes");
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ActionWithUnspecifiedTier_ResolvesToStandardDeployment()
+    {
+        var h = new Harness();
+        await h.SeedSessionAsync(BuildSession());
+        h.GivenBinding(inputSchema: ComposeInputSchema);
+        // No tier passed — mirrors the vast majority of pre-existing Actions whose
+        // sprk_modeltier column has never been set.
+        h.GivenFlatTextAction("ROLE: Explain the selected clause.");
+        h.OpenAi.RawJsonToReturn = """{"explanation":"ok"}""";
+
+        var chunks = await h.DispatchAsync(new { selectionText = "Liability is capped." });
+
+        chunks.Should().NotContain(c => c.Type == "error");
+        h.OpenAi.LastModel.Should().Be(
+            Harness.StandardDeploymentName,
+            "an Action with no sprk_modeltier MUST default deterministically to the Standard tier");
+    }
+
     // ─── Harness ─────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string? fileId = null)
@@ -233,6 +278,12 @@ public sealed class ContextBinderActionRunnerSeamTests
 
     private sealed class Harness
     {
+        // Distinct per-tier deployment names (task 010) — deliberately NOT real Azure OpenAI deployment
+        // names, so a test failure that resolves to the wrong tier's value is unambiguous at a glance.
+        public const string FastDeploymentName = "seam-fast-deploy";
+        public const string StandardDeploymentName = "seam-standard-deploy";
+        public const string ReasoningDeploymentName = "seam-reasoning-deploy";
+
         public ChatSessionManager Sessions { get; }
         public RecordingOpenAiClient OpenAi { get; } = new();
         public Mock<IConsumerRoutingService> Routing { get; } = new();
@@ -247,8 +298,15 @@ public sealed class ContextBinderActionRunnerSeamTests
                 Mock.Of<IChatDataverseRepository>(),
                 Mock.Of<ILogger<ChatSessionManager>>());
 
+            var modelOptions = Options.Create(new DocumentIntelligenceOptions
+            {
+                FastModel = FastDeploymentName,
+                StandardModel = StandardDeploymentName,
+                ReasoningModel = ReasoningDeploymentName,
+            });
+
             var renderer = new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>());
-            var runner = new ActionRunner(OpenAi, renderer, Mock.Of<ILogger<ActionRunner>>());
+            var runner = new ActionRunner(OpenAi, renderer, Mock.Of<ILogger<ActionRunner>>(), modelOptions);
             var binder = new ContextBinder(Sessions, Mock.Of<ILogger<ContextBinder>>());
             var router = new OutputRouter(Sessions, Mock.Of<ILogger<OutputRouter>>());
             var pending = new PendingPlanManager(
@@ -277,7 +335,7 @@ public sealed class ContextBinderActionRunnerSeamTests
                     InputSchemaJson = inputSchema,
                 });
 
-        public void GivenFlatTextAction(string systemPrompt) =>
+        public void GivenFlatTextAction(string systemPrompt, AiModelTier? tier = null) =>
             Scope
                 .Setup(s => s.GetActionAsync(ActionId, It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new AnalysisAction
@@ -287,6 +345,7 @@ public sealed class ContextBinderActionRunnerSeamTests
                     SystemPrompt = systemPrompt,
                     OutputSchemaJson = ComposeOutputSchema,
                     Temperature = 0.2m,
+                    ModelTier = tier,
                 });
 
         public void GivenJpsAction(string systemPromptJps, string outputSchema) =>
@@ -342,11 +401,17 @@ public sealed class ContextBinderActionRunnerSeamTests
         public string RawJsonToReturn { get; set; } = "{}";
         public string? LastPrompt { get; private set; }
 
+        /// <summary>The <c>model</c> deployment name ActionRunner passed on the most recent call — the
+        /// task 010 assertion point (proves the resolved deployment reached the LLM boundary, not just
+        /// the resolver's return value in isolation).</summary>
+        public string? LastModel { get; private set; }
+
         public Task<string> GetStructuredCompletionRawAsync(
             string prompt, BinaryData jsonSchema, string schemaName, string? model = null,
             int? maxOutputTokens = null, float? temperature = null, CancellationToken cancellationToken = default)
         {
             LastPrompt = prompt;
+            LastModel = model;
             return Task.FromResult(RawJsonToReturn);
         }
 
