@@ -100,6 +100,18 @@
     <Compile Include="..\..\integration\seam\**\*.cs" LinkBase="SeamTests" />
   </ItemGroup>
 
+  <!--
+    ai-advanced-capabilities-nda-r1 task 052 (2026-07-26) — first backfill of the
+    tests/integration/tenant/** KEEP category (ADR-038 §2 path #4: tenant boundary
+    enforcement). Prior to this task the category had zero compiled test files (flagged
+    CRITICAL BACKFILL in tests/integration/tenant/README.md). Compiled INTO this assembly for
+    the same fixture-coupling reason as the contract/regression/seam globs above. New
+    tenant-isolation tests add files under tests/integration/tenant/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\tenant\**\*.cs" LinkBase="TenantTests" />
+  </ItemGroup>
+
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).
        Linked from tests/Insights/fixtures/ so the same fixtures can be consumed by
        unit tests here, D-P16 smoke tests, and D-P14 synthesis playbook integration
