@@ -68,6 +68,16 @@ grounded facts.
 
 ### Decision
 
+**The shared invariant first: grounding is mode-independent.** Spaarke AI supports two output/action
+modes — **deterministic** (fact-bound) and **advisory** (informed by probabilistic reasoning). The
+mode changes *how* the system reasons and expresses an answer; it never changes *whether* the answer
+must be grounded. In BOTH modes, every assertion of fact MUST be demonstrably traceable to a
+confirmed source (a cited document span and/or a grounding reference in the ledger), and **no
+output — deterministic or advisory — may contain a hallucinated fact, legal authority, standard
+position, or citation that cannot be resolved to a confirmed source.** Advisory mode buys reasoning
+*depth*, paid for entirely by keeping every underlying fact grounded and every recommendation
+traceable to those grounded facts; it is never a licence to assert beyond the sources.
+
 Refine invariant (a): a cataloged capability declares an **output determinism mode** in catalog
 data — `fact` (default) or `advisory`. This governs the *determinism of expression and synthesis*,
 never the *accuracy or auditability of facts*.

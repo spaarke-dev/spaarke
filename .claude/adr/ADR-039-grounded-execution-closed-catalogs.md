@@ -85,6 +85,16 @@ Spaarke AI has exactly **one dispatch protocol** (three entry paths) over
 > that the *default* deterministic reading of invariant (a) discouraged. This refines invariant
 > (a); it does not add a fourth output category, a new entry path, or a new mechanism.
 
+**Grounding is mode-independent — the invariant BOTH modes share.** The determinism mode changes
+*how* the system reasons and expresses an answer, never *whether* it must be grounded. In BOTH
+modes, every assertion of fact MUST be demonstrably traceable to a confirmed source (a cited
+document span and/or a grounding reference recorded in the ledger). **Hallucination — any factual
+claim, legal authority, standard position, or citation that cannot be resolved to a confirmed
+source — is prohibited in both modes and has no code path.** The `advisory` mode buys reasoning
+depth and synthesis, paid for *entirely* by keeping every underlying fact grounded and every
+recommendation traceable to those grounded facts. It is never a licence to assert, imply, or
+recommend something the sources do not support.
+
 **Refinement of grounded-execution invariant (a).** A cataloged capability's output (invariant
 (a)) has a declared **output determinism mode**, carried as catalog **data** on the Action
 (default `fact` when unstated). The mode governs the *determinism of expression and synthesis*,
@@ -107,6 +117,12 @@ never the *accuracy or auditability of facts*.
   "risk is catalog-declared data" (ADR-041) and "behavior is data" (invariant #4).
 - **MUST** cite the source span and/or grounding reference for every FACTUAL claim; a claim it
   cannot ground it MUST decline or mark explicitly as unverified — never fabricate.
+- **MUST** ground the reasoning itself, not only the isolated facts: every recommendation, risk
+  rating, or opinion MUST be derived from and traceable to the cited grounded material (the
+  subject document + the firm standard / retrieved knowledge), MUST visibly distinguish grounded
+  fact from reasoned judgment, and MUST NOT introduce facts, legal authorities, or standard
+  positions absent from the grounded sources. Advisory judgment is *reasoning over grounded
+  evidence*, never assertion beyond it.
 - **MUST** carry a not-authoritative / advisory disclaimer in its output contract (for legal
   advisory: "not legal advice"), and surface high-risk findings for human review.
 - **MUST** remain subject to EVERY other ADR-039 invariant — closed catalog, one of the three
