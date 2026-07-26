@@ -84,7 +84,7 @@ A non-lawyer uploads an NDA into the SpaarkeAi Assistant and receives a full, st
 ### Applicable ADRs
 - **ADR-039** (grounded execution & closed catalogs) — **amended by this project** (deterministic vs advisory tiers); three entry paths, Binding-only routing, eval-gated.
 - **ADR-040** (session ledger) — write output before render; `{bindingId}@t{n}`.
-- **ADR-016** (model/budget) — model-tier is the "deferred enhancement" this project completes.
+- **ADR-039** (single tier→deployment resolver) — model-tier is the "deferred enhancement" this project completes.
 - **ADR-013** (AI facade boundary) — CRUD↔AI via `Services/Ai/PublicContracts/`.
 - **ADR-038** (testing strategy) — eval suite is KEEP-class `tests/integration/contract/**`; no `Mock<HttpMessageHandler>` / DI-registration / ctor-null tests.
 - **ADR-032** (kill-switch) — if any capability is feature-gated, use Null-Object.
@@ -144,7 +144,7 @@ BFF=Y → each BFF-touching task states a Placement Justification citing `.claud
 | ADR | Rule challenged | Conflict | Path | Rationale |
 |---|---|---|---|---|
 | **ADR-039** invariant #3 (grounded execution) | "every output is prompt-controlled+schema-validated (a) or cited tool-composed (b); free-form untethered completion has no code path" — strict verbatim/low-temp reading | The advisory tier needs full-model reasoning depth to beat a general LLM; a strict verbatim reading blocks the north star | **B — amendment** | Refine invariant #3 into **two grounding tiers**: **fact/deterministic** (assertions about doc/data → verbatim-grounded + citation-verified; unchanged) and **advisory/probabilistic** (reasoned recommendations → full model reasoning; still Action-**prompt-controlled** ⇒ stays inside 3(a); factual claims cited; marked "not legal advice"; nothing fabricated). Refines, does not break, the invariant. This project authors the concise + full amendment; the program (r8) generalizes it. |
-| **ADR-016** | model tier a "deferred enhancement" | Reasoning tier needed now | **C — comply by completing** | The `sprk_modeltier` path is already designed (an in-code comment anticipates it); this project implements the deferred last-mile — no ADR change. |
+| **ADR-039** | model tier a "deferred enhancement" | Reasoning tier needed now | **C — comply by completing** | The `sprk_modeltier` path is already designed (an in-code comment anticipates it); this project implements the deferred last-mile — no ADR change. |
 | — | Auto-apply redlines | None | comply | Redlines are user-driven; factual findings cite. |
 
 ## Success Criteria

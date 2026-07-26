@@ -20,16 +20,32 @@ namespace Sprk.Bff.Api.Tests.Seam.Ai;
 
 /// <summary>
 /// ai-advanced-capabilities-nda-r1 task 011 vertical-slice seam — the definition-of-done for the
-/// runtime model-tier picker's server-side composition (ADR-016; ADR-038's <c>tests/integration/seam/**</c>
+/// runtime model-tier picker's server-side composition (ADR-039; ADR-038's <c>tests/integration/seam/**</c>
 /// DoD for dispatch-spine changes). Drives the PRODUCTION <see cref="SessionDispatchOrchestrator"/> to
 /// prove that <see cref="SessionDispatchRequest.ModelTierOverride"/> (the Assistant's runtime tier-picker
 /// selection) composes with the resolved Binding's own <see cref="Binding.ModelTierOverride"/> and the
 /// Action's default tier in the documented precedence — request override wins, then Binding override,
 /// then Action default — and that leaving both unset is byte-identical to the pre-task-011 behavior (the
-/// Action's own tier governs, task 010). The one doubled collaborator is <see cref="IActionRunner"/>
-/// (captures the composed <c>AnalysisAction</c> the orchestrator actually dispatches); session store,
-/// routing resolution, and the output router are real, mirroring <c>CodedWorkflowDispatchSeamTests</c>'
-/// harness shape.
+/// Action's own tier governs, task 010).
+/// <para>
+/// <b>Real vs mocked collaborators</b>: the session store (<see cref="ChatSessionManager"/>, backed by
+/// <see cref="InMemoryTenantCache"/>), the output router (<see cref="OutputRouter"/>), and the
+/// confirmation-gate manager (<see cref="PendingPlanManager"/>) are all real, production instances.
+/// <see cref="IConsumerRoutingService"/> (Routing — supplies the resolved <see cref="Binding"/>) and
+/// <see cref="IScopeResolverService"/> (Scope — supplies the resolved <see cref="AnalysisAction"/>) are
+/// <c>Mock&lt;T&gt;</c>, along with <see cref="IContextBinder"/> (input binding, short-circuited to the
+/// structured-operand path) and <see cref="IActionRunner"/> (captures the composed <c>AnalysisAction</c>
+/// the orchestrator actually dispatches).
+/// </para>
+/// <para>
+/// <b>Coverage caveat</b>: because Routing is mocked, <see cref="Harness.GivenBinding"/> always seeds
+/// <see cref="Binding.ActionModelTier"/> and the mocked <see cref="AnalysisAction.ModelTier"/> with the
+/// SAME value — this seam cannot distinguish the orchestrator reading the Binding's (potentially stale,
+/// TTL-cached via <c>ConsumerRoutingService</c>) <c>ActionModelTier</c> snapshot from reading the
+/// freshly-fetched Action's own <c>ModelTier</c>. The cache-staleness fix (composing off
+/// <c>action.ModelTier</c>, not <c>binding.EffectiveModelTier</c>/<c>binding.ActionModelTier</c>) is
+/// exercised only by construction/inspection, not by an assertion in this file.
+/// </para>
 /// </summary>
 public sealed class ModelTierOverrideDispatchSeamTests
 {
@@ -64,8 +80,8 @@ public sealed class ModelTierOverrideDispatchSeamTests
 
         h.CapturedAction.Should().NotBeNull();
         h.CapturedAction!.ModelTier.Should().Be(AiModelTier.Fast,
-            "with no per-request override, the Binding's own sprk_modeltieroverride still governs via " +
-            "Binding.EffectiveModelTier — task 010 behavior is unaffected by task 011's addition");
+            "with no per-request override, the Binding's own sprk_modeltieroverride (Binding.ModelTierOverride) " +
+            "still governs over the Action's default tier — task 010 behavior is unaffected by task 011's addition");
     }
 
     [Fact]

@@ -632,7 +632,7 @@ public static class ChatEndpoints
                 activeSessionFileId: session.ActiveDocument?.SessionFileId,
                 // ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime tier-picker
                 // selection for this turn — forwarded to every projected capability tool so a
-                // text-path dispatch composes it with the Binding's own tier override (ADR-016 — the
+                // text-path dispatch composes it with the Binding's own tier override (ADR-039 — the
                 // ONE resolver). Null (the default) is a no-op.
                 modelTierOverride: request.ModelTierOverride,
                 cancellationToken: cancellationToken);
@@ -3119,7 +3119,7 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/> and, from there, to
 /// every projected capability tool for the turn — it composes with (does not replace) the dispatched
 /// Binding's own <c>sprk_modeltieroverride</c> / <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.Binding.EffectiveModelTier"/>
-/// through the ONE tier→deployment resolver (ADR-016). Default <c>null</c> = no override; the Action's
+/// through the ONE tier→deployment resolver (ADR-039). Default <c>null</c> = no override; the Action's
 /// own tier governs unchanged (pre-task-011 behavior).
 /// </param>
 /// <remarks>
