@@ -1521,8 +1521,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_STYLES,
         ...COMPOSE_R4_OPAQUE_ATOMS,
         opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
-                        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
-                        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
+        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
+        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
@@ -1697,8 +1697,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         if (projection.status === 'partial' && projection.warnings.length > 0) {
           projectionImportWarnings.push({
             type: 'warning',
-            message:
-              'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+            message: 'Some formatting may not display fully in Compose — open in Word to review the complete document.',
           });
         }
         if (projectionRevisionResult.unresolvedItems.length > 0) {
@@ -2049,12 +2048,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
             past the disabled toolbar controls). Informs only; the representable edits still save. */}
         {deferralNotice ? (
-          <div
-            className={styles.deferralNotice}
-            role="status"
-            aria-live="polite"
-            data-testid="compose-deferral-notice"
-          >
+          <div className={styles.deferralNotice} role="status" aria-live="polite" data-testid="compose-deferral-notice">
             <Text size={200} className={styles.deferralNoticeText}>
               {deferralNotice}
             </Text>

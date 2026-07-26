@@ -203,9 +203,7 @@ describe('renderUnresolvedRevisionPlaceholders (task 053, FR-10 / invariant I-7)
       extensions: [StarterKit, InsertionMark, DeletionMark, ...COMPOSE_R3_PARAID],
       content: '<p>Untouched.</p>',
     });
-    expect(() =>
-      renderUnresolvedRevisionPlaceholders(bareEditor, [revision({ id: 'r11', text: 'x' })])
-    ).not.toThrow();
+    expect(() => renderUnresolvedRevisionPlaceholders(bareEditor, [revision({ id: 'r11', text: 'x' })])).not.toThrow();
     bareEditor.destroy();
   });
 });

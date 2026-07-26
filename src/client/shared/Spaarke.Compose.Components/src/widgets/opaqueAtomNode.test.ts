@@ -84,7 +84,8 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
   });
 
   describe('inline atom — AppendAtom projection shape', () => {
-    const html = '<p data-paraid="FEED0001">Hello <span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span> World</p>';
+    const html =
+      '<p data-paraid="FEED0001">Hello <span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span> World</p>';
 
     it('parses the server span into a composeInlineAtom, preserving order within the paragraph', () => {
       const editor = makeEditor(html);
@@ -134,7 +135,8 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
 
   describe('non-editability — typing inside an atom is a no-op (negative case)', () => {
     it('a block atom has no interior content position to type into', () => {
-      const html = '<p>Before</p><div class="compose-atom" data-atom-kind="sdt" data-atomid="A1B2C3D4" contenteditable="false"></div><p>After</p>';
+      const html =
+        '<p>Before</p><div class="compose-atom" data-atom-kind="sdt" data-atomid="A1B2C3D4" contenteditable="false"></div><p>After</p>';
       const editor = makeEditor(html);
 
       // Locate the atom's document position, then attempt to place the cursor ONE position deeper
@@ -149,7 +151,11 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
 
       const before = editor.getHTML();
       // Attempt to select "inside" the atom (pos + 1, its content offset) and insert text there.
-      editor.chain().setTextSelection(atomPos + 1).insertContent('X').run();
+      editor
+        .chain()
+        .setTextSelection(atomPos + 1)
+        .insertContent('X')
+        .run();
       const after = editor.getHTML();
 
       // The atom's own placeholder markup (kind + atomId) is unchanged — the typed character never
@@ -167,7 +173,8 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
     });
 
     it('an inline atom has no interior content position to type into', () => {
-      const html = '<p data-paraid="FEED0001">Hello <span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span> World</p>';
+      const html =
+        '<p data-paraid="FEED0001">Hello <span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span> World</p>';
       const editor = makeEditor(html);
 
       let atomPos = -1;
@@ -177,7 +184,11 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
       });
       expect(atomPos).toBeGreaterThanOrEqual(0);
 
-      editor.chain().setTextSelection(atomPos + 1).insertContent('X').run();
+      editor
+        .chain()
+        .setTextSelection(atomPos + 1)
+        .insertContent('X')
+        .run();
       const after = editor.getHTML();
 
       // The atom's rendered label is unchanged — "Field: 1", not "Field: 1X" or "Field: X1".

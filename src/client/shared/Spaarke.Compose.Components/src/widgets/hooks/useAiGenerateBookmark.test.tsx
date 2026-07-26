@@ -22,7 +22,11 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import type { Editor as ReactEditor } from '@tiptap/react';
 import { COMPOSE_R3_PARAID } from '../paraIdExtension';
-import { useAiGenerateBookmark, extractComposeOperations, type AiGenerateBookmarkController } from './useAiGenerateBookmark';
+import {
+  useAiGenerateBookmark,
+  extractComposeOperations,
+  type AiGenerateBookmarkController,
+} from './useAiGenerateBookmark';
 import type { AiApplyValidationController, AiApplyReviewItem } from './useAiApplyValidation';
 import {
   ComposeAiToolbar,
@@ -114,7 +118,12 @@ describe('extractComposeOperations (I-7 free-text refusal classifier)', () => {
   });
 
   it('a mixed array (an op + free-text garbage) is refused → null', () => {
-    expect(extractComposeOperations([{ type: 'insertText', paraId: PARA_ID, at: { runIndex: 0, offset: 0 }, text: 'x' }, 'noise'])).toBeNull();
+    expect(
+      extractComposeOperations([
+        { type: 'insertText', paraId: PARA_ID, at: { runIndex: 0, offset: 0 }, text: 'x' },
+        'noise',
+      ])
+    ).toBeNull();
   });
 
   it('an object with no operations key is refused → null', () => {
@@ -122,7 +131,9 @@ describe('extractComposeOperations (I-7 free-text refusal classifier)', () => {
   });
 
   it('an op missing paraId is not a valid operation → refused', () => {
-    expect(extractComposeOperations({ operations: [{ type: 'insertText', at: { runIndex: 0, offset: 0 }, text: 'x' }] })).toBeNull();
+    expect(
+      extractComposeOperations({ operations: [{ type: 'insertText', at: { runIndex: 0, offset: 0 }, text: 'x' }] })
+    ).toBeNull();
   });
 });
 
@@ -308,7 +319,10 @@ describe('useAiGenerateBookmark — deleted-content bookmark surfaces for review
     });
     // Delete a range that strictly CONTAINS the bookmark's tracked start (assoc -1) → MapResult.deleted.
     act(() => {
-      editor.chain().deleteRange({ from: brown.from - 2, to: brown.to + 2 }).run();
+      editor
+        .chain()
+        .deleteRange({ from: brown.from - 2, to: brown.to + 2 })
+        .run();
     });
 
     let ret!: ReturnType<AiGenerateBookmarkController['resolveOnReturn']>;
@@ -470,10 +484,18 @@ describe('ComposeAiToolbar — FR-07 task-041 apply-validation wiring (ADR-021 d
   it('an "operations" resolveOnReturn result is handed to aiApplyValidation.validateAndApply', async () => {
     const user = userEvent.setup();
     const controller = stubController();
-    const opsOutcome = { status: 'operations' as const, requestId: 'ctx-req', operations: [], resolved: null, review: null };
+    const opsOutcome = {
+      status: 'operations' as const,
+      requestId: 'ctx-req',
+      operations: [],
+      resolved: null,
+      review: null,
+    };
     (controller.resolveOnReturn as jest.Mock).mockReturnValue(opsOutcome);
     const applyValidation = stubApplyValidation();
-    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete', result: opsPayload() });
+    const dispatchConsumerOverride = jest
+      .fn()
+      .mockResolvedValue({ streamId: 's1', status: 'complete', result: opsPayload() });
 
     renderToolbar({ controller, dispatchConsumerOverride, applyValidation });
 
@@ -486,9 +508,15 @@ describe('ComposeAiToolbar — FR-07 task-041 apply-validation wiring (ADR-021 d
   it('ADDITIVE: a "refused" resolveOnReturn result does NOT reach aiApplyValidation (no operations to validate)', async () => {
     const user = userEvent.setup();
     const controller = stubController();
-    (controller.resolveOnReturn as jest.Mock).mockReturnValue({ status: 'refused', requestId: 'ctx-req', reason: 'free-text' });
+    (controller.resolveOnReturn as jest.Mock).mockReturnValue({
+      status: 'refused',
+      requestId: 'ctx-req',
+      reason: 'free-text',
+    });
     const applyValidation = stubApplyValidation();
-    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete', result: 'free text' });
+    const dispatchConsumerOverride = jest
+      .fn()
+      .mockResolvedValue({ streamId: 's1', status: 'complete', result: 'free text' });
 
     renderToolbar({ controller, dispatchConsumerOverride, applyValidation });
 
@@ -501,7 +529,12 @@ describe('ComposeAiToolbar — FR-07 task-041 apply-validation wiring (ADR-021 d
   it('renders a surfaced review item under the dark theme with no hard-coded hex color (ADR-021)', () => {
     const reviewItem: AiApplyReviewItem = {
       id: 'ai-review-1',
-      operation: { type: 'replaceRange', paraId: 'ZZZZ0001', range: { start: { runIndex: 0, offset: 0 }, end: { runIndex: 0, offset: 1 } }, text: 'x' },
+      operation: {
+        type: 'replaceRange',
+        paraId: 'ZZZZ0001',
+        range: { start: { runIndex: 0, offset: 0 }, end: { runIndex: 0, offset: 1 } },
+        text: 'x',
+      },
       reason: 'unknown-paraId',
       fuzzy: null,
     };

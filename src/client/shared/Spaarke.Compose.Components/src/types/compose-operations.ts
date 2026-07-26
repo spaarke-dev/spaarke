@@ -283,8 +283,6 @@ export function isComposeOperationLog(value: unknown): value is ComposeOperation
   }
   const log = value as { schemaVersion?: unknown; operations?: unknown };
   return (
-    typeof log.schemaVersion === 'string' &&
-    Array.isArray(log.operations) &&
-    log.operations.every(isComposeOperation)
+    typeof log.schemaVersion === 'string' && Array.isArray(log.operations) && log.operations.every(isComposeOperation)
   );
 }

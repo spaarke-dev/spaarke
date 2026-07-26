@@ -994,8 +994,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // anchor landed in later-deleted content (`deletedContentFlag`) are surfaced by the snapshot and EXCLUDED
       // from what we apply — never-silently-dropped, but not re-applied onto content a later edit removed. The
       // born-in-editor create-on-save path authors the whole document via `contentModel`, so it sends no op-log.
-      const opLogSnapshot =
-        !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
+      const opLogSnapshot = !isTransientCreate && editorIsDirty ? editorRef.current.serializeOperationLog() : null;
       const operationLog = opLogSnapshot
         ? {
             schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION,

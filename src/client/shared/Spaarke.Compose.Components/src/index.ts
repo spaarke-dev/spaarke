@@ -333,10 +333,5 @@ export type { ApplyImportedCommentAnchorsResult } from './widgets/importedCommen
 // R4 task 023: `collectEditedParagraphs` (the paragraph-diff export) is REMOVED — dirty-save capture
 // routes only through the step interceptor's operation log (`serializeOperationLog` on the editor
 // handle); `buildContentModel` (the born-in-editor full-render path) is unchanged here (task 033).
-export {
-  docxToTipTapHtml,
-  stampParaIds,
-  captureParaIdSnapshot,
-  buildContentModel,
-} from './utils/docxBridge';
+export { docxToTipTapHtml, stampParaIds, captureParaIdSnapshot, buildContentModel } from './utils/docxBridge';
 export type { MammothConversionResult, TipTapNode } from './utils/docxBridge';

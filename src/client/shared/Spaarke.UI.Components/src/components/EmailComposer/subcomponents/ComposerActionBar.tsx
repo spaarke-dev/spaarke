@@ -156,42 +156,42 @@ export const ComposerActionBar: React.FC<IComposerActionBarProps> = ({
         </Button>
 
         {showSendModeChoice && onSendModeChange ? (
-            <Menu
-              positioning="below-end"
-              checkedValues={{ sendFrom: [sendMode] }}
-              onCheckedValueChange={(_e, data) => {
-                const next = data.checkedItems[0] as CommunicationSendMode | undefined;
-                if (next) onSendModeChange(next);
-              }}
-            >
-              <MenuTrigger disableButtonEnhancement>
-                {(triggerProps: MenuButtonProps) => (
-                  <SplitButton
-                    menuButton={{ ...triggerProps, 'aria-label': 'Choose mailbox' }}
-                    primaryActionButton={{ onClick: onSend, disabled: busy || !canSend }}
-                    appearance="primary"
-                    disabled={busy || !canSend}
-                  >
-                    {sendLabel}
-                  </SplitButton>
-                )}
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  <MenuItemRadio name="sendFrom" value="sharedMailbox">
-                    {SEND_FROM_LABEL.sharedMailbox}
-                  </MenuItemRadio>
-                  <MenuItemRadio name="sendFrom" value="user">
-                    {SEND_FROM_LABEL.user}
-                  </MenuItemRadio>
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          ) : (
-            <Button appearance="primary" onClick={onSend} disabled={busy || !canSend}>
-              {sendLabel}
-            </Button>
-          )}
+          <Menu
+            positioning="below-end"
+            checkedValues={{ sendFrom: [sendMode] }}
+            onCheckedValueChange={(_e, data) => {
+              const next = data.checkedItems[0] as CommunicationSendMode | undefined;
+              if (next) onSendModeChange(next);
+            }}
+          >
+            <MenuTrigger disableButtonEnhancement>
+              {(triggerProps: MenuButtonProps) => (
+                <SplitButton
+                  menuButton={{ ...triggerProps, 'aria-label': 'Choose mailbox' }}
+                  primaryActionButton={{ onClick: onSend, disabled: busy || !canSend }}
+                  appearance="primary"
+                  disabled={busy || !canSend}
+                >
+                  {sendLabel}
+                </SplitButton>
+              )}
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItemRadio name="sendFrom" value="sharedMailbox">
+                  {SEND_FROM_LABEL.sharedMailbox}
+                </MenuItemRadio>
+                <MenuItemRadio name="sendFrom" value="user">
+                  {SEND_FROM_LABEL.user}
+                </MenuItemRadio>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        ) : (
+          <Button appearance="primary" onClick={onSend} disabled={busy || !canSend}>
+            {sendLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

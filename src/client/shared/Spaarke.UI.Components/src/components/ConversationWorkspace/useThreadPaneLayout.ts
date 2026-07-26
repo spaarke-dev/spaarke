@@ -73,7 +73,10 @@ function loadPersisted(storageKey: string): Partial<PersistedState> | null {
 
 function persist(storageKey: string, state: PersistedState): void {
   try {
-    localStorage.setItem(storageKey, JSON.stringify({ widthPx: Math.round(state.widthPx), collapsed: state.collapsed }));
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ widthPx: Math.round(state.widthPx), collapsed: state.collapsed })
+    );
   } catch {
     // Silently ignore storage errors.
   }

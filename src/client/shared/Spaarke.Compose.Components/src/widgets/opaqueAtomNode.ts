@@ -118,8 +118,7 @@ export const ComposeBlockAtomNode = Node.create<ComposeBlockAtomOptions>({
       atomId: {
         default: null,
         parseHTML: (element: HTMLElement) => element.getAttribute('data-atomid'),
-        renderHTML: attributes =>
-          attributes.atomId ? { 'data-atomid': attributes.atomId as string } : {},
+        renderHTML: attributes => (attributes.atomId ? { 'data-atomid': attributes.atomId as string } : {}),
       },
       kind: {
         default: 'unknown',

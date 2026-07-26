@@ -86,10 +86,7 @@ const PARA_ID = '0A1B2C3D';
 /** A paragraph with a bold "Hello" run (len 5) + a normal " world" run (len 6). */
 function twoRunDoc(): PMNode {
   const bold = schema.marks.bold.create();
-  const p = schema.nodes.paragraph.create({ paraId: PARA_ID }, [
-    schema.text('Hello', [bold]),
-    schema.text(' world'),
-  ]);
+  const p = schema.nodes.paragraph.create({ paraId: PARA_ID }, [schema.text('Hello', [bold]), schema.text(' world')]);
   return schema.nodes.doc.create(null, [p]);
 }
 
@@ -230,13 +227,11 @@ describe('classifyStep — refusal + escalation seams', () => {
     const doc = twoRunDoc();
     // Treat ANY paragraph as "opaque" via override → an interior edit is refused.
     const step = new ReplaceStep(abs(3), abs(3), inlineSlice('x'));
-    const cls = classifyStep(step, doc, { isOpaqueAtom: (n) => n.type.name === 'paragraph' });
+    const cls = classifyStep(step, doc, { isOpaqueAtom: n => n.type.name === 'paragraph' });
     // The insertion range is zero-width so the guard does not fire on a collapsed range;
     // a spanning edit over the "opaque" paragraph content is what gets refused.
     const spanStep = new ReplaceStep(abs(1), abs(4), inlineSlice('z'));
-    expect(classifyStep(spanStep, doc, { isOpaqueAtom: (n) => n.type.name === 'paragraph' }).kind).toBe(
-      'refused-atom',
-    );
+    expect(classifyStep(spanStep, doc, { isOpaqueAtom: n => n.type.name === 'paragraph' }).kind).toBe('refused-atom');
     // (collapsed edit still classifies normally under the override)
     expect(cls.kind).toBe('ops');
   });
@@ -246,7 +241,7 @@ describe('createStepInterceptorPlugin — live capture path', () => {
   it('emits captured operations once per dispatched doc-changing transaction', () => {
     const captured: ComposeOperation[][] = [];
     const plugin = createStepInterceptorPlugin({
-      onOperations: (ops) => captured.push(ops),
+      onOperations: ops => captured.push(ops),
     });
     let state = EditorState.create({ doc: twoRunDoc(), plugins: [plugin] });
 
@@ -274,7 +269,7 @@ describe('createStepInterceptorPlugin — live capture path', () => {
 
   it('skips a transaction flagged with STEP_INTERCEPTOR_IGNORE_META', () => {
     const captured: ComposeOperation[][] = [];
-    const plugin = createStepInterceptorPlugin({ onOperations: (ops) => captured.push(ops) });
+    const plugin = createStepInterceptorPlugin({ onOperations: ops => captured.push(ops) });
     let state = EditorState.create({ doc: twoRunDoc(), plugins: [plugin] });
     const tr = state.tr.insertText('x', abs(3), abs(3)).setMeta(STEP_INTERCEPTOR_IGNORE_META, true);
     state = state.apply(tr);
@@ -286,7 +281,7 @@ describe('createStepInterceptorPlugin — live capture path', () => {
     // the same edit twice yields identical ops — there is no theme-dependent branch.
     const runs: ComposeOperation[][] = [];
     for (let i = 0; i < 2; i++) {
-      const plugin = createStepInterceptorPlugin({ onOperations: (ops) => runs.push(ops) });
+      const plugin = createStepInterceptorPlugin({ onOperations: ops => runs.push(ops) });
       let state = EditorState.create({ doc: twoRunDoc(), plugins: [plugin] });
       state = state.apply(state.tr.insertText('z', abs(3), abs(3)));
     }
@@ -345,10 +340,10 @@ describe('RebasedOperationLog — rebase-across-concurrent-edits (task 022, FR-0
     expect(snapshot.orderedOps).toHaveLength(2);
 
     const opA = snapshot.orderedOps.find(
-      (o) => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === '!'
+      o => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === '!'
     );
     const opB = snapshot.orderedOps.find(
-      (o) => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === 'Hi '
+      o => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === 'Hi '
     );
     expect(opA).toBeDefined();
     expect(opB).toBeDefined();
@@ -389,7 +384,8 @@ describe('RebasedOperationLog — rebase-across-concurrent-edits (task 022, FR-0
     expect(state.doc.textContent).toBe('Say Hello ');
 
     const snapshot = log.serialize(state.doc);
-    const deleteOp = snapshot.orderedOps.find((o) => o.operation.type === 'deleteRange')!.operation as DeleteRangeOperation;
+    const deleteOp = snapshot.orderedOps.find(o => o.operation.type === 'deleteRange')!
+      .operation as DeleteRangeOperation;
     expect(deleteOp.range).toEqual({ start: { runIndex: 0, offset: 10 }, end: { runIndex: 0, offset: 10 } });
   });
 });
@@ -434,7 +430,7 @@ describe('RebasedOperationLog — document-order serialization with a base versi
 
     expect(snapshot.orderedOps).toHaveLength(3);
     // DOCUMENT order (AAAA, BBBB, CCCC) — NOT capture order (CCCC, AAAA, BBBB).
-    expect(snapshot.orderedOps.map((o) => o.operation.paraId)).toEqual(ids);
+    expect(snapshot.orderedOps.map(o => o.operation.paraId)).toEqual(ids);
     expect(snapshot.baseVersion).toBe('etag-v1:schema-v1');
   });
 
@@ -476,7 +472,7 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
     const snapshot = log.serialize(state.doc);
     // Both ops remain in the log — NEVER silently dropped.
     expect(snapshot.orderedOps).toHaveLength(2);
-    const flaggedInsert = snapshot.orderedOps.find((o) => o.operation.type === 'insertText')!;
+    const flaggedInsert = snapshot.orderedOps.find(o => o.operation.type === 'insertText')!;
     expect(flaggedInsert.deletedContentFlag).toBe(true);
   });
 
@@ -496,7 +492,7 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
 
     const snapshot = log.serialize(state.doc);
     const insertOp = snapshot.orderedOps.find(
-      (o) => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === 'X'
+      o => o.operation.type === 'insertText' && (o.operation as InsertTextOperation).text === 'X'
     )!;
     expect(insertOp.deletedContentFlag).toBe(false);
   });
@@ -513,7 +509,9 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
 
 /** N one-line paragraphs, ids `ids[i]`, each with text `texts[i]`. */
 function paras(ids: string[], texts: string[]): PMNode {
-  const blocks = ids.map((id, i) => schema.nodes.paragraph.create({ paraId: id }, texts[i] ? [schema.text(texts[i])] : []));
+  const blocks = ids.map((id, i) =>
+    schema.nodes.paragraph.create({ paraId: id }, texts[i] ? [schema.text(texts[i])] : [])
+  );
   return schema.nodes.doc.create(null, blocks);
 }
 
@@ -532,7 +530,7 @@ describe('classifyStructuralStep — whole-paragraph delete / merge (task 031, c
     expect(appended[0]).toEqual({ type: 'mergeParagraph', paraId: 'BBBB2222', targetParaId: 'AAAA1111' });
     // It is in the serialized log — no longer silently lost.
     const snapshot = log.serialize(tr.doc);
-    expect(snapshot.orderedOps.map((o) => o.operation.type)).toContain('mergeParagraph');
+    expect(snapshot.orderedOps.map(o => o.operation.type)).toContain('mergeParagraph');
   });
 
   it('deleting an entire paragraph NODE emits deleteParagraph{paraId} (the retired empty-text sentinel semantic)', () => {

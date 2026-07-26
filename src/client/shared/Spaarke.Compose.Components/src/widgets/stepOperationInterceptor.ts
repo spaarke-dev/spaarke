@@ -54,12 +54,7 @@ import {
 } from '@tiptap/pm/transform';
 
 import { PARAID_NODE_TYPES } from './paraIdExtension';
-import type {
-  ComposeOperation,
-  ComposeRunPoint,
-  ComposeMarkType,
-  ComposeBlockAttr,
-} from '../types/compose-operations';
+import type { ComposeOperation, ComposeRunPoint, ComposeMarkType, ComposeBlockAttr } from '../types/compose-operations';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -158,7 +153,7 @@ interface RunSpan {
 function markSetKey(marks: readonly Mark[]): string {
   if (marks.length === 0) return '';
   return marks
-    .map((m) => m.type.name)
+    .map(m => m.type.name)
     .sort()
     .join(',');
 }
@@ -172,7 +167,7 @@ function markSetKey(marks: readonly Mark[]): string {
 export function runsOfBlock(block: PMNode): RunSpan[] {
   const runs: RunSpan[] = [];
   let current: RunSpan | null = null;
-  block.forEach((child) => {
+  block.forEach(child => {
     if (child.isText) {
       const key = markSetKey(child.marks);
       const len = child.text?.length ?? 0;
@@ -217,10 +212,7 @@ export function runLocalPoint(block: PMNode, k: number): ComposeRunPoint {
  * paraId-bearing textblock (e.g. a caret at a block boundary or inside a non-paragraph
  * container) — the caller treats a null anchor as "not an inline paragraph edit".
  */
-export function resolveRunAnchor(
-  doc: PMNode,
-  pos: number,
-): ComposeAnchor | null {
+export function resolveRunAnchor(doc: PMNode, pos: number): ComposeAnchor | null {
   if (pos < 0 || pos > doc.content.size) return null;
   const $pos = doc.resolve(pos);
   const parent = $pos.parent;
@@ -241,11 +233,11 @@ function rangeContainsOpaqueAtom(
   doc: PMNode,
   from: number,
   to: number,
-  isOpaqueAtom: (node: PMNode) => boolean,
+  isOpaqueAtom: (node: PMNode) => boolean
 ): boolean {
   if (to <= from) return false; // a zero-width insertion cannot land INSIDE a leaf atom
   let found = false;
-  doc.nodesBetween(from, to, (node) => {
+  doc.nodesBetween(from, to, node => {
     if (found) return false;
     if (isOpaqueAtom(node)) {
       found = true;
@@ -260,7 +252,7 @@ function rangeContainsOpaqueAtom(
 function fragmentIsInline(fragment: Fragment): boolean {
   if (fragment.childCount === 0) return true;
   let inline = true;
-  fragment.forEach((child) => {
+  fragment.forEach(child => {
     if (!child.isInline) inline = false;
   });
   return inline;
@@ -269,7 +261,7 @@ function fragmentIsInline(fragment: Fragment): boolean {
 /** The first inline text node's marks within a fragment (the marks the inserted text carries), or `[]`. */
 function firstInlineMarks(fragment: Fragment): readonly Mark[] {
   let marks: readonly Mark[] = [];
-  fragment.descendants((node) => {
+  fragment.descendants(node => {
     if (node.isText) {
       marks = node.marks;
       return false;
@@ -308,7 +300,7 @@ interface StructuralBlock {
 /** Ordered list of paraId-bearing textblock paragraphs, each with its paraId (or null) + text content. */
 function structuralBlocks(doc: PMNode): StructuralBlock[] {
   const out: StructuralBlock[] = [];
-  doc.descendants((node) => {
+  doc.descendants(node => {
     if ((PARAID_NODE_TYPES as readonly string[]).includes(node.type.name) && node.isTextblock) {
       const pid = (node.attrs as { paraId?: unknown } | undefined)?.paraId;
       out.push({
@@ -354,7 +346,7 @@ function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): 
   const after = structuralBlocks(applied.doc);
   const afterById = new Map<string, StructuralBlock>();
   for (const b of after) if (b.paraId) afterById.set(b.paraId, b);
-  const removed = before.filter((b) => b.paraId !== null && !afterById.has(b.paraId));
+  const removed = before.filter(b => b.paraId !== null && !afterById.has(b.paraId));
 
   // ---- one paragraph removed → merge (backward) or whole-paragraph delete ----
   if (removed.length === 1 && after.length === before.length - 1) {
@@ -398,23 +390,36 @@ function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): 
         if (moved && moved.text === suffix) {
           return {
             kind: 'ops',
-            ops: [{ type: 'splitParagraph', paraId: s.paraId, at: runLocalPoint(s.node, prefix.text.length), newParaId: mintParaId() }],
+            ops: [
+              {
+                type: 'splitParagraph',
+                paraId: s.paraId,
+                at: runLocalPoint(s.node, prefix.text.length),
+                newParaId: mintParaId(),
+              },
+            ],
           };
         }
       }
     }
 
-    const existingUnchanged = before.every((b) => !b.paraId || afterById.get(b.paraId)?.text === b.text);
+    const existingUnchanged = before.every(b => !b.paraId || afterById.get(b.paraId)?.text === b.text);
     if (existingUnchanged) {
-      const newIdx = after.findIndex((b) => b.paraId === null);
+      const newIdx = after.findIndex(b => b.paraId === null);
       if (newIdx >= 0) {
         const refBefore = after[newIdx - 1];
         const refAfter = after[newIdx + 1];
         if (refBefore?.paraId) {
-          return { kind: 'ops', ops: [{ type: 'insertParagraph', paraId: refBefore.paraId, newParaId: mintParaId(), position: 'After' }] };
+          return {
+            kind: 'ops',
+            ops: [{ type: 'insertParagraph', paraId: refBefore.paraId, newParaId: mintParaId(), position: 'After' }],
+          };
         }
         if (refAfter?.paraId) {
-          return { kind: 'ops', ops: [{ type: 'insertParagraph', paraId: refAfter.paraId, newParaId: mintParaId(), position: 'Before' }] };
+          return {
+            kind: 'ops',
+            ops: [{ type: 'insertParagraph', paraId: refAfter.paraId, newParaId: mintParaId(), position: 'Before' }],
+          };
         }
       }
     }
@@ -437,7 +442,7 @@ function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): 
 export function classifyStep(
   step: Step,
   docBefore: PMNode,
-  options: StepOperationInterceptorOptions,
+  options: StepOperationInterceptorOptions
 ): StepClassification {
   const isOpaqueAtom = options.isOpaqueAtom ?? defaultIsOpaqueAtom;
 
@@ -457,12 +462,7 @@ export function classifyStep(
     const sameBlock = $from.sameParent($to);
 
     // Inline, same-paragraph edit → an inline op. Anything else is structural (task 031).
-    if (
-      sameBlock &&
-      isParaIdBlock($from.parent) &&
-      $from.parent.isTextblock &&
-      fragmentIsInline(slice.content)
-    ) {
+    if (sameBlock && isParaIdBlock($from.parent) && $from.parent.isTextblock && fragmentIsInline(slice.content)) {
       const anchorFrom = resolveRunAnchor(docBefore, from);
       const anchorTo = resolveRunAnchor(docBefore, to);
       if (!anchorFrom || !anchorTo || anchorFrom.paraId !== anchorTo.paraId) {
@@ -563,7 +563,7 @@ function pointOf(anchor: ComposeAnchor): ComposeRunPoint {
 function classifyMarkStep(
   step: AddMarkStep | RemoveMarkStep,
   docBefore: PMNode,
-  type: 'setMark' | 'clearMark',
+  type: 'setMark' | 'clearMark'
 ): StepClassification {
   const composeMark = TIPTAP_MARK_TO_COMPOSE[step.mark.type.name];
   if (!composeMark) {
@@ -844,7 +844,10 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     }
     return null;
   }
-  if ((step instanceof AddMarkStep || step instanceof RemoveMarkStep) && (op.type === 'setMark' || op.type === 'clearMark')) {
+  if (
+    (step instanceof AddMarkStep || step instanceof RemoveMarkStep) &&
+    (op.type === 'setMark' || op.type === 'clearMark')
+  ) {
     return { kind: 'range', start: toFinal(step.from, -1), end: toFinal(step.to, 1) };
   }
   if (step instanceof AttrStep && op.type === 'setBlockAttr') {
