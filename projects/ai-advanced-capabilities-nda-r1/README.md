@@ -1,8 +1,17 @@
 # NDA Review & Analysis (Advisory Vertical) — `ai-advanced-capabilities-nda-r1`
 
-> **Status**: 🟡 Planning (artifacts generated; tasks pending `/task-create`)
+> **Status**: 🟢 Implementation complete — deployment pending (env-blocked). All 18 code tasks committed + gated on PR #689. Live steps in [`DEPLOYMENT-RUNBOOK.md`](DEPLOYMENT-RUNBOOK.md).
 > **Program**: ai-advanced-capabilities-development — first analysis/advisory vertical
-> **Branch**: `work/ai-advanced-capabilities-nda-r1` · **Created**: 2026-07-25
+> **Branch**: `work/ai-advanced-capabilities-nda-r1` · **Created**: 2026-07-25 · **Build complete**: 2026-07-26
+
+## Build status (2026-07-26)
+
+18 of 22 tasks done, every wave build-verified + code-review + adr-check gated. Remaining are not codeable without a live environment:
+- **052** tenant-pin integration test — gated on the owner's tenant-pin fix decision (§6 security-adjacent; see runbook §1).
+- **060 / 061** deploy + live UI UAT — need Azure/Dataverse creds + a deployed org.
+- **090** wrap-up — codeable parts done (this README, `notes/lessons-learned.md`, `DEPLOYMENT-RUNBOOK.md`); `/test-diet` + status→Complete + merge happen post-deployment.
+
+**North star delivered in code**: relaxed-determinism advisory review (ADR-039 amendment, strengthened so grounding/no-hallucination spans both modes) on the Reasoning tier, single-surface Compose UX (cited summary panel + right-gutter advisory comments + per-clause Draft Alternative + Summary-Page + comment-baked export + SPE versioning), NDA classification + "Review an NDA" card, runtime model picker, and the eval harness that grades it. The one thing standing between code and a live demo is the env-blocked deployment + the tenant-pin fix sign-off.
 
 ## What this delivers
 
