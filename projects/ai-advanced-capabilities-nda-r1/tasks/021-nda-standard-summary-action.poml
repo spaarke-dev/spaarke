@@ -4,7 +4,7 @@
     <title>NDA-STANDARD-SUMMARY Action (UC3) — plain-language summary of the standard</title>
     <phase>2 NDA Review Capability</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New JPS Action but low blast radius; reuses the Action authoring pattern; single-purpose summary.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,6 +90,30 @@
 
   <notes>
     §11 justification: prefer extending an existing summary binding if one fits; only add a new Action if none does.
+
+    COMPLETED (2026-07-26): §11 check ran first — grepped infra/dataverse/actions for existing summary
+    Actions; compose-explain-clause (single selected clause, attorney-facing) and
+    compose-summarize-word-changes (Word tracked-changes diff) both fail the extension test (different
+    input shape, different audience, different subject — neither targets KNW-011). New Action authored:
+    infra/dataverse/actions/nda-standard-summary.action.json (actionCode nda-standard-summary), Fast tier,
+    outputDeterminism=advisory (per the task's own ADR-039 constraint — plain-language rephrasing needs the
+    advisory allowance even though grounding stays deterministic), closed minimal output contract
+    {overview, sections[{topic, explanation, standardRefs}]} (no per-finding riskLevel/sectionRef/quotedText
+    — this Action never reviews a document). Input schema mirrors list-tasks' "documentText as structured
+    operand, content unused" pattern (no uploaded doc; KNW-011 is grounding, not maker input) — same
+    ContextBinder.HasStructuredOperand rationale. Mirrors added: infra/dataverse/inputschemas/ +
+    infra/dataverse/outputschemas/nda-standard-summary.*.json, verified byte-parity with the action.json
+    outputSchema. jps-validate run in the adapted mirror-first-Action-row mode (same class as nda-review /
+    compose-* action files — the skill's literal Step 2/3 "$schema: https://spaarke.com/schemas/prompt/v1"
+    checks target the pre-R7 JPS-wrapper format and do not apply to this file class, same drift already
+    accepted for task 020's nda-review): PASS on all applicable structural + OpenAI-structured-output
+    schema checks (additionalProperties:false, object-level-only required, string maxLength, no
+    property-level required, no legacy dispatch drift, no $choices/scopes issues). Live sample-run is
+    environment-blocked (no deployed Dataverse row / no Azure OpenAI Fast-tier call from this session) and
+    additionally gated on the same NFR-06 tenant-pin fix already escalated for nda-review/task 012/052 —
+    flagged, not faked. Deploy-to-Dataverse (MCP create_record) and jps-scope-refresh are deferred to the
+    project's deploy task (060), consistent with how task 020 left nda-review un-deployed pending the
+    tenant-pin fix.
   </notes>
 
   <execution>
