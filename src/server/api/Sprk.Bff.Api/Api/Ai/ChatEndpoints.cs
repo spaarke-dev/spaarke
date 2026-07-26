@@ -464,11 +464,12 @@ public static class ChatEndpoints
         response.Headers["X-Accel-Buffering"] = "no";
 
         logger.LogInformation(
-            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, attachments={AttachmentCount}, attachmentChars={AttachmentChars}, document={DocumentId}",
+            "SendMessage: session={SessionId}, tenant={TenantId}, msgLen={MsgLen}, attachments={AttachmentCount}, attachmentChars={AttachmentChars}, document={DocumentId}, modelTierOverride={ModelTierOverride}",
             sessionId, tenantId, request.Message.Length,
             request.Attachments?.Count ?? 0,
             request.Attachments?.Sum(a => a.TextContent?.Length ?? 0) ?? 0,
-            request.DocumentId ?? session.DocumentId);
+            request.DocumentId ?? session.DocumentId,
+            request.ModelTierOverride);
 
         // === AIPU2-028: Cross-Matter Conversation Safety (FR-408) ===
         // Before building the agent or AI history, detect whether the session has pivoted
@@ -629,6 +630,11 @@ public static class ChatEndpoints
                 // names it the default target when the LLM omits fileIds. Deterministic scoping lives
                 // in SessionDispatchOrchestrator.ResolveTargetFiles.
                 activeSessionFileId: session.ActiveDocument?.SessionFileId,
+                // ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime tier-picker
+                // selection for this turn — forwarded to every projected capability tool so a
+                // text-path dispatch composes it with the Binding's own tier override (ADR-016 — the
+                // ONE resolver). Null (the default) is a no-op.
+                modelTierOverride: request.ModelTierOverride,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -3106,6 +3112,16 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
+/// <param name="ModelTierOverride">
+/// ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime model-tier picker selection for
+/// THIS turn (raw <c>sprk_aimodeltier</c> option-set value — the SAME wire vocabulary the maker-facing
+/// catalog editor already uses, e.g. <c>100000002</c> = Reasoning). Forwarded to
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/> and, from there, to
+/// every projected capability tool for the turn — it composes with (does not replace) the dispatched
+/// Binding's own <c>sprk_modeltieroverride</c> / <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.Binding.EffectiveModelTier"/>
+/// through the ONE tier→deployment resolver (ADR-016). Default <c>null</c> = no override; the Action's
+/// own tier governs unchanged (pre-task-011 behavior).
+/// </param>
 /// <remarks>
 /// FR-P2-05 hard cutover (task 034): the former soft-slash bias field was RETIRED
 /// end-to-end (NFR-08). There is no longer any client-to-server intent-bias hint —
@@ -3115,7 +3131,8 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
-    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null,
+    AiModelTier? ModelTierOverride = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).

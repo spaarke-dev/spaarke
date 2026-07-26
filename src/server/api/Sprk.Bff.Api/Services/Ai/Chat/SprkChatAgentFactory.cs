@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
@@ -322,6 +323,13 @@ public class SprkChatAgentFactory
     /// the active file and tells the LLM it is the default target when no fileIds are passed. Prompt-only;
     /// the deterministic scoping lives in <c>SessionDispatchOrchestrator.ResolveTargetFiles</c>.
     /// </param>
+    /// <param name="modelTierOverride">
+    /// ai-advanced-capabilities-nda-r1 task 011: the Assistant's runtime tier-picker selection for THIS
+    /// turn, captured once here and forwarded to every projected <see cref="BindingCapabilityTool"/> so a
+    /// text-path capability dispatch composes it with the Binding's own tier override (see
+    /// <c>SessionDispatchRequest.ModelTierOverride</c>). Default <c>null</c> = no override — the
+    /// dispatched Binding's own tier composition governs unchanged (pre-task-011 behavior).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -342,6 +350,7 @@ public class SprkChatAgentFactory
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         string? activeSessionFileId = null,
+        AiModelTier? modelTierOverride = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -800,9 +809,10 @@ public class SprkChatAgentFactory
 
                     // sseWriter rides along for the FR-P2-03 capture_mode: modal escape
                     // (elicitation_modal event); null on non-chat surfaces (degrades to
-                    // loop elicitation inside the tool).
+                    // loop elicitation inside the tool). modelTierOverride (task 011) rides
+                    // along the same way — captured once per turn, forwarded verbatim.
                     tools.Add(new BindingCapabilityTool(
-                        binding, _serviceProvider, tenantId, sessionId, _logger, sseWriter));
+                        binding, _serviceProvider, tenantId, sessionId, _logger, sseWriter, modelTierOverride));
                 }
 
                 _logger.LogInformation(

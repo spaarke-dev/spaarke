@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -55,6 +56,7 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         string? activeSessionFileId = null,
+        AiModelTier? modelTierOverride = null,
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CreateAgentAsync));

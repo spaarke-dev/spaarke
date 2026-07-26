@@ -107,6 +107,8 @@ import {
   RefinementChipBar,
   FilesAttachedIndicator,
   UploadProgressIndicator,
+  AssistantModelTierPicker,
+  AssistantModelTier,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
 
@@ -1407,9 +1409,25 @@ export function ConversationPane(): React.JSX.Element {
   //   2b. Otherwise → show the mount-then-ask message + the four intent chips.
   // Gated on an active source document being present; every other message delegates verbatim to the
   // command-routing decorate (hard-slash / soft-slash / reference resolution — ADR-039 unchanged).
+  // ai-advanced-capabilities-nda-r1 task 011 (spec FR-04b): the Assistant's runtime model-tier
+  // picker selection. `null` (the default) means "unset" — decorateOutboundBody below omits the
+  // wire field entirely, so the dispatched Action's own sprk_modeltier governs exactly as before
+  // this control existed. A non-null selection is added to the outbound message body and rides
+  // sprk_modeltieroverride through the ONE tier→deployment resolver (ADR-016, task 010). Declared
+  // here (ABOVE handleDecorateOutboundBodyWithRevise) rather than beside the other simple UI state
+  // further down, because that callback's dependency array closes over it immediately below.
+  const [modelTierOverride, setModelTierOverride] = React.useState<AssistantModelTier | null>(null);
+
   const { handleDecorateOutboundBody } = commands;
   const handleDecorateOutboundBodyWithRevise = React.useCallback(
     async (body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      // ai-advanced-capabilities-nda-r1 task 011: only add the wire field when the user has picked a
+      // tier — omitted entirely on the (default) unset path, so the outbound body shape is byte-
+      // identical to pre-task-011 for every session that never touches the picker.
+      if (modelTierOverride !== null) {
+        body.modelTierOverride = modelTierOverride;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
       const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
@@ -1503,6 +1521,7 @@ export function ConversationPane(): React.JSX.Element {
       selection.selectionChip,
       draftBindingId,
       chips,
+      modelTierOverride,
     ]
   );
 
@@ -1945,6 +1964,18 @@ export function ConversationPane(): React.JSX.Element {
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
               transcriptFooterSlot={transcriptFooter}
+              // ai-advanced-capabilities-nda-r1 task 011 (FR-04b): the runtime model-tier picker,
+              // rendered directly above the composer via SprkChat's `aboveInputSlot` seam (the
+              // Click-path next-step chip strip's former slot — see types.ts doc; this is now its
+              // only consumer). Disabled during the same in-flight windows the composer itself locks
+              // on, so the picker can't change mid-turn.
+              aboveInputSlot={
+                <AssistantModelTierPicker
+                  value={modelTierOverride}
+                  onChange={setModelTierOverride}
+                  disabled={attachments.isPromoting || eventBatch.isEventInFlight || chips.dispatching}
+                />
+              }
               onPlaybookChange={playbook.handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}

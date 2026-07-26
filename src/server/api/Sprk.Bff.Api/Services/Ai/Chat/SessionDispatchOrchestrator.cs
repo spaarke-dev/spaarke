@@ -540,12 +540,24 @@ public class SessionDispatchOrchestrator
             // was written (e.g. the session vanished from the store mid-turn).
             session = boundInputs.UpdatedSession ?? session;
 
+            // ai-advanced-capabilities-nda-r1 task 011: compose the per-request tier override (if any)
+            // OVER the resolved Binding's own EffectiveModelTier — the request's runtime picker selection
+            // is the most-specific signal, then the Binding's stored override, then the Action's default.
+            // Substituting onto a COPY of `action` keeps ModelTierDeploymentResolver (inside ActionRunner)
+            // the ONE resolver — no second routing mechanism (ADR-016 / ADR-039). When both are unset this
+            // is a no-op (`effectiveAction` reference-equals `action`'s values) — byte-identical to
+            // pre-task-011 behavior.
+            var effectiveModelTier = request.ModelTierOverride ?? binding.EffectiveModelTier;
+            var effectiveAction = effectiveModelTier != action.ModelTier
+                ? action with { ModelTier = effectiveModelTier }
+                : action;
+
             output = default;
             string? llmError = null;
             try
             {
                 output = await _actionRunner
-                    .RunAsync(action, boundInputs, runContext, cancellationToken)
+                    .RunAsync(effectiveAction, boundInputs, runContext, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -1140,6 +1152,16 @@ public class SessionDispatchOrchestrator
 /// uncertainty handling; a firing numeric/multi-call producer is a documented follow-on that drops in
 /// behind this seam without a spine change. Default <c>false</c> = confident (backward-compatible).
 /// </param>
+/// <param name="ModelTierOverride">
+/// ai-advanced-capabilities-nda-r1 task 011: per-run tier override selected by the Assistant's runtime
+/// model-tier picker. Composes with (does not replace) the ONE tier→deployment resolver
+/// (<see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/>, task 010): when
+/// set, it wins over the resolved Binding's own <see cref="Binding.ModelTierOverride"/> /
+/// <see cref="Binding.EffectiveModelTier"/>, which in turn wins over the Action's default tier — the
+/// SAME precedence <see cref="Binding.EffectiveModelTier"/> already encodes, extended one level with this
+/// ephemeral per-request value (never persisted to the <c>sprk_playbookconsumer</c> row). Default
+/// <c>null</c> = no override; behavior is byte-identical to pre-task-011 (the Action's own tier governs).
+/// </param>
 public sealed record SessionDispatchRequest(
     string TenantId,
     string SessionId,
@@ -1147,7 +1169,8 @@ public sealed record SessionDispatchRequest(
     JsonElement? Args,
     string? CorrelationId = null,
     string? ActingUserEmail = null,
-    bool DispatchUncertain = false);
+    bool DispatchUncertain = false,
+    AiModelTier? ModelTierOverride = null);
 
 /// <summary>
 /// A Click dispatch that was refused at the catalog-resolution boundary (ADR-039:
