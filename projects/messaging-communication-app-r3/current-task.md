@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Active work** | UAT iteration on the Communications conversation UI (widget + `sprk_communicationconversationpage` modal code page + `CommunicationConversationPanel` PCF) + backend thread-creation bug fixes. Direct UAT loop, NOT a POML task. |
-| **Status** | Round 5 UAT + create-thread-500 fix: **committed, pushed, merged to master, BFF DEPLOYED.** Auto-threading fix: **committed locally (`60f3ea0fd`), NOT pushed, NOT deployed — deploy DEFERRED by operator until other project work merges.** |
-| **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`60f3ea0fd`**. Working tree clean. |
-| **Next Action** | **Await operator go-ahead to deploy the auto-threading fix.** When given: push branch → merge master (pick up the other projects' work) → rebuild BFF → `Deploy-BffApi.ps1` → smoke. See "Deferred deploy" below. |
+| **Status** | Round 5 UAT + create-thread-500 fix: **committed, pushed, merged to master, BFF DEPLOYED.** Auto-threading fix (`60f3ea0fd`): **pushed + BFF DEPLOYED 2026-07-25** (branch synced current with master via merge `bf371c05d`; deploy hash-verified, 47.49 MB, smoke 401/200). **NOT yet merged to master** — held for a normal PR with `/conflict-check` on shared `ThreadResolver.cs`. |
+| **Branch / HEAD** | `work/messaging-communication-app-r3` @ **`bf371c05d`** (pushed, 0 behind master). Working tree clean. |
+| **Next Action** | **Open PR to land the auto-threading fix to master** — run `/conflict-check` first (shared `ThreadResolver.cs`, co-edited by r1/r2/email-r4). Also: operator uploads PCF v1.6.0 zip; re-UAT the ＋ New Thread button + modal centering. |
 | **Deploy** | BFF + code pages: I deploy directly (`Deploy-BffApi.ps1`, `Deploy-WebResourceInline.ps1`, `Deploy-SpaarkeAi.ps1`). **PCF: I build + hand the zip; operator uploads to Dataverse.** |
 
 ### Critical Context (4 sentences)
@@ -27,9 +27,9 @@ The conversation UI is three surfaces sharing `@spaarke/ui-components` (`Convers
 | Round 5 UAT (widget fill, modal polish, PCF v1.6.0 centering) | ✅ `a6ce2b088` | ✅ | ✅ (in master before this session) | ✅ code pages; **PCF v1.6.0 = operator uploads** |
 | Create-record-thread **500** fix (`ThreadResolver.CreateRecordThreadAsync`) | ✅ `1a8d8fc36` | ✅ | ✅ (via merge) | ✅ **BFF deployed** (commit `ccd1202c0`, 47.49 MB) |
 | Notification-spine **dedup** fix (operator merged to master) | `f69566597` (#688) | — | ✅ | ✅ (rode along in the same BFF deploy) |
-| **Auto-threading** record-anchoring fix (5 sites) | ✅ **`60f3ea0fd`** | ❌ **not pushed** | ❌ | ❌ **DEFERRED** |
+| **Auto-threading** record-anchoring fix (5 sites) | ✅ **`60f3ea0fd`** | ✅ pushed | ❌ (PR pending) | ✅ **BFF DEPLOYED 2026-07-25** (merge `bf371c05d`, 47.49 MB) |
 
-**The live BFF** (`spaarke-bff-dev`) is at the `ccd1202c0` state: create-thread-500 fixed + dedup fixed. The auto-threading fix is one commit ahead, local only.
+**The live BFF** (`spaarke-bff-dev`) is at the `bf371c05d` state: create-thread-500 + dedup + **auto-threading record-anchoring** all deployed, plus the 10 merged commits of other in-flight projects' BFF work. The auto-threading fix is deployed to dev but not yet landed on master (PR + `/conflict-check` pending).
 
 ---
 
