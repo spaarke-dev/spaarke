@@ -12,7 +12,7 @@
  *     ADR-021 dark-mode check.
  */
 import * as React from 'react';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, createEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
@@ -203,6 +203,72 @@ describe('ComposeCommentGutter', () => {
     );
     expect(screen.getByTestId('compose-comment-gutter-card-thread-1')).toHaveAttribute('aria-expanded', 'true');
 
+    editor.destroy();
+  });
+
+  it('resizes the pane when the left-edge handle is dragged left (UAT round-3 D1)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onWidthChange = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            width={220}
+            onWidthChange={onWidthChange}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const handle = await screen.findByTestId('compose-comment-gutter-resize');
+    // jsdom lacks the Pointer Capture API — stub it so the handlers don't throw.
+    handle.setPointerCapture = jest.fn();
+    handle.releasePointerCapture = jest.fn();
+    handle.hasPointerCapture = jest.fn().mockReturnValue(true);
+
+    // jsdom's PointerEvent does not carry clientX from the fireEvent init, so build the event and
+    // define clientX explicitly.
+    const firePointer = (type: 'pointerDown' | 'pointerMove' | 'pointerUp', clientX: number): void => {
+      const ev = createEvent[type](handle, { pointerId: 1 });
+      Object.defineProperty(ev, 'clientX', { get: () => clientX });
+      fireEvent(handle, ev);
+    };
+
+    // The gutter is on the RIGHT — dragging the handle LEFT (smaller clientX) widens it by the delta.
+    firePointer('pointerDown', 500);
+    firePointer('pointerMove', 440); // 60px left → +60 → 280
+    expect(onWidthChange).toHaveBeenLastCalledWith(280);
+
+    // Dragging far left clamps to the max bound (480).
+    firePointer('pointerMove', 0);
+    expect(onWidthChange).toHaveBeenLastCalledWith(480);
+
+    firePointer('pointerUp', 0);
+    editor.destroy();
+  });
+
+  it('renders no resize handle when onWidthChange is not wired (fixed-width mount)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(screen.queryByTestId('compose-comment-gutter-resize')).not.toBeInTheDocument();
     editor.destroy();
   });
 

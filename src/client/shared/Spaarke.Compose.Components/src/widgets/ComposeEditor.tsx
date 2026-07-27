@@ -1524,6 +1524,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // right-gutter advisory comment cards are shown. Defaults ON (the prior always-on-when-threads-exist
     // behavior); the "Review" toolbar dropdown toggles it without discarding the placed threads.
     const [reviewNotesVisible, setReviewNotesVisible] = React.useState<boolean>(true);
+    // UAT round-3 D1 — user-resizable comment-pane width, persisted for the session so it survives tab
+    // switches. The gutter's left-edge drag handle reports the new (clamped) width here.
+    const [gutterWidth, setGutterWidth] = React.useState<number>(() => {
+      try {
+        const saved = sessionStorage.getItem('spaarke.compose.commentGutterWidth');
+        const n = saved ? parseInt(saved, 10) : Number.NaN;
+        return Number.isFinite(n) ? n : COMMENT_GUTTER_WIDTH_PX;
+      } catch {
+        return COMMENT_GUTTER_WIDTH_PX;
+      }
+    });
+    const handleGutterWidthChange = React.useCallback((w: number): void => {
+      setGutterWidth(w);
+      try {
+        sessionStorage.setItem('spaarke.compose.commentGutterWidth', String(w));
+      } catch {
+        // sessionStorage unavailable (private mode) — width still applies for this session.
+      }
+    }, []);
 
     // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
     // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
@@ -2488,10 +2507,15 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         <div className={styles.editorScrollWrap}>
           <div
             ref={editorScrollRef}
-            className={mergeClasses(
-              styles.editorSurface,
-              advisoryComments.threads.length > 0 && reviewNotesVisible ? styles.editorSurfaceWithGutter : undefined
-            )}
+            className={styles.editorSurface}
+            // UAT round-3 D1: reserve room on the right for the (resizable) comment rail so document
+            // text never runs under the cards. Dynamic width replaces the former fixed
+            // `editorSurfaceWithGutter` padding class.
+            style={
+              advisoryComments.threads.length > 0 && reviewNotesVisible
+                ? { paddingRight: `calc(${gutterWidth}px + ${tokens.spacingHorizontalL})` }
+                : undefined
+            }
             data-testid="compose-editor-surface"
           >
             <EditorContent editor={editor} />
@@ -2505,6 +2529,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             editor={editor}
             threads={reviewNotesVisible ? advisoryComments.threads : []}
             scrollContainerRef={editorScrollRef}
+            width={gutterWidth}
+            onWidthChange={handleGutterWidthChange}
           />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>

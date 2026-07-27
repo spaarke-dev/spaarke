@@ -69,8 +69,11 @@ import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor } from './NdaReviewSummaryPanel';
 
-/** Right-rail column width — cards clear of the document's own right margin. */
+/** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
+/** Resize bounds (UAT round-3 D1) — the user can drag the rail between these. */
+export const MIN_COMMENT_GUTTER_WIDTH_PX = 160;
+export const MAX_COMMENT_GUTTER_WIDTH_PX = 480;
 /** Fixed vertical gap enforced between stacked cards (collision-avoidance pass). */
 const CARD_GAP_PX = 8;
 /** Fallback card height used ONLY before a card's real height has been measured (first paint). */
@@ -88,11 +91,27 @@ const useStyles = makeStyles({
     top: 0,
     right: 0,
     bottom: 0,
+    // Width is applied inline (UAT round-3 D1 — user-resizable); this is the fallback default.
     width: `${COMMENT_GUTTER_WIDTH_PX}px`,
     // The rail itself never intercepts clicks over the document beneath it — only individual cards
     // (which re-enable pointer events) are interactive.
     pointerEvents: 'none',
     zIndex: 1,
+  },
+  // UAT round-3 D1 — a thin drag strip on the rail's LEFT edge to resize the comment pane. Re-enables
+  // pointer events (the rail disables them) so only this strip + the cards are interactive.
+  resizeHandle: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: '-3px',
+    width: '6px',
+    cursor: 'col-resize',
+    pointerEvents: 'auto',
+    zIndex: 2,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralStroke1,
+    },
   },
   card: {
     position: 'absolute',
@@ -164,6 +183,10 @@ export interface ComposeCommentGutterProps {
    * together, so the ref is populated before this component's effects run).
    */
   scrollContainerRef: React.RefObject<HTMLDivElement | null>;
+  /** Current rail width in px (UAT round-3 D1 — user-resizable). Defaults to {@link COMMENT_GUTTER_WIDTH_PX}. */
+  width?: number;
+  /** Called (during a drag on the left-edge handle) with the new, clamped rail width. Omit to make the rail fixed-width. */
+  onWidthChange?: (width: number) => void;
 }
 
 /** One thread's resolved raw (pre-collision) Y position, `top` relative to the rail's own top edge. */
@@ -195,9 +218,41 @@ export function layoutCommentGutterCards(
 }
 
 export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JSX.Element | null {
-  const { editor, threads, scrollContainerRef } = props;
+  const { editor, threads, scrollContainerRef, width = COMMENT_GUTTER_WIDTH_PX, onWidthChange } = props;
   const styles = useStyles();
   const railRef = React.useRef<HTMLDivElement | null>(null);
+
+  // UAT round-3 D1 — left-edge drag to resize. The gutter sits on the RIGHT, so dragging the handle
+  // LEFT (decreasing clientX) WIDENS the pane; the new width is clamped to [MIN, MAX] and reported to
+  // the host, which owns the width state (and persists it). Pointer capture keeps the drag tracking
+  // even if the cursor leaves the 6px strip.
+  const dragStateRef = React.useRef<{ startX: number; startWidth: number } | null>(null);
+  const onResizePointerDown = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>): void => {
+      if (!onWidthChange) return;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      dragStateRef.current = { startX: e.clientX, startWidth: width };
+    },
+    [onWidthChange, width]
+  );
+  const onResizePointerMove = React.useCallback(
+    (e: React.PointerEvent<HTMLDivElement>): void => {
+      const drag = dragStateRef.current;
+      if (!drag || !onWidthChange) return;
+      const delta = drag.startX - e.clientX; // drag left → positive → wider
+      const next = Math.min(
+        MAX_COMMENT_GUTTER_WIDTH_PX,
+        Math.max(MIN_COMMENT_GUTTER_WIDTH_PX, drag.startWidth + delta)
+      );
+      onWidthChange(next);
+    },
+    [onWidthChange]
+  );
+  const onResizePointerUp = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    dragStateRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
   const cardElementsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [cardTops, setCardTops] = React.useState<Record<string, number>>({});
   // Per-card expand/collapse (item #5). A Set of thread ids whose full text is shown.
@@ -306,7 +361,24 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
   if (!editor || threads.length === 0) return null;
 
   return (
-    <div ref={railRef} className={styles.rail} data-testid="compose-comment-gutter">
+    <div
+      ref={railRef}
+      className={styles.rail}
+      style={{ width: `${width}px` }}
+      data-testid="compose-comment-gutter"
+    >
+      {onWidthChange ? (
+        <div
+          className={styles.resizeHandle}
+          onPointerDown={onResizePointerDown}
+          onPointerMove={onResizePointerMove}
+          onPointerUp={onResizePointerUp}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize comments pane"
+          data-testid="compose-comment-gutter-resize"
+        />
+      ) : null}
       {threads.map(thread => {
         const top = cardTops[thread.id];
         if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
