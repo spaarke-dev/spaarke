@@ -1,16 +1,23 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-27 (by context-handoff, pre-/compact). **Read this block first.**
+> **Last Updated**: 2026-07-27 (UAT round-2 5-item plan IMPLEMENTED + DEPLOYED). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review **WORKING END-TO-END LIVE** in spaarkedev1 (grounded gpt-5 findings + Review-Summary panel + in-doc highlights + right-gutter comments). |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `6330d9ce8`. Working tree CLEAN. |
-| **Deployed** | BFF → spaarke-bff-dev (hash-verified, healthy). Code page → `sprk_spaarkeai` (published). Both from current branch HEAD. |
-| **Next Action** | Implement the **5-item UAT plan below** (start with #4 — the one real bug). Owner chose: checkpoint now → /compact → resume the build. |
-| **App Insights** | appId `6a76b012-46d9-412f-b4ab-4905658a9559` (component `spe-insights-dev-67e2xz`, rg `spe-infrastructure-westus2`). Query via `az monitor app-insights query --app <id> --analytics-query "..."`. This is how every root cause this session was found — USE IT. |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-2 5-item plan is IMPLEMENTED, TESTED, and DEPLOYED** — awaiting owner UAT verification (esp. #4 comment-to-Word, which needs a live repro to confirm the bake). |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `cd06cf2e6`. Working tree CLEAN. |
+| **Deployed (2026-07-27 round-2)** | BFF → spaarke-bff-dev (hash-verified 4/4, healthy; publish 46.14 MB compressed, under §10 60 MB). Code page → `sprk_spaarkeai` (updated + published). Both from HEAD cd06cf2e6. No new master since branch point (no clobber). |
+| **Next Action** | **Owner UAT of round-2.** #4 needs a CLEAN live repro: fresh-upload a NEW NDA → review → SAVE ONCE → open in Word → confirm the comment now bakes as a native `w:comment`. If it still orphans, pull App Insights for the `re-anchored: auto/review/orphan` line — Seam A only recovers a BENIGN version bump (same paragraph count + text); a Word structural rewrite (paraIds reassigned / paragraphs merged) still ORPHANs and needs Seam B (fuzzy text re-anchor + comment paraId rewrite), currently deferred. |
+| **App Insights** | appId `6a76b012-46d9-412f-b4ab-4905658a9559` (component `spe-insights-dev-67e2xz`, rg `spe-infrastructure-westus2`). Query via `az monitor app-insights query --app <id> --analytics-query "..."`. This is how every root cause is found — USE IT. |
+
+### ✅ UAT round-2 — 5 items DONE (commit `cd06cf2e6`, deployed 2026-07-27)
+- **#4 (BUG) comment-to-Word**: Seam A in `ComposeService.ReanchorStaleSaveAsync` — stamp client-minted paraIds (from `request.ParaIdMap`) into BOTH the retained baseline AND the re-downloaded current bytes before re-anchoring (reuses `ComposeBaselineParaIdStamper`, fail-open/count-gated/text-verified). A benign stale-save (eTag counter moved, content unchanged) now re-anchors AUTO (exact-paraId) → bakes native `w:comment`; a genuinely diverged doc still ORPHANs (no wrong-paragraph stamp). New green seam test `Save_StaleBase_ClientMintedComment_StampsAndBakesNativeComment_ThroughTheWire` (ConcurrencySaveSeamTests, 4/4). **CAVEAT: fully confirmed only by live repro.** Seam B (fuzzy text re-anchor for Word-structural-rewrite case) deferred — see Next Action.
+- **#1+2 "Review" toolbar dropdown**: icon-only right-aligned `MenuItemCheckbox` menu (`ComposeFormatToolbar`) toggling Review Summary (host panel) + Review Notes (gutter); shown only when a review exists. Wired via new `ComposeEditor.reviewSummary` prop + local `reviewNotesVisible` state (gates the gutter). +5 tests.
+- **#3 concise sticky linked TL;DR**: `NdaReviewSummaryPanel` reworked — ranked most-severe-first, one line per finding (section+risk+clamped explanation; NO quote/standard duplication), `position:sticky` top, each row clicks → `editorRef.highlightCitedSpan(quotedText, sectionRef)` (strict resolve + scrollIntoView). +4 tests (old citation test replaced with concise-contract + rank + navigate tests).
+- **#5 gutter expand/collapse**: per-card Show more/less in `ComposeCommentGutter` (collapse budget 140 chars); re-runs collision layout on toggle. +2 tests.
+- Verification: Compose.Components tsc clean · 87/87 ComposeEditor+Workspace · gutter/toolbar/summary suites green · BFF build clean + new seam test green.
 
 ### ✅ Fixes DEPLOYED this session (2026-07-27) — the review pipeline now works
 1. **Reasoning-tier request shape** (`OpenAiClient.GetStructuredCompletionRawAsync`): OMIT both `temperature` AND `MaxOutputTokenCount` for the ReasoningModel deployment (gated by `IsReasoningDeployment`). The live blocker was `max_tokens` (the SDK serializes `MaxOutputTokenCount`→`max_tokens` even at api-version 2025-04-01-preview; gpt-5 rejects it). +15 unit tests. Commit `82c087a31`.
