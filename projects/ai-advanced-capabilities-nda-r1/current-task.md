@@ -9,7 +9,22 @@
 | **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-2 5-item plan is IMPLEMENTED, TESTED, and DEPLOYED** — awaiting owner UAT verification (esp. #4 comment-to-Word, which needs a live repro to confirm the bake). |
 | **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `cd06cf2e6`. Working tree CLEAN. |
 | **Deployed (2026-07-27 round-2)** | BFF → spaarke-bff-dev (hash-verified 4/4, healthy; publish 46.14 MB compressed, under §10 60 MB). Code page → `sprk_spaarkeai` (updated + published). Both from HEAD cd06cf2e6. No new master since branch point (no clobber). |
-| **Next Action** | **Round-3 UAT + final 2 items.** Round-3 batches 1-3 are DEPLOYED (below). Remaining: (1) **takeaway polish** — model-authored `takeaway` field via NDA_Review Action re-seed (client derivation already live); (2) **carried-over** — over-broad `allowsknowledge` gate, binding-mirror drift, and **merge/PR** the branch. The takeaway re-seed changes the LIVE Action output → confirm with owner before re-seeding. |
+| **Next Action** | **Round-4 batch B** (below) — the interconnected selection/highlighting work (#5/#6/#8). Then deferred re-seeds (takeaway field, allowsknowledge) + merge/PR. Round-4 batch A DEPLOYED (commit e21b43501). |
+
+### 🔨 UAT round-4 — batch A DEPLOYED (e21b43501); batch B = NEXT
+**Batch A done (client-only):** #1 summary visual anchor (brand accent + shadow) · #2 sort control (header bar; by section default / by risk) · #3+#9 § / ¶ markers via `formatSectionRef` (summary rows + gutter cards) · #4 default sort = document position · #7 review-notes pane defaults widest (480, `MAX_COMMENT_GUTTER_WIDTH_PX`). 45 summary+gutter tests green.
+
+**Batch B — TODO (design ready):**
+- **#5** Review Summary: hide the panel scrollbar (`scrollbarWidth:none` + `::-webkit-scrollbar{display:none}` on `.panel`) and add a down-arrow FAB when scrollable (mirror `ComposeEditor` FIX #9 pattern — track scroll pos, show a circular Button that scrolls the panel down).
+- **#6** highlight the summary row currently navigated-to (active-row selected state). Shares the selection state with #8.
+- **#8** BIDIRECTIONAL linked highlight + COLOR SWAP (the crux):
+  - Shared "selected thread id" state in ComposeEditor (or a hook), synced both ways.
+  - Base highlight color = **light blue**; **selected** highlight = **yellow**. Change `CommentAnchorMark` (`marks/CommentAnchorMark.ts`) to color by selected state (it currently renders a fixed highlight span). Likely a ProseMirror decoration keyed on the selected thread id, OR a mark attr toggle.
+  - Click a highlighted paragraph in the doc → select that thread → its gutter card highlights (gray) + the paragraph turns yellow.
+  - Click a gutter card → select → scroll to + yellow-highlight the paragraph; the card keeps a **gray** selection until another card/click.
+  - Wiring: gutter card `onClick` (careful: card is already a click target for expand when truncatable — need a select-vs-expand affordance, e.g. select on click + expand via the chevron only, OR select always + expand toggle separately). ComposeEditor holds `selectedThreadId`, passes to gutter (selected style) + to the mark/decoration (yellow). Editor click→thread resolution via `findCommentAnchorRange`/posAt.
+  - Files: `ComposeCommentGutter.tsx` (selected card style + onClick→select), `marks/CommentAnchorMark.ts` (base light-blue, selected yellow), `ComposeEditor.tsx` (selectedThreadId state + editor click handler + decoration), maybe a small `useSelectedAdvisoryThread` hook.
+- **Recommend a fresh context (/compact) before batch B** — it's a coordinated multi-file change on the LIVE working highlighting; do it carefully, not at high context.
 
 ### ✅ UAT round-3 — DEPLOYED (commits ce4882142 → 6a414bbac, 2026-07-27)
 - **#10 comments-to-Word — FIXED + user-confirmed.** Two-part: (a) bake comments on the ContentModel create-on-save path (`ComposeService.SaveAsync` else-if, fail-soft); (b) the REAL cause — `composeSessionCommentThreadsToAnchoredComments` dropped cross-paragraph comments (`start.paraId !== end.paraId`), so 0 comments were sent. Now CLAMPS a cross-paragraph comment to its start paragraph. Also raised Azure OpenAI `NetworkTimeout` to 300s (`OpenAiClient` + `DocumentIntelligenceOptions.OpenAiNetworkTimeoutSeconds`) — the gpt-5-reasoning review was timing out at the SDK-default 100s ("couldn't run that action").
