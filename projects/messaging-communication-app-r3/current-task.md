@@ -25,11 +25,13 @@ The conversation UI is three surfaces sharing `@spaarke/ui-components` (`Convers
 | Item | Committed | Pushed | Merged to master | **Deployed** |
 |------|-----------|--------|------------------|--------------|
 | Round 5 UAT (widget fill, modal polish, PCF v1.6.0 centering) | ✅ `a6ce2b088` | ✅ | ✅ (in master before this session) | ✅ code pages; **PCF v1.6.0 = operator uploads** |
-| Create-record-thread **500** fix (`ThreadResolver.CreateRecordThreadAsync`) | ✅ `1a8d8fc36` | ✅ | ✅ (via merge) | ✅ **BFF deployed** (commit `ccd1202c0`, 47.49 MB) |
+| Create-record-thread **500** fix (`ThreadResolver.CreateRecordThreadAsync`) | ✅ `1a8d8fc36` | ✅ | ❌ **NOT on master** (earlier "via merge" note was WRONG) | ⚠️ **was deployed 07-25, REVERTED by another project's shared-BFF deploy from master** |
 | Notification-spine **dedup** fix (operator merged to master) | `f69566597` (#688) | — | ✅ | ✅ (rode along in the same BFF deploy) |
 | **Auto-threading** record-anchoring fix (5 sites) | ✅ **`60f3ea0fd`** | ✅ pushed | ❌ (PR pending) | ✅ **BFF DEPLOYED 2026-07-25** (merge `bf371c05d`, 47.49 MB) |
 
-**The live BFF** (`spaarke-bff-dev`) is at the `bf371c05d` state: create-thread-500 + dedup + **auto-threading record-anchoring** all deployed, plus the 10 merged commits of other in-flight projects' BFF work. The auto-threading fix is deployed to dev but not yet landed on master (PR + `/conflict-check` pending).
+**⚠️ REGRESSION DISCOVERED 2026-07-27**: the live BFF was reverted to master's BUGGY `ThreadResolver` by another project's shared-BFF deploy (the BFF is shared; another project deployed from master, which still has `thread["sprk_regardingrecordtype"] = ...` at lines 154/389/515). Create-thread is 500 again in UAT. **Neither `1a8d8fc36` (create-thread) nor `60f3ea0fd` (auto-threading) is on master** — they only ever lived on this branch + the 07-25 dev deploy. **Lesson: these fixes MUST land on master (PR) or any shared-BFF redeploy re-breaks them.** Do NOT rely on a branch-only dev deploy for a shared-BFF fix.
+
+Additional latent fix found same day: `ThreadMembershipDerivationService.ReadThreadContextAsync` (`70dc05642`) requested the same non-existent attr in a ColumnSet (background reconcile read path).
 
 ---
 

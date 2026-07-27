@@ -185,6 +185,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         title={threadNames[props.threadId]}
         regarding={{ entityType, id }}
         onOpenRecord={onOpenRecord}
+        // An email is a sprk_communication row (TimelineMessage.id IS the
+        // sprk_communication GUID) — open it via the SAME record-modal path as
+        // the regarding record (§B UAT 2026-07-27 item 3).
+        onOpenEmail={(msg) => onOpenRecord('sprk_communication', msg.id)}
       />
     ),
     [currentUserSystemUserId, threadNames, entityType, id, onOpenRecord]
