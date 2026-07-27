@@ -1,17 +1,25 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-27 (by context-handoff — UAT round-4 batch A DEPLOYED; batch B #5/#6/#8 NEXT). **Read this block first.**
+> **Last Updated**: 2026-07-27 (UAT round-4 batch B IMPLEMENTED + TESTED + DEPLOYED; awaiting owner UAT). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-2 5-item plan is IMPLEMENTED, TESTED, and DEPLOYED** — awaiting owner UAT verification (esp. #4 comment-to-Word, which needs a live repro to confirm the bake). |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `cd06cf2e6`. Working tree CLEAN. |
-| **Deployed (2026-07-27 round-2)** | BFF → spaarke-bff-dev (hash-verified 4/4, healthy; publish 46.14 MB compressed, under §10 60 MB). Code page → `sprk_spaarkeai` (updated + published). Both from HEAD cd06cf2e6. No new master since branch point (no clobber). |
-| **Next Action** | **Round-4 batch B** (below) — the interconnected selection/highlighting work (#5/#6/#8). Then deferred re-seeds (takeaway field, allowsknowledge) + merge/PR. Round-4 batch A DEPLOYED (commit e21b43501). |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-4 batch B (#5/#6/#8) IMPLEMENTED, TESTED (+11), DEPLOYED** — awaiting owner UAT. Rounds 2, 3, 4A also deployed. |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `ae8169781`. Working tree CLEAN (only researcher-memory stash noise, unrelated). |
+| **Deployed (2026-07-27 batch B)** | Code page ONLY (client-only change, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), updated + published, 4918 KB, from HEAD ae8169781. SpaarkeAi aliases `@spaarke/compose-components`→SOURCE so my edits transpile directly (verified: `compose-mark-comment-anchor-selected` + `nda-review-summary-scroll-down` present in bundle). Only new master since base = `0e1e30d95` (email-r5 docs, untouches SpaarkeAi/Compose → no clobber). |
+| **Next Action** | Owner UAT of batch B. Then: (1) the deferred re-seeds (takeaway field, allowsknowledge gate — owner confirm first, outward-facing); (2) merge/PR `work/ai-nda-r1-followups`. |
 
-### 🔨 UAT round-4 — batch A DEPLOYED (e21b43501); batch B = NEXT
+### ✅ UAT round-4 — batch B DEPLOYED (ae8169781, 2026-07-27)
+**Batch B done (client-only):**
+- **#8 Bidirectional linked highlight + colour swap.** New `marks/SelectedCommentExtension.ts` (ProseMirror VIEW decoration, never serialized to DOCX — same rationale as QaHighlightExtension) paints the SELECTED advisory thread's clause yellow via `compose-mark-comment-anchor-selected`. `CommentAnchorMark` base colour changed YELLOW→LIGHT BLUE (`colorPaletteBlueBackground2`) in ComposeEditor useStyles; selected override = yellow. Shared `selectedThreadId` state in ComposeEditor set from BOTH sides: gutter card click (`selectThread` — toggles + scrolls doc to clause via editorScrollRef coordsAtPos) AND doc click on a highlighted clause (editor `click` DOM handler reads `data-comment-id`; click off-anchor deselects). Effect dispatches select/clear meta to the plugin. Gutter: `selectedThreadId`+`onSelectThread` props; selected card = gray (`cardSelected`, aria-pressed); when selection wired, card CLICK selects + the double-arrow cue becomes a real expand BUTTON (stopPropagation) — select-vs-expand. Unwired/library mounts keep round-3 D2 (whole-card-expands) — existing 45 tests still green.
+- **#6 Summary active row.** `NdaReviewSummaryPanel` `activeIndex` state; navigated-to row = `findingRowActive` (gray + brand accent) + `aria-current`, moves on each row click, still calls onNavigate.
+- **#5 Summary scroll affordance.** Panel restructured wrapper(sticky chrome + FAB containing block) / scroller(panel: maxHeight 32vh, overflow, scrollbar hidden `scrollbarWidth:none`+`::-webkit-scrollbar{display:none}`); down-arrow FAB (`nda-review-summary-scroll-down`) shown only when content overflows (measured like ComposeEditor FIX #9). testid/role/aria stayed on the scroller so all existing queries pass.
+- **Tests +11:** SelectedCommentExtension.test.ts (6 — plugin state + decoration class + DOCX-safe getHTML), gutter selection (3 — onSelectThread, selected aria-pressed, select-vs-expand), summary #6 active-row + #5 FAB-absent (2). Full Compose.Components: **598/599 green**.
+- **⚠️ 1 pre-existing failure (NOT batch B):** `ComposeEditor.advisoryComments.test.tsx` "unique target resolves…" expects placed=1 but gets 2 (the "appears twice" ambiguous target resolves as unique in THIS env). PROVEN independent of batch B — fails identically with my ComposeEditor.tsx + SelectedCommentExtension.ts stashed. Likely fixture/env drift introduced earlier (round-3/4A) — flag for owner; not a batch-B regression.
+
+### 🗄️ UAT round-4 — batch A DEPLOYED (e21b43501)
 **Batch A done (client-only):** #1 summary visual anchor (brand accent + shadow) · #2 sort control (header bar; by section default / by risk) · #3+#9 § / ¶ markers via `formatSectionRef` (summary rows + gutter cards) · #4 default sort = document position · #7 review-notes pane defaults widest (480, `MAX_COMMENT_GUTTER_WIDTH_PX`). 45 summary+gutter tests green.
 
 **Batch B — TODO (design ready):**
