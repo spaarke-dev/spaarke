@@ -41,7 +41,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // AnalysisAction record carries the canonical {SystemPrompt + OutputSchema + Temperature}
         // triple — consumed unconditionally by AiCompletionNodeExecutor; ignored by executors
         // that do not need a structured-output schema.
-        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_outputschemajson";
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -84,6 +84,9 @@ public class AnalysisActionService : DataverseHttpServiceBase
             // Temperature plumbing above — explicit int→enum cast (established pattern, see
             // NodeService.cs sprk_executortype) rather than relying on implicit STJ enum-number binding.
             ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         };
@@ -120,7 +123,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // OData filter (URL-encoded single quotes around the literal). Top=1 because
         // sprk_actioncode is unique by design even when not enforced as an alternate key.
         var encoded = Uri.EscapeDataString(actionCode);
-        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
+        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
         var response = await Http.GetAsync(url, cancellationToken);
 
         await EnsureSuccessWithDiagnosticsAsync(response, $"GetActionByCodeAsync({actionCode})", cancellationToken);
@@ -145,6 +148,9 @@ public class AnalysisActionService : DataverseHttpServiceBase
             IsImmutable = false,
             Temperature = entity.Temperature,
             ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             OutputSchemaJson = entity.OutputSchemaJson
         };
 
@@ -177,7 +183,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // See GetActionAsync above for the full rationale and Wave 4 task 046 follow-up.
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_outputschemajson",
+            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson",
             expandClause: null,
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -216,6 +222,9 @@ public class AnalysisActionService : DataverseHttpServiceBase
             Temperature = entity.Temperature,
             // ai-advanced-capabilities-nda-r1 task 010: per-action model-tier default.
             ModelTier = entity.ModelTier.HasValue ? (AiModelTier)entity.ModelTier.Value : null,
+            // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
+            // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
+            AllowsKnowledge = entity.AllowsKnowledge ?? false,
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         }).ToArray();
@@ -488,6 +497,14 @@ public class AnalysisActionService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_outputschemajson")]
         public string? OutputSchemaJson { get; set; }
+
+        /// <summary>
+        /// Knowledge-retrieval opt-in (<c>sprk_allowsknowledge</c>). When true, the linear
+        /// <c>ActionRunner</c> path retrieves grounding references from <c>spaarke-rag-references</c>
+        /// (e.g. the firm NDA standard KNW-011) and injects them before the completion. Null → false.
+        /// </summary>
+        [JsonPropertyName("sprk_allowsknowledge")]
+        public bool? AllowsKnowledge { get; set; }
     }
 
     #endregion
