@@ -11,7 +11,7 @@
  *     ADR-021 dark-mode check (no hex literals in the rendered output).
  */
 import * as React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import {
@@ -239,6 +239,33 @@ describe('NdaReviewSummaryPanel', () => {
     screen.getByTestId('nda-review-summary-finding-0').click();
     expect(onNavigate).toHaveBeenCalledTimes(1);
     expect(onNavigate.mock.calls[0][0]).toMatchObject({ sectionRef: 'Section 4.2, para 2 (p. 3)' });
+  });
+
+  it('UAT round-4 #6 — marks the navigated-to row ACTIVE (aria-current), and moves it when another row is clicked', () => {
+    const onNavigate = jest.fn();
+    renderPanel({ onNavigate });
+    const row0 = screen.getByTestId('nda-review-summary-finding-0');
+    const row1 = screen.getByTestId('nda-review-summary-finding-1');
+    // No active row before any navigation.
+    expect(row0).not.toHaveAttribute('aria-current');
+    expect(row1).not.toHaveAttribute('aria-current');
+
+    fireEvent.click(row0);
+    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('nda-review-summary-finding-1')).not.toHaveAttribute('aria-current');
+
+    // Clicking another row moves the active state (and still navigates).
+    fireEvent.click(screen.getByTestId('nda-review-summary-finding-1'));
+    expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('nda-review-summary-finding-0')).not.toHaveAttribute('aria-current');
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+  });
+
+  it('UAT round-4 #5 — the down-arrow FAB is absent when the panel content fits (nothing below the fold)', () => {
+    // jsdom reports scrollHeight === clientHeight (0), so the panel is never "scrollable" here — the FAB
+    // must not render. (Live, when findings overflow the 32vh cap, it appears — exercised in UAT.)
+    renderPanel({});
+    expect(screen.queryByTestId('nda-review-summary-scroll-down')).not.toBeInTheDocument();
   });
 
   it('renders rows as non-interactive when onNavigate is not wired', () => {

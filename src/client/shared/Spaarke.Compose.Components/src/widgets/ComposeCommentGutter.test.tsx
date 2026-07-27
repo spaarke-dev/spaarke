@@ -504,4 +504,104 @@ describe('ComposeCommentGutter', () => {
     dark.unmount();
     editorDark.destroy();
   });
+
+  // -------------------------------------------------------------------------
+  // UAT round-4 #8 — selection (bidirectional linked highlight; select-vs-expand)
+  // -------------------------------------------------------------------------
+
+  it('calls onSelectThread when a card is clicked (selection wired) — the card is a select button', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onSelectThread = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={onSelectThread}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    // With selection wired, even a SHORT (non-truncatable) card is a select button.
+    expect(card).toHaveAttribute('role', 'button');
+    expect(card).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(card);
+    expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+    editor.destroy();
+  });
+
+  it('renders the selected card with its selected (gray) state via aria-pressed', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={jest.fn()}
+            selectedThreadId="thread-1"
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    editor.destroy();
+  });
+
+  it('when selection is wired, a truncatable card SELECTS on card click and EXPANDS only via the cue button', async () => {
+    const longText =
+      'This advisory explanation is deliberately much longer than the collapsed body budget so the ' +
+      'card is truncatable and a distinct expand affordance appears in the card body region below.';
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onSelectThread = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: longText })]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={onSelectThread}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    const body = screen.getByTestId('compose-comment-gutter-body-thread-1');
+    expect(body.textContent).toContain('…'); // starts collapsed
+
+    // Clicking the card body SELECTS (does not expand).
+    fireEvent.click(card);
+    expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1').textContent).toContain('…');
+
+    // The cue is a real button; clicking it EXPANDS without also selecting.
+    onSelectThread.mockClear();
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-expand-thread-1'));
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1')).toHaveTextContent(
+      'expand affordance appears in the card body'
+    );
+    expect(onSelectThread).not.toHaveBeenCalled();
+    editor.destroy();
+  });
 });

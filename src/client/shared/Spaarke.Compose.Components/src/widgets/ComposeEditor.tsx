@@ -94,6 +94,7 @@ import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
   composeSessionCommentThreadsToAnchoredComments,
+  findCommentAnchorRange,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
 import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX, MAX_COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
@@ -103,6 +104,7 @@ import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
+import { SelectedCommentExtension, selectedCommentPluginKey } from './marks/SelectedCommentExtension';
 import {
   usePendingRedline,
   resolveTargetSpans,
@@ -261,6 +263,14 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
  * structurally different kind of extension (plugin-only, no schema mark).
  */
 const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
+
+/**
+ * ai-advanced-capabilities-nda-r1 UAT round-4 #8 — the "selected advisory comment" highlight, another
+ * single ProseMirror VIEW-DECORATION plugin (NOT a Mark; same DOCX-safety rationale as
+ * {@link COMPOSE_R2_QA_HIGHLIGHT}). Paints the currently-selected advisory thread's clause the SELECTED
+ * colour (yellow); the base anchor stays light blue via the `compose-mark-comment-anchor` mark class.
+ */
+const COMPOSE_NDA_SELECTED_COMMENT = [SelectedCommentExtension];
 
 /**
  * FR-17 in-editor find/replace (task 040) — another single ProseMirror VIEW-DECORATION plugin (NOT
@@ -912,7 +922,17 @@ const useStyles = makeStyles({
     '& .compose-mark-deletion + .compose-mark-insertion::before': {
       content: 'none', // the pair's cue already sits on the leading deletion span
     },
+    // UAT round-4 #8 — the BASE advisory comment anchor is LIGHT BLUE; it turns YELLOW only when its
+    // thread is selected (the `compose-mark-comment-anchor-selected` view decoration below, painted by
+    // SelectedCommentExtension), giving the bidirectional doc↔gutter linked-highlight cue.
     '& .compose-mark-comment-anchor': {
+      backgroundColor: tokens.colorPaletteBlueBackground2,
+      color: tokens.colorNeutralForeground1,
+      borderRadius: tokens.borderRadiusSmall,
+    },
+    // The SELECTED advisory anchor (view decoration, never serialized) overrides the base blue with
+    // yellow. Higher specificity than the base rule so it wins wherever both classes apply.
+    '& .compose-mark-comment-anchor.compose-mark-comment-anchor-selected, & .compose-mark-comment-anchor-selected': {
       backgroundColor: tokens.colorPaletteYellowBackground2,
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
@@ -1722,6 +1742,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...LOCKED_EXTENSIONS,
         ...COMPOSE_R2_MARKS,
         ...COMPOSE_R2_QA_HIGHLIGHT,
+        ...COMPOSE_NDA_SELECTED_COMMENT,
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
@@ -1778,6 +1799,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             if (ledgerRef) {
               setRedlineClickAnchor({ x: event.clientX, y: event.clientY, ledgerRef });
             }
+            // UAT round-4 #8 — a click on a highlighted advisory clause SELECTS that thread (the linked
+            // gutter card turns gray; this anchor turns yellow). A click that lands on NO advisory
+            // anchor deselects (the card returns to its base state) — so the selection follows where the
+            // reviewer is looking. Uses the anchor mark's `data-comment-id` provenance attribute.
+            const anchor = target?.closest?.('[data-compose-mark="comment-anchor"]') as HTMLElement | null;
+            const commentId = anchor?.getAttribute('data-comment-id') ?? '';
+            setSelectedThreadId(commentId || null);
             // Return false: never swallow the click — the caret still moves and normal editing works.
             return false;
           },
@@ -2045,6 +2073,56 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ComposeCommentThread's own panel instance below — see placeAdvisoryComments' JSDoc on
     // ComposeEditorHandle for why the two stay independent.
     const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
+
+    // ----- UAT round-4 #8 — bidirectional linked highlight (doc anchor ↔ gutter card) --------------
+    // A single "selected advisory thread" id, shared between the in-document anchor (turns yellow via
+    // SelectedCommentExtension) and the right-rail gutter card (turns gray). Set from EITHER side: a
+    // click on a gutter card (`selectThread`) or on a highlighted clause in the document (the editor
+    // `click` DOM handler below). `null` = nothing selected (every anchor stays base light-blue).
+    const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(null);
+    // Mirror the current selection into a ref so the stable `selectThread` callback can toggle without
+    // re-subscribing (avoids churning the gutter's `onSelectThread` identity every selection change).
+    const selectedThreadIdRef = React.useRef<string | null>(null);
+    React.useEffect(() => {
+      selectedThreadIdRef.current = selectedThreadId;
+    }, [selectedThreadId]);
+
+    // Push the selection into the ProseMirror decoration plugin whenever it changes (the plugin paints
+    // the selected clause yellow; clearing repaints it base blue). A no-op meta dispatch is cheap and
+    // keeps React state as the single source of truth.
+    React.useEffect(() => {
+      if (!editor) return;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(
+          selectedCommentPluginKey,
+          selectedThreadId ? { type: 'select', commentId: selectedThreadId } : { type: 'clear' }
+        )
+      );
+    }, [editor, selectedThreadId]);
+
+    // Gutter-card click → TOGGLE selection (re-clicking the selected card deselects; clicking another
+    // switches). On SELECT, scroll the document to the clause so the linked yellow anchor is in view —
+    // reusing the coordsAtPos ancestor-scroll technique useDocQaHighlight/the gutter already use.
+    const selectThread = React.useCallback(
+      (threadId: string): void => {
+        const willSelect = selectedThreadIdRef.current !== threadId;
+        setSelectedThreadId(willSelect ? threadId : null);
+        if (!willSelect || !editor) return;
+        const span = findCommentAnchorRange(editor.state.doc, threadId);
+        const scroller = editorScrollRef.current;
+        if (!span || !scroller) return;
+        try {
+          const coords = editor.view.coordsAtPos(span.from);
+          const rect = scroller.getBoundingClientRect();
+          const target = scroller.scrollTop + (coords.top - rect.top) - rect.height / 3;
+          scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        } catch {
+          // coordsAtPos measures real DOM layout and can throw in a detached/not-yet-painted view —
+          // selection still applied above; the next paint shows the highlight without the scroll.
+        }
+      },
+      [editor]
+    );
 
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
@@ -2611,6 +2689,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             width={gutterWidth}
             onWidthChange={handleGutterWidthChange}
             resolveStandardText={bffBaseUrl ? resolveStandardText : undefined}
+            selectedThreadId={selectedThreadId}
+            onSelectThread={selectThread}
           />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>

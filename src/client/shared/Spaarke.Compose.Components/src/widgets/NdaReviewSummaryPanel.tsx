@@ -67,9 +67,32 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss16Regular, Info16Regular, ChevronRight16Regular, ArrowSort16Regular } from '@fluentui/react-icons';
+import {
+  Dismiss16Regular,
+  Info16Regular,
+  ChevronRight16Regular,
+  ArrowSort16Regular,
+  ArrowDown16Regular,
+} from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
+  // UAT round-4 #5 — the OUTER positioning shell. Owns the pinned/sticky chrome (brand accent, shadow,
+  // opaque background) AND is the containing block for the absolutely-positioned down-arrow FAB, so the
+  // FAB stays pinned at the panel's bottom edge instead of scrolling away with the findings.
+  wrapper: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
+    flexShrink: 0,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorNeutralStroke2,
+    // UAT round-4 #1 — a clear visual anchor: a brand accent strip on the left + a soft shadow so the
+    // summary reads as a distinct, pinned panel rather than blending into the document.
+    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: tokens.shadow4,
+  },
   panel: {
     display: 'flex',
     flexDirection: 'column',
@@ -79,21 +102,10 @@ const useStyles = makeStyles({
     // reader can orient at a glance, then scroll the document (which scrolls INSIDE the editor below).
     maxHeight: '32vh',
     overflowY: 'auto',
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    backgroundColor: tokens.colorNeutralBackground2,
-    flexShrink: 0,
-    // Anchored at the top of the compose column: it stays visible while the document body scrolls
-    // beneath it (item #3 "leave the summary points visible while scrolling"). The opaque background +
-    // z-index keep scrolled content from bleeding through if the column itself ever scrolls.
-    position: 'sticky',
-    top: 0,
-    zIndex: 2,
-    // UAT round-4 #1 — a clear visual anchor: a brand accent strip on the left + a soft shadow so the
-    // summary reads as a distinct, pinned panel rather than blending into the document.
-    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
-    boxShadow: tokens.shadow4,
+    // UAT round-4 #5 — hide the native scrollbar; the down-arrow FAB is the scroll affordance instead
+    // (mirrors the ComposeEditor FIX #9 scrollbar-hidden surface + down-arrow pattern).
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
   },
   // UAT round-4 #2 — the title + sort control sit in a light-gray header bar.
   headerBar: {
@@ -190,6 +202,30 @@ const useStyles = makeStyles({
     ':active': {
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
+  },
+  // UAT round-4 #6 — the row the reader last navigated to reads as the ACTIVE row: a gray fill + brand
+  // accent border (mirrors the gutter card's selected state), so the summary and the document stay
+  // visually in sync about "which finding are we on".
+  findingRowActive: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      border: `1px solid ${tokens.colorBrandStroke1}`,
+    },
+  },
+  // UAT round-4 #5 — the down-arrow FAB pinned at the panel's bottom-right; appears only while more
+  // findings sit below the fold. Circular, semantic-token surface (ADR-021).
+  scrollDownFab: {
+    position: 'absolute',
+    right: tokens.spacingHorizontalS,
+    bottom: tokens.spacingVerticalS,
+    zIndex: 3,
+    minWidth: '28px',
+    width: '28px',
+    height: '28px',
+    padding: 0,
+    boxShadow: tokens.shadow8,
   },
   findingHeader: {
     display: 'flex',
@@ -386,6 +422,42 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   // UAT round-4 #4 — DEFAULT to document order (section/paragraph/sentence), not risk. The model emits
   // findings in document order, so the original index IS that order. #2 lets the reader switch to risk.
   const [sortBy, setSortBy] = React.useState<NdaSummarySort>('section');
+  // UAT round-4 #6 — the finding index the reader last navigated to; that row renders as ACTIVE so the
+  // summary and the document stay in sync about "which finding are we on".
+  const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
+
+  // UAT round-4 #5 — hide the panel's native scrollbar and expose a down-arrow FAB that appears only
+  // while more findings sit below the fold, scrolling the panel on click (ComposeEditor FIX #9 pattern).
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [showScrollDown, setShowScrollDown] = React.useState(false);
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const measure = (): void => {
+      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setShowScrollDown(remaining > 8);
+    };
+    measure();
+    el.addEventListener('scroll', measure, { passive: true });
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+    }
+    window.addEventListener('resize', measure, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', measure);
+      ro?.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // Re-measure when the rendered finding set changes (findings arriving/sort change alters height).
+  }, [findings, sortBy, open]);
+
+  const scrollPanelDown = React.useCallback((): void => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: Math.min(el.scrollHeight, el.scrollTop + el.clientHeight * 0.8), behavior: 'smooth' });
+  }, []);
 
   if (!open) return null;
 
@@ -408,13 +480,15 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
     });
 
   return (
-    <div
-      className={styles.panel}
-      role="complementary"
-      aria-label="NDA review summary"
-      data-testid="nda-review-summary-panel"
-    >
-      <div className={styles.headerBar}>
+    <div className={styles.wrapper}>
+      <div
+        ref={scrollRef}
+        className={styles.panel}
+        role="complementary"
+        aria-label="NDA review summary"
+        data-testid="nda-review-summary-panel"
+      >
+        <div className={styles.headerBar}>
         <Text weight="semibold">Review Summary</Text>
         <div className={styles.headerActions}>
           {/* UAT round-4 #2 — sort by section (default) or risk. */}
@@ -532,12 +606,17 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
               </Text>
             );
             const testId = `nda-review-summary-finding-${index}`;
+            const isActive = activeIndex === index; // UAT round-4 #6
             return navigable ? (
               <button
                 key={index}
                 type="button"
-                className={`${styles.findingRow} ${styles.findingRowClickable}`}
-                onClick={() => onNavigate?.(finding)}
+                className={`${styles.findingRow} ${styles.findingRowClickable}${isActive ? ` ${styles.findingRowActive}` : ''}`}
+                onClick={() => {
+                  setActiveIndex(index); // UAT round-4 #6 — mark this the active/navigated-to row
+                  onNavigate?.(finding);
+                }}
+                aria-current={isActive ? 'true' : undefined}
                 aria-label={`Go to ${finding.sectionRef ?? 'flagged section'} in the document`}
                 data-testid={testId}
               >
@@ -552,7 +631,22 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
             );
           })
         )}
+        </div>
       </div>
+      {/* UAT round-4 #5 — down-arrow FAB: the scrollbar is hidden, so this is the scroll affordance.
+          Shown only while more findings sit below the fold. */}
+      {showScrollDown ? (
+        <Button
+          appearance="primary"
+          shape="circular"
+          size="small"
+          icon={<ArrowDown16Regular />}
+          className={styles.scrollDownFab}
+          aria-label="Scroll down for more findings"
+          onClick={scrollPanelDown}
+          data-testid="nda-review-summary-scroll-down"
+        />
+      ) : null}
     </div>
   );
 }

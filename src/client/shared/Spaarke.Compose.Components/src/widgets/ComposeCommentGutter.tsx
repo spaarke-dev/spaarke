@@ -203,6 +203,31 @@ const useStyles = makeStyles({
       border: `1px solid ${tokens.colorNeutralStroke1}`,
     },
   },
+  // UAT round-4 #8: the SELECTED review note keeps a gray highlight (until re-clicked or another note
+  // is selected). Paired with the in-document anchor turning yellow (SelectedCommentExtension). Gray
+  // background + a brand accent border so the linked card reads as "this one".
+  cardSelected: {
+    backgroundColor: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorBrandStroke1}`,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      border: `1px solid ${tokens.colorBrandStroke1}`,
+    },
+  },
+  // UAT round-4 #8: when selection is wired, the double-arrow cue becomes the dedicated expand control
+  // (card click selects instead) — reset it to a bare, centered icon button.
+  expandCueButton: {
+    display: 'flex',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: '100%',
+    padding: 0,
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
+    color: tokens.colorNeutralForeground3,
+    ':hover': { color: tokens.colorNeutralForeground2 },
+  },
   // The double-down-arrow expandability cue (UAT round-3 D2), centered under the card body; rotates
   // 180° when the card is expanded (points up = "collapse").
   expandCue: {
@@ -245,6 +270,19 @@ export interface ComposeCommentGutterProps {
    * text — a standalone/library mount with no BFF wiring.
    */
   resolveStandardText?: (standardRef: string) => Promise<string | null>;
+  /**
+   * UAT round-4 #8 — the currently-selected advisory thread id (shared with the in-document anchor
+   * highlight). The matching card renders a gray "selected" state. `null`/omitted = no selection.
+   */
+  selectedThreadId?: string | null;
+  /**
+   * UAT round-4 #8 — called with a thread id when the reviewer clicks a card, to SELECT it (the host
+   * toggles selection + scrolls the document to the clause + paints its anchor yellow). When wired, a
+   * card CLICK selects (rather than expands) and the double-arrow cue becomes the dedicated expand
+   * control. Omit for a standalone/library mount with no selection wiring — a card click then keeps its
+   * original expand/collapse behavior.
+   */
+  onSelectThread?: (threadId: string) => void;
 }
 
 /**
@@ -350,7 +388,16 @@ export function layoutCommentGutterCards(
 }
 
 export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JSX.Element | null {
-  const { editor, threads, scrollContainerRef, width = COMMENT_GUTTER_WIDTH_PX, onWidthChange, resolveStandardText } = props;
+  const {
+    editor,
+    threads,
+    scrollContainerRef,
+    width = COMMENT_GUTTER_WIDTH_PX,
+    onWidthChange,
+    resolveStandardText,
+    selectedThreadId = null,
+    onSelectThread,
+  } = props;
   const styles = useStyles();
   const railRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -519,6 +566,12 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
         const bodyText = isExpanded || !isTruncatable ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
         const loc = thread.sectionRef ? formatSectionRef(thread.sectionRef) : null; // UAT round-4 #9 — § / ¶
+        const isSelected = selectedThreadId === thread.id; // UAT round-4 #8
+        // UAT round-4 #8: when selection is wired the card CLICK selects (and the cue button expands);
+        // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).
+        const selectable = Boolean(onSelectThread);
+        const isInteractive = selectable || isTruncatable;
+        const activate = selectable ? () => onSelectThread?.(thread.id) : isTruncatable ? () => toggleExpanded(thread.id) : undefined;
         return (
           <div
             key={thread.id}
@@ -526,22 +579,35 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
               if (el) cardElementsRef.current.set(thread.id, el);
               else cardElementsRef.current.delete(thread.id);
             }}
-            className={mergeClasses(styles.card, isTruncatable ? styles.cardClickable : undefined)}
+            className={mergeClasses(
+              styles.card,
+              isInteractive ? styles.cardClickable : undefined,
+              isSelected ? styles.cardSelected : undefined
+            )}
             style={{ top: `${top}px` }}
-            role={isTruncatable ? 'button' : 'complementary'}
-            tabIndex={isTruncatable ? 0 : undefined}
-            aria-expanded={isTruncatable ? isExpanded : undefined}
+            role={isInteractive ? 'button' : 'complementary'}
+            tabIndex={isInteractive ? 0 : undefined}
+            aria-pressed={selectable ? isSelected : undefined}
+            aria-expanded={!selectable && isTruncatable ? isExpanded : undefined}
             aria-label={
               `Comment${thread.sectionRef ? `: ${thread.sectionRef}` : ''}` +
-              (isTruncatable ? (isExpanded ? ' — expanded, activate to collapse' : ' — truncated, activate to expand') : '')
+              (selectable
+                ? isSelected
+                  ? ' — selected, activate to deselect'
+                  : ' — activate to select and go to the clause'
+                : isTruncatable
+                  ? isExpanded
+                    ? ' — expanded, activate to collapse'
+                    : ' — truncated, activate to expand'
+                  : '')
             }
-            onClick={isTruncatable ? () => toggleExpanded(thread.id) : undefined}
+            onClick={activate}
             onKeyDown={
-              isTruncatable
+              activate
                 ? e => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      toggleExpanded(thread.id);
+                      activate();
                     }
                   }
                 : undefined
@@ -599,15 +665,35 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
                 </Text>
               )
             ) : null}
-            {/* UAT round-3 D2: double-down-arrow expandability cue (the whole card is the click target). */}
+            {/* UAT round-3 D2: double-down-arrow expandability cue. When selection is wired (round-4 #8)
+                the card click SELECTS, so the cue becomes the dedicated expand button (stopPropagation
+                keeps it from also selecting); otherwise it stays the passive cue and the whole card
+                toggles expand. */}
             {isTruncatable ? (
-              <div
-                className={styles.expandCue}
-                aria-hidden
-                data-testid={`compose-comment-gutter-expand-${thread.id}`}
-              >
-                <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
-              </div>
+              selectable ? (
+                <button
+                  type="button"
+                  className={styles.expandCueButton}
+                  aria-label={isExpanded ? 'Collapse comment' : 'Expand comment'}
+                  aria-expanded={isExpanded}
+                  onClick={e => {
+                    e.stopPropagation();
+                    toggleExpanded(thread.id);
+                  }}
+                  onKeyDown={e => e.stopPropagation()}
+                  data-testid={`compose-comment-gutter-expand-${thread.id}`}
+                >
+                  <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
+                </button>
+              ) : (
+                <div
+                  className={styles.expandCue}
+                  aria-hidden
+                  data-testid={`compose-comment-gutter-expand-${thread.id}`}
+                >
+                  <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
+                </div>
+              )
             ) : null}
           </div>
         );
