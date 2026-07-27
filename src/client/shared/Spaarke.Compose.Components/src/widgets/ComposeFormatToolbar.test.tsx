@@ -483,3 +483,61 @@ describe('ComposeFormatToolbar — sticky pin, global disable, dark mode', () =>
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review dropdown (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Review dropdown', () => {
+  const reviewProps = (over: Partial<ComposeFormatToolbarProps> = {}): Partial<ComposeFormatToolbarProps> => ({
+    hasReview: true,
+    reviewSummaryOpen: false,
+    reviewNotesOpen: true,
+    onToggleReviewSummary: jest.fn(),
+    onToggleReviewNotes: jest.fn(),
+    ...over,
+  });
+
+  it('is hidden when no review is present (hasReview falsy)', () => {
+    renderFormatToolbar({}, { props: reviewProps({ hasReview: false }) });
+    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument();
+  });
+
+  it('is hidden when the toggle handlers are not wired', () => {
+    renderFormatToolbar({}, { props: { hasReview: true } });
+    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument();
+  });
+
+  it('shows the icon-only Review trigger when a review is present and handlers are wired', () => {
+    renderFormatToolbar({}, { props: reviewProps() });
+    const trigger = screen.getByTestId('compose-format-review-menu');
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-label', 'Review');
+  });
+
+  it('toggling "Review Summary" fires onToggleReviewSummary (and not Notes)', async () => {
+    const user = userEvent.setup();
+    const onToggleReviewSummary = jest.fn();
+    const onToggleReviewNotes = jest.fn();
+    renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
+
+    await user.click(screen.getByTestId('compose-format-review-menu'));
+    await user.click(await screen.findByTestId('compose-format-review-summary-toggle'));
+
+    expect(onToggleReviewSummary).toHaveBeenCalledTimes(1);
+    expect(onToggleReviewNotes).not.toHaveBeenCalled();
+  });
+
+  it('toggling "Review Notes" fires onToggleReviewNotes (and not Summary)', async () => {
+    const user = userEvent.setup();
+    const onToggleReviewSummary = jest.fn();
+    const onToggleReviewNotes = jest.fn();
+    renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
+
+    await user.click(screen.getByTestId('compose-format-review-menu'));
+    await user.click(await screen.findByTestId('compose-format-review-notes-toggle'));
+
+    expect(onToggleReviewNotes).toHaveBeenCalledTimes(1);
+    expect(onToggleReviewSummary).not.toHaveBeenCalled();
+  });
+});

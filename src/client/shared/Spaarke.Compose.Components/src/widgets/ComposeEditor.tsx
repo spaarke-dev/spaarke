@@ -547,6 +547,22 @@ export interface ComposeEditorProps {
    * defaults to `'You'` when omitted (standalone/library mounts).
    */
   commentAuthor?: string;
+
+  /**
+   * ai-advanced-capabilities-nda-r1 (UAT round-2 items #1/#2) — the review-summary panel's
+   * visibility state, threaded from the host (`ComposeWorkspace`) so the editor's own "Review"
+   * toolbar dropdown can toggle it alongside the right-gutter "Review Notes". The host owns the
+   * panel (it renders `NdaReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
+   * no NDA advisory review — the "Review" control then never appears.
+   */
+  reviewSummary?: {
+    /** Whether the review-summary panel is currently shown. */
+    open: boolean;
+    /** True once a review has produced findings (gates whether the "Review" control appears at all). */
+    hasFindings: boolean;
+    /** Toggle the review-summary panel's visibility. */
+    onToggle: () => void;
+  };
 }
 
 /**
@@ -1379,6 +1395,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       canSave,
       isSaving,
       commentAuthor = 'You',
+      reviewSummary,
     } = props;
 
     const styles = useStyles();
@@ -1503,6 +1520,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // yields `null` and the panel shows a "select text" hint instead of guessing an anchor.
     const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
     const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
+    // ai-advanced-capabilities-nda-r1 (UAT round-2 item #2) — "Review Notes" visibility: whether the
+    // right-gutter advisory comment cards are shown. Defaults ON (the prior always-on-when-threads-exist
+    // behavior); the "Review" toolbar dropdown toggles it without discarding the placed threads.
+    const [reviewNotesVisible, setReviewNotesVisible] = React.useState<boolean>(true);
 
     // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
     // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
@@ -2191,6 +2212,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
+          // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
+          // present (in-document advisory threads OR summary findings the host reports). "Review Summary"
+          // toggles the host's docked panel; "Review Notes" toggles the right-gutter cards (local state).
+          hasReview={advisoryComments.threads.length > 0 || Boolean(reviewSummary?.hasFindings)}
+          reviewSummaryOpen={reviewSummary?.open ?? false}
+          onToggleReviewSummary={reviewSummary?.onToggle}
+          reviewNotesOpen={reviewNotesVisible}
+          onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
         />
         {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
@@ -2461,7 +2490,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             ref={editorScrollRef}
             className={mergeClasses(
               styles.editorSurface,
-              advisoryComments.threads.length > 0 ? styles.editorSurfaceWithGutter : undefined
+              advisoryComments.threads.length > 0 && reviewNotesVisible ? styles.editorSurfaceWithGutter : undefined
             )}
             data-testid="compose-editor-surface"
           >
@@ -2469,10 +2498,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           </div>
           {/* task 032 (right-gutter comment layout, FR-16) — NDA-REVIEW advisory comment cards,
               vertically aligned to their live anchor position (coordsAtPos), right of the document.
-              Renders nothing while there are no advisory comment threads. */}
+              Renders nothing while there are no advisory comment threads. UAT round-2 item #2: the
+              "Review" toolbar dropdown's "Review Notes" toggle hides them without discarding the placed
+              threads — passing an empty list makes the gutter render null while the threads persist. */}
           <ComposeCommentGutter
             editor={editor}
-            threads={advisoryComments.threads}
+            threads={reviewNotesVisible ? advisoryComments.threads : []}
             scrollContainerRef={editorScrollRef}
           />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}

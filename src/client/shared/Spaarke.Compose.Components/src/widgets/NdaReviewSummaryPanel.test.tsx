@@ -78,6 +78,7 @@ function renderPanel(opts: {
   placementFailureCount?: number;
   theme?: typeof webLightTheme;
   onClose?: () => void;
+  onNavigate?: (finding: NdaReviewFindingSummary) => void;
 }) {
   const onClose = opts.onClose ?? jest.fn();
   const result = render(
@@ -87,6 +88,7 @@ function renderPanel(opts: {
         onClose={onClose}
         findings={opts.findings ?? SAMPLE_FINDINGS}
         placementFailureCount={opts.placementFailureCount}
+        onNavigate={opts.onNavigate}
       />
     </FluentProvider>
   );
@@ -111,21 +113,58 @@ describe('NdaReviewSummaryPanel', () => {
     expect(screen.queryByTestId('nda-review-summary-overall-risk')).not.toBeInTheDocument();
   });
 
-  it('renders overallRisk (derived) + each flagged section with its citation', () => {
+  it('renders overallRisk (derived) + a concise TL;DR row per finding (section + risk + explanation)', () => {
     renderPanel({});
 
     // Overall risk = max(High, Medium) = High
     expect(screen.getByTestId('nda-review-summary-overall-risk')).toHaveTextContent('High');
 
+    // UAT round-2 item #3: each row is a concise TL;DR — section locator + risk band + a short
+    // explanation — so the reader can orient at a glance.
     expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('Section 4.2, para 2 (p. 3)');
-    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('Confidential Information means');
     expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('High');
-    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent(
-      'B3 - Definition of Confidential Information'
-    );
+    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('narrower than the standard');
 
     expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Section 8.1 (p. 5)');
     expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Medium');
+  });
+
+  it('does NOT duplicate the in-document comment: no verbatim quote or firm-standard citation (item #3)', () => {
+    // The summary is a scan strip, deliberately NOT a second copy of the gutter comment — the verbatim
+    // quotedText and the standardRef citation live only on the in-document Review Note.
+    renderPanel({});
+    const row = screen.getByTestId('nda-review-summary-finding-0');
+    expect(row).not.toHaveTextContent('Confidential Information means');
+    expect(row).not.toHaveTextContent('B3 - Definition of Confidential Information');
+  });
+
+  it('ranks findings most-severe-first regardless of input order (item #3)', () => {
+    // Input order Low, Critical — the panel must render Critical (its original index 1) BEFORE Low
+    // (index 0) so the reader focuses on the top issue first. testIds stay keyed to the ORIGINAL index.
+    renderPanel({
+      findings: [
+        { sectionRef: 'Clause A', quotedText: 'a', riskLevel: 'Low', explanation: 'minor' },
+        { sectionRef: 'Clause B', quotedText: 'b', riskLevel: 'Critical', explanation: 'severe' },
+      ],
+    });
+    const rows = screen.getAllByTestId(/nda-review-summary-finding-\d+/);
+    expect(rows[0]).toHaveTextContent('Critical');
+    expect(rows[0]).toHaveTextContent('Clause B');
+    expect(rows[1]).toHaveTextContent('Low');
+  });
+
+  it('calls onNavigate with the finding when a TL;DR row is clicked (item #3 link-to-section)', () => {
+    const onNavigate = jest.fn();
+    renderPanel({ onNavigate });
+    screen.getByTestId('nda-review-summary-finding-0').click();
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate.mock.calls[0][0]).toMatchObject({ sectionRef: 'Section 4.2, para 2 (p. 3)' });
+  });
+
+  it('renders rows as non-interactive when onNavigate is not wired', () => {
+    renderPanel({});
+    // No onNavigate → the row is a static div, not a button.
+    expect(screen.getByTestId('nda-review-summary-finding-0').tagName).toBe('DIV');
   });
 
   it('omits the placement-failure notice when the count is zero/absent (nice-to-have, not required)', () => {

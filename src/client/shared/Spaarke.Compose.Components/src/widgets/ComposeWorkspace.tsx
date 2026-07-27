@@ -2350,6 +2350,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             findings={reviewSummaryFindings}
             placementFailureCount={reviewSummaryFailedCount}
             overallRisk={reviewSummaryOverallRisk}
+            // UAT round-2 item #3 — each TL;DR point links to its clause: reuse the editor's existing
+            // cited-span primitive (strict resolve + ephemeral highlight + scrollIntoView), the SAME
+            // anchoring `placeAdvisoryComments` used to place the gutter comment, so the reader jumps
+            // straight to the flagged text. No new imperative API (CLAUDE.md §11 reuse-first).
+            onNavigate={finding => {
+              if (finding.quotedText) {
+                editorRef.current?.highlightCitedSpan(finding.quotedText, finding.sectionRef);
+              }
+            }}
           />
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
@@ -2402,6 +2411,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               }}
               canSave={canSaveNow}
               isSaving={isSavingNow}
+              // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
+              // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
+              // the panel's real render gate; `hasFindings` gates whether the "Review" control appears.
+              reviewSummary={{
+                open: reviewSummaryOpen && reviewSummaryFindings.length > 0,
+                hasFindings: reviewSummaryFindings.length > 0,
+                onToggle: () => setReviewSummaryOpen(o => !o),
+              }}
             />
           </div>
         </>

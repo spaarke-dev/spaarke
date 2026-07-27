@@ -1064,6 +1064,27 @@ public class ComposeService : IComposeService
             currentBytes = buffer.ToArray();
         }
 
+        // Seam A (UAT round-2 item #4 — advisory comments must survive a STALE save and bake as native
+        // w:comment). The client's minted paraIds live only in request.ParaIdMap — physically absent from
+        // BOTH the retained baseline AND the freshly-fetched current bytes. Without them, an advisory
+        // comment's client-minted ParaId resolves to nothing in currentParaIds below → 0.0 re-anchor score
+        // → ORPHAN band → surfaced-but-never-baked (the exact "comments don't survive Save to Word" bug the
+        // non-stale path does NOT have, because it stamps first — see the sibling Stamp call in SaveAsync).
+        // Stamp both corpora with the SAME fail-open, count-gated, text-verified stamper: where the version
+        // bump was benign (unchanged paragraph structure + text — a metadata touch or an eTag-counter move
+        // that did not really edit content), the client paraId becomes physically present in currentBytes →
+        // ResolveByParaId hits confidence 1.0 → AUTO → the exact-paraId auto-apply gate below bakes the
+        // comment. Where the current bytes genuinely diverged (different paragraph count, or the anchored
+        // text changed), the stamper no-ops (count gate / text-verify) and the comment correctly stays
+        // ORPHAN — never a wrong-paragraph stamp. Stamping originalBaseline too repopulates each comment's
+        // TextPattern (via the IndexOfParaId hint below) so a text-drifted clause surfaces as REVIEW rather
+        // than a blind ORPHAN in the re-anchor banner.
+        if (request.ParaIdMap is { Count: > 0 })
+        {
+            originalBaseline = _baselineParaIdStamper.Stamp(originalBaseline, request.ParaIdMap);
+            currentBytes = _baselineParaIdStamper.Stamp(currentBytes, request.ParaIdMap);
+        }
+
         IReadOnlyList<string> oldParagraphs;
         IReadOnlyList<string?> oldParaIds;
         IReadOnlyList<string> currentParagraphs;

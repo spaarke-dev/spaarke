@@ -64,7 +64,7 @@
  */
 import * as React from 'react';
 import { type Editor } from '@tiptap/react';
-import { Badge, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Badge, Button, Text, makeStyles, tokens } from '@fluentui/react-components';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor } from './NdaReviewSummaryPanel';
 
@@ -74,6 +74,12 @@ export const COMMENT_GUTTER_WIDTH_PX = 220;
 const CARD_GAP_PX = 8;
 /** Fallback card height used ONLY before a card's real height has been measured (first paint). */
 const DEFAULT_CARD_HEIGHT_PX = 96;
+/**
+ * Collapsed-card body character budget (UAT round-2 item #5). Advisory explanations frequently run
+ * well past this in the narrow rail, so a collapsed card shows a preview + a "Show more" toggle; the
+ * expanded card shows the full text. Kept short so the default (collapsed) rail stays scannable.
+ */
+const COLLAPSED_BODY_MAX_CHARS = 140;
 
 const useStyles = makeStyles({
   rail: {
@@ -116,6 +122,15 @@ const useStyles = makeStyles({
   },
   standardRef: {
     color: tokens.colorNeutralForeground3,
+  },
+  // "Show more"/"Show less" toggle — a compact, left-aligned link-style button (item #5).
+  expandToggle: {
+    alignSelf: 'flex-start',
+    minWidth: 'auto',
+    paddingLeft: 0,
+    paddingRight: 0,
+    height: 'auto',
+    fontWeight: tokens.fontWeightRegular,
   },
 });
 
@@ -173,6 +188,17 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
   const railRef = React.useRef<HTMLDivElement | null>(null);
   const cardElementsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [cardTops, setCardTops] = React.useState<Record<string, number>>({});
+  // Per-card expand/collapse (item #5). A Set of thread ids whose full text is shown.
+  const [expandedIds, setExpandedIds] = React.useState<ReadonlySet<string>>(() => new Set());
+
+  const toggleExpanded = React.useCallback((id: string): void => {
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   const recompute = React.useCallback((): void => {
     if (!editor || !railRef.current) return;
@@ -258,6 +284,13 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run whenever the thread SET changes
   }, [threads.length, recompute]);
 
+  // Expanding/collapsing a card changes its measured height — re-run the collision layout so cards
+  // below reflow to clear (or reclaim) the space (item #5). Runs after the new text has committed to
+  // the DOM (useLayoutEffect) so `offsetHeight` reflects the expanded/collapsed size.
+  React.useLayoutEffect(() => {
+    recompute();
+  }, [expandedIds, recompute]);
+
   if (!editor || threads.length === 0) return null;
 
   return (
@@ -265,6 +298,10 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
       {threads.map(thread => {
         const top = cardTops[thread.id];
         if (top === undefined) return null; // anchor unresolved (deleted) — omitted, never guessed
+        const fullText = thread.text.trim();
+        const isExpanded = expandedIds.has(thread.id);
+        const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
+        const bodyText = isExpanded || !isTruncatable ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
         return (
           <div
             key={thread.id}
@@ -294,8 +331,20 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
               ) : null}
             </div>
             <Text size={200} className={styles.body} data-testid={`compose-comment-gutter-body-${thread.id}`}>
-              {truncate(thread.text, 280)}
+              {bodyText}
             </Text>
+            {isTruncatable ? (
+              <Button
+                appearance="transparent"
+                size="small"
+                className={styles.expandToggle}
+                onClick={() => toggleExpanded(thread.id)}
+                aria-expanded={isExpanded}
+                data-testid={`compose-comment-gutter-expand-${thread.id}`}
+              >
+                {isExpanded ? 'Show less' : 'Show more'}
+              </Button>
+            ) : null}
             {thread.standardRef ? (
               <Text size={100} className={styles.standardRef}>
                 Standard: {thread.standardRef}

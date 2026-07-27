@@ -55,21 +55,29 @@
  */
 import * as React from 'react';
 import { Badge, Text, Button, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import { Dismiss16Regular, Info16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, Info16Regular, ChevronRight16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   panel: {
     display: 'flex',
     flexDirection: 'column',
-    rowGap: tokens.spacingVerticalS,
+    rowGap: tokens.spacingVerticalXS,
     padding: tokens.spacingHorizontalS,
-    maxHeight: '40vh',
+    // UAT round-2 item #3: a compact TL;DR strip, not a full findings dump — keep it short so the
+    // reader can orient at a glance, then scroll the document (which scrolls INSIDE the editor below).
+    maxHeight: '32vh',
     overflowY: 'auto',
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
+    // Anchored at the top of the compose column: it stays visible while the document body scrolls
+    // beneath it (item #3 "leave the summary points visible while scrolling"). The opaque background +
+    // z-index keep scrolled content from bleeding through if the column itself ever scrolls.
+    position: 'sticky',
+    top: 0,
+    zIndex: 2,
   },
   header: {
     display: 'flex',
@@ -105,16 +113,33 @@ const useStyles = makeStyles({
   list: {
     display: 'flex',
     flexDirection: 'column',
-    rowGap: tokens.spacingVerticalS,
+    rowGap: tokens.spacingVerticalXS,
   },
-  finding: {
+  // One TL;DR row per flagged finding. A native button (reset to inherit) so the WHOLE row is a
+  // click target that jumps to the clause; the static variant (no `onNavigate` wired) drops the
+  // affordances. Two lines max: header (section + risk + chevron) then a one-line explanation.
+  findingRow: {
     display: 'flex',
     flexDirection: 'column',
-    rowGap: tokens.spacingVerticalXS,
+    rowGap: '2px',
     padding: tokens.spacingHorizontalS,
     borderRadius: tokens.borderRadiusMedium,
     backgroundColor: tokens.colorNeutralBackground1,
     border: `1px solid ${tokens.colorNeutralStroke2}`,
+    font: 'inherit',
+    textAlign: 'left',
+    width: '100%',
+    boxSizing: 'border-box',
+  },
+  findingRowClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      border: `1px solid ${tokens.colorNeutralStroke1}`,
+    },
+    ':active': {
+      backgroundColor: tokens.colorNeutralBackground1Pressed,
+    },
   },
   findingHeader: {
     display: 'flex',
@@ -122,18 +147,28 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     columnGap: tokens.spacingHorizontalXS,
   },
+  findingHeaderLeft: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+  },
   sectionRef: {
     color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
-  quotedText: {
-    color: tokens.colorNeutralForeground2,
-    fontStyle: 'italic',
+  chevron: {
+    flexShrink: 0,
+    color: tokens.colorNeutralForeground3,
   },
   explanation: {
-    color: tokens.colorNeutralForeground1,
-  },
-  standardRef: {
-    color: tokens.colorNeutralForeground3,
+    color: tokens.colorNeutralForeground2,
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical',
+    overflow: 'hidden',
   },
 });
 
@@ -169,12 +204,6 @@ export function riskBadgeColor(risk: string | undefined): 'success' | 'warning' 
     default:
       return 'subtle';
   }
-}
-
-/** Truncated, log-safe-length label for a quoted excerpt (mirrors ComposeCommentThread's helper). */
-function truncate(text: string, max: number): string {
-  const trimmed = text.trim();
-  return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
 }
 
 /** One flagged-section finding — the CLOSED contract's 5 fields (nda-review.schema.json), minus the
@@ -228,10 +257,18 @@ export interface NdaReviewSummaryPanelProps {
    * client-derived {@link deriveOverallRisk} fallback — see the file header's derivation note.
    */
   overallRisk?: string;
+
+  /**
+   * UAT round-2 item #3 — invoked when the reader clicks a TL;DR row, to jump the document to that
+   * flagged clause. The host (`ComposeWorkspace`) wires this to the editor's cited-span primitive
+   * (`highlightCitedSpan`: strict resolve + ephemeral highlight + scrollIntoView) keyed on the
+   * finding's `quotedText`. Omit for a non-interactive summary (rows render as static cards).
+   */
+  onNavigate?: (finding: NdaReviewFindingSummary) => void;
 }
 
 export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.JSX.Element | null {
-  const { open, onClose, findings, placementFailureCount, overallRisk: serverOverallRisk } = props;
+  const { open, onClose, findings, placementFailureCount, overallRisk: serverOverallRisk, onNavigate } = props;
   const styles = useStyles();
 
   if (!open) return null;
@@ -240,6 +277,17 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   // when it's unavailable (see the file header's OVERALL RISK note).
   const overallRisk = serverOverallRisk ?? deriveOverallRisk(findings);
   const overallRiskIsDerived = serverOverallRisk === undefined;
+
+  // UAT round-2 item #3 — rank most-severe-first so the reader focuses on the top issues. A stable
+  // sort (index tiebreak) keeps equal-severity findings in their original document order; unknown
+  // severities sort last. Non-mutating (findings is a readonly prop).
+  const rankedFindings = findings
+    .map((finding, index) => ({ finding, index }))
+    .sort((a, b) => {
+      const sa = isRiskSeverity(a.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(a.finding.riskLevel) : -1;
+      const sb = isRiskSeverity(b.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(b.finding.riskLevel) : -1;
+      return sb - sa || a.index - b.index;
+    });
 
   return (
     <div
@@ -290,36 +338,56 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
       ) : null}
 
       <div className={styles.list}>
-        {findings.length === 0 ? (
+        {rankedFindings.length === 0 ? (
           <Text size={200} className={styles.empty} data-testid="nda-review-summary-empty">
             No flagged sections yet. Run NDA Review on this document to see findings here.
           </Text>
         ) : (
-          findings.map((finding, index) => (
-            <div key={index} className={styles.finding} data-testid={`nda-review-summary-finding-${index}`}>
+          rankedFindings.map(({ finding, index }) => {
+            // Concise TL;DR row: section + risk on line 1, a 2-line-clamped explanation on line 2. The
+            // full quote + firm-standard citation live on the in-document Review Note (gutter card) —
+            // the summary is a scan strip, deliberately NOT a second copy of the comments (item #3).
+            const navigable = Boolean(onNavigate && finding.quotedText);
+            const header = (
               <div className={styles.findingHeader}>
-                <Text weight="semibold" size={200} className={styles.sectionRef}>
-                  {finding.sectionRef ?? 'Unreferenced section'}
-                </Text>
+                <div className={styles.findingHeaderLeft}>
+                  <Text weight="semibold" size={200} className={styles.sectionRef}>
+                    {finding.sectionRef ?? 'Unreferenced section'}
+                  </Text>
+                  {navigable ? <ChevronRight16Regular className={styles.chevron} /> : null}
+                </div>
                 {finding.riskLevel ? (
                   <Badge appearance="tint" color={riskBadgeColor(finding.riskLevel)}>
                     {finding.riskLevel}
                   </Badge>
                 ) : null}
               </div>
-              <Text size={200} className={styles.quotedText}>
-                &ldquo;{truncate(finding.quotedText, 240)}&rdquo;
-              </Text>
+            );
+            const explanation = (
               <Text size={200} className={styles.explanation}>
                 {finding.explanation}
               </Text>
-              {finding.standardRef ? (
-                <Text size={100} className={styles.standardRef}>
-                  Standard: {finding.standardRef}
-                </Text>
-              ) : null}
-            </div>
-          ))
+            );
+            const testId = `nda-review-summary-finding-${index}`;
+            return navigable ? (
+              <button
+                key={index}
+                type="button"
+                className={`${styles.findingRow} ${styles.findingRowClickable}`}
+                onClick={() => onNavigate?.(finding)}
+                aria-label={`Go to ${finding.sectionRef ?? 'flagged section'} in the document`}
+                data-testid={testId}
+              >
+                {header}
+                {explanation}
+              </button>
+            ) : (
+              <div key={index} className={styles.findingRow} data-testid={testId}>
+                {header}
+                {explanation}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

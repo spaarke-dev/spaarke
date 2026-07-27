@@ -12,7 +12,7 @@
  *     ADR-021 dark-mode check.
  */
 import * as React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
@@ -159,6 +159,68 @@ describe('ComposeCommentGutter', () => {
     expect(card).toHaveTextContent('3.2');
     expect(card).toHaveTextContent('Standard: B3 - Retention');
     expect(card).toHaveTextContent('Indefinite retention deviates from the standard 3-year term.');
+
+    editor.destroy();
+  });
+
+  it('truncates a long comment with a "Show more" toggle that reveals the full text (UAT round-2 #5)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const longText =
+      'Indefinite retention deviates from the standard 3-year term, and this explanation is deliberately ' +
+      'long enough to exceed the collapsed body budget so the show-more affordance appears in the card.';
+    expect(longText.length).toBeGreaterThan(140);
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: longText })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    // Collapsed: the body is truncated (ellipsis) and the tail of the text is hidden.
+    const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
+    expect(body.textContent).toContain('…');
+    expect(body).not.toHaveTextContent('affordance appears in the card');
+
+    const toggle = screen.getByTestId('compose-comment-gutter-expand-thread-1');
+    expect(toggle).toHaveTextContent('Show more');
+    fireEvent.click(toggle);
+
+    // Expanded: full text shown; toggle flips to "Show less".
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1')).toHaveTextContent(
+      'affordance appears in the card'
+    );
+    expect(screen.getByTestId('compose-comment-gutter-expand-thread-1')).toHaveTextContent('Show less');
+
+    editor.destroy();
+  });
+
+  it('shows no expand toggle for a short comment that fits (UAT round-2 #5)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    // The default thread text is short (< the collapsed budget) — no toggle.
+    expect(screen.queryByTestId('compose-comment-gutter-expand-thread-1')).not.toBeInTheDocument();
 
     editor.destroy();
   });

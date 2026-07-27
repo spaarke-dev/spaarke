@@ -65,6 +65,7 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemCheckbox,
 } from '@fluentui/react-components';
 import {
   TextBold24Regular,
@@ -92,6 +93,7 @@ import {
   TableDeleteRow24Regular,
   TableDeleteColumn24Regular,
   TableDismiss24Regular,
+  ClipboardTaskListLtr24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -206,6 +208,22 @@ export interface ComposeFormatToolbarProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+
+  // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
+  //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
+  //      toggles: "Review Summary" (the docked TL;DR panel) and "Review Notes" (the right-gutter
+  //      advisory comment cards). Both surfaces already exist; this is a single toolbar control that
+  //      shows/hides each without dismissing the review data. ----
+  /** True when an NDA advisory review has run (summary findings or in-document advisory comments exist). */
+  hasReview?: boolean;
+  /** Whether the review-summary docked panel is currently shown. */
+  reviewSummaryOpen?: boolean;
+  /** Toggle the review-summary panel. */
+  onToggleReviewSummary?: () => void;
+  /** Whether the right-gutter advisory comment cards ("Review Notes") are currently shown. */
+  reviewNotesOpen?: boolean;
+  /** Toggle the right-gutter advisory comments. */
+  onToggleReviewNotes?: () => void;
 }
 
 /**
@@ -315,6 +333,11 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     isSaving,
     trackChangesEnabled,
     onToggleTrackChanges,
+    hasReview,
+    reviewSummaryOpen,
+    onToggleReviewSummary,
+    reviewNotesOpen,
+    onToggleReviewNotes,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -717,8 +740,52 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Menu>
       ) : null}
 
-      {/* Spacer — pushes Track Changes + Save + Undo/Redo to the right edge. */}
+      {/* Spacer — pushes Review + Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
+
+      {/* ---- Review (UAT round-2 items #1/#2) — icon-only dropdown; shows/hides the review-summary
+             panel and the right-gutter advisory comments. Rendered ONLY when an NDA advisory review is
+             present (hasReview) and both toggle handlers are wired — a plain document never shows it.
+             Controlled MenuItemCheckbox: the checked set is derived from the two visibility booleans;
+             a change diffs the new set against the current one to fire exactly the toggled handler. ---- */}
+      {hasReview && onToggleReviewSummary && onToggleReviewNotes ? (
+        <Menu
+          checkedValues={{
+            review: [
+              ...(reviewSummaryOpen ? ['summary'] : []),
+              ...(reviewNotesOpen ? ['notes'] : []),
+            ],
+          }}
+          onCheckedValueChange={(_e, data) => {
+            if (data.name !== 'review') return;
+            const wantSummary = data.checkedItems.includes('summary');
+            const wantNotes = data.checkedItems.includes('notes');
+            if (wantSummary !== Boolean(reviewSummaryOpen)) onToggleReviewSummary();
+            if (wantNotes !== Boolean(reviewNotesOpen)) onToggleReviewNotes();
+          }}
+        >
+          <MenuTrigger disableButtonEnhancement>
+            <ToolbarButton
+              appearance={reviewSummaryOpen || reviewNotesOpen ? 'primary' : 'subtle'}
+              icon={<ClipboardTaskListLtr24Regular />}
+              aria-label="Review"
+              title="Review"
+              disabled={controlDisabled}
+              data-testid="compose-format-review-menu"
+            />
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              <MenuItemCheckbox name="review" value="summary" data-testid="compose-format-review-summary-toggle">
+                Review Summary
+              </MenuItemCheckbox>
+              <MenuItemCheckbox name="review" value="notes" data-testid="compose-format-review-notes-toggle">
+                Review Notes
+              </MenuItemCheckbox>
+            </MenuList>
+          </MenuPopover>
+        </Menu>
+      ) : null}
 
       {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.
              The visible "Track changes" text label was dropped for an icon-only toggle; the accessible
