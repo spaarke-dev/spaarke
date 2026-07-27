@@ -67,7 +67,16 @@ public class OpenAiClient : IOpenAiClient
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         var credential = new AzureKeyCredential(_options.OpenAiKey);
-        _client = new AzureOpenAIClient(endpoint, credential);
+        // Raise the per-attempt network timeout above the SDK default (100s). The Reasoning tier
+        // (gpt-5-reasoning) routinely needs 2-4 minutes on a full document; at 100s the call is
+        // cancelled + retried 3× and surfaces to the user as "couldn't run that action" (observed
+        // 2026-07-27 on the HELIO NDA review). Fast/Standard tiers finish well within this, so one
+        // global value is safe. Configurable via DocumentIntelligence:OpenAiNetworkTimeoutSeconds.
+        var clientOptions = new AzureOpenAIClientOptions
+        {
+            NetworkTimeout = TimeSpan.FromSeconds(_options.OpenAiNetworkTimeoutSeconds),
+        };
+        _client = new AzureOpenAIClient(endpoint, credential, clientOptions);
 
         // Register with circuit breaker registry
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.AzureOpenAI);

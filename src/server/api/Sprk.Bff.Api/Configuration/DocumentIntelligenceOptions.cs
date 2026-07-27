@@ -162,6 +162,18 @@ public class DocumentIntelligenceOptions
     public int DocIntelTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
+    /// Per-attempt network timeout (seconds) for Azure OpenAI chat-completion calls
+    /// (<c>AzureOpenAIClientOptions.NetworkTimeout</c>). The SDK default is 100s, which the slow
+    /// Reasoning tier (gpt-5-reasoning) blows through on a larger document — the call is cancelled,
+    /// retried 3×, and finally surfaces as "couldn't run that action" (observed 2026-07-27 on the
+    /// HELIO NDA review). Reasoning completions routinely need 2-4 minutes; default 300s gives them
+    /// room while still bounding a genuinely hung request. Fast/Standard tiers complete well within
+    /// this, so a single global value is safe.
+    /// </summary>
+    [Range(30, 600, ErrorMessage = "DocumentIntelligence:OpenAiNetworkTimeoutSeconds must be between 30 and 600")]
+    public int OpenAiNetworkTimeoutSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Number of consecutive Document Intelligence failures before the circuit breaker opens.
     /// When open, requests immediately return a degradation message without calling the service.
     /// Default: 3 consecutive failures.
