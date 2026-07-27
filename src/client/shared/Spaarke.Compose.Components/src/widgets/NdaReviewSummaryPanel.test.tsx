@@ -16,6 +16,7 @@ import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-com
 import {
   NdaReviewSummaryPanel,
   deriveOverallRisk,
+  deriveTakeaway,
   NDA_REVIEW_DISCLAIMER_TEXT,
   type NdaReviewFindingSummary,
 } from './NdaReviewSummaryPanel';
@@ -46,6 +47,44 @@ describe('deriveOverallRisk', () => {
 
   it('ignores unrecognized riskLevel strings when computing the max', () => {
     expect(deriveOverallRisk([{ riskLevel: 'Medium' }, { riskLevel: 'not-a-level' as string }])).toBe('Medium');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. deriveTakeaway — short-headline derivation (UAT round-3 S2/S3/S4)
+// ---------------------------------------------------------------------------
+
+describe('deriveTakeaway', () => {
+  it('extracts the Judgment portion and drops the "Grounded fact —" preamble (S2)', () => {
+    const explanation =
+      'Grounded fact — The NDA limits use to an undefined "intended purpose". ' +
+      'Judgment — Deviates from the standard, creating open-ended scope and enforcement risk.';
+    expect(deriveTakeaway(explanation)).toBe(
+      'Deviates from the standard, creating open-ended scope and enforcement risk'
+    );
+  });
+
+  it('strips a leading "This clause/agreement" so it reads as a takeaway, and capitalizes (S3/S4)', () => {
+    expect(deriveTakeaway('Judgment — This clause deviates from the standard and raises risk.')).toBe(
+      'Deviates from the standard and raises risk'
+    );
+  });
+
+  it('reduces a multi-sentence judgment to its first sentence (S4 conciseness)', () => {
+    const t = deriveTakeaway(
+      'Judgment — Exceeds the standard duty of care. It also lacks a carve-out for public information.'
+    );
+    expect(t).toBe('Exceeds the standard duty of care');
+  });
+
+  it('falls back to the explanation (trailing period trimmed) when neither marker is present', () => {
+    expect(deriveTakeaway('An indefinite term exceeds the standard survival period.')).toBe(
+      'An indefinite term exceeds the standard survival period'
+    );
+  });
+
+  it('returns empty string for empty input', () => {
+    expect(deriveTakeaway('')).toBe('');
   });
 });
 
@@ -165,6 +204,24 @@ describe('NdaReviewSummaryPanel', () => {
     renderPanel({});
     // No onNavigate → the row is a static div, not a button.
     expect(screen.getByTestId('nda-review-summary-finding-0').tagName).toBe('DIV');
+  });
+
+  it('renders the model takeaway (short headline) instead of the full explanation when supplied (S3/S4)', () => {
+    renderPanel({
+      findings: [
+        {
+          sectionRef: 'Clause X',
+          quotedText: 'q',
+          riskLevel: 'High',
+          explanation:
+            'Grounded fact — a long detailed grounded description of the clause. Judgment — a long detailed judgment.',
+          takeaway: 'Broad confidentiality carve-out beyond firm standard',
+        },
+      ],
+    });
+    const row = screen.getByTestId('nda-review-summary-finding-0');
+    expect(row).toHaveTextContent('Broad confidentiality carve-out beyond firm standard');
+    expect(row).not.toHaveTextContent('a long detailed grounded description');
   });
 
   it('omits the placement-failure notice when the count is zero/absent (nice-to-have, not required)', () => {

@@ -64,7 +64,8 @@
  */
 import * as React from 'react';
 import { type Editor } from '@tiptap/react';
-import { Badge, Button, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor } from './NdaReviewSummaryPanel';
 
@@ -123,14 +124,25 @@ const useStyles = makeStyles({
   standardRef: {
     color: tokens.colorNeutralForeground3,
   },
-  // "Show more"/"Show less" toggle — a compact, left-aligned link-style button (item #5).
-  expandToggle: {
-    alignSelf: 'flex-start',
-    minWidth: 'auto',
-    paddingLeft: 0,
-    paddingRight: 0,
-    height: 'auto',
-    fontWeight: tokens.fontWeightRegular,
+  // UAT round-3 D2: a truncatable card is itself the expand/collapse click target (no separate
+  // "Show more" text button) — the whole block toggles, with a chevron cue.
+  cardClickable: {
+    cursor: 'pointer',
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground1Hover,
+      border: `1px solid ${tokens.colorNeutralStroke1}`,
+    },
+  },
+  // The double-down-arrow expandability cue (UAT round-3 D2), centered under the card body; rotates
+  // 180° when the card is expanded (points up = "collapse").
+  expandCue: {
+    display: 'flex',
+    justifyContent: 'center',
+    color: tokens.colorNeutralForeground3,
+    marginTop: '2px',
+  },
+  expandCueOpen: {
+    transform: 'rotate(180deg)',
   },
 });
 
@@ -309,10 +321,26 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
               if (el) cardElementsRef.current.set(thread.id, el);
               else cardElementsRef.current.delete(thread.id);
             }}
-            className={styles.card}
+            className={mergeClasses(styles.card, isTruncatable ? styles.cardClickable : undefined)}
             style={{ top: `${top}px` }}
-            role="complementary"
-            aria-label={`Comment${thread.sectionRef ? `: ${thread.sectionRef}` : ''}`}
+            role={isTruncatable ? 'button' : 'complementary'}
+            tabIndex={isTruncatable ? 0 : undefined}
+            aria-expanded={isTruncatable ? isExpanded : undefined}
+            aria-label={
+              `Comment${thread.sectionRef ? `: ${thread.sectionRef}` : ''}` +
+              (isTruncatable ? (isExpanded ? ' — expanded, activate to collapse' : ' — truncated, activate to expand') : '')
+            }
+            onClick={isTruncatable ? () => toggleExpanded(thread.id) : undefined}
+            onKeyDown={
+              isTruncatable
+                ? e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleExpanded(thread.id);
+                    }
+                  }
+                : undefined
+            }
             data-testid={`compose-comment-gutter-card-${thread.id}`}
           >
             <div className={styles.cardHeader}>
@@ -333,22 +361,20 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
             <Text size={200} className={styles.body} data-testid={`compose-comment-gutter-body-${thread.id}`}>
               {bodyText}
             </Text>
-            {isTruncatable ? (
-              <Button
-                appearance="transparent"
-                size="small"
-                className={styles.expandToggle}
-                onClick={() => toggleExpanded(thread.id)}
-                aria-expanded={isExpanded}
-                data-testid={`compose-comment-gutter-expand-${thread.id}`}
-              >
-                {isExpanded ? 'Show less' : 'Show more'}
-              </Button>
-            ) : null}
             {thread.standardRef ? (
               <Text size={100} className={styles.standardRef}>
                 Standard: {thread.standardRef}
               </Text>
+            ) : null}
+            {/* UAT round-3 D2: double-down-arrow expandability cue (the whole card is the click target). */}
+            {isTruncatable ? (
+              <div
+                className={styles.expandCue}
+                aria-hidden
+                data-testid={`compose-comment-gutter-expand-${thread.id}`}
+              >
+                <ChevronDoubleDown16Regular className={isExpanded ? styles.expandCueOpen : undefined} />
+              </div>
             ) : null}
           </div>
         );

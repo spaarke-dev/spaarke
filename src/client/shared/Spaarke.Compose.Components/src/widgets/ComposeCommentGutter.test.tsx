@@ -163,7 +163,7 @@ describe('ComposeCommentGutter', () => {
     editor.destroy();
   });
 
-  it('truncates a long comment with a "Show more" toggle that reveals the full text (UAT round-2 #5)', async () => {
+  it('truncates a long comment; clicking the card block reveals the full text (UAT round-2 #5 / round-3 D2)', async () => {
     const editor = makeEditor();
     applyCommentAnchor(editor, 'thread-1', 1, 20);
     jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
@@ -186,25 +186,27 @@ describe('ComposeCommentGutter', () => {
       </FluentProvider>
     );
 
-    // Collapsed: the body is truncated (ellipsis) and the tail of the text is hidden.
+    // Collapsed: the body is truncated (ellipsis), the tail hidden, the whole card is a button with
+    // the double-chevron expand cue (round-3 D2 — no separate "Show more" text button).
     const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
     expect(body.textContent).toContain('…');
     expect(body).not.toHaveTextContent('affordance appears in the card');
+    const card = screen.getByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveAttribute('role', 'button');
+    expect(card).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('compose-comment-gutter-expand-thread-1')).toBeInTheDocument(); // chevron cue
 
-    const toggle = screen.getByTestId('compose-comment-gutter-expand-thread-1');
-    expect(toggle).toHaveTextContent('Show more');
-    fireEvent.click(toggle);
-
-    // Expanded: full text shown; toggle flips to "Show less".
+    // Clicking anywhere on the card expands it.
+    fireEvent.click(card);
     expect(screen.getByTestId('compose-comment-gutter-body-thread-1')).toHaveTextContent(
       'affordance appears in the card'
     );
-    expect(screen.getByTestId('compose-comment-gutter-expand-thread-1')).toHaveTextContent('Show less');
+    expect(screen.getByTestId('compose-comment-gutter-card-thread-1')).toHaveAttribute('aria-expanded', 'true');
 
     editor.destroy();
   });
 
-  it('shows no expand toggle for a short comment that fits (UAT round-2 #5)', async () => {
+  it('a short comment is not clickable and shows no expand cue (UAT round-2 #5)', async () => {
     const editor = makeEditor();
     applyCommentAnchor(editor, 'thread-1', 1, 20);
     jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
@@ -218,8 +220,9 @@ describe('ComposeCommentGutter', () => {
       </FluentProvider>
     );
 
-    await screen.findByTestId('compose-comment-gutter-card-thread-1');
-    // The default thread text is short (< the collapsed budget) — no toggle.
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    // The default thread text is short (< the collapsed budget) — not a button, no cue.
+    expect(card).not.toHaveAttribute('role', 'button');
     expect(screen.queryByTestId('compose-comment-gutter-expand-thread-1')).not.toBeInTheDocument();
 
     editor.destroy();

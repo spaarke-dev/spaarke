@@ -221,6 +221,45 @@ export interface NdaReviewFindingSummary {
   explanation: string;
   /** The firm-standard clause this finding is measured against — the standard-side citation. */
   standardRef?: string;
+  /**
+   * UAT round-3 (S3/S4) — a short, crisp TL;DR headline for this finding (the takeaway, NOT the full
+   * explanation). When the model supplies it (a future NDA_Review `takeaway` field), the summary
+   * renders it verbatim; when absent, the panel derives one from {@link explanation} (see
+   * {@link deriveTakeaway}). Kept distinct from the in-document comment, which carries the full
+   * grounded-fact + judgment text.
+   */
+  takeaway?: string;
+}
+
+/**
+ * UAT round-3 (S2/S3/S4) — derive a short, scannable takeaway from a full advisory `explanation` when
+ * the model didn't supply a dedicated {@link NdaReviewFindingSummary.takeaway}. The explanation is
+ * authored as "Grounded fact — … Judgment — …"; the takeaway IS the judgment (the risk), with the
+ * "Grounded fact — …" preamble dropped (S2), reduced to its first sentence and de-"This"-ed so it
+ * reads as a headline rather than a copy of the comment (S3/S4). Falls back to the explanation itself
+ * if neither marker is present.
+ */
+export function deriveTakeaway(explanation: string): string {
+  const text = (explanation ?? '').trim();
+  if (!text) return '';
+  // Prefer the "Judgment —" portion (the takeaway); else drop a leading "Grounded fact —" preamble.
+  const judgment = /judgment\s*[—:\-]\s*/i.exec(text);
+  let core = judgment
+    ? text.slice(judgment.index + judgment[0].length)
+    : text.replace(/^grounded fact\s*[—:\-]\s*/i, '');
+  core = core.trim();
+  // First sentence only (keep it to one line) — clamp at the first sentence break that isn't
+  // trivially short (avoids cutting a tiny lead like "Yes.").
+  const sentenceEnd = core.search(/[.;]\s/);
+  if (sentenceEnd >= 15) core = core.slice(0, sentenceEnd);
+  // Drop a leading "This clause/agreement/NDA " and any trailing sentence punctuation so the line
+  // reads as a headline, then capitalize.
+  core = core
+    .replace(/^this\s+(clause\s+|agreement\s+|nda\s+)?/i, '')
+    .replace(/[.;]+\s*$/, '')
+    .trim();
+  if (!core) return text;
+  return core.charAt(0).toUpperCase() + core.slice(1);
 }
 
 /** Derives an overall-risk band from the rendered findings — see the file header's derivation note. */
@@ -363,9 +402,11 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
                 ) : null}
               </div>
             );
+            // S2/S3/S4: render the short takeaway (model-supplied when available, else derived) — NOT
+            // the full grounded-fact+judgment explanation, which lives on the in-document comment.
             const explanation = (
               <Text size={200} className={styles.explanation}>
-                {finding.explanation}
+                {finding.takeaway ?? deriveTakeaway(finding.explanation)}
               </Text>
             );
             const testId = `nda-review-summary-finding-${index}`;

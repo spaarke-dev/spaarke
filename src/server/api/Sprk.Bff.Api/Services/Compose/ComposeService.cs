@@ -649,6 +649,44 @@ public class ComposeService : IComposeService
                 ResolveRevisionAuthor(httpContext),
                 observedAt);
         }
+        // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
+        // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
+        // DIRTY transient save (the reviewer's session goes dirty the moment the AI places comment marks)
+        // sends a rendered ContentModel instead — App Insights showed the NDA saving as
+        // transientCreate=True with a ContentModel, so its advisory comments were silently dropped (no
+        // native w:comment reached Word). The renderer (ComposeDocumentRenderer.SynthesizeDocument) stamps
+        // each block's CLIENT paraId into the rendered .docx (CarryClientParaId/AssignParaIds), and the
+        // comment anchors reference those SAME client-minted paraIds — so a comments-only patch resolves
+        // cleanly. Empty op-log + comments is a first-class ComposeShadowPatchEngine.Apply case; pass a
+        // fresh ComposeOperationLog() so its SchemaVersion matches. Runs BEFORE the SummaryPage append +
+        // SPE write, mirroring the loaded-doc block's ordering.
+        // FAIL-SOFT: a create-on-save currently succeeds WITHOUT comments; baking must never regress that
+        // to a hard failure. If a comment's paraId can't resolve (e.g. a non-hex editor id the renderer
+        // re-minted, or a range shifted by pending-insert exclusion), log it and persist the rendered
+        // bytes uncommented rather than throwing — the save still lands; the drop is visible in telemetry.
+        else if (request.ContentModel is not null && hasComments)
+        {
+            try
+            {
+                var withComments = _patchEngine.Apply(
+                    contentToPersist,
+                    new ComposeOperationLog(),
+                    request.Comments,
+                    ResolveRevisionAuthor(httpContext),
+                    observedAt);
+                contentToPersist = withComments;
+
+                _logger.LogInformation(
+                    "Compose save: baked {CommentCount} advisory comment(s) as native w:comment onto the rendered ContentModel (create-on-save path) (session={SessionId}).",
+                    request.Comments?.Count ?? 0, request.SessionId);
+            }
+            catch (ComposePatchException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose save: could not bake {CommentCount} advisory comment(s) onto the rendered ContentModel ({Kind}) — persisting the document WITHOUT them so the save still succeeds (session={SessionId}).",
+                    request.Comments?.Count ?? 0, ex.Kind, request.SessionId);
+            }
+        }
 
         // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
         // result, append the Summary Page (TL;DR + flagged-section overview + recommendations) as a
