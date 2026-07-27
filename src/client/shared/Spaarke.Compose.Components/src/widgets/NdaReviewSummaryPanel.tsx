@@ -54,8 +54,20 @@
  * @see projects/ai-advanced-capabilities-nda-r1/spec.md FR-07
  */
 import * as React from 'react';
-import { Badge, Text, Button, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import { Dismiss16Regular, Info16Regular, ChevronRight16Regular } from '@fluentui/react-icons';
+import {
+  Badge,
+  Text,
+  Button,
+  Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItemRadio,
+  makeStyles,
+  tokens,
+} from '@fluentui/react-components';
+import { Dismiss16Regular, Info16Regular, ChevronRight16Regular, ArrowSort16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   panel: {
@@ -78,11 +90,49 @@ const useStyles = makeStyles({
     position: 'sticky',
     top: 0,
     zIndex: 2,
+    // UAT round-4 #1 — a clear visual anchor: a brand accent strip on the left + a soft shadow so the
+    // summary reads as a distinct, pinned panel rather than blending into the document.
+    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
+    boxShadow: tokens.shadow4,
+  },
+  // UAT round-4 #2 — the title + sort control sit in a light-gray header bar.
+  headerBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalS,
+    paddingInline: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalXS,
+    marginInline: `calc(-1 * ${tokens.spacingHorizontalS})`,
+    marginBlockStart: `calc(-1 * ${tokens.spacingHorizontalS})`,
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  headerActions: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXXS,
   },
   header: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  // UAT round-4 #3/#9 — the § / ¶ markers before a finding's section label.
+  sectionMarkers: {
+    display: 'flex',
+    alignItems: 'baseline',
+    columnGap: '4px',
+    minWidth: 0,
+  },
+  glyph: {
+    color: tokens.colorNeutralForeground3,
+    flexShrink: 0,
+  },
+  paraMarker: {
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
   },
   disclaimer: {
     display: 'flex',
@@ -206,6 +256,30 @@ export function riskBadgeColor(risk: string | undefined): 'success' | 'warning' 
   }
 }
 
+/**
+ * UAT round-4 (#3/#9) — split a free-form `sectionRef` into a section label + optional paragraph number
+ * so the summary row and the review-note card can render the § (section) / ¶ (paragraph) markers. The
+ * model's sectionRef is free text ("Section 4.2, para 2 (p. 3)" or "LIMITED USE…, para 1 (p. 1)"): pull
+ * the paragraph number, strip the "para…"/"(p. N)" tail + a leading "Section " to get the section label.
+ * Robust to any shape — an unparseable ref falls back to the whole string as the section label.
+ */
+export function formatSectionRef(sectionRef?: string): { section: string; paragraph?: string } {
+  const text = (sectionRef ?? '').trim();
+  if (!text) return { section: 'Unreferenced' };
+  const paraMatch = /\bpara(?:graph)?\.?\s*(\d+)/i.exec(text);
+  const paragraph = paraMatch ? paraMatch[1] : undefined;
+  let section = text
+    .replace(/,?\s*para(?:graph)?\.?\s*\d+.*$/i, '')
+    .replace(/\s*\(p\.?\s*\d+\)\s*$/i, '')
+    .replace(/^section\s+/i, '')
+    .trim();
+  if (!section) section = text;
+  return { section, paragraph };
+}
+
+/** Sort order for the summary findings (UAT round-4 #2/#4). */
+export type NdaSummarySort = 'section' | 'risk';
+
 /** One flagged-section finding — the CLOSED contract's 5 fields (nda-review.schema.json), minus the
  *  array-position identity. `quotedText`/`explanation` required (a finding is never emitted without
  *  them — see `projectFlaggedSectionsToAdvisoryComments`'s guard); the rest are optional so a
@@ -309,6 +383,9 @@ export interface NdaReviewSummaryPanelProps {
 export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.JSX.Element | null {
   const { open, onClose, findings, placementFailureCount, overallRisk: serverOverallRisk, onNavigate } = props;
   const styles = useStyles();
+  // UAT round-4 #4 — DEFAULT to document order (section/paragraph/sentence), not risk. The model emits
+  // findings in document order, so the original index IS that order. #2 lets the reader switch to risk.
+  const [sortBy, setSortBy] = React.useState<NdaSummarySort>('section');
 
   if (!open) return null;
 
@@ -317,15 +394,17 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   const overallRisk = serverOverallRisk ?? deriveOverallRisk(findings);
   const overallRiskIsDerived = serverOverallRisk === undefined;
 
-  // UAT round-2 item #3 — rank most-severe-first so the reader focuses on the top issues. A stable
-  // sort (index tiebreak) keeps equal-severity findings in their original document order; unknown
-  // severities sort last. Non-mutating (findings is a readonly prop).
-  const rankedFindings = findings
+  // UAT round-4 #2/#4 — sort by document position (default) or by risk severity. Both are stable on the
+  // original index (document order) as the tiebreak. Non-mutating (findings is a readonly prop).
+  const sortedFindings = findings
     .map((finding, index) => ({ finding, index }))
     .sort((a, b) => {
-      const sa = isRiskSeverity(a.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(a.finding.riskLevel) : -1;
-      const sb = isRiskSeverity(b.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(b.finding.riskLevel) : -1;
-      return sb - sa || a.index - b.index;
+      if (sortBy === 'risk') {
+        const sa = isRiskSeverity(a.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(a.finding.riskLevel) : -1;
+        const sb = isRiskSeverity(b.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(b.finding.riskLevel) : -1;
+        if (sb !== sa) return sb - sa;
+      }
+      return a.index - b.index; // document order (default; and the risk-tiebreak)
     });
 
   return (
@@ -335,18 +414,50 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
       aria-label="NDA review summary"
       data-testid="nda-review-summary-panel"
     >
-      <div className={styles.header}>
+      <div className={styles.headerBar}>
         <Text weight="semibold">Review Summary</Text>
-        <Tooltip content="Close review summary" relationship="description" withArrow>
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<Dismiss16Regular />}
-            aria-label="Close review summary"
-            onClick={onClose}
-            data-testid="nda-review-summary-close"
-          />
-        </Tooltip>
+        <div className={styles.headerActions}>
+          {/* UAT round-4 #2 — sort by section (default) or risk. */}
+          <Menu
+            checkedValues={{ sort: [sortBy] }}
+            onCheckedValueChange={(_e, data) => {
+              const next = data.checkedItems[0];
+              if (next === 'section' || next === 'risk') setSortBy(next);
+            }}
+          >
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content={`Sort by ${sortBy === 'risk' ? 'risk' : 'section'}`} relationship="label" withArrow>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<ArrowSort16Regular />}
+                  aria-label="Sort findings"
+                  data-testid="nda-review-summary-sort"
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItemRadio name="sort" value="section" data-testid="nda-review-summary-sort-section">
+                  By section / paragraph
+                </MenuItemRadio>
+                <MenuItemRadio name="sort" value="risk" data-testid="nda-review-summary-sort-risk">
+                  By risk
+                </MenuItemRadio>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+          <Tooltip content="Close review summary" relationship="description" withArrow>
+            <Button
+              appearance="subtle"
+              size="small"
+              icon={<Dismiss16Regular />}
+              aria-label="Close review summary"
+              onClick={onClose}
+              data-testid="nda-review-summary-close"
+            />
+          </Tooltip>
+        </div>
       </div>
 
       <div className={styles.disclaimer} data-testid="nda-review-summary-disclaimer">
@@ -377,22 +488,33 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
       ) : null}
 
       <div className={styles.list}>
-        {rankedFindings.length === 0 ? (
+        {sortedFindings.length === 0 ? (
           <Text size={200} className={styles.empty} data-testid="nda-review-summary-empty">
             No flagged sections yet. Run NDA Review on this document to see findings here.
           </Text>
         ) : (
-          rankedFindings.map(({ finding, index }) => {
+          sortedFindings.map(({ finding, index }) => {
             // Concise TL;DR row: section + risk on line 1, a 2-line-clamped explanation on line 2. The
             // full quote + firm-standard citation live on the in-document Review Note (gutter card) —
             // the summary is a scan strip, deliberately NOT a second copy of the comments (item #3).
             const navigable = Boolean(onNavigate && finding.quotedText);
+            const loc = formatSectionRef(finding.sectionRef); // UAT round-4 #3 — § / ¶ markers
             const header = (
               <div className={styles.findingHeader}>
                 <div className={styles.findingHeaderLeft}>
-                  <Text weight="semibold" size={200} className={styles.sectionRef}>
-                    {finding.sectionRef ?? 'Unreferenced section'}
-                  </Text>
+                  <div className={styles.sectionMarkers}>
+                    <Text size={200} className={styles.glyph} aria-hidden>
+                      §
+                    </Text>
+                    <Text weight="semibold" size={200} className={styles.sectionRef}>
+                      {loc.section}
+                    </Text>
+                    {loc.paragraph ? (
+                      <Text size={200} className={styles.paraMarker}>
+                        ¶ {loc.paragraph}
+                      </Text>
+                    ) : null}
+                  </div>
                   {navigable ? <ChevronRight16Regular className={styles.chevron} /> : null}
                 </div>
                 {finding.riskLevel ? (

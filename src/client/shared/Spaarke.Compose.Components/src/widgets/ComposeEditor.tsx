@@ -96,7 +96,7 @@ import {
   composeSessionCommentThreadsToAnchoredComments,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX, MAX_COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
@@ -1581,12 +1581,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // UAT round-3 D1 — user-resizable comment-pane width, persisted for the session so it survives tab
     // switches. The gutter's left-edge drag handle reports the new (clamped) width here.
     const [gutterWidth, setGutterWidth] = React.useState<number>(() => {
+      // UAT round-4 #7 — DEFAULT the review-notes pane to its widest so cards sit closer to their
+      // corresponding sections; a saved (user-dragged) width still wins.
       try {
         const saved = sessionStorage.getItem('spaarke.compose.commentGutterWidth');
         const n = saved ? parseInt(saved, 10) : Number.NaN;
-        return Number.isFinite(n) ? n : COMMENT_GUTTER_WIDTH_PX;
+        return Number.isFinite(n) ? n : MAX_COMMENT_GUTTER_WIDTH_PX;
       } catch {
-        return COMMENT_GUTTER_WIDTH_PX;
+        return MAX_COMMENT_GUTTER_WIDTH_PX;
       }
     });
     const handleGutterWidthChange = React.useCallback((w: number): void => {

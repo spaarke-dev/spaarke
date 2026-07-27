@@ -77,7 +77,7 @@ import {
 } from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { riskBadgeColor } from './NdaReviewSummaryPanel';
+import { riskBadgeColor, formatSectionRef } from './NdaReviewSummaryPanel';
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -146,7 +146,20 @@ const useStyles = makeStyles({
   },
   sectionRef: {
     color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
+  // UAT round-4 #9 — the § / ¶ markers before a review note's section label.
+  cardSectionMarkers: {
+    display: 'flex',
+    alignItems: 'baseline',
+    columnGap: '4px',
+    minWidth: 0,
+    overflow: 'hidden',
+  },
+  cardGlyph: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
+  cardParaMarker: { color: tokens.colorNeutralForeground2, flexShrink: 0, whiteSpace: 'nowrap' },
   body: {
     color: tokens.colorNeutralForeground1,
   },
@@ -505,6 +518,7 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         const isExpanded = expandedIds.has(thread.id);
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
         const bodyText = isExpanded || !isTruncatable ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
+        const loc = thread.sectionRef ? formatSectionRef(thread.sectionRef) : null; // UAT round-4 #9 — § / ¶
         return (
           <div
             key={thread.id}
@@ -535,9 +549,25 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
             data-testid={`compose-comment-gutter-card-${thread.id}`}
           >
             <div className={styles.cardHeader}>
-              <Text weight="semibold" size={200} className={styles.sectionRef}>
-                {thread.sectionRef ?? 'Comment'}
-              </Text>
+              {loc ? (
+                <div className={styles.cardSectionMarkers}>
+                  <Text size={200} className={styles.cardGlyph} aria-hidden>
+                    §
+                  </Text>
+                  <Text weight="semibold" size={200} className={styles.sectionRef}>
+                    {loc.section}
+                  </Text>
+                  {loc.paragraph ? (
+                    <Text size={200} className={styles.cardParaMarker}>
+                      ¶ {loc.paragraph}
+                    </Text>
+                  ) : null}
+                </div>
+              ) : (
+                <Text weight="semibold" size={200} className={styles.sectionRef}>
+                  Comment
+                </Text>
+              )}
               {thread.riskLevel ? (
                 <Badge
                   appearance="tint"

@@ -12,11 +12,13 @@
  */
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import {
   NdaReviewSummaryPanel,
   deriveOverallRisk,
   deriveTakeaway,
+  formatSectionRef,
   NDA_REVIEW_DISCLAIMER_TEXT,
   type NdaReviewFindingSummary,
 } from './NdaReviewSummaryPanel';
@@ -85,6 +87,32 @@ describe('deriveTakeaway', () => {
 
   it('returns empty string for empty input', () => {
     expect(deriveTakeaway('')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1c. formatSectionRef — § / ¶ marker parsing (UAT round-4 #3/#9)
+// ---------------------------------------------------------------------------
+
+describe('formatSectionRef', () => {
+  it('splits "Section 4.2, para 2 (p. 3)" into section 4.2 + paragraph 2', () => {
+    expect(formatSectionRef('Section 4.2, para 2 (p. 3)')).toEqual({ section: '4.2', paragraph: '2' });
+  });
+
+  it('keeps a heading-name section and its paragraph', () => {
+    expect(formatSectionRef('LIMITED USE OF CONFIDENTIAL INFORMATION, para 1 (p. 1)')).toEqual({
+      section: 'LIMITED USE OF CONFIDENTIAL INFORMATION',
+      paragraph: '1',
+    });
+  });
+
+  it('returns no paragraph when the ref has none', () => {
+    expect(formatSectionRef('Section 8.1 (p. 5)')).toEqual({ section: '8.1', paragraph: undefined });
+  });
+
+  it('falls back to the whole string / "Unreferenced" for unparseable / empty input', () => {
+    expect(formatSectionRef('Preamble')).toEqual({ section: 'Preamble', paragraph: undefined });
+    expect(formatSectionRef(undefined)).toEqual({ section: 'Unreferenced', paragraph: undefined });
   });
 });
 
@@ -160,11 +188,15 @@ describe('NdaReviewSummaryPanel', () => {
 
     // UAT round-2 item #3: each row is a concise TL;DR — section locator + risk band + a short
     // explanation — so the reader can orient at a glance.
-    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('Section 4.2, para 2 (p. 3)');
-    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('High');
-    expect(screen.getByTestId('nda-review-summary-finding-0')).toHaveTextContent('narrower than the standard');
+    // UAT round-4 #3 — the sectionRef renders with § / ¶ markers (formatSectionRef).
+    const row0 = screen.getByTestId('nda-review-summary-finding-0');
+    expect(row0).toHaveTextContent('§');
+    expect(row0).toHaveTextContent('4.2');
+    expect(row0).toHaveTextContent('¶ 2');
+    expect(row0).toHaveTextContent('High');
+    expect(row0).toHaveTextContent('narrower than the standard');
 
-    expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Section 8.1 (p. 5)');
+    expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('8.1');
     expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Medium');
   });
 
@@ -177,18 +209,27 @@ describe('NdaReviewSummaryPanel', () => {
     expect(row).not.toHaveTextContent('B3 - Definition of Confidential Information');
   });
 
-  it('ranks findings most-severe-first regardless of input order (item #3)', () => {
-    // Input order Low, Critical — the panel must render Critical (its original index 1) BEFORE Low
-    // (index 0) so the reader focuses on the top issue first. testIds stay keyed to the ORIGINAL index.
+  it('defaults to document order and re-sorts by risk on demand (UAT round-4 #2/#4)', async () => {
+    const user = userEvent.setup();
+    // Input order Low, Critical (document order). DEFAULT keeps document order; the sort control
+    // switches to risk (most-severe-first). testIds stay keyed to the ORIGINAL index.
     renderPanel({
       findings: [
         { sectionRef: 'Clause A', quotedText: 'a', riskLevel: 'Low', explanation: 'minor' },
         { sectionRef: 'Clause B', quotedText: 'b', riskLevel: 'Critical', explanation: 'severe' },
       ],
     });
-    const rows = screen.getAllByTestId(/nda-review-summary-finding-\d+/);
+
+    // #4 — default is DOCUMENT order: Low (index 0) before Critical (index 1).
+    let rows = screen.getAllByTestId(/nda-review-summary-finding-\d+/);
+    expect(rows[0]).toHaveTextContent('Low');
+    expect(rows[1]).toHaveTextContent('Critical');
+
+    // #2 — switch to risk sort → Critical first.
+    await user.click(screen.getByTestId('nda-review-summary-sort'));
+    await user.click(await screen.findByTestId('nda-review-summary-sort-risk'));
+    rows = screen.getAllByTestId(/nda-review-summary-finding-\d+/);
     expect(rows[0]).toHaveTextContent('Critical');
-    expect(rows[0]).toHaveTextContent('Clause B');
     expect(rows[1]).toHaveTextContent('Low');
   });
 
