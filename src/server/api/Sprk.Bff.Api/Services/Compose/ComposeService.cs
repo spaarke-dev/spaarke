@@ -705,9 +705,10 @@ public class ComposeService : IComposeService
         }
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
-            isTransientCreate, request.SessionId, request.DocumentRecordId, request.Content.Length);
+            isTransientCreate, request.ContentModel is not null, request.Comments?.Count ?? 0,
+            request.SessionId, request.DocumentRecordId, request.Content.Length);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 1 — container (FR-05, Fork A + Fork B).
