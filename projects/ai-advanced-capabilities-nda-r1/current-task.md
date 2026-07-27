@@ -6,10 +6,15 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-5 batch A (#2/#3/#4/#5/#6/#7/#8) IMPLEMENTED, TESTED (+12), DEPLOYED** — awaiting owner UAT. Rounds 2/3/4A/4B also deployed. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `b4204df7b`. Working tree CLEAN (only researcher-memory stash noise, unrelated). |
-| **Deployed (2026-07-27 r5-A)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4918 KB, from HEAD b4204df7b. SpaarkeAi aliases `@spaarke/compose-components`→SOURCE so edits transpile directly (verified parseAdvisoryNote/noteSegment present, old glyph styles gone). Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
-| **Next Action** | Owner UAT of r5-A. Then the TWO deferred round-5 items, both needing a direction call: **#1** relocate Review Summary INTO the editor top (replacing the unused comments band) + derive section heading/number from the live doc; **#9** center-screen streaming SSE progress modal (needs SSE-availability investigation + scope decision — may touch BFF). Also still-deferred: takeaway-field re-seed, allowsknowledge gate, merge/PR. |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-5 batch A (#2–#8) + #1 (relocation + doc-derived location) IMPLEMENTED, TESTED, DEPLOYED** — awaiting owner UAT. Rounds 2/3/4A/4B also deployed. NOW building **#9** (streaming modal — owner approved). |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `9e14e793c`. Working tree CLEAN. |
+| **Deployed (2026-07-27 r5 #1)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4919 KB, from HEAD 9e14e793c. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
+| **Next Action** | Finish **#9** center-screen streaming SSE progress modal (owner approved "build it reusing AiProgressStepper + SSE stage events"). Then: owner UAT; deferred takeaway-field re-seed, allowsknowledge gate, merge/PR. |
+
+### ✅ UAT round-5 #1 DEPLOYED (9e14e793c) — Review Summary relocated + doc-derived location
+- Panel now renders INSIDE `ComposeEditor` top region (below toolbar, in-flow, expands on toggle) — moved out of `ComposeWorkspace` (mount removed; data threaded via extended `reviewSummary` prop {open,hasFindings,onToggle,findings,placementFailureCount}). Wrapper sticky→relative. Nav = editor's own highlightCitedSpan.
+- New `ndaClauseLocation.ts`: `findGoverningHeading(doc,pos)` + `deriveClauseLocationLabel(doc,pos,sectionRef)` → "Pg 1 · Sec 3 · Para 1 · <heading>" (page/para from model, section ordinal + heading from live doc; heading = `heading` node OR paragraph pStyle Heading1..6; graceful fallback to formatClauseLocation). Used by BOTH summary (ComposeEditor enriches findings w/ locationLabel via resolveTargetSpans strict) AND gutter notes (via findCommentAnchorRange). Session comments (no sectionRef) keep "Comment".
+- Removed unused overallRisk state from ComposeWorkspace. +7 tests; 617/618 green (same pre-existing advisoryComments fail).
 
 ### ✅ UAT round-5 — batch A DEPLOYED (b4204df7b, 2026-07-27)
 Client-only Review Summary/Notes polish:
