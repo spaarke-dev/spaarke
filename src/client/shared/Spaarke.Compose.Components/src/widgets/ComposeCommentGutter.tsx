@@ -78,6 +78,7 @@ import {
 import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor, formatClauseLocation } from './NdaReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './ndaClauseLocation';
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -623,7 +624,16 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         const showStructured = isExpanded || !isTruncatable; // #7: structured aspects when fully shown
         const bodyText = showStructured ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
         const segments = showStructured ? parseAdvisoryNote(fullText) : null; // UAT round-5 #7
-        const loc = thread.sectionRef ? formatClauseLocation(thread.sectionRef) : null; // UAT round-5 #6
+        // UAT round-5 #6/#1 — the note's location, resolved from the LIVE document (section heading +
+        // ordinal that the model's sectionRef lacks) via the thread's current anchor. Identical to the
+        // summary row. Only advisory notes carry a `sectionRef`; a plain session comment has none and
+        // keeps the generic "Comment" label. Falls back to the model-only label when no editor.
+        const anchorSpan = thread.sectionRef && editor ? findCommentAnchorRange(editor.state.doc, thread.id) : null;
+        const loc = thread.sectionRef
+          ? editor
+            ? deriveClauseLocationLabel(editor.state.doc, anchorSpan?.from ?? null, thread.sectionRef)
+            : formatClauseLocation(thread.sectionRef)
+          : null;
         const isSelected = selectedThreadId === thread.id; // UAT round-4 #8
         // UAT round-4 #8: when selection is wired the card CLICK selects (and the cue button expands);
         // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).

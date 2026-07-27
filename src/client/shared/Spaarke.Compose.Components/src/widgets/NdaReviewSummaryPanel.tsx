@@ -70,20 +70,19 @@ import {
 import { Dismiss16Regular, Info16Regular, ArrowSort16Regular, ArrowDown16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
-  // UAT round-4 #5 — the OUTER positioning shell. Owns the pinned/sticky chrome (brand accent, shadow,
-  // opaque background) AND is the containing block for the absolutely-positioned down-arrow FAB, so the
-  // FAB stays pinned at the panel's bottom edge instead of scrolling away with the findings.
+  // UAT round-5 #1 — the OUTER shell. The panel now lives INSIDE the editor's top region (below the
+  // toolbar), IN-FLOW: opening the Review Summary EXPANDS this area and pushes the document down;
+  // closing removes it. `position: relative` makes it the containing block for the absolutely-positioned
+  // down-arrow FAB (so the FAB stays pinned at the panel's bottom edge, not scrolling with the findings).
   wrapper: {
-    position: 'sticky',
-    top: 0,
-    zIndex: 2,
+    position: 'relative',
     flexShrink: 0,
     backgroundColor: tokens.colorNeutralBackground2,
     borderBottomWidth: '1px',
     borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     // UAT round-4 #1 — a clear visual anchor: a brand accent strip on the left + a soft shadow so the
-    // summary reads as a distinct, pinned panel rather than blending into the document.
+    // summary reads as a distinct panel rather than blending into the document.
     borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
     boxShadow: tokens.shadow4,
   },
@@ -346,6 +345,14 @@ export interface NdaReviewFindingSummary {
    * grounded-fact + judgment text.
    */
   takeaway?: string;
+  /**
+   * UAT round-5 #1/#3 — a fully-resolved location label ("Pg 1 · Sec 3 · Para 1 · Agreement Not To
+   * Disclose Confidential Information") the HOST computes from the LIVE editor document (section
+   * heading + ordinal, which the model's `sectionRef` lacks). When present the row renders it verbatim;
+   * when absent the panel falls back to {@link formatClauseLocation} on `sectionRef`. See
+   * {@link ../widgets/ndaClauseLocation.ts}.
+   */
+  locationLabel?: string;
 }
 
 /**
@@ -563,7 +570,7 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
             const header = (
               <div className={styles.findingHeader}>
                 <Text weight="semibold" size={200} className={styles.sectionRef}>
-                  {formatClauseLocation(finding.sectionRef)}
+                  {finding.locationLabel ?? formatClauseLocation(finding.sectionRef)}
                 </Text>
                 {finding.riskLevel ? (
                   <Badge appearance="tint" color={riskBadgeColor(finding.riskLevel)}>

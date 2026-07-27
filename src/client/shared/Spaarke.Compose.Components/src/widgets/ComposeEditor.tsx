@@ -92,6 +92,8 @@ import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
+import { NdaReviewSummaryPanel, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './ndaClauseLocation';
 import {
   composeSessionCommentThreadsToAnchoredComments,
   findCommentAnchorRange,
@@ -573,6 +575,15 @@ export interface ComposeEditorProps {
     hasFindings: boolean;
     /** Toggle the review-summary panel's visibility. */
     onToggle: () => void;
+    /**
+     * UAT round-5 #1 — the flagged-section findings, so the editor can render the Review Summary panel
+     * INSIDE its own top region (below the toolbar), replacing the former host-rendered docked panel.
+     * The editor enriches each finding with a doc-derived `locationLabel` (section heading + ordinal —
+     * {@link ../widgets/ndaClauseLocation.ts}) before rendering.
+     */
+    findings: readonly NdaReviewFindingSummary[];
+    /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
+    placementFailureCount?: number;
   };
 }
 
@@ -2125,6 +2136,36 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       [editor]
     );
 
+    // ----- UAT round-5 #1 — Review Summary hosted INSIDE the editor -----------------------------
+    // Enrich each finding with a doc-derived location label (section heading + ordinal, which the
+    // model's sectionRef lacks — ndaClauseLocation.ts) by strict-resolving its quotedText to a document
+    // position, then walking to the governing heading. Recomputed only when the finding set changes
+    // (a snapshot at review time — a later edit that shifts headings does not re-label, which is fine
+    // for an advisory digest). Falls back to the model-only label when a quote can't be resolved.
+    const reviewFindings = reviewSummary?.findings;
+    const enrichedReviewFindings = React.useMemo((): readonly NdaReviewFindingSummary[] => {
+      if (!reviewFindings || reviewFindings.length === 0) return reviewFindings ?? [];
+      if (!editor) return reviewFindings;
+      return reviewFindings.map(finding => {
+        let pos: number | null = null;
+        if (finding.quotedText) {
+          const resolved = resolveTargetSpans(editor, finding.quotedText, 'strict');
+          if (resolved.ok) pos = resolved.spans[0].from;
+        }
+        return { ...finding, locationLabel: deriveClauseLocationLabel(editor.state.doc, pos, finding.sectionRef) };
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional review-time snapshot (see note)
+    }, [editor, reviewFindings]);
+
+    // Summary-row navigation: reuse the editor's own cited-span primitive (strict resolve + ephemeral
+    // highlight + scrollIntoView), the SAME anchoring the gutter comment uses — no host round-trip.
+    const handleReviewNavigate = React.useCallback(
+      (finding: NdaReviewFindingSummary): void => {
+        if (finding.quotedText) qaHighlight.highlight(finding.quotedText, finding.sectionRef);
+      },
+      [qaHighlight]
+    );
+
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
     // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
@@ -2415,6 +2456,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               data-testid="compose-deferral-notice-dismiss"
             />
           </div>
+        ) : null}
+        {/* UAT round-5 #1 — the Review Summary now lives HERE, inside the editor's top region (below the
+            toolbar), replacing the former host-rendered docked panel. Toggling "Review Summary" in the
+            toolbar's Review dropdown expands/collapses this in-flow area. The editor owns navigation
+            (its own highlightCitedSpan primitive) and enriches each finding's location with the section
+            heading/ordinal from the live document (ndaClauseLocation.ts). */}
+        {reviewSummary ? (
+          <NdaReviewSummaryPanel
+            open={reviewSummary.open}
+            onClose={reviewSummary.onToggle}
+            findings={enrichedReviewFindings}
+            placementFailureCount={reviewSummary.placementFailureCount}
+            onNavigate={handleReviewNavigate}
+          />
         ) : null}
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
