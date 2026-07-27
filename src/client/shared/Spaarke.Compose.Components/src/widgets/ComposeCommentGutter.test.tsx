@@ -272,6 +272,68 @@ describe('ComposeCommentGutter', () => {
     editor.destroy();
   });
 
+  it('opens a popover with the standard clause text when the "Standard" link is clicked (UAT round-3 D3)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const resolveStandardText = jest
+      .fn()
+      .mockResolvedValue('Required: use solely for the Purpose; protect with at least reasonable care.');
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ standardRef: 'B5 - Use & disclosure obligations' })]}
+            scrollContainerRef={scrollContainerRef}
+            resolveStandardText={resolveStandardText}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const link = await screen.findByTestId('compose-comment-gutter-standard-thread-1');
+    expect(link).toHaveTextContent('Standard: B5 - Use & disclosure obligations');
+
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(resolveStandardText).toHaveBeenCalledWith('B5 - Use & disclosure obligations')
+    );
+    expect(
+      await screen.findByText('Required: use solely for the Purpose; protect with at least reasonable care.')
+    ).toBeInTheDocument();
+
+    editor.destroy();
+  });
+
+  it('renders standardRef as plain text when no resolver is wired (UAT round-3 D3)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ standardRef: 'B5 - Use & disclosure obligations' })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveTextContent('Standard: B5 - Use & disclosure obligations');
+    // No resolver → no clickable link button.
+    expect(screen.queryByTestId('compose-comment-gutter-standard-thread-1')).not.toBeInTheDocument();
+
+    editor.destroy();
+  });
+
   it('a short comment is not clickable and shows no expand cue (UAT round-2 #5)', async () => {
     const editor = makeEditor();
     applyCommentAnchor(editor, 'thread-1', 1, 20);

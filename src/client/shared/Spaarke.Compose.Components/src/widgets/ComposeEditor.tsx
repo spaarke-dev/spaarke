@@ -97,6 +97,7 @@ import {
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
 import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
@@ -1352,6 +1353,59 @@ function useSelectionEventDispatch(
 }
 
 // ---------------------------------------------------------------------------
+// Advisory-comment anchor resolution (UAT round-3 S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * A distinctive leading fragment of an excerpt — likelier to be VERBATIM (and unique) than the full,
+ * possibly lightly-paraphrased/truncated excerpt. First-sentence within a window, min ~24 chars so it
+ * stays distinctive, capped ~120 at a word boundary.
+ */
+function distinctiveAnchorPrefix(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 40) return trimmed;
+  const window = trimmed.slice(0, 120);
+  const sentenceEnd = window.search(/[.;]\s/);
+  if (sentenceEnd >= 24) return window.slice(0, sentenceEnd);
+  const cap = trimmed.slice(0, 100);
+  const lastSpace = cap.lastIndexOf(' ');
+  return lastSpace >= 24 ? cap.slice(0, lastSpace) : cap;
+}
+
+/**
+ * UAT round-3 S1 — resolve an advisory comment's anchor with graceful fallbacks so a flagged clause is
+ * still highlighted/commented when its verbatim `targetText` doesn't STRICTLY resolve (the model lightly
+ * paraphrased or truncated it, it spans a paragraph boundary, or it recurs in the document). Unlike a
+ * redline EDIT — which MUST stay strict, since a wrong anchor corrupts the document — an advisory COMMENT
+ * only needs to sit on the flagged text, so anchoring to a verbatim PREFIX or the FIRST occurrence is a
+ * safe, useful fallback, NOT a blind guess (the prefix / first match is real document text that actually
+ * appears). Returns null only when even a distinctive prefix cannot be located — the finding then stays
+ * in the Review Summary, unanchored (surfaced via the placement-failure count), never silently forced
+ * onto the wrong text.
+ */
+function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): { from: number; to: number } | null {
+  const strict = resolveTargetSpans(editor, targetText, 'strict');
+  if (strict.ok) return strict.spans[0];
+  // Recurs verbatim (ambiguous) → anchor the FIRST occurrence of the flagged clause.
+  if (strict.kind === 'ambiguous') {
+    const first = resolveTargetSpans(editor, targetText, 'first');
+    if (first.ok) return first.spans[0];
+  }
+  // Paraphrased / truncated / cross-paragraph (not_found) → retry with a distinctive verbatim PREFIX,
+  // which anchors the comment at the flagged clause's start.
+  const prefix = distinctiveAnchorPrefix(targetText);
+  if (prefix && prefix !== targetText) {
+    const p = resolveTargetSpans(editor, prefix, 'strict');
+    if (p.ok) return p.spans[0];
+    if (p.kind === 'ambiguous') {
+      const pf = resolveTargetSpans(editor, prefix, 'first');
+      if (pf.ok) return pf.spans[0];
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // ComposeEditor — the component
 // ---------------------------------------------------------------------------
 
@@ -1543,6 +1597,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // sessionStorage unavailable (private mode) — width still applies for this session.
       }
     }, []);
+    // UAT round-3 D3 — fetch the full standard-clause text behind a review comment's standardRef on
+    // demand (GET /api/ai/nda-standard/clauses/{ref}). Only wired when a bffBaseUrl is present; a
+    // standalone/library mount without a backend renders standardRef as plain text.
+    const resolveStandardText = React.useCallback(
+      async (standardRef: string): Promise<string | null> => {
+        if (!bffBaseUrl) return null;
+        try {
+          const url = `${bffBaseUrl}/api/ai/nda-standard/clauses/${encodeURIComponent(standardRef)}`;
+          const res = await authenticatedFetch(url, { method: 'GET' });
+          const data = (await res.json()) as { text?: string };
+          return typeof data.text === 'string' ? data.text : null;
+        } catch {
+          // authenticatedFetch throws ApiError on non-2xx (e.g. an unknown ref → 404) — treat as
+          // "unavailable" so the popover shows a graceful message rather than crashing the gutter.
+          return null;
+        }
+      },
+      [bffBaseUrl]
+    );
 
     // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
     // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
@@ -2127,12 +2200,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           let placed = 0;
           const failed: AdvisoryCommentFailure[] = [];
           for (const item of items) {
-            const resolved = resolveTargetSpans(editor, item.targetText, 'strict');
-            if (!resolved.ok) {
-              failed.push({ targetText: item.targetText, kind: resolved.kind });
+            // UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence / verbatim prefix)
+            // so a finding whose excerpt lightly diverges or recurs still highlights instead of being
+            // dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is non-destructive (unlike a
+            // redline edit), so this is a safe relaxation of strict placement, scoped to advisory comments.
+            const span = resolveAdvisoryAnchorSpan(editor, item.targetText);
+            if (!span) {
+              failed.push({ targetText: item.targetText, kind: 'not_found' });
               continue;
             }
-            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0], {
+            const threadId = advisoryComments.createThread(item.explanation, span, {
               riskLevel: item.riskLevel,
               sectionRef: item.sectionRef,
               standardRef: item.standardRef,
@@ -2531,6 +2608,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             scrollContainerRef={editorScrollRef}
             width={gutterWidth}
             onWidthChange={handleGutterWidthChange}
+            resolveStandardText={bffBaseUrl ? resolveStandardText : undefined}
           />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>

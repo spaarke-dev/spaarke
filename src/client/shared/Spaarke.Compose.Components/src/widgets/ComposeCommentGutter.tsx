@@ -64,7 +64,17 @@
  */
 import * as React from 'react';
 import { type Editor } from '@tiptap/react';
-import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import {
+  Badge,
+  Text,
+  Spinner,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  makeStyles,
+  mergeClasses,
+  tokens,
+} from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor } from './NdaReviewSummaryPanel';
@@ -143,6 +153,34 @@ const useStyles = makeStyles({
   standardRef: {
     color: tokens.colorNeutralForeground3,
   },
+  // UAT round-3 D3 — the "Standard: {ref}" line becomes a clickable link that opens a popover with the
+  // full clause text. Reset the native button to a left-aligned link look.
+  standardRefButton: {
+    alignSelf: 'flex-start',
+    padding: 0,
+    border: 'none',
+    background: 'none',
+    font: 'inherit',
+    textAlign: 'left',
+    cursor: 'pointer',
+    color: tokens.colorBrandForegroundLink,
+    fontSize: tokens.fontSizeBase100,
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dotted',
+    ':hover': { color: tokens.colorBrandForegroundLinkHover },
+  },
+  standardPopover: {
+    maxWidth: '340px',
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+  },
+  standardPopoverTitle: {
+    color: tokens.colorNeutralForeground1,
+  },
+  standardPopoverBody: {
+    color: tokens.colorNeutralForeground2,
+  },
   // UAT round-3 D2: a truncatable card is itself the expand/collapse click target (no separate
   // "Show more" text button) — the whole block toggles, with a chevron cue.
   cardClickable: {
@@ -187,6 +225,87 @@ export interface ComposeCommentGutterProps {
   width?: number;
   /** Called (during a drag on the left-edge handle) with the new, clamped rail width. Omit to make the rail fixed-width. */
   onWidthChange?: (width: number) => void;
+  /**
+   * UAT round-3 D3 — resolves the full standard-clause text for a finding's `standardRef` (e.g. "B5 -
+   * Use & disclosure obligations"), fetched on demand when the reviewer clicks the "Standard: …" line.
+   * Returns null when the clause can't be found. Omit to render `standardRef` as plain (non-clickable)
+   * text — a standalone/library mount with no BFF wiring.
+   */
+  resolveStandardText?: (standardRef: string) => Promise<string | null>;
+}
+
+/**
+ * UAT round-3 D3 — the clickable "Standard: {ref}" line inside a gutter card. Opens a Fluent Popover
+ * that fetches the clause text once on first open. `stopPropagation` keeps a click/keypress here from
+ * also toggling the card's expand/collapse (the card is itself a button).
+ */
+function StandardRefChip(props: {
+  standardRef: string;
+  resolve: (ref: string) => Promise<string | null>;
+  className: string;
+  surfaceClassName: string;
+  titleClassName: string;
+  bodyClassName: string;
+  threadId: string;
+}): React.JSX.Element {
+  const { standardRef, resolve, className, surfaceClassName, titleClassName, bodyClassName, threadId } = props;
+  const [open, setOpen] = React.useState(false);
+  const [text, setText] = React.useState<string | null>(null);
+  const [status, setStatus] = React.useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const fetchedRef = React.useRef(false);
+
+  const handleOpenChange = React.useCallback(
+    (_e: unknown, data: { open: boolean }): void => {
+      setOpen(data.open);
+      if (data.open && !fetchedRef.current) {
+        fetchedRef.current = true;
+        setStatus('loading');
+        resolve(standardRef)
+          .then(t => {
+            setText(t);
+            setStatus(t === null ? 'error' : 'done');
+          })
+          .catch(() => setStatus('error'));
+      }
+    },
+    [resolve, standardRef]
+  );
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange} withArrow positioning="before" size="small">
+      <PopoverTrigger disableButtonEnhancement>
+        <button
+          type="button"
+          className={className}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => e.stopPropagation()}
+          data-testid={`compose-comment-gutter-standard-${threadId}`}
+        >
+          Standard: {standardRef}
+        </button>
+      </PopoverTrigger>
+      <PopoverSurface
+        className={surfaceClassName}
+        onClick={e => e.stopPropagation()}
+        data-testid={`compose-comment-gutter-standard-popover-${threadId}`}
+      >
+        <Text weight="semibold" size={200} className={titleClassName}>
+          {standardRef}
+        </Text>
+        {status === 'loading' ? (
+          <Spinner size="tiny" label="Loading standard…" labelPosition="after" />
+        ) : status === 'error' ? (
+          <Text size={200} className={bodyClassName}>
+            The standard clause text is unavailable right now.
+          </Text>
+        ) : (
+          <Text size={200} className={bodyClassName}>
+            {text}
+          </Text>
+        )}
+      </PopoverSurface>
+    </Popover>
+  );
 }
 
 /** One thread's resolved raw (pre-collision) Y position, `top` relative to the rail's own top edge. */
@@ -218,7 +337,7 @@ export function layoutCommentGutterCards(
 }
 
 export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JSX.Element | null {
-  const { editor, threads, scrollContainerRef, width = COMMENT_GUTTER_WIDTH_PX, onWidthChange } = props;
+  const { editor, threads, scrollContainerRef, width = COMMENT_GUTTER_WIDTH_PX, onWidthChange, resolveStandardText } = props;
   const styles = useStyles();
   const railRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -434,9 +553,21 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
               {bodyText}
             </Text>
             {thread.standardRef ? (
-              <Text size={100} className={styles.standardRef}>
-                Standard: {thread.standardRef}
-              </Text>
+              resolveStandardText ? (
+                <StandardRefChip
+                  standardRef={thread.standardRef}
+                  resolve={resolveStandardText}
+                  className={styles.standardRefButton}
+                  surfaceClassName={styles.standardPopover}
+                  titleClassName={styles.standardPopoverTitle}
+                  bodyClassName={styles.standardPopoverBody}
+                  threadId={thread.id}
+                />
+              ) : (
+                <Text size={100} className={styles.standardRef}>
+                  Standard: {thread.standardRef}
+                </Text>
+              )
             ) : null}
             {/* UAT round-3 D2: double-down-arrow expandability cue (the whole card is the click target). */}
             {isTruncatable ? (
