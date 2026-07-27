@@ -6,10 +6,23 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-4 batch B (#5/#6/#8) IMPLEMENTED, TESTED (+11), DEPLOYED** — awaiting owner UAT. Rounds 2, 3, 4A also deployed. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `ae8169781`. Working tree CLEAN (only researcher-memory stash noise, unrelated). |
-| **Deployed (2026-07-27 batch B)** | Code page ONLY (client-only change, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), updated + published, 4918 KB, from HEAD ae8169781. SpaarkeAi aliases `@spaarke/compose-components`→SOURCE so my edits transpile directly (verified: `compose-mark-comment-anchor-selected` + `nda-review-summary-scroll-down` present in bundle). Only new master since base = `0e1e30d95` (email-r5 docs, untouches SpaarkeAi/Compose → no clobber). |
-| **Next Action** | Owner UAT of batch B. Then: (1) the deferred re-seeds (takeaway field, allowsknowledge gate — owner confirm first, outward-facing); (2) merge/PR `work/ai-nda-r1-followups`. |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-5 batch A (#2/#3/#4/#5/#6/#7/#8) IMPLEMENTED, TESTED (+12), DEPLOYED** — awaiting owner UAT. Rounds 2/3/4A/4B also deployed. |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `b4204df7b`. Working tree CLEAN (only researcher-memory stash noise, unrelated). |
+| **Deployed (2026-07-27 r5-A)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4918 KB, from HEAD b4204df7b. SpaarkeAi aliases `@spaarke/compose-components`→SOURCE so edits transpile directly (verified parseAdvisoryNote/noteSegment present, old glyph styles gone). Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
+| **Next Action** | Owner UAT of r5-A. Then the TWO deferred round-5 items, both needing a direction call: **#1** relocate Review Summary INTO the editor top (replacing the unused comments band) + derive section heading/number from the live doc; **#9** center-screen streaming SSE progress modal (needs SSE-availability investigation + scope decision — may touch BFF). Also still-deferred: takeaway-field re-seed, allowsknowledge gate, merge/PR. |
+
+### ✅ UAT round-5 — batch A DEPLOYED (b4204df7b, 2026-07-27)
+Client-only Review Summary/Notes polish:
+- **#2** removed the "Overall risk" banner (summary). **#4** removed the nav chevron (summary rows).
+- **#3/#6** one clear location line via shared `formatClauseLocation(sectionRef)` → "Pg N · Sec N · Para N" (or the heading verbatim when the model puts it in sectionRef), REPLACING the "§ Paragraph N (p.1) ¶ N" glyph soup — identical in summary rows AND gutter notes. (Section number + heading FROM THE LIVE DOC still pending #1.)
+- **#5** colour recode (ComposeEditor `compose-mark-comment-anchor` + gutter `cardSelected` + summary `findingRowActive`): BASE clause = LIGHT GRAY (`colorNeutralBackground3`); SELECTED clause + SELECTED note + ACTIVE summary row = YELLOW (`colorPaletteYellowBackground2`, coordinated). Reverses batch B's blue/gray.
+- **#7** gutter note body splits "Grounded fact" / "Advisory judgment" into bold-labelled separate paragraphs (`parseAdvisoryNote`; older bare "Judgment"→"Advisory judgment"; plain notes unchanged; structured when expanded/short, truncated plain when collapsed).
+- **#8** removed the gutter card `top` CSS transition (it made scroll chase the last frame → "choppy"); cards track scroll instantly now.
+- Tests +12 (parseAdvisoryNote 5, formatClauseLocation 5, gutter location/#7 2); 610/611 Compose.Components green (same 1 pre-existing advisoryComments failure, unrelated).
+
+### 🔜 Round-5 deferred — need a direction call
+- **#1 (structural):** move `NdaReviewSummaryPanel` mount FROM ComposeWorkspace (line ~2347, above `editorSlot`) INTO ComposeEditor's top region (where `ComposeCommentThread` renders, ~line 2434 — the "unused comments" band the user flagged), in-flow so the "Review Summary" toggle EXPANDS that area. Thread findings/failedCount/onNavigate via the existing `reviewSummary` prop. THEN ComposeEditor (which has the doc) can derive the real section heading + section number by walking from each finding's anchor to the nearest heading node → complete the #3/#6 "Pg 1 · Sec 3 · Para 1 · Agreement Not To Disclose…" format in BOTH surfaces. Riskiest item (layout) — hold for owner OK on placement.
+- **#9 (new feature):** center-screen popup streaming the SSE progress of a running review (replace the tiny Assistant "Working" icon). Needs: investigate whether the review's SSE already emits progress events the client can surface (dispatch/streaming pipeline), decide client-only vs BFF, and a design. Bigger; its own turn.
 
 ### ✅ UAT round-4 — batch B DEPLOYED (ae8169781, 2026-07-27)
 **Batch B done (client-only):**
