@@ -121,6 +121,15 @@ export interface ConsumerChipsDeps {
    * action chips never reach here (they route through `onLocalChipAction`). Omitted → no usage tracking.
    */
   onChipDispatched?: (bindingId: string) => void;
+
+  /**
+   * nda-r1 follow-up: notified with the TERMINAL `dispatched.result` of each Binding dispatch on the
+   * chip/card path (the "Review an NDA" card dispatches through here, NOT through dispatchComposeAction).
+   * The host wires this to the NDA-REVIEW advisory-comments bridge (`emitFromResult`), which is a safe
+   * structural no-op for every non-NDA result shape — so the flagged clauses materialize as Compose
+   * document comments instead of only rendering as raw JSON in the transcript. Omitted → no projection.
+   */
+  onDispatchResult?: (result: unknown) => void;
 }
 
 export interface ConsumerChipsController {
@@ -162,6 +171,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     getActiveSourceFile,
     onLocalChipAction,
     getAppendedLocalChips,
+    onDispatchResult,
     onCorrespondenceDraft,
     chipDisplayPreference,
     onChipDispatched,
@@ -216,6 +226,10 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
         attachmentCount: sessionAttachmentCount,
       })
         .then((dispatched) => {
+          // nda-r1 follow-up: hand the terminal result to the host's advisory-comments bridge so the
+          // "Review an NDA" card path (which dispatches through here, not dispatchComposeAction) also
+          // materializes flagged clauses as Compose document comments. Safe no-op for non-NDA shapes.
+          onDispatchResult?.(dispatched.result);
           // UAT 2026-07-19: a surface-launch capability (create-matter / create-project) hands its
           // drafted output to the WIZARD — rendering that draft in the transcript dumped raw JSON
           // ("{matter_name:…, resolvedLookups:…}") into the chat. Suppress the transcript render for
@@ -350,6 +364,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       onCorrespondenceDraft,
       getAppendedLocalChips,
       onChipDispatched,
+      onDispatchResult,
     ]
   );
 

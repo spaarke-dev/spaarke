@@ -468,6 +468,10 @@ export function ConversationPane(): React.JSX.Element {
   // files) route here. `handleDocAction` (the reused editor/email bridges) is declared further
   // below, so the chip strip reaches it through a ref rather than reordering hook declarations.
   const localChipActionRef = React.useRef<(actionId: string) => void>(() => undefined);
+  // nda-r1 follow-up: the NDA-REVIEW advisory-comments bridge (`emitFromResult`, defined further below
+  // with the other Compose bridges) is reached from the chips controller through this ref so the "Review
+  // an NDA" card path also materializes flagged clauses as Compose comments (not just raw JSON).
+  const ndaReviewEmitRef = React.useRef<(result: unknown) => void>(() => undefined);
   // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
   // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
   // (subject / body / suggested recipients) captured from the last "Draft a response" result.
@@ -514,6 +518,10 @@ export function ConversationPane(): React.JSX.Element {
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
     // UAT R4-6 / R4-11: local-action chips route through the ref to `handleLocalChipAction` (below).
     onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
+    // nda-r1 follow-up: every Binding dispatch result on the chip/card path flows to the NDA-REVIEW
+    // advisory-comments bridge (via ref — defined below). Materializes flagged clauses as Compose
+    // comments for the "Review an NDA" card; safe no-op for every non-NDA result shape.
+    onDispatchResult: React.useCallback((result: unknown) => ndaReviewEmitRef.current(result), []),
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
     // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
@@ -851,6 +859,9 @@ export function ConversationPane(): React.JSX.Element {
   // useComposeWorkspaceReceivers materializes a comment thread per flagged clause. See
   // useNdaReviewAdvisoryCommentsBridge.ts for the full rationale.
   const ndaReviewAdvisoryComments = useNdaReviewAdvisoryCommentsBridge({ dispatch, getSessionId });
+  // nda-r1 follow-up: publish emitFromResult to the ref the chips controller reaches (declared above the
+  // useConsumerChips call), so the "Review an NDA" card dispatch materializes flagged clauses as comments.
+  ndaReviewEmitRef.current = ndaReviewAdvisoryComments.emitFromResult;
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
