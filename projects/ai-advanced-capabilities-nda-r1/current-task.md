@@ -1,28 +1,43 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> ## ⭐ Post-UAT follow-ups (2026-07-26) — DONE + DEPLOYED to spaarkedev1
-> Branch **`work/ai-nda-r1-followups`** (off master 751532d7e; pushed; NOT yet merged/PR'd). Commit `968810b6b`.
->
-> **1. BFF reasoning-tier request shape (UAT #3 "can't run that action" root cause) — FIXED + DEPLOYED (2 rounds).**
-> - **Round 1 (temperature) was correct but NOT the blocker.** `OpenAiClient` now OMITS `temperature` for the ReasoningModel deployment (`ResolveEffectiveTemperature`) — gpt-5 400s on any temperature incl. 0.0.
-> - **Round 2 (the ACTUAL root cause), found via App Insights:** the live 400 was `"Unsupported parameter: 'max_tokens' ... use 'max_completion_tokens' instead"`. The OpenAI/Azure SDK (OpenAI 2.8.0 / Azure.AI.OpenAI 2.8.0-beta.1) serializes `ChatCompletionOptions.MaxOutputTokenCount` as `max_tokens` **even at api-version 2025-04-01-preview** (confirmed from the request URL in dependency telemetry), and gpt-5/o-series reject it *before* temperature is evaluated. Fix: `OpenAiClient` OMITS `MaxOutputTokenCount` entirely for reasoning (no SDK surface here emits `max_completion_tokens`; the model uses its default and the strict schema bounds the body). Both omissions centralized behind `IsReasoningDeployment`. Reverted the moot ActionRunner 16000 ceiling.
-> - +15 unit tests. BFF built + deployed to spaarke-bff-dev twice (hash-verified, healthy). §10 publish: 47.50 MB (< 60 MB). **Verified via App Insights that the deployed code ran (`temp=(null)`, deployment=gpt-5-reasoning) — deploy was live; the max_tokens 400 was the true block.**
->
-> **2. "Review an NDA" card placement (UAT #2) — FIXED + DEPLOYED.** Moved from the top-of-pane notification (`SuggestionCard`, read as "hidden") into the Suggested-Next-Steps strip as an in-line local chip `local:nda-review` (mirrors the existing `local:revise-in-compose` pattern) → same mount-in-Compose + dispatch flow (`handleReviewNda`). SpaarkeAi code page rebuilt (clean cache; `local:nda-review` verified in bundle) + deployed to `sprk_spaarkeai` (published).
->
-> **3. UC3 `nda-standard-summary` (deferred follow-up) — DONE (live).** Created Action `sprk_analysisaction` id `27bef356-3889-f111-8077-7ced8ddc4a05` (Fast tier=100000000, temp 0.3, `sprk_allowsknowledge=true` for KNW-011 grounding, closed `{overview, sections[]}` schema) + surgically upserted the binding (mirror already had the row): consumerType=`nda-standard-summary`, enabled, surfaces=`assistant`, disposition=Informational, `sprk_Action`→that Action. Verified via read-back. (Routing cache ~5-min TTL — may take up to 5 min to appear in capability discovery.)
->
-> **⚠️ Finding — Binding mirror is STALE vs live (13 drifts).** `Seed-PlaybookConsumers.ps1 -DiffOnly` shows the live `sprk_playbookconsumer` table has evolved past the committed mirror `infra/dataverse/sprk_playbookconsumer-rows.json` (chat-summarize/create-matter/create-task/draft-correspondence chipTransitions+disposition+toolDescription, nda-review toolDescription). I did NOT run the full seeder (would REVERT live drift) — used a surgical single-row upsert for UC3 instead. **Owner action:** reconcile deliberately, then `-Export` + commit to re-baseline the mirror.
->
-> **⚠️ Master-merge (2026-07-26):** origin/master advanced to `e31fa0902` (assistant-r1 "lighter proactive-suggestion UI" — SuggestionCard.tsx + useSuggestionCards.tsx). My earlier code-page deploy (from a base predating it) had CLOBBERED that fix on the live web resource. Merged origin/master into `work/ai-nda-r1-followups` (clean — disjoint files), rebuilt + REDEPLOYED both BFF and code page so all three fixes coexist live. **Lesson: always `git fetch origin` + merge master before rebuilding/redeploying the code page — a code-page deploy ships the whole bundle and silently reverts any master fix not in your tree.**
->
-> **Next when we continue:** (a) smoke-test the live NDA flow in spaarkedev1 (review runs on gpt-5 now; card in follow-on row; UC3 "explain the standard"); (b) PR/merge `work/ai-nda-r1-followups` → master; (c) check/merge PR #690 (CI-LFS); (d) reconcile the binding mirror.
+> **Last Updated**: 2026-07-27 (by context-handoff, pre-/compact). **Read this block first.**
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **State** | NDA advisory review **WORKING END-TO-END LIVE** in spaarkedev1 (grounded gpt-5 findings + Review-Summary panel + in-doc highlights + right-gutter comments). |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `6330d9ce8`. Working tree CLEAN. |
+| **Deployed** | BFF → spaarke-bff-dev (hash-verified, healthy). Code page → `sprk_spaarkeai` (published). Both from current branch HEAD. |
+| **Next Action** | Implement the **5-item UAT plan below** (start with #4 — the one real bug). Owner chose: checkpoint now → /compact → resume the build. |
+| **App Insights** | appId `6a76b012-46d9-412f-b4ab-4905658a9559` (component `spe-insights-dev-67e2xz`, rg `spe-infrastructure-westus2`). Query via `az monitor app-insights query --app <id> --analytics-query "..."`. This is how every root cause this session was found — USE IT. |
+
+### ✅ Fixes DEPLOYED this session (2026-07-27) — the review pipeline now works
+1. **Reasoning-tier request shape** (`OpenAiClient.GetStructuredCompletionRawAsync`): OMIT both `temperature` AND `MaxOutputTokenCount` for the ReasoningModel deployment (gated by `IsReasoningDeployment`). The live blocker was `max_tokens` (the SDK serializes `MaxOutputTokenCount`→`max_tokens` even at api-version 2025-04-01-preview; gpt-5 rejects it). +15 unit tests. Commit `82c087a31`.
+2. **Grounding wired into the linear Action path** (`ActionRunner` + `AnalysisAction.AllowsKnowledge` surfaced from `sprk_allowsknowledge` via `AnalysisActionService`): retrieves from `spaarke-rag-references` (TopK=12, MinScore=0) and injects into the prompt. Reuses `ReferenceRetrievalService` incl. its NFR-06 tenant OR-clause. Commit `f53c83397`.
+3. **References-index semantic-config name** (`ReferenceRetrievalService`): `knowledge-semantic-config` → **`rag-references-semantic-config`** (matches the live index; the old name 400'd every query). Commit `083b1cf67`. **This was the fix that made grounding actually work** — confirmed live: `Reference grounding: chunks=12 sources=3 chars=22349`, output cited KNW-011 clauses B5/B6/B8/B9 (de-embedded from the prompt → only retrieval could produce them).
+4. **Advisory comments on the card dispatch path** (`useConsumerChips` `onDispatchResult` → `ndaReviewAdvisoryComments.emitFromResult`): the "Review an NDA" card dispatches via chips, which never reached the bridge; now it does → gutter comments + highlights + summary render. Commit `6330d9ce8`.
+- Also this session: reasoning temperature (round 1, correct but not the blocker); "Review an NDA" card moved to the follow-on strip (`local:nda-review`); UC3 `nda-standard-summary` Action+binding created live (id `27bef356-3889-f111-8077-7ced8ddc4a05`); merged origin/master (`e31fa0902` assistant-r1 UI fix) after an earlier code-page deploy had clobbered it.
+
+### 🔨 UAT round-2 feedback → 5-item PLAN (the work to do next)
+| # | Item | Type | Approach / files |
+|---|---|---|---|
+| **4** | **Advisory comments must survive Save → bake as native Word `w:comment`** (confirmed broken: Word web + desktop show nothing after save) | **BUG** | ROOT CAUSE FOUND via App Insights: `Compose save: ... re-anchored: auto=0 review=0 orphan=5 of 5 comment(s)` — all 5 comments landed in the **ORPHAN** band on a STALE save (stamped eTag `,1` vs live `,3`), and orphaned comments are surfaced-but-NOT-baked. Uploaded NDA has client-minted paraIds; base moved across multiple saves → anchors don't match live baseline. Server bake logic itself is CORRECT (`ComposeService.cs:625` `if (ContentModel is null && (hasOperations \|\| hasComments))` → `_patchEngine.Apply(..., request.Comments, ...)`). Fix = make advisory-comment anchors survive the save (client `getAnchoredComments` capture + server re-anchor/stamp for client-minted-paraId docs). **Needs a CLEAN repro first: fresh-upload a NEW NDA, review, do ONE save (avoid the multi-save stale state) to confirm the non-stale path bakes before fixing the orphan case.** Files: `ComposeService.cs` (re-anchor/`ReanchorStaleSaveAsync`/`ComposeBaselineParaIdStamper`), `ComposeWorkspace.tsx` (save ~1027 `getAnchoredComments`), `ComposeEditor.tsx` (`placeAdvisoryComments`/`getAnchoredComments`). |
+| **1+2** | **"Review" toolbar dropdown** — icon-only, RIGHT side; dropdown = "Review Summary" (toggle summary panel) + "Review Notes" (toggle gutter comments) | Feature | `ComposeEditor.tsx` toolbar + visibility state for the summary panel + `ComposeCommentGutter`. Both surfaces already exist; add a toolbar control + show/hide state. |
+| **3** | **Review Summary = concise TL;DR** — VERY concise for quick orientation; **STICKY at top** (stays visible while scrolling the doc); **each summary point LINKS to its section** (click → scroll/navigate to that clause position) | Feature | Summary panel component: render overall risk + ranked High/Critical one-liners (not a full duplicate of comments); position sticky; wire each point → editor scroll-to-anchor (reuse the comment-anchor paraId/coordsAtPos the gutter already uses). |
+| **5** | **Comment cards truncate** ("...") — add **expand/collapse** to see the full comment text | Feature | `ComposeCommentGutter.tsx` — per-card expand toggle. |
+> **Design principle to preserve:** Review Summary = *review chrome* (toolbar-toggled, NEVER baked into the document/.docx). Review Notes/Comments = *annotations on the document* (DO bake as native Word comments so they travel with the file). Original "summary as a first doc page" idea is SUPERSEDED by the toolbar-toggle approach (owner-approved) — do not inject the summary into document content.
+
+### ⚠️ Open follow-ups (non-blocking, deferred)
+- **Over-broad grounding gate:** `sprk_allowsknowledge=true` on **57 of ~60 Actions**, so my `action.AllowsKnowledge` gate makes many unrelated Actions (classify, briefing, create-matter…) also query the references index (degrades gracefully — relevance-filtered/caught, but wasteful + could inject irrelevant refs). Proper fix = per-Action knowledge-source LINK (retrieve only from an Action's linked reference sources), not the broad flag. Do this once the review UX is solid.
+- **Binding mirror STALE vs live (13 drifts):** `Seed-PlaybookConsumers.ps1 -DiffOnly` shows live `sprk_playbookconsumer` evolved past committed `infra/dataverse/sprk_playbookconsumer-rows.json`. Do NOT run the full seeder (reverts live drift). Reconcile deliberately → `-Export` + commit.
+- **Merge/PR:** `work/ai-nda-r1-followups` not merged; PR #690 (CI-LFS) still open.
 
 ---
 
-**Mode**: autonomous wave execution (owner-authorized 2026-07-25). Parallel subagents per wave; build + code-review + adr-check gates each wave; branch-only (no master merge); env-coupled steps flagged never faked. PR #689.
+**Mode**: post-build UAT iteration (owner-driven). Branch-only; deploy-to-dev per owner request each round; every root cause found empirically via App Insights (no guessing).
 
-**Status**: implementation complete + deployed + post-UAT follow-ups deployed · **HEAD**: 968810b6b (branch work/ai-nda-r1-followups)
+**Status**: NDA review pipeline LIVE + WORKING; 5-item UAT plan pending · **HEAD**: 6330d9ce8 (branch work/ai-nda-r1-followups)
 
 ## Done + committed (gated)
 - 001 ✅ ADR-039 amendment (Output Determinism Modes; grounding mode-independent; strengthened + signed off)
