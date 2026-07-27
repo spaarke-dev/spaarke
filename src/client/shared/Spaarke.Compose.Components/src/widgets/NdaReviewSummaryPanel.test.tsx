@@ -19,6 +19,7 @@ import {
   deriveOverallRisk,
   deriveTakeaway,
   formatSectionRef,
+  formatClauseLocation,
   NDA_REVIEW_DISCLAIMER_TEXT,
   type NdaReviewFindingSummary,
 } from './NdaReviewSummaryPanel';
@@ -117,6 +118,38 @@ describe('formatSectionRef', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 1d. formatClauseLocation — one clear location line (UAT round-5 #3/#6)
+// ---------------------------------------------------------------------------
+
+describe('formatClauseLocation', () => {
+  it('renders "Pg N · Sec N · Para N" from a numbered section ref', () => {
+    expect(formatClauseLocation('Section 4.2, para 2 (p. 3)')).toBe('Pg 3 · Sec 4.2 · Para 2');
+  });
+
+  it('renders the heading verbatim (no "Sec" prefix) when the ref carries a heading name', () => {
+    expect(formatClauseLocation('LIMITED USE OF CONFIDENTIAL INFORMATION, para 1 (p. 1)')).toBe(
+      'Pg 1 · LIMITED USE OF CONFIDENTIAL INFORMATION · Para 1'
+    );
+  });
+
+  it('renders just page + paragraph when there is no section identity', () => {
+    expect(formatClauseLocation('Paragraph 5 (p. 1)')).toBe('Pg 1 · Para 5');
+  });
+
+  it('omits absent parts and never emits § / ¶ glyphs', () => {
+    const label = formatClauseLocation('Section 8.1 (p. 5)');
+    expect(label).toBe('Pg 5 · Sec 8.1');
+    expect(label).not.toContain('§');
+    expect(label).not.toContain('¶');
+  });
+
+  it('falls back to the raw ref / "Unreferenced" for unparseable / empty input', () => {
+    expect(formatClauseLocation('Preamble')).toBe('Preamble');
+    expect(formatClauseLocation(undefined)).toBe('Unreferenced');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 2. NdaReviewSummaryPanel — Fluent v9 UI
 // ---------------------------------------------------------------------------
 
@@ -173,30 +206,30 @@ describe('NdaReviewSummaryPanel', () => {
     expect(screen.getByTestId('nda-review-summary-disclaimer')).toHaveTextContent(NDA_REVIEW_DISCLAIMER_TEXT);
   });
 
-  it('shows the empty state when there are no findings, with no overall-risk badge', () => {
+  it('shows the empty state when there are no findings (UAT round-5 #2 — no overall-risk banner)', () => {
     renderPanel({ findings: [] });
     expect(screen.getByTestId('nda-review-summary-empty')).toBeInTheDocument();
-    expect(screen.getByTestId('nda-review-summary-overall-risk-empty')).toBeInTheDocument();
+    // UAT round-5 #2 — the overall-risk banner was removed entirely.
     expect(screen.queryByTestId('nda-review-summary-overall-risk')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('nda-review-summary-overall-risk-empty')).not.toBeInTheDocument();
   });
 
-  it('renders overallRisk (derived) + a concise TL;DR row per finding (section + risk + explanation)', () => {
+  it('renders a concise TL;DR row per finding with a clear location line + risk (UAT round-5 #2/#3/#4)', () => {
     renderPanel({});
 
-    // Overall risk = max(High, Medium) = High
-    expect(screen.getByTestId('nda-review-summary-overall-risk')).toHaveTextContent('High');
+    // UAT round-5 #2 — no overall-risk banner anywhere.
+    expect(screen.queryByTestId('nda-review-summary-overall-risk')).not.toBeInTheDocument();
 
-    // UAT round-2 item #3: each row is a concise TL;DR — section locator + risk band + a short
-    // explanation — so the reader can orient at a glance.
-    // UAT round-4 #3 — the sectionRef renders with § / ¶ markers (formatSectionRef).
+    // UAT round-5 #3 — the location renders as a single clear line ("Pg 3 · Sec 4.2 · Para 2"), no § / ¶
+    // glyph soup. #4 — no chevron icon.
     const row0 = screen.getByTestId('nda-review-summary-finding-0');
-    expect(row0).toHaveTextContent('§');
-    expect(row0).toHaveTextContent('4.2');
-    expect(row0).toHaveTextContent('¶ 2');
+    expect(row0).toHaveTextContent('Pg 3 · Sec 4.2 · Para 2');
+    expect(row0).not.toHaveTextContent('§');
+    expect(row0).not.toHaveTextContent('¶');
     expect(row0).toHaveTextContent('High');
     expect(row0).toHaveTextContent('narrower than the standard');
 
-    expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('8.1');
+    expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Pg 5 · Sec 8.1');
     expect(screen.getByTestId('nda-review-summary-finding-1')).toHaveTextContent('Medium');
   });
 

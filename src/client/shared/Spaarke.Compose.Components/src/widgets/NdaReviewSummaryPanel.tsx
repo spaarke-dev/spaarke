@@ -67,13 +67,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import {
-  Dismiss16Regular,
-  Info16Regular,
-  ChevronRight16Regular,
-  ArrowSort16Regular,
-  ArrowDown16Regular,
-} from '@fluentui/react-icons';
+import { Dismiss16Regular, Info16Regular, ArrowSort16Regular, ArrowDown16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   // UAT round-4 #5 — the OUTER positioning shell. Owns the pinned/sticky chrome (brand accent, shadow,
@@ -130,22 +124,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  // UAT round-4 #3/#9 — the § / ¶ markers before a finding's section label.
-  sectionMarkers: {
-    display: 'flex',
-    alignItems: 'baseline',
-    columnGap: '4px',
-    minWidth: 0,
-  },
-  glyph: {
-    color: tokens.colorNeutralForeground3,
-    flexShrink: 0,
-  },
-  paraMarker: {
-    color: tokens.colorNeutralForeground2,
-    flexShrink: 0,
-    whiteSpace: 'nowrap',
-  },
   disclaimer: {
     display: 'flex',
     alignItems: 'flex-start',
@@ -159,11 +137,6 @@ const useStyles = makeStyles({
     flexShrink: 0,
     marginTop: '2px',
     color: tokens.colorNeutralForeground2,
-  },
-  overallRow: {
-    display: 'flex',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
   },
   failureNotice: {
     color: tokens.colorPaletteYellowForeground1,
@@ -203,15 +176,15 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralBackground1Pressed,
     },
   },
-  // UAT round-4 #6 — the row the reader last navigated to reads as the ACTIVE row: a gray fill + brand
-  // accent border (mirrors the gutter card's selected state), so the summary and the document stay
-  // visually in sync about "which finding are we on".
+  // UAT round-4 #6 / round-5 #5 — the row the reader last navigated to reads as ACTIVE with a YELLOW
+  // fill, coordinated with the selected clause highlight + selected review note (round-5 #5: selected =
+  // yellow everywhere) so the summary, the document, and the gutter stay visually in sync.
   findingRowActive: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorPaletteYellowBackground2,
+    border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground3,
-      border: `1px solid ${tokens.colorBrandStroke1}`,
+      backgroundColor: tokens.colorPaletteYellowBackground2,
+      border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
     },
   },
   // UAT round-4 #5 — the down-arrow FAB pinned at the panel's bottom-right; appears only while more
@@ -313,6 +286,40 @@ export function formatSectionRef(sectionRef?: string): { section: string; paragr
   return { section, paragraph };
 }
 
+/**
+ * UAT round-5 (#3/#6) — a single, clear location label from the model's free-text `sectionRef`,
+ * REPLACING the confusing "§ Paragraph N (p. 1) ¶ N" glyph soup. Parses the page + paragraph and
+ * renders "Pg {page} · Para {paragraph}" (omitting whichever part is absent). Used verbatim in BOTH the
+ * summary rows and the right-gutter review-note cards so the two surfaces read identically (the UAT ask
+ * "also use same in the Review Notes"). Falls back to the raw ref when nothing parses (never blank).
+ *
+ * NOTE: the section HEADING (e.g. "Agreement Not To Disclose Confidential Information") and section
+ * number are NOT in the model output — deriving them needs the live editor document, which this
+ * presentational panel does not have. They are added when the summary is hosted inside the editor
+ * (round-5 #1 relocation). This helper covers the page/paragraph the model DOES emit, cleanly.
+ */
+export function formatClauseLocation(sectionRef?: string): string {
+  const text = (sectionRef ?? '').trim();
+  if (!text) return 'Unreferenced';
+  const pageMatch = /\(?\bp(?:g|age)?\.?\s*(\d+)\)?/i.exec(text);
+  const paraMatch = /\bpara(?:graph)?\.?\s*(\d+)/i.exec(text);
+  // Whatever remains after stripping the page + paragraph tails and a leading "Section " is the
+  // section identity — either a number ("4.2") or, when the model put the heading in the ref, the
+  // section HEADING ("LIMITED USE OF CONFIDENTIAL INFORMATION"). Numeric labels get a "Sec " prefix;
+  // heading labels render verbatim.
+  const label = text
+    .replace(/\(?\bp(?:g|age)?\.?\s*\d+\)?/i, '') // drop "(p. N)"
+    .replace(/,?\s*para(?:graph)?\.?\s*\d+/i, '') // drop ", para N" / "Paragraph N"
+    .replace(/^section\s+/i, '') // drop a leading "Section "
+    .replace(/[,;\s]+$/, '')
+    .trim();
+  const parts: string[] = [];
+  if (pageMatch) parts.push(`Pg ${pageMatch[1]}`);
+  if (label) parts.push(/^[\d.]+$/.test(label) ? `Sec ${label}` : label);
+  if (paraMatch) parts.push(`Para ${paraMatch[1]}`);
+  return parts.length > 0 ? parts.join(' · ') : text;
+}
+
 /** Sort order for the summary findings (UAT round-4 #2/#4). */
 export type NdaSummarySort = 'section' | 'risk';
 
@@ -401,9 +408,8 @@ export interface NdaReviewSummaryPanelProps {
    */
   placementFailureCount?: number;
   /**
-   * task 032 — the NDA-REVIEW Action's own server-asserted `overallRisk` (from the
-   * `compose_advisory_comments` event's `overallRisk` field). When present, PREFERRED over the
-   * client-derived {@link deriveOverallRisk} fallback — see the file header's derivation note.
+   * @deprecated UAT round-5 #2 — the "Overall risk" banner was REMOVED (low value, UI space). The prop
+   * is retained (ignored) so existing callers compile unchanged; it no longer renders anything.
    */
   overallRisk?: string;
 
@@ -417,7 +423,7 @@ export interface NdaReviewSummaryPanelProps {
 }
 
 export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.JSX.Element | null {
-  const { open, onClose, findings, placementFailureCount, overallRisk: serverOverallRisk, onNavigate } = props;
+  const { open, onClose, findings, placementFailureCount, onNavigate } = props;
   const styles = useStyles();
   // UAT round-4 #4 — DEFAULT to document order (section/paragraph/sentence), not risk. The model emits
   // findings in document order, so the original index IS that order. #2 lets the reader switch to risk.
@@ -460,11 +466,6 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   }, []);
 
   if (!open) return null;
-
-  // task 032: prefer the real, server-asserted field; fall back to the client-side derivation only
-  // when it's unavailable (see the file header's OVERALL RISK note).
-  const overallRisk = serverOverallRisk ?? deriveOverallRisk(findings);
-  const overallRiskIsDerived = serverOverallRisk === undefined;
 
   // UAT round-4 #2/#4 — sort by document position (default) or by risk severity. Both are stable on the
   // original index (document order) as the tiebreak. Non-mutating (findings is a readonly prop).
@@ -539,21 +540,6 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
         <Text size={200}>{NDA_REVIEW_DISCLAIMER_TEXT}</Text>
       </div>
 
-      <div className={styles.overallRow}>
-        <Text weight="semibold" size={300}>
-          {overallRiskIsDerived ? 'Overall risk (from findings):' : 'Overall risk:'}
-        </Text>
-        {overallRisk ? (
-          <Badge appearance="tint" color={riskBadgeColor(overallRisk)} data-testid="nda-review-summary-overall-risk">
-            {overallRisk}
-          </Badge>
-        ) : (
-          <Text size={200} className={styles.empty} data-testid="nda-review-summary-overall-risk-empty">
-            Not yet available
-          </Text>
-        )}
-      </div>
-
       {placementFailureCount && placementFailureCount > 0 ? (
         <Text size={200} className={styles.failureNotice} data-testid="nda-review-summary-placement-failures">
           {placementFailureCount} finding{placementFailureCount === 1 ? '' : 's'} could not be anchored as an
@@ -572,25 +558,13 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
             // full quote + firm-standard citation live on the in-document Review Note (gutter card) —
             // the summary is a scan strip, deliberately NOT a second copy of the comments (item #3).
             const navigable = Boolean(onNavigate && finding.quotedText);
-            const loc = formatSectionRef(finding.sectionRef); // UAT round-4 #3 — § / ¶ markers
+            // UAT round-5 #3 — one clear location line (no § / ¶ glyph soup); #4 — no chevron (the
+            // whole row is obviously clickable). Uses the SAME formatter the gutter notes use (#6).
             const header = (
               <div className={styles.findingHeader}>
-                <div className={styles.findingHeaderLeft}>
-                  <div className={styles.sectionMarkers}>
-                    <Text size={200} className={styles.glyph} aria-hidden>
-                      §
-                    </Text>
-                    <Text weight="semibold" size={200} className={styles.sectionRef}>
-                      {loc.section}
-                    </Text>
-                    {loc.paragraph ? (
-                      <Text size={200} className={styles.paraMarker}>
-                        ¶ {loc.paragraph}
-                      </Text>
-                    ) : null}
-                  </div>
-                  {navigable ? <ChevronRight16Regular className={styles.chevron} /> : null}
-                </div>
+                <Text weight="semibold" size={200} className={styles.sectionRef}>
+                  {formatClauseLocation(finding.sectionRef)}
+                </Text>
                 {finding.riskLevel ? (
                   <Badge appearance="tint" color={riskBadgeColor(finding.riskLevel)}>
                     {finding.riskLevel}

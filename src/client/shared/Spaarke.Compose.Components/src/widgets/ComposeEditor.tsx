@@ -922,11 +922,12 @@ const useStyles = makeStyles({
     '& .compose-mark-deletion + .compose-mark-insertion::before': {
       content: 'none', // the pair's cue already sits on the leading deletion span
     },
-    // UAT round-4 #8 — the BASE advisory comment anchor is LIGHT BLUE; it turns YELLOW only when its
+    // UAT round-5 #5 — the BASE advisory comment anchor is LIGHT GRAY; it turns YELLOW only when its
     // thread is selected (the `compose-mark-comment-anchor-selected` view decoration below, painted by
-    // SelectedCommentExtension), giving the bidirectional doc↔gutter linked-highlight cue.
+    // SelectedCommentExtension) — coordinated with the selected review note (also yellow). This makes
+    // "highlighted (a finding is here)" clearly distinct from "selected (this is the one I'm on)".
     '& .compose-mark-comment-anchor': {
-      backgroundColor: tokens.colorPaletteBlueBackground2,
+      backgroundColor: tokens.colorNeutralBackground3,
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
     },

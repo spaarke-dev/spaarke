@@ -77,7 +77,7 @@ import {
 } from '@fluentui/react-components';
 import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { riskBadgeColor, formatSectionRef } from './NdaReviewSummaryPanel';
+import { riskBadgeColor, formatClauseLocation } from './NdaReviewSummaryPanel';
 
 /** Right-rail column DEFAULT width — cards clear of the document's own right margin. */
 export const COMMENT_GUTTER_WIDTH_PX = 220;
@@ -136,7 +136,9 @@ const useStyles = makeStyles({
     border: `1px solid ${tokens.colorNeutralStroke2}`,
     boxShadow: tokens.shadow4,
     pointerEvents: 'auto',
-    transition: 'top 120ms ease-out',
+    // UAT round-5 #8 — NO `top` transition. The rail recomputes each card's `top` from coordsAtPos on
+    // every scroll frame; animating `top` made each frame chase the last, producing the "choppy" scroll
+    // the reviewer reported. Tracking the scroll instantly (no transition) is smooth.
   },
   cardHeader: {
     display: 'flex',
@@ -149,18 +151,27 @@ const useStyles = makeStyles({
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
-  },
-  // UAT round-4 #9 — the § / ¶ markers before a review note's section label.
-  cardSectionMarkers: {
-    display: 'flex',
-    alignItems: 'baseline',
-    columnGap: '4px',
     minWidth: 0,
-    overflow: 'hidden',
   },
-  cardGlyph: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
-  cardParaMarker: { color: tokens.colorNeutralForeground2, flexShrink: 0, whiteSpace: 'nowrap' },
   body: {
+    color: tokens.colorNeutralForeground1,
+  },
+  // UAT round-5 #7 — the advisory note's "Grounded fact" / "Advisory judgment" aspects render as
+  // separate, labelled paragraphs so the two halves of the analysis are easy to tell apart.
+  noteSegments: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalXS,
+  },
+  noteSegment: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: '1px',
+  },
+  noteSegmentLabel: {
+    color: tokens.colorNeutralForeground2,
+  },
+  noteSegmentBody: {
     color: tokens.colorNeutralForeground1,
   },
   standardRef: {
@@ -203,15 +214,15 @@ const useStyles = makeStyles({
       border: `1px solid ${tokens.colorNeutralStroke1}`,
     },
   },
-  // UAT round-4 #8: the SELECTED review note keeps a gray highlight (until re-clicked or another note
-  // is selected). Paired with the in-document anchor turning yellow (SelectedCommentExtension). Gray
-  // background + a brand accent border so the linked card reads as "this one".
+  // UAT round-5 #5: the SELECTED review note turns YELLOW, coordinated with its in-document clause (also
+  // yellow when selected) — the reviewer sees the section and its note as one linked, yellow pair, while
+  // UNselected clauses read light gray. Persists until re-clicked or another note is selected.
   cardSelected: {
-    backgroundColor: tokens.colorNeutralBackground3,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
+    backgroundColor: tokens.colorPaletteYellowBackground2,
+    border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
     ':hover': {
-      backgroundColor: tokens.colorNeutralBackground3,
-      border: `1px solid ${tokens.colorBrandStroke1}`,
+      backgroundColor: tokens.colorPaletteYellowBackground2,
+      border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
     },
   },
   // UAT round-4 #8: when selection is wired, the double-arrow cue becomes the dedicated expand control
@@ -245,6 +256,51 @@ const useStyles = makeStyles({
 function truncate(text: string, max: number): string {
   const trimmed = text.trim();
   return trimmed.length > max ? `${trimmed.slice(0, max)}…` : trimmed;
+}
+
+/** One labelled aspect of an advisory note ("Grounded fact" / "Advisory judgment"), or an unlabelled run. */
+export interface AdvisoryNoteSegment {
+  /** The aspect label (e.g. "Grounded fact"), or undefined for text with no recognized label. */
+  label?: string;
+  /** The aspect's prose. */
+  body: string;
+}
+
+/** The labels the NDA-REVIEW Action authors its advisory explanations with (case-insensitive). */
+const ADVISORY_NOTE_LABELS = ['Grounded fact', 'Advisory judgment', 'Judgment'] as const;
+
+/**
+ * UAT round-5 #7 — split an advisory note into its "Grounded fact" / "Advisory judgment" aspects so each
+ * renders as its own labelled, separated paragraph (the reviewer asked what the labels mean + for them to
+ * be bold + separate for readability). The Action authors explanations as
+ * "Grounded fact: … Advisory judgment: …" (also older "Judgment: …"); we split on those markers. Text
+ * with no recognized label returns a single unlabelled segment (rendered plainly, unchanged) — so a note
+ * that doesn't follow the convention never gets mangled.
+ */
+export function parseAdvisoryNote(text: string): AdvisoryNoteSegment[] {
+  const trimmed = (text ?? '').trim();
+  if (!trimmed) return [];
+  // Find every label occurrence (label + following “:”/“—”/“-”), in document order.
+  const pattern = new RegExp(`\\b(${ADVISORY_NOTE_LABELS.join('|')})\\b\\s*[:—-]\\s*`, 'gi');
+  const marks: { label: string; start: number; bodyStart: number }[] = [];
+  for (let m = pattern.exec(trimmed); m !== null; m = pattern.exec(trimmed)) {
+    marks.push({ label: m[1], start: m.index, bodyStart: m.index + m[0].length });
+  }
+  if (marks.length === 0) return [{ body: trimmed }];
+  const segments: AdvisoryNoteSegment[] = [];
+  // Any prose before the first label is kept as an unlabelled lead segment (never dropped).
+  if (marks[0].start > 0) {
+    const lead = trimmed.slice(0, marks[0].start).trim();
+    if (lead) segments.push({ body: lead });
+  }
+  for (let i = 0; i < marks.length; i++) {
+    const end = i + 1 < marks.length ? marks[i + 1].start : trimmed.length;
+    const body = trimmed.slice(marks[i].bodyStart, end).trim();
+    // Normalize the display label (older "Judgment" reads as "Advisory judgment").
+    const label = /^judgment$/i.test(marks[i].label) ? 'Advisory judgment' : marks[i].label;
+    segments.push({ label, body });
+  }
+  return segments;
 }
 
 export interface ComposeCommentGutterProps {
@@ -564,8 +620,10 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         const fullText = thread.text.trim();
         const isExpanded = expandedIds.has(thread.id);
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
-        const bodyText = isExpanded || !isTruncatable ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
-        const loc = thread.sectionRef ? formatSectionRef(thread.sectionRef) : null; // UAT round-4 #9 — § / ¶
+        const showStructured = isExpanded || !isTruncatable; // #7: structured aspects when fully shown
+        const bodyText = showStructured ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
+        const segments = showStructured ? parseAdvisoryNote(fullText) : null; // UAT round-5 #7
+        const loc = thread.sectionRef ? formatClauseLocation(thread.sectionRef) : null; // UAT round-5 #6
         const isSelected = selectedThreadId === thread.id; // UAT round-4 #8
         // UAT round-4 #8: when selection is wired the card CLICK selects (and the cue button expands);
         // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).
@@ -615,25 +673,10 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
             data-testid={`compose-comment-gutter-card-${thread.id}`}
           >
             <div className={styles.cardHeader}>
-              {loc ? (
-                <div className={styles.cardSectionMarkers}>
-                  <Text size={200} className={styles.cardGlyph} aria-hidden>
-                    §
-                  </Text>
-                  <Text weight="semibold" size={200} className={styles.sectionRef}>
-                    {loc.section}
-                  </Text>
-                  {loc.paragraph ? (
-                    <Text size={200} className={styles.cardParaMarker}>
-                      ¶ {loc.paragraph}
-                    </Text>
-                  ) : null}
-                </div>
-              ) : (
-                <Text weight="semibold" size={200} className={styles.sectionRef}>
-                  Comment
-                </Text>
-              )}
+              {/* UAT round-5 #6 — one clear location line (no § / ¶ glyph soup), identical to the summary. */}
+              <Text weight="semibold" size={200} className={styles.sectionRef}>
+                {loc ?? 'Comment'}
+              </Text>
               {thread.riskLevel ? (
                 <Badge
                   appearance="tint"
@@ -645,9 +688,28 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
                 </Badge>
               ) : null}
             </div>
-            <Text size={200} className={styles.body} data-testid={`compose-comment-gutter-body-${thread.id}`}>
-              {bodyText}
-            </Text>
+            {/* UAT round-5 #7 — when fully shown, split "Grounded fact" / "Advisory judgment" into
+                separate labelled paragraphs; collapsed shows a plain truncated preview. */}
+            {segments ? (
+              <div className={styles.noteSegments} data-testid={`compose-comment-gutter-body-${thread.id}`}>
+                {segments.map((seg, i) => (
+                  <div key={i} className={styles.noteSegment}>
+                    {seg.label ? (
+                      <Text size={200} weight="semibold" className={styles.noteSegmentLabel}>
+                        {seg.label}
+                      </Text>
+                    ) : null}
+                    <Text size={200} className={styles.noteSegmentBody}>
+                      {seg.body}
+                    </Text>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Text size={200} className={styles.body} data-testid={`compose-comment-gutter-body-${thread.id}`}>
+                {bodyText}
+              </Text>
+            )}
             {thread.standardRef ? (
               resolveStandardText ? (
                 <StandardRefChip
