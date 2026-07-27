@@ -62,7 +62,9 @@ import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionC
 import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
-import { useNdaReviewAdvisoryCommentsBridge } from "./useNdaReviewAdvisoryCommentsBridge";
+import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
+import { useNdaReviewRunProgress } from "./useNdaReviewRunProgress";
+import { NdaReviewProgressModal } from "./NdaReviewProgressModal";
 import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
@@ -472,6 +474,15 @@ export function ConversationPane(): React.JSX.Element {
   // with the other Compose bridges) is reached from the chips controller through this ref so the "Review
   // an NDA" card path also materializes flagged clauses as Compose comments (not just raw JSON).
   const ndaReviewEmitRef = React.useRef<(result: unknown) => void>(() => undefined);
+  // UAT round-5 #9 — center-screen progress modal for a running NDA review. Driven by the three real
+  // client transitions: dispatch-start (onChipDispatched, gated to the NDA binding), NDA-shaped terminal
+  // result (onDispatchResult), and dispatch-settle-without-result (a chips.dispatching effect → fail).
+  // Refs let the stable []-deps chip callbacks reach the current hook + binding id without re-subscribing.
+  const ndaRun = useNdaReviewRunProgress();
+  const ndaRunRef = React.useRef(ndaRun);
+  ndaRunRef.current = ndaRun;
+  const ndaReviewBindingIdRef = React.useRef<string | null>(null);
+  ndaReviewBindingIdRef.current = ndaReviewBindingId;
   // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
   // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
   // (subject / body / suggested recipients) captured from the last "Draft a response" result.
@@ -521,7 +532,11 @@ export function ConversationPane(): React.JSX.Element {
     // nda-r1 follow-up: every Binding dispatch result on the chip/card path flows to the NDA-REVIEW
     // advisory-comments bridge (via ref — defined below). Materializes flagged clauses as Compose
     // comments for the "Review an NDA" card; safe no-op for every non-NDA result shape.
-    onDispatchResult: React.useCallback((result: unknown) => ndaReviewEmitRef.current(result), []),
+    onDispatchResult: React.useCallback((result: unknown) => {
+      ndaReviewEmitRef.current(result);
+      // UAT round-5 #9 — an NDA-shaped terminal result completes the progress modal.
+      if (isNdaReviewResult(result)) ndaRunRef.current.complete();
+    }, []),
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
     // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
@@ -556,9 +571,23 @@ export function ConversationPane(): React.JSX.Element {
     onChipDispatched: React.useCallback((bindingId: string) => {
       recordChipUsage(bindingId);
       setChipUsageTick((t) => t + 1);
+      // UAT round-5 #9 — when the NDA-review binding is the one dispatched (from the "Review an NDA"
+      // card OR its chip), open the center-screen progress modal.
+      if (ndaReviewBindingIdRef.current && bindingId === ndaReviewBindingIdRef.current) {
+        ndaRunRef.current.begin();
+      }
     }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
+  // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
+  // `onDispatchResult` runs before the dispatch's `.finally` clears `dispatching`). `ndaRun.fail` is a
+  // stable callback, so this effect only re-runs when `chips.dispatching` actually flips.
+  const ndaRunFail = ndaRun.fail;
+  React.useEffect(() => {
+    if (!chips.dispatching) ndaRunFail();
+  }, [chips.dispatching, ndaRunFail]);
 
   // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
   // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
@@ -1881,6 +1910,9 @@ export function ConversationPane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
+      {/* UAT round-5 #9 — center-screen live-progress popup while an NDA review runs (portals to
+          document.body, so its placement in the tree is immaterial). */}
+      <NdaReviewProgressModal status={ndaRun.status} onClose={ndaRun.close} />
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
