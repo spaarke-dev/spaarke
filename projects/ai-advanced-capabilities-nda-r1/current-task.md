@@ -1,6 +1,6 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-27 (UAT round-2 5-item plan IMPLEMENTED + DEPLOYED). **Read this block first.**
+> **Last Updated**: 2026-07-27 (by context-handoff — UAT round-4 batch A DEPLOYED; batch B #5/#6/#8 NEXT). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
