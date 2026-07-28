@@ -6,10 +6,19 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 ready fixes DEPLOYED** (popup width, #1 scrollbar, #2 sort). Round-8 AI-tooling (#3–#7) = SCOPED, NOT started (needs server bindings). |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `d1be83701`. Working tree CLEAN. |
-| **Deployed (2026-07-27 r8a)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4926 KB, from HEAD d1be83701. Master since base = only `0e1e30d95` → no clobber. |
-| **Next Action** | Owner decision on round-8 AI-tooling (#3–#7 — see below; needs server bindings + `instruction` slot). Then deferred: takeaway-field re-seed, allowsknowledge gate, merge/PR. |
+| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 mostly DEPLOYED**: popup width, #1 scrollbar, #2 sort, #7 Assistant explanation, #3/#4/#5 Review-Note ⋮ menu. Remaining: #6 BubbleMenu cleanup + Make-concise/Describe-changes (need bindings). |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `c9b57fc1f`. Working tree CLEAN. |
+| **Deployed (2026-07-27 r8, 3 commits)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4928 KB. d1be83701 (popup/#1/#2) → 488113b59 (#7) → c9b57fc1f (#3/#4/#5). Master since base = only `0e1e30d95` → no clobber. |
+| **Next Action** | Owner UAT of round-8. Remaining: #6 BubbleMenu cleanup (client-only, deferred for shared-component care), Make-concise/Describe-changes tools (need seeded bindings + `instruction` slot — owner go-ahead). Then takeaway re-seed, allowsknowledge, merge/PR. |
+
+### ✅ UAT round-8 DEPLOYED (d1be83701, 488113b59, c9b57fc1f)
+- **Popup width** 460→560 (bg covers the 4-step track). **#1** modern thin scrollbar, removed the FAB. **#2** summary "By section" sorts by resolved `docPosition` (true doc order). `NdaReviewSummaryPanel`/`ComposeEditor`.
+- **#7** Assistant confirmation appends the model's rationale — `extractComposeEditExplanation` (draft-alternative `rationale` / revise `summary`, NOT the redline text) → `**What I changed:** …` in `ConversationPane.dispatchComposeAction`. +3 tests.
+- **#3/#4/#5** Per-Review-Note ⋮ AI-tools menu: `ComposeCommentGutter` `noteTools`+`onRunNoteTool` props; ⋮ Menu (stopPropagation). `ComposeEditor` reads binding-wired edit actions from `getComposeAiToolbarActions()` (allow-list `NOTE_TOOL_LABELS`, NOT the registry `materializesInEditor` flag), `runNoteTool` dispatches the action against the note's `findCommentAnchorRange` span with the toolbar's slot shape, ALWAYS `documentSessionId:sessionId` (redline routing) → reuses the existing draft-alternative binding → Assistant confirms (#7). Extensible: add id+label to `NOTE_TOOL_LABELS`. +2 tests. 620/621 green.
+
+### 🔴 Round-8 remaining
+- **#6 BubbleMenu cleanup** (remove non-working Explain/Email/Defined-terms; the selection toolbar): CLIENT-ONLY but touches the heavily-tested shared `ComposeAiToolbar` + interacts with the live registry (removing from DEFAULT_ACTIONS may not drop a live-registered action) — deferred for careful handling.
+- **Make-concise + Describe-changes tools** (note ⋮ + BubbleMenu): NEED seeded server bindings (`compose-make-concise`, `compose-rewrite-instruction`) + a free-text `instruction` input-schema slot (outward-facing). Client stubs are commented in `NOTE_TOOL_LABELS`; once seeded, add the id+label and (for describe-changes) an `instruction` slot. Owner go-ahead needed.
 
 ### ✅ UAT round-8 ready fixes DEPLOYED (d1be83701)
 - **Popup width**: round-7's maxWidth:460 was narrower than the 4-step track (~400px, flex-shrink:0) → track overflowed the white surface. Now `width:560px, maxWidth:92vw`. `NdaReviewProgressModal.tsx`.
