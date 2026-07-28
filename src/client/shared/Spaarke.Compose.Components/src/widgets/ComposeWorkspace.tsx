@@ -216,12 +216,13 @@ interface RawComposeProjectionPayload {
   schemaVersion?: string;
 }
 
-// Phase-1 mammoth removal / FR-01 (task 010) / FR-03 (task 011): normalizes a raw wire `projection`
+// FR-01 (task 010) / FR-03 (task 011): normalizes a raw wire `projection`
 // field into the `ComposeServerProjection` shape the reducer/editor expect, defaulting every field
 // defensively. `undefined`/`null` (an older BFF, or a failed/unreachable projection call) normalizes
-// to `null` — the editor's mammoth fallback. Shared by the stored-doc Load, assistant-upload
-// (task 010), and Browse->project (task 011) hydration sites so the three doors do not fork the same
-// defaulting logic three times over.
+// to `null` — since task 013 (F-2 "one reader") the editor has no client-side fallback reader left,
+// so a null projection now renders an explicit error/unavailable state instead. Shared by the
+// stored-doc Load, assistant-upload (task 010), and Browse->project (task 011) hydration sites so
+// the three doors do not fork the same defaulting logic three times over.
 function normalizeProjection(p: RawComposeProjectionPayload | null | undefined): ComposeServerProjection | null {
   if (!p) return null;
   return {
@@ -723,8 +724,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap?: ParaIdMapEntry[];
           importedRevisions?: ImportedRevision[];
           importedComments?: ImportedComment[];
-          // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server
-          // DOCX→editor projection. Optional so an older BFF (no projection) falls back to mammoth.
+          // The server DOCX→editor projection. Optional so an older BFF (no projection) still parses —
+          // task 013 (F-2): the editor now renders an error/unavailable state, not a mammoth fallback.
           projection?: {
             status?: 'success' | 'partial' | 'failed';
             canEdit?: boolean;
@@ -755,9 +756,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
         const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
         const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
-        // Phase-1 mammoth removal / task 011: normalize the server projection defensively via the
-        // shared `normalizeProjection` helper (also used by Upload + Browse->project). An older BFF
-        // (no projection field) → null → the editor falls back to the client mammoth convert.
+        // Task 011: normalize the server projection defensively via the shared `normalizeProjection`
+        // helper (also used by Upload + Browse->project). An older BFF (no projection field) → null →
+        // (task 013, F-2) the editor renders an explicit error/unavailable state.
         const hydratedProjection = normalizeProjection(payload.projection);
         dispatch({
           kind: 'loadSucceeded',
@@ -1728,15 +1729,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
       // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2 path-A resolution): project the
       // browsed bytes through the SAME stateless server reader Load/Upload use (POST
-      // /api/compose/project) so Browse renders via the one-reader projection branch (F-2) instead
-      // of the lossy client mammoth fallback. This is a READ-only round-trip: the server returns a
-      // projection and persists NOTHING (no ITenantCache write, no SPE write, no sprk_document row)
-      // — it does NOT violate ADR-040 / R4 I-2 (the client still authors no .docx bytes; it merely
-      // asks the server to render bytes it already holds locally, and the server hands back a
-      // render without storing or echoing them as an authored artifact). Best-effort: if the BFF is
-      // unconfigured/unreachable or the call fails, fall through with `projection: null` so Browse
-      // still mounts standalone via the mammoth fallback — Browse's historical zero-BFF-dependency
-      // contract for the MOUNT itself is preserved; only the render fidelity degrades.
+      // /api/compose/project) so Browse renders via the one-reader projection branch (F-2). This is a
+      // READ-only round-trip: the server returns a projection and persists NOTHING (no ITenantCache
+      // write, no SPE write, no sprk_document row) — it does NOT violate ADR-040 / R4 I-2 (the client
+      // still authors no .docx bytes; it merely asks the server to render bytes it already holds
+      // locally, and the server hands back a render without storing or echoing them as an authored
+      // artifact).
+      //
+      // Task 013 (F-2 "one reader") RECONCILIATION: the client mammoth fallback reader has been
+      // DELETED, so Browse now HARD-REQUIRES this round-trip to produce an editable surface. The
+      // fetch below stays best-effort at the NETWORK layer (unconfigured `bffBaseUrl` / thrown fetch
+      // still fall through with `projection: null`, and `mountTransient` still dispatches so the tab
+      // navigates and the file is registered with the active chat session) — but a null projection no
+      // longer degrades to a lossy mammoth render. `ComposeEditor` now renders an explicit "couldn't
+      // prepare this document for editing" error/unavailable state for a docx mount with no
+      // projection (see `ComposeEditor.tsx`'s `projectionUnavailable` state) — never a silent blank or
+      // degraded editor.
       void (async () => {
         let projection: ComposeServerProjection | null = null;
         if (bffBaseUrl) {
@@ -1751,9 +1759,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               projection = normalizeProjection(payload.projection);
             }
           } catch {
-            // Network/parse failure — fall through with projection: null (mammoth fallback). Browse
-            // must not be blocked by an unreachable BFF; the projection round-trip is a render-fidelity
-            // enhancement, not a mount precondition.
+            // Network/parse failure — fall through with projection: null. The MOUNT itself still
+            // proceeds (dispatch below), but per task 013 (F-2) the editor renders the explicit
+            // error/unavailable state rather than a degraded render — there is no fallback reader.
             projection = null;
           }
         }
@@ -2042,7 +2050,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): the server DOCX→editor projection,
           // built from these SAME uploaded bytes via ComposeDocxProjectionBuilder — the identical
           // shape the stored-doc Load response carries. Optional so an older BFF (no projection
-          // field) still mounts via the mammoth fallback (backward compatible).
+          // field) still mounts — task 013 (F-2): the editor renders an error/unavailable state, not
+          // a mammoth fallback (which no longer exists client-side).
           projection?: {
             status?: 'success' | 'partial' | 'failed';
             canEdit?: boolean;
@@ -2063,7 +2072,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         // Normalize the server projection defensively via the shared `normalizeProjection` helper —
         // same shape/defaults as the Load effect above. An older BFF (no projection field) → null →
-        // the editor falls back to mammoth.
+        // (task 013, F-2) the editor renders an explicit error/unavailable state.
         const hydratedUploadProjection = normalizeProjection(payload.projection);
 
         // An upload mount has no SPE drive — clear any stale Search-resolved drive id
@@ -2453,8 +2462,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               paraIdMap={state.paraIdMap}
               importedRevisions={state.importedRevisions}
               importedComments={state.importedComments}
-              // Phase-1 mammoth removal: the server DOCX→editor projection (stored-document Load only).
-              // When present the editor mounts projection.html directly; null → mammoth fallback.
+              // The server DOCX→editor projection — every mount door hydrates it (tasks 010/011/012).
+              // When present the editor mounts projection.html directly; null on a docx mount → (task
+              // 013, F-2 "one reader") the editor renders an explicit error/unavailable state.
               projection={state.projection}
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}

@@ -12,7 +12,8 @@
  * Responsibilities:
  *  1. Mount TipTap with the LOCKED Spike #1 extension set (StarterKit +
  *     11 standard MIT extensions — zero TipTap Pro, zero custom).
- *  2. Import DOCX bytes via mammoth (lazy-loaded) on `docxBytes` prop change.
+ *  2. Mount the `projection` prop's server-rendered HTML on `docxBytes` prop change (task 013,
+ *     F-2 "one reader" — the client-side mammoth import reader was deleted).
  *  3. Expose `serialize()` via ref — lazy-loads `docx` to export TipTap state
  *     back to DOCX bytes for SPE save.
  *  4. Emit PaneEventBus events per the locked compose-contracts:
@@ -103,6 +104,7 @@ import {
   CommentMultiple20Regular,
   Dismiss16Regular,
   DocumentProhibited24Regular,
+  ErrorCircle24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import {
@@ -151,13 +153,11 @@ import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 // resolve). Same rationale as ComposeWorkspace.tsx above.
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
-import {
-  docxToTipTapHtml,
-  stampParaIds,
-  captureParaIdSnapshot,
-  buildContentModel,
-  buildBaselineParaIdMap,
-} from '../utils/docxBridge';
+// Task 013 (spaarkeai-compose-fidelity-r4.5, F-2 "one reader"): `docxToTipTapHtml` (the client
+// mammoth reader) and `stampParaIds` (only ever called from the now-deleted mammoth branch) are no
+// longer imported here — every mount now hydrates via the `projection` branch below, whose HTML
+// already carries server paraIds (`data-paraid`), so no client-side stamping pass is needed.
+import { captureParaIdSnapshot, buildContentModel, buildBaselineParaIdMap } from '../utils/docxBridge';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
 // R4 FR-03/FR-06 (task 020/022/032) — the step→operation interceptor + its rebased
 // operation log. A headless, read-only ProseMirror plugin captures transaction steps
@@ -193,16 +193,17 @@ import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useCo
 // Wave 6 (UAT-R4, DEF-G) — non-docx reference-only guard
 // ---------------------------------------------------------------------------
 //
-// Editable Compose content is DOCX-ONLY by design (mammoth parses OOXML/zip;
-// there is no PDF→editable conversion — Open-in-Word is the escape hatch). A
-// DOCX is a ZIP archive, so its first four bytes are the ZIP local-file-header
-// magic `PK\x03\x04` (0x50 0x4B 0x03 0x04). Any other leading signature — a
-// `%PDF-` header, plain text, etc. — cannot be a DOCX; mammoth would THROW on
-// it and (pre-Wave-6) leave a silent, confusing empty `<p></p>` editor. Since
-// Wave 3 made "Open in Compose" open the active SOURCE document, a chat-uploaded
-// PDF can now reach this editor. We detect non-docx from the byte signature
-// BEFORE calling mammoth and render an explicit reference-only state instead
-// (with the mammoth throw as a defensive fallback that renders the same state).
+// Editable Compose content is DOCX-ONLY by design (the server projection parses
+// OOXML/zip; there is no PDF→editable conversion — Open-in-Word is the escape
+// hatch). A DOCX is a ZIP archive, so its first four bytes are the ZIP
+// local-file-header magic `PK\x03\x04` (0x50 0x4B 0x03 0x04). Any other leading
+// signature — a `%PDF-` header, plain text, etc. — cannot be a DOCX; the server
+// projection would fail-closed on it and (pre-Wave-6) leave a silent, confusing
+// empty `<p></p>` editor. Since Wave 3 made "Open in Compose" open the active
+// SOURCE document, a chat-uploaded PDF can now reach this editor. We detect
+// non-docx from the byte signature BEFORE the mount and render an explicit
+// reference-only state instead (a `status:'failed'`/`canEdit:false` projection —
+// see below — is a defensive second layer that renders the same state).
 //
 // `PK\x05\x06` (empty archive) / `PK\x07\x08` (spanned) are deliberately NOT
 // treated as docx — a real .docx always begins with a local file header
@@ -225,10 +226,10 @@ function isDocxBytes(bytes: ArrayBuffer): boolean {
 const NON_DOCX_EXTENSION = /\.(pdf|txt|rtf|doc|xlsx?|pptx?|csv|zip|md|html?|json|xml|png|jpe?g|gif|tiff?)$/i;
 
 /**
- * Wave 6 (DEF-G) — decide whether a mounted buffer is an EDITABLE DOCX (attempt
- * mammoth) or a reference-only file. Combines the two pre-mammoth signals so the
- * common non-docx cases are caught BEFORE the import (never relying on a mammoth
- * throw, which — swapped mid-session — would fight ProseMirror's DOM):
+ * Wave 6 (DEF-G) — decide whether a mounted buffer is an EDITABLE DOCX (mount via
+ * the server projection) or a reference-only file. Combines two signals so the
+ * common non-docx cases are caught BEFORE the mount (never relying on a
+ * projection failure, which — swapped mid-session — would fight ProseMirror's DOM):
  *  1. An explicitly non-docx fileName extension is reference-only even if the
  *     bytes look like a ZIP (xlsx/pptx are ZIPs too).
  *  2. Otherwise, a real .docx must carry the OOXML ZIP local-file-header magic.
@@ -253,7 +254,7 @@ function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined): boole
  * is responsible for `npm install --legacy-peer-deps` resolving compatible
  * versions across the 14 TipTap packages.
  *
- * All packages MIT-licensed; mammoth is BSD-2-Clause; docx is MIT. NO TipTap
+ * All packages MIT-licensed; docx (server-side render input) is MIT. NO TipTap
  * Pro (Track Changes, Comments, Mathematics, Drawing). NO custom extensions.
  */
 const LOCKED_EXTENSIONS = [
@@ -470,7 +471,9 @@ export interface ComposeEditorProps {
    * DOCX bytes to render (typically from SPE drive-item content via
    * `ComposeDocumentService.LoadDocumentAsync`). `null` means "no document
    * loaded yet"; the editor renders an empty paragraph. Changing this prop
-   * triggers a mammoth re-import.
+   * triggers a mount via the `projection` prop's server-rendered HTML (task
+   * 013, F-2 "one reader"); a present-but-`projection`-less mount renders an
+   * explicit error/unavailable state — there is no client-side fallback reader.
    */
   docxBytes: ArrayBuffer | null;
 
@@ -487,13 +490,13 @@ export interface ComposeEditorProps {
 
   /**
    * FR-08/FR-09 (spaarkeai-compose-r3 task 011) — the server pre-parse `w14:paraId`
-   * map from the Load response (task 010), in document order. When a `docxBytes`
-   * document is mounted, these ids are stamped onto the editor's paragraph nodes
-   * as hidden attributes immediately after import (see {@link stampParaIds}), so
-   * edited paragraphs map back to their original OOXML paragraphs on the retained-
-   * original delta save (FR-12). Absent/empty for an AI-drafted seed (`initialHtml`)
-   * — there the paraId extension mints fresh OOXML-shaped ids itself. Identifiers
-   * only (Tier 1 safe).
+   * map from the Load response (task 010), in document order. Historically stamped
+   * onto the editor's paragraph nodes as hidden attributes via {@link stampParaIds}
+   * immediately after the (now-deleted) client-side mammoth import. Task 013 (F-2
+   * "one reader"): the server `projection` prop's HTML now carries `data-paraid`
+   * directly, so the mount effect no longer calls `stampParaIds` with this map —
+   * it is accepted for prop-shape/host-contract compatibility but currently unused
+   * by the mount path. Identifiers only (Tier 1 safe).
    */
   paraIdMap?: readonly ParaIdMapEntry[];
 
@@ -502,8 +505,8 @@ export interface ComposeEditorProps {
    * (`w:ins`/`w:del`, any authorship) recovered server-side on Load and projected onto the Load
    * response (`ImportedRevision[]`), in document order. On a `docxBytes` mount these are rendered as
    * first-class, author/date-attributed, accept/reject-able insertion/deletion marks anchored by
-   * `paraId` (see {@link applyImportedRevisions}) — instead of the mammoth-flattened prose the editor
-   * would otherwise show. Absent/empty for an AI-drafted seed (`initialHtml`) or a document with no
+   * `paraId` (see {@link applyImportedRevisions}) — instead of the flattened prose the server
+   * projection would otherwise show. Absent/empty for an AI-drafted seed (`initialHtml`) or a document with no
    * existing revisions. Set atomically with `docxBytes` + `paraIdMap` by the host (same mount contract).
    * Privacy: `text`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
    */
@@ -516,7 +519,7 @@ export interface ComposeEditorProps {
    * threads (first comment on a span = thread root, the rest = flat replies — see
    * {@link groupImportedComments}) and rendered via the `ComposeCommentThread` panel (task 044),
    * anchored by `paraId` (see {@link applyImportedCommentAnchors}) — instead of the comments the
-   * mammoth convert would otherwise silently drop. Absent/empty for an AI-drafted seed (`initialHtml`)
+   * server projection would otherwise silently drop. Absent/empty for an AI-drafted seed (`initialHtml`)
    * or a document with no existing comments. Set atomically with `docxBytes` + `paraIdMap` by the host
    * (same mount contract as `importedRevisions`).
    * Privacy: `commentText`/`anchorText` are Tier 3 (document content) — carried in-memory only, never logged.
@@ -524,13 +527,16 @@ export interface ComposeEditorProps {
   importedComments?: readonly ImportedComment[];
 
   /**
-   * Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — the server-side
-   * DOCX→editor projection from a STORED-DOCUMENT Load. When present the editor mounts `projection.html`
-   * DIRECTLY (the paraId extension parses `data-paraid`) instead of running the client mammoth convert +
-   * position-based `stampParaIds` — eliminating the two-engine drift. Fail-closed: `canEdit === false`
-   * (or `status === 'failed'`) ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank
-   * editable doc over a non-empty baseline. Null/absent for a transient (Browse / assistant-upload /
-   * AI-draft) mount or an older BFF — those fall back to the mammoth convert.
+   * The server-side DOCX→editor projection (`ComposeDocxProjectionBuilder`, `Sprk.Bff.Api`) — the
+   * SOLE docx→editor reader as of task 013 (F-2 "one reader"; the client-side mammoth convert was
+   * deleted). Every entry path (stored-document Load, assistant-upload, Browse, open-in-Compose)
+   * supplies this by hydrating it server-side before mounting `docxBytes`. When present the editor
+   * mounts `projection.html` DIRECTLY (the paraId extension parses `data-paraid`). Fail-closed:
+   * `canEdit === false` (or `status === 'failed'`) ⇒ the editor renders a read-only / "Open in Word"
+   * state, NEVER a blank editable doc over a non-empty baseline. Null/absent (the projection
+   * round-trip failed, was unreachable, or was never attempted) with a non-null `docxBytes` ⇒ the
+   * editor renders an explicit error/unavailable state (task 013) — there is no client-side fallback
+   * reader to fall back to.
    * Privacy: `html` is Tier 3 (document content) — carried in-memory only, never logged.
    */
   projection?: ComposeServerProjection | null;
@@ -567,9 +573,10 @@ export interface ComposeEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
 
   /**
-   * Called with mammoth's conversion-warning array after each DOCX import.
-   * The host can surface a "this document was simplified on load" banner
-   * (deferred to R2 per Spike #1 §5.4; R1 only logs to console).
+   * Called with the server projection's fidelity-warning array after each DOCX mount (task 013:
+   * formerly mammoth's per-conversion warnings; now `projection.warnings` + unresolved-revision
+   * notices). The host can surface a "this document was simplified on load" banner (deferred to R2
+   * per Spike #1 §5.4; R1 only logs to console).
    *
    * Tier 1 safe (warnings are configuration metadata, not document content).
    */
@@ -1115,6 +1122,17 @@ const useStyles = makeStyles({
     maxWidth: '420px',
     color: tokens.colorNeutralForeground3,
   },
+  // Task 013 (F-2 "one reader") — the mammoth client-side fallback reader was deleted, so a docx
+  // mount with no server projection (BFF unreachable/failed) has no reader left. Distinct from
+  // `referenceOnly` (a non-docx file, by design not editable) — this is a FAILURE state, so the
+  // icon uses the danger semantic token while reusing the same calm, centered layout. Semantic
+  // tokens only (ADR-021 dark-mode-correct).
+  projectionUnavailableIcon: {
+    fontSize: '48px',
+    width: '48px',
+    height: '48px',
+    color: tokens.colorStatusDangerForeground1,
+  },
   // DEF-17 (UAT-R3): the popup (AI-actions-ONLY since task 111) must present a
   // SINGLE row. The former `flexWrap: 'wrap'` + `maxWidth: '420px'` cap forced
   // a second wrapped row once the text-labelled buttons exceeded 420px — that
@@ -1631,10 +1649,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- Wave 6 (DEF-G) — non-docx reference-only state ------------------
     // Non-null when a NON-DOCX buffer reached the editor (detected by byte
-    // signature before mammoth, or via the mammoth-throw fallback). The editor
+    // signature before the mount, or via a fail-closed projection). The editor
     // then renders an explicit reference-only surface instead of a silent empty
     // `<p></p>`. `fileName` is the UI label only (Tier 1 identifier).
     const [referenceOnly, setReferenceOnly] = React.useState<{ fileName?: string } | null>(null);
+
+    // ----- Task 013 (F-2 "one reader") — projection-unavailable state ------
+    // Non-null when a valid, editable DOCX buffer reached the editor but NO server projection was
+    // supplied (`projection` prop is null) — i.e. the `POST /api/compose/{project,upload}` round-trip
+    // failed, was unreachable, or the host is an older BFF build without projection support. Before
+    // task 013 this fell back to a client-side mammoth conversion; that second reader is now deleted
+    // (F-2 — exactly one docx→editor reader). There is nothing left to fall back to, so the editor
+    // surfaces this explicit, calm error/unavailable state — NEVER a silent blank editor and NEVER a
+    // second client-side docx parser. `fileName` is the UI label only (Tier 1 identifier).
+    const [projectionUnavailable, setProjectionUnavailable] = React.useState<{ fileName?: string } | null>(
+      null
+    );
 
     // ----- Task 111 — right-click (context-menu) AI-toolbar trigger --------
     // The screen point (viewport coords) of the last suppressed native context
@@ -1912,8 +1942,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       if (!editor) return;
       if (!docxBytes) {
-        // Any prior reference-only state is cleared when we leave the docx path.
+        // Any prior reference-only / projection-unavailable state is cleared when we leave the docx path.
         setReferenceOnly(null);
+        setProjectionUnavailable(null);
         // DEF-08: an AI-drafted full-document seed sets the editor content DIRECTLY from HTML
         // (no docx decode) — the draft body IS the editor content. A draft is a transient working
         // draft (never yet saved), so report dirty=true to the workspace (create-on-save first Save
@@ -1938,21 +1969,23 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         return;
       }
       // Wave 6 (DEF-G): a NON-DOCX buffer (e.g. a chat-uploaded PDF reaching the
-      // editor via Wave-3 "Open in Compose") cannot be edited — mammoth would
-      // throw and leave a silent empty editor. Detect it from the byte signature
-      // BEFORE attempting the import and render an explicit reference-only state.
-      // The editable DOCX path below is unchanged. Nothing is editable here, so
-      // report dirty=false (no create-on-save for a reference-only file).
+      // editor via Wave-3 "Open in Compose") cannot be edited. Detect it from the
+      // byte signature BEFORE attempting to mount and render an explicit
+      // reference-only state. The editable DOCX path below is unchanged. Nothing
+      // is editable here, so report dirty=false (no create-on-save for a
+      // reference-only file).
       if (!isEditableDocx(docxBytes, documentRef?.fileName)) {
         editor.commands.setContent('<p></p>');
         dirtyRef.current = false;
         setReferenceOnly({ fileName: documentRef?.fileName });
+        setProjectionUnavailable(null);
         onDirtyChange?.(false);
         return;
       }
-      // A valid DOCX cleared any prior reference-only state (e.g. a subsequent
-      // real .docx mount replacing a non-docx one).
+      // A valid DOCX cleared any prior reference-only / projection-unavailable state (e.g. a
+      // subsequent real .docx mount replacing a non-docx one, or a retry that succeeded).
       setReferenceOnly(null);
+      setProjectionUnavailable(null);
       // gap 1.6 / DEF-01: a TRANSIENT (Browse/Upload) mount has no SPE pointer yet (empty
       // speDriveItemId). Its create-on-save first Save must be reachable, so we report
       // dirty=true to the workspace (there IS unsaved work — the draft has never been
@@ -1962,13 +1995,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // the workspace-facing onDirtyChange signal. A stored (non-transient) load reports clean.
       const isTransientMount = !documentRef?.speDriveItemId;
 
-      // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): when the host
-      // supplies a SERVER PROJECTION (a stored-document Load), mount its paraId-tagged HTML DIRECTLY — the
-      // paraId extension parses `data-paraid` on setContent, so there is NO client mammoth convert and NO
-      // position-based `stampParaIds` (the two-engine drift that caused the save-abort bug class). The
-      // imported-revision/comment overlays + the snapshot run EXACTLY as the mammoth path below, now keyed
-      // by the exact server paraIds. A transient/browse mount (no projection) still uses the mammoth
-      // fallback below (its create-on-save persists the original bytes, so paraId alignment is moot there).
+      // Phase-1 mammoth removal COMPLETE (task 013, F-2 "one reader"): the host ALWAYS supplies a
+      // SERVER PROJECTION for every entry path (Load, Upload, Browse, open-in-Compose) — mount its
+      // paraId-tagged HTML DIRECTLY. The paraId extension parses `data-paraid` on setContent, so
+      // there is NO client-side docx conversion and NO position-based `stampParaIds` (the two-engine
+      // drift that caused the recurring save-abort bug class). If `projection` is null here, there is
+      // NO second reader to fall back to (see the `else` branch below) — the editor surfaces an
+      // explicit error/unavailable state instead of a silent blank editor.
       if (projection) {
         // Fail-closed (design §4 / GPT §11): a failed or non-editable projection MUST NOT mount a blank
         // editable doc over a non-empty retained baseline — render the reference-only "Open in Word" state.
@@ -1977,12 +2010,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           opLogRef.current?.reset(); // R4 FR-06 (task 032): no user edits on a reference-only mount.
           dirtyRef.current = false;
           setReferenceOnly({ fileName: documentRef?.fileName });
+          setProjectionUnavailable(null);
           onDirtyChange?.(false);
           return;
         }
+        setProjectionUnavailable(null);
         editor.commands.setContent(projection.html);
-        // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot mirror the mammoth
-        // path below (applied AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers).
+        // paraIds arrive in the HTML (data-paraid) — NO stampParaIds. Overlays + snapshot apply
+        // AFTER setContent, BEFORE the snapshot, addToHistory:false inside the helpers.
         const projectionRevisionResult = applyImportedRevisions(editor, importedRevisions);
         applyImportedCommentAnchors(editor, importedComments);
         // FR-10 / I-7 (task 053): a revision whose paraId is unresolvable (Word regenerated it on an
@@ -2017,93 +2052,29 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         return;
       }
 
-      let cancelled = false;
-      setIsImporting(true);
-      docxToTipTapHtml(docxBytes)
-        .then(({ html, messages }) => {
-          if (cancelled) return;
-          editor.commands.setContent(html);
-          // FR-09 (task 011): stamp the server pre-parse `w14:paraId`s onto the paragraph
-          // nodes EXPLICITLY, immediately after setContent, so load-time identity is
-          // server-owned (the paraId extension's own minting only fills ids the server did
-          // not supply + re-mints on split). No-op when the map is absent (empty stamp).
-          stampParaIds(editor, paraIdMap);
-          // FR-24 (task 050, import round-trip): render the EXISTING Word revisions (recovered server-side
-          // by DocxAnnotationReader, projected onto the Load response) as first-class insertion/deletion
-          // marks — instead of the mammoth-flattened prose. Applied AFTER stampParaIds so paraId anchoring
-          // is exact, and BEFORE captureParaIdSnapshot so an imported revision's marks are folded into the
-          // load-time reject-state baseline (an untouched imported revision then reads as NOT edited on the
-          // next save — it rides the retained original, per task 052). Marks apply with addToHistory:false
-          // and the dirty flag is reset just below, so this render is not a user edit.
-          const mammothRevisionResult = applyImportedRevisions(editor, importedRevisions);
-          // FR-25 (task 051, import round-trip): anchor each imported comment thread's root span with the
-          // visible commentAnchor mark (the SAME mark a user's own "create thread" gesture applies), keyed
-          // by the same thread id `initialCommentThreads` (above) used to seed the FR-23 panel. Applied
-          // AFTER stampParaIds (exact paraId anchoring) and BEFORE captureParaIdSnapshot, mirroring
-          // applyImportedRevisions immediately above — the anchor mark must fold into the load-time
-          // reject-state baseline, not read as a user edit on the next save.
-          applyImportedCommentAnchors(editor, importedComments);
-          // FR-10 / I-7 (task 053): surface any revision that could not be anchored (see the projection
-          // branch above for the full rationale) — appended once, after the resolved revisions/comments,
-          // and folded into the load-time baseline below (never a user edit).
-          renderUnresolvedRevisionPlaceholders(editor, mammothRevisionResult.unresolvedItems);
-          // FR-01 (task 027): snapshot the load-time reject-state text per paraId — the baseline the C2
-          // minted-id map + the live Track Changes decoration diff against. Captured AFTER the stamp so
-          // every block carries its server paraId.
-          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
-          // R4 FR-06 (task 032): drop any ops the setContent/import transactions produced (the load is not a
-          // user edit) so the op-log starts empty, aligned to this load-time reject-state baseline.
-          opLogRef.current?.reset();
-          dirtyRef.current = false; // fresh load: editor's internal dirty flag is clean (FR-06a)
-          onDirtyChange?.(isTransientMount);
-          // Privacy: messages are Tier 1 safe (configuration metadata).
-          // Document HTML itself is Tier 3 — NEVER logged.
-          if (messages.length > 0) {
-            // eslint-disable-next-line no-console
-            console.info(`[ComposeEditor] mammoth surfaced ${messages.length} warning(s) on import`);
-          }
-          const combinedImportWarnings = [...messages];
-          if (mammothRevisionResult.unresolvedItems.length > 0) {
-            combinedImportWarnings.push({
-              type: 'warning',
-              message: `${mammothRevisionResult.unresolvedItems.length} imported revision(s) could not be automatically placed — see the review marker(s) at the end of the document.`,
-            });
-          }
-          onImportWarnings?.(combinedImportWarnings);
-        })
-        .catch(err => {
-          // eslint-disable-next-line no-console
-          console.error('[ComposeEditor] DOCX import failed', err instanceof Error ? err.message : String(err));
-          // Wave 6 (DEF-G): the pre-mammoth `isEditableDocx` gate above is the
-          // ROBUST non-docx detector (extension + ZIP signature) — it routes the
-          // real reference-only cases (PDF/txt/xlsx/etc.) away BEFORE this import,
-          // while ProseMirror is still pristine. We deliberately do NOT flip to
-          // reference-only HERE: a mammoth throw on a buffer that DID pass the gate
-          // is a genuinely-DOCX-but-unparseable case (corrupt OOXML / rare env
-          // failure), and swapping the surface mid-session would unmount a live
-          // ProseMirror instance. Preserve the original behavior — log + leave the
-          // editor — so a transient import failure never yields a false "can't be
-          // edited" verdict for a real .docx.
-        })
-        .finally(() => {
-          if (!cancelled) setIsImporting(false);
-        });
-      return () => {
-        cancelled = true;
-      };
-      // `documentRef?.speDriveItemId` is read (transient-vs-stored) but intentionally NOT a dep:
-      // the effect must re-run ONLY on a new `docxBytes` mount. Adding it would re-run on
-      // save-success (when speDriveItemId gets populated on the same bytes) and clobber the
-      // user's edits by re-importing the original mount bytes. The captured value is correct
-      // because `mountTransient` sets docxBytes + documentRef atomically in one render.
-      // `paraIdMap` is likewise read-but-not-a-dep for the same reason: the host sets it
-      // atomically with `docxBytes` per mount, so the captured value is the map for THESE
-      // bytes; adding it as a dep would risk a re-import (edit clobber) on an identity change.
-      // `importedRevisions` (FR-24, task 050) follows the identical mount contract — set atomically
-      // with `docxBytes` + `paraIdMap`, read here but intentionally not a dep for the same reason.
-      // `importedComments` (FR-25, task 051) follows the identical mount contract for the SAME reason —
-      // only the mark-application side is read here; `initialCommentThreads` (the panel-seeding half) is
-      // a separate useMemo above, correctly reactive to `importedComments` on its own.
+      // Task 013 (F-2 "one reader"): `projection` is null here — the client mammoth fallback
+      // reader has been DELETED, so there is no second docx→editor reader left to try. This is a
+      // valid, editable DOCX (the `isEditableDocx` gate above already passed) whose server
+      // projection round-trip failed, was unreachable (BFF down / network error), or was never
+      // attempted (an older host build). Surface a clear, explicit error/unavailable state — NEVER
+      // a silent blank `<p></p>` editor and NEVER a second client-side parser. The document remains
+      // available to the Assistant for reference (same "Open in Word" escape hatch the reference-only
+      // state offers), and Track Changes/redline features are moot since nothing mounted.
+      editor.commands.setContent('<p></p>');
+      opLogRef.current?.reset();
+      dirtyRef.current = false;
+      setReferenceOnly(null);
+      setProjectionUnavailable({ fileName: documentRef?.fileName });
+      onDirtyChange?.(false);
+      // `documentRef?.speDriveItemId` is read (transient-vs-stored, `isTransientMount` above) but
+      // intentionally NOT a dep: the effect must re-run ONLY on a new `docxBytes` mount. Adding it
+      // would re-run on save-success (when speDriveItemId gets populated on the same bytes) and
+      // clobber the user's edits by re-mounting the original mount bytes. The captured value is
+      // correct because `mountTransient` sets docxBytes + documentRef atomically in one render.
+      // `paraIdMap` / `importedRevisions` / `importedComments` are likewise read-but-not-a-dep for the
+      // same reason: the host sets them atomically with `docxBytes` per mount, so the captured value
+      // is correct for THESE bytes; adding them as deps would risk a re-mount (edit clobber) on an
+      // identity change. `projection` follows the identical mount contract for the same reason.
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [editor, docxBytes, initialHtml, onDirtyChange, onImportWarnings]);
 
@@ -2378,7 +2349,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ro?.disconnect();
         if (editor) editor.off('transaction', measure);
       };
-    }, [editor, referenceOnly, isImporting]);
+    }, [editor, referenceOnly, projectionUnavailable, isImporting]);
 
     // ----- Imperative handle ----------------------------------------------
     React.useImperativeHandle(
@@ -2552,6 +2523,40 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             <Text size={200} className={styles.referenceOnlyDetail}>
               Only Word (.docx) documents can be edited here. This file is available to the Assistant for reference —
               ask it to summarize, extract from, or answer questions about it.
+            </Text>
+          </div>
+        </div>
+      );
+    }
+
+    // Task 013 (F-2 "one reader") — a valid, editable DOCX reached the editor but the server
+    // projection round-trip failed/was unreachable, and the client mammoth fallback reader has
+    // been DELETED. Show an explicit, calm error/unavailable surface INSTEAD of a silent blank
+    // editor and INSTEAD of a second client-side parser. The document remains available to the
+    // Assistant for reference. Semantic tokens only (ADR-021 dark-mode-correct).
+    if (projectionUnavailable) {
+      return (
+        <div
+          className={styles.container}
+          role="region"
+          aria-label={projectionUnavailable.fileName ?? 'Compose editor'}
+          data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
+        >
+          <div
+            className={styles.referenceOnly}
+            role="status"
+            data-testid="compose-projection-unavailable"
+          >
+            <ErrorCircle24Regular className={styles.projectionUnavailableIcon} aria-hidden="true" />
+            <Text weight="semibold">
+              {projectionUnavailable.fileName
+                ? `Couldn’t prepare “${projectionUnavailable.fileName}” for editing`
+                : 'Couldn’t prepare this document for editing'}
+            </Text>
+            <Text size={200} className={styles.referenceOnlyDetail}>
+              Something went wrong preparing this document — try opening it again. This file is still
+              available to the Assistant for reference — ask it to summarize, extract from, or answer
+              questions about it.
             </Text>
           </div>
         </div>

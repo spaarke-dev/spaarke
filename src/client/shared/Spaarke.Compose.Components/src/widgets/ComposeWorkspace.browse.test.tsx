@@ -288,6 +288,38 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
     expect(editorProjection.current?.html).toBe('<p>Hello</p>');
   });
 
+  // Task 013 (spaarkeai-compose-fidelity-r4.5, FR-04 / F-2 "one reader") reconciliation: the client
+  // mammoth fallback is DELETED, so a docx mount with no projection now renders an explicit error
+  // state INSIDE ComposeEditor (proven at the ComposeEditor unit level in
+  // ComposeEditor.projection.test.tsx). At THIS boundary the contract under test is narrower but
+  // load-bearing: an unreachable BFF must NOT block the Browse mount itself — the tab still
+  // navigates, the file is still registered with the active chat session for Assistant reference,
+  // and `mountTransient` still dispatches with `projection: null` (never blocking on the network
+  // call) — it is ComposeEditor's render, not this dispatch, that changed in task 013.
+  it('BFF unreachable (fetch throws): the Browse mount still proceeds with projection: null (never blocked)', async () => {
+    authenticatedFetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/api/compose/project')) {
+        throw new Error('network unreachable');
+      }
+      return { ok: false, status: 404, json: async () => [], text: async () => '' };
+    });
+
+    renderWorkspace();
+
+    fireEvent.click(screen.getByTestId('compose-empty-state-browse'));
+    const fileInput = screen.getByTestId('compose-workspace-browse-file-input') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [makeDocxFile()] } });
+
+    // The mount still proceeds — never blocked by the failed round-trip.
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    expect(screen.queryByTestId('compose-empty-state')).not.toBeInTheDocument();
+    expect(editorDocxBytes.current).toBeInstanceOf(ArrayBuffer);
+
+    // `projection` normalizes to null — ComposeEditor (unit-tested separately) is responsible for
+    // rendering the error/unavailable state from here, not this dispatch.
+    await waitFor(() => expect(editorProjection.current).toBeNull());
+  });
+
   it('(negative) cancelling the picker leaves the empty state unchanged and mounts nothing', async () => {
     renderWorkspace();
 

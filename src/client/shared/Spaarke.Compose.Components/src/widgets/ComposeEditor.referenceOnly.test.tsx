@@ -3,21 +3,28 @@
  *
  * Since Wave 3 made "Open in Compose" open the active SOURCE document, a chat-
  * uploaded PDF (or any non-docx buffer) can reach the Compose editor. Editable
- * Compose content is DOCX-ONLY (mammoth parses OOXML/zip); a non-docx buffer
- * previously made mammoth throw and left a SILENT empty `<p></p>` — a confusing
- * dead-end. Wave 6 detects non-docx from the byte signature BEFORE mammoth and
- * renders an explicit reference-only state instead.
+ * Compose content is DOCX-ONLY (the server projection parses OOXML/zip); a
+ * non-docx buffer previously made the client-side mammoth reader throw and left
+ * a SILENT empty `<p></p>` — a confusing dead-end. Wave 6 detects non-docx from
+ * the byte signature BEFORE the mount and renders an explicit reference-only
+ * state instead.
  *
  * Contract under test (ComposeEditor.tsx, docxBytes effect + render):
  *  - NON-DOCX buffer (e.g. a `%PDF-1.4` signature with a .pdf fileName) → the
- *    `compose-reference-only` surface renders; NO editable `role="textbox"`.
- *  - DOCX buffer (ZIP `PK\x03\x04` local-file-header magic) → the editable
- *    editor (`role="textbox"`) renders as before; NO reference-only surface.
+ *    `compose-reference-only` surface renders; NO editable `role="textbox"`
+ *    (regardless of whether a `projection` prop is supplied).
+ *  - DOCX buffer (ZIP `PK\x03\x04` local-file-header magic) WITH a server
+ *    `projection` → the editable editor (`role="textbox"`) renders; NO
+ *    reference-only surface. Task 013 (F-2 "one reader"): the client-side
+ *    mammoth reader is DELETED, so a DOCX buffer with NO projection now
+ *    renders the error/unavailable state — see ComposeEditor.projection.test.tsx
+ *    for that contract; this file stays scoped to the non-docx-vs-docx signature
+ *    gate.
  *
- * The DOCX bridge is mocked so the import resolves synchronously (jsdom has no
- * mammoth WASM path); the real editor + real effect + real signature check drive
- * the assertion. For the non-docx case mammoth is asserted NOT to be called
- * (detection happens before the import attempt).
+ * The DOCX bridge is mocked as a regression guard: `docxToTipTapHtml` no longer
+ * exists in production, but the mock's presence lets this suite assert it is
+ * NEVER called on either path — a spurious call would indicate a reintroduced
+ * client-side reader.
  */
 
 import * as React from 'react';
@@ -25,6 +32,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 import { ComposeEditor, type ComposeEditorDocumentRef } from './ComposeEditor';
+import type { ComposeServerProjection } from '../types/compose-contracts';
 
 // ComposeAiToolbar's `useAuth()` throws outside a real `initAuth()` bootstrap.
 // This test never dispatches an action, so a stub token is sufficient. Mirrors
@@ -39,14 +47,12 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-// Resolve the mammoth import synchronously — only exercised on the DOCX path.
+// Regression guard only (task 013): production no longer imports `docxToTipTapHtml` — this mock
+// exists so a spurious call is observable if a client-side reader is ever reintroduced.
 const docxToTipTapHtml = jest.fn(async () => ({ html: '<p>Loaded document body</p>', messages: [] }));
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: (...args: unknown[]) => docxToTipTapHtml(...(args as [])),
-  // task 011: ComposeEditor imports stampParaIds (called after a real docx import);
-  // a no-op keeps this reference-only suite's mock complete.
   stampParaIds: jest.fn(),
-  // task 027: snapshot capture after stampParaIds — no-op returning an empty map.
   captureParaIdSnapshot: jest.fn(() => new Map()),
 }));
 
@@ -62,11 +68,20 @@ const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]; // %PDF-
 /** ZIP local-file-header magic `PK\x03\x04` — the necessary signature of a real DOCX. */
 const DOCX_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 
-function renderEditor(docxBytes: ArrayBuffer, documentRef: ComposeEditorDocumentRef | undefined) {
+function renderEditor(
+  docxBytes: ArrayBuffer,
+  documentRef: ComposeEditorDocumentRef | undefined,
+  projection: ComposeServerProjection | null = null
+) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <PaneEventBusProvider>
-        <ComposeEditor docxBytes={docxBytes} documentRef={documentRef} sessionId="session-defg" />
+        <ComposeEditor
+          docxBytes={docxBytes}
+          projection={projection}
+          documentRef={documentRef}
+          sessionId="session-defg"
+        />
       </PaneEventBusProvider>
     </FluentProvider>
   );
@@ -89,18 +104,25 @@ describe('ComposeEditor — Wave 6 (DEF-G) non-docx reference-only guard', () =>
     // ...and there is NO editable editor and no silent empty ProseMirror surface.
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 
-    // mammoth was NEVER invoked — detection happened before the import attempt.
+    // No client-side reader was invoked — detection happened before the mount attempt.
     expect(docxToTipTapHtml).not.toHaveBeenCalled();
   });
 
-  it('DOCX buffer (PK\\x03\\x04 zip signature): renders the editable editor, NOT the reference-only state', async () => {
-    renderEditor(bufferFrom(DOCX_SIGNATURE), { speDriveItemId: 'matter-doc-9', fileName: 'contract.docx' });
+  it('DOCX buffer (PK\\x03\\x04 zip signature) WITH a server projection: renders the editable editor, NOT the reference-only state', async () => {
+    renderEditor(bufferFrom(DOCX_SIGNATURE), { speDriveItemId: 'matter-doc-9', fileName: 'contract.docx' }, {
+      status: 'success',
+      canEdit: true,
+      html: '<p data-paraid="AB12CD34">Loaded document body</p>',
+      warnings: [],
+      schemaVersion: 'compose-html-v1',
+    });
 
-    // The editable editor mounts (effect ran → mammoth import resolved).
+    // The editable editor mounts via the server projection — the DOCX-only signature gate passed.
     await screen.findByRole('textbox');
-    await waitFor(() => expect(docxToTipTapHtml).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('compose-reference-only')).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId('compose-projection-unavailable')).not.toBeInTheDocument());
 
-    // The reference-only surface is absent on the valid-docx path.
-    expect(screen.queryByTestId('compose-reference-only')).not.toBeInTheDocument();
+    // F-2 "one reader" (task 013): no client-side reader is ever invoked, on either path.
+    expect(docxToTipTapHtml).not.toHaveBeenCalled();
   });
 });
