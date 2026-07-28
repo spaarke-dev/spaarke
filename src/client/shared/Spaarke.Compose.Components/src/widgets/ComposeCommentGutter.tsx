@@ -85,6 +85,10 @@ export const COMMENT_GUTTER_WIDTH_PX = 220;
 /** Resize bounds (UAT round-3 D1) — the user can drag the rail between these. */
 export const MIN_COMMENT_GUTTER_WIDTH_PX = 160;
 export const MAX_COMMENT_GUTTER_WIDTH_PX = 480;
+/** Minimum height (UAT round-6 #2) the Review Notes container can be dragged down to. */
+export const MIN_COMMENT_GUTTER_HEIGHT_PX = 120;
+/** sessionStorage key persisting the user's Review Notes container height (UAT round-6 #2). */
+const GUTTER_HEIGHT_STORAGE_KEY = 'spaarke.compose.notesGutterHeight';
 /** Fixed vertical gap enforced between stacked cards (collision-avoidance pass). */
 const CARD_GAP_PX = 8;
 /** Fallback card height used ONLY before a card's real height has been measured (first paint). */
@@ -101,23 +105,64 @@ const useStyles = makeStyles({
     position: 'absolute',
     top: 0,
     right: 0,
-    bottom: 0,
-    // Width is applied inline (UAT round-3 D1 — user-resizable); this is the fallback default.
+    // Width + height are applied inline (user-resizable — width UAT round-3 D1, height UAT round-6 #2);
+    // these are the fallback defaults.
     width: `${COMMENT_GUTTER_WIDTH_PX}px`,
-    // The rail itself never intercepts clicks over the document beneath it — only individual cards
-    // (which re-enable pointer events) are interactive.
+    // UAT round-6 #2 — the Review Notes are their OWN bounded container: clip cards to the rail box so a
+    // card whose anchored clause has scrolled ABOVE the fold (negative computed top) can NEVER render up
+    // into the Review Summary above (the reviewer's "notes scroll into the summary" complaint), and a
+    // card past the (resizable) bottom edge is clipped too.
+    overflow: 'hidden',
+    // The rail itself never intercepts clicks over the document beneath it — only the resize handles +
+    // individual cards (which re-enable pointer events) are interactive.
     pointerEvents: 'none',
     zIndex: 1,
   },
-  // UAT round-3 D1 — a thin drag strip on the rail's LEFT edge to resize the comment pane. Re-enables
-  // pointer events (the rail disables them) so only this strip + the cards are interactive.
+  // UAT round-3 D1 — a thin drag strip on the rail's LEFT edge to resize the comment pane WIDTH.
   resizeHandle: {
     position: 'absolute',
     top: 0,
     bottom: 0,
-    left: '-3px',
+    left: 0,
     width: '6px',
     cursor: 'col-resize',
+    pointerEvents: 'auto',
+    zIndex: 2,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralStroke1,
+    },
+  },
+  // UAT round-6 #3 — the notes scroll-down affordance, CENTERED on the notes container's bottom (not
+  // off to a corner). Circular, elevated; nudges the document down to reveal notes clipped below.
+  scrollNotesDown: {
+    position: 'absolute',
+    bottom: tokens.spacingVerticalM,
+    left: '50%',
+    transform: 'translateX(-50%)',
+    zIndex: 3,
+    pointerEvents: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '28px',
+    height: '28px',
+    padding: 0,
+    borderRadius: '9999px',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground2,
+    boxShadow: tokens.shadow8,
+    cursor: 'pointer',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  // UAT round-6 #2 — a drag strip on the rail's BOTTOM edge to resize the Review Notes container HEIGHT.
+  bottomResizeHandle: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '6px',
+    cursor: 'row-resize',
     pointerEvents: 'auto',
     zIndex: 2,
     ':hover': {
@@ -271,6 +316,17 @@ export interface AdvisoryNoteSegment {
 const ADVISORY_NOTE_LABELS = ['Grounded fact', 'Advisory judgment', 'Judgment'] as const;
 
 /**
+ * UAT round-6 #5 — the DISPLAY labels the reviewer asked for, mapped from the model's authored markers:
+ * "Grounded fact" → "Flagged clause", "Advisory judgment" / "Judgment" → "Assessment says". Detection
+ * still keys on the model's original words; only the rendered label changes.
+ */
+const ADVISORY_NOTE_DISPLAY_LABEL: Record<string, string> = {
+  'grounded fact': 'Flagged clause',
+  'advisory judgment': 'Assessment says',
+  judgment: 'Assessment says',
+};
+
+/**
  * UAT round-5 #7 — split an advisory note into its "Grounded fact" / "Advisory judgment" aspects so each
  * renders as its own labelled, separated paragraph (the reviewer asked what the labels mean + for them to
  * be bold + separate for readability). The Action authors explanations as
@@ -297,8 +353,9 @@ export function parseAdvisoryNote(text: string): AdvisoryNoteSegment[] {
   for (let i = 0; i < marks.length; i++) {
     const end = i + 1 < marks.length ? marks[i + 1].start : trimmed.length;
     const body = trimmed.slice(marks[i].bodyStart, end).trim();
-    // Normalize the display label (older "Judgment" reads as "Advisory judgment").
-    const label = /^judgment$/i.test(marks[i].label) ? 'Advisory judgment' : marks[i].label;
+    // UAT round-6 #5 — display the reviewer's preferred label ("Flagged clause" / "Assessment says"),
+    // falling back to the model's own word for any unmapped label.
+    const label = ADVISORY_NOTE_DISPLAY_LABEL[marks[i].label.toLowerCase()] ?? marks[i].label;
     segments.push({ label, body });
   }
   return segments;
@@ -489,8 +546,49 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     dragStateRef.current = null;
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   }, []);
+
+  // UAT round-6 #2 — the Review Notes container is now bounded (overflow:hidden) with a RESIZABLE bottom
+  // edge. `null` = fill the available height (default); a number caps it. Dragging the bottom handle
+  // down grows it, up shrinks it (clamped to [MIN, the editorScrollWrap height]). Persisted in
+  // sessionStorage so it survives a remount, exactly like the width.
+  const [railHeight, setRailHeight] = React.useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const stored = window.sessionStorage.getItem(GUTTER_HEIGHT_STORAGE_KEY);
+    const parsed = stored ? Number.parseInt(stored, 10) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const heightDragRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
+  const onHeightPointerDown = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const current = railRef.current?.offsetHeight ?? 0;
+    heightDragRef.current = { startY: e.clientY, startHeight: current };
+  }, []);
+  const onHeightPointerMove = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = heightDragRef.current;
+    if (!drag) return;
+    const delta = e.clientY - drag.startY; // drag down → positive → taller
+    const max = railRef.current?.parentElement?.clientHeight ?? Number.MAX_SAFE_INTEGER;
+    const next = Math.min(max, Math.max(MIN_COMMENT_GUTTER_HEIGHT_PX, drag.startHeight + delta));
+    setRailHeight(next);
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(GUTTER_HEIGHT_STORAGE_KEY, String(next));
+  }, []);
+  const onHeightPointerUp = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    heightDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
+
   const cardElementsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [cardTops, setCardTops] = React.useState<Record<string, number>>({});
+  // UAT round-6 #3 — true when at least one card sits at/below the (bounded) rail's bottom edge, so the
+  // centered scroll-down affordance appears.
+  const [hasClippedBelow, setHasClippedBelow] = React.useState(false);
+  const onScrollNotesDown = React.useCallback((): void => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const step = railRef.current?.clientHeight ?? el.clientHeight;
+    el.scrollTo({ top: el.scrollTop + step * 0.8, behavior: 'smooth' });
+  }, [scrollContainerRef]);
   // Per-card expand/collapse (item #5). A Set of thread ids whose full text is shown.
   const [expandedIds, setExpandedIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
@@ -540,6 +638,12 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
       return unchanged ? prev : next;
     });
 
+    // UAT round-6 #3 — does any card sit at/below the bounded rail's bottom edge (clipped)? If so, show
+    // the centered scroll-down affordance. `clientHeight` reflects the current (possibly resized) rail.
+    const railClientHeight = railRef.current.clientHeight;
+    const clipped = Object.values(next).some(top => top > railClientHeight - 24);
+    setHasClippedBelow(prev => (prev === clipped ? prev : clipped));
+
     // A card that just got its FIRST position (this pass) wasn't in `cardElementsRef` yet (it only
     // mounts once `cardTops` includes it), so this pass used the DEFAULT_CARD_HEIGHT_PX estimate for
     // it — not its real rendered height. Nothing else automatically re-triggers `recompute` once that
@@ -582,10 +686,12 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
 
   // Re-measure after cards render (real heights may differ from DEFAULT_CARD_HEIGHT_PX, e.g. a long
   // explanation wraps to more lines) — a second layout pass corrects the initial estimate-based math.
+  // Also re-runs when the container height changes (UAT round-6 #2 resize) so the clipped-state (#3) and
+  // stacking reflect the new bounds.
   React.useLayoutEffect(() => {
     recompute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run whenever the thread SET changes
-  }, [threads.length, recompute]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run whenever the thread SET / height changes
+  }, [threads.length, railHeight, recompute]);
 
   // Expanding/collapsing a card changes its measured height — re-run the collision layout so cards
   // below reflow to clear (or reclaim) the space (item #5). Runs after the new text has committed to
@@ -600,7 +706,7 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     <div
       ref={railRef}
       className={styles.rail}
-      style={{ width: `${width}px` }}
+      style={{ width: `${width}px`, height: railHeight != null ? `${railHeight}px` : '100%' }}
       data-testid="compose-comment-gutter"
     >
       {onWidthChange ? (
@@ -614,6 +720,30 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
           aria-label="Resize comments pane"
           data-testid="compose-comment-gutter-resize"
         />
+      ) : null}
+      {/* UAT round-6 #2 — drag the bottom edge to resize the Review Notes container height. */}
+      <div
+        className={styles.bottomResizeHandle}
+        onPointerDown={onHeightPointerDown}
+        onPointerMove={onHeightPointerMove}
+        onPointerUp={onHeightPointerUp}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the Review Notes height"
+        data-testid="compose-comment-gutter-resize-bottom"
+      />
+      {/* UAT round-6 #3 — a down-arrow, centered on the notes container, appears when cards are clipped
+          below the (resized) bottom edge; it nudges the document down to bring the next note into view. */}
+      {hasClippedBelow ? (
+        <button
+          type="button"
+          className={styles.scrollNotesDown}
+          aria-label="Scroll down for more notes"
+          onClick={onScrollNotesDown}
+          data-testid="compose-comment-gutter-scroll-down"
+        >
+          <ChevronDoubleDown16Regular />
+        </button>
       ) : null}
       {threads.map(thread => {
         const top = cardTops[thread.id];

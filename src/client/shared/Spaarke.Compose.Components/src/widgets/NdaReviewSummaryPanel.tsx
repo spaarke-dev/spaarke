@@ -67,7 +67,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss16Regular, Info16Regular, ArrowSort16Regular, ArrowDown16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, ArrowSort16Regular, ArrowDown16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   // UAT round-5 #1 — the OUTER shell. The panel now lives INSIDE the editor's top region (below the
@@ -186,11 +186,12 @@ const useStyles = makeStyles({
       border: `1px solid ${tokens.colorPaletteYellowBorderActive}`,
     },
   },
-  // UAT round-4 #5 — the down-arrow FAB pinned at the panel's bottom-right; appears only while more
-  // findings sit below the fold. Circular, semantic-token surface (ADR-021).
+  // UAT round-4 #5 / round-6 #3 — the down-arrow FAB pinned at the panel's bottom, CENTERED (round-6:
+  // no longer off in the right corner); appears only while more findings sit below the fold.
   scrollDownFab: {
     position: 'absolute',
-    right: tokens.spacingHorizontalS,
+    left: '50%',
+    transform: 'translateX(-50%)',
     bottom: tokens.spacingVerticalS,
     zIndex: 3,
     minWidth: '28px',
@@ -542,10 +543,9 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
         </div>
       </div>
 
-      <div className={styles.disclaimer} data-testid="nda-review-summary-disclaimer">
-        <Info16Regular className={styles.disclaimerIcon} />
-        <Text size={200}>{NDA_REVIEW_DISCLAIMER_TEXT}</Text>
-      </div>
+      {/* UAT round-6 #4 — the not-legal-advice disclaimer banner was REMOVED from the panel body; the
+          warning now lives behind the info (ⓘ) button on the far right of the editor toolbar (the
+          `NDA_REVIEW_DISCLAIMER_TEXT` constant is still exported for it). */}
 
       {placementFailureCount && placementFailureCount > 0 ? (
         <Text size={200} className={styles.failureNotice} data-testid="nda-review-summary-placement-failures">

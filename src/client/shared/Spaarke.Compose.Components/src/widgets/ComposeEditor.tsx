@@ -92,7 +92,7 @@ import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
-import { NdaReviewSummaryPanel, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
+import { NdaReviewSummaryPanel, NDA_REVIEW_DISCLAIMER_TEXT, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './ndaClauseLocation';
 import {
   composeSessionCommentThreadsToAnchoredComments,
@@ -2434,6 +2434,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // present (in-document advisory threads OR summary findings the host reports). "Review Summary"
           // toggles the host's docked panel; "Review Notes" toggles the right-gutter cards (local state).
           hasReview={advisoryComments.threads.length > 0 || Boolean(reviewSummary?.hasFindings)}
+          // UAT round-6 #4 — the not-legal-advice warning behind the toolbar's info button (moved out of
+          // the Review Summary body); present only when an NDA advisory review is.
+          reviewDisclaimer={
+            advisoryComments.threads.length > 0 || reviewSummary?.hasFindings ? NDA_REVIEW_DISCLAIMER_TEXT : undefined
+          }
           reviewSummaryOpen={reviewSummary?.open ?? false}
           onToggleReviewSummary={reviewSummary?.onToggle}
           reviewNotesOpen={reviewNotesVisible}
@@ -2748,20 +2753,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             selectedThreadId={selectedThreadId}
             onSelectThread={selectThread}
           />
-          {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
-          <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
-            <Button
-              appearance={commentsOpen ? 'primary' : 'secondary'}
-              shape="circular"
-              size="large"
-              className={styles.commentsToggleFab}
-              icon={<CommentMultiple20Regular />}
-              aria-label="Toggle comments panel"
-              aria-pressed={commentsOpen}
-              onClick={handleToggleComments}
-              data-testid="compose-comments-toggle"
-            />
-          </Tooltip>
+          {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
+              REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the
+              advisory Review Notes gutter is the comment surface). The ComposeCommentThread panel +
+              useComposeCommentThreads instance remain in the codebase (now unreachable from the UI) so
+              the capability can be re-exposed later without re-plumbing. */}
           {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
               styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
               ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}

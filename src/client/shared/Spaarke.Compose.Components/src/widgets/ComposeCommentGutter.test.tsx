@@ -94,19 +94,19 @@ describe('layoutCommentGutterCards', () => {
 // ---------------------------------------------------------------------------
 
 describe('parseAdvisoryNote', () => {
-  it('splits a "Grounded fact: … Advisory judgment: …" note into two labelled segments', () => {
+  it('splits a "Grounded fact: … Advisory judgment: …" note into two labelled segments (UAT round-6 #5 display labels)', () => {
     const segments = parseAdvisoryNote(
       'Grounded fact: The NDA imposes a best-efforts standard. Advisory judgment: The standard requires reasonable care.'
     );
     expect(segments).toEqual([
-      { label: 'Grounded fact', body: 'The NDA imposes a best-efforts standard.' },
-      { label: 'Advisory judgment', body: 'The standard requires reasonable care.' },
+      { label: 'Flagged clause', body: 'The NDA imposes a best-efforts standard.' },
+      { label: 'Assessment says', body: 'The standard requires reasonable care.' },
     ]);
   });
 
-  it('normalizes an older bare "Judgment" label to "Advisory judgment"', () => {
+  it('maps an older bare "Judgment" label to "Assessment says"', () => {
     const segments = parseAdvisoryNote('Grounded fact — a fact. Judgment — a judgment.');
-    expect(segments.map(s => s.label)).toEqual(['Grounded fact', 'Advisory judgment']);
+    expect(segments.map(s => s.label)).toEqual(['Flagged clause', 'Assessment says']);
   });
 
   it('returns a single unlabelled segment when there are no recognized labels', () => {
@@ -118,7 +118,7 @@ describe('parseAdvisoryNote', () => {
   it('keeps any lead prose before the first label as an unlabelled segment', () => {
     const segments = parseAdvisoryNote('Preamble text. Grounded fact: the fact.');
     expect(segments[0]).toEqual({ body: 'Preamble text.' });
-    expect(segments[1]).toEqual({ label: 'Grounded fact', body: 'the fact.' });
+    expect(segments[1]).toEqual({ label: 'Flagged clause', body: 'the fact.' });
   });
 
   it('returns an empty array for empty input', () => {
@@ -692,13 +692,14 @@ describe('ComposeCommentGutter', () => {
     );
 
     const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
-    expect(body).toHaveTextContent('Grounded fact');
+    // UAT round-6 #5 — the reviewer's display labels.
+    expect(body).toHaveTextContent('Flagged clause');
     expect(body).toHaveTextContent('A best-efforts standard.');
-    expect(body).toHaveTextContent('Advisory judgment');
+    expect(body).toHaveTextContent('Assessment says');
     expect(body).toHaveTextContent('Needs reasonable care.');
     // The labels are rendered as their own (semibold) elements, not inline with the body text.
     const labelEls = Array.from(body.querySelectorAll('*')).filter(
-      el => el.textContent === 'Grounded fact' || el.textContent === 'Advisory judgment'
+      el => el.textContent === 'Flagged clause' || el.textContent === 'Assessment says'
     );
     expect(labelEls.length).toBeGreaterThanOrEqual(2);
     editor.destroy();

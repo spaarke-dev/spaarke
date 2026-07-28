@@ -66,6 +66,10 @@ import {
   MenuList,
   MenuItem,
   MenuItemCheckbox,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
 } from '@fluentui/react-components';
 import {
   TextBold24Regular,
@@ -82,6 +86,7 @@ import {
   TextAlignRight24Regular,
   ArrowUndo24Regular,
   ArrowRedo24Regular,
+  Info24Regular,
   ChevronDown16Regular,
   DocumentEdit24Regular,
   OpenRegular,
@@ -138,6 +143,11 @@ const useStyles = makeStyles({
   // Pushes Save + Undo/Redo to the right edge of the single row.
   spacer: {
     flexGrow: 1,
+  },
+  // UAT round-6 #4 — the not-legal-advice disclaimer popover (opened from the toolbar info button).
+  disclaimerPopover: {
+    maxWidth: '320px',
+    color: tokens.colorNeutralForeground2,
   },
   // task 039 P3: the Word dropdown is now a VERTICAL, labelled list (was a horizontal icon-only
   // palette) — each action reads as a full-width menu row with an icon + text label. Semantic tokens only.
@@ -224,6 +234,12 @@ export interface ComposeFormatToolbarProps {
   reviewNotesOpen?: boolean;
   /** Toggle the right-gutter advisory comments. */
   onToggleReviewNotes?: () => void;
+  /**
+   * UAT round-6 #4 — the not-legal-advice warning text. When provided (an NDA advisory review is
+   * present), an info (ⓘ) button appears at the far right of the toolbar; clicking it shows this text in
+   * a popover. Replaces the standing disclaimer banner that used to sit inside the Review Summary.
+   */
+  reviewDisclaimer?: string;
 }
 
 /**
@@ -338,6 +354,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onToggleReviewSummary,
     reviewNotesOpen,
     onToggleReviewNotes,
+    reviewDisclaimer,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -845,6 +862,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         onClick={() => editor.chain().focus().redo().run()}
         data-testid="compose-format-redo"
       />
+
+      {/* UAT round-6 #4 — the not-legal-advice warning, moved OUT of the Review Summary body to a far-
+          right info (ⓘ) button. Shown only when an NDA advisory review is present (reviewDisclaimer set). */}
+      {hasReview && reviewDisclaimer ? (
+        <Popover withArrow positioning="below-end" size="small">
+          <PopoverTrigger disableButtonEnhancement>
+            <ToolbarButton
+              appearance="subtle"
+              icon={<Info24Regular />}
+              aria-label="About this review"
+              data-testid="compose-format-review-info"
+            />
+          </PopoverTrigger>
+          <PopoverSurface data-testid="compose-format-review-info-popover">
+            <Text size={200} className={styles.disclaimerPopover}>
+              {reviewDisclaimer}
+            </Text>
+          </PopoverSurface>
+        </Popover>
+      ) : null}
     </Toolbar>
   );
 }

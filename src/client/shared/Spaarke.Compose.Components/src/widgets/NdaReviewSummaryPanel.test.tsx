@@ -201,9 +201,11 @@ describe('NdaReviewSummaryPanel', () => {
     expect(screen.queryByTestId('nda-review-summary-panel')).not.toBeInTheDocument();
   });
 
-  it('always renders the fixed not-legal-advice disclaimer banner', () => {
+  it('UAT round-6 #4 — no longer renders the disclaimer banner in the panel body (moved to the toolbar info button)', () => {
     renderPanel({});
-    expect(screen.getByTestId('nda-review-summary-disclaimer')).toHaveTextContent(NDA_REVIEW_DISCLAIMER_TEXT);
+    expect(screen.queryByTestId('nda-review-summary-disclaimer')).not.toBeInTheDocument();
+    // The constant is still exported (the toolbar info popover uses it).
+    expect(NDA_REVIEW_DISCLAIMER_TEXT).toContain('not legal advice');
   });
 
   it('shows the empty state when there are no findings (UAT round-5 #2 — no overall-risk banner)', () => {

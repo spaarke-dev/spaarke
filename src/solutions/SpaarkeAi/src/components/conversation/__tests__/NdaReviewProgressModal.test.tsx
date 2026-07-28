@@ -8,7 +8,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { NdaReviewProgressModal, NDA_REVIEW_PROGRESS_STEPS } from '../NdaReviewProgressModal';
+import { NdaReviewProgressModal, NDA_REVIEW_PROGRESS_STEPS, NDA_REVIEW_WORKING_PHRASES } from '../NdaReviewProgressModal';
 
 function renderModal(status: 'idle' | 'running' | 'complete' | 'error', onClose = jest.fn()) {
   return {
@@ -51,5 +51,25 @@ describe('NdaReviewProgressModal', () => {
   it('shows the error title on failure', () => {
     renderModal('error');
     expect(screen.getByText('The review couldn’t finish')).toBeInTheDocument();
+  });
+
+  it('UAT round-6 #7 — shows a rotating legal "working" phrase while running, and rotates it over time', () => {
+    jest.useFakeTimers();
+    renderModal('running');
+    const line = screen.getByTestId('nda-review-progress-working');
+    const first = line.textContent ?? '';
+    expect(NDA_REVIEW_WORKING_PHRASES.some(p => first.includes(p))).toBe(true);
+    // After the rotate interval, the phrase advances to the next one.
+    act(() => {
+      jest.advanceTimersByTime(2200);
+    });
+    const second = screen.getByTestId('nda-review-progress-working').textContent ?? '';
+    expect(NDA_REVIEW_WORKING_PHRASES.some(p => second.includes(p))).toBe(true);
+    expect(second).not.toBe(first);
+  });
+
+  it('UAT round-6 #7 — hides the working phrase line on a terminal state', () => {
+    renderModal('complete');
+    expect(screen.queryByTestId('nda-review-progress-working')).not.toBeInTheDocument();
   });
 });
