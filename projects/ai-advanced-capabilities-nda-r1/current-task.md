@@ -6,10 +6,23 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-6 COMPLETE — all items DEPLOYED**. Rounds 2/3/4A/4B/5 also deployed. Awaiting owner UAT. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `11d07d792`. Working tree CLEAN. |
-| **Deployed (2026-07-27 r6)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4926 KB, from HEAD 11d07d792. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
-| **Next Action** | Owner UAT of round-6. Then deferred (owner timing): takeaway-field re-seed (outward-facing Action change), over-broad allowsknowledge gate, merge/PR `work/ai-nda-r1-followups`. |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-7 COMPLETE — all items DEPLOYED**. Rounds 2/3/4A/4B/5/6 also deployed. Awaiting owner UAT. |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `aa355dec0`. Working tree CLEAN. |
+| **Deployed (2026-07-27 r7)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4927 KB, from HEAD aa355dec0. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
+| **Next Action** | Owner UAT of round-7. Then deferred (owner timing): takeaway-field re-seed (outward-facing Action change), over-broad allowsknowledge gate, merge/PR `work/ai-nda-r1-followups`. |
+
+### ✅ UAT round-7 DEPLOYED (aa355dec0) — review panel UX + JSON/warning suppression
+Client-only:
+- **#1** Progress modal content CENTERED (own centered title — stepper `title=""` — + centered working line; surface maxWidth 460). `NdaReviewProgressModal.tsx`.
+- **#2** Review Summary header STICKY (`position:sticky` top offset cancels the scroller padding). **#3** Summary resizable from the bottom (`bottomResizeHandle` + `panelHeight` state, sessionStorage `spaarke.compose.reviewSummaryHeight`). **#6** Summary is now an inset bordered/rounded/shadowed card on `colorNeutralBackground3` — clearly distinct from the document. `NdaReviewSummaryPanel.tsx`.
+- **#4** Summary DEFAULTS COLLAPSED — `ComposeWorkspace` no longer `setReviewSummaryOpen(true)` on review complete (Notes still default visible via ComposeEditor `reviewNotesVisible`).
+- **#5** Toolbar Review dropdown SPLIT into two separate icon toggles (`compose-format-review-summary-toggle` ClipboardTaskList + `compose-format-review-notes-toggle` CommentMultiple; each aria-pressed). `ComposeFormatToolbar.tsx`; MenuItemCheckbox removed. Tests rewritten.
+- **#7** Raw NDA analysis JSON no longer dumped in the Assistant transcript — `useConsumerChips` adds an `isNdaReview` branch (via `isNdaReviewResult`) that suppresses the render + posts a short completion message.
+- **#8** Both formatting warnings suppressed: import banner via new `ComposeBannerStack` `hideImportWarnings` prop (ComposeWorkspace passes it); the "…isn't saved yet" deferral banner render gated off in `ComposeEditor` (behavior unchanged, only the banner hidden).
+- **Follow-up (async msg):** collapsed Review Notes now show the RENAMED labels ("Flagged clause" / "Assessment says") — the gutter ALWAYS renders structured segments (first segment truncated when collapsed); previously the collapsed preview leaked the model's raw "Grounded fact"/"Advisory judgment".
+- Tests green: Compose.Components 618/619 (pre-existing advisoryComments fail), SpaarkeAi modal/chips green, tsc Surface-owned 0.
+
+**Note for owner:** every finding shows "Sec 1" because the sample NDA has one top-level heading governing the whole doc — accurate but coarse. More granular section numbers need a model/Action re-seed (deferred). Also: `hideImportWarnings` + the deferral-banner suppression are GLOBAL to Compose (via ComposeWorkspace) — if any non-NDA Compose workflow needs those warnings back, gate them on a context flag.
 
 ### ✅ UAT round-6 DEPLOYED (11d07d792) — Review Notes container, disclaimer→toolbar, label rename, modal polish
 Client-only:
