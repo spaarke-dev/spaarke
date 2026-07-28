@@ -1350,6 +1350,106 @@ public sealed class ComposeDocxProjectionBuilderTests
     }
 
     // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 032 (WS-3, FR-13) — AppendNumberingAttrs: the 031-computed label emitted as a PARAGRAPH DATA
+    // ATTRIBUTE (data-computed-number/data-numbering-level), never as text content. The client
+    // (composeNumberAtomExtension.ts) renders the visible atom; this only proves the server carries the
+    // data correctly and — critically — that it does NOT leak into run text (the text-exactness harness
+    // invariant: source-run text == projected text).
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Build_NumberedListItem_EmitsComputedNumberAndLevelDataAttributesOnParagraph()
+    {
+        var docx = BuildDocxWithNumbering(NumberFormatValues.Decimal, NumberedPara("00F00001", "First clause"));
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        projection.Html.Should().Contain("data-computed-number=\"1.\"");
+        projection.Html.Should().Contain("data-numbering-level=\"0\"");
+    }
+
+    [Fact]
+    public void Build_UnnumberedParagraph_EmitsNoComputedNumberOrLevelAttribute()
+    {
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(Para("00F00002", "Plain paragraph")));
+
+        projection.Html.Should().NotContain("data-computed-number").And.NotContain("data-numbering-level");
+    }
+
+    [Fact]
+    public void Build_NumberedParagraph_NeverInjectsTheComputedLabelAsRunText()
+    {
+        // FR-13's core constraint: the computed label is COMPUTED, not source text. If it ever leaked
+        // into the run text (rather than staying an attribute), the text-exactness harness (source-run
+        // text == projected text) would break. The paragraph's own source text ("First clause") carries
+        // no leading "1." in the .docx — so the projected INNER TEXT (between the closing '>' of the
+        // opening <p> tag and '</p>') must be exactly the source text, never the label prepended to it.
+        var docx = BuildDocxWithNumbering(NumberFormatValues.Decimal, NumberedPara("00F00003", "First clause"));
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        var openTagEnd = projection.Html.IndexOf("</p>", StringComparison.Ordinal);
+        var innerTextStart = projection.Html.LastIndexOf('>', openTagEnd) + 1;
+        var innerText = projection.Html[innerTextStart..openTagEnd];
+        innerText.Should().Be("First clause", "the computed label must live ONLY in the data attribute, never prepended to the run text");
+    }
+
+    [Fact]
+    public void Build_SecondLevelNumberedListItem_EmitsNumberingLevelMatchingIlvl()
+    {
+        // A direct w:numPr paragraph at ilvl=1 against a 2-level abstractNum (same 2-level shape as
+        // BuildDocxWithHeadingStyleCarryingNumPr's fixture, reused here for a DIRECT — not style-linked —
+        // numbered paragraph) — proves data-numbering-level carries the paragraph's OWN ilvl, not always 0.
+        using var ms = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = wordDoc.AddMainDocumentPart();
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2" }) { LevelIndex = 1 })
+                { AbstractNumberId = 12 },
+                new NumberingInstance(new AbstractNumId { Val = 12 }) { NumberID = 5 });
+            numberingPart.Numbering.Save();
+            main.Document = new Document(new Body(NumberedPara("00F00005", "Sub-item", ilvl: 1, numId: 5)));
+            main.Document.Save();
+        }
+
+        var projection = new ComposeDocxProjectionBuilder().Build(ms.ToArray());
+
+        projection.Html.Should().Contain("data-numbering-level=\"1\"");
+    }
+
+    [Fact]
+    public void Build_StyleLinkedNumberedHeading_EmitsComputedNumberOnTheHeadingTagItself()
+    {
+        // FR-12/FR-13: style-linked numbering (numPr lives on the STYLE, not the paragraph) must ALSO
+        // carry the computed label — on the <h#> tag, exactly like a direct-numPr <p>/<li><p>.
+        var docx = BuildDocxWithHeadingStyleCarryingNumPr();
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        projection.Html.Should().MatchRegex("<h\\d[^>]*data-computed-number=\"[^\"]+\"[^>]*>",
+            "a style-linked numbered heading carries its computed label as a data attribute on the <h#> tag");
+    }
+
+    [Fact]
+    public void Build_BulletListItem_EmitsTheBulletGlyphVerbatimNeverAFabricatedArabicNumeral()
+    {
+        // Bullet format's lvlText is the literal glyph "•" (no %n placeholder to substitute) —
+        // ComposeLabel composes it verbatim (031 notes: "bullet -> the lvlText glyph verbatim"), so a
+        // bullet DOES carry a (non-numeric) computed label. This locks the actual behavior and confirms
+        // 032's attribute wiring never fabricates a spurious arabic "1." on a bullet.
+        var docx = BuildDocxWithNumbering(NumberFormatValues.Bullet, NumberedPara("00F00004", "Bulleted item"));
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        projection.Html.Should().Contain("data-computed-number=\"•\"");
+        projection.Html.Should().NotContain("data-computed-number=\"1\"");
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
     // Task 031 (WS-3, FR-11..FR-14) — the deterministic numbering COMPUTATION engine. Asserts the
     // computed label == the label Word displays, per numbered paragraph. THE flagship / NFR-02 release
     // blocker. Synthetic fixtures cover the schemes the decimal-only corpus does not (letters, roman,

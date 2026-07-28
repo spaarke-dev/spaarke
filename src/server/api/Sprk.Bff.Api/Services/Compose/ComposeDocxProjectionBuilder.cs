@@ -144,6 +144,11 @@ public sealed class ComposeDocxProjectionBuilder
                 // computation has a ready per-paragraph lookup with no extra pass.
                 var numberingModel = BuildNumberingModel(mainPart);
                 var numberingByParagraph = new Dictionary<Paragraph, ParagraphNumberingRef>(ReferenceEqualityComparer.Instance);
+                // Task 032 (WS-3, FR-13): the 031-computed label, keyed by paragraph INSTANCE so Pass 2
+                // (render) can attach it to the emitted `<p>`/`<h#>` tag as a DATA ATTRIBUTE (never as text
+                // content — the text-exactness harness compares source-run text to projected text, and the
+                // computed label is not source text). Populated in the SAME Pass-1 loop below; no second walk.
+                var computedNumberByParagraph = new Dictionary<Paragraph, string>(ReferenceEqualityComparer.Instance);
                 var numberingDiagnostics = new List<string>();
 
                 // Task 031 (WS-3, FR-11..FR-14): the deterministic numbering COMPUTATION engine — replays
@@ -196,6 +201,10 @@ public sealed class ComposeDocxProjectionBuilder
                         // counter is exact (FR-11/FR-12). The engine mutates its counters here; the returned
                         // label is attached to this paragraph's ParaIdMap entry for 032 render + WS-4 (FR-13).
                         computedNumber = numberingEngine.Compute(numberingRef);
+                        if (computedNumber is not null)
+                        {
+                            computedNumberByParagraph[paragraphs[i]] = computedNumber;
+                        }
 
                         if (numberingModel.AbstractNumIdByNumId.TryGetValue(numberingRef.NumId, out var absId))
                         {
@@ -217,7 +226,7 @@ public sealed class ComposeDocxProjectionBuilder
                 // FR-02 (task 012): whole-construct atoms mint from the SAME collision-checked `seen` pool
                 // paragraph ids use (format-consistent, never colliding) — ctx gets that pool + the mint
                 // delegate so it can allocate atom ids lazily, in document order, during this single pass.
-                var ctx = new BuildContext(mainPart, idByParagraph, cancellationToken, seen, MintUnique, numberingModel, numberingByParagraph);
+                var ctx = new BuildContext(mainPart, idByParagraph, cancellationToken, seen, MintUnique, numberingModel, numberingByParagraph, computedNumberByParagraph);
                 foreach (var diag in numberingDiagnostics) ctx.AddWarning(diag, 1);
                 RenderBlockChildren(body, ctx);
                 ctx.CloseOpenList();
@@ -319,6 +328,7 @@ public sealed class ComposeDocxProjectionBuilder
             if (listInfo.Level > 0) ctx.AddWarning("multi-level-numbering", 1);
             ctx.Append("<li><p");
             ctx.AppendParaIdAttr(paraId);
+            ctx.AppendNumberingAttrs(p);
             AppendParagraphStyle(p, ctx);
             ctx.Append(">");
             RenderInline(p, ctx);
@@ -332,6 +342,7 @@ public sealed class ComposeDocxProjectionBuilder
         var tag = headingLevel is int lvl ? $"h{lvl}" : "p";
         ctx.Append($"<{tag}");
         ctx.AppendParaIdAttr(paraId);
+        ctx.AppendNumberingAttrs(p);
         AppendParagraphStyle(p, ctx);
         ctx.Append(">");
         RenderInline(p, ctx);
@@ -1621,6 +1632,7 @@ public sealed class ComposeDocxProjectionBuilder
         private readonly StringBuilder _sb = new(4096);
         private readonly Dictionary<Paragraph, string> _idByParagraph;
         private readonly Dictionary<Paragraph, ParagraphNumberingRef> _numberingByParagraph;
+        private readonly Dictionary<Paragraph, string> _computedNumberByParagraph;
         private readonly Dictionary<string, int> _warnings = new(StringComparer.Ordinal);
         private readonly HashSet<string> _seenIds;
         private readonly Func<HashSet<string>, string> _mintUnique;
@@ -1631,7 +1643,8 @@ public sealed class ComposeDocxProjectionBuilder
         public BuildContext(
             MainDocumentPart mainPart, Dictionary<Paragraph, string> idByParagraph, CancellationToken ct,
             HashSet<string> seenIds, Func<HashSet<string>, string> mintUnique,
-            NumberingModel numbering, Dictionary<Paragraph, ParagraphNumberingRef> numberingByParagraph)
+            NumberingModel numbering, Dictionary<Paragraph, ParagraphNumberingRef> numberingByParagraph,
+            Dictionary<Paragraph, string> computedNumberByParagraph)
         {
             MainPart = mainPart;
             _idByParagraph = idByParagraph;
@@ -1640,6 +1653,7 @@ public sealed class ComposeDocxProjectionBuilder
             _mintUnique = mintUnique;
             Numbering = numbering;
             _numberingByParagraph = numberingByParagraph;
+            _computedNumberByParagraph = computedNumberByParagraph;
         }
 
         public MainDocumentPart MainPart { get; }
@@ -1684,6 +1698,36 @@ public sealed class ComposeDocxProjectionBuilder
             Append(" data-paraid=\"");
             AppendEscapedAttr(paraId);
             Append("\"");
+        }
+
+        /// <summary>
+        /// Task 032 (WS-3, FR-13): emits the 031-computed numbering label as a PARAGRAPH DATA ATTRIBUTE
+        /// (<c>data-computed-number</c>) plus its zero-based level (<c>data-numbering-level</c>) on the
+        /// paragraph's own <c>&lt;p&gt;</c>/<c>&lt;h#&gt;</c> tag — never as text content. The computed
+        /// label is COMPUTED, not source text: injecting it into the run text would break the
+        /// text-exactness harness (source-run text == projected text). The client
+        /// (<c>composeNumberAtomExtension.ts</c>) reads this attribute and renders the visible,
+        /// non-editable number-atom prefix; this method only carries the data. No-op for a paragraph with
+        /// no computed label (unnumbered, or FR-13's "unresolvable numId" fail-closed case — never
+        /// fabricate a number).
+        /// </summary>
+        public void AppendNumberingAttrs(Paragraph p)
+        {
+            if (!_computedNumberByParagraph.TryGetValue(p, out var number) || string.IsNullOrEmpty(number))
+            {
+                return;
+            }
+
+            Append(" data-computed-number=\"");
+            AppendEscapedAttr(number);
+            Append("\"");
+
+            if (_numberingByParagraph.TryGetValue(p, out var numberingRef))
+            {
+                Append(" data-numbering-level=\"");
+                Append(numberingRef.Ilvl.ToString(CultureInfo.InvariantCulture));
+                Append("\"");
+            }
         }
 
         /// <summary>FR-02 (task 012): mints a whole-construct atom identity from the SAME collision-checked,

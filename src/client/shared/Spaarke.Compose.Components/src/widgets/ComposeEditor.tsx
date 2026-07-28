@@ -147,6 +147,7 @@ import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 import { COMPOSE_INDENT } from './composeIndentExtension';
+import { COMPOSE_NUMBER_ATOM } from './composeNumberAtomExtension';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -322,6 +323,14 @@ const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
 // LOCKED TextAlign registration for the SAME node types (`paragraph`/`heading`) so the server
 // projection's `margin-left`/`text-indent` (AppendIndentDeclarations) round-trips through
 // setContent/getHTML instead of being silently stripped by the base Paragraph/Heading node schema.
+
+// FR-13/FR-14 explicit non-editable number-atom (task 032, fidelity-r4.5) — `COMPOSE_NUMBER_ATOM`,
+// factored into `./composeNumberAtomExtension` (see that module's header). Preserves the server
+// projection's `data-computed-number`/`data-numbering-level` (AppendNumberingAttrs, task 032) as hidden
+// node attributes AND renders the label as a non-editable ProseMirror VIEW DECORATION prefix — never a
+// doc node, so it cannot participate in the tracked-edit stream (FR-14 read-time-only boundary). The
+// browser's native `<ol>` marker is unconditionally suppressed in `useStyles().editorSurface` below —
+// this decoration is the SOLE source of a legal-numbered paragraph's displayed number (F-3 invariant).
 
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
@@ -953,6 +962,16 @@ const useStyles = makeStyles({
       color: tokens.colorBrandForegroundLink,
       textDecoration: 'underline',
     },
+    // FR-13 (task 032, fidelity-r4.5): the editor NEVER relies on the browser `<ol>` CSS auto-count for
+    // a legal number (F-3 invariant) — `composeNumberAtomExtension.ts`'s decoration is the SOLE source
+    // of a displayed number. Suppressing the native marker here (not per-item) is intentionally
+    // unconditional: it applies even to the rare unresolvable-numId case where no atom renders (031's
+    // "do not fabricate a number" fail-closed posture) — showing NO number is safer than a CSS-counted
+    // one that would silently disagree with 031's computed label ("1." vs "4.2", the double-numbering
+    // defect this task exists to fix). `<ul>` bullet lists are untouched (no legal number involved).
+    '& .ProseMirror ol': {
+      listStyleType: 'none',
+    },
     '& .ProseMirror table': {
       borderCollapse: 'collapse',
       width: '100%',
@@ -1062,6 +1081,21 @@ const useStyles = makeStyles({
       outlineWidth: '2px',
       outlineStyle: 'solid',
       outlineColor: tokens.colorBrandStroke1,
+    },
+    // FR-13 (task 032, fidelity-r4.5): the explicit non-editable number-atom prefix
+    // (`composeNumberAtomExtension.ts` — a ProseMirror widget DECORATION, never a doc node). Semantic
+    // tokens only (ADR-021: no hardcoded hex; theme-adaptive in both light and dark).
+    // `userSelect: 'none'`/`pointerEvents: 'none'` are layout/interaction only (not color rules) — the
+    // widget is not part of the doc model at all, so it is already structurally impossible to place a
+    // caret inside; these are defense-in-depth so it never intercepts a click meant for the adjacent text.
+    '& .compose-number-atom': {
+      display: 'inline-block',
+      marginRight: tokens.spacingHorizontalXS,
+      color: tokens.colorNeutralForeground1,
+      fontWeight: tokens.fontWeightSemibold,
+      userSelect: 'none',
+      pointerEvents: 'none',
+      whiteSpace: 'nowrap',
     },
     // FR-35 Doc Q&A ephemeral highlight (task 072) — a ProseMirror view
     // decoration, NOT a doc Mark (never serializes to DOCX). Semantic tokens
@@ -1868,6 +1902,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
         ...COMPOSE_INDENT,
+        ...COMPOSE_NUMBER_ATOM,
         ...COMPOSE_R4_OPAQUE_ATOMS,
         opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
         // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
