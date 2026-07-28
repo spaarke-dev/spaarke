@@ -241,11 +241,26 @@ analysis-hub investigation):
   and reusable as §5/§6/§8 claim. The hub *shell* is largely composition; the *data spine + session binding* is
   the net-new core.
 
-### 11.7 Readiness verdict
-**Not yet spec-ready without owner decisions.** The reuse inventory (§8) is mostly sound, but the durable spine
-(§2) and session model (§3) need the corrections above + these decisions locked before `/design-to-spec`:
-1. **Session store binding** — bind to `sprk_aichatsummary` + new analysis FK (recommended) vs revive `sprk_analysischatmessage`.
-2. **Legacy retirement** — retire the deprecated AnalysisEndpoints session path + `sprk_chathistory` JSON? (recommended yes.)
-3. **Association model** — polymorphic `sprk_analysis → Matter/Project/…` lookup shape (single polymorphic "regarding" vs per-type lookups).
-4. **Durable-transcript contract** — reopen relies on Cosmos warm durability vs true Dataverse cold persistence (net-new).
-5. **Scope boundary** — is the tabular doc×question review grid (§9 Q5) in THIS project or deferred?
+### 11.7 Readiness verdict — ✅ ALL DECISIONS LOCKED (owner, 2026-07-28) → SPEC-READY
+
+1. **Session store binding** — ✅ **Bind to `sprk_aichatsummary` + a new `→ sprk_analysis` lookup.**
+   **Retire/supersede** the dead `sprk_analysischatmessage` (do not revive).
+2. **Legacy retirement** — ✅ **Retire** the deprecated `AnalysisEndpoints` in-memory session path +
+   `sprk_analysis.sprk_chathistory` JSON blob. Standardize on `ChatEndpoints` (Cosmos/Redis).
+3. **Association model** — ✅ **RegardingResolver field-SET (per-type typed lookups), NOT a single polymorphic field.**
+   New fields on `sprk_analysis`: `sprk_regardingmatter`, `sprk_regardingproject`, **`sprk_regardingdocument`**, …
+   (owner sets these up), resolved by the existing RegardingResolver field-set + logic/code.
+   **KEEP `sprk_documentid`** as the SPE subject-pointer (the file hop). `sprk_regardingdocument` is a *separate*
+   regarding-context field; when an analysis is document-only, `sprk_documentid` and `sprk_regardingdocument`
+   point to the same record — **owner confirms the duplicate is fine** (different roles: SPE hop vs context/rollup).
+   New `sprk_worktype` column also net-new.
+4. **Durable-transcript contract** — ✅ **MVP: Cosmos = the durable transcript store-of-record** (long-term
+   primary, cheap, complete, fast reopen). **Dataverse = the business anchor** (`sprk_analysis` metadata +
+   important field-level data + some JSON, incl. the Review Summary Memo). **Defer** per-message Dataverse cold
+   persistence (immutable/compliance-grade) — add later only if legal retention of every raw message is required.
+5. **Tabular doc×question review grid** — ✅ **Deferred** to a later project.
+
+**Storage model (locked, shared with agreements-r1):** full chat history → **Cosmos**; business anchor +
+structured deliverables (memo, outputs) → **Dataverse** (`sprk_analysis` / `sprk_analysisoutput`).
+
+**Next step:** run `/design-to-spec` → `/project-pipeline` on this design.
