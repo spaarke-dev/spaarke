@@ -1,15 +1,34 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-27 (by context-handoff — round-8 mostly deployed; CONTEXTUAL AI TOOL LIBRARY architecture agreed with owner, see §ARCHITECTURE below; pre-compaction). **Read this block first.**
+> **Last Updated**: 2026-07-28 (by context-handoff — everything below SHIPPED + SEEDED + DEPLOYED + MERGED to master; working tree CLEAN; pre-compaction). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–8 deployed. **CONTEXTUAL AI TOOL LIBRARY: design doc written + PHASE-1 SHIPPED & DEPLOYED (e23e2a67c)** — descriptor `surfaces`/`domains` + `getToolsForSurface`; BubbleMenu + Review-Note ⋮ both draw from ONE registry; round-8 **#6 RESOLVED** (Explain/Compare/Defined-terms retired via `surfaces:[]`, Email menu removed → BubbleMenu = Draft alternative only). 626 tests pass (1 pre-existing advisoryComments). Deployed to `sprk_spaarkeai` 5206a442-… (4927 KB). Phase 2/3 (catalog link + new bindings) = owner-gated. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `c9b57fc1f` (code) / latest = checkpoint commit. Working tree CLEAN. |
-| **Deployed (2026-07-27 r8, 3 commits)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4928 KB. d1be83701 (popup/#1/#2) → 488113b59 (#7) → c9b57fc1f (#3/#4/#5). Master since base = only `0e1e30d95` → no clobber. |
-| **Next Action** | **✅ Design doc + Phase-1 DONE & DEPLOYED.** Owner approved all 3 decisions (build here / activeDomain from session context / do phase-1 now). **UAT the lean BubbleMenu (Draft alternative only; Explain/Compare/Defined-terms/Email gone) + the Review-Note ⋮ (Draft compliant alternative).** Then **owner-gated PHASE 2/3**: (2) catalog analysis→tool-binding link + discovery-hook read (schema); (3) new bindings `compose-make-concise` / `compose-rewrite-instruction` (+ free-text `instruction` slot) / `compose-draft-compliant-alternative` (`domains:['nda']`) — the first domain-scoped tool triggers threading the session `activeAnalysisDomain` from ComposeWorkspace → ComposeEditor/toolbar. Also still deferred: takeaway re-seed, allowsknowledge. |
+| **State** | **NDA r1 UAT COMPLETE — all fixes live in spaarkedev1 + merged to master.** Everything in the §SESSION-2026-07-28 recap below is done. Awaiting owner UAT of the last batch. Two follow-on projects scaffolded on master. |
+| **Branch** | `work/ai-nda-r1-followups`. HEAD `3a1886511`. **behind/ahead of origin/master = 0/0; branch = origin/branch = master; main repo `C:\code_files\spaarke` synced. Working tree CLEAN. Fully pushed + merged.** |
+| **Deployed** | `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), ~4930 KB, client-only (no BFF). Latest deploy = progress-popup title one-line-centered fix (`3a1886511`); prior popup UAT (556d6e913: centered "Reviewing your agreement", left-aligned single-line rotating phrase). Compose bindings SEEDED to Dataverse (see §SEEDED). |
+| **Next Action** | **Owner is UAT-ing.** Then: **(1)** create the **Agreement Analysis** project (owner's "nda-r2" enhancement list — name it for the WORK TYPE, e.g. `ai-agreement-analysis-r1`, NOT nda-r2; NDA = first knowledge sub-domain) — owner to paste the enhancement list → capture → `/design-to-spec` → new worktree. **(2)** formalize **`analysis-hub-r1`** (platform: `sprk_analysis` spine + session persistence + hub widget + wizard — design-discussion.md written, ready for `/design-to-spec`). **(3)** **`research-r1`** (Legal Research work type — notes written). **(4)** the 12 pre-existing e2e failures on master (compose-session-routing / edit-controls / three-pane-coordination) need a remediation pass — CONFIRMED independent of all this branch's work. |
+
+## 📓 SESSION 2026-07-28 recap (what shipped — all merged to master + deployed)
+
+**Contextual AI Tool Library (phases 1/2/3) + work-type reframe:**
+- **Phase 1** (`e23e2a67c`): descriptor `surfaces` + `getToolsForSurface`; BubbleMenu + Review-Note ⋮ draw from ONE registry; **#6** — Explain/Compare/Defined-terms retired via `surfaces:[]`, Email menu removed → BubbleMenu = Draft alternative only.
+- **Phase 3** (`626b2489e`): two NEW tools — **`compose-make-concise`** + **`compose-rewrite-instruction`** ("Describe a change", free-text `instruction` slot via a shared Fluent dialog). Authored mirror-first + client-wired.
+- **Phase 3 SEEDED** to spaarkedev1 (`f1440ed1a` checkpoint; see §SEEDED for GUIDs) — direct Web API POST (NOT the whole-catalog seed, which would revert 11 rows of env drift). Tools now ENABLED.
+- **Phase 2 A+B** (`5dc89974c`): renamed scoping dim `domains → workTypes` (+ `activeWorkType`); threaded `activeWorkType` end-to-end (ComposeEditor prop → toolbar + note menu; default `'*'`, host passes `'agreement-analysis'`). Behavior-neutral. **Phase 2 Layer C** (catalog-driven work-type column + BFF filter) DEFERRED until a 2nd work type. The 3-level model (work type > knowledge sub-domain > UI affordance) is in `notes/contextual-ai-tool-library-design.md` §10.
+
+**Workspace UAT fixes (root-caused via Explore):**
+- **#1 Tab independence** (`283e9a989`): a seedless compose open no longer clobbers the active analysis tab — gated the seedless-reuse-active branch on the `widgetData.source` marker. +2 regression tests.
+- **#2/#3 Pane state loss** (`ce45b5f5c`): `ThreePaneLayout` UNMOUNTED panes on collapse (destroying pane-local state — lost Assistant session + compose tabs). Fixed: panes now **keep-mounted-hidden** (`display:none` + `aria-hidden`) on collapse; strip renders alongside. Only live consumer = SpaarkeAi ThreePaneShell. +ThreePaneLayout.statePreserved test. **Owner confirmed session persists.**
+- **Progress popup** (`ce45b5f5c` + `556d6e913`): rebuilt as a VERTICAL step list (fits width; spinner on the active step); title centered = **"Reviewing your agreement"** (no ellipsis); rotating phrase = own left-aligned single no-wrap line.
+
+**Follow-on projects scaffolded (on master, `4684c7382`):**
+- `C:\code_files\spaarke\projects\ai-advanced-capabilities-analysis-hub-r1\design-discussion.md` — PLATFORM: `sprk_analysis` durable spine, two-tier session model (loose vs Analysis-owned; analysis-launch forks a new session + warning; multiple sessions per Analysis via `sprk_analysischatmessage`), file storage (**files → SPE**; session/state → Cosmos+Redis; Analysis stores SPE pointers), hub widget (create-new type cards + existing-analyses DataGrid) + per-type wizard, pane-persistence hardening backlog, reuse inventory.
+- `C:\code_files\spaarke\projects\ai-advanced-capabilities-research-r1\` — Legal Research work type; `COMPETITIVE-LANDSCAPE.md` (Harvey/Legora/CoCounsel/Robin/Protégé) + `notes/discussion-2026-07-28-*.md`. Aligns with program umbrella `projects/ai-advanced-capabilities-development/PROGRAM-ROADMAP.md`.
+
+**Key architecture decisions this session:** work type is the tool-scoping axis (not knowledge); NDA = first sub-domain of Agreement Analysis; Legal Research = a genuinely DIFFERENT surface (query→cited-authorities→memo). Session model = two-tier (not every chat is an Analysis record). Owner's UAT list for the popup was the last item.
 
 ## 🌱 SEEDED to spaarkedev1 (2026-07-28) — phase-3 compose tools
 Seeded via direct Web API POST (NOT the whole-catalog `Seed-PlaybookConsumers.ps1`, which would have

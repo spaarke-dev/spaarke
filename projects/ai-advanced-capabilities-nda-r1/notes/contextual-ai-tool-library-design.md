@@ -200,3 +200,36 @@ Per the standing constraint (new server bindings & schema need owner go-ahead):
 1. **Ship location** — build inside this NDA project (NDA = consumer #1, documented for drop-in) vs a standalone platform project. **My lean: build here** — the substrate is here, NDA exercises it end-to-end, and phase-4 graduates the doc when Case-law lands.
 2. **`activeDomain` source** — where the client reads "which vertical is active": from the launched analysis/session context (recommended — it already knows the consumer type) vs an explicit workspace toggle.
 3. **Approve phase-1 client refactor now?** It's client-only, backward-compatible, and folds in the #6 cleanup — a clean first increment ahead of any server work.
+
+---
+
+## 10. Work-type reframe + status (2026-07-28) — SUPERSEDES the "domain" framing above
+
+Owner feedback surfaced that the scoping dimension called `domain` in §2–§9 above was conflating **two different axes**. The corrected model — validated against the market (see [`../../ai-advanced-capabilities-research-r1/COMPETITIVE-LANDSCAPE.md`](../../ai-advanced-capabilities-research-r1/COMPETITIVE-LANDSCAPE.md); every leader ships work-type surfaces with knowledge as a sub-axis) — has **three** levels:
+
+| Level | What it is | Example | Governs |
+|---|---|---|---|
+| **1. Work type** | the *product surface* the user navigates to by intent | Agreement Analysis · Legal Research · Due Diligence | the widget/UX **and the tool palette** |
+| **2. Knowledge sub-domain** | a grounding variation *within* a work type | NDA vs MSA vs employment (all Agreement Analysis) | **only grounding** — same UI, same tools |
+| **3. UI affordance** | *where* a tool renders | `selection` (BubbleMenu) · `review-note` (⋮) | which menu the tool appears in |
+
+**Key correction:** tools associate to **work type**, NOT knowledge sub-domain. NDA and MSA are the *same* Agreement Analysis surface with identical tools — only the playbook/knowledge differs. So:
+- The descriptor dimension is renamed **`domains` → `workTypes`** (and `activeDomain` → `activeWorkType`), done 2026-07-28.
+- Shared edit primitives (Draft alternative, Make concise, Describe a change) are `workTypes: ['*']`.
+- A tool specific to a surface tags e.g. `workTypes: ['agreement-analysis']`.
+- **Knowledge (NDA/MSA) is out of the tool library entirely** — it lives in the Action's grounding/playbook.
+
+**"Agreement Analysis" is the first work type; NDA is its first knowledge sub-domain.** "Legal Research" is a *future, genuinely different widget* (query→cited-authorities→memo — NOT the Compose editor with new tools); it gets its own design + tool palette. See the competitive report's § research-surface recommendation.
+
+### Two extension recipes (the preparedness artifact)
+
+- **Add an agreement sub-type (e.g. MSA, employment)** — *knowledge-only, near-zero UI*: author the playbook/knowledge source + (if needed) a review Action/classification for that sub-type; reuse the **same** Agreement Analysis surface + the **same** tool palette. No new widget, no new tools, no client change.
+- **Add a work type (e.g. Legal Research)** — *new surface*: design the widget UX, define its tool palette (new Actions/Bindings), tag those tools `workTypes: ['<new-work-type>']`, and have the host pass `activeWorkType='<new-work-type>'`. The tool-library seam (`getToolsForSurface`) already filters correctly — a drop-in.
+
+### Status of the phases (as of 2026-07-28)
+
+- **Phase 1 (client library)** — ✅ SHIPPED + DEPLOYED (`surfaces`/`workTypes` + `getToolsForSurface`; #6 cleanup).
+- **Phase 3 (new tools)** — ✅ SHIPPED + SEEDED + DEPLOYED: `compose-make-concise` + `compose-rewrite-instruction` (free-text `instruction`) live in spaarkedev1.
+- **Phase 2 Layer A (active-work-type signal)** — ✅ threaded client-side (`activeWorkType` prop on ComposeEditor → BubbleMenu + Review-Note menu; default `'*'`; host passes `'agreement-analysis'`).
+- **Phase 2 Layer B (tool→work-type membership)** — client-side today (in `DEFAULT_ACTIONS` / registration). Sufficient for a Case-law drop-in.
+- **Phase 2 Layer C (catalog-driven work-type: `sprk_playbookconsumer` column + `/api/ai/capabilities` filter)** — DEFERRED until a 2nd work type needs catalog-driven tool membership (§10/§11: no current behavioral need; the seam is ready).

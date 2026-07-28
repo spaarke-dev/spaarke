@@ -530,8 +530,8 @@ describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contextual AI Tool Library (phase 1) — getToolsForSurface: the two-dimension
-// (surface × domain) selector + the surface/domain defaults.
+// Contextual AI Tool Library — getToolsForSurface: the two-dimension
+// (surface × workType) selector + the surface/workType defaults.
 // ---------------------------------------------------------------------------
 
 describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
@@ -557,28 +557,28 @@ describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
     }
   });
 
-  it('domain narrowing: a domains:[nda] tool shows ONLY for activeDomain nda, while a domains:[*] tool shows for any domain', () => {
+  it('workType narrowing: a workTypes:[agreement-analysis] tool shows ONLY for that work type, while a workTypes:[*] primitive shows for any', () => {
     registerComposeAiToolbarAction({
-      id: 'test-nda-only',
-      label: 'NDA compliant alternative',
-      tooltip: 'NDA-only.',
-      bindingId: 'b-nda',
+      id: 'test-agreement-only',
+      label: 'Compare to firm playbook',
+      tooltip: 'Agreement-analysis-only.',
+      bindingId: 'b-agr',
       placement: 'primary',
       surfaces: ['review-note'],
-      domains: ['nda'],
+      workTypes: ['agreement-analysis'],
     });
 
-    // Agnostic domain '*' → the nda-only tool is hidden; the '*' edit primitives still show.
-    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-nda-only');
+    // Shared work type '*' → the agreement-only tool is hidden; the '*' edit primitives still show.
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-agreement-only');
     expect(getToolsForSurface('review-note', '*').map(a => a.id)).toContain('compose-draft-alternative');
-    // Active domain 'nda' → BOTH the '*' primitives and the nda-only tool surface.
-    const ndaIds = getToolsForSurface('review-note', 'nda').map(a => a.id);
-    expect(ndaIds).toContain('compose-draft-alternative');
-    expect(ndaIds).toContain('test-nda-only');
-    // A DIFFERENT vertical (case-law) → the nda-only tool is hidden again; the '*' primitives remain.
-    const caseLawIds = getToolsForSurface('review-note', 'case-law').map(a => a.id);
-    expect(caseLawIds).not.toContain('test-nda-only');
-    expect(caseLawIds).toContain('compose-draft-alternative');
+    // Active work type 'agreement-analysis' → BOTH the '*' primitives and the agreement-only tool.
+    const agrIds = getToolsForSurface('review-note', 'agreement-analysis').map(a => a.id);
+    expect(agrIds).toContain('compose-draft-alternative');
+    expect(agrIds).toContain('test-agreement-only');
+    // A DIFFERENT work type ('legal-research') → the agreement-only tool is hidden; primitives remain.
+    const researchIds = getToolsForSurface('review-note', 'legal-research').map(a => a.id);
+    expect(researchIds).not.toContain('test-agreement-only');
+    expect(researchIds).toContain('compose-draft-alternative');
   });
 
   it('a registered action with NO surfaces defaults to the selection surface (backward-compatible)', () => {
