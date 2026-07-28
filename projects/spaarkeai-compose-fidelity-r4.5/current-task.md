@@ -16,10 +16,20 @@
 ### Deploys queued for HUMAN
 - **014** (WS-1 deploy+UAT) + **034** (WS-3 deploy+UAT) — batched; need Compose deploy to shared `sprk_spaarkeai` + manual UAT. Code proceeds without them (020 deps 013, not 014).
 
+### Completed (18/22 incl. added 035)
+- Phase 0: 001, 002 ✅ · WS-5: 050, 051, 052 ✅ (DEFER)
+- WS-1: 010–013 ✅ (gate PASS) · WS-2: 020–022 ✅ (gate PASS; 5 silent drops fixed)
+- **WS-3: 030, 031, 032, 033, 035 ✅ (gate PASS)** — flagship NFR-02 green (24/24 golden = Word); **DEF-03** (numId counter bug caught by round-trip) fixed via task 035; full Compose suite **694 pass / 0 skip / 0 fail**.
+
 ### In progress / next
-- **020** WS-2 stop-silent-drops (`w:cr`/`w:sym`) — dispatching (sonnet, FULL, xhigh).
-- Then WS-2 021→022, WS-3 030→033 (flagship 031 opus), WS-4 040→042, wrap-up 090.
-- STOP-for-human: the queued deploys; 031 numbering-divergence hard-stop; 042 citation-contract question; 052 licensing (fast-follow).
+- **040** WS-4 projection reference fields (computedNumber already present from 031; add numberingLevel/listPath/headingLevel) — 🔄
+- Then 041 (persist paraId→number in payload + session ledger), **042** (opus citation resolver — single/sub-item/range; has the citation-CONTRACT unresolved-question → may escalate), wrap-up 090.
+
+### STOP-for-human
+- Queued deploys 014 + 034 (batched). · 042 citation-contract question (spec Unresolved Q). · 052 licensing sign-offs (fast-follow only).
+
+### Open defer-issues (notes/defer-issues.md)
+- DEF-01 advisoryComments (pre-existing; WS-3 031 domain — still red, revisit). · DEF-02 payload-size hardening. · DEF-03 ✅ RESOLVED (task 035).
 
 ## Project state
 

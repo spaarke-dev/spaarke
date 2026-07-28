@@ -24,7 +24,7 @@
 | 033 | Round-trip agreement test (write-side ↔ read-side) | 3 Numbering | WS-3 | sonnet | high | FULL | 032 | ✘ | ✅ (caught **DEF-03**; now green) |
 | 035 | **Fix DEF-03**: numId-aware counter/reset in NumberingComputationEngine | 3 Numbering | WS-3 | **opus** | xhigh | FULL | 033 | ✘ | ✅ (counter re-keyed (numId,level); 694 pass/0 fail) |
 | 034 | Deploy + UAT — numbering identical to Word | 3 Numbering | WS-3 | sonnet | med | STANDARD | 033 | ✘ | 🔲 |
-| 040 | Extend projection with reference fields | 4 Reference | WS-4 | sonnet | high | FULL | 033 | ✘ | 🔲 |
+| 040 | Extend projection with reference fields | 4 Reference | WS-4 | sonnet | high | FULL | 033 | ✘ | ✅ (numberingLevel/listPath/headingLevel; 705 pass) |
 | 041 | Persist `paraId → number` (payload + session ledger) | 4 Reference | WS-4 | sonnet | high | FULL | 040 | ✘ | 🔲 |
 | 042 | **Citation resolver (single / sub-item / range)** | 4 Reference | WS-4 | **opus** | xhigh | FULL | 041 | ✘ | 🔲 |
 | 050 | WS-5 spike — LibreOffice-headless pagination + divergence | 5 Page/Line | WS-5 | sonnet | high | STANDARD | 001 | ✔ | ✅ |

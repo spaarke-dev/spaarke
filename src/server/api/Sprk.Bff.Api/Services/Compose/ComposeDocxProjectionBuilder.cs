@@ -190,20 +190,29 @@ public sealed class ComposeDocxProjectionBuilder
                     // never for numbering.xml cruft a paragraph never references (common in Word-authored
                     // docs and not itself a fidelity defect).
                     string? computedNumber = null;
+                    int? numberingLevel = null;
+                    IReadOnlyList<int>? listPath = null;
                     var numberingRef = ResolveParagraphNumbering(paragraphs[i], numberingModel);
                     if (numberingRef is not null)
                     {
                         numberingByParagraph[paragraphs[i]] = numberingRef;
 
-                        // Task 031: advance the counters (in doc order) and compute the displayed label.
-                        // MUST run for EVERY numbered paragraph in order — including style-linked headings
-                        // ListInfo excludes from list treatment — so the per-(numId, level) instance-scoped
-                        // counter is exact (FR-11/FR-12). The engine mutates its counters here; the returned
-                        // label is attached to this paragraph's ParaIdMap entry for 032 render + WS-4 (FR-13).
-                        computedNumber = numberingEngine.Compute(numberingRef);
-                        if (computedNumber is not null)
+                        // Task 031: advance the counters (in doc order) and compute the displayed label +
+                        // the level's ordinal chain (task 040, WS-4/FR-16 — the SAME engine call, no
+                        // recomputation). MUST run for EVERY numbered paragraph in order — including
+                        // style-linked headings ListInfo excludes from list treatment — so the per-(numId,
+                        // level) instance-scoped counter is exact (FR-11/FR-12). The engine mutates its
+                        // counters here; the returned label + chain attach to this paragraph's ParaIdMap
+                        // entry for 032 render + WS-4 (FR-13/FR-16, the reference layer 041/042 build on).
+                        var computation = numberingEngine.Compute(numberingRef);
+                        if (computation is not null)
                         {
+                            computedNumber = computation.Value.Label;
                             computedNumberByParagraph[paragraphs[i]] = computedNumber;
+                            // Un-numbered / unresolvable paragraphs never reach here — never a fabricated
+                            // level or chain (matches ComputedNumber's own fail-closed null convention).
+                            numberingLevel = numberingRef.Ilvl;
+                            listPath = computation.Value.ListPath;
                         }
 
                         if (numberingModel.AbstractNumIdByNumId.TryGetValue(numberingRef.NumId, out var absId))
@@ -219,7 +228,15 @@ public sealed class ComposeDocxProjectionBuilder
                         }
                     }
 
-                    map.Add(new ParaIdMapEntry(i, id, minted, computedNumber));
+                    // Task 040 (WS-4, FR-16): the heading OUTLINE level (Heading1..Heading6 → 1..6; null for
+                    // a non-heading paragraph) — independent of numbering (a heading may or may not carry
+                    // style-linked w:numPr; a numbered list item is never a heading — see RenderParagraph's
+                    // headingLevel/listInfo mutual exclusion). Computed here (not deferred to Pass 2) so it
+                    // lands on the SAME ParaIdMap entry as computedNumber/numberingLevel/listPath — the full
+                    // per-paragraph reference set FR-16 requires, all populated from this single doc-order walk.
+                    var headingLevel = HeadingLevel(paragraphs[i]);
+
+                    map.Add(new ParaIdMapEntry(i, id, minted, computedNumber, numberingLevel, listPath, headingLevel));
                 }
 
                 // Pass 2 (render): ONE structural tree walk emits HTML, pulling each paragraph's id by instance.
@@ -319,7 +336,7 @@ public sealed class ComposeDocxProjectionBuilder
             return;
         }
 
-        var headingLevel = HeadingLevel(p, ctx);
+        var headingLevel = HeadingLevel(p);
         var listInfo = headingLevel is null ? ListInfo(p, ctx) : null;
 
         if (listInfo is not null)
@@ -943,7 +960,10 @@ public sealed class ComposeDocxProjectionBuilder
 
     // ── classification helpers ───────────────────────────────────────────────────────────────────────
 
-    private static int? HeadingLevel(Paragraph p, BuildContext ctx)
+    // Note (task 040, WS-4/FR-16): the `ctx` parameter was unused in the body (heading-level classification
+    // is a pure style-id read) — dropped so this helper is callable from the Pass-1 loop (below), which runs
+    // BEFORE `BuildContext` exists (`ctx` is constructed after Pass-1, at the Pass-2 render handoff).
+    private static int? HeadingLevel(Paragraph p)
     {
         var styleId = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
         if (string.IsNullOrEmpty(styleId)) return null;
@@ -1302,6 +1322,16 @@ public sealed class ComposeDocxProjectionBuilder
     // ComposeDocumentRenderer (task 033 proves the two agree).
 
     /// <summary>
+    /// The result of one <see cref="NumberingComputationEngine.Compute"/> call (task 040, WS-4/FR-16):
+    /// <paramref name="Label"/> is the displayed number Word shows (e.g. <c>"4.2"</c>); <paramref name="ListPath"/>
+    /// is the ORDINAL CHAIN — the raw numeric counter at every level from 0 through the paragraph's own
+    /// <c>ilvl</c> (e.g. <c>[4, 2]</c>) — the same computation the label's <c>%n</c> substitution draws from,
+    /// surfaced separately so a consumer (the projection payload, WS-4's citation map) does not need to
+    /// re-parse the formatted label to recover the level-by-level counters.
+    /// </summary>
+    internal readonly record struct NumberingComputationResult(string Label, IReadOnlyList<int> ListPath);
+
+    /// <summary>
     /// Deterministic replay of Word's numbering algorithm (FR-11) over a <see cref="NumberingModel"/>, run
     /// once per document across the projection's SINGLE document-order Pass-1 walk. A single instance is
     /// created before the walk and <see cref="Compute"/> is called — in document order — for each numbered
@@ -1351,13 +1381,16 @@ public sealed class ComposeDocxProjectionBuilder
         public NumberingComputationEngine(NumberingModel model) => _model = model;
 
         /// <summary>
-        /// Advances the counters for one numbered paragraph (in document order) and returns the label Word
-        /// displays for it, or <c>null</c> when the numbering is unresolvable (the <c>numId</c> is not in the
-        /// model — no corpus doc hits this; it is the escalation-relevant "construct outside the model" case,
-        /// already surfaced as a warning by <see cref="Build"/>). Must be called exactly once per numbered
-        /// paragraph, in document order, for the single-counter replay to be exact.
+        /// Advances the counters for one numbered paragraph (in document order) and returns the displayed
+        /// label Word computes for it TOGETHER WITH the level's ordinal chain (task 040, WS-4/FR-16 — e.g.
+        /// <c>"4.2"</c> pairs with <c>[4, 2]</c>), or <c>null</c> when the numbering is unresolvable (the
+        /// <c>numId</c> is not in the model — no corpus doc hits this; it is the escalation-relevant
+        /// "construct outside the model" case, already surfaced as a warning by <see cref="Build"/>). Must be
+        /// called exactly once per numbered paragraph, in document order, for the single-counter replay to be
+        /// exact. The chain is read from the SAME counter state the label was just composed from — computed
+        /// together so a caller can never observe the chain for a different (later) paragraph's counters.
         /// </summary>
-        public string? Compute(ParagraphNumberingRef numbering)
+        public NumberingComputationResult? Compute(ParagraphNumberingRef numbering)
         {
             var numId = numbering.NumId;
             var ilvl = numbering.Ilvl;
@@ -1386,8 +1419,35 @@ public sealed class ComposeDocxProjectionBuilder
             //    instance's deeper levels reset — a sibling numId sharing the abstractNum is independent.
             ResetDeeperLevels(numId, abstractNumId, ilvl);
 
-            // 3) format + compose the displayed label.
-            return ComposeLabel(numId, abstractNumId, ilvl, levelDef);
+            // 3) format + compose the displayed label, and (task 040, WS-4/FR-16) the raw ordinal chain
+            //    (levels 0..ilvl of THIS numId's counters) the label's %1..%n substitution drew from — e.g.
+            //    label "4.2" pairs with chain [4, 2]. Read BEFORE any later paragraph's Compute() call can
+            //    mutate these same counter keys, so the chain always reflects THIS paragraph's numbering.
+            var label = ComposeLabel(numId, abstractNumId, ilvl, levelDef);
+            var listPath = BuildOrdinalChain(numId, ilvl);
+            return new NumberingComputationResult(label, listPath);
+        }
+
+        /// <summary>
+        /// The ordinal chain (task 040, WS-4/FR-16) — the numeric counter at every level from 0 through
+        /// <paramref name="ilvl"/> for <paramref name="numId"/>, e.g. <c>[4, 2]</c> for a level-1 paragraph
+        /// under a level-0 "4". Mirrors <see cref="SubstituteLvlText"/>'s own <c>%n</c> counter-or-Start
+        /// fallback exactly (a shallower level not yet counted since the last reset shows its <c>w:start</c>,
+        /// matching what a <c>lvlText</c> template referencing it would display) — so the chain is always
+        /// consistent with what <see cref="ComposeLabel"/> would compose for any prefix of levels 0..ilvl,
+        /// even when the current level's <c>lvlText</c> itself does not reference every ancestor level.
+        /// </summary>
+        private List<int> BuildOrdinalChain(int numId, int ilvl)
+        {
+            var chain = new List<int>(ilvl + 1);
+            for (var level = 0; level <= ilvl; level++)
+            {
+                var value = _counters.TryGetValue((numId, level), out var cv)
+                    ? cv
+                    : (_model.ResolveLevel(numId, level)?.Start ?? 1);
+                chain.Add(value);
+            }
+            return chain;
         }
 
         private int InitialValue(int numId, int ilvl, NumberingLevelDef? levelDef)

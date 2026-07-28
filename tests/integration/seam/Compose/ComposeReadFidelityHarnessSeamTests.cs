@@ -428,4 +428,97 @@ public sealed class ComposeReadFidelityHarnessSeamTests
             "continuous 1..12 run — see corpus-manifest.md row 13");
         CountOccurrences(projection.Html, "<li>").Should().Be(12, "2 + 2 + 4 + 4 numbered paragraphs across the 4 sections");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // (c) REFERENCE-FIELD POPULATION — FR-16 (task 040, WS-4). The full per-paragraph reference set
+    // (computedNumber/numberingLevel/listPath/headingLevel) the citation layer (041 persisted map,
+    // 042 citation resolver) builds on. This seam does NOT recompute numbering — it proves task 040
+    // correctly SURFACES the SAME 031/032 engine computation already proven by the NumberingExactness_*
+    // Theory above, over the SAME corpus paragraphs (paraId-keyed, not just the label).
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    public static IEnumerable<object?[]> ReferenceFieldExemplars()
+    {
+        // (docFileName, 0-based ordinal index, expected numberingLevel, expected listPath, expected
+        // headingLevel) — hand-verified against corpus-manifest.md §1.5's golden labels: listPath is the
+        // level-0..ilvl counter chain the label's own %n substitution composed from (e.g. label "4.2"
+        // decomposes to [4, 2]); headingLevel is the paragraph's OWN style-derived outline level,
+        // independent of whether it is numbered.
+        yield return new object?[] { "heading-style-numbering.docx", 0, 0, new[] { 1 }, 1 };    // Heading1 "Recitals" -> "1"
+        yield return new object?[] { "heading-style-numbering.docx", 6, 0, new[] { 4 }, 1 };    // Heading1 "Confidentiality" -> "4"
+        yield return new object?[] { "heading-style-numbering.docx", 7, 1, new[] { 4, 1 }, 2 }; // Heading2 "Purpose" -> "4.1"
+        yield return new object?[] { "heading-style-numbering.docx", 9, 1, new[] { 4, 2 }, 2 }; // Heading2 "Confidentiality" -> "4.2", the FR-12 example
+        yield return new object?[] { "multilevel-1-1-1.docx", 1, 0, new[] { 1 }, null };        // ilvl0 "Introduction" -> "1."
+        yield return new object?[] { "multilevel-1-1-1.docx", 2, 1, new[] { 1, 1 }, null };     // ilvl1 "Background" -> "1.1."
+        yield return new object?[] { "multilevel-1-1-1.docx", 3, 2, new[] { 1, 1, 1 }, null };  // ilvl2 "History" -> "1.1.1."
+        yield return new object?[] { "multilevel-1-1-1.docx", 6, 0, new[] { 2 }, null };        // ilvl0 "Definitions" -> "2." (levels 1/2 reset)
+        yield return new object?[] { "nda-interrupted-clauses.docx", 12, 0, new[] { 4 }, null }; // post-interruption clause -> "4." (continuous, not restarted)
+    }
+
+    /// <summary>
+    /// FR-16 acceptance: for a numbered paragraph, <see cref="ParaIdMapEntry.NumberingLevel"/> equals its
+    /// <c>ilvl</c> and <see cref="ParaIdMapEntry.ListPath"/> equals the ordinal chain the golden
+    /// <see cref="ParaIdMapEntry.ComputedNumber"/> label was itself composed from (proving no divergence
+    /// between the surfaced fields and the 031-computed label they describe) — and, where applicable,
+    /// <see cref="ParaIdMapEntry.HeadingLevel"/> matches the paragraph's own Heading1..Heading6 style.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ReferenceFieldExemplars))]
+    public void ReferenceFields_OnNumberedExemplars_ExposeLevelListPathAndHeadingLevel(
+        string docFileName, int paragraphOrdinalIndex, int expectedNumberingLevel, int[] expectedListPath, int? expectedHeadingLevel)
+    {
+        var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(LoadCorpusDoc(docFileName));
+        using var doc = WordprocessingDocument.Open(new MemoryStream(bytes, writable: false), isEditable: false);
+        var paragraph = doc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>().ElementAt(paragraphOrdinalIndex);
+        var paraId = paragraph.ParagraphId!.Value!.ToUpperInvariant();
+
+        var projection = new ComposeDocxProjectionBuilder().Build(bytes);
+        var entry = projection.ParaIdMap.First(e => string.Equals(e.ParaId, paraId, StringComparison.OrdinalIgnoreCase));
+
+        entry.NumberingLevel.Should().Be(expectedNumberingLevel,
+            $"'{docFileName}' ordinal {paragraphOrdinalIndex}: numberingLevel must equal the paragraph's own ilvl");
+        entry.ListPath.Should().Equal(expectedListPath,
+            $"'{docFileName}' ordinal {paragraphOrdinalIndex}: listPath must be the ordinal chain computedNumber '{entry.ComputedNumber}' was composed from");
+        entry.HeadingLevel.Should().Be(expectedHeadingLevel,
+            $"'{docFileName}' ordinal {paragraphOrdinalIndex}: headingLevel must match the paragraph's style-derived outline level");
+    }
+
+    /// <summary>
+    /// FR-16 negative: an un-numbered paragraph carries computedNumber/numberingLevel/listPath as a
+    /// CONSISTENT null triple — never a fabricated level or chain for a paragraph the 031 engine never
+    /// computed a label for (mirrors the existing computedNumber "never fabricate" convention).
+    /// </summary>
+    [Fact]
+    public void ReferenceFields_OnUnnumberedParagraph_CarryConsistentNullTriple()
+    {
+        var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(LoadCorpusDoc("multilevel-1-1-1.docx"));
+        var projection = new ComposeDocxProjectionBuilder().Build(bytes);
+
+        // Ordinal 0 is the un-numbered title paragraph preceding the "1." Introduction item.
+        var entry = projection.ParaIdMap.Single(e => e.Index == 0);
+
+        entry.ComputedNumber.Should().BeNull();
+        entry.NumberingLevel.Should().BeNull();
+        entry.ListPath.Should().BeNull();
+    }
+
+    /// <summary>
+    /// FR-16 acceptance: <see cref="ParaIdMapEntry.HeadingLevel"/> is populated INDEPENDENTLY of numbering —
+    /// a plain (non-style-linked) Heading1 carries its outline level even though it carries no computed
+    /// number. This is the interrupting Heading1 in nda-interrupted-clauses.docx (corpus-manifest.md row 9),
+    /// which sits between clauses "3." and "4." and is itself never numbered.
+    /// </summary>
+    [Fact]
+    public void ReferenceFields_OnPlainUnnumberedHeading_PopulatesHeadingLevelWithoutFabricatingANumber()
+    {
+        var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(LoadCorpusDoc("nda-interrupted-clauses.docx"));
+        var projection = new ComposeDocxProjectionBuilder().Build(bytes);
+
+        var entry = projection.ParaIdMap.Single(e => e.Index == 5);
+
+        entry.HeadingLevel.Should().Be(1, "the interrupting paragraph carries the Heading1 style");
+        entry.ComputedNumber.Should().BeNull("the interrupting heading is not itself numbered");
+        entry.NumberingLevel.Should().BeNull();
+        entry.ListPath.Should().BeNull();
+    }
 }
