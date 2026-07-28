@@ -307,13 +307,75 @@ the code-page modal. Both host the same three-pane Analysis surface.
 
 ---
 
-## 13. Existing-Analysis retirement + reuse investigation (IN PROGRESS 2026-07-28)
+## 13. Existing-Analysis retirement + reuse map (code-verified 2026-07-28)
 
-Owner (critical): thoroughly investigate existing 'Analysis' components and where previous ones must be REMOVED —
-**especially the `sprk_analysisworkspace` HTML code-page web resource** (has a chat, document preview, analysis
-output). Likely retire, but understand fully first. Two Explore agents dispatched:
-1. `sprk_analysisworkspace` deep-dive — source, contents, invocation, dependencies, live-vs-legacy, retirement verdict.
-2. Analysis component landscape (server + client) — KEEP/RETIRE/MIGRATE map; record-subgrid reality; code-page-modal
-   reuse path for 2b/2d.
+Two Explore agents mapped every existing Analysis component. Verdict + plan below.
 
-Findings + the retirement/reuse map fold in here before `/design-to-spec`.
+### 13.1 `sprk_analysisworkspace` code page → **RETIRE-WITH-MIGRATION**
+- **Source**: `src/client/code-pages/AnalysisWorkspace/` (webpack, React 19). **Stale** (last real commit 2026-07-06)
+  while SpaarkeAi is under daily dev — functionally superseded, operationally still wired.
+- **What it is**: a full 3-pane workspace — **Editor** (Lexical analysis-output) | **Source** (side-by-side doc
+  preview: PDF iframe + Office embed, `SourceViewerPanel.tsx`) | **Chat** (shared `SprkChat`) — plus
+  `DiffReviewPanel` (accept/reject redlines), export, auto-save, 12 hooks.
+- **4 names to reconcile**: `sprk_analysisworkspace` (HTML web resource) · `sprk_AnalysisWorkspace` (navigateTo
+  casing) · `sprk_AnalysisWorkspaceLauncher` (JS) · dead custom page `sprk_analysisworkspace_8bc0b`.
+
+### 13.2 Consolidated KEEP / MIGRATE / RETIRE
+
+**KEEP (reuse in hub, no change):**
+- Server: `POST /api/ai/analysis/create` (durable-record creation), `POST /execute` (**already modernized** R7
+  Wave 4 → dispatches `IPlaybookOrchestrationService`), `POST /export` (Email/Teams/PDF/DOCX),
+  `IAnalysisDataverseService` (`CreateAnalysisAsync`/`CreateAnalysisOutputAsync`/`AssociateScopesAsync`),
+  `AnalysisResultPersistence`, `AnalysisRagProcessor`, `sprk_analysisoutput`.
+- Client: `FindingsWidget` (`Spaarke.AI.Widgets`), `AnalysisEditorWidget` (`Spaarke.AI.Outputs`),
+  `NdaReviewSummaryPanel` + Compose widgets, **`launch-resolver.openSpaarkeAi`** (the modal-open primitive — see 13.3).
+
+**MIGRATE:**
+- `POST /{id}/save` + `GET /{id}` (keep record read/save; **drop the `sprk_chathistory` blob read** — transcript
+  comes from Cosmos), `AnalysisOrchestrationService` (save/export/get glue only), `sprk_analysisworkingversion`
+  (working-doc edits move to compose/Cosmos), NDA-specific conversation hooks → **generalize to work-type**, the
+  AnalysisWorkspace 3-pane → **fold into SpaarkeAi**.
+
+**RETIRE (superseded):**
+- `POST /{id}/continue`, `POST /{id}/resume` (legacy in-memory session), `sprk_analysis.sprk_chathistory` JSON,
+  `sprk_analysischatmessage` (dead shell), AnalysisWorkspace's **unique** hooks/services (`analysisApi.ts`,
+  `useAnalysis*`, `AnalysisAiContext`, `ChatPanel`, `SourceViewerPanel`, `useInlineAiToolbar`), and the web
+  resources themselves (`sprk_analysisworkspace` HTML + `sprk_AnalysisWorkspaceLauncher` + dead custom page).
+  Session binding standardizes on `ChatEndpoints` + `sprk_aichatsummary` (+ new `→ sprk_analysis` FK).
+- **Shared widgets SURVIVE** — retiring the code page retires only its *unique* stack; `FindingsWidget`,
+  `AnalysisEditorWidget`, `NdaReviewSummaryPanel` live in `@spaarke/*` libs and are what the hub reuses.
+
+**NET-NEW:** client `sprk_analysis` TS type; `sprk_worktype` column; `sprk_regardingmatter/project/document`
+field-set; record→analysis 1:N + **subgrids on Matter/Project forms**; the Analysis hub widget; session↔Analysis
+fork-on-analysis logic; a record→modal ribbon launcher reusing `openSpaarkeAi`.
+
+### 13.3 Modal-open path (answers entry-matrix 2b/2d) — SOLVED, reuse `openSpaarkeAi`
+The reusable primitive is **`src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` → `openSpaarkeAi(params, target=2)`**
+— `navigateTo({pageType:'webresource', webresourceName:'sprk_spaarkeai', data}, {target:2, 80%×80%})`, accepts
+`entityLogicalName`+`entityId`+`matterId`. Mirror the existing `composeMode`/`openSpaarkeAiCompose` precedent to add
+an `analysisId`/`worktype`/`regarding` param; add a `sprk_matter`/`sprk_project` ribbon script (mirror
+`DocumentComposeLaunch`) that reads the form record id and calls it. **Do NOT route through `surfaceLaunchRegistry`**
+— that's the reactive *in-chat* path (agent offers a surface), explicitly distinct from record-driven opens. (Add a
+`workspace-tab` registry entry ONLY if you also want the Assistant to *offer* "open Agreement Analysis" in chat.)
+
+### 13.4 Record subgrid — 100% NET-NEW
+**No form has a `sprk_analysis` subgrid/tab today; no record→analysis 1:N wiring exists.** `sprk_analysis`'s only
+lookups are `_sprk_documentid_value` + `sprk_Playbook`. The §12.2 model (record has a subgrid of its analyses;
+analysis belongs to one record) requires the new regarding field-set + subgrids added to the parent forms.
+
+### 13.5 Retirement sequence (becomes explicit hub tasks — ordered, nothing dangles)
+1. **Repoint 4 server-side deep-links** (compiled C#, would 404): `HandoffUrlBuilder.BuildAnalysisWorkspaceUrl`
+   (← `PlaybookStatusEndpoints`, `PlaybookInvocationService`, `AgentErrorHandler`) + notification `actionUrl`
+   (`AnalysisEndpoints.cs:783`) → target `sprk_spaarkeai` via `openSpaarkeAi` deep-link shape.
+2. **Repoint client launch points**: `sprk_analysis` form OnLoad/ribbon launcher + PlaybookLibrary navigateTo →
+   `openSpaarkeAi`. Remove the dead custom-page path in `sprk_analysis_commands.js`.
+3. **Confirm SpaarkeAi parity** for the 4 capabilities (13.6) before cutover.
+4. **Delete** the web resources + `Deploy-AnalysisWorkspace.ps1` + the `AnalysisWorkspace/` source tree; reconcile
+   the casing so nothing dangles.
+
+### 13.6 The one capability GAP to verify before cutover
+SpaarkeAi/Compose covers: accept/reject redlines ✅, export (the `/export` endpoint is KEEP) ✅, auto-save ✅ (to
+SPE). **The likely gap = side-by-side ORIGINAL-SOURCE preview** (`SourceViewerPanel`: PDF iframe / Office embed) —
+Compose shows the *working* doc, not necessarily the *original source* beside it. **Verify; if absent, it's
+migration scope** (a source-preview pane in the three-pane), not deletion. (Also the PDF-preview tie-in to the
+agreements-r1 `compose-r5` question — this proves read-only PDF preview already exists as a pattern.)
