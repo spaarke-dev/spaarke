@@ -86,6 +86,7 @@ function renderToolbar(
     actions?: ReadonlyArray<ComposeAiToolbarAction>;
     dispatchConsumerOverride?: DispatchConsumer;
     forceVisible?: boolean;
+    onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
   },
   theme: typeof webLightTheme = webLightTheme
 ) {
@@ -100,6 +101,7 @@ function renderToolbar(
         actions={ui.actions}
         dispatchConsumerOverride={ui.dispatchConsumerOverride}
         forceVisible={ui.forceVisible}
+        onRequestInstruction={ui.onRequestInstruction}
       />
     </FluentProvider>
   );
@@ -399,6 +401,84 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Contextual AI Tool Library (phase 3) — free-text instruction tools
+// (compose-rewrite-instruction / "Describe a change…") collect the user's
+// instruction via onRequestInstruction BEFORE dispatch and pass it as a slot.
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — free-text instruction tools (phase 3)', () => {
+  const INSTRUCTION_ACTION: ComposeAiToolbarAction = {
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip: 'Describe a change.',
+    bindingId: 'test-binding-rewrite',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change…',
+  };
+
+  it('collects the instruction via onRequestInstruction and dispatches it as a slot', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
+    const onRequestInstruction = jest.fn().mockResolvedValue('make it mutual');
+
+    renderToolbar({ editor, actions: [INSTRUCTION_ACTION], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-rewrite-instruction'));
+
+    expect(onRequestInstruction).toHaveBeenCalledWith(expect.objectContaining({ id: 'compose-rewrite-instruction' }));
+    expect(dispatchConsumerOverride).toHaveBeenCalledWith(
+      'test-binding-rewrite',
+      expect.objectContaining({
+        slots: expect.objectContaining({ selectionText: 'Hello world', instruction: 'make it mutual' }),
+      })
+    );
+  });
+
+  it('does NOT dispatch when the user cancels the instruction dialog (resolves null)', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn();
+    const onRequestInstruction = jest.fn().mockResolvedValue(null);
+
+    renderToolbar({ editor, actions: [INSTRUCTION_ACTION], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-rewrite-instruction'));
+
+    expect(onRequestInstruction).toHaveBeenCalledTimes(1);
+    expect(dispatchConsumerOverride).not.toHaveBeenCalled();
+  });
+
+  it('a non-instruction tool (no inputPrompt) dispatches WITHOUT calling onRequestInstruction or adding an instruction slot', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
+    const onRequestInstruction = jest.fn().mockResolvedValue('should not be called');
+    const concise: ComposeAiToolbarAction = {
+      id: 'compose-make-concise',
+      label: 'Make more concise',
+      tooltip: 'Condense.',
+      bindingId: 'test-binding-concise',
+      placement: 'primary',
+      materializesInEditor: true,
+      surfaces: ['selection', 'review-note'],
+    };
+
+    renderToolbar({ editor, actions: [concise], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-make-concise'));
+
+    expect(onRequestInstruction).not.toHaveBeenCalled();
+    expect(dispatchConsumerOverride).toHaveBeenCalledWith(
+      'test-binding-concise',
+      expect.objectContaining({ slots: expect.not.objectContaining({ instruction: expect.anything() }) })
+    );
+  });
+});
+
 describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
   it('drops struck (deletion-marked) originals and keeps AI insertions as accepted text', () => {
     // A strike+replace pending redline: "old clause" struck, "new clause" inserted.
@@ -450,19 +530,22 @@ describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contextual AI Tool Library (phase 1) — getToolsForSurface: the two-dimension
-// (surface × domain) selector + the surface/domain defaults.
+// Contextual AI Tool Library — getToolsForSurface: the two-dimension
+// (surface × workType) selector + the surface/workType defaults.
 // ---------------------------------------------------------------------------
 
 describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
   it('default DEFAULT_ACTIONS: only Draft-alternative is on the selection surface (Explain/Compare/Defined-terms retired, #6)', () => {
     const ids = getToolsForSurface('selection', '*').map(a => a.id);
-    expect(ids).toEqual(['compose-draft-alternative']);
+    // The three edit primitives (round-8 #6 retired Explain/Compare/Defined-terms; phase-3 added
+    // make-concise + rewrite-instruction). Order = DEFAULT_ACTIONS order.
+    expect(ids).toEqual(['compose-draft-alternative', 'compose-make-concise', 'compose-rewrite-instruction']);
   });
 
-  it('Draft-alternative is the ONE definition shown on both selection AND review-note surfaces', () => {
-    expect(getToolsForSurface('selection', '*').map(a => a.id)).toContain('compose-draft-alternative');
-    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(['compose-draft-alternative']);
+  it('the edit primitives are shown on both the selection AND review-note surfaces from one definition each', () => {
+    const EDIT_TOOLS = ['compose-draft-alternative', 'compose-make-concise', 'compose-rewrite-instruction'];
+    expect(getToolsForSurface('selection', '*').map(a => a.id)).toEqual(EDIT_TOOLS);
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(EDIT_TOOLS);
   });
 
   it('retired tools (surfaces: []) appear on NO surface even though they remain in the registry', () => {
@@ -474,25 +557,28 @@ describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
     }
   });
 
-  it('domain narrowing: a domains:[nda] tool shows ONLY for activeDomain nda, while a domains:[*] tool shows for any domain', () => {
+  it('workType narrowing: a workTypes:[agreement-analysis] tool shows ONLY for that work type, while a workTypes:[*] primitive shows for any', () => {
     registerComposeAiToolbarAction({
-      id: 'test-nda-only',
-      label: 'NDA compliant alternative',
-      tooltip: 'NDA-only.',
-      bindingId: 'b-nda',
+      id: 'test-agreement-only',
+      label: 'Compare to firm playbook',
+      tooltip: 'Agreement-analysis-only.',
+      bindingId: 'b-agr',
       placement: 'primary',
       surfaces: ['review-note'],
-      domains: ['nda'],
+      workTypes: ['agreement-analysis'],
     });
 
-    // Agnostic domain '*' → the nda-only tool is hidden; the '*' Draft primitive still shows.
-    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(['compose-draft-alternative']);
-    // Active domain 'nda' → BOTH the '*' primitive and the nda-only tool surface.
-    const ndaIds = getToolsForSurface('review-note', 'nda').map(a => a.id);
-    expect(ndaIds).toContain('compose-draft-alternative');
-    expect(ndaIds).toContain('test-nda-only');
-    // A DIFFERENT vertical (case-law) → the nda-only tool is hidden again.
-    expect(getToolsForSurface('review-note', 'case-law').map(a => a.id)).toEqual(['compose-draft-alternative']);
+    // Shared work type '*' → the agreement-only tool is hidden; the '*' edit primitives still show.
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-agreement-only');
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toContain('compose-draft-alternative');
+    // Active work type 'agreement-analysis' → BOTH the '*' primitives and the agreement-only tool.
+    const agrIds = getToolsForSurface('review-note', 'agreement-analysis').map(a => a.id);
+    expect(agrIds).toContain('compose-draft-alternative');
+    expect(agrIds).toContain('test-agreement-only');
+    // A DIFFERENT work type ('legal-research') → the agreement-only tool is hidden; primitives remain.
+    const researchIds = getToolsForSurface('review-note', 'legal-research').map(a => a.id);
+    expect(researchIds).not.toContain('test-agreement-only');
+    expect(researchIds).toContain('compose-draft-alternative');
   });
 
   it('a registered action with NO surfaces defaults to the selection surface (backward-compatible)', () => {

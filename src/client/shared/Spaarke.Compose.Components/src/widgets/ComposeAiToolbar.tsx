@@ -129,6 +129,8 @@ import {
   Info24Regular,
   ArrowSwapRegular,
   DocumentEdit24Regular,
+  TextGrammarArrowLeft24Regular,
+  Wand24Regular,
   MoreVertical20Regular,
   Dismiss16Regular,
 } from '@fluentui/react-icons';
@@ -239,22 +241,22 @@ const TOOLBAR_SELECTION_TEXT_CAP = 16000;
 // ---------------------------------------------------------------------------
 
 /**
- * The UI surfaces on which a tool can appear (Contextual AI Tool Library, phase 1 —
+ * The UI surfaces on which a tool can appear (Contextual AI Tool Library —
  * see `projects/ai-advanced-capabilities-nda-r1/notes/contextual-ai-tool-library-design.md`).
  * A tool's `surfaces` is the FIRST of the two library dimensions (the second is
- * `domains`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
+ * `workTypes`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
  * `whole-document` / `assistant-chip` are declared for future surfaces.
  */
 export type ToolSurface = 'selection' | 'review-note' | 'whole-document' | 'assistant-chip';
 
 /**
  * Optional runtime context a tool's `appliesTo` predicate may inspect. Kept minimal
- * for phase 1 (no predicate ships yet); a future tool can gate on the selection text
+ * for now (no predicate ships yet); a future tool can gate on the selection text
  * or the active document.
  */
 export interface ToolContext {
   readonly selectionText?: string;
-  readonly activeDomain?: string;
+  readonly activeWorkType?: string;
 }
 
 /**
@@ -285,7 +287,7 @@ export interface ComposeAiToolbarAction {
    */
   readonly materializesInEditor?: boolean;
 
-  // --- Contextual AI Tool Library (phase 1) — surfacing dimensions ---
+  // --- Contextual AI Tool Library — surfacing dimensions ---
   /**
    * WHICH UI surfaces render this tool. Defaults to `['selection']` when omitted
    * (= today's behavior: BubbleMenu only). A single definition may list several
@@ -295,11 +297,14 @@ export interface ComposeAiToolbarAction {
    */
   readonly surfaces?: readonly ToolSurface[];
   /**
-   * WHICH analysis verticals surface this tool. `['*']` (default) = shared/agnostic,
-   * shown in every vertical; `['nda']` = shown only when NDA is the active analysis.
-   * The active vertical narrows the surface's tool set to `domains ∋ '*' || activeDomain`.
+   * WHICH WORK TYPES surface this tool — the product surface the user chose by intent
+   * (`'agreement-analysis'`, `'legal-research'`, …), NOT the knowledge sub-domain (NDA
+   * vs MSA is a grounding difference within a work type, not a tool-scoping axis).
+   * `['*']` (default) = a shared edit primitive shown in every work type (e.g. Draft
+   * alternative / Make concise); `['agreement-analysis']` = shown only in that surface.
+   * The active work type narrows the surface's tool set to `workTypes ∋ '*' || activeWorkType`.
    */
-  readonly domains?: readonly string[];
+  readonly workTypes?: readonly string[];
   /** Optional runtime predicate — return `false` to hide the tool for the given context. */
   readonly appliesTo?: (ctx: ToolContext) => boolean;
   /** Free-text prompt seed for instruction-style tools (e.g. "Describe a change…"). */
@@ -351,7 +356,7 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     placement: 'primary',
     // Round-8 #6 (UAT): RETIRED from the selection surface — the explain output was
     // not useful in practice. Definition kept so a future context can re-tag it
-    // (`surfaces: ['selection']`) without re-authoring. `domains: ['*']` when re-enabled.
+    // (`surfaces: ['selection']`) without re-authoring. `workTypes: ['*']` when re-enabled.
     surfaces: [],
   },
   {
@@ -362,7 +367,7 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     placement: 'primary',
     // Round-8 #6 (UAT): RETIRED from the selection surface — redundant with the NDA
     // Review Notes (which already carry per-clause playbook comparison). Re-tag per
-    // domain if a non-advisory Compose context wants inline clause comparison.
+    // work type if a non-advisory Compose context wants inline clause comparison.
     surfaces: [],
   },
   {
@@ -376,8 +381,34 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     materializesInEditor: true,
     // Contextual AI Tool Library: the reusable edit primitive — shown on BOTH the
     // BubbleMenu and each Review Note's ⋮ menu, from this ONE definition (round-8 #4).
-    // `domains` defaults to ['*'] (available in every analysis vertical).
+    // `workTypes` defaults to ['*'] (a shared primitive, available in every work type).
     surfaces: ['selection', 'review-note'],
+  },
+  {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — one-click "make more concise".
+    // Same structured-edit → redline path as draft-alternative; different prompt intent.
+    // Catalog: infra/dataverse/actions/compose-make-concise.action.json (+ binding row).
+    id: 'compose-make-concise',
+    label: 'Make more concise',
+    tooltip: 'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+  },
+  {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — free-text "describe a change".
+    // The ONLY current tool with an `inputPrompt`: the host collects the user's
+    // instruction before dispatch and passes it as the `instruction` slot.
+    // Catalog: infra/dataverse/actions/compose-rewrite-instruction.action.json (+ binding row).
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip: 'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change you’d like to make to this clause.',
   },
   {
     // gap 2.3 — the defined-terms scan (FR-11).
@@ -443,28 +474,30 @@ export function getComposeAiToolbarActions(): readonly ComposeAiToolbarAction[] 
 }
 
 /**
- * Contextual AI Tool Library selector (phase 1). Returns the tools that render on a
- * given `surface` for the `activeDomain`, applying both library dimensions plus the
+ * Contextual AI Tool Library selector. Returns the tools that render on a given
+ * `surface` for the `activeWorkType`, applying both library dimensions plus the
  * optional `appliesTo` predicate:
  *
- *   surfaces ∋ surface   AND   (domains ∋ '*' OR domains ∋ activeDomain)   AND   appliesTo(ctx) !== false
+ *   surfaces ∋ surface   AND   (workTypes ∋ '*' OR workTypes ∋ activeWorkType)   AND   appliesTo(ctx) !== false
  *
  * Defaults preserve today's behavior: a tool with no `surfaces` is treated as
- * `['selection']`; a tool with no `domains` is treated as `['*']` (agnostic). This is
- * how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu (`'review-note'`)
- * draw from ONE registry — a single definition surfaces in the contexts it declares.
+ * `['selection']`; a tool with no `workTypes` is treated as `['*']` (a shared primitive).
+ * This is how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu
+ * (`'review-note'`) draw from ONE registry — a single definition surfaces in the
+ * contexts it declares. `activeWorkType` is the product surface the user chose
+ * (`'agreement-analysis'` / `'legal-research'`), NOT the knowledge sub-domain.
  */
 export function getToolsForSurface(
   surface: ToolSurface,
-  activeDomain: string,
+  activeWorkType: string,
   ctx?: ToolContext
 ): readonly ComposeAiToolbarAction[] {
   return getComposeAiToolbarActions().filter(a => {
     const surfaces = a.surfaces ?? ['selection'];
     if (!surfaces.includes(surface)) return false;
-    const domains = a.domains ?? ['*'];
-    if (!domains.includes('*') && !domains.includes(activeDomain)) return false;
-    if (a.appliesTo && a.appliesTo(ctx ?? { activeDomain }) === false) return false;
+    const workTypes = a.workTypes ?? ['*'];
+    if (!workTypes.includes('*') && !workTypes.includes(activeWorkType)) return false;
+    if (a.appliesTo && a.appliesTo(ctx ?? { activeWorkType }) === false) return false;
     return true;
   });
 }
@@ -496,13 +529,22 @@ export interface ComposeAiToolbarProps {
    */
   actions?: ReadonlyArray<ComposeAiToolbarAction>;
   /**
-   * Contextual AI Tool Library (phase 1) — the ACTIVE analysis vertical, used to
-   * narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
-   * Defaults to `'*'` (agnostic): only `domains: ['*']` tools show. A host that runs
-   * a specific vertical (e.g. NDA review) passes its domain (`'nda'`) so
-   * domain-scoped tools also appear. Ignored when `actions` is supplied.
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user
+   * chose), used to narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
+   * Defaults to `'*'`: only shared `workTypes: ['*']` primitives show. A host running a
+   * specific work type (e.g. Agreement Analysis) passes its id (`'agreement-analysis'`)
+   * so work-type-scoped tools also appear. Knowledge sub-domain (NDA vs MSA) does NOT
+   * belong here — it only affects grounding. Ignored when `actions` is supplied.
    */
-  activeAnalysisDomain?: string;
+  activeWorkType?: string;
+  /**
+   * Contextual AI Tool Library (phase 3) — free-text tool prompt. When an action declares
+   * an `inputPrompt` (e.g. "Describe a change…"), the toolbar calls this to collect the
+   * user's free-text `instruction` BEFORE dispatch; the host renders the input UI and
+   * resolves the entered text (or `null` if cancelled). Absent ⇒ an `inputPrompt` tool
+   * cannot dispatch (no-op) — the host that wants free-text tools MUST provide this.
+   */
+  onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
   /**
    * FR-18 host serialization seam (see `ComposeActionEnqueue`). When provided,
    * every action dispatch routes through the host's serial queue instead of the
@@ -639,7 +681,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     bffBaseUrl,
     dispatch,
     actions,
-    activeAnalysisDomain = '*',
+    activeWorkType = '*',
+    onRequestInstruction,
     enqueueComposeAction,
     dispatchConsumerOverride,
     forceVisible,
@@ -691,7 +734,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   );
 
   const handleActionClick = React.useCallback(
-    (action: ComposeAiToolbarAction): void => {
+    async (action: ComposeAiToolbarAction): Promise<void> => {
       if (!editor) return;
       if (!action.bindingId) {
         // Phase-4 catalog gate — see file header "PHASE-4 STUB BOUNDARY".
@@ -705,6 +748,17 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       const rawText = editor.state.doc.textBetween(from, to, ' ');
       const selectionText =
         rawText.length > TOOLBAR_SELECTION_TEXT_CAP ? rawText.slice(0, TOOLBAR_SELECTION_TEXT_CAP) : rawText;
+
+      // Contextual AI Tool Library (phase 3): a free-text tool (`inputPrompt`, e.g. "Describe a
+      // change…") collects the user's instruction via the host dialog BEFORE dispatch. Selection
+      // is already captured above (from/to/selectionText), so it survives the modal. Cancel/empty
+      // ⇒ abort. The `instruction` becomes a dispatch slot the Action's inputSchema declares.
+      let instruction: string | undefined;
+      if (action.inputPrompt) {
+        const entered = onRequestInstruction ? await onRequestInstruction(action) : null;
+        if (!entered || !entered.trim()) return;
+        instruction = entered.trim();
+      }
 
       // FR-07 (task 040) — GENERATE-WINDOW BOOKMARK (opt-in via `aiGenerateBookmark`; drops only
       // for a `materializesInEditor` Generate action). Drop a request-scoped bookmark at the
@@ -734,6 +788,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           // dropped AND the caret sat in a paraId-bearing block). The model returns JSON operations
           // referencing this paraId, not free text to search (I-7).
           ...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
+          // Contextual AI Tool Library (phase 3): the free-text instruction for an `inputPrompt` tool.
+          ...(instruction ? { instruction } : {}),
         },
       };
 
@@ -791,7 +847,16 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           });
       }
     },
-    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId, aiGenerateBookmark, aiApplyValidation]
+    [
+      editor,
+      dispatchConsumer,
+      enqueueComposeAction,
+      documentRef,
+      sessionId,
+      aiGenerateBookmark,
+      aiApplyValidation,
+      onRequestInstruction,
+    ]
   );
 
   // Round-8 #6 (UAT): the "Email" split-menu was REMOVED from the selection toolbar —
@@ -810,12 +875,12 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const reviewItems = aiApplyValidation?.reviewQueue ?? [];
   if (!showActionToolbar && reviewItems.length === 0) return null;
 
-  // Contextual AI Tool Library (phase 1): the BubbleMenu IS the `selection` surface,
-  // so draw from `getToolsForSurface('selection', …)` — this is what drops the tools
-  // retired via `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and
-  // narrows to the active analysis vertical. `placement` remains the intra-surface
-  // primary-vs-overflow ORDERING. Tests may still inject a fixed `actions` list.
-  const allActions = actions ?? getToolsForSurface('selection', activeAnalysisDomain);
+  // Contextual AI Tool Library: the BubbleMenu IS the `selection` surface, so draw from
+  // `getToolsForSurface('selection', …)` — this is what drops the tools retired via
+  // `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and narrows to the
+  // active work type. `placement` remains the intra-surface primary-vs-overflow ORDERING.
+  // Tests may still inject a fixed `actions` list.
+  const allActions = actions ?? getToolsForSurface('selection', activeWorkType);
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
@@ -841,7 +906,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                 disabled={!action.bindingId}
                 aria-label={action.label}
                 data-testid={`compose-ai-toolbar-${action.id}`}
-                onClick={() => handleActionClick(action)}
+                onClick={() => void handleActionClick(action)}
               />
             </Tooltip>
           ))}
@@ -872,7 +937,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                       disabled={!action.bindingId}
                       title={action.tooltip}
                       data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                      onClick={() => handleActionClick(action)}
+                      onClick={() => void handleActionClick(action)}
                     >
                       {action.label}
                     </MenuItem>
@@ -926,6 +991,10 @@ function actionIcon(actionId: string): React.JSX.Element {
       return <ArrowSwapRegular />;
     case 'compose-draft-alternative':
       return <DocumentEdit24Regular />;
+    case 'compose-make-concise':
+      return <TextGrammarArrowLeft24Regular />;
+    case 'compose-rewrite-instruction':
+      return <Wand24Regular />;
     default:
       return <DocumentEdit24Regular />;
   }

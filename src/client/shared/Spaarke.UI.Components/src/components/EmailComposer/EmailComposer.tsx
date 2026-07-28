@@ -32,7 +32,6 @@ import {
   Text,
   Tooltip,
   ToolbarButton,
-  ToolbarDivider,
   Menu,
   MenuTrigger,
   MenuPopover,
@@ -468,25 +467,25 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
           </Menu>
         )}
         {showRecordSearch && (
-          <>
-            <ToolbarDivider />
-            <Menu positioning="below-end">
-              <MenuTrigger disableButtonEnhancement>
-                <Tooltip content="Insert a link to a record" relationship="label">
-                  <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
-                </Tooltip>
-              </MenuTrigger>
-              <MenuPopover>
-                <MenuList>
-                  {recordSearchCatalog.map(t => (
-                    <MenuItem key={t.logicalName} onClick={() => runRecordSearch(t.logicalName)}>
-                      {t.displayName}
-                    </MenuItem>
-                  ))}
-                </MenuList>
-              </MenuPopover>
-            </Menu>
-          </>
+          // Grouped in the SAME toolbar section as the paperclip — no divider between them
+          // (owner UAT 2026-07-27). The section-leading divider is still supplied once by
+          // ToolbarPlugin, separating this whole group from the editor controls.
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Insert a link to a record" relationship="label">
+                <ToolbarButton icon={<SearchRegular />} aria-label="Insert record link" />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {recordSearchCatalog.map(t => (
+                  <MenuItem key={t.logicalName} onClick={() => runRecordSearch(t.logicalName)}>
+                    {t.displayName}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
         )}
         {showConnector && (
           <Tooltip content="Relate this email to a record" relationship="label">

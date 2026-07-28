@@ -1,17 +1,24 @@
 # NDA Review & Analysis (Advisory Vertical) — `ai-advanced-capabilities-nda-r1`
 
-> **Status**: 🟢 Implementation complete — deployment pending (env-blocked). All 18 code tasks committed + gated on PR #689. Live steps in [`DEPLOYMENT-RUNBOOK.md`](DEPLOYMENT-RUNBOOK.md).
+> **Portfolio**: [Project #2 · Issue #693](https://github.com/spaarke-dev/spaarke/issues/693) (Completed · Epic #421 SPAARKE AI) · **Archived** 2026-07-28 (`.archived`)
+> **Status**: ✅ **COMPLETE — all 22 tasks ✅, deployed to spaarkedev1, UAT-approved.** Live in `sprk_spaarkeai` + BFF `spaarke-bff-dev`. Grounding + Reasoning tier verified in-env 2026-07-28.
 > **Program**: ai-advanced-capabilities-development — first analysis/advisory vertical
-> **Branch**: `work/ai-advanced-capabilities-nda-r1` · **Created**: 2026-07-25 · **Build complete**: 2026-07-26
+> **Branch**: `work/ai-advanced-capabilities-nda-r1` · **Created**: 2026-07-25 · **Build complete**: 2026-07-26 · **Closed**: 2026-07-28
 
-## Build status (2026-07-26)
+## Build status (CLOSED 2026-07-28)
 
-18 of 22 tasks done, every wave build-verified + code-review + adr-check gated. Remaining are not codeable without a live environment:
-- **052** tenant-pin integration test — gated on the owner's tenant-pin fix decision (§6 security-adjacent; see runbook §1).
-- **060 / 061** deploy + live UI UAT — need Azure/Dataverse creds + a deployed org.
-- **090** wrap-up — codeable parts done (this README, `notes/lessons-learned.md`, `DEPLOYMENT-RUNBOOK.md`); `/test-diet` + status→Complete + merge happen post-deployment.
+All 22 tasks ✅. The four tasks that were env-blocked at build time (011 picker, 012 grounding pin, 013 Reasoning deploy, 020 Action) were completed through the UAT follow-up commit wave and **deployed 2026-07-28 12:15 UTC**; verified empirically this session (live `az`/`pac` access to spaarkedev1):
+- **012 / NFR-06 grounding pin** — KNW-011 seeded (8 chunks, `tenantId=system`, `documentType=legal`); OR-clause tenant-pin fix owner-approved (`9176ff25b`) + de-embedded the standard from the prompt. Reproduced empirically: bare-tenant filter → **0 chunks**, `(tenant or 'system')` → **8 chunks**. `ReferenceRetrievalService.cs:316`. NDA-REVIEW is now genuinely RAG-grounded (first version that is).
+- **013 Reasoning tier** — `gpt-5-reasoning` deployment live on `spaarke-openai-dev` (smoke: `REASONING-OK`, finish:stop); `DocumentIntelligence__ReasoningModel=gpt-5-reasoning` set on `spaarke-bff-dev`; request-shape/timeout fixes deployed.
+- **011 picker** — runtime model-tier picker in `ConversationPane`/`ConversationPaneChrome` + override composition.
+- **020 Action** — `nda-review.action.json`: `modelTier:Reasoning`, `outputDeterminism:advisory`, closed schema `{overallRisk, flaggedSections[…]}`, not-legal-advice + citation + decline guardrails in prompt.
+- **060 deploy** — BFF (46.13 MB compressed, ≤60 MB §10 gate ✅), code page, Actions/Bindings, AI Search index all deployed + reachable (healthz 200).
+- **061 UI e2e** — experiential gate met via owner UAT rounds 5–8 (documented). Automated browser suite not re-run this session (no headless browser); 12 pre-existing e2e failures on master (compose-session-routing / edit-controls / three-pane-coordination) are **independent of this project** and tracked for a separate remediation pass.
+- **090 wrap-up** — `/test-diet` clean (all 40 test files MAINTAIN; `notes/test-diet-report.md`); this closeout.
 
-**North star delivered in code**: relaxed-determinism advisory review (ADR-039 amendment, strengthened so grounding/no-hallucination spans both modes) on the Reasoning tier, single-surface Compose UX (cited summary panel + right-gutter advisory comments + per-clause Draft Alternative + Summary-Page + comment-baked export + SPE versioning), NDA classification + "Review an NDA" card, runtime model picker, and the eval harness that grades it. The one thing standing between code and a live demo is the env-blocked deployment + the tenant-pin fix sign-off.
+⚠️ **Re-UAT recommended**: the grounding + de-embed change means the deployed NDA-REVIEW is the first version actually pulling the 8-chunk KNW-011 standard via RAG (prior UAT ran on the prompt-embedded standard / silently-zero grounding). Output character may have shifted — worth a fresh pass.
+
+**North star delivered**: relaxed-determinism advisory review (ADR-039 amendment) on the Reasoning tier, single-surface Compose UX (cited summary panel + right-gutter advisory comments + per-clause Draft Alternative + Summary-Page + comment-baked export + SPE versioning), NDA classification + "Review an NDA" card, runtime model picker, and the eval harness that grades it.
 
 ## What this delivers
 

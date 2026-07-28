@@ -80,7 +80,23 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip, Badge } from '@fluentui/react-components';
+import {
+  makeStyles,
+  mergeClasses,
+  tokens,
+  Spinner,
+  Text,
+  Button,
+  Tooltip,
+  Badge,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Textarea,
+} from '@fluentui/react-components';
 import {
   ArrowDown20Regular,
   Checkmark16Regular,
@@ -91,6 +107,7 @@ import {
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import {
   ComposeAiToolbar,
+  type ComposeAiToolbarAction,
   type ComposeActionEnqueue,
   getComposeAiToolbarActions,
   getToolsForSurface,
@@ -346,17 +363,18 @@ const DEFERRED_FORMAT_NOTICE =
  */
 const NOTE_TOOL_SURFACE_LABELS: Record<string, string> = {
   'compose-draft-alternative': 'Draft compliant alternative',
-  // 'compose-make-concise': 'Make more concise',        // shown automatically once the binding is seeded (surfaces ∋ 'review-note')
-  // 'compose-rewrite-instruction': 'Describe a change…', // pending seeded binding + instruction slot
+  'compose-make-concise': 'Make more concise',
+  'compose-rewrite-instruction': 'Describe a change…',
 };
 
 /**
- * Phase 1 uses the agnostic domain `'*'` for the Review-Note surface — every phase-1 tool
- * (Draft alternative) is `domains: ['*']`, so it shows regardless. The first DOMAIN-SCOPED note
- * tool (phase 3: `compose-draft-compliant-alternative`, `domains: ['nda']`) is what will require
- * threading the ACTIVE analysis domain here from the host session context (design decision #2).
+ * Fallback work type for the Review-Note surface when the host does not pass one. All shared
+ * edit primitives (Draft alternative / Make concise / Describe a change) are `workTypes: ['*']`,
+ * so they show regardless. A WORK-TYPE-SCOPED note tool (e.g. an agreement-analysis-only tool)
+ * shows only when the host threads `activeWorkType='agreement-analysis'` (via the ComposeEditor
+ * prop). Knowledge sub-domain (NDA vs MSA) is NOT this — it only affects grounding.
  */
-const NOTE_TOOL_ACTIVE_DOMAIN = '*';
+const NOTE_TOOL_FALLBACK_WORKTYPE = '*';
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -617,6 +635,14 @@ export interface ComposeEditorProps {
     /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
     placementFailureCount?: number;
   };
+  /**
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
+   * `'agreement-analysis'` (NDA/MSA/employment review), `'legal-research'`, … The host passes
+   * this so the BubbleMenu + Review-Note ⋮ menu surface work-type-scoped tools in addition to the
+   * shared `['*']` primitives. Defaults to `'*'` (shared primitives only). Knowledge sub-domain
+   * (NDA vs MSA) is NOT this — it only affects grounding. See the tool-library design doc.
+   */
+  activeWorkType?: string;
 }
 
 /**
@@ -1514,6 +1540,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       isSaving,
       commentAuthor = 'You',
       reviewSummary,
+      activeWorkType = '*',
     } = props;
 
     const styles = useStyles();
@@ -2213,10 +2240,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // BubbleMenu — a tool appears here because its definition declares `surfaces ∋ 'review-note'`
         // (round-8 #4: one Draft-alternative definition, two surfaces). `bindingId` filters out
         // still-stubbed tools; the label may be surface-overridden (NOTE_TOOL_SURFACE_LABELS).
-        getToolsForSurface('review-note', NOTE_TOOL_ACTIVE_DOMAIN)
+        getToolsForSurface('review-note', activeWorkType || NOTE_TOOL_FALLBACK_WORKTYPE)
           .filter(a => a.bindingId)
           .map(a => ({ id: a.id, label: NOTE_TOOL_SURFACE_LABELS[a.id] ?? a.label })),
-      []
+      [activeWorkType]
     );
     const [noteTools, setNoteTools] = React.useState(readNoteTools);
     React.useEffect(() => {
@@ -2225,16 +2252,50 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     }, [readNoteTools]);
     const noteToolSeqRef = React.useRef(0);
 
+    // ----- Contextual AI Tool Library (phase 3) — free-text instruction dialog -------------
+    // ONE shared dialog serves BOTH the BubbleMenu (ComposeAiToolbar via `onRequestInstruction`)
+    // and the Review-Note ⋮ menu (runNoteTool). A tool that declares `inputPrompt` (e.g. "Describe
+    // a change…") opens this dialog to collect the user's free-text `instruction` before dispatch;
+    // it resolves to the entered text, or `null` if cancelled.
+    const [instructionPrompt, setInstructionPrompt] = React.useState<{
+      open: boolean;
+      action: ComposeAiToolbarAction | null;
+      value: string;
+    }>({ open: false, action: null, value: '' });
+    const instructionResolveRef = React.useRef<((v: string | null) => void) | null>(null);
+
+    const promptForInstruction = React.useCallback(
+      (action: ComposeAiToolbarAction): Promise<string | null> =>
+        new Promise<string | null>(resolve => {
+          instructionResolveRef.current = resolve;
+          setInstructionPrompt({ open: true, action, value: '' });
+        }),
+      []
+    );
+    const settleInstruction = React.useCallback((result: string | null): void => {
+      setInstructionPrompt(prev => ({ ...prev, open: false }));
+      const resolve = instructionResolveRef.current;
+      instructionResolveRef.current = null;
+      resolve?.(result);
+    }, []);
+
     // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
     // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
     // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
     // the model's rationale (round-8 #7).
     const runNoteTool = React.useCallback(
-      (threadId: string, toolId: string): void => {
+      async (threadId: string, toolId: string): Promise<void> => {
         if (!editor || !enqueueComposeAction || !sessionId) return;
         const action = getComposeAiToolbarActions().find(a => a.id === toolId);
         // Guard: must be a wired tool that declares the review-note surface (Contextual AI Tool Library).
         if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
+        // Free-text tool (inputPrompt): collect the instruction BEFORE resolving the span/dispatch.
+        let instruction: string | undefined;
+        if (action.inputPrompt) {
+          const entered = await promptForInstruction(action);
+          if (!entered || !entered.trim()) return;
+          instruction = entered.trim();
+        }
         const span = findCommentAnchorRange(editor.state.doc, threadId);
         if (!span) return;
         const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
@@ -2250,6 +2311,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               documentSpeId: documentRef?.speDriveItemId,
               documentRecordId: documentRef?.sprkDocumentId,
               sessionId,
+              // Contextual AI Tool Library (phase 3): the free-text instruction for an inputPrompt tool.
+              ...(instruction ? { instruction } : {}),
             },
           },
           // Every note tool is an in-editor EDIT action, so ALWAYS route to the document session (DEF-09)
@@ -2258,7 +2321,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           documentSessionId: sessionId,
         }).catch(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef]
+      [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]
     );
 
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
@@ -2640,6 +2703,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
+              onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
               forceVisible
             />
@@ -2900,10 +2965,66 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
+              onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
             />
           </BubbleMenu>
         ) : null}
+
+        {/* ===================================================================
+            Contextual AI Tool Library (phase 3) — shared free-text INSTRUCTION
+            dialog. Opened by any `inputPrompt` tool from EITHER the BubbleMenu
+            (ComposeAiToolbar.onRequestInstruction) or a Review Note's ⋮ menu
+            (runNoteTool). Resolves the promise from `promptForInstruction` with
+            the entered text (Apply) or null (Cancel / dismiss).
+            =================================================================== */}
+        <Dialog
+          open={instructionPrompt.open}
+          onOpenChange={(_, data) => {
+            if (!data.open) settleInstruction(null);
+          }}
+        >
+          <DialogSurface aria-describedby={undefined} data-testid="compose-instruction-dialog">
+            <DialogBody>
+              <DialogTitle>{instructionPrompt.action?.label ?? 'Describe a change'}</DialogTitle>
+              <DialogContent>
+                <Textarea
+                  value={instructionPrompt.value}
+                  placeholder={instructionPrompt.action?.inputPrompt}
+                  onChange={(_, data) => setInstructionPrompt(prev => ({ ...prev, value: data.value }))}
+                  resize="vertical"
+                  textarea={{ 'aria-label': 'Change instruction', autoFocus: true }}
+                  style={{ width: '100%', minHeight: '96px' }}
+                  data-testid="compose-instruction-input"
+                  onKeyDown={e => {
+                    // Ctrl/Cmd+Enter submits (a plain Enter inserts a newline in the textarea).
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && instructionPrompt.value.trim()) {
+                      settleInstruction(instructionPrompt.value);
+                    }
+                  }}
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button
+                  appearance="secondary"
+                  onClick={() => settleInstruction(null)}
+                  data-testid="compose-instruction-cancel"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  appearance="primary"
+                  disabled={!instructionPrompt.value.trim()}
+                  onClick={() => settleInstruction(instructionPrompt.value)}
+                  data-testid="compose-instruction-submit"
+                >
+                  Apply
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       </div>
     );
   }
