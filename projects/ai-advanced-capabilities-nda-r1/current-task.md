@@ -9,9 +9,11 @@
 | **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 mostly DEPLOYED**: popup width, #1 scrollbar, #2 sort, #7 Assistant explanation, #3/#4/#5 Review-Note ⋮ menu. Remaining: #6 BubbleMenu cleanup + Make-concise/Describe-changes (need bindings). **NEW: owner + I agreed on the CONTEXTUAL AI TOOL LIBRARY pattern — see the §ARCHITECTURE block below.** |
 | **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `c9b57fc1f` (code) / latest = checkpoint commit. Working tree CLEAN. |
 | **Deployed (2026-07-27 r8, 3 commits)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4928 KB. d1be83701 (popup/#1/#2) → 488113b59 (#7) → c9b57fc1f (#3/#4/#5). Master since base = only `0e1e30d95` → no clobber. |
-| **Next Action** | **Write the design doc for the CONTEXTUAL AI TOOL LIBRARY (§ARCHITECTURE below) — owner asked for it; lock the model, then refactor the registry.** Also round-8 remaining: #6 BubbleMenu cleanup (client-only), Make-concise/Describe-changes tools (need seeded bindings + `instruction` slot). Then takeaway re-seed, allowsknowledge, merge/PR. |
+| **Next Action** | **✅ Design doc WRITTEN** → `notes/contextual-ai-tool-library-design.md` (grounded in real `ComposeAiToolbarAction` descriptor + registry). **Awaiting owner on 3 open decisions (doc §9): ship-location (my lean = build here), activeDomain source, and approve phase-1 client refactor now.** Phase-1 = client-only descriptor `surfaces`/`domains` + `getToolsForSurface` + repoint both menus + resolve #6 by untagging (backward-compatible, deployable). Then owner-gated: catalog analysis→tool-binding link + new bindings (make-concise/rewrite-instruction/draft-compliant-alternative + `instruction` slot). Then takeaway re-seed, allowsknowledge, merge/PR. |
 
-## 🏛️ ARCHITECTURE — Contextual AI Tool Library (agreed with owner 2026-07-27, DESIGN-DOC PENDING)
+## 🏛️ ARCHITECTURE — Contextual AI Tool Library (agreed with owner 2026-07-27) → **DESIGN DOC WRITTEN 2026-07-27: `notes/contextual-ai-tool-library-design.md`**
+
+> Full design (2 dims, 2-layer capability/surfacing split, descriptor change, NDA worked example, phasing, owner decisions) now lives in `notes/contextual-ai-tool-library-design.md`. Summary below retained for quick recall.
 
 **The ask (owner):** a reusable **library of AI "tools"** surfaced in relevant contexts. NDA analysis surfaces the NDA-relevant subset of inline BubbleMenu / Review-Note tools; a FUTURE analysis (e.g. "Case-law research") surfaces a DIFFERENT subset — same surfaces, different tool set per analysis vertical.
 
