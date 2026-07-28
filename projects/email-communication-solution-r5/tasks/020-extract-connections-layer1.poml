@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-13/FR-18: Extract PRODUCTION `ConnectionsEditor` Layer-1 logic (`provenance.ts` + `ConnectionsWriteHandler.applyRegardingSelection`) into `@spaarke/communication-components`; PCF consumes; view unchanged</title>
+    <phase>2 Layer-1 extraction</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield extraction across the PCF boundary touching a shared lib + a live PCF; the additive association write path is correctness-critical (MUST NOT clear-and-set); establishes the shared-lib scaffold + barrel every other Phase-2 task builds on; NFR-04 (OOB form + PCF regression-free) is non-negotiable. Modifies `.ts`/`.tsx`, tags refactor/shared-lib. FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Production-vs-stub judgment (must pick the PCF `ConnectionsEditor`, NOT the stale `CommunicationPage` copy) + preserving the additive-write semantics under extraction is the exact failure mode a sloppy refactor re-introduces. Most complex Phase-2 extraction; establishes the barrel scaffold.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Establishes the new `@spaarke/communication-components` logic export folder + edits the barrel `src/index.ts`; tasks 021/022 add sibling exports to the SAME barrel afterward. Barrel edits serialize — 020 must land the scaffold before P2 fans out.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, shared-lib, refactor</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extract the **production** `ConnectionsEditor`'s React-agnostic Layer-1 logic — `provenance.ts` (Xrm-free pure TS: grouping/deriving/parsing helpers + types) and the association write handler `ConnectionsWriteHandler.ts` whose `applyRegardingSelection` is the ADDITIVE multi-lookup write path — out of the `CommunicationConnections` PCF and into shared `@spaarke/communication-components`, so BOTH the OOB-form PCF and the future Phase-3 code-page review view consume one copy. The PCF re-imports the extracted logic; its React 16 `ConnectionsEditor.tsx` view is otherwise UNCHANGED. You MUST use the PRODUCTION PCF sources — MUST NOT reuse the stale `CommunicationPage` stub (design Lens 4). Establish the shared-lib logic export folder + barrel wiring that tasks 021/022 extend.</prompt>
+  <role>SPAARKE platform developer. Expert in TypeScript module boundaries, PCF virtual controls (ADR-022), and the Communication/Association additive write model (ADR-045). Follow ADRs strictly.</role>
+  <goal>`provenance.ts` (all types + functions: `parseProvenance`, `deriveConnections`, `mergeFiledConnections`, `deriveAiSuggestedTypes`, `deriveCreateActions`, `groupConnectionsByAction`, `groupCandidatesByName`, `confidenceBand`, etc. — verbatim, no behavior change) and `ConnectionsWriteHandler.ts` (`applyRegardingSelection` additive write + `unlinkRegarding`, `advanceAssociationStatus`, `persistOverrideReason`, `discoverHostNavProps`, `resolveAllowedCatalog`, and the `IRegardingSelection`/`IResolverWriteContext`/`IResolverWriteResult` contracts) live in `src/client/shared/Spaarke.Communication.Components/src/logic/connections/` and are re-exported from the shared barrel. The `CommunicationConnections` PCF imports them from `@spaarke/communication-components` instead of its local copies, builds clean via `npm run build:prod`, and behaves identically (association review + additive write). The extracted logic modules contain NO React import (pure TS) and NO `as React.ComponentType` cast.</goal>
+
+  <context>
+    <background>Spec FR-13 (interactive association review reusing the extracted `ConnectionsEditor` + additive `applyRegardingSelection`) + FR-18 (two-layer extraction) + design Lens 4 ("Associations review — LOGIC + write path — COMPLETE: extract Layer-1 logic; ⚠ CommunicationPage's copy is a stale stub — replace"). The reading pane (Phase 3, task 035) needs a React 19 review view over the SAME logic the OOB-form PCF uses. The design decision (design "Reuse architecture — two-layer split") is to share React-agnostic LOGIC, not React components, across the PCF↔code-page boundary: PCF virtual controls run under platform React 16.14/runtime 17.0.2 and cannot bundle their own React; the code page bundles React 19. `provenance.ts` is already pure TS (zero imports) and `ConnectionsWriteHandler` already abstracts Dataverse behind an injected `IResolverWriteContext` (delegates the SET path to `applyResolverFields` from `@spaarke/ui-components`) — so both are Layer-1-ready with minimal change. This task also creates the shared-lib logic-export scaffold (`src/logic/`) + barrel entry that tasks 021/022 extend.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/CommunicationConnections/provenance.ts</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/CommunicationConnections/handlers/ConnectionsWriteHandler.ts</file>
+      <file role="modify">src/client/pcf/CommunicationConnections/CommunicationConnections/ConnectionsEditor.tsx</file>
+      <file role="modify">src/client/pcf/CommunicationConnections/CommunicationConnections/CommunicationConnectionsApp.tsx</file>
+      <file role="modify">src/client/pcf/CommunicationConnections/CommunicationConnections/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/logic/connections/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="context-do-not-reuse">src/client/code-pages/CommunicationPage/src/components/ConnectionsEditor.tsx (STALE STUB — MUST NOT reuse; the design correction says replace it)</file>
+      <file role="context-do-not-reuse">src/client/code-pages/CommunicationPage/src/components/provenance.ts (prototype the PCF copy was ported from — NOT the source of truth)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency. First Phase-2 task; establishes the shared-lib logic scaffold that 021/022 extend.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">PRODUCTION source only: extract from `src/client/pcf/CommunicationConnections/CommunicationConnections/` (`provenance.ts` + `handlers/ConnectionsWriteHandler.ts`). MUST NOT copy from, merge with, or reconcile against the stale `src/client/code-pages/CommunicationPage/src/components/ConnectionsEditor.tsx` / `provenance.ts` stub (design Lens 4). If the two have drifted, the PCF copy wins unconditionally.</constraint>
+    <constraint source="ADR-045">The association write path stays ADDITIVE: `applyRegardingSelection` MUST preserve existing sibling regarding lookups (multi-lookup add), MUST NOT clear-and-set. Extraction moves the code verbatim — it MUST NOT alter write semantics, the `IResolverWriteContext` seam, or the delegation to `applyResolverFields`.</constraint>
+    <constraint source="NFR-05">Layer-1 = React-agnostic. The extracted `provenance.ts` and `ConnectionsWriteHandler.ts` MUST contain no `import ... from 'react'`, no React runtime API (`createRoot`, `use()`, Actions), and introduce no `as React.ComponentType` cast. Grep-provable (`from 'react'` returns nothing in the two extracted files).</constraint>
+    <constraint source="NFR-04">Zero regression: the `CommunicationConnections` PCF keeps its existing React 16 `ConnectionsEditor.tsx` view; only its IMPORT of `provenance`/`ConnectionsWriteHandler` changes (local relative path → `@spaarke/communication-components`). The OOB `sprk_communication` form + this PCF must function identically. Do NOT rewrite the PCF view.</constraint>
+    <constraint source="ADR-022">Two-layer split is slim-first: share LOGIC (pure TS), not React components, across the PCF boundary. The PCF remains a virtual control on platform React; no bundled React introduced.</constraint>
+    <constraint source="project">Barrel coordination: add the new `src/logic/connections` export to `@spaarke/communication-components/src/index.ts`. Barrel edits SERIALIZE across Phase-2 tasks (021/022 add sibling entries to the same file) — this task lands the scaffold first. Run `/conflict-check` before the PR (shared `@spaarke/communication-components`, contended with messaging-r2/r3, notification-spine-r1, email-r4).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF↔code-page two-layer logic extraction; additive association write</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm-free provenance core" location="src/client/pcf/CommunicationConnections/CommunicationConnections/provenance.ts">Already pure TS (zero imports). Move verbatim into `src/logic/connections/provenance.ts`; the PCF re-imports it. This is the template for a Layer-1 core.</pattern>
+      <pattern name="Injected-context write handler" location="src/client/pcf/CommunicationConnections/CommunicationConnections/handlers/ConnectionsWriteHandler.ts">`applyRegardingSelection` takes an `IResolverWriteContext` (host webApi abstracted) and delegates the SET to `applyResolverFields` from `@spaarke/ui-components` — already React-agnostic + host-agnostic. Preserve the contract exactly.</pattern>
+      <pattern name="Existing shared barrel shape" location="src/client/shared/Spaarke.Communication.Components/src/index.ts">Currently `export * from './widgets';`. Add `export * from './logic/connections';` (via a `src/logic/connections/index.ts` re-export) — the scaffold 021/022 extend.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this task + spec FR-13/FR-18 + design Lens 4 + the ADRs. Declare RIGOR LEVEL FULL / model opus / effort xhigh. Confirm you are reading the PRODUCTION PCF `provenance.ts`/`ConnectionsWriteHandler.ts`, NOT the CommunicationPage stub.</step>
+    <step order="1">Create `src/client/shared/Spaarke.Communication.Components/src/logic/connections/` and move `provenance.ts` there verbatim (all exported types + functions unchanged). Add a `logic/connections/index.ts` that re-exports it.</step>
+    <step order="2">Move `handlers/ConnectionsWriteHandler.ts` into `src/logic/connections/ConnectionsWriteHandler.ts` verbatim (keep `applyRegardingSelection`, `unlinkRegarding`, `advanceAssociationStatus`, `persistOverrideReason`, `discoverHostNavProps`, `resolveAllowedCatalog`, `_resetNavPropCacheForTests`, and the `IRegardingSelection`/`IResolverWriteContext`/`IResolverWriteResult` contracts). Confirm its only non-TS-lib import is `applyResolverFields` from `@spaarke/ui-components` (add that dep to the shared lib's package.json if not already present). Re-export from `logic/connections/index.ts`.</step>
+    <step order="3">Wire the barrel: add `export * from './logic/connections';` to `src/client/shared/Spaarke.Communication.Components/src/index.ts` (or a `./logic` sub-barrel). This is the scaffold 021/022 extend.</step>
+    <step order="4">Update the PCF: change `ConnectionsEditor.tsx` + `CommunicationConnectionsApp.tsx` + `index.ts` to import `provenance` helpers/types and the write handler from `@spaarke/communication-components` instead of the local `./provenance` / `./handlers/ConnectionsWriteHandler`. DELETE the now-duplicate local `provenance.ts` + `handlers/ConnectionsWriteHandler.ts` from the PCF (no duplicated business logic). Do NOT change the PCF view's rendering.</step>
+    <step order="5">Grep-verify React-agnosticism: `from 'react'` returns nothing in the two extracted files; no `as React.ComponentType` anywhere on the extracted code. Grep-verify no remaining import of the stale CommunicationPage stub from any r5 code.</step>
+    <step order="6">Build the shared lib (`npm run build`) and the PCF (`npm run build:prod`) — both clean. Run any existing `CommunicationConnections` unit tests; they pass against the re-homed logic.</step>
+    <step order="7">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 020 → ✅.</step>
+    <step order="8">Document the new shared logic export path + the barrel contract (so 021/022 mirror it) and any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the PCF's `provenance`/write-handler logic turns out to be entangled with React state (e.g. the write handler reaches into component hooks/refs) such that extraction would require rewriting the PCF's React 16 `ConnectionsEditor.tsx` view — violating NFR-04 (regression-free) — STOP and escalate per root CLAUDE.md §6/§6.5. Do NOT rewrite the PCF view to force the extraction.</trigger>
+    <trigger>If the production PCF `provenance.ts`/write-handler and the stale CommunicationPage stub have diverged in a way that makes "which is authoritative" genuinely ambiguous (not just drift), STOP and escalate rather than silently merging.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) + PCF (`npm run build:prod`); Vite/PCF installs use `npm install --legacy-peer-deps --no-audit --no-fund`.</tool>
+    <tool name="terminal">grep for React imports / stale-stub references; run PCF unit tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/logic/connections/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="code">src/client/pcf/CommunicationConnections/CommunicationConnections/ConnectionsEditor.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the extracted `provenance.ts` + `ConnectionsWriteHandler.ts` in `src/client/shared/Spaarke.Communication.Components/src/logic/connections/`, when grepped, then neither contains `import ... from 'react'`, any React runtime API (`createRoot`/`use(`/Actions), or an `as React.ComponentType` cast (React-agnostic Layer-1, NFR-05).</criterion>
+    <criterion testable="true">Given the source is the PRODUCTION PCF, when the extraction is reviewed, then it was taken from `src/client/pcf/CommunicationConnections/...` and NO code from `src/client/code-pages/CommunicationPage/.../ConnectionsEditor.tsx`|`provenance.ts` is imported or merged (stale stub not reused).</criterion>
+    <criterion testable="true">Given `applyRegardingSelection` after extraction, when it writes a chosen regarding, then existing sibling regarding lookups are preserved (additive multi-lookup) and it does NOT clear-and-set — write semantics identical to before extraction (ADR-045).</criterion>
+    <criterion testable="true">Given the `CommunicationConnections` PCF, when built with `npm run build:prod`, then it compiles clean importing `provenance`/`ConnectionsWriteHandler` from `@spaarke/communication-components`, its local duplicates are deleted, and its React 16 `ConnectionsEditor.tsx` view is unchanged (regression-free, NFR-04).</criterion>
+    <criterion testable="true">Given the shared barrel `@spaarke/communication-components/src/index.ts`, when imported, then it re-exports the connections logic (`parseProvenance`, `deriveConnections`, `applyRegardingSelection`, etc.) — establishing the scaffold tasks 021/022 extend.</criterion>
+    <criterion testable="true">Negative: grep of all r5 code confirms no remaining import of the CommunicationPage stub `provenance`/`ConnectionsEditor`; no business logic is duplicated between the PCF and the shared lib.</criterion>
+    <criterion testable="true">Shared lib build + PCF `build:prod` both green; existing `CommunicationConnections` unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Cite spec FR-18 (two-layer control extraction) + FR-13 + NFR-04 (regression-free) + NFR-05 (React-agnostic cores) in the PR. This is EXTRACTION of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` needed (modify/refactor exempt). Barrel edits serialize: land this scaffold before P2 (021/022) fans out. Run `/conflict-check` before the PR — `@spaarke/communication-components` is contended with messaging-r2/r3, notification-spine-r1, email-r4. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

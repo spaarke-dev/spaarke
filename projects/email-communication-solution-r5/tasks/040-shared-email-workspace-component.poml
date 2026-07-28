@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-01 / NFR-06: Assemble the single shared React 19 `EmailWorkspace` component (dual-mount source of truth)</title>
+    <phase>4 Dual-use surface</phase>
+    <gate>after:033,034,035,036</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Composition root that both mounts (widget + code page) render — the load-bearing dual-mount parity contract (NFR-06). Modifies `.tsx`; composes all Phase-3 sub-views; a defect here propagates to both surfaces. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Assembly/composition of already-built Phase-3 sub-views into one component following the established Pattern D reference; no new architecture or security-critical logic. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>This is the composition root both mounts (041 widget + 042 code page) consume; the sub-view tasks (033–036) all compose into it. Serialize — no concurrent edit of the shared `EmailWorkspace` surface.</parallel-reason>
+    <deps>033,034,035,036</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Compose the single shared React 19 `EmailWorkspace` component in `@spaarke/communication-components` — the ONE component both mounts render. It wires the left `EmailCardList` (030) + `ViewSelector` (031) into the reading-pane shell (032) which composes the `.eml` render branch (033), envelope header + attachments (034), associations review + tracking (035), and compose/toolbar (036). This single source of truth guarantees dual-mount parity (NFR-06): one bug fix propagates to both the SpaarkeAi widget (041) and the standalone code page (042). Follow the dual-use Pattern D reference `CommunicationsWorkspaceWidget.tsx` / `CalendarWorkspaceWidget.tsx`. Do NOT author mount-specific logic here — mounts are thin wrappers over this component.</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 shared-lib composition and the SpaarkeAi dual-use Pattern D. Follow ADRs strictly.</role>
+  <goal>A single exported `EmailWorkspace` React 19 component in `src/client/shared/Spaarke.Communication.Components/src/` (barrel-exported from `@spaarke/communication-components`) that renders the full Outlook-style two-pane Email surface by composing the Phase-3 sub-views, and is consumed IDENTICALLY by both the widget mount (041) and the code-page mount (042). The component owns all surface state (selected card, active view, loading/empty/error states) and takes only host-agnostic props (e.g. an `IDataverseClient`/data adapter + `authenticatedFetch`) — no PCF context, no mount-specific branching.</goal>
+
+  <context>
+    <background>Spec FR-01 + NFR-06 + Success Criterion 1: the Email surface must open as BOTH a SpaarkeAi workspace widget and a standalone code page, rendering identically, from ONE shared component. Design Lens 2 fixes this as dual-use Pattern D ("Both mount the same React 19 shared-lib component — single source of truth"). Phases 0–3 built the pieces: `sanitizeEmailHtml` (001), the `.eml` render branch (033), `EmailCardList` (030), `ViewSelector` integration (031), the reading-pane shell (032), header/attachments (034), associations/tracking (035), and compose/toolbar (036). This task assembles them; 041/042 are thin mounts over the result.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/EmailWorkspace.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Events.Components/src/widgets/CalendarWorkspaceWidget/CalendarWorkspaceWidget.tsx</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/communications.registration.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">`.eml` render branch (sandboxed iframe + `sprk_body` degradation).</dependency>
+      <dependency task="034" status="pending">Envelope header (`CommunicationHeader`) + attachments view.</dependency>
+      <dependency task="035" status="pending">Associations review (interactive/additive) + tracking view.</dependency>
+      <dependency task="036" status="pending">Compose reuse (Reply/ReplyAll/Fwd/New) + "Open full form" modal.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dual-mount parity (NFR-06): `EmailWorkspace` is the SINGLE source of truth for the surface. It MUST NOT contain any mount-specific branching (no `if (isWidget)` / `if (isCodePage)`); mounts 041/042 wrap it thinly. Any surface behavior lives here so one fix propagates to both.</constraint>
+    <constraint source="ADR-022">This component and every sub-view it composes are React 19 (code page / widget layer). It MUST NOT be shared into any PCF and MUST NOT introduce an `as React.ComponentType` cast on this new code-page work (NFR-05, slim-first). PCFs keep their React 16/17 views.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; theme (light/dark) is inherited from the host `FluentProvider` — this component MUST NOT mount its own `FluentProvider` (the mounts own theming). Renders correctly in dark mode.</constraint>
+    <constraint source="ADR-028">All BFF calls (`.eml` render) go through `@spaarke/auth` `authenticatedFetch` supplied by the host — no new auth surface, no token snapshots.</constraint>
+    <constraint source="project">Reuse only: compose the existing sub-views (033–036) + `EmailCardList`/`ViewSelector`/`PanelSplitter`. MUST NOT fork a composer (canonical `EmailComposer`/`SendEmailDialog` via 036) and MUST NOT re-implement association/attachment/tracking logic (consume the Layer-1 cores from 020–023).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SpaarkeAi dual-use Pattern D + shared-lib composition</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-adoption.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D dual-use widget" location="src/client/shared/Spaarke.Communication.Components/src/widgets/CommunicationsWorkspaceWidget/CommunicationsWorkspaceWidget.tsx">The reference rich Pattern D widget — host-agnostic props, self-contained state, no `FluentProvider`. Mirror its shape for `EmailWorkspace`.</pattern>
+      <pattern name="Barrel export" location="src/client/shared/Spaarke.Communication.Components/src/index.ts">Export `EmailWorkspace` (and its props type) so both mounts import from `@spaarke/communication-components`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this project's CLAUDE.md + spec FR-01/NFR-06 + design Lens 2. Declare RIGOR LEVEL: FULL with reason. Confirm 033–036 are ✅ before composing.</step>
+    <step order="1">Define `EmailWorkspaceProps` — host-agnostic: a Dataverse data adapter (`IDataverseClient` / `Xrm.WebApi` shim), an `authenticatedFetch` for the `.eml` render call, and optional initial view id. No PCF context type.</step>
+    <step order="2">Author `EmailWorkspace.tsx`: `PanelSplitter` two-pane layout — left = `ViewSelector` (031) over `sprk_communication` Email saved views + `EmailCardList` (030); right = the reading-pane shell (032) hosting header/attachments (034), `.eml` body branch (033), associations/tracking (035), and the full-width toolbar/compose (036).</step>
+    <step order="3">Own surface state centrally: selected card id, active saved view, and the loading/empty/error/uncertainty states (spec FR-19) — header paints from the loaded record while the `.eml` body swaps in when the render returns.</step>
+    <step order="4">Verify NO mount-specific branching and NO self-mounted `FluentProvider`; theme flows from the host. Confirm no `as React.ComponentType` cast (NFR-05).</step>
+    <step order="5">Barrel-export `EmailWorkspace` + `EmailWorkspaceProps` from `src/index.ts`.</step>
+    <step order="6">Build the shared lib (`npm run build` — NOT a PCF build) and run its unit tests; add/adjust a smoke render test that mounts `EmailWorkspace` under a `FluentProvider` (test host) in both `webLightTheme` and `webDarkTheme`.</step>
+    <step order="7">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 040 to ✅.</step>
+    <step order="8">Document the `EmailWorkspaceProps` contract (what each mount must supply) in `projects/email-communication-solution-r5/notes/` for 041/042.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dual-mount parity cannot be achieved without mount-specific branching inside `EmailWorkspace` (e.g. the widget host and code-page host require structurally different data access that cannot be abstracted behind one adapter prop), STOP and escalate per root CLAUDE.md §6 rather than forking behavior into two code paths.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CommunicationsWorkspaceWidget.tsx` (rich Pattern D chat/thread widget) and `CommunicationPage` (single-record page) — the closest neighbors in `@spaarke/communication-components`.</existing>
+    <extension>No — `CommunicationsWorkspaceWidget` is the multi-channel chat/thread metaphor and `CommunicationPage` is single-record; the Outlook mail master/detail surface (flat card list + reading-pane "as sent") is a distinct metaphor and entry point. It reuses the same lib + Pattern D pipeline (not forked).</extension>
+    <cost-of-doing-nothing>Without one shared `EmailWorkspace`, the widget and code page would each assemble the sub-views independently, so a reading-pane bug fixed in one mount silently persists in the other — the exact dual-mount-drift failure NFR-06/Success Criterion 1 exist to prevent, and there is no standalone mailbox destination.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Dual-mount parity smoke">
+      <steps><step>Render `EmailWorkspace` with a stub data adapter (one Email record with quoted `.eml`).</step><step>Select the card.</step></steps>
+      <expected>Left card list + right reading pane render; header paints from the record, `.eml` body swaps in — identical DOM regardless of host wrapper.</expected>
+    </test>
+    <test name="Dark-mode render (ADR-021)">
+      <steps><step>Render `EmailWorkspace` under `FluentProvider theme={webDarkTheme}`.</step></steps>
+      <expected>Two-pane surface + toolbar render legibly in dark mode; no hardcoded light colors; contrast preserved.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test the shared lib (`npm run build`, NOT a PCF build)</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/EmailWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/EmailWorkspace.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the built `@spaarke/communication-components`, when `EmailWorkspace` is imported and rendered with a data adapter, then it renders the two-pane surface composing `EmailCardList` + `ViewSelector` + reading-pane shell + all Phase-3 sub-views (033–036).</criterion>
+    <criterion testable="true">Given the same `EmailWorkspace` component, when rendered by two different host wrappers (widget-style and code-page-style), then the produced surface is identical (dual-mount parity) — verified by the parity smoke test.</criterion>
+    <criterion testable="true">Given a selected Email card with a `.eml` archive, when the card is clicked, then the header paints from the record and the `.eml` body swaps into the reading pane (loading→loaded state transition).</criterion>
+    <criterion testable="true">Negative: `EmailWorkspace` contains NO mount-specific branch (`isWidget`/`isCodePage`) and mounts no `FluentProvider` of its own — theme is inherited from the host (grep + review).</criterion>
+    <criterion testable="true">Negative (NFR-05): no `as React.ComponentType` cast is introduced on this component; it imports no PCF `ComponentFramework` type.</criterion>
+    <criterion testable="true">`EmailWorkspace` renders legibly under `webDarkTheme` (ADR-021 dark-mode ui-test passes).</criterion>
+    <criterion testable="true">All shared-lib unit tests pass; the lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-01 + NFR-06 + Success Criterion 1; design Lens 2 (target surfaces, Pattern D). This is `parallel-safe:false` — the composition root 041/042 consume. Run `/conflict-check` before opening the PR (shared `@spaarke/communication-components`). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>
