@@ -17,8 +17,8 @@
 actions, bidirectional summary↔note↔document highlighting, cleaner Assistant confirmations, and a first-class
 **Review Summary Memo** (generate-as-docx / email). All build directly on the nda-r1 Compose review surface.
 
-**Isn't:** a from-scratch surface. 5 of the 6 enhancements are refinements to Compose review UX or the memo output;
-they reuse shipped nda-r1 primitives. The one platform item (PDF ingest) is flagged for a separate Compose project.
+**Isn't:** a from-scratch surface. 6 of the 7 enhancements are refinements to Compose review UX or the memo/export
+output; they reuse shipped nda-r1 primitives. The one platform item (PDF ingest) is flagged for a separate Compose project.
 
 **Relationship to the hub:** **largely independent.** These are Compose-surface + output features; they do not
 require the `sprk_analysis` spine/session work of `analysis-hub-r1`. The one tie-in is memo persistence (#5), which
@@ -101,6 +101,24 @@ email compose with the memo in the body + subject prefilled, using our Email com
   + subject prefilled from the memo.
 - **Size:** moderate; mostly wiring shipped renderers + EmailComposer to the #5 memo content.
 
+**#7 — Word-comment export fidelity (handoff from compose-r4 UAT).**
+When a reviewed agreement is saved + opened in Word, each AI comment currently exports as **raw `explanation`
+prose + a hardcoded author** — it does NOT mirror the on-screen gutter structure. Want each `w:comment` to mirror
+the gutter: **Author** (configurable, not hardcoded "AI Advisory Review") · label **"Flagged clause"** (not
+"Grounded fact") · **"Assessment says: …"** · **"Standard: …"** reference (citation, ideally full clause text).
+- **Root cause (one cause, four symptoms):** the structured relabel exists **only in the on-screen gutter** and is
+  never applied to the exported comment; `standardRef` is produced + carried as thread metadata but **explicitly
+  dropped at export** (the docx mapping reads only author/text/timestamp). Full file:line breakdown in
+  `notes/word-comment-export-gap.md`.
+- **Reuse / seam (client-only; server `ApplyComment` needs NO change):** apply the same relabel + append
+  `standardRef` when composing the export `commentText` — either in `ComposeEditor.placeAdvisoryComments`
+  (`ComposeEditor.tsx:2492`) or the export mapping `composeSessionCommentThreadsToAnchoredComments`
+  (`ComposeCommentThread.types.ts:256-262`, lifting the never-export scope). The playbook data already exists.
+- **Synergy with #5:** same structured data (Flagged clause / Assessment / Standard) feeds BOTH the Word-comment
+  export AND the memo. **Recommended shared enabler:** optionally split the Action output `explanation` into
+  discrete `flaggedClause` / `assessment` fields so neither consumer string-parses markers — do it once, both win.
+- **Size:** small–moderate, client-only. Natural to build alongside #5 (shared data + assembly).
+
 ---
 
 ## 2. Reuse inventory (§11 — build almost nothing net-new)
@@ -116,6 +134,7 @@ email compose with the memo in the body + subject prefilled, using our Email com
 | Memo docx export (#6) | ✅ `ComposeDocumentRenderer` / `ComposeShadowPatchEngine` (nda-r1 Summary-Page engines) |
 | Memo email (#6) | ✅ `EmailComposer` form |
 | Memo persistence (#5) | ✅ Dataverse `sprk_analysisoutput` (exists) — per the analysis-hub storage model |
+| Word-comment export (#7) | ✅ server `ComposeShadowPatchEngine.ApplyComment` (no change) + the export mapping seam (`composeSessionCommentThreadsToAnchoredComments`) — client relabel + `standardRef` only |
 | Contextual tool palette (batch actions) | ✅ Contextual AI Tool Library (`workTypes`×`surfaces`, shipped nda-r1) |
 
 **Net-new:** the multi-select selection model + sub-toolbar (#3); the summary↔note reverse-highlight link (#2);
