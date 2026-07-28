@@ -1,0 +1,67 @@
+{
+  "$comment": "ai-advanced-capabilities-nda-r1 (Contextual AI Tool Library phase 3) — compose-rewrite-instruction Action SEED (systemPrompt home). ACTION-ONLY, no playbook: per ADR-039 a capability is an Action row + Binding row, and the Compose engine is frozen (NO new sprk_analysisplaybook records). Mirror-first author surface for the sprk_analysisaction row (sprk_actioncode=compose-rewrite-instruction) carrying the JPS systemPrompt + Azure-OpenAI-Structured-Outputs output schema. Deploy via scripts/Deploy-AnalysisAction.ps1 (action-only; upsert by sprk_actioncode) OR Dataverse MCP create_record from this mirror. The Binding that routes to it is in sprk_playbookconsumer-rows.json and DECLARES the core `compose` disposition (BindingDisposition.Compose = 100000006). The input/output schema mirrors under infra/dataverse/inputschemas|outputschemas are the CI-validated projections of this row. Owner hygiene: actionCode carries NO version suffix.",
+  "$comment-disposition": "EDIT-producing capability (like compose-draft-alternative): the LLM emits a STRUCTURED-EDIT PAYLOAD (target_text/new_text/match_mode/rationale/sources), NOT free-form markup. The payload is written to the session ledger as a SessionOutput under the `compose` disposition BEFORE any render (ADR-040); the Workspace materializes a pending track-change addressable as {bindingId}@t{n}. The disposition lives on the Binding row (sprk_disposition), not here.",
+  "$comment-justification": "CLAUDE.md §11 — Existing: compose-draft-alternative rewrites a clause toward playbook/precedent; compose-revise-document takes a free-text instruction but operates over the WHOLE document. Extension: neither covers 'rewrite THIS SELECTED clause per my free-text instruction' (the clause-scoped Word-Copilot 'describe a change' interaction, round-8 UAT #4). Cost-of-doing-nothing: users can only pick from fixed clause tools (draft alternative / make concise) — there is no way to say 'make this mutual', 'add a 30-day cure period', 'change governing law to Delaware' on a selected clause. Reuses the structured-edit output schema + redline path (differs from draft-alternative ONLY by adding the free-text `instruction` slot and steering the rewrite by it rather than by playbook grounding).",
+  "actionCode": "compose-rewrite-instruction",
+  "name": "Compose — Rewrite by Instruction",
+  "description": "Rewrite a selected contract clause according to a user's free-text instruction (e.g. 'make this mutual', 'add a 30-day cure period', 'change governing law to Delaware') for the Compose inline AI toolbar and each Review Note's tools menu (Contextual AI Tool Library). An edit-producing Compose capability: it emits a structured edit payload (target_text/new_text/match_mode/rationale/sources) written to the session ledger under the `compose` disposition before render, so the Workspace materializes a pending track-change the attorney can accept, replace, or undo.",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing AiAnalysisNodeExecutor / prompt-driven executor. No new executor (ADR-039 reuse).",
+  "temperature": 0.3,
+  "$comment-temperature": "Low-moderate temperature — the rewrite follows a specific instruction faithfully but drafts new_text, so it needs the same modest latitude as compose-draft-alternative (0.3).",
+  "systemPrompt": "ROLE: You are the Spaarke Compose rewrite-by-instruction assistant. A user has selected a clause (or clause fragment) in a contract they are drafting and given a free-text INSTRUCTION describing the change they want. You produce a STRUCTURED EDIT PAYLOAD that a track-change surface will materialize — you never emit free-form markup, diff text, or prose containing the rewrite.\n\nINPUT: a selectionText field carrying the exact selected clause, an instruction field carrying the user's free-text request, plus optional surrounding-document and matter/firm playbook/precedent context provided by the retrieval layer.\n\nINSTRUCTIONS:\n  1. Rewrite the selected clause to satisfy the user's instruction as faithfully and precisely as possible, in sound, drafting-ready contract language. Change ONLY what the instruction requires plus whatever is necessary for the clause to remain internally consistent and enforceable; preserve everything else (defined terms, party references, unrelated obligations).\n  2. Emit a JSON object matching the output schema EXACTLY. additionalProperties is false; do not add fields.\n  3. target_text: the EXACT substring of the current clause the edit replaces. Copy it VERBATIM from selectionText (character-for-character, including punctuation and casing) so the editor can locate it. When rewriting the whole selection, target_text is the entire selectionText.\n  4. new_text: the rewritten clause language that fulfils the instruction. Self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). This is the text inserted as a pending track-change.\n  5. match_mode: how the editor should locate target_text — 'strict' (target_text is the full selection; replace it as a whole — DEFAULT), 'first', or 'all' (e.g. when the instruction is a defined-term or party-name change that should apply everywhere). Choose 'first'/'all' only when target_text is a shorter fragment.\n  6. rationale: a concise plain-language note on HOW the rewrite satisfies the instruction (≤1 short paragraph, ≤1500 chars) — e.g. 'Made the indemnity mutual by adding reciprocal obligations for both parties and neutralizing the one-sided carve-out.'\n  7. sources: grounding for the edit — each entry { type, id, snippet } from the retrieval layer. Empty array when the retrieval layer supplied no grounding — do NOT invent sources.\n\nCONSTRAINTS:\n  - Follow the instruction, but do NOT exceed it — never introduce substantive changes the user did not ask for.\n  - If the instruction is ambiguous, unsafe, or cannot be satisfied faithfully from the selected clause (e.g. it asks for something the clause has no basis for), make the most reasonable good-faith interpretation, and NOTE the assumption or limitation in rationale; if it truly cannot be done, set new_text equal to target_text (a no-op edit) and explain why in rationale.\n  - target_text MUST be a verbatim substring of selectionText — never paraphrase it, or the edit will fail to locate and apply.\n  - Emit ONE payload (one target_text/new_text pair). Do not propose multiple disjoint edits.\n  - Do NOT echo secrets, tokens, or content outside the supplied clause + context.",
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["target_text", "new_text", "match_mode", "rationale", "sources"],
+    "$comment-required": "Object-level required array (ALL five fields required). Property-level boolean 'required' is FORBIDDEN (invalid JSON Schema; 400-fails the request) — OpenAiFunctionSchemaValidator enforces this. match_mode is a CLOSED SET expressed via the OpenAI-subset `enum` keyword.",
+    "properties": {
+      "target_text": {
+        "type": "string",
+        "description": "The exact substring of the current clause the edit replaces — copied VERBATIM from selectionText so the editor can locate it. The whole selection when rewriting it as a unit.",
+        "maxLength": 16000
+      },
+      "new_text": {
+        "type": "string",
+        "description": "The rewritten clause language fulfilling the instruction — self-contained, drafting-ready contract prose (no placeholders, no commentary, no markup). Inserted as a pending track-change.",
+        "maxLength": 16000
+      },
+      "match_mode": {
+        "type": "string",
+        "description": "How the editor locates target_text: 'strict' (replace the whole selection — default), 'first' (first occurrence of a fragment), or 'all' (every occurrence, e.g. a defined-term change).",
+        "enum": ["strict", "first", "all"]
+      },
+      "rationale": {
+        "type": "string",
+        "description": "Concise plain-language note on HOW the rewrite satisfies the instruction (≤1 short paragraph, ≤1500 chars).",
+        "maxLength": 1500
+      },
+      "sources": {
+        "type": "array",
+        "description": "Grounding for the edit — each entry is { type, id, snippet }. Empty array when the retrieval layer supplied no grounding — never fabricated.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "snippet"],
+          "properties": {
+            "type": {
+              "type": "string",
+              "description": "The source kind (e.g. 'playbook', 'precedent', 'clause').",
+              "maxLength": 80
+            },
+            "id": {
+              "type": "string",
+              "description": "The retrieval-layer identifier for the source — never fabricated."
+            },
+            "snippet": {
+              "type": "string",
+              "description": "A SHORT supporting excerpt from the source.",
+              "maxLength": 1000
+            }
+          }
+        }
+      }
+    }
+  }
+}

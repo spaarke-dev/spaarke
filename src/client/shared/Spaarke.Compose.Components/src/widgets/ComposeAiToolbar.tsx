@@ -129,6 +129,8 @@ import {
   Info24Regular,
   ArrowSwapRegular,
   DocumentEdit24Regular,
+  TextGrammarArrowLeft24Regular,
+  Wand24Regular,
   MoreVertical20Regular,
   Dismiss16Regular,
 } from '@fluentui/react-icons';
@@ -380,6 +382,32 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     surfaces: ['selection', 'review-note'],
   },
   {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — one-click "make more concise".
+    // Same structured-edit → redline path as draft-alternative; different prompt intent.
+    // Catalog: infra/dataverse/actions/compose-make-concise.action.json (+ binding row).
+    id: 'compose-make-concise',
+    label: 'Make more concise',
+    tooltip: 'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+  },
+  {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — free-text "describe a change".
+    // The ONLY current tool with an `inputPrompt`: the host collects the user's
+    // instruction before dispatch and passes it as the `instruction` slot.
+    // Catalog: infra/dataverse/actions/compose-rewrite-instruction.action.json (+ binding row).
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip: 'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change you’d like to make to this clause.',
+  },
+  {
     // gap 2.3 — the defined-terms scan (FR-11).
     id: 'compose-defined-terms',
     label: 'Defined terms',
@@ -503,6 +531,14 @@ export interface ComposeAiToolbarProps {
    * domain-scoped tools also appear. Ignored when `actions` is supplied.
    */
   activeAnalysisDomain?: string;
+  /**
+   * Contextual AI Tool Library (phase 3) — free-text tool prompt. When an action declares
+   * an `inputPrompt` (e.g. "Describe a change…"), the toolbar calls this to collect the
+   * user's free-text `instruction` BEFORE dispatch; the host renders the input UI and
+   * resolves the entered text (or `null` if cancelled). Absent ⇒ an `inputPrompt` tool
+   * cannot dispatch (no-op) — the host that wants free-text tools MUST provide this.
+   */
+  onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
   /**
    * FR-18 host serialization seam (see `ComposeActionEnqueue`). When provided,
    * every action dispatch routes through the host's serial queue instead of the
@@ -640,6 +676,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     dispatch,
     actions,
     activeAnalysisDomain = '*',
+    onRequestInstruction,
     enqueueComposeAction,
     dispatchConsumerOverride,
     forceVisible,
@@ -691,7 +728,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   );
 
   const handleActionClick = React.useCallback(
-    (action: ComposeAiToolbarAction): void => {
+    async (action: ComposeAiToolbarAction): Promise<void> => {
       if (!editor) return;
       if (!action.bindingId) {
         // Phase-4 catalog gate — see file header "PHASE-4 STUB BOUNDARY".
@@ -705,6 +742,17 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       const rawText = editor.state.doc.textBetween(from, to, ' ');
       const selectionText =
         rawText.length > TOOLBAR_SELECTION_TEXT_CAP ? rawText.slice(0, TOOLBAR_SELECTION_TEXT_CAP) : rawText;
+
+      // Contextual AI Tool Library (phase 3): a free-text tool (`inputPrompt`, e.g. "Describe a
+      // change…") collects the user's instruction via the host dialog BEFORE dispatch. Selection
+      // is already captured above (from/to/selectionText), so it survives the modal. Cancel/empty
+      // ⇒ abort. The `instruction` becomes a dispatch slot the Action's inputSchema declares.
+      let instruction: string | undefined;
+      if (action.inputPrompt) {
+        const entered = onRequestInstruction ? await onRequestInstruction(action) : null;
+        if (!entered || !entered.trim()) return;
+        instruction = entered.trim();
+      }
 
       // FR-07 (task 040) — GENERATE-WINDOW BOOKMARK (opt-in via `aiGenerateBookmark`; drops only
       // for a `materializesInEditor` Generate action). Drop a request-scoped bookmark at the
@@ -734,6 +782,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           // dropped AND the caret sat in a paraId-bearing block). The model returns JSON operations
           // referencing this paraId, not free text to search (I-7).
           ...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
+          // Contextual AI Tool Library (phase 3): the free-text instruction for an `inputPrompt` tool.
+          ...(instruction ? { instruction } : {}),
         },
       };
 
@@ -791,7 +841,16 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           });
       }
     },
-    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId, aiGenerateBookmark, aiApplyValidation]
+    [
+      editor,
+      dispatchConsumer,
+      enqueueComposeAction,
+      documentRef,
+      sessionId,
+      aiGenerateBookmark,
+      aiApplyValidation,
+      onRequestInstruction,
+    ]
   );
 
   // Round-8 #6 (UAT): the "Email" split-menu was REMOVED from the selection toolbar —
@@ -841,7 +900,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                 disabled={!action.bindingId}
                 aria-label={action.label}
                 data-testid={`compose-ai-toolbar-${action.id}`}
-                onClick={() => handleActionClick(action)}
+                onClick={() => void handleActionClick(action)}
               />
             </Tooltip>
           ))}
@@ -872,7 +931,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                       disabled={!action.bindingId}
                       title={action.tooltip}
                       data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                      onClick={() => handleActionClick(action)}
+                      onClick={() => void handleActionClick(action)}
                     >
                       {action.label}
                     </MenuItem>
@@ -926,6 +985,10 @@ function actionIcon(actionId: string): React.JSX.Element {
       return <ArrowSwapRegular />;
     case 'compose-draft-alternative':
       return <DocumentEdit24Regular />;
+    case 'compose-make-concise':
+      return <TextGrammarArrowLeft24Regular />;
+    case 'compose-rewrite-instruction':
+      return <Wand24Regular />;
     default:
       return <DocumentEdit24Regular />;
   }
