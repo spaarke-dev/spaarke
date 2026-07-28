@@ -138,6 +138,14 @@ public sealed class ComposeDocxProjectionBuilder
                     if (!string.IsNullOrEmpty(id)) seen.Add(id!);
                 }
 
+                // Task 030 (WS-3, FR-11/FR-12): parse the numbering MODEL once — a side-part read of
+                // numbering.xml/styles.xml, NOT a second body walk. Per-paragraph resolution is folded
+                // into the Pass-1 loop below (already visits every paragraph once) so 031's future
+                // computation has a ready per-paragraph lookup with no extra pass.
+                var numberingModel = BuildNumberingModel(mainPart);
+                var numberingByParagraph = new Dictionary<Paragraph, ParagraphNumberingRef>(ReferenceEqualityComparer.Instance);
+                var numberingDiagnostics = new List<string>();
+
                 var map = new List<ParaIdMapEntry>(paragraphs.Count);
                 var offsetTable = new List<ParaOffsetMap>(paragraphs.Count);
                 var idByParagraph = new Dictionary<Paragraph, string>(ReferenceEqualityComparer.Instance);
@@ -164,13 +172,36 @@ public sealed class ComposeDocxProjectionBuilder
                     // SAME pass and SAME Descendants<Paragraph>() order, so the table stays index-aligned with
                     // ParaIdMap by construction (cannot drift). The run flatten mirrors the render walk below.
                     offsetTable.Add(BuildParaOffsetMap(paragraphs[i], id));
+
+                    // Task 030 (FR-11/FR-12): resolve THIS paragraph's numbering in the SAME Pass-1 pass —
+                    // direct w:numPr or style-linked via pStyle. Only escalate (warn) for constructs
+                    // genuinely OUTSIDE the model (an actually-used numStyleLink chain or picture bullet) —
+                    // never for numbering.xml cruft a paragraph never references (common in Word-authored
+                    // docs and not itself a fidelity defect).
+                    var numberingRef = ResolveParagraphNumbering(paragraphs[i], numberingModel);
+                    if (numberingRef is not null)
+                    {
+                        numberingByParagraph[paragraphs[i]] = numberingRef;
+                        if (numberingModel.AbstractNumIdByNumId.TryGetValue(numberingRef.NumId, out var absId))
+                        {
+                            if (numberingModel.UnresolvedNumStyleLinkAbstractNumIds.Contains(absId))
+                            {
+                                numberingDiagnostics.Add("numstylelink-unresolved");
+                            }
+                            else if (numberingModel.ResolveLevel(numberingRef.NumId, numberingRef.Ilvl)?.HasPictureBullet == true)
+                            {
+                                numberingDiagnostics.Add("picture-bullet-unresolved");
+                            }
+                        }
+                    }
                 }
 
                 // Pass 2 (render): ONE structural tree walk emits HTML, pulling each paragraph's id by instance.
                 // FR-02 (task 012): whole-construct atoms mint from the SAME collision-checked `seen` pool
                 // paragraph ids use (format-consistent, never colliding) — ctx gets that pool + the mint
                 // delegate so it can allocate atom ids lazily, in document order, during this single pass.
-                var ctx = new BuildContext(mainPart, idByParagraph, cancellationToken, seen, MintUnique);
+                var ctx = new BuildContext(mainPart, idByParagraph, cancellationToken, seen, MintUnique, numberingModel, numberingByParagraph);
+                foreach (var diag in numberingDiagnostics) ctx.AddWarning(diag, 1);
                 RenderBlockChildren(body, ctx);
                 ctx.CloseOpenList();
 
@@ -938,6 +969,300 @@ public sealed class ComposeDocxProjectionBuilder
         }
     }
 
+    // ── numbering model (task 030, spaarkeai-compose-fidelity-r4.5 WS-3, FR-11/FR-12) ─────────────────
+    // The read-side numbering MODEL — the closed input the WS-3 computation engine (task 031) replays
+    // Word's algorithm over (design §4 WS-3 "Algorithm"). Parses `numbering.xml` (`w:num` →
+    // `w:abstractNumId` → `w:abstractNum`, per-level `w:numFmt`/`w:lvlText`/`w:start`/`w:lvlRestart`/
+    // `w:isLgl`/`w:lvlOverride`/`w:startOverride`) and resolves STYLE-LINKED numbering from `styles.xml`
+    // (FR-12: a paragraph style — e.g. Heading2 — carrying the `w:numPr`, exercised by
+    // heading-style-numbering.docx / corpus-manifest.md row 10). NO number is computed here — that is
+    // task 031; this region only builds + exposes the model and resolves each paragraph's effective
+    // `(numId, ilvl)`. Model construction is a side-part read (numbering.xml / styles.xml are NOT the
+    // document body) and per-paragraph resolution is wired into the EXISTING Pass-1 identity-assignment
+    // loop in <see cref="Build"/> (`:134-171` at time of writing) — so this adds NO second full-document
+    // walk; the single document-order paragraph walk invariant (`:18-26`) is untouched.
+
+    /// <summary>One level's authored numbering definition. Mirrors exactly the field set
+    /// <c>ComposeDocumentRenderer</c> (the write-side mirror) authors via <c>StartNumberingValue</c>/
+    /// <c>LevelText</c>/<c>NumberingFormat</c>/<c>ParagraphStyleIdInLevel</c> (`:570-640`), so task 033's
+    /// read↔write round-trip test can compare like-for-like.</summary>
+    internal sealed record NumberingLevelDef(
+        int AbstractNumId,
+        int Level,
+        NumberFormatValues? NumFmt,
+        string? LvlText,
+        int? Start,
+        int? LvlRestart,
+        bool IsLgl,
+        string? ParagraphStyleIdInLevel,
+        bool HasPictureBullet);
+
+    /// <summary>A `numId`-scoped level override (`w:lvlOverride`) — either a `w:startOverride` (restart
+    /// THIS numId's counter at a value, without redefining the level — other numIds sharing the same
+    /// abstractNum keep its own `w:start`) or a full replacement `w:lvl` (<see cref="FullLevelOverride"/>
+    /// non-null), which supersedes the abstractNum's own level definition for this numId.</summary>
+    internal sealed record NumberingLevelOverrideDef(int? StartOverride, NumberingLevelDef? FullLevelOverride);
+
+    /// <summary>A paragraph's resolved numbering source — direct `w:numPr` (<see cref="StyleLinked"/> =
+    /// false, mirrors <see cref="ListInfo"/>'s (numId,ilvl) extraction exactly so the two never disagree
+    /// on the direct case) or style-linked via `pStyle` (FR-12, <see cref="StyleLinked"/> = true).
+    /// Resolved for EVERY numbered paragraph — including style-linked headings <see cref="ListInfo"/>
+    /// deliberately excludes from list treatment — because 031 needs both cases to replay Word's single
+    /// per-(abstractNumId, level) counter across the whole document.</summary>
+    internal sealed record ParagraphNumberingRef(int NumId, int Ilvl, bool StyleLinked, string? SourceStyleId);
+
+    /// <summary>
+    /// The read-side numbering MODEL (task 030) — the closed input task 031 walks. Built ONCE per
+    /// document by <see cref="BuildNumberingModel"/>.
+    /// </summary>
+    internal sealed class NumberingModel
+    {
+        public required IReadOnlyDictionary<int, int> AbstractNumIdByNumId { get; init; }
+        public required IReadOnlyDictionary<(int AbstractNumId, int Level), NumberingLevelDef> Levels { get; init; }
+        public required IReadOnlyDictionary<(int NumId, int Level), NumberingLevelOverrideDef> Overrides { get; init; }
+        public required IReadOnlyDictionary<string, ParagraphNumberingRef> StyleLinkedNumbering { get; init; }
+
+        /// <summary>AbstractNum ids whose `w:numStyleLink` indirection (FR-12's harder chain case — the
+        /// design's flagged "numStyleLink as a potential uncovered construct") could NOT be resolved to a
+        /// concrete level set. Escalation surface: a paragraph resolving to one of these ids means the
+        /// doc uses a numbering construct outside this model (this task's escalation trigger).</summary>
+        public required IReadOnlySet<int> UnresolvedNumStyleLinkAbstractNumIds { get; init; }
+
+        /// <summary>Resolves the effective level definition for `(numId, ilvl)`, honoring a full
+        /// `w:lvlOverride` before falling back to the abstractNum's own level — the same precedence
+        /// <c>ComposeDocumentRenderer</c> authors (an override always wins). Null means the numId is
+        /// unresolvable or that exact level is not defined (031's call whether to fall back to the
+        /// nearest lower level, mirroring <see cref="ResolveOrdered"/>'s existing tolerant fallback).</summary>
+        public NumberingLevelDef? ResolveLevel(int numId, int ilvl)
+        {
+            if (Overrides.TryGetValue((numId, ilvl), out var over) && over.FullLevelOverride is not null)
+            {
+                return over.FullLevelOverride;
+            }
+            return AbstractNumIdByNumId.TryGetValue(numId, out var abstractNumId) && Levels.TryGetValue((abstractNumId, ilvl), out var def)
+                ? def
+                : null;
+        }
+
+        /// <summary>A `w:startOverride` for `(numId, ilvl)`, or null if this numId does not override the
+        /// level's start.</summary>
+        public int? ResolveStartOverride(int numId, int ilvl) =>
+            Overrides.TryGetValue((numId, ilvl), out var over) ? over.StartOverride : null;
+    }
+
+    /// <summary>
+    /// Parses `numbering.xml` into a <see cref="NumberingModel"/> (FR-11) and resolves STYLE-LINKED
+    /// numbering from `styles.xml` (FR-12). Pure / static / never throws on a malformed numbering or
+    /// styles part (mirrors <see cref="ResolveOrdered"/>'s fail-open posture) — a defect in one part
+    /// degrades that part of the model to empty rather than aborting the whole projection (F-04, Build()
+    /// never throws). `internal` (not private) so task 031 and this task's own sanity tests can drive it
+    /// directly over the corpus fixtures without a full <see cref="Build"/> round-trip.
+    /// </summary>
+    internal static NumberingModel BuildNumberingModel(MainDocumentPart mainPart)
+    {
+        var abstractNumIdByNumId = new Dictionary<int, int>();
+        var levels = new Dictionary<(int, int), NumberingLevelDef>();
+        var overrides = new Dictionary<(int, int), NumberingLevelOverrideDef>();
+        var unresolvedNumStyleLink = new HashSet<int>();
+
+        // "numbering style" (`w:style w:type="numbering"`) -> the numId it authors — needed BEFORE the
+        // numbering.xml pass to chase an abstractNum's `w:numStyleLink` indirection.
+        var numberingStyleNumId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var stylesPartForLink = mainPart.StyleDefinitionsPart?.Styles;
+            if (stylesPartForLink is not null)
+            {
+                foreach (var style in stylesPartForLink.Elements<Style>())
+                {
+                    var sid = style.StyleId?.Value;
+                    var numId = style.StyleParagraphProperties?.NumberingProperties?.NumberingId?.Val?.Value;
+                    if (sid is not null && numId is not null) numberingStyleNumId[sid] = numId.Value;
+                }
+            }
+        }
+        catch { /* fail-open — numStyleLink chains simply won't resolve */ }
+
+        try
+        {
+            var numbering = mainPart.NumberingDefinitionsPart?.Numbering;
+            if (numbering is not null)
+            {
+                var abstractNumsById = numbering.Elements<AbstractNum>()
+                    .Where(a => a.AbstractNumberId?.Value is not null)
+                    .GroupBy(a => a.AbstractNumberId!.Value)
+                    .ToDictionary(g => g.Key, g => g.First()); // GroupBy: a malformed doc could repeat an id; first wins, never throws
+
+                foreach (var (abstractNumId, abstractNum) in abstractNumsById)
+                {
+                    var effective = abstractNum;
+                    var numStyleLink = abstractNum.NumberingStyleLink?.Val?.Value;
+                    if (!string.IsNullOrEmpty(numStyleLink))
+                    {
+                        var resolved = ResolveNumStyleLinkTarget(numStyleLink!, numberingStyleNumId, numbering, abstractNumsById);
+                        if (resolved is not null) { effective = resolved; }
+                        else { unresolvedNumStyleLink.Add(abstractNumId); continue; }
+                    }
+
+                    foreach (var level in effective.Elements<Level>())
+                    {
+                        var lvl = level.LevelIndex?.Value ?? 0;
+                        levels[(abstractNumId, lvl)] = ToLevelDef(abstractNumId, lvl, level);
+                    }
+                }
+
+                foreach (var instance in numbering.Elements<NumberingInstance>())
+                {
+                    var numId = instance.NumberID?.Value;
+                    var abstractNumId = instance.AbstractNumId?.Val?.Value;
+                    if (numId is null || abstractNumId is null) continue;
+                    abstractNumIdByNumId[numId.Value] = abstractNumId.Value;
+
+                    foreach (var lvlOverride in instance.Elements<LevelOverride>())
+                    {
+                        var lvl = lvlOverride.LevelIndex?.Value ?? 0;
+                        var startOverride = lvlOverride.StartOverrideNumberingValue?.Val?.Value;
+                        var fullOverride = lvlOverride.Level is { } overrideLevel
+                            ? ToLevelDef(abstractNumId.Value, lvl, overrideLevel)
+                            : null;
+                        overrides[(numId.Value, lvl)] = new NumberingLevelOverrideDef(startOverride, fullOverride);
+                    }
+                }
+            }
+        }
+        catch { /* fail-open — see class remarks */ }
+
+        var styleLinked = new Dictionary<string, ParagraphNumberingRef>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var stylesPart = mainPart.StyleDefinitionsPart?.Styles;
+            if (stylesPart is not null)
+            {
+                var stylesById = stylesPart.Elements<Style>()
+                    .Where(s => s.StyleId?.Value is not null)
+                    .GroupBy(s => s.StyleId!.Value!)
+                    .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+                foreach (var (styleId, style) in stylesById)
+                {
+                    var resolved = ResolveStyleNumbering(style, stylesById);
+                    if (resolved is not null) styleLinked[styleId] = resolved;
+                }
+            }
+        }
+        catch { /* fail-open — see class remarks */ }
+
+        return new NumberingModel
+        {
+            AbstractNumIdByNumId = abstractNumIdByNumId,
+            Levels = levels,
+            Overrides = overrides,
+            StyleLinkedNumbering = styleLinked,
+            UnresolvedNumStyleLinkAbstractNumIds = unresolvedNumStyleLink,
+        };
+    }
+
+    private static NumberingLevelDef ToLevelDef(int abstractNumId, int lvl, Level level) => new(
+        AbstractNumId: abstractNumId,
+        Level: lvl,
+        NumFmt: level.NumberingFormat?.Val?.Value,
+        LvlText: level.LevelText?.Val?.Value,
+        Start: level.StartNumberingValue?.Val?.Value,
+        LvlRestart: level.LevelRestart?.Val?.Value,
+        IsLgl: IsOn(level.IsLegalNumberingStyle),
+        ParagraphStyleIdInLevel: level.ParagraphStyleIdInLevel?.Val?.Value,
+        HasPictureBullet: level.LevelPictureBulletId is not null);
+
+    /// <summary>Chases an abstractNum's `w:numStyleLink` (FR-12 chain case): the target is a "numbering
+    /// style" (`w:style w:type="numbering"`) whose OWN `w:numPr` names the numId carrying the REAL level
+    /// definitions — one more indirection than the ordinary numId→abstractNum lookup. Bounded hop count +
+    /// a visited-set cycle guard (never observed in the corpus, but the model must not hang on one).
+    /// Returns null — unresolved — if the chain bottoms out without reaching a concrete abstractNum; the
+    /// caller records that abstractNumId in <see cref="NumberingModel.UnresolvedNumStyleLinkAbstractNumIds"/>.</summary>
+    private static AbstractNum? ResolveNumStyleLinkTarget(
+        string targetStyleId,
+        IReadOnlyDictionary<string, int> numberingStyleNumId,
+        Numbering numbering,
+        IReadOnlyDictionary<int, AbstractNum> abstractNumsById,
+        int maxHops = 8)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var currentStyleId = targetStyleId;
+        for (var hop = 0; hop < maxHops; hop++)
+        {
+            if (!visited.Add(currentStyleId)) return null; // cycle
+            if (!numberingStyleNumId.TryGetValue(currentStyleId, out var numId)) return null;
+
+            var instance = numbering.Elements<NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == numId);
+            var abstractNumId = instance?.AbstractNumId?.Val?.Value;
+            if (abstractNumId is null || !abstractNumsById.TryGetValue(abstractNumId.Value, out var abstractNum))
+            {
+                return null;
+            }
+
+            var nextLink = abstractNum.NumberingStyleLink?.Val?.Value;
+            if (string.IsNullOrEmpty(nextLink)) return abstractNum; // concrete — chain resolved
+            currentStyleId = nextLink!;
+        }
+        return null; // hop budget exhausted — treat as unresolved rather than risk a pathological loop
+    }
+
+    /// <summary>Resolves a paragraph STYLE's effective numbering (FR-12) — the style's own `w:numPr`, or
+    /// (if absent) the nearest `w:basedOn` ancestor's, mirroring Word's paragraph-property style
+    /// inheritance. Bounded hop count + visited-set cycle guard against a malformed `w:basedOn` chain.
+    /// <see cref="ParagraphNumberingRef.SourceStyleId"/> in the returned ref is the style that ACTUALLY
+    /// carries the `w:numPr` (which may be an ancestor of <paramref name="style"/>, not <paramref
+    /// name="style"/> itself, when resolved via `w:basedOn`).</summary>
+    private static ParagraphNumberingRef? ResolveStyleNumbering(
+        Style style, IReadOnlyDictionary<string, Style> stylesById, int maxHops = 20)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Style? current = style;
+        for (var hop = 0; hop < maxHops && current is not null; hop++)
+        {
+            var sid = current.StyleId?.Value;
+            if (sid is not null && !visited.Add(sid)) return null; // cycle
+
+            var numPr = current.StyleParagraphProperties?.NumberingProperties;
+            var numId = numPr?.NumberingId?.Val?.Value;
+            if (numId is not null)
+            {
+                var ilvl = numPr!.NumberingLevelReference?.Val?.Value ?? 0;
+                return new ParagraphNumberingRef(numId.Value, ilvl, StyleLinked: true, SourceStyleId: sid);
+            }
+
+            var basedOnId = current.BasedOn?.Val?.Value;
+            current = basedOnId is not null && stylesById.TryGetValue(basedOnId, out var parent) ? parent : null;
+        }
+        return null;
+    }
+
+    /// <summary>Resolves a paragraph's effective `(numId, ilvl)` for the WS-3 numbering model (FR-11/
+    /// FR-12) — direct `w:numPr` first (mirrors <see cref="ListInfo"/>'s extraction exactly), else the
+    /// paragraph's `pStyle` resolved through <see cref="NumberingModel.StyleLinkedNumbering"/>
+    /// (heading-style-numbering.docx's Heading1/Heading2, corpus-manifest.md row 10). `internal` so 031
+    /// calls this from the SAME per-paragraph call site <see cref="Build"/>'s Pass-1 loop already visits
+    /// (no second walk) and so this task's tests can assert the resolution directly.</summary>
+    internal static ParagraphNumberingRef? ResolveParagraphNumbering(Paragraph p, NumberingModel model)
+    {
+        var directNumPr = p.ParagraphProperties?.NumberingProperties;
+        var directNumId = directNumPr?.NumberingId?.Val?.Value;
+        if (directNumId is not null)
+        {
+            var ilvl = directNumPr!.NumberingLevelReference?.Val?.Value ?? 0;
+            return new ParagraphNumberingRef(
+                directNumId.Value, ilvl, StyleLinked: false, SourceStyleId: p.ParagraphProperties?.ParagraphStyleId?.Val?.Value);
+        }
+
+        var styleId = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
+        if (styleId is not null && model.StyleLinkedNumbering.TryGetValue(styleId, out var styleRef))
+        {
+            return styleRef;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// FR-09's alignment emit (was <c>AppendAlignment</c>) plus FR-07 (task 021) <c>w:ind</c> emit, combined
     /// into ONE <c>style="…"</c> attribute — an HTML element cannot carry two <c>style</c> attributes, so
@@ -1044,6 +1369,7 @@ public sealed class ComposeDocxProjectionBuilder
     {
         private readonly StringBuilder _sb = new(4096);
         private readonly Dictionary<Paragraph, string> _idByParagraph;
+        private readonly Dictionary<Paragraph, ParagraphNumberingRef> _numberingByParagraph;
         private readonly Dictionary<string, int> _warnings = new(StringComparer.Ordinal);
         private readonly HashSet<string> _seenIds;
         private readonly Func<HashSet<string>, string> _mintUnique;
@@ -1053,13 +1379,16 @@ public sealed class ComposeDocxProjectionBuilder
 
         public BuildContext(
             MainDocumentPart mainPart, Dictionary<Paragraph, string> idByParagraph, CancellationToken ct,
-            HashSet<string> seenIds, Func<HashSet<string>, string> mintUnique)
+            HashSet<string> seenIds, Func<HashSet<string>, string> mintUnique,
+            NumberingModel numbering, Dictionary<Paragraph, ParagraphNumberingRef> numberingByParagraph)
         {
             MainPart = mainPart;
             _idByParagraph = idByParagraph;
             CancellationToken = ct;
             _seenIds = seenIds;
             _mintUnique = mintUnique;
+            Numbering = numbering;
+            _numberingByParagraph = numberingByParagraph;
         }
 
         public MainDocumentPart MainPart { get; }
@@ -1068,10 +1397,21 @@ public sealed class ComposeDocxProjectionBuilder
         public string Html => _sb.ToString();
         public IReadOnlyList<ComposeBlockAtom> BlockAtoms => _blockAtoms;
 
+        /// <summary>Task 030 (WS-3, FR-11/FR-12): the read-side numbering MODEL for this document,
+        /// resolved once in <see cref="Build"/>'s Pass 1. Task 031's computation engine consumes this
+        /// (plus <see cref="TryGetParagraphNumbering"/>) from the SAME single document-order walk.</summary>
+        public NumberingModel Numbering { get; }
+
         public IReadOnlyList<ComposeProjectionWarning> Warnings =>
             _warnings.Select(kv => new ComposeProjectionWarning(kv.Key, kv.Value)).ToList();
 
         public bool TryGetParaId(Paragraph p, out string paraId) => _idByParagraph.TryGetValue(p, out paraId!);
+
+        /// <summary>The numbering source resolved for <paramref name="p"/> in Pass 1 (task 030) — direct
+        /// `w:numPr` or style-linked via `pStyle` (FR-12). False when <paramref name="p"/> is not a
+        /// numbered paragraph.</summary>
+        public bool TryGetParagraphNumbering(Paragraph p, out ParagraphNumberingRef numbering) =>
+            _numberingByParagraph.TryGetValue(p, out numbering!);
 
         public void AddWarning(string code, int count)
         {

@@ -1071,4 +1071,281 @@ public sealed class ComposeDocxProjectionBuilderTests
         projection.Warnings.Should().NotContain(w =>
             w.Code == "page-break-rendered-as-line-break" || w.Code == "column-break-rendered-as-line-break");
     }
+
+    // ── task 030 (spaarkeai-compose-fidelity-r4.5, WS-3): numbering-MODEL reader (FR-11/FR-12) ─────────
+    // Sanity-tests the PARSED MODEL only — abstractNum/level fields (numFmt/lvlText/start/lvlRestart/
+    // isLgl/lvlOverride) + per-paragraph (numId,ilvl) resolution, direct AND style-linked. No computed
+    // display label is asserted anywhere here — that is task 031's job, not this one's. Drives the real
+    // `internal` parser (InternalsVisibleTo) over real in-memory .docx fixtures and the real task-001
+    // corpus — no Mock<HttpMessageHandler>/DI/ctor tests (ADR-038).
+
+    private static byte[] BuildDocxWithMultiLevelNumberingAndOverride()
+    {
+        // AbstractNum id=7, 2 levels: level0 decimal "%1." start=1; level1 lowerLetter "%1.%2" start=1
+        // lvlRestart=1 isLgl=true. NumberingInstance numId=3 -> abstractNumId=7, WITH a level-0
+        // w:lvlOverride/w:startOverride=5 (numId-scoped restart, independent of the abstractNum's own
+        // w:start) — exercises every FR-11 field in one fixture.
+        using var ms = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = wordDoc.AddMainDocumentPart();
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(
+                        new StartNumberingValue { Val = 1 },
+                        new NumberingFormat { Val = NumberFormatValues.Decimal },
+                        new LevelText { Val = "%1." })
+                    { LevelIndex = 0 },
+                    new Level(
+                        new StartNumberingValue { Val = 1 },
+                        new NumberingFormat { Val = NumberFormatValues.LowerLetter },
+                        new LevelText { Val = "%1.%2" },
+                        new LevelRestart { Val = 1 },
+                        new IsLegalNumberingStyle())
+                    { LevelIndex = 1 })
+                { AbstractNumberId = 7 },
+                new NumberingInstance(
+                    new AbstractNumId { Val = 7 },
+                    new LevelOverride(new StartOverrideNumberingValue { Val = 5 }) { LevelIndex = 0 })
+                { NumberID = 3 });
+            numberingPart.Numbering.Save();
+
+            main.Document = new Document(new Body(NumberedPara("A0000001", "clause", ilvl: 0, numId: 3)));
+            main.Document.Save();
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void BuildNumberingModel_ForMultiLevelAbstractNumWithOverride_ExposesEveryFr11Field()
+    {
+        var docx = BuildDocxWithMultiLevelNumberingAndOverride();
+        using var ms = new MemoryStream(docx);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+
+        model.AbstractNumIdByNumId[3].Should().Be(7);
+
+        var level0 = model.Levels[(7, 0)];
+        level0.NumFmt.Should().Be(NumberFormatValues.Decimal);
+        level0.LvlText.Should().Be("%1.");
+        level0.Start.Should().Be(1);
+        level0.IsLgl.Should().BeFalse();
+
+        var level1 = model.Levels[(7, 1)];
+        level1.NumFmt.Should().Be(NumberFormatValues.LowerLetter);
+        level1.LvlText.Should().Be("%1.%2");
+        level1.LvlRestart.Should().Be(1);
+        level1.IsLgl.Should().BeTrue("w:isLgl forces legal (decimal-style) numbering per FR-11");
+
+        model.ResolveStartOverride(numId: 3, ilvl: 0).Should().Be(5,
+            "the numId-scoped w:lvlOverride/w:startOverride must be captured independent of the abstractNum's own w:start");
+    }
+
+    [Fact]
+    public void ResolveParagraphNumbering_ForDirectNumPr_ResolvesNumIdAndIlvlAsNotStyleLinked()
+    {
+        var docx = BuildDocxWithMultiLevelNumberingAndOverride();
+        using var ms = new MemoryStream(docx);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
+
+        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+
+        resolved.Should().NotBeNull();
+        resolved!.NumId.Should().Be(3);
+        resolved.Ilvl.Should().Be(0);
+        resolved.StyleLinked.Should().BeFalse("a direct w:numPr paragraph is not style-linked (FR-12 is the OTHER case)");
+    }
+
+    private static byte[] BuildDocxWithHeadingStyleCarryingNumPr()
+    {
+        // FR-12 shape: numId/ilvl live on the "Heading2" STYLE's own w:pPr/w:numPr (styles.xml), NOT on
+        // the paragraph directly — mirrors heading-style-numbering.docx (corpus-manifest.md row 10).
+        using var ms = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = wordDoc.AddMainDocumentPart();
+
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2" }) { LevelIndex = 1 })
+                { AbstractNumberId = 9 },
+                new NumberingInstance(new AbstractNumId { Val = 9 }) { NumberID = 4 });
+            numberingPart.Numbering.Save();
+
+            var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+            var heading2 = new Style(
+                new StyleParagraphProperties(new NumberingProperties(
+                    new NumberingLevelReference { Val = 1 }, new NumberingId { Val = 4 })))
+            { Type = StyleValues.Paragraph, StyleId = "Heading2" };
+            stylesPart.Styles = new Styles(heading2);
+            stylesPart.Styles.Save();
+
+            // Paragraph carries ONLY pStyle — no direct w:numPr (the FR-12 defect this task fixes the READ for).
+            var p = new Paragraph(new Run(new Text("Confidentiality") { Space = SpaceProcessingModeValues.Preserve }))
+            {
+                ParagraphId = new HexBinaryValue("00H20001"),
+                ParagraphProperties = new ParagraphProperties(new ParagraphStyleId { Val = "Heading2" }),
+            };
+            main.Document = new Document(new Body(p));
+            main.Document.Save();
+        }
+        return ms.ToArray();
+    }
+
+    [Fact]
+    public void ResolveParagraphNumbering_ForHeadingStyleCarryingNumPrDirectly_ResolvesStyleLinkedNumIdAndIlvl()
+    {
+        // FR-12 acceptance example ("4.2 Confidentiality") — the model side, not the computed label.
+        var docx = BuildDocxWithHeadingStyleCarryingNumPr();
+        using var ms = new MemoryStream(docx);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
+
+        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+
+        resolved.Should().NotBeNull("the paragraph has NO direct w:numPr — resolution must fall back to its pStyle (FR-12)");
+        resolved!.NumId.Should().Be(4);
+        resolved.Ilvl.Should().Be(1);
+        resolved.StyleLinked.Should().BeTrue();
+        resolved.SourceStyleId.Should().Be("Heading2");
+    }
+
+    [Fact]
+    public void ResolveParagraphNumbering_ForStyleInheritingNumberingViaBasedOn_ResolvesThroughAncestorChain()
+    {
+        // FR-12's inheritance edge: a style with NO numPr of its own but w:basedOn an ancestor that HAS
+        // one — Word's paragraph-property style inheritance applies to numbering too.
+        using var ms0 = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms0, WordprocessingDocumentType.Document))
+        {
+            var main = wordDoc.AddMainDocumentPart();
+
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 })
+                { AbstractNumberId = 11 },
+                new NumberingInstance(new AbstractNumId { Val = 11 }) { NumberID = 6 });
+            numberingPart.Numbering.Save();
+
+            var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+            var ancestor = new Style(
+                new StyleParagraphProperties(new NumberingProperties(
+                    new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 6 })))
+            { Type = StyleValues.Paragraph, StyleId = "Heading2" };
+            var child = new Style(new StyleParagraphProperties()) // no numPr of its own
+            { Type = StyleValues.Paragraph, StyleId = "Heading2Sub", BasedOn = new BasedOn { Val = "Heading2" } };
+            stylesPart.Styles = new Styles(ancestor, child);
+            stylesPart.Styles.Save();
+
+            var p = new Paragraph(new Run(new Text("Sub-clause") { Space = SpaceProcessingModeValues.Preserve }))
+            {
+                ParagraphId = new HexBinaryValue("00H30001"),
+                ParagraphProperties = new ParagraphProperties(new ParagraphStyleId { Val = "Heading2Sub" }),
+            };
+            main.Document = new Document(new Body(p));
+            main.Document.Save();
+        }
+        var docx = ms0.ToArray();
+
+        using var ms = new MemoryStream(docx);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
+
+        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+
+        resolved.Should().NotBeNull("Heading2Sub inherits numbering from its w:basedOn ancestor Heading2");
+        resolved!.NumId.Should().Be(6);
+        resolved.StyleLinked.Should().BeTrue();
+        resolved.SourceStyleId.Should().Be("Heading2", "the ANCESTOR that actually carries the w:numPr, not the queried style Heading2Sub");
+    }
+
+    // ── task 030: same sanity assertions over the REAL task-001 corpus exemplars (no invented fixture) ──
+
+    private static string CorpusDocPath(string fileName) =>
+        Path.Combine(Path.GetDirectoryName(ComposeCorpusFixtureLocator.EnumerateDocumentPaths().First())!, fileName);
+
+    [Fact]
+    public void BuildNumberingModel_OverHeadingStyleNumberingCorpusDoc_ResolvesStyleLinkedHeadingsAtBothLevels()
+    {
+        var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(CorpusDocPath("heading-style-numbering.docx"));
+        using var ms = new MemoryStream(bytes, writable: false);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+
+        // corpus-manifest.md row 10: Heading1 -> level 0 "%1"; Heading2 -> level 1 "%1.%2" — resolved
+        // from the STYLE, since document.xml itself carries zero w:numPr (task 001's confirmed fact).
+        var resolvedByOrdinal = mainPart.Document!.Body!.Descendants<Paragraph>()
+            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .ToList();
+
+        var heading1Refs = resolvedByOrdinal.Where(r => r is { StyleLinked: true, Ilvl: 0 }).ToList();
+        heading1Refs.Should().NotBeEmpty("Heading1 paragraphs (e.g. 'Recitals', 'Definitions') resolve at ilvl 0 via their style");
+        var heading2Refs = resolvedByOrdinal.Where(r => r is { StyleLinked: true, Ilvl: 1 }).ToList();
+        heading2Refs.Should().NotBeEmpty("Heading2 paragraphs (e.g. '4.1 Purpose', '4.2 Confidentiality') resolve at ilvl 1 via their style");
+    }
+
+    [Fact]
+    public void BuildNumberingModel_OverMultilevelCorpusDoc_Exposes3LevelsWithComposedLvlTextTemplates()
+    {
+        var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(CorpusDocPath("multilevel-1-1-1.docx"));
+        using var ms = new MemoryStream(bytes, writable: false);
+        using var doc = WordprocessingDocument.Open(ms, isEditable: false);
+        var mainPart = doc.MainDocumentPart!;
+
+        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+
+        // corpus-manifest.md row 11: single abstractNum, 3 levels, "%1." / "%1.%2." / "%1.%2.%3.".
+        var directRefs = mainPart.Document!.Body!.Descendants<Paragraph>()
+            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .Where(r => r is not null)
+            .Select(r => r!)
+            .ToList();
+
+        directRefs.Should().Contain(r => r.Ilvl == 0);
+        directRefs.Should().Contain(r => r.Ilvl == 1);
+        directRefs.Should().Contain(r => r.Ilvl == 2);
+        directRefs.Should().OnlyContain(r => !r.StyleLinked, "multilevel-1-1-1.docx uses direct w:numPr at every level, not style-linked numbering");
+
+        // Every resolved (numId, ilvl) pair must have a level definition with a non-empty lvlText template.
+        foreach (var r in directRefs.DistinctBy(r => (r.NumId, r.Ilvl)))
+        {
+            var level = model.ResolveLevel(r.NumId, r.Ilvl);
+            level.Should().NotBeNull($"level {r.Ilvl} of numId {r.NumId} must be defined in numbering.xml");
+            level!.LvlText.Should().NotBeNullOrEmpty();
+        }
+    }
+
+    [Fact]
+    public void Build_OverNumberingExemplarCorpusDocs_ParsesModelWithoutAnyEscalationWarning()
+    {
+        // Negative/escalation-boundary check (this task's <escalation> trigger): none of the three WS-3
+        // numbering exemplars use a numStyleLink chain or a picture bullet, so wiring the model reader
+        // into Build() must NOT introduce a new "numstylelink-unresolved" or "picture-bullet-unresolved"
+        // warning on any of them — a false escalation on ordinary numbering would itself be a defect.
+        foreach (var fileName in new[] { "nda-interrupted-clauses.docx", "heading-style-numbering.docx", "multilevel-1-1-1.docx" })
+        {
+            var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(CorpusDocPath(fileName));
+
+            var projection = new ComposeDocxProjectionBuilder().Build(bytes);
+
+            projection.Warnings.Should().NotContain(
+                w => w.Code == "numstylelink-unresolved" || w.Code == "picture-bullet-unresolved",
+                $"{fileName} does not use either construct — the model reader must not false-positive escalate");
+        }
+    }
 }

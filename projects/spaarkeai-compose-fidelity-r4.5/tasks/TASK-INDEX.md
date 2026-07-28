@@ -18,7 +18,7 @@
 | 020 | Stop silent drops (`w:cr`, `w:sym`) + warning mechanism | 2 Harden read | WS-2 | sonnet | xhigh | FULL | 013 | ✘ | ✅ (8/8 text-exact; gate @ WS-2 boundary) |
 | 021 | Emit `w:ind` indentation + `white-space:pre-wrap` | 2 Harden read | WS-2 | sonnet | high | FULL | 020 | ✘ | ✅ (+composeIndentExtension.ts; gate @ WS-2 boundary) |
 | 022 | OOXML construct audit + missing projection tests | 2 Harden read | WS-2 | sonnet | high | FULL | 021 | ✘ | ✅ (5 silent drops fixed; **WS-2 gate PASS**) |
-| 030 | Numbering-model reader (numbering.xml + style-linked) | 3 Numbering | WS-3 | sonnet | xhigh | FULL | 022 | ✘ | 🔲 |
+| 030 | Numbering-model reader (numbering.xml + style-linked) | 3 Numbering | WS-3 | sonnet | xhigh | FULL | 022 | ✘ | ✅ (model exposed for 031; HTML byte-identical) |
 | 031 | **Numbering computation engine (replay Word)** | 3 Numbering | WS-3 | **opus** | xhigh | FULL | 030 | ✘ | 🔲 |
 | 032 | Render computed label as non-editable number-atom | 3 Numbering | WS-3 | sonnet | high | FULL | 031 | ✘ | 🔲 |
 | 033 | Round-trip agreement test (write-side ↔ read-side) | 3 Numbering | WS-3 | sonnet | high | FULL | 032 | ✘ | 🔲 |
