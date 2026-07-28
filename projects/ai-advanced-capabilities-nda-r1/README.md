@@ -1,5 +1,6 @@
 # NDA Review & Analysis (Advisory Vertical) — `ai-advanced-capabilities-nda-r1`
 
+> **Portfolio**: [Project #2 · Issue #693](https://github.com/spaarke-dev/spaarke/issues/693) (Completed · Epic #421 SPAARKE AI) · **Archived** 2026-07-28 (`.archived`)
 > **Status**: ✅ **COMPLETE — all 22 tasks ✅, deployed to spaarkedev1, UAT-approved.** Live in `sprk_spaarkeai` + BFF `spaarke-bff-dev`. Grounding + Reasoning tier verified in-env 2026-07-28.
 > **Program**: ai-advanced-capabilities-development — first analysis/advisory vertical
 > **Branch**: `work/ai-advanced-capabilities-nda-r1` · **Created**: 2026-07-25 · **Build complete**: 2026-07-26 · **Closed**: 2026-07-28
