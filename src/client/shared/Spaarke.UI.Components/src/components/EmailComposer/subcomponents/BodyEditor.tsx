@@ -39,7 +39,10 @@ function htmlToPlainText(html: string): string {
     .replace(/<\s*li[^>]*>/gi, '• ');
   const el = document.createElement('div');
   el.innerHTML = withBreaks;
-  return (el.textContent || '').replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').trim();
+  return (el.textContent || '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -148,7 +151,6 @@ export const BodyEditor = React.forwardRef<RichTextEditorRef, IBodyEditorProps>(
       )}
 
       <div className={styles.editorArea} style={{ minHeight }}>
-
         {format === 'HTML' ? (
           <div className={styles.editorFill}>
             <RichTextEditor

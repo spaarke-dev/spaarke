@@ -93,16 +93,23 @@ import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar'
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
-  composeSessionCommentThreadsToDocxAnnotations,
+  composeSessionCommentThreadsToAnchoredComments,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
+import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
-import { usePendingRedline, type MaterializeStatus, type ConfidenceBand } from './hooks/usePendingRedline';
+import {
+  usePendingRedline,
+  resolveTargetSpans,
+  type MaterializeStatus,
+  type ConfidenceBand,
+} from './hooks/usePendingRedline';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
+import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
@@ -144,6 +151,8 @@ import type {
   ComposeContentModel,
   ImportedRevision,
   ImportedComment,
+  // Task 040 (comment-export wiring fix)
+  ComposeAnchoredComment,
 } from '../types/compose-contracts';
 // Redline → Word save fidelity (UAT-R7 #2/#3/#4): the redline→annotation bridge + its wire type.
 import { redlineMarksToDocxAnnotations, type DocxAnnotationInput } from './useComposeWordShuttle';
@@ -541,6 +550,51 @@ export interface ComposeEditorProps {
 }
 
 /**
+ * One flagged clause to materialize as an advisory comment (ai-advanced-capabilities-nda-r1 task
+ * 031). A deliberately PLAIN structural type — decoupled from the PaneEventBus event shape
+ * (`ComposeAdvisoryCommentItem` in `@spaarke/ai-widgets`), mirroring {@link
+ * ComposeEditorHandle.highlightCitedSpan}'s primitive-args convention so ComposeEditor's public
+ * surface never depends on the bus's event union.
+ */
+export interface AdvisoryCommentInput {
+  /** Verbatim quoted NDA clause excerpt — the `resolveTargetSpans('strict')` anchor target. Tier-3. */
+  targetText: string;
+  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3. */
+  explanation: string;
+  /**
+   * task 032 (right-gutter comment layout) — optional metadata passed through to the created
+   * thread's {@link ComposeCommentThreadModel} (via `useComposeCommentThreads.createThread`'s
+   * metadata parameter) so the right-rail gutter card can render a risk badge + citation. Structural
+   * mirror of `ComposeAdvisoryCommentItem`'s own optional fields (`@spaarke/ai-widgets`).
+   */
+  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
+  sectionRef?: string;
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
+  riskLevel?: string;
+  /** Optional standard/playbook reference the flag cites. */
+  standardRef?: string;
+}
+
+/**
+ * A flagged range that could not be resolved to a unique span (FR-19 "do not guess" — reported,
+ * never silently dropped). `kind` mirrors {@link ResolveResult}'s failure kinds.
+ */
+export interface AdvisoryCommentFailure {
+  /** The unresolved target text (truncated by the caller for display; carried verbatim here). */
+  targetText: string;
+  /** `not_found` — zero matches; `ambiguous` — more than one match (do not guess which). */
+  kind: 'not_found' | 'ambiguous';
+}
+
+/** Outcome of {@link ComposeEditorHandle.placeAdvisoryComments}. */
+export interface AdvisoryCommentPlacementResult {
+  /** Count of comments successfully anchored + created. */
+  placed: number;
+  /** Ranges that could not be resolved to a unique span — never silently dropped. */
+  failed: AdvisoryCommentFailure[];
+}
+
+/**
  * Imperative handle exposed by ComposeEditor — host calls these via ref.
  */
 export interface ComposeEditorHandle {
@@ -597,14 +651,19 @@ export interface ComposeEditorHandle {
   hasPendingRedlines(): boolean;
 
   /**
-   * Item 5b (UAT round-4, FR-23): the FR-23 comment-thread panel's NEW (session-authored) threads
-   * mapped to {@link DocxAnnotationInput}[] (`w:comment`) via `composeCommentThreadsToDocxAnnotations`.
-   * The host appends these to the save `annotations` list so panel comments persist as native Word
-   * comments (previously they lived only in React state and vanished on reload). IMPORTED threads
-   * (seeded from the retained original's own `w:comment`s) are EXCLUDED — they already ride the
-   * retained baseline, so re-emitting them would duplicate. Empty when no session comments exist.
+   * Task 040 (comment-export wiring fix): BOTH the FR-23 session Comments panel's own thread
+   * instance AND the NDA-REVIEW advisory thread instance ({@link getAdvisoryCommentThreads}, task
+   * 031), mapped to {@link ComposeAnchoredComment}[] via
+   * `composeSessionCommentThreadsToAnchoredComments` — each thread's LIVE `commentAnchor` mark span
+   * resolved to a durable `(paraId, run-local range)` (D2), no text-search (I-7). The host sends the
+   * result in the Save request's `comments` field; `ComposeShadowPatchEngine.ApplyComment` bakes each
+   * as a native `w:comment` (ADR-049). IMPORTED session threads (seeded from the retained original's
+   * own `w:comment`s) are EXCLUDED — they already ride the retained baseline, so re-emitting them
+   * would duplicate. REPLACES the retired {@link getCommentThreadAnnotations} (`DocxAnnotationInput`,
+   * text-anchored via the stale `annotations` save field, which the server never deserialized — every
+   * comment sent that way was silently dropped). Empty when no session/advisory comments exist.
    */
-  getCommentThreadAnnotations(): DocxAnnotationInput[];
+  getAnchoredComments(): ComposeAnchoredComment[];
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -692,6 +751,31 @@ export interface ComposeEditorHandle {
 
   /** Clear the active Doc Q&A ephemeral highlight immediately (no-op if none active). */
   clearCitedHighlight(): void;
+
+  /**
+   * NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031). For each flagged
+   * clause, resolves `targetText` against the CURRENT document via `resolveTargetSpans('strict')`
+   * — the SAME anchoring primitive {@link highlightCitedSpan} uses — and, on a unique match,
+   * creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`) carrying
+   * `explanation` as the thread's text. Uses a DEDICATED `useComposeCommentThreads` instance
+   * (author `'AI Advisory Review'`), separate from the session Comments panel's own instance —
+   * both apply the SAME `commentAnchor` mark to the document, so both are visible as
+   * comment-anchor spans; a future right-gutter layout unifies the browsing UI across both
+   * authors. Ranges that fail strict resolution (`not_found` / `ambiguous`) are reported via the
+   * result's `failed` list — NEVER silently dropped (FR-19 "do not guess" rule). No-op (returns
+   * every item as `not_found`) if the editor is unmounted.
+   */
+  placeAdvisoryComments(items: readonly AdvisoryCommentInput[]): AdvisoryCommentPlacementResult;
+
+  /**
+   * The advisory comment threads placed via {@link placeAdvisoryComments} so far, in creation
+   * order. READ SURFACE task 031 exposed for task 040 to consume — {@link getAnchoredComments} now
+   * maps these threads (alongside the session Comments panel's own thread instance) to native
+   * `w:comment` save output. Kept as its own getter (rather than folded silently into
+   * {@link getAnchoredComments}) so a caller can still inspect/count the advisory threads on their
+   * own, independent of the export mapping.
+   */
+  getAdvisoryCommentThreads(): readonly ComposeCommentThreadModel[];
 }
 
 // ---------------------------------------------------------------------------
@@ -984,6 +1068,13 @@ const useStyles = makeStyles({
     right: tokens.spacingHorizontalM,
     zIndex: 2,
     boxShadow: tokens.shadow16,
+  },
+  // task 032 (right-gutter comment layout) — reserves room for the right-rail comment gutter so its
+  // cards sit in true margin space alongside the document rather than overlapping body text. Applied
+  // ONLY while there is at least one advisory-comment thread to place (see the render section below);
+  // an editor with no advisory comments keeps its full-width `editorSurface` padding.
+  editorSurfaceWithGutter: {
+    paddingRight: `calc(${COMMENT_GUTTER_WIDTH_PX}px + ${tokens.spacingHorizontalL})`,
   },
   // FR-22 (task 043) — floating "Styles" pane toggle, pinned top-LEFT of the editor scroll region
   // (the top-right corner is taken by `commentsToggleFab`). Semantic tokens only (ADR-021
@@ -1423,10 +1514,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // Item 5b (UAT round-4, FR-23): the comment-thread panel owns its thread state (survives
     // open/close). To PERSIST panel comments on save, the panel reports its live threads up via
-    // `onThreadsChanged` into this ref; the imperative `getCommentThreadAnnotations()` maps the
+    // `onThreadsChanged` into this ref; the imperative `getAnchoredComments()` (task 040) maps the
     // SESSION-authored ones (excluding imported threads, which ride the retained original) to
-    // `w:comment` annotations. A ref (not state) keeps this off the render path — save reads the
-    // latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
+    // `w:comment`-baking `ComposeAnchoredComment`s. A ref (not state) keeps this off the render path
+    // — save reads the latest value imperatively. The imported-id set is derived from `initialCommentThreads`.
     const commentThreadsRef = React.useRef<readonly ComposeCommentThreadModel[]>(initialCommentThreads);
     const handleCommentThreadsChanged = React.useCallback((threads: readonly ComposeCommentThreadModel[]): void => {
       commentThreadsRef.current = threads;
@@ -1521,8 +1612,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_STYLES,
         ...COMPOSE_R4_OPAQUE_ATOMS,
         opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
-                        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
-                        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
+        // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
+        // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
       ],
       content: '<p></p>',
@@ -1697,8 +1788,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         if (projection.status === 'partial' && projection.warnings.length > 0) {
           projectionImportWarnings.push({
             type: 'warning',
-            message:
-              'Some formatting may not display fully in Compose — open in Word to review the complete document.',
+            message: 'Some formatting may not display fully in Compose — open in Word to review the complete document.',
           });
         }
         if (projectionRevisionResult.unresolvedItems.length > 0) {
@@ -1835,6 +1925,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
 
+    // ----- NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) -----------
+    // A DEDICATED useComposeCommentThreads instance (author 'AI Advisory Review'), separate from
+    // ComposeCommentThread's own panel instance below — see placeAdvisoryComments' JSDoc on
+    // ComposeEditorHandle for why the two stay independent.
+    const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
+
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
     // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
@@ -1938,14 +2034,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         getRedlineAnnotations: () =>
           editor ? redlineMarksToDocxAnnotations(editor.getJSON(), 'Spaarke Assistant', new Date().toISOString()) : [],
         hasPendingRedlines: () => redline.pending.length > 0,
-        // Item 5b (UAT round-4, FR-23): panel comments → `w:comment` annotations, EXCLUDING imported
-        // threads (they already ride the retained-original baseline; re-emitting would duplicate). The
-        // imported id set is the load-time `initialCommentThreads` (seeded from the doc's own comments).
-        getCommentThreadAnnotations: () =>
-          composeSessionCommentThreadsToDocxAnnotations(
-            commentThreadsRef.current,
-            new Set(initialCommentThreads.map(t => t.id))
-          ),
+        // Task 040 (comment-export wiring fix): BOTH the session Comments panel's own thread
+        // instance (commentThreadsRef, excluding IMPORTED threads — they already ride the
+        // retained-original baseline) AND the NDA-REVIEW advisory thread instance
+        // (advisoryComments.threads) resolve their live commentAnchor mark span to a durable
+        // (paraId, run-local range) — no text-search (I-7). The imported id set is the load-time
+        // `initialCommentThreads` (seeded from the doc's own comments); advisory threads have no
+        // imported counterpart, so nothing is excluded for that instance.
+        getAnchoredComments: () => {
+          if (!editor) return [];
+          const importedIds = new Set(initialCommentThreads.map(t => t.id));
+          return [
+            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, commentThreadsRef.current, importedIds),
+            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, advisoryComments.threads, new Set()),
+          ];
+        },
         getCounts: () => {
           if (!editor) return { characters: 0, words: 0 };
           // The CharacterCount extension hangs storage off editor.storage.
@@ -1969,8 +2072,52 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         rejectPendingRedline: ledgerRef => redline.reject(ledgerRef),
         highlightCitedSpan: (sourceText, sectionLabel) => qaHighlight.highlight(sourceText, sectionLabel),
         clearCitedHighlight: () => qaHighlight.clear(),
+        // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031): resolve each
+        // flagged clause via the SAME resolveTargetSpans('strict') anchoring highlightCitedSpan
+        // uses, then createThread (the dedicated `advisoryComments` instance above) instead of an
+        // ephemeral highlight. FR-19 "do not guess" — a failed resolution is reported, never
+        // silently dropped.
+        placeAdvisoryComments: items => {
+          if (!editor) {
+            return {
+              placed: 0,
+              failed: items.map(item => ({ targetText: item.targetText, kind: 'not_found' as const })),
+            };
+          }
+          let placed = 0;
+          const failed: AdvisoryCommentFailure[] = [];
+          for (const item of items) {
+            const resolved = resolveTargetSpans(editor, item.targetText, 'strict');
+            if (!resolved.ok) {
+              failed.push({ targetText: item.targetText, kind: resolved.kind });
+              continue;
+            }
+            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0], {
+              riskLevel: item.riskLevel,
+              sectionRef: item.sectionRef,
+              standardRef: item.standardRef,
+            });
+            if (threadId) {
+              placed += 1;
+            } else {
+              // createThread returns null only for a collapsed range/empty text — resolveTargetSpans
+              // already guaranteed a non-collapsed span, so this is defensive, not expected.
+              failed.push({ targetText: item.targetText, kind: 'not_found' });
+            }
+          }
+          return { placed, failed };
+        },
+        // Read surface for task 040 (comment-export wiring) — see the handle JSDoc.
+        getAdvisoryCommentThreads: () => advisoryComments.threads,
       }),
-      [editor, redline, qaHighlight]
+      // NOTE: `advisoryComments.createThread` (a `React.useCallback` memoized on `[editor, author]`
+      // inside useComposeCommentThreads), NOT the whole `advisoryComments` object — that hook
+      // returns a fresh object literal every render (unlike `redline`/`qaHighlight`, which memoize
+      // via `React.useMemo`), so depending on it directly would rebuild this handle every render.
+      // `advisoryComments.threads` (read by getAdvisoryCommentThreads) is intentionally included so
+      // the handle refreshes when new threads are added — it changes only on an actual createThread
+      // call (React state), not every render.
+      [editor, redline, qaHighlight, advisoryComments.createThread, advisoryComments.threads]
     );
 
     // ----- Render ---------------------------------------------------------
@@ -2049,12 +2196,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
             past the disabled toolbar controls). Informs only; the representable edits still save. */}
         {deferralNotice ? (
-          <div
-            className={styles.deferralNotice}
-            role="status"
-            aria-live="polite"
-            data-testid="compose-deferral-notice"
-          >
+          <div className={styles.deferralNotice} role="status" aria-live="polite" data-testid="compose-deferral-notice">
             <Text size={200} className={styles.deferralNoticeText}>
               {deferralNotice}
             </Text>
@@ -2315,9 +2457,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             The FAB is a sibling of the scroller (not inside it) so it stays pinned
             at the bottom instead of scrolling away with the content. */}
         <div className={styles.editorScrollWrap}>
-          <div ref={editorScrollRef} className={styles.editorSurface} data-testid="compose-editor-surface">
+          <div
+            ref={editorScrollRef}
+            className={mergeClasses(
+              styles.editorSurface,
+              advisoryComments.threads.length > 0 ? styles.editorSurfaceWithGutter : undefined
+            )}
+            data-testid="compose-editor-surface"
+          >
             <EditorContent editor={editor} />
           </div>
+          {/* task 032 (right-gutter comment layout, FR-16) — NDA-REVIEW advisory comment cards,
+              vertically aligned to their live anchor position (coordsAtPos), right of the document.
+              Renders nothing while there are no advisory comment threads. */}
+          <ComposeCommentGutter
+            editor={editor}
+            threads={advisoryComments.threads}
+            scrollContainerRef={editorScrollRef}
+          />
           {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
           <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
             <Button

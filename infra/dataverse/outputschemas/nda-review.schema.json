@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/nda-review.schema.json",
+  "title": "NDA Review — Output Schema (nda-review)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='nda-review' (ai-advanced-capabilities-nda-r1 task 020). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/nda-review.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator; overallRisk and riskLevel are constrained strings via the enum keyword. CLOSED CONTRACT: exactly {overallRisk, flaggedSections[{sectionRef, quotedText, riskLevel, explanation, standardRef}]} — tasks 030/031/041 consume exactly these fields. No disclaimer field: the not-legal-advice framing is a systemPrompt posture + a fixed review-summary-panel constant (see the Action's $comment-disclaimer), not a per-run generated output field. Advisory determinism (ADR-039 amendment): reasoning is probabilistic but every factual claim is cited (quotedText+sectionRef for the document span, standardRef for the standard clause).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overallRisk", "flaggedSections"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN. overallRisk/riskLevel are closed sets via enum.",
+  "properties": {
+    "overallRisk": {
+      "type": "string",
+      "description": "Overall risk rating for the whole NDA (Part A rubric). Low = safe to sign as-is/trivial edits; Medium = sign after noted edits; High = material concern requiring negotiation; Critical = severe issue potentially blocking signature. At least as severe as the most severe sign/no-sign-driving finding. High/Critical are the attorney-review signal.",
+      "enum": ["Low", "Medium", "High", "Critical"]
+    },
+    "flaggedSections": {
+      "type": "array",
+      "description": "One entry per grounded finding, from the represented party's perspective. Empty array when the NDA has no material deviations from the standard (do not invent findings). Emit a finding ONLY when all five fields can be grounded in the NDA + the standard; decline (omit) anything unverifiable.",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sectionRef", "quotedText", "riskLevel", "explanation", "standardRef"],
+        "properties": {
+          "sectionRef": {
+            "type": "string",
+            "description": "Page/section/paragraph locator for where the finding sits in the NDA (e.g. 'Section 4.2, para 2 (p. 3)'). Derived from the NDA's own numbering; paragraph position when unnumbered. This locates the finding for the reviewing attorney.",
+            "maxLength": 300
+          },
+          "quotedText": {
+            "type": "string",
+            "description": "VERBATIM excerpt copied from the NDA (documentText input) — the exact relevant/offending language, not paraphrased. The document-span citation that makes the finding auditable.",
+            "maxLength": 2000
+          },
+          "riskLevel": {
+            "type": "string",
+            "description": "Severity of THIS finding per the Part A rubric. High or Critical marks it attorney-review-worthy (the machine signal task 022's classification + task 030's panel use).",
+            "enum": ["Low", "Medium", "High", "Critical"]
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Advisory explanation: what the clause does (grounded fact), how it deviates from the standard, and why it carries this risk (reasoned judgment) — grounded fact visibly distinct from judgment. Concise, specific, advisory. Not legal advice.",
+            "maxLength": 2000
+          },
+          "standardRef": {
+            "type": "string",
+            "description": "The firm-standard clause the finding is measured against (e.g. 'B3 - Definition of Confidential Information'). Must be a real clause (B1-B16) of the supplied Spaarke NDA standard (KNW-011). The standard-side citation.",
+            "maxLength": 300
+          }
+        }
+      }
+    }
+  }
+}

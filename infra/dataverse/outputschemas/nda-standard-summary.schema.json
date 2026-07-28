@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.com/schemas/analysisaction/nda-standard-summary.schema.json",
+  "title": "NDA Standard Summary — Output Schema (nda-standard-summary)",
+  "description": "Output schema for sprk_analysisaction sprk_actioncode='nda-standard-summary' (ai-advanced-capabilities-nda-r1 task 021, UC3). MIRRORS VERBATIM the outputSchema in infra/dataverse/actions/nda-standard-summary.action.json. Azure OpenAI Structured Outputs compatible: additionalProperties:false, object-level required arrays, no anyOf/oneOf/discriminator. CLOSED, MINIMAL CONTRACT: exactly {overview, sections[{topic, explanation, standardRefs}]} — deliberately smaller than nda-review's per-finding contract since this Action never reviews a document (no sectionRef/quotedText/riskLevel: there is no document span to cite or risk to rate). No disclaimer field: the not-legal-advice framing is a systemPrompt posture + the shared fixed review-summary-panel constant (see the Action's $comment-disclaimer). Advisory determinism (ADR-039 amendment): light paraphrase/synthesis for plain-language readability on the Fast tier, every stated position grounded and cited via standardRefs to a real clause (B1-B15) of the supplied Spaarke NDA standard (KNW-011).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["overview", "sections"],
+  "$comment-required": "Object-level required array only — property-level boolean 'required' is FORBIDDEN.",
+  "properties": {
+    "overview": {
+      "type": "string",
+      "description": "1-2 plain-language sentences framing what the summary below covers. No legal jargon.",
+      "maxLength": 500
+    },
+    "sections": {
+      "type": "array",
+      "description": "Plain-language topics covering the firm's default NDA positions, thematically grouped (prefer fewer, well-grounded sections over one per clause). Omit clause B16 (mechanical drafting-integrity checks) — not a negotiable position.",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["topic", "explanation", "standardRefs"],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Short plain-language topic label (e.g. 'What counts as confidential'). Not legal terminology.",
+            "maxLength": 100
+          },
+          "explanation": {
+            "type": "string",
+            "description": "Plain-language explanation of the firm's default position on this topic and why it's the default, for a non-lawyer reader. Grounded fact only; no fabricated rationale.",
+            "maxLength": 800
+          },
+          "standardRefs": {
+            "type": "array",
+            "description": "The firm-standard clause(s) (B1-B15; B16 excluded from this summary) this section summarizes. At least one. Must be real clauses of the supplied Spaarke NDA standard (KNW-011).",
+            "maxItems": 4,
+            "items": {
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        }
+      }
+    }
+  }
+}

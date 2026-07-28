@@ -342,7 +342,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           const entityId = val.replace(/[{}]/g, '').toLowerCase();
           const entityType =
             (recAny[`_${m.field}_value@Microsoft.Dynamics.CRM.lookuplogicalname`] as string) ?? m.entityType;
-          const entityName = recAny[`_${m.field}_value@OData.Community.Display.V1.FormattedValue`] as string | undefined;
+          const entityName = recAny[`_${m.field}_value@OData.Community.Display.V1.FormattedValue`] as
+            | string
+            | undefined;
           inherited.push({
             entityType,
             entityId,
@@ -721,7 +723,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
           on that focus loss). Non-modal fixes both the UAT-r6 auto-close and the UAT-r7 "lookup
           behind the modal / can't select" issue. The composer still renders as an elevated floating
           surface; all closes route through its own X / Cancel / Send → onClose/onSent. */}
-      <Dialog modalType="non-modal" open={composerMode !== null} onOpenChange={(_, d) => !d.open && setComposerMode(null)}>
+      <Dialog
+        modalType="non-modal"
+        open={composerMode !== null}
+        onOpenChange={(_, d) => !d.open && setComposerMode(null)}
+      >
         <DialogSurface className={s.dialogSurface}>
           <DialogBody className={s.dialogBody}>{composerProps && <SendEmailPageR16 {...composerProps} />}</DialogBody>
         </DialogSurface>

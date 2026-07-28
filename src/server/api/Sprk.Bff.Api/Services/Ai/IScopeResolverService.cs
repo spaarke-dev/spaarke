@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
@@ -650,6 +652,25 @@ public record AnalysisAction
     /// </para>
     /// </remarks>
     public decimal? Temperature { get; init; }
+
+    /// <summary>
+    /// Per-action model-tier default (<c>sprk_analysisaction.sprk_modeltier</c>). Null = platform
+    /// default (Standard tier — see
+    /// <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ModelTierDeploymentResolver"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors the <see cref="Temperature"/> per-action-column plumbing pattern (Wave B-G9c1). Wired
+    /// end-to-end by <c>ai-advanced-capabilities-nda-r1</c> task 010 — completes the previously
+    /// dead-ended <c>AiModelTier</c> vocabulary (catalog-only per ADR-016 until this task) into an
+    /// actual deployment-name resolution consumed by <c>ActionRunner</c>.
+    /// </para>
+    /// <para>
+    /// <strong>Null semantics</strong>: when null (column missing or NULL on the row), the resolver
+    /// treats the Action as Standard tier — matching the platform default per ADR-016.
+    /// </para>
+    /// </remarks>
+    public AiModelTier? ModelTier { get; init; }
 
     /// <summary>
     /// Structured-Outputs JSON Schema for the action (sprk_outputschemajson, multiline text).

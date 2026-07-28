@@ -9,7 +9,17 @@
  */
 
 import * as React from "react";
-import { makeStyles, tokens, Button, Spinner, Tag, Text, Tooltip } from "@fluentui/react-components";
+import {
+  makeStyles,
+  tokens,
+  Button,
+  Dropdown,
+  Option,
+  Spinner,
+  Tag,
+  Text,
+  Tooltip,
+} from "@fluentui/react-components";
 import {
   EditRegular,
   DismissRegular,
@@ -248,6 +258,34 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
   },
 
+  // ── Runtime model-tier picker (ai-advanced-capabilities-nda-r1 task 011) ──
+  // Same compact status-row idiom as uploadProgressIndicator above (border +
+  // background2 strip, small padding) so the two `aboveInputSlot` rows read
+  // as one visual family.
+  modelTierRow: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground2,
+  },
+  modelTierLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
+  modelTierDropdown: {
+    minWidth: "148px",
+    maxWidth: "168px",
+  },
+
   // ── Conversation restore summary block (AIPU2-106) ────────────────────────
   restoreSummaryBlock: {
     flexShrink: 0,
@@ -458,6 +496,92 @@ export function UploadProgressIndicator(props: {
     >
       <Spinner size="tiny" />
       <Text className={styles.uploadProgressText}>{label}</Text>
+    </div>
+  );
+}
+
+/**
+ * Runtime advisory model-tier vocabulary (ai-advanced-capabilities-nda-r1 task 011). Mirrors the
+ * server's `AiModelTier` enum (`Sprk.Bff.Api.Services.Ai.PublicContracts.Binding.cs`) and the raw
+ * `sprk_aimodeltier` Dataverse option-set values the maker-facing catalog editor already uses
+ * (`PlaybookBuilder/src/types/catalog.ts`) — the SAME wire vocabulary, not a parallel one. Do not
+ * renumber; these are the live option-set values.
+ */
+export enum AssistantModelTier {
+  Fast = 100000000,
+  Standard = 100000001,
+  Reasoning = 100000002,
+}
+
+const MODEL_TIER_DEFAULT_KEY = "default";
+
+const MODEL_TIER_OPTIONS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: MODEL_TIER_DEFAULT_KEY, label: "Default" },
+  { key: String(AssistantModelTier.Fast), label: "Fast" },
+  { key: String(AssistantModelTier.Standard), label: "Standard" },
+  { key: String(AssistantModelTier.Reasoning), label: "Reasoning" },
+];
+
+/**
+ * Runtime model-tier picker (ai-advanced-capabilities-nda-r1 task 011, spec FR-04b) — rendered above
+ * the SprkChat input zone via `aboveInputSlot` (the Click-path next-step chip strip's former slot;
+ * this is now its only consumer — see `SprkChat` types.ts `aboveInputSlot` doc). Lets the user pick the
+ * advisory model tier for the NEXT turn's capability dispatch; "Default" (the initial/unset state)
+ * preserves today's behavior exactly — the dispatched Action's own `sprk_modeltier` governs. A non-null
+ * selection rides `sprk_modeltieroverride` on the outbound chat-message body through the ONE
+ * tier→deployment resolver (ADR-016 / task 010's `ModelTierDeploymentResolver`) — no second routing
+ * mechanism (ADR-039).
+ *
+ * Mirrors `UploadProgressIndicator`'s compact status-row idiom directly above (same bordered
+ * `colorNeutralBackground2` strip) for visual + theming consistency — ADR-021: Fluent v9 semantic
+ * tokens only, dark-mode adapts automatically via `tokens.*`, no hardcoded colors. The host
+ * (ConversationPane) owns the selected-tier state and decorates the outbound body; this component is
+ * pure presentation + selection, like its `Dropdown` siblings in `SemanticSearchCriteriaTool`.
+ */
+export function AssistantModelTierPicker(props: {
+  value: AssistantModelTier | null;
+  onChange: (value: AssistantModelTier | null) => void;
+  disabled?: boolean;
+}): React.JSX.Element {
+  const styles = useStyles();
+  const { value, onChange, disabled } = props;
+
+  const selectedKey = value === null ? MODEL_TIER_DEFAULT_KEY : String(value);
+  const selectedLabel =
+    MODEL_TIER_OPTIONS.find((o) => o.key === selectedKey)?.label ?? MODEL_TIER_OPTIONS[0].label;
+
+  const handleOptionSelect = React.useCallback(
+    (_e: unknown, data: { optionValue?: string }) => {
+      if (!data.optionValue || data.optionValue === MODEL_TIER_DEFAULT_KEY) {
+        onChange(null);
+        return;
+      }
+      onChange(Number(data.optionValue) as AssistantModelTier);
+    },
+    [onChange],
+  );
+
+  return (
+    <div className={styles.modelTierRow} data-testid="assistant-model-tier-picker">
+      <Text className={styles.modelTierLabel} id="assistant-model-tier-label">
+        Model
+      </Text>
+      <Dropdown
+        className={styles.modelTierDropdown}
+        size="small"
+        aria-labelledby="assistant-model-tier-label"
+        value={selectedLabel}
+        selectedOptions={[selectedKey]}
+        onOptionSelect={handleOptionSelect}
+        disabled={disabled}
+        data-testid="assistant-model-tier-dropdown"
+      >
+        {MODEL_TIER_OPTIONS.map((o) => (
+          <Option key={o.key} value={o.key} text={o.label}>
+            {o.label}
+          </Option>
+        ))}
+      </Dropdown>
     </div>
   );
 }

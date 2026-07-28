@@ -238,7 +238,9 @@ interface INotice {
 
 /** Seeds the record picker from an optional host-supplied regarding. */
 function seedAssociation(regarding?: INewThreadModalRegarding): AssociationResult | null {
-  return regarding ? { entityType: regarding.entityType, recordId: regarding.id, recordName: regarding.name ?? '' } : null;
+  return regarding
+    ? { entityType: regarding.entityType, recordId: regarding.id, recordName: regarding.name ?? '' }
+    : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +353,11 @@ export const NewThreadModal: React.FC<INewThreadModalProps> = ({
     const hasBody = body.trim().length > 0;
     if (hasBody) {
       const associations: ICommunicationAssociation[] = [
-        { entityType: association.entityType, entityId: association.recordId, entityName: association.recordName || undefined },
+        {
+          entityType: association.entityType,
+          entityId: association.recordId,
+          entityName: association.recordName || undefined,
+        },
       ];
       try {
         await sendCommunication(

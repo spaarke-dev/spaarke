@@ -628,7 +628,9 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       // surface callbacks). Absent controller ⇒ nothing added (unchanged dispatch shape).
       const useBookmark = !!aiGenerateBookmark && action.materializesInEditor === true;
       const bookmarkRequestId = useBookmark ? `${action.id}#bm${(clickSeqRef.current += 1)}` : undefined;
-      const bookmarkContext = useBookmark ? aiGenerateBookmark!.beginGenerate({ requestId: bookmarkRequestId }) : undefined;
+      const bookmarkContext = useBookmark
+        ? aiGenerateBookmark!.beginGenerate({ requestId: bookmarkRequestId })
+        : undefined;
 
       // Slots mirror the SHIPPED compose-selection scope's authored field
       // list (task 024) — not invented (see Spike 0 §3a: the server owns the
@@ -763,121 +765,121 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   // aria-labels preserved. Grouping is carried by distinct glyphs + tooltips.
   return (
     <>
-    {showActionToolbar ? (
-    <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
-      {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
+      {showActionToolbar ? (
+        <Toolbar size="small" className={styles.toolbar} aria-label="AI actions" data-testid="compose-ai-toolbar">
+          {/* FIX #9 — ICON-ONLY primary buttons (the tool WORDS were removed); the
           hover Tooltip names each tool. Names come from `action.label`. */}
-      {primaryActions.map(action => (
-        <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={actionIcon(action.id)}
-            disabled={!action.bindingId}
-            aria-label={action.label}
-            data-testid={`compose-ai-toolbar-${action.id}`}
-            onClick={() => handleActionClick(action)}
-          />
-        </Tooltip>
-      ))}
-
-      {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
-          labelled buttons; both items dispatch a workspace/widget_load that opens
-          the EmailStubWidget tab (see handleEmailAction). */}
-      <Menu positioning="below-end">
-        <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="Email" relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              icon={<Mail24Regular />}
-              aria-label="Email"
-              data-testid="compose-ai-toolbar-email"
-            />
-          </Tooltip>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            <MenuItem
-              icon={<Open24Regular />}
-              data-testid="compose-ai-toolbar-email-open"
-              onClick={() => handleEmailAction('open')}
-            >
-              Open in Email
-            </MenuItem>
-            <MenuItem
-              icon={<Send24Regular />}
-              data-testid="compose-ai-toolbar-email-send"
-              onClick={() => handleEmailAction('send')}
-            >
-              Send in Email
-            </MenuItem>
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-
-      <Menu positioning="below-end">
-        <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="More actions" relationship="description" withArrow>
-            <ToolbarButton
-              appearance="subtle"
-              // FIX #9 — VERTICAL three-dots overflow affordance.
-              icon={<MoreVertical20Regular />}
-              aria-label="More actions"
-              data-testid="compose-ai-toolbar-more"
-            />
-          </Tooltip>
-        </MenuTrigger>
-        <MenuPopover>
-          <MenuList>
-            {overflowActions.length === 0 ? (
-              <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
-                No additional actions yet
-              </MenuItem>
-            ) : (
-              overflowActions.map(action => (
-                <MenuItem
-                  key={action.id}
-                  disabled={!action.bindingId}
-                  title={action.tooltip}
-                  data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                  onClick={() => handleActionClick(action)}
-                >
-                  {action.label}
-                </MenuItem>
-              ))
-            )}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
-    </Toolbar>
-    ) : null}
-
-    {/* FR-07 (task 041) — review banner: unvalidatable AI operations, surfaced never silently
-        placed/dropped (FR-07 / NFR-02 / I-7). Dark-mode-correct semantic tokens only (ADR-021). */}
-    {reviewItems.length > 0 ? (
-      <div className={styles.reviewBanner} role="status" data-testid="compose-ai-review-banner">
-        {reviewItems.map(item => (
-          <div key={item.id} className={styles.reviewItem} data-testid={`compose-ai-review-item-${item.id}`}>
-            <Text size={200} className={styles.reviewItemText}>
-              An AI suggestion needs review — {reviewReasonLabel(item.reason)}
-              {item.fuzzy?.matchedParagraphPreview
-                ? ` (possible match: "${item.fuzzy.matchedParagraphPreview}")`
-                : ''}
-              .
-            </Text>
-            <Tooltip content="Dismiss" relationship="description" withArrow>
-              <Button
+          {primaryActions.map(action => (
+            <Tooltip key={action.id} content={action.label} relationship="description" withArrow>
+              <ToolbarButton
                 appearance="subtle"
-                size="small"
-                icon={<Dismiss16Regular />}
-                aria-label="Dismiss review item"
-                data-testid={`compose-ai-review-dismiss-${item.id}`}
-                onClick={() => aiApplyValidation?.dismissReview(item.id)}
+                icon={actionIcon(action.id)}
+                disabled={!action.bindingId}
+                aria-label={action.label}
+                data-testid={`compose-ai-toolbar-${action.id}`}
+                onClick={() => handleActionClick(action)}
               />
             </Tooltip>
-          </div>
-        ))}
-      </div>
-    ) : null}
+          ))}
+
+          {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
+          labelled buttons; both items dispatch a workspace/widget_load that opens
+          the EmailStubWidget tab (see handleEmailAction). */}
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="Email" relationship="description" withArrow>
+                <ToolbarButton
+                  appearance="subtle"
+                  icon={<Mail24Regular />}
+                  aria-label="Email"
+                  data-testid="compose-ai-toolbar-email"
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                <MenuItem
+                  icon={<Open24Regular />}
+                  data-testid="compose-ai-toolbar-email-open"
+                  onClick={() => handleEmailAction('open')}
+                >
+                  Open in Email
+                </MenuItem>
+                <MenuItem
+                  icon={<Send24Regular />}
+                  data-testid="compose-ai-toolbar-email-send"
+                  onClick={() => handleEmailAction('send')}
+                >
+                  Send in Email
+                </MenuItem>
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+
+          <Menu positioning="below-end">
+            <MenuTrigger disableButtonEnhancement>
+              <Tooltip content="More actions" relationship="description" withArrow>
+                <ToolbarButton
+                  appearance="subtle"
+                  // FIX #9 — VERTICAL three-dots overflow affordance.
+                  icon={<MoreVertical20Regular />}
+                  aria-label="More actions"
+                  data-testid="compose-ai-toolbar-more"
+                />
+              </Tooltip>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {overflowActions.length === 0 ? (
+                  <MenuItem disabled data-testid="compose-ai-toolbar-more-empty">
+                    No additional actions yet
+                  </MenuItem>
+                ) : (
+                  overflowActions.map(action => (
+                    <MenuItem
+                      key={action.id}
+                      disabled={!action.bindingId}
+                      title={action.tooltip}
+                      data-testid={`compose-ai-toolbar-overflow-${action.id}`}
+                      onClick={() => handleActionClick(action)}
+                    >
+                      {action.label}
+                    </MenuItem>
+                  ))
+                )}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </Toolbar>
+      ) : null}
+
+      {/* FR-07 (task 041) — review banner: unvalidatable AI operations, surfaced never silently
+        placed/dropped (FR-07 / NFR-02 / I-7). Dark-mode-correct semantic tokens only (ADR-021). */}
+      {reviewItems.length > 0 ? (
+        <div className={styles.reviewBanner} role="status" data-testid="compose-ai-review-banner">
+          {reviewItems.map(item => (
+            <div key={item.id} className={styles.reviewItem} data-testid={`compose-ai-review-item-${item.id}`}>
+              <Text size={200} className={styles.reviewItemText}>
+                An AI suggestion needs review — {reviewReasonLabel(item.reason)}
+                {item.fuzzy?.matchedParagraphPreview
+                  ? ` (possible match: "${item.fuzzy.matchedParagraphPreview}")`
+                  : ''}
+                .
+              </Text>
+              <Tooltip content="Dismiss" relationship="description" withArrow>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Dismiss16Regular />}
+                  aria-label="Dismiss review item"
+                  data-testid={`compose-ai-review-dismiss-${item.id}`}
+                  onClick={() => aiApplyValidation?.dismissReview(item.id)}
+                />
+              </Tooltip>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </>
   );
 }

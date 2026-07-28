@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Bindings + "Review an NDA" card + NDA classification/routing</title>
+    <phase>2 NDA Review Capability</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires Bindings + Assistant classification + card routing across Dataverse seed + client; drives the entry path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Binding seeding + classification/card wiring against the ADR-039/043 dispatch model with a clear reference; mechanical once contracts are set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches binding seed + Assistant classification + card; 033/051 depend on it; sequential after 020.</parallel-reason>
+    <deps>020</deps>
+    <tags>ai, dataverse, frontend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the Bindings (nda-review/default, nda-standard-summary), wire NDA classification on document upload so
+    the Assistant offers a "Review an NDA" action card, and resolve the card's binding GUID so clicking it opens
+    the file in the Compose tab and runs NDA-REVIEW.
+  </prompt>
+
+  <role>
+    SPAARKE AI + Code Page developer. Expert in the ADR-043 execution spine (ContextBinder → envelope,
+    DispositionRoutability), the Assistant surface-launch mechanism, and the playbook-consumer binding rows.
+  </role>
+
+  <goal>
+    Uploading an NDA yields a "Review an NDA" card; clicking it deterministically opens the document in the Compose
+    tab and dispatches NDA-REVIEW via the nda-review/default binding; the nda-standard-summary binding exists for UC3.
+  </goal>
+
+  <context>
+    <background>
+      Binding rows live in infra/dataverse/sprk_playbookconsumer-rows.json (seed via Seed-PlaybookConsumers.ps1).
+      Surface launch is a static consumerType → surfaceLaunchRegistry lookup (see ASSISTANT-SURFACE-LAUNCH-MECHANISM
+      doc). Classification runs on the document_uploaded event. Some toolbar bindings today are bindingId:'' stubs.
+    </background>
+    <relevant-files>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file>scripts/dataverse/Seed-PlaybookConsumers.ps1</file>
+      <file>src/solutions/SpaarkeAi/src/components/</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </relevant-files>
+    <dependencies>020 (NDA-REVIEW Action must exist to bind).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043">Routing goes through the execution spine's DispositionRoutability registry; the card is a Click entry path in the closed catalog.</constraint>
+    <constraint source="ADR-039">Surface identity (which tab/surface the card opens) stays in CODE via the surfaceLaunchRegistry — do not push surface identity into the server (per the surface-launch mechanism doc + CLAUDE.md §10).</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA">"Review an NDA" is a persistent act-on item → an action CARD (not a chip/bubble); follow the UI element criteria.</constraint>
+    <constraint source="project">Classification must not mis-fire on non-NDA uploads (negative case); a non-NDA upload does NOT surface the card.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Playbook-consumer binding seed" location="infra/dataverse/sprk_playbookconsumer-rows.json">
+        Add binding rows and seed via Seed-PlaybookConsumers.ps1; resolve the card's binding GUID from the seeded row.
+      </pattern>
+      <pattern name="Surface launch registry" location="docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md">
+        Add ONE registry entry mapping the NDA consumerType to the Compose-tab surface launch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add binding rows nda-review/default and nda-standard-summary; seed via Seed-PlaybookConsumers.ps1; capture the GUIDs.</step>
+    <step order="2">Add NDA classification on document_uploaded; ensure non-NDA uploads do not trigger the card.</step>
+    <step order="3">Add the "Review an NDA" action card; resolve its binding GUID (replace any bindingId:'' stub for this path).</step>
+    <step order="4">Add the surfaceLaunchRegistry entry so the card opens the document in the Compose tab (PaneEventBus widget_load) and dispatches NDA-REVIEW.</step>
+    <step order="5">Manually verify: NDA upload → card → Compose tab opens on the file → NDA-REVIEW runs.</step>
+    <step order="6">Verify negative case: a non-NDA upload surfaces no card.</step>
+    <step order="7">Update TASK-INDEX.md: mark 022 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If deterministic card→surface routing seems to need server-side surface identity, STOP and escalate — surface identity stays in code (ADR-039 / surface-launch mechanism doc).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Seed script + dispatch checks.</tool>
+    <tool name="npm">Build the code page.</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (nda-review/default, nda-standard-summary)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/ (card + classification + registry entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an NDA upload, when classification runs, then a "Review an NDA" card appears.</criterion>
+    <criterion testable="true">Given the card is clicked, when it routes, then the document opens in the Compose tab and NDA-REVIEW dispatches via nda-review/default.</criterion>
+    <criterion testable="true">Given a non-NDA upload, when classification runs, then no NDA card appears (negative case).</criterion>
+    <criterion testable="true">The nda-standard-summary binding exists and resolves.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Review an NDA card + Compose launch">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Upload a sample NDA in the Assistant</step>
+        <step>Verify a "Review an NDA" card appears</step>
+        <step>Click the card; verify the document opens in the Compose tab</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Card appears for NDA, opens Compose tab, no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Entry path for the whole flow. Keep surface identity in the code registry (one entry). Task 051 adds
+    golden-utterance dispatch eval for this card + NL intent.
+
+    COMPLETED (2026-07-26): fully DATA-DRIVEN + client-only — ZERO BFF code touched (chat-classify /
+    CLS-CHAT@v1 was reused as-is; its toolDescription already documents "nda" as a supported docType
+    label). Binding rows nda-review/default + nda-standard-summary/default added to
+    infra/dataverse/sprk_playbookconsumer-rows.json (disposition=Informational per task 023's fan-out
+    design). Card resolves its bindingId via the EXISTING GET /api/ai/capabilities capability-discovery
+    read (useCapabilityDiscovery — same seam ConversationPane already uses for
+    compose-revise-document/compose-draft-document/compose-summarize) — zero hardcoded GUID, portable
+    across environments, matches the useComposeToolbarActivation precedent. Classification is a
+    UI-presentation branch on chat-classify's existing docType output (event_classification SSE),
+    forwarded via a new optional useEventBatch.onClassified callback — not a second intent-detection
+    mechanism. Card is the existing stateless SuggestionCard component (reuse, CLAUDE.md §11). Click
+    handler reuses mountFileInCompose (existing) to open the file in Compose + chips.dispatchBinding
+    (existing Click-path seam) to run NDA-REVIEW scoped via slots.fileIds. Added ONE
+    surfaceLaunchRegistry entry (nda-review → workspace-tab/compose) per the task's explicit
+    instruction, for TEXT-path readiness — the CLICK path uses mountFileInCompose directly since the
+    registry's static widgetData can't carry a per-click file id. Live Dataverse seeding
+    (Seed-PlaybookConsumers.ps1) is env-blocked in this session (no live credentials) — data-file
+    changes are ready to seed. See notes/task-022-bindings-review-card-classification.md for full detail.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

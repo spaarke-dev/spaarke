@@ -1287,4 +1287,5 @@ export type {
   SetBlockAttrOperation,
   ComposeOperation,
   ComposeOperationLog,
+  ComposeAnchoredComment,
 } from './compose-operations';

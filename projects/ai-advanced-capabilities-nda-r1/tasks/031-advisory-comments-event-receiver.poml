@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Advisory-comments event + receiver — materialize AI comments in the Compose doc</title>
+    <phase>3 Compose Review Experience</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield ProseMirror/Tiptap comment materialization via PaneEventBus + receiver reusing existing hooks; on the critical path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield wiring reusing createThread + resolveTargetSpans with a clear precedent (compose_qa_highlight); Sonnet's follow-through fits.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Event + receiver path; distinct from 030's panel and 041's server writer. 032/040 depend on it.</parallel-reason>
+    <deps>023</deps>
+    <tags>frontend, react, ai</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Materialize the advisory comments into the Compose document: emit a compose_advisory_comments event over the
+    PaneEventBus (ADR-030) from the ledgered NDA-REVIEW result, and add a receiver that reuses createThread +
+    resolveTargetSpans('strict') to place a Tiptap comment on each flagged clause range, with the comment text =
+    the AI advisory explanation. Mirror the existing compose_qa_highlight client-event pattern.
+  </prompt>
+
+  <role>
+    SPAARKE Compose client developer. Expert in Tiptap/ProseMirror, the CommentAnchorMark, useComposeCommentThreads
+    (createThread, importThreads, resolveTargetSpans), and the PaneEventBus receiver pattern.
+  </role>
+
+  <goal>
+    A completed NDA-REVIEW causes advisory comments to appear on the correct flagged ranges in the Compose editor,
+    each carrying the AI explanation, via a lightweight client-event path (not a new routable server disposition).
+  </goal>
+
+  <context>
+    <background>
+      Reuse-first: compose_qa_highlight is the precedent client-event path. useComposeCommentThreads already exposes
+      createThread + resolveTargetSpans('strict'); CommentAnchorMark renders the highlight span. The comments payload
+      comes from task 023's fan-out. This is NOT a new server disposition — the Action output is ledgered (ADR-040)
+      and the client materializes comments from it.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/hooks/useComposeCommentThreads.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeWorkspaceReceivers.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <dependencies>023 (advisory-comments payload). Feeds 032 (gutter layout) + 040 (export).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">The event rides the typed PaneEventBus channel (compose_advisory_comments); follow the typed-channel contract.</constraint>
+    <constraint source="ADR-040">Comments derive from the ledgered result; do not trigger a new model call on the client.</constraint>
+    <constraint source="ADR-049">Comment anchoring uses the existing CommentAnchorMark + resolveTargetSpans('strict'); ranges that fail strict resolution are reported, not silently dropped.</constraint>
+    <constraint source="project">Mirror the compose_qa_highlight event+receiver shape exactly. The receiver reuses createThread + resolveTargetSpans — do NOT reimplement anchoring. Each comment's text is the AI advisory explanation for that flagged section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-033-streaming-chat-tool-side-channel.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="compose_qa_highlight client event" location="src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeWorkspaceReceivers.ts">
+        Copy this event+receiver shape; swap payload to advisory comments and place threads instead of highlights.
+      </pattern>
+      <pattern name="Comment threading" location="src/client/shared/Spaarke.Compose.Components/src/hooks/useComposeCommentThreads.ts">
+        Reuse createThread + resolveTargetSpans('strict') to anchor each comment.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace compose_qa_highlight from emission through the receiver to the editor decoration.</step>
+    <step order="2">Define the compose_advisory_comments event payload (flaggedSections → {targetText/range, explanation}).</step>
+    <step order="3">Emit the event from the ledgered NDA-REVIEW result.</step>
+    <step order="4">Add the receiver: for each flagged section, resolveTargetSpans('strict') → createThread with the advisory explanation as the comment text.</step>
+    <step order="5">Report ranges that fail strict resolution (surface count in the summary panel / console) rather than dropping silently.</step>
+    <step order="6">Verify comments appear on the correct clauses with the right text; run UI tests.</step>
+    <step order="7">Update TASK-INDEX.md: mark 031 ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If strict anchor resolution fails for most flagged ranges (systemic, not incidental), STOP and escalate — the NDA-REVIEW output's range contract (task 020) likely needs adjustment rather than loosening anchoring to 'fuzzy'.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the shared Compose lib + code page.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/useComposeWorkspaceReceivers.ts (advisory-comments receiver)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a completed NDA-REVIEW, when the event fires, then advisory comments appear on the flagged clause ranges with text = the AI explanation.</criterion>
+    <criterion testable="true">Comments are created via createThread + resolveTargetSpans('strict') (existing hooks; no new anchoring code).</criterion>
+    <criterion testable="true">Ranges failing strict resolution are reported (count surfaced), not silently dropped.</criterion>
+    <criterion testable="true">No new server disposition and no client-side model call are introduced.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Advisory comments materialize">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=webresource&amp;webresourceName=sprk_SpaarkeAi</url>
+      <steps>
+        <step>Run NDA-REVIEW on a sample NDA; open Compose</step>
+        <step>Verify advisory comments appear on flagged clauses with explanation text</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Comments anchored to correct clauses; explanation text present; no console errors.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    Critical path (001→010→020→023→031→040). Anchoring reuse is the key to correctness — do not reinvent it.
+
+    COMPLETED 2026-07-26. Event + receiver: `compose_advisory_comments` added as an additive
+    WorkspacePaneEvent discriminant (PaneEventTypes.ts) carrying `advisoryComments[]` (targetText/
+    explanation/sectionRef/riskLevel/standardRef). Receiver wired in useComposeWorkspaceReceivers.ts
+    (onAdvisoryComments), mirroring onQaHighlight exactly. Materialization: ComposeEditor.tsx gained
+    `placeAdvisoryComments()` on ComposeEditorHandle — reuses resolveTargetSpans('strict') +
+    a dedicated useComposeCommentThreads(editor, 'AI Advisory Review') instance's createThread (no
+    anchoring reimplementation); failed resolutions (not_found/ambiguous) are returned, never
+    dropped. ComposeWorkspace wires the receiver to the handle + console.warns on failures (a
+    user-visible surface awaits the review-summary panel, task 030). Emission: new hook
+    `useNdaReviewAdvisoryCommentsBridge.ts` in SpaarkeAi's conversation folder, wired into
+    ConversationPane's existing `dispatchComposeAction` informational-result branch (structural
+    shape-detection on `{overallRisk, flaggedSections[]}`, mirroring composeResultFormat.ts's
+    convention) — a client-derived projection of the SAME terminal chunk already rendered as prose;
+    no second model call, no new server disposition. 15 new tests added (2 ComposeEditor-level,
+    13 bridge-level) alongside the existing 532; all green. Full client build chain (ai-widgets →
+    compose-components → SpaarkeAi) typechecks + builds clean. UI-tests step (live NDA-REVIEW run +
+    visual verification) is env-blocked (no live org in this session) — flagged, not faked.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates + Step 9.7 ui-test.</protocol>
+  </execution>
+</task>

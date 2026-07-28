@@ -194,7 +194,14 @@ requests
 **Model Deployments**:
 | Deployment Name | Model | Purpose |
 |-----------------|-------|---------|
-| `gpt-4o-mini` | gpt-4o-mini (2024-07-18) | Document summarization |
+| `gpt-4o-mini` | gpt-4o-mini (2024-07-18) | Document summarization; Fast/Standard model-tier default (ADR-016) |
+
+**NOT yet deployed** (recommended, per `ai-advanced-capabilities-nda-r1` task 013 — see
+`projects/ai-advanced-capabilities-nda-r1/notes/task-013-reasoning-provisioning.md`): a Reasoning-tier
+deployment (recommended model `gpt-5`, `GlobalStandard` SKU) for `DocumentIntelligence:ReasoningModel`
+(ADR-016 Reasoning tier — advisory/multi-step Actions, e.g. NDA-REVIEW). Env-blocked pending Azure
+provisioning access; `ModelTierDeploymentResolver` falls back to `StandardModel` (`gpt-4o-mini`) until
+this lands.
 
 **App Service Settings** (bound to `DocumentIntelligenceOptions`, section `DocumentIntelligence`):
 ```
@@ -202,6 +209,7 @@ DocumentIntelligence__Enabled=true
 DocumentIntelligence__OpenAiEndpoint=https://spaarke-openai-dev.openai.azure.com/
 DocumentIntelligence__OpenAiKey=(from Key Vault: ai-openai-key)
 DocumentIntelligence__SummarizeModel=gpt-4o-mini
+DocumentIntelligence__ReasoningModel=(unset until task 013 provisioning lands; target deployment name TBD, recommended model gpt-5)
 ```
 
 ---

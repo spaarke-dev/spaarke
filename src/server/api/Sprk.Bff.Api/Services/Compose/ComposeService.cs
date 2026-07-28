@@ -650,6 +650,22 @@ public class ComposeService : IComposeService
                 observedAt);
         }
 
+        // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
+        // result, append the Summary Page (TL;DR + flagged-section overview + recommendations) as a
+        // page-broken, non-tracked section at the END of the document — AFTER any edit-log/comment
+        // application above, so the summary always lands as the true tail of what gets persisted. Pure,
+        // deterministic, no second LLM call (ComposeSummaryPageGenerator); no new package (ADR-049 — reuses
+        // ComposeDocumentRenderer, never the retired DocxAnnotationWriter).
+        if (request.SummaryPage is not null)
+        {
+            var summaryBlocks = ComposeSummaryPageGenerator.Build(request.SummaryPage);
+            contentToPersist = _documentRenderer.AppendSection(contentToPersist, summaryBlocks);
+
+            _logger.LogInformation(
+                "Compose save: appended NDA-REVIEW Summary Page ({FindingCount} flagged section(s), overallRisk={OverallRisk}) to the document (session={SessionId}).",
+                request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
+        }
+
         _logger.LogInformation(
             "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,

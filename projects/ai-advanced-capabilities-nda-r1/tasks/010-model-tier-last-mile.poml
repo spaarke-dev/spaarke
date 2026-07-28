@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Model-tier last-mile — wire AiModelTier → deployment resolver in ActionRunner</title>
+    <phase>1 Platform Enablers</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs (ActionRunner, options, DI); tags include bff-api; brownfield wiring on the dispatch hot path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component brownfield wiring with an explicit canonical reference to mirror (the working per-Action temperature path); not architectural authoring.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ActionRunner.cs + DocumentIntelligenceOptions.cs which tasks 011/023/040/041 also read; sequential to avoid churn on shared BFF files.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, ai, config, di</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Complete the dead-ended model-tier selection: resolve AiModelTier (Fast/Standard/Reasoning) to a concrete
+    Azure OpenAI deployment and pass it through ActionRunner instead of the hardcoded model:null → gpt-4o-mini.
+    Mirror the proven per-Action temperature path exactly. This enables NDA-REVIEW to run on the Reasoning tier.
+  </prompt>
+
+  <role>
+    SPAARKE BFF developer. Expert in ASP.NET Core options binding, the Services/Ai LinearConsumers pipeline, and
+    the PublicContracts AI facade. Follow ADR-013 (facade), ADR-016 (model tier), ADR-032 (kill-switch).
+  </role>
+
+  <goal>
+    An Action carrying sprk_modeltier=Reasoning executes against the configured Reasoning deployment; ActionRunner
+    no longer hardcodes model:null; StandardModel/ReasoningModel deployment names are configurable via
+    DocumentIntelligenceOptions + appsettings; unit/seam tests prove the resolution.
+  </goal>
+
+  <context>
+    <background>
+      AiModelTier, sprk_modeltier (Action), sprk_modeltieroverride (Binding), and EffectiveModelTier already
+      EXIST in the contracts but dead-end: ActionRunner.cs hardcodes model:null which falls back to gpt-4o-mini.
+      The per-Action `temperature` field IS wired end-to-end and is the reference pattern to copy. See spec FR-04
+      and PLAN §2 canonical seeds.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.json</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/</file>
+    </relevant-files>
+    <dependencies>001 (advisory-tier amendment) — Reasoning-tier advisory execution must be governance-sanctioned first.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-016">Model-tier selection is the sanctioned mechanism for deployment routing; do not introduce a second parallel mechanism.</constraint>
+    <constraint source="ADR-013">CRUD/consumer code must go through Services/Ai/PublicContracts facade; do not inject IOpenAiClient or AI-internal types into non-AI code.</constraint>
+    <constraint source="ADR-032">If the resolver is feature-gated, register a Null-Object fallback so unconditional endpoints keep working (symmetric registration).</constraint>
+    <constraint source="CLAUDE.md-10">State the Placement Justification in the PR/notes (this stays in BFF — extends existing ActionRunner). Run `dotnet publish -c Release` and report compressed size + diff vs ~49.63 MB baseline; must stay ≤60 MB. Verify no new HIGH CVE.</constraint>
+    <constraint source="project">Mirror the temperature wiring path exactly (same plumbing points from Action contract → ActionRunner → OpenAI call). Every code path added must resolve tier deterministically; default tier when unspecified = Standard.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-016-ai-rate-limits.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-Action temperature plumbing" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs">
+        Trace how `temperature` flows from the Action contract into the OpenAI call and replicate it for model-tier → deployment name.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Trace the working `temperature` path from Action contract → ActionRunner → OpenAI invocation; note every plumbing point.</step>
+    <step order="2">Add StandardModel/ReasoningModel (and Fast) deployment-name config to DocumentIntelligenceOptions + appsettings.</step>
+    <step order="3">Implement a tier→deployment resolver (EffectiveModelTier → deployment name), defaulting to Standard when unspecified.</step>
+    <step order="4">Replace ActionRunner's model:null hardcode with the resolved deployment; ensure the Action's ModelTier is read and honored.</step>
+    <step order="5">If gated, add the ADR-032 Null-Object fallback + symmetric registration.</step>
+    <step order="6">Add/extend seam tests: an Action with Reasoning tier resolves to the Reasoning deployment; unspecified → Standard.</step>
+    <step order="7">Run `dotnet build` + tests; run `dotnet publish -c Release` and record compressed size + diff.</step>
+    <step order="8">Update TASK-INDEX.md: mark 010 ✅. Document Placement Justification + size in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If wiring model-tier requires a new AI-internal type to cross the PublicContracts facade into consumer code, STOP and escalate (ADR-013 / CLAUDE.md §10) rather than piercing the facade.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF.</tool>
+    <tool name="terminal">Run CVE + size checks.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (model-tier resolution)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an Action with sprk_modeltier=Reasoning, when it executes, then ActionRunner invokes the configured Reasoning deployment (not gpt-4o-mini).</criterion>
+    <criterion testable="true">Given an Action with no tier specified, when it executes, then the resolver returns the Standard deployment.</criterion>
+    <criterion testable="true">ActionRunner contains no remaining model:null hardcode on the execution path.</criterion>
+    <criterion testable="true">Seam tests cover Reasoning-resolves and default-resolves cases and pass.</criterion>
+    <criterion testable="true">`dotnet publish -c Release` compressed output is ≤60 MB; size + diff vs baseline reported in notes.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Enables the Reasoning-tier north star. Task 011 (runtime picker) builds on the same resolver via
+    sprk_modeltieroverride. Do NOT add a NuGet package — deployment names are config, not a new dependency.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute checklist incl. Step 9.5 code-review + adr-check (FULL rigor). Enforce §10 publish-size gate.</protocol>
+  </execution>
+</task>

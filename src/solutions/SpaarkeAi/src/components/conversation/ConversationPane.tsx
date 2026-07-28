@@ -59,9 +59,11 @@ import { useConsumerChips } from "./useConsumerChips";
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
 import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
+import { SuggestionCard } from "./SuggestionCard";
 import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
+import { useNdaReviewAdvisoryCommentsBridge } from "./useNdaReviewAdvisoryCommentsBridge";
 import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
@@ -83,7 +85,7 @@ import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./compos
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
-import { formatEventOutputMarkdown, toDisplayList } from "./DocumentUploadedEventStream";
+import { formatEventOutputMarkdown, toDisplayList, type EventClassificationData } from "./DocumentUploadedEventStream";
 import { formatComposeActionResultMarkdown } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
@@ -107,6 +109,8 @@ import {
   RefinementChipBar,
   FilesAttachedIndicator,
   UploadProgressIndicator,
+  AssistantModelTierPicker,
+  AssistantModelTier,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
 
@@ -321,10 +325,15 @@ export function ConversationPane(): React.JSX.Element {
   // discovery fetch when EITHER a revise OR a draft-document intent is first detected (both stay
   // inert on a mounted-but-idle pane).
   const [draftCapabilityNeeded, setDraftCapabilityNeeded] = React.useState<boolean>(false);
+  // task 022 (NDA review card): the SAME deferred capability-discovery seam resolves the
+  // `nda-review` bindingId — enabled the moment classification flags an NDA upload (below),
+  // well before the user reads the card and clicks it. Zero hardcoded GUID, zero new BFF read
+  // (reuses GET /api/ai/capabilities — the same closed-catalog projection revise/draft use).
+  const [ndaReviewCapabilityNeeded, setNdaReviewCapabilityNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
-    enabled: reviseCapabilityNeeded || draftCapabilityNeeded,
+    enabled: reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
@@ -349,6 +358,14 @@ export function ConversationPane(): React.JSX.Element {
   const summarizeBindingId = React.useMemo<string | null>(
     () =>
       launchableCapabilities.find((c) => c.consumerType === "compose-summarize")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
+  // task 022 — the `nda-review` Binding id, resolved from the SAME closed capability catalog
+  // (ADR-039: bindingId only from discovery, never invented/hardcoded — portable across
+  // environments exactly like reviseBindingId/draftBindingId/summarizeBindingId above).
+  const ndaReviewBindingId = React.useMemo<string | null>(
+    () => launchableCapabilities.find((c) => c.consumerType === "nda-review")?.bindingId ?? null,
     [launchableCapabilities]
   );
 
@@ -390,6 +407,26 @@ export function ConversationPane(): React.JSX.Element {
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
 
+  // task 022 (NDA review card): the classified upload waiting on the "Review an NDA" card,
+  // if any. Set by handleNdaClassified (below) purely from the ONE existing classifier's
+  // (chat-classify / CLS-CHAT@v1) already-produced `docType` output — never a second
+  // classification mechanism (ADR-039). Cleared on click-dispatch, dismiss, or a fresh
+  // session (handleSessionCreated) — never left stale across sessions.
+  const [ndaReviewFile, setNdaReviewFile] = React.useState<{
+    fileId: string;
+    fileName: string;
+  } | null>(null);
+  const handleNdaClassified = React.useCallback((data: EventClassificationData): void => {
+    const docType = typeof data.docType === "string" ? data.docType.trim().toLowerCase() : "";
+    // Negative case (task 022 acceptance criterion 3): any docType other than "nda" — including
+    // an absent/unclassified result — leaves ndaReviewFile untouched, so no card renders.
+    if (docType !== "nda" || !data.fileId) return;
+    // Kick off the deferred capability-discovery fetch NOW (well before the user reads the
+    // card and clicks it) so ndaReviewBindingId is resolved by dispatch time.
+    setNdaReviewCapabilityNeeded(true);
+    setNdaReviewFile({ fileId: data.fileId, fileName: data.fileName ?? "the document" });
+  }, []);
+
   // Stable-ref indirection keeps eventBatch → chips composition acyclic.
   const acceptChipsRef = React.useRef<(raw: unknown) => void>(() => undefined);
   const eventBatch = useEventBatch({
@@ -398,6 +435,7 @@ export function ConversationPane(): React.JSX.Element {
     getSessionId,
     enqueueAssistantMessage: injection.enqueue,
     onChips: React.useCallback((raw: unknown) => acceptChipsRef.current(raw), []),
+    onClassified: handleNdaClassified,
   });
 
   const attachments = useAttachments({
@@ -790,6 +828,15 @@ export function ConversationPane(): React.JSX.Element {
   // FIX #7a — the preview modal's "Open record" action reuses the ONE `previewNavigationService`
   // hoisted above (also drives the task-052 suggestion-card modal open).
 
+  // ai-advanced-capabilities-nda-r1 task 031 — NDA-REVIEW advisory comments. A client-derived
+  // projection of the SAME ledgered NDA-REVIEW result (ADR-040; no second model call, no new
+  // server disposition). Detects the NDA-REVIEW output shape structurally (mirrors
+  // composeResultFormat.ts's mutually-exclusive-required-fields convention) and, on a match,
+  // emits `compose_advisory_comments` on the workspace channel so
+  // useComposeWorkspaceReceivers materializes a comment thread per flagged clause. See
+  // useNdaReviewAdvisoryCommentsBridge.ts for the full rationale.
+  const ndaReviewAdvisoryComments = useNdaReviewAdvisoryCommentsBridge({ dispatch, getSessionId });
+
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
       // DEF-09: an editor-materializing compose EDIT action (Draft alternative) carries
@@ -813,6 +860,11 @@ export function ConversationPane(): React.JSX.Element {
           const formatted =
             formatComposeActionResultMarkdown(dispatched.result) ?? formatEventOutputMarkdown(dispatched.result);
           injection.enqueue(makeLocalAssistantMessage(formatted));
+          // task 031 — a client-derived projection alongside the prose above (NDA-REVIEW's
+          // {overallRisk, flaggedSections[]} shape is not one of the 5 known Compose action
+          // shapes, so it renders via the formatEventOutputMarkdown fallback AND, here,
+          // separately materializes as document comments; no-op for any other action's result).
+          ndaReviewAdvisoryComments.emitFromResult(dispatched.result);
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
@@ -849,8 +901,11 @@ export function ConversationPane(): React.JSX.Element {
     },
     // Depend on the memoized `trackAppliedEdit` (stable), not the whole `supersession` object (new
     // identity each render) — keeps dispatchComposeAction stable so the bridge registration + serial
-    // queue don't re-register every render.
-    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit]
+    // queue don't re-register every render. Same reasoning for
+    // `ndaReviewAdvisoryComments.emitFromResult` (itself stable — memoized on `[dispatch,
+    // getSessionId]`, both stable — see useNdaReviewAdvisoryCommentsBridge.ts) over the whole
+    // `ndaReviewAdvisoryComments` object, which is a fresh literal every render.
+    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit, ndaReviewAdvisoryComments.emitFromResult]
   );
 
   // FR-17 affordance handlers (task 034). "Try another approach" passes the CURRENT
@@ -962,6 +1017,32 @@ export function ConversationPane(): React.JSX.Element {
   //                    message keeps the flow sensible even if the doc isn't saved yet (offer to open it).
   //  - "draft-email" → dispatch the Email workspace `widget_load` using the EXACT interop contract the
   //                    WorkspacePane owner's handler expects (the stub tab itself is created by that owner).
+  // task 022 — "Review an NDA" card click: (1) open the classified file in the Compose tab via
+  // the EXISTING `mountFileInCompose` helper (the SAME dynamic per-file widget_load seed
+  // "Revise document" already uses — the `nda-review` surfaceLaunchRegistry entry documents the
+  // same "compose" surface identity for a future TEXT-path surface_launch dispatch, but a
+  // static registry `widgetData` can't carry a per-click file id, so the CLICK path here reuses
+  // the existing dynamic helper directly rather than routing through resolveSurfaceLaunch);
+  // (2) dispatch NDA-REVIEW on that file through the SAME shared Click-path
+  // `chips.dispatchBinding` seam every other consumer chip uses (ADR-039 — one dispatch
+  // mechanism), scoping the run to just this file via `slots: { fileIds }` (the identical
+  // wire shape the server's own chip transitions already use — EventRulesService.cs).
+  const handleReviewNda = React.useCallback((): void => {
+    if (!ndaReviewFile) return;
+    const { fileId, fileName } = ndaReviewFile;
+    mountFileInCompose(fileId, fileName);
+    if (ndaReviewBindingId) {
+      chips.dispatchBinding(ndaReviewBindingId, { slots: { fileIds: [fileId] } });
+    } else {
+      // Capability discovery hasn't resolved yet (or the catalog is unreachable) — the file still
+      // opens in Compose above; tell the user the review itself didn't start (never a silent drop).
+      injection.enqueue(
+        makeLocalAssistantMessage("Sorry — NDA review isn't available right now. Please try again.")
+      );
+    }
+    setNdaReviewFile(null);
+  }, [ndaReviewFile, ndaReviewBindingId, mountFileInCompose, chips, injection]);
+
   const handleDocAction = React.useCallback(
     (action: ComposeDocAction): void => {
       // R6-2: the user acted on a doc-action chip — clear the revise-context flag so the strip
@@ -1407,9 +1488,25 @@ export function ConversationPane(): React.JSX.Element {
   //   2b. Otherwise → show the mount-then-ask message + the four intent chips.
   // Gated on an active source document being present; every other message delegates verbatim to the
   // command-routing decorate (hard-slash / soft-slash / reference resolution — ADR-039 unchanged).
+  // ai-advanced-capabilities-nda-r1 task 011 (spec FR-04b): the Assistant's runtime model-tier
+  // picker selection. `null` (the default) means "unset" — decorateOutboundBody below omits the
+  // wire field entirely, so the dispatched Action's own sprk_modeltier governs exactly as before
+  // this control existed. A non-null selection is added to the outbound message body and rides
+  // sprk_modeltieroverride through the ONE tier→deployment resolver (ADR-016, task 010). Declared
+  // here (ABOVE handleDecorateOutboundBodyWithRevise) rather than beside the other simple UI state
+  // further down, because that callback's dependency array closes over it immediately below.
+  const [modelTierOverride, setModelTierOverride] = React.useState<AssistantModelTier | null>(null);
+
   const { handleDecorateOutboundBody } = commands;
   const handleDecorateOutboundBodyWithRevise = React.useCallback(
     async (body: Record<string, unknown>): Promise<Record<string, unknown> | null> => {
+      // ai-advanced-capabilities-nda-r1 task 011: only add the wire field when the user has picked a
+      // tier — omitted entirely on the (default) unset path, so the outbound body shape is byte-
+      // identical to pre-task-011 for every session that never touches the picker.
+      if (modelTierOverride !== null) {
+        body.modelTierOverride = modelTierOverride;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
       const detection = detectReviseThisDocumentIntent(messageText);
       const hasActiveSourceDoc =
@@ -1503,6 +1600,7 @@ export function ConversationPane(): React.JSX.Element {
       selection.selectionChip,
       draftBindingId,
       chips,
+      modelTierOverride,
     ]
   );
 
@@ -1605,6 +1703,8 @@ export function ConversationPane(): React.JSX.Element {
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
+      // task 022: a fresh session has no pending "Review an NDA" card.
+      setNdaReviewFile(null);
     },
     [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
   );
@@ -1843,6 +1943,27 @@ export function ConversationPane(): React.JSX.Element {
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
 
+        {/* task 022 — "Review an NDA" action CARD (ASSISTANT-UI-ELEMENT-CRITERIA: a persistent
+            act-on item, not tied to the current turn, → Card, not a chip). Reuses the existing
+            stateless SuggestionCard presentational component (clickable region + dismiss 'x',
+            Fluent v9 tokens, dark-mode safe) rather than a new card component (CLAUDE.md §11).
+            Renders only when the ONE existing classifier (chat-classify) flagged the most
+            recently uploaded file as an NDA — a non-NDA upload renders nothing here (negative
+            case, task 022 acceptance criterion 3). */}
+        {ndaReviewFile && (
+          <SuggestionCard
+            suggestion={{
+              suggestionId: `nda-review:${ndaReviewFile.fileId}`,
+              title: "Review an NDA",
+              snippet: ndaReviewFile.fileName,
+              actionHint: "nda-review",
+            }}
+            disabled={chips.dispatching}
+            onAction={handleReviewNda}
+            onDismiss={() => setNdaReviewFile(null)}
+          />
+        )}
+
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (
           <WelcomeStartCards
@@ -1945,6 +2066,18 @@ export function ConversationPane(): React.JSX.Element {
               // post-mount document-action chips ABOVE them in the SAME footer slot (both beneath the
               // last message). The node is memoized so slot-keyed auto-scroll fires only on change.
               transcriptFooterSlot={transcriptFooter}
+              // ai-advanced-capabilities-nda-r1 task 011 (FR-04b): the runtime model-tier picker,
+              // rendered directly above the composer via SprkChat's `aboveInputSlot` seam (the
+              // Click-path next-step chip strip's former slot — see types.ts doc; this is now its
+              // only consumer). Disabled during the same in-flight windows the composer itself locks
+              // on, so the picker can't change mid-turn.
+              aboveInputSlot={
+                <AssistantModelTierPicker
+                  value={modelTierOverride}
+                  onChange={setModelTierOverride}
+                  disabled={attachments.isPromoting || eventBatch.isEventInFlight || chips.dispatching}
+                />
+              }
               onPlaybookChange={playbook.handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}

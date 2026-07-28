@@ -83,6 +83,26 @@ export interface ComposeFlowSelection {
   contextLabel?: string;
 }
 
+/**
+ * One advisory comment to materialize in the Compose editor, carried by the
+ * `compose_advisory_comments` discriminant (ai-advanced-capabilities-nda-r1 task 031). A
+ * CLIENT-DERIVED projection of one `flaggedSections[]` entry from the ledgered NDA-REVIEW result
+ * (ADR-040) — NOT a second server disposition, NOT a new model call. Structural mirror of the
+ * NDA-REVIEW Action output contract's flagged-section shape (task 020).
+ */
+export interface ComposeAdvisoryCommentItem {
+  /** Verbatim quoted NDA clause excerpt — the `resolveTargetSpans('strict')` anchor target. Tier-3. */
+  targetText: string;
+  /** The AI's advisory explanation for this flag — becomes the comment thread's text. Tier-3. */
+  explanation: string;
+  /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). Tier-1 safe identifier. */
+  sectionRef?: string;
+  /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). Tier-1 safe enum-like string. */
+  riskLevel?: string;
+  /** Optional standard/playbook reference the flag cites. Tier-1 safe identifier. */
+  standardRef?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Workspace channel
 // ---------------------------------------------------------------------------
@@ -309,6 +329,20 @@ export interface WorkspacePaneEvent {
     //    span. Additive discriminant; see the qaSourceText/qaSectionLabel
     //    field block below.
     | 'compose_qa_highlight'
+    // ── Compose advisory comments (ai-advanced-capabilities-nda-r1 task 031) ──
+    //    Assistant → Workspace. A CLIENT-DERIVED projection of the SAME ledgered
+    //    NDA-REVIEW result the review-summary panel renders (ADR-040 — no second
+    //    server disposition, no new model call): one entry per flagged clause.
+    //    The Workspace receiver (`useComposeWorkspaceReceivers`) resolves each
+    //    `targetText` via `resolveTargetSpans('strict')` and, on a unique match,
+    //    creates a PERSISTENT comment thread (`useComposeCommentThreads.createThread`)
+    //    carrying `explanation` as the thread text — reusing the SAME anchoring
+    //    primitives `compose_qa_highlight` uses for its ephemeral highlight, applied
+    //    here as a durable `commentAnchor` mark instead. Ranges that fail strict
+    //    resolution are reported (never silently dropped, per the FR-19 "do not
+    //    guess" rule). Additive discriminant; see the `advisoryComments` field block
+    //    below.
+    | 'compose_advisory_comments'
     // ── Compose D-F3 content-render ack signal (spaarkeai-compose-r2 task 071,
     //    FR-34) ── Workspace(ComposeWorkspace) → Workspace(WorkspacePane). The
     //    honest-UI-ack refinement for CONTENT-bearing Compose opens: a
@@ -840,6 +874,32 @@ export interface WorkspacePaneEvent {
    * `type === 'compose_qa_highlight'`. Tier-1 safe.
    */
   qaSectionLabel?: string;
+
+  // ── Compose advisory comments fields (task 031) ────────────────────────────
+  //
+  // Carried by the `compose_advisory_comments` discriminant ONLY. One entry per
+  // `flaggedSections[]` item from the ledgered NDA-REVIEW result. `sessionId` +
+  // `timestamp` (declared above) are reused. `ledgerRef` (declared above, Flow 5
+  // block) MAY additionally be set for provenance/dedupe — optional, since the
+  // advisory-comments materialization does not itself re-read the ledger (the
+  // dispatcher already holds the terminal chunk's payload verbatim).
+
+  /**
+   * The flagged-section advisory comments to materialize, present when
+   * `type === 'compose_advisory_comments'`. Tier-3 (each item carries the AI's
+   * quoted excerpt + explanation) — see {@link ComposeAdvisoryCommentItem}.
+   */
+  advisoryComments?: ComposeAdvisoryCommentItem[];
+
+  /**
+   * task 032 (right-gutter comment layout) — the NDA-REVIEW Action's own top-level `overallRisk`
+   * string (the ledgered result's `{overallRisk, flaggedSections[]}` contract, task 020), carried
+   * verbatim alongside `advisoryComments` when `type === 'compose_advisory_comments'`. Coarse
+   * qualitative signal only (NEVER a numeric score, per ADR-039). Optional — an older emitter that
+   * hasn't wired this field simply omits it; the review-summary panel falls back to deriving it from
+   * `advisoryComments[].riskLevel` in that case (see `NdaReviewSummaryPanel.tsx`).
+   */
+  overallRisk?: string;
 }
 
 // ---------------------------------------------------------------------------

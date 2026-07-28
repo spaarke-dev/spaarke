@@ -130,7 +130,10 @@ jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
     ComposeEditor: ReactLib.forwardRef(
-      (props: { onSave?: () => void; canSave?: boolean; onDirtyChange?: (d: boolean) => void }, ref: React.Ref<unknown>) => {
+      (
+        props: { onSave?: () => void; canSave?: boolean; onDirtyChange?: (d: boolean) => void },
+        ref: React.Ref<unknown>
+      ) => {
         editorProps.current = props;
         ReactLib.useEffect(() => {
           props.onDirtyChange?.(true);
@@ -140,7 +143,7 @@ jest.mock('./ComposeEditor', () => {
           serializeOperationLog: () => ({ orderedOps: [], baseVersion: null }),
           commitSaved: jest.fn(),
           getBaselineParaIdMap: () => [],
-          getCommentThreadAnnotations: () => [],
+          getAnchoredComments: () => [],
           getRedlineAnnotations: () => [],
           hasPendingRedlines: () => false,
           buildContentModel: () => CONTENT_MODEL,

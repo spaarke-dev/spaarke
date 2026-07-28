@@ -568,6 +568,17 @@ public sealed record SaveComposeDocumentRequest
     /// skipped and behavior is unchanged.
     /// </summary>
     public IReadOnlyList<ComposeBaselineParaId>? ParaIdMap { get; init; }
+
+    /// <summary>
+    /// Task 041 (Phase 4, NDA-REVIEW Summary Page): optional Summary Page content, deterministically derived
+    /// from the ONE ledgered NDA-REVIEW result (<c>{overallRisk, flaggedSections[]}</c>, task 023) — NO
+    /// second LLM call (see <see cref="ComposeSummaryPageGenerator"/>). When present, <see cref="SaveAsync"/>
+    /// appends it as a page-broken, non-tracked section at the END of <c>contentToPersist</c> via
+    /// <see cref="ComposeDocumentRenderer.AppendSection"/> (ADR-049; the retired <c>DocxAnnotationWriter</c>
+    /// stays retired). Null/absent (every non-NDA-REVIEW Compose save) → no Summary Page appended, unchanged
+    /// behavior.
+    /// </summary>
+    public NdaReviewSummaryPageInput? SummaryPage { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>

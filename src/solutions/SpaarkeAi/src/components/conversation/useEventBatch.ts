@@ -36,6 +36,7 @@ import {
   formatClassificationMessage,
   formatEventOutputMarkdown,
   formatNoticeMessage,
+  type EventClassificationData,
 } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 
@@ -58,6 +59,17 @@ export interface EventBatchDeps {
    * Passed as a stable indirection so hook composition stays acyclic.
    */
   onChips: (raw: unknown) => void;
+  /**
+   * ai-advanced-capabilities-nda-r1 task 022: notified with the RAW
+   * `event_classification` data for every classified file, IN ADDITION to the
+   * existing compact "File classified" transcript line. Lets the host react to
+   * the classifier's `docType` (e.g. render a "Review an NDA" card when
+   * `docType === "nda"`) without adding a second classification mechanism —
+   * `chat-classify` (CLS-CHAT@v1) remains the ONE classifier (ADR-039); this is
+   * purely a UI-presentation branch on its already-produced output. Optional —
+   * omitted hosts see no behavior change.
+   */
+  onClassified?: (data: EventClassificationData) => void;
 }
 
 export interface EventBatchMachine {
@@ -107,7 +119,7 @@ export interface EventBatchMachine {
 }
 
 export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
-  const { bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips } = deps;
+  const { bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips, onClassified } = deps;
 
   // #2b (UAT 2026-07-18): count of in-flight Event SSE streams so the host can
   // lock the composer during the classify window. A counter (not a bool) because
@@ -209,6 +221,9 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
         onClassification: (data) => {
           // P1-5: compact, collapsed-by-default classification entry (was a full chat bubble).
           enqueueAssistantMessage(makeFileStatusMessage(formatClassificationMessage(data), "File classified"));
+          // task 022: forward the raw classification so the host can react to docType
+          // (e.g. the "Review an NDA" card) — additive, no behavior change if unset.
+          onClassified?.(data);
         },
         onOutput: (data) => {
           enqueueAssistantMessage(
@@ -236,7 +251,7 @@ export function useEventBatch(deps: EventBatchDeps): EventBatchMachine {
       .finally(() => {
         setInFlightEvents((n) => Math.max(0, n - 1));
       });
-  }, [bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips]);
+  }, [bffBaseUrl, getAccessToken, getSessionId, enqueueAssistantMessage, onChips, onClassified]);
   fireRef.current = fire;
 
   const noteChipsChanged = React.useCallback(

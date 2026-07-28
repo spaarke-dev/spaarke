@@ -32,6 +32,14 @@ describe('surfaceLaunchRegistry', () => {
     expect(resolveSurfaceLaunch('create-todo')).toMatchObject({ kind: 'oob-form', surface: 'sprk_todo' });
   });
 
+  it('resolves nda-review to the compose workspace-tab surface (ai-advanced-capabilities-nda-r1 task 022)', () => {
+    const entry = resolveSurfaceLaunch('nda-review');
+    expect(entry).toBeDefined();
+    expect(entry!.kind).toBe('workspace-tab');
+    expect(entry!.surface).toBe('compose');
+    expect(entry!.title).toBe('Compose');
+  });
+
   it('returns undefined for unknown / empty consumerTypes (graceful, no throw)', () => {
     expect(resolveSurfaceLaunch('does-not-exist')).toBeUndefined();
     expect(resolveSurfaceLaunch('')).toBeUndefined();

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="ai-advanced-capabilities-nda-r1">
+  <metadata>
+    <title>Summary-Page DOCX writer — TL;DR + flagged overview + recommendations</title>
+    <phase>4 Export &amp; Persistence</phase>
+    <gate>clear</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New server-side OOXML section-insert in ComposeShadowPatchEngine/ComposeDocumentRenderer; export correctness.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New OOXML writer following the existing patch-engine/renderer conventions with a concrete reference; specified output.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine/ComposeDocumentRenderer shared with 040; sequence after 040 to avoid engine churn (or coordinate carefully).</parallel-reason>
+    <deps>023</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Generate a concise "Summary Page" in the exported/rendered DOCX: TL;DR + flagged-section overview +
+    recommendations, derived from the ledgered NDA-REVIEW result. Insert it as a document section with a page break
+    (default at the end) via ComposeShadowPatchEngine/ComposeDocumentRenderer. No new package.
+  </prompt>
+
+  <role>
+    SPAARKE BFF developer. Expert in the ComposeShadowPatchEngine section/patch model and ComposeDocumentRenderer
+    OOXML generation. Follow ADR-049 + CLAUDE.md §10.
+  </role>
+
+  <goal>
+    The rendered/exported DOCX contains a Summary Page section (TL;DR, flagged overview, recommendations) built
+    from the ledgered result, separated by a page break; a seam test asserts the section is present and well-formed.
+  </goal>
+
+  <context>
+    <background>
+      spec FR (Summary Page): concise, default end-of-document, server-side OOXML. DocxAnnotationWriter.cs is
+      RETIRED — the real engines are ComposeShadowPatchEngine + ComposeDocumentRenderer. Content derives from the
+      one ledgered {overallRisk, flaggedSections[]} result (task 023) — no extra model call.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>tests/integration/seam/ (summary-page presence)</file>
+    </relevant-files>
+    <dependencies>023 (ledgered result supplies the summary content).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Insert the Summary Page via the shadow-document patch/section model (ComposeShadowPatchEngine / ComposeDocumentRenderer); do NOT use the retired DocxAnnotationWriter or add a new OOXML package.</constraint>
+    <constraint source="CLAUDE.md-10">State Placement Justification; run publish-size ≤60 MB; report diff. No new NuGet.</constraint>
+    <constraint source="project">Content = TL;DR + flagged-section overview + recommendations, concise. Default position = end of document, separated by a page break. Derive from the ledgered result — no second LLM call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+    </files>
+    <patterns>
+      <pattern name="Section insert / renderer" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">
+        Follow the existing section/patch conventions to add a page-broken Summary Page section.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Study how ComposeShadowPatchEngine/ComposeDocumentRenderer add sections + page breaks.</step>
+    <step order="2">Build the Summary Page content model (TL;DR, flagged overview, recommendations) from the ledgered result.</step>
+    <step order="3">Insert it as a page-broken section, default at end.</step>
+    <step order="4">Add a seam test asserting the section exists + is well-formed OOXML.</step>
+    <step order="5">Run build + tests + publish-size check; report diff.</step>
+    <step order="6">Update TASK-INDEX.md: mark 041 ✅; record Placement Justification + size in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (Summary-Page section writer)</output>
+    <output type="test">tests/integration/seam/ (summary-page presence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a completed NDA-REVIEW, when the DOCX is rendered/exported, then it contains a Summary Page (TL;DR + flagged overview + recommendations) separated by a page break at the end.</criterion>
+    <criterion testable="true">The Summary Page is produced via ComposeShadowPatchEngine/ComposeDocumentRenderer (not DocxAnnotationWriter) with no new package.</criterion>
+    <criterion testable="true">A seam test asserts the section is present and well-formed.</criterion>
+    <criterion testable="true">`dotnet publish -c Release` ≤60 MB; diff reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Works with 040 (comment baking) to produce the fully-annotated export. Keep the page concise.
+
+    COMPLETED (Sonnet-5, FULL rigor). New `ComposeSummaryPageGenerator` (pure, deterministic content-model
+    builder from the ledgered `{overallRisk, flaggedSections[]}` — no second LLM call) + new
+    `ComposeDocumentRenderer.AppendSection(byte[], IReadOnlyList&lt;ComposeBlock&gt;)` (page-break + non-tracked
+    paragraphs appended at the true document end, trailing sectPr preserved as last body child, fresh
+    paraIds minted). Deliberately NOT a ComposeShadowPatchEngine operation (would emit unwanted tracked
+    w:ins). Wired via new optional `SaveComposeDocumentRequest.SummaryPage` consumed in
+    `ComposeService.SaveAsync`. No new package; DocxAnnotationWriter stays retired. Seam test
+    `tests/integration/seam/Compose/ComposeSummaryPageSeamTests.cs` (8/8 pass, real compose-corpus fixtures).
+    Build PASS; full Compose seam suite 52/52 PASS. Publish 51.29 MB compressed vs 47.49 MB last-recorded
+    baseline (+3.80 MB — worktree carries other uncommitted parallel-wave work; this task's own 2 files add
+    only a few KB). Well under the 60 MB ceiling. See
+    `projects/ai-advanced-capabilities-nda-r1/notes/task-041-summary-page-docx-writer.md` for full detail.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL). Enforce §10 size gate.</protocol>
+  </execution>
+</task>
