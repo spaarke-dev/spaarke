@@ -6,10 +6,21 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-5 COMPLETE — all 9 items IMPLEMENTED, TESTED, DEPLOYED** (batch A #2–#8, #1 relocation+doc-location, #9 progress modal). Awaiting owner UAT. Rounds 2/3/4A/4B also deployed. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `2a4263661`. Working tree CLEAN. |
-| **Deployed (2026-07-27 r5 #9)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4924 KB, from HEAD 2a4263661. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
-| **Next Action** | Owner UAT of full round-5. Then deferred (owner timing): takeaway-field re-seed (outward-facing Action change), over-broad allowsknowledge gate, merge/PR `work/ai-nda-r1-followups`. |
+| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-6 COMPLETE — all items DEPLOYED**. Rounds 2/3/4A/4B/5 also deployed. Awaiting owner UAT. |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `11d07d792`. Working tree CLEAN. |
+| **Deployed (2026-07-27 r6)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4926 KB, from HEAD 11d07d792. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
+| **Next Action** | Owner UAT of round-6. Then deferred (owner timing): takeaway-field re-seed (outward-facing Action change), over-broad allowsknowledge gate, merge/PR `work/ai-nda-r1-followups`. |
+
+### ✅ UAT round-6 DEPLOYED (11d07d792) — Review Notes container, disclaimer→toolbar, label rename, modal polish
+Client-only:
+- **#2** Right-gutter Review Notes = own bounded container: `overflow:hidden` on the rail (a card whose clause scrolled above the fold no longer renders UP into the Review Summary — the root cause was the rail's default `overflow:visible` + negative computed `top`), plus a RESIZABLE bottom edge (`bottomResizeHandle`, `railHeight` state, sessionStorage `spaarke.compose.notesGutterHeight`). `ComposeCommentGutter.tsx`.
+- **#3a** Centered notes down-arrow (`scrollNotesDown`, shown when `hasClippedBelow`) + re-centered the summary FAB (was bottom-right).
+- **#3b** Removed the OOB Comments toggle FAB in `ComposeEditor` (session comments unused; ComposeCommentThread panel remains mounted-but-unreachable). Repointed `ComposeEditor.paneToggleCrash.test.tsx` to the Review Summary panel toggle (same null↔<div> BubbleMenu-crash guard).
+- **#4** Removed the not-legal-advice banner from `NdaReviewSummaryPanel`; added an info (ⓘ) button far-right in `ComposeFormatToolbar` (new `reviewDisclaimer` prop; ComposeEditor passes `NDA_REVIEW_DISCLAIMER_TEXT` when a review is present) → Popover shows the text.
+- **#5** `parseAdvisoryNote` DISPLAY labels: "Grounded fact"→"Flagged clause", "Advisory judgment"/"Judgment"→"Assessment says" (detection still keys on the model's words).
+- **#6** Progress modal rebuilt on Fluent `Dialog`/`DialogSurface` (elevated surface + scrim + true screen-center; was a flat portal). `NdaReviewProgressModal.tsx`.
+- **#7** Rotating legal "working…" line (`NDA_REVIEW_WORKING_PHRASES`, 2.2s cadence, spinner) — Claude-Code-style, shows activity during the long run.
+- Tests updated + +2 phrase tests; Compose.Components 617/618 (pre-existing advisoryComments fail), SpaarkeAi modal/hook green, tsc Surface-owned 0.
 
 ### ✅ UAT round-5 #9 DEPLOYED (2a4263661) — center-screen live-progress modal
 - New `NdaReviewProgressModal.tsx` (SpaarkeAi conversation): renders the shared `@spaarke/ui-components` `AiProgressStepper` (variant="card") in a full-viewport React portal → true screen-center + dimmed backdrop. Real phases: reading → retrieving firm standards → analyzing clauses → writing advisory notes.
