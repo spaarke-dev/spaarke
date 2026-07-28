@@ -11,6 +11,23 @@
 | **Deployed (2026-07-27 r8, 3 commits)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4928 KB. d1be83701 (popup/#1/#2) → 488113b59 (#7) → c9b57fc1f (#3/#4/#5). Master since base = only `0e1e30d95` → no clobber. |
 | **Next Action** | **✅ Design doc + Phase-1 DONE & DEPLOYED.** Owner approved all 3 decisions (build here / activeDomain from session context / do phase-1 now). **UAT the lean BubbleMenu (Draft alternative only; Explain/Compare/Defined-terms/Email gone) + the Review-Note ⋮ (Draft compliant alternative).** Then **owner-gated PHASE 2/3**: (2) catalog analysis→tool-binding link + discovery-hook read (schema); (3) new bindings `compose-make-concise` / `compose-rewrite-instruction` (+ free-text `instruction` slot) / `compose-draft-compliant-alternative` (`domains:['nda']`) — the first domain-scoped tool triggers threading the session `activeAnalysisDomain` from ComposeWorkspace → ComposeEditor/toolbar. Also still deferred: takeaway re-seed, allowsknowledge. |
 
+## 🌱 SEEDED to spaarkedev1 (2026-07-28) — phase-3 compose tools
+Seeded via direct Web API POST (NOT the whole-catalog `Seed-PlaybookConsumers.ps1`, which would have
+reverted 11 rows of legit env drift — see hygiene note). GUIDs (env-specific):
+- `compose-make-concise`: action `a20d6c16-888a-f111-8076-7ced8d174eb8`, binding `65549e51-888a-f111-8077-7ced8ddc4a05`
+- `compose-rewrite-instruction`: action `a40d6c16-888a-f111-8076-7ced8d174eb8`, binding `904f2d53-888a-f111-8076-7ced8d174eb8`
+Both: surfaces `workspace,compose`, disposition 100000006 (Compose/redline), enabled, toolDescription set,
+inputschema+outputschema populated. Client auto-discovers + enables via `useComposeToolbarActivation`.
+Seed scripts (idempotent, re-runnable): `scratchpad/seed-compose-actions.mjs` + `seed-compose-bindings.mjs`
+(pattern: check-then-POST, mirror the live draft-alternative row shape, bind `sprk_Action@odata.bind`).
+
+**⚠️ CATALOG-HYGIENE FINDING (for owner):** `infra/dataverse/sprk_playbookconsumer-rows.json` MIRROR is STALE
+vs the live env — `-DiffOnly` showed 14 diffs: 2 env rows missing from mirror (create-project, create-todo),
+11 rows drifted (env has NEWER values the mirror lacks — e.g. create-matter/create-task disposition
+100000007 in env vs 100000000 in mirror; nda-review toolDescription refined in env; chip transitions). The
+env is ahead of the mirror. **Do NOT run a full `Seed-PlaybookConsumers.ps1` seed** until someone runs
+`-Export` to reconcile env→mirror + commits. Not fixed here (out of scope); flagged for a hygiene task.
+
 ## 🏛️ ARCHITECTURE — Contextual AI Tool Library (agreed with owner 2026-07-27) → **DESIGN DOC WRITTEN 2026-07-27: `notes/contextual-ai-tool-library-design.md`**
 
 > Full design (2 dims, 2-layer capability/surfacing split, descriptor change, NDA worked example, phasing, owner decisions) now lives in `notes/contextual-ai-tool-library-design.md`. Summary below retained for quick recall.
