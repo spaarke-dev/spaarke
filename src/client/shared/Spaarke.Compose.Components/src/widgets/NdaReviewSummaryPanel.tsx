@@ -67,7 +67,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { Dismiss16Regular, ArrowSort16Regular, ArrowDown16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, ArrowSort16Regular } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
   // UAT round-5 #1 — the OUTER shell. The panel now lives INSIDE the editor's top region (below the
@@ -97,10 +97,17 @@ const useStyles = makeStyles({
     // default cap. A compact TL;DR strip, not a full findings dump.
     maxHeight: '32vh',
     overflowY: 'auto',
-    // UAT round-4 #5 — hide the native scrollbar; the down-arrow FAB is the scroll affordance instead
-    // (mirrors the ComposeEditor FIX #9 scrollbar-hidden surface + down-arrow pattern).
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': { display: 'none' },
+    // UAT round-8 #1 — a MODERN thin scrollbar (the round-4 scrollbar-hidden + down-arrow FAB was
+    // reverted per reviewer request). Thin, rounded, low-contrast thumb; transparent track.
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+    '::-webkit-scrollbar': { width: '8px', height: '8px' },
+    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: '4px',
+    },
+    '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStrokeAccessible },
   },
   // UAT round-4 #2 / round-7 #2 — the title + sort control sit in a STICKY light-gray header bar that
   // stays pinned at the top of the card while the findings scroll beneath it.
@@ -375,6 +382,13 @@ export interface NdaReviewFindingSummary {
    * {@link ../widgets/ndaClauseLocation.ts}.
    */
   locationLabel?: string;
+  /**
+   * UAT round-8 #2 — the resolved DOCUMENT POSITION of this finding's clause (the ProseMirror `from` of
+   * its strict-matched span), supplied by the host from the live editor. "By section / paragraph" sorts
+   * on this so findings run top→bottom in true document order — the model emits them out of order (e.g.
+   * Preamble findings last), so sorting on emission index alone put late document sections first.
+   */
+  docPosition?: number;
 }
 
 /**
@@ -461,38 +475,9 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   // summary and the document stay in sync about "which finding are we on".
   const [activeIndex, setActiveIndex] = React.useState<number | null>(null);
 
-  // UAT round-4 #5 — hide the panel's native scrollbar and expose a down-arrow FAB that appears only
-  // while more findings sit below the fold, scrolling the panel on click (ComposeEditor FIX #9 pattern).
+  // UAT round-8 #1 — the panel scrolls with a modern thin scrollbar; the down-arrow FAB + its
+  // scroll-position measurement were removed. `scrollRef` is retained for the bottom-resize drag.
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
-  const [showScrollDown, setShowScrollDown] = React.useState(false);
-  React.useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const measure = (): void => {
-      const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-      setShowScrollDown(remaining > 8);
-    };
-    measure();
-    el.addEventListener('scroll', measure, { passive: true });
-    let ro: ResizeObserver | undefined;
-    if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(measure);
-      ro.observe(el);
-    }
-    window.addEventListener('resize', measure, { passive: true });
-    return () => {
-      el.removeEventListener('scroll', measure);
-      ro?.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-    // Re-measure when the rendered finding set changes (findings arriving/sort change alters height).
-  }, [findings, sortBy, open]);
-
-  const scrollPanelDown = React.useCallback((): void => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: Math.min(el.scrollHeight, el.scrollTop + el.clientHeight * 0.8), behavior: 'smooth' });
-  }, []);
 
   // UAT round-7 #3 — the Review Summary is resizable from the bottom (like the Review Notes). `null` =
   // the default 32vh cap; a number caps the scroller height. Persisted in sessionStorage.
@@ -522,8 +507,12 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
 
   if (!open) return null;
 
-  // UAT round-4 #2/#4 — sort by document position (default) or by risk severity. Both are stable on the
-  // original index (document order) as the tiebreak. Non-mutating (findings is a readonly prop).
+  // UAT round-4 #2/#4 + round-8 #2 — sort by DOCUMENT POSITION (default) or by risk severity. "By
+  // section" now orders on each finding's resolved `docPosition` (top→bottom in the real document), NOT
+  // the model's emission order (which is out of document order). Findings whose clause couldn't be
+  // resolved (no docPosition) fall to the end, stable on emission index. Non-mutating.
+  const docOrder = (f: NdaReviewFindingSummary): number =>
+    f.docPosition ?? Number.MAX_SAFE_INTEGER;
   const sortedFindings = findings
     .map((finding, index) => ({ finding, index }))
     .sort((a, b) => {
@@ -531,8 +520,11 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
         const sa = isRiskSeverity(a.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(a.finding.riskLevel) : -1;
         const sb = isRiskSeverity(b.finding.riskLevel) ? RISK_SEVERITY_ORDER.indexOf(b.finding.riskLevel) : -1;
         if (sb !== sa) return sb - sa;
+        return docOrder(a.finding) - docOrder(b.finding); // risk tiebreak = document order
       }
-      return a.index - b.index; // document order (default; and the risk-tiebreak)
+      // "By section / paragraph" = true document order, then emission index as a stable tiebreak.
+      const byDoc = docOrder(a.finding) - docOrder(b.finding);
+      return byDoc !== 0 ? byDoc : a.index - b.index;
     });
 
   return (
@@ -662,20 +654,7 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
         )}
         </div>
       </div>
-      {/* UAT round-4 #5 — down-arrow FAB: the scrollbar is hidden, so this is the scroll affordance.
-          Shown only while more findings sit below the fold. */}
-      {showScrollDown ? (
-        <Button
-          appearance="primary"
-          shape="circular"
-          size="small"
-          icon={<ArrowDown16Regular />}
-          className={styles.scrollDownFab}
-          aria-label="Scroll down for more findings"
-          onClick={scrollPanelDown}
-          data-testid="nda-review-summary-scroll-down"
-        />
-      ) : null}
+      {/* UAT round-8 #1 — the down-arrow FAB was REMOVED; the panel now shows a modern thin scrollbar. */}
       {/* UAT round-7 #3 — drag the bottom edge to resize the Review Summary height. */}
       <div
         className={styles.bottomResizeHandle}

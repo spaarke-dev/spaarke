@@ -2152,7 +2152,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           const resolved = resolveTargetSpans(editor, finding.quotedText, 'strict');
           if (resolved.ok) pos = resolved.spans[0].from;
         }
-        return { ...finding, locationLabel: deriveClauseLocationLabel(editor.state.doc, pos, finding.sectionRef) };
+        return {
+          ...finding,
+          locationLabel: deriveClauseLocationLabel(editor.state.doc, pos, finding.sectionRef),
+          // UAT round-8 #2 — the resolved document position drives the summary's "by section" sort.
+          docPosition: pos ?? undefined,
+        };
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional review-time snapshot (see note)
     }, [editor, reviewFindings]);

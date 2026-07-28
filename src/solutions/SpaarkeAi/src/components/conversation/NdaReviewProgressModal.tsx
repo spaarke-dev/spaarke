@@ -71,10 +71,13 @@ const COMPLETE_LINGER_MS = 900;
 const ERROR_LINGER_MS = 3200;
 
 const useStyles = makeStyles({
-  // UAT round-7 #1 — a compact, CENTERED popup: constrain the surface width and center every child
-  // (the stepper's own track is already centered; the title + working line were left-aligned).
+  // UAT round-7 #1 + follow-up — a CENTERED popup. The surface must be WIDE ENOUGH to contain the whole
+  // 4-step flow diagram: the track's chips + connectors are `flex-shrink: 0` (≈400px total), so a too-
+  // narrow surface let the track overflow past the white background. Give it comfortable room + let it
+  // grow with content so the background always covers the entire diagram.
   surface: {
-    maxWidth: '460px',
+    width: '560px',
+    maxWidth: '92vw',
   },
   body: {
     display: 'flex',
