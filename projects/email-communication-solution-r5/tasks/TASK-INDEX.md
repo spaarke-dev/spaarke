@@ -15,9 +15,9 @@
 | 010 | `GET /api/documents/{id}/eml-render` (MimeKit + sanitize + cache + tests) | 1 | ✅ | FULL | opus/xhigh | — | ❌ | 002 |
 | 020 | Extract production `ConnectionsEditor` Layer-1 logic (additive write) | 2 | ✅ | FULL | opus/xhigh | — | ❌ | — |
 | 021 | Extract `CommunicationAttachments` Layer-1 + promote `AttachmentList` | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
-| 022 | Extract `CommunicationActions` Layer-1 (action-bar logic) | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
+| 022 | Extract `CommunicationActions` Layer-1 (action-bar logic) | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
 | 023 | Lift `TrackingFieldTrio` generic core → `@spaarke/ui-components` | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
-| 030 | `EmailCardList` flat card list + loading/empty states | 3 | 🔲 | FULL | sonnet/high | P3a | ✅ | 001 |
+| 030 | `EmailCardList` flat card list + loading/empty states | 3 | ✅ | FULL | sonnet/high | P3a | ✅ | 001 |
 | 031 | `ViewSelector` over `sprk_communication` saved views + List/Thread toggle | 3 | 🔲 | STANDARD | sonnet/high | P3a | ✅ | — |
 | 032 | Reading-pane shell (`PanelSplitter` 2-pane + full-width toolbar) | 3 | 🔲 | FULL | sonnet/high | — | ❌ | 030 |
 | 033 | `.eml` render branch — sandboxed iframe + `sprk_body` degradation | 3 | 🔲 | FULL | opus/xhigh | P3b | ✅ | 010, 032 |

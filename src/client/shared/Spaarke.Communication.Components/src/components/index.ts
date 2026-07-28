@@ -6,3 +6,4 @@
  */
 
 export * from './AttachmentList';
+export * from './EmailCardList';

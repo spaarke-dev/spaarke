@@ -13,6 +13,7 @@
     "./logic/connections": "./src/logic/connections/index.ts",
     "./logic/connections/provenance": "./src/logic/connections/provenance.ts",
     "./logic/attachments": "./src/logic/attachments/index.ts",
+    "./logic/actions": "./src/logic/actions/index.ts",
     "./components": "./src/components/index.ts",
     "./components/AttachmentList": "./src/components/AttachmentList/index.ts"
   },

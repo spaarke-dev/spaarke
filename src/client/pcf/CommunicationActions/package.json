@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
+    "@spaarke/communication-components": "file:../../shared/Spaarke.Communication.Components",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {

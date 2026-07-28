@@ -11,7 +11,7 @@ import {
   fetchSourceAttachments,
   type ISourceAttachmentRecord,
   type IActionsWebApi,
-} from '../CommunicationActions/attachmentsSource';
+} from '@spaarke/communication-components/logic/actions';
 
 const DV = 'https://org.crm.dynamics.com';
 
