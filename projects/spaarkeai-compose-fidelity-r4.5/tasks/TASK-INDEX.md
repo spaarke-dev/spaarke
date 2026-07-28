@@ -11,7 +11,7 @@
 | 001 | Extend fidelity corpus — legal-numbering exemplars | 0 Foundation | — | sonnet | med | STANDARD | — | ✔ | ✅ |
 | 002 | Read-fidelity harness — text-exact + numbering-exact golden | 0 Foundation | — | sonnet | high | FULL | 001 | ✔ | ✅ |
 | 010 | Upload path returns a projection | 1 One reader | WS-1 | sonnet | high | FULL | 002 | ✘ | ✅ (gate @ WS-1 boundary) |
-| 011 | Stateless `POST /api/compose/project` for browse | 1 One reader | WS-1 | sonnet | high | FULL | 010 | ✘ | 🔲 |
+| 011 | Stateless `POST /api/compose/project` for browse | 1 One reader | WS-1 | sonnet | high | FULL | 010 | ✘ | ✅ (gate @ WS-1 boundary) |
 | 012 | Open-in-Compose transient projected server-side | 1 One reader | WS-1 | sonnet | high | FULL | 011 | ✘ | 🔲 |
 | 013 | Delete mammoth fallback + `docxToTipTapHtml` | 1 One reader | WS-1 | sonnet | high | FULL | 012 | ✘ | 🔲 |
 | 014 | Deploy + UAT — one reader everywhere | 1 One reader | WS-1 | sonnet | med | STANDARD | 013 | ✘ | 🔲 |

@@ -138,6 +138,9 @@ import type {
   ImportedComment,
   // ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
   ComposeAnchoredComment,
+  // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5): shared normalize-target type for the
+  // Load/Upload/Browse->project projection hydration sites (see `normalizeProjection` below).
+  ComposeServerProjection,
 } from '../types/compose-contracts';
 // R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
@@ -189,6 +192,45 @@ function mintDocumentSessionId(): string {
     return c.randomUUID();
   }
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// ASP.NET Core deserializes byte[] request-body fields from a base64 string (System.Text.Json
+// convention) — every Compose client caller that sends raw document bytes (Save's retained-original
+// encode, and FR-03/task 011's project() browse round-trip) shares this ONE encoder rather than
+// forking the conversion. Iterate (not spread) to avoid a call-stack overflow on large documents.
+function arrayBufferToBase64(buf: ArrayBuffer): string {
+  const view = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
+  return btoa(binary);
+}
+
+/** Raw wire shape of a `projection` field on a Compose bytes->response payload (Load / Upload /
+ * Project) — every field optional so an older BFF build (predating the projection wiring) still
+ * normalizes cleanly. */
+interface RawComposeProjectionPayload {
+  status?: 'success' | 'partial' | 'failed';
+  canEdit?: boolean;
+  html?: string;
+  warnings?: { code: string; count: number }[];
+  schemaVersion?: string;
+}
+
+// Phase-1 mammoth removal / FR-01 (task 010) / FR-03 (task 011): normalizes a raw wire `projection`
+// field into the `ComposeServerProjection` shape the reducer/editor expect, defaulting every field
+// defensively. `undefined`/`null` (an older BFF, or a failed/unreachable projection call) normalizes
+// to `null` — the editor's mammoth fallback. Shared by the stored-doc Load, assistant-upload
+// (task 010), and Browse->project (task 011) hydration sites so the three doors do not fork the same
+// defaulting logic three times over.
+function normalizeProjection(p: RawComposeProjectionPayload | null | undefined): ComposeServerProjection | null {
+  if (!p) return null;
+  return {
+    status: p.status ?? 'failed',
+    canEdit: p.canEdit ?? false,
+    html: p.html ?? '',
+    warnings: Array.isArray(p.warnings) ? p.warnings : [],
+    schemaVersion: p.schemaVersion ?? 'compose-html-v1',
+  };
 }
 
 // Item 7 (UAT round-4): the single generic starter scaffold "Open template" mounts today. A neutral
@@ -713,18 +755,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         const hydratedParaIdMap = Array.isArray(payload.paraIdMap) ? payload.paraIdMap : [];
         const hydratedImportedRevisions = Array.isArray(payload.importedRevisions) ? payload.importedRevisions : [];
         const hydratedImportedComments = Array.isArray(payload.importedComments) ? payload.importedComments : [];
-        // Phase-1 mammoth removal: normalize the server projection defensively. An older BFF (no
-        // projection field) → null → the editor falls back to the client mammoth convert.
-        const p = payload.projection;
-        const hydratedProjection = p
-          ? {
-              status: p.status ?? 'failed',
-              canEdit: p.canEdit ?? false,
-              html: p.html ?? '',
-              warnings: Array.isArray(p.warnings) ? p.warnings : [],
-              schemaVersion: p.schemaVersion ?? 'compose-html-v1',
-            }
-          : null;
+        // Phase-1 mammoth removal / task 011: normalize the server projection defensively via the
+        // shared `normalizeProjection` helper (also used by Upload + Browse->project). An older BFF
+        // (no projection field) → null → the editor falls back to the client mammoth convert.
+        const hydratedProjection = normalizeProjection(payload.projection);
         dispatch({
           kind: 'loadSucceeded',
           docxBytes: bytes.buffer,
@@ -1027,14 +1061,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const anchoredComments: ComposeAnchoredComment[] =
         typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
 
-      // Base64-encode the RETAINED ORIGINAL bytes. ASP.NET Core deserializes byte[] from a base64 string;
-      // iterate (not spread) to avoid a call-stack overflow on large documents.
-      const encodeRetained = (buf: ArrayBuffer): string => {
-        const view = new Uint8Array(buf);
-        let binary = '';
-        for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
-        return btoa(binary);
-      };
+      // Base64-encode the RETAINED ORIGINAL bytes via the shared module-level encoder (see
+      // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
+      const encodeRetained = arrayBufferToBase64;
 
       // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
       // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
@@ -1690,36 +1719,71 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       setSearchResolvedDriveId(null);
       // Wave 2 (UAT-R3 Test #3 fix): mint the tab's DOCUMENT session id here. Unlike the
       // assistant-upload path (which gets a server sessionId via requestUploadMount), a Browse
-      // mount never hits the server, so its `mountTransient` reducer previously left
-      // state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId: ''`,
-      // which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
+      // mount never hits the server for its identity, so its `mountTransient` reducer previously
+      // left state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId:
+      // ''`, which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
       // EDIT (redline). A minted, tab-lifetime id restores EDIT routing (DEF-09/DEF-11) and the
       // redline-from-ledger materialization (which aborts on empty state.sessionId).
       const browseDocumentSessionId = mintDocumentSessionId();
-      // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
-      // knows which SPE container to mint the new sprk_document's drive-item in.
-      dispatch({
-        kind: 'mountTransient',
-        docxBytes: result,
-        fileName: file.name,
-        containerId: containerIdRef.current,
-        sessionId: browseDocumentSessionId,
-      });
-      // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
-      // (create-on-save, task 013) is enabled immediately.
-      setIsDirty(true);
-      // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
-      // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
-      // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
-      // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
-      // the PaneEventBus (ADR-015 keeps the bus content-free).
-      // Wave 3 Part 2: thread the tab's minted document session id so the server sets
-      // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
-      void registerActiveDocumentRef.current?.({
-        docxBytes: result,
-        fileName: file.name,
-        documentSessionId: browseDocumentSessionId,
-      });
+
+      // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2 path-A resolution): project the
+      // browsed bytes through the SAME stateless server reader Load/Upload use (POST
+      // /api/compose/project) so Browse renders via the one-reader projection branch (F-2) instead
+      // of the lossy client mammoth fallback. This is a READ-only round-trip: the server returns a
+      // projection and persists NOTHING (no ITenantCache write, no SPE write, no sprk_document row)
+      // — it does NOT violate ADR-040 / R4 I-2 (the client still authors no .docx bytes; it merely
+      // asks the server to render bytes it already holds locally, and the server hands back a
+      // render without storing or echoing them as an authored artifact). Best-effort: if the BFF is
+      // unconfigured/unreachable or the call fails, fall through with `projection: null` so Browse
+      // still mounts standalone via the mammoth fallback — Browse's historical zero-BFF-dependency
+      // contract for the MOUNT itself is preserved; only the render fidelity degrades.
+      void (async () => {
+        let projection: ComposeServerProjection | null = null;
+        if (bffBaseUrl) {
+          try {
+            const response = await authenticatedFetch(`${bffBaseUrl}/api/compose/project`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
+            });
+            if (response.ok) {
+              const payload = (await response.json()) as { projection?: RawComposeProjectionPayload };
+              projection = normalizeProjection(payload.projection);
+            }
+          } catch {
+            // Network/parse failure — fall through with projection: null (mammoth fallback). Browse
+            // must not be blocked by an unreachable BFF; the projection round-trip is a render-fidelity
+            // enhancement, not a mount precondition.
+            projection = null;
+          }
+        }
+
+        // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
+        // knows which SPE container to mint the new sprk_document's drive-item in.
+        dispatch({
+          kind: 'mountTransient',
+          docxBytes: result,
+          fileName: file.name,
+          containerId: containerIdRef.current,
+          sessionId: browseDocumentSessionId,
+          projection,
+        });
+        // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
+        // (create-on-save, task 013) is enabled immediately.
+        setIsDirty(true);
+        // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
+        // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
+        // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
+        // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
+        // the PaneEventBus (ADR-015 keeps the bus content-free).
+        // Wave 3 Part 2: thread the tab's minted document session id so the server sets
+        // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
+        void registerActiveDocumentRef.current?.({
+          docxBytes: result,
+          fileName: file.name,
+          documentSessionId: browseDocumentSessionId,
+        });
+      })();
     };
     reader.onerror = () => {
       dispatch({
@@ -1728,7 +1792,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       });
     };
     reader.readAsArrayBuffer(file);
-  }, []);
+  }, [bffBaseUrl]);
 
   // -------------------------------------------------------------------------
   // Item 7 (UAT round-4) — Blank page / Open template born-in-editor mounts
@@ -1997,18 +2061,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }
         if (ac.signal.aborted) return;
 
-        // Normalize the server projection defensively — same shape/defaults as the Load effect
-        // above. An older BFF (no projection field) → null → the editor falls back to mammoth.
-        const up = payload.projection;
-        const hydratedUploadProjection = up
-          ? {
-              status: up.status ?? 'failed',
-              canEdit: up.canEdit ?? false,
-              html: up.html ?? '',
-              warnings: Array.isArray(up.warnings) ? up.warnings : [],
-              schemaVersion: up.schemaVersion ?? 'compose-html-v1',
-            }
-          : null;
+        // Normalize the server projection defensively via the shared `normalizeProjection` helper —
+        // same shape/defaults as the Load effect above. An older BFF (no projection field) → null →
+        // the editor falls back to mammoth.
+        const hydratedUploadProjection = normalizeProjection(payload.projection);
 
         // An upload mount has no SPE drive — clear any stale Search-resolved drive id
         // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.

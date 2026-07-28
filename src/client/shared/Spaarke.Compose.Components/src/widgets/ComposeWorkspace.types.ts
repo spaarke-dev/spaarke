@@ -186,12 +186,13 @@ export type ComposeWorkspaceAction =
   // (the upload path's `mountTransient`, which follows `requestUploadMount`) the reducer
   // preserves the sessionId already on state — INVARIANT: no mount leaves state.sessionId empty.
   //
-  // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): `projection`, when supplied, is the SAME
-  // ComposeServerProjection shape the stored-doc Load path hydrates (see the `loadSucceeded`
-  // action above) — the assistant-upload door (POST /api/compose/upload) now runs the uploaded
-  // bytes through the server projection builder too. Undefined/omitted (the Browse-direct-upload
-  // door, not yet wired — task 011) normalizes to `null` in the reducer, preserving the existing
-  // mammoth-fallback behavior for that door unchanged.
+  // FR-01/FR-03 (tasks 010/011, spaarkeai-compose-fidelity-r4.5): `projection`, when supplied, is
+  // the SAME ComposeServerProjection shape the stored-doc Load path hydrates (see the
+  // `loadSucceeded` action above) — the assistant-upload door (POST /api/compose/upload) AND the
+  // Browse-direct-upload door (POST /api/compose/project, task 011, T-2 path-A) both run their
+  // bytes through the server projection builder now. Undefined/omitted (an older BFF, or a failed/
+  // unreachable projection call) normalizes to `null` in the reducer, preserving the mammoth
+  // fallback for that mount.
   | {
       kind: 'mountTransient';
       docxBytes: ArrayBuffer;
@@ -347,12 +348,12 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
-        // FR-01 (task 010): the assistant-upload door now supplies a server projection built from
-        // the SAME uploaded bytes (POST /api/compose/upload runs them through
-        // ComposeDocxProjectionBuilder) — hydrate it so the editor mounts via the projection branch,
-        // identical to stored-doc Load. The Browse-direct-upload door (task 011, not yet wired)
-        // still omits `action.projection`, which normalizes to `null` here — unchanged mammoth
-        // fallback for that door until 011 lands.
+        // FR-01/FR-03 (tasks 010/011): both the assistant-upload door (POST /api/compose/upload)
+        // AND the Browse-direct-upload door (POST /api/compose/project, T-2 path-A) now supply a
+        // server projection built from the SAME mounted bytes (ComposeDocxProjectionBuilder) —
+        // hydrate it so the editor mounts via the projection branch, identical to stored-doc Load.
+        // `action.projection` normalizes to `null` here when omitted (an older BFF) or when the
+        // caller's projection round-trip failed/was unreachable — unchanged mammoth fallback.
         projection: action.projection ?? null,
         errorMessage: null,
       };

@@ -61,6 +61,24 @@ public static class ComposeEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
+        // (1b) POST /api/compose/project — FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2):
+        //     stateless, read-only DOCX->projection endpoint for the Browse-local-file door. Takes
+        //     the caller-supplied bytes directly and renders them — NO ITenantCache write, NO SPE
+        //     write, NO sprk_document authoring; a call leaves zero server-side state. This is a
+        //     projection READ, not byte-authoring, so it does NOT violate ADR-040 / R4 I-2 (the
+        //     client still authors no .docx bytes) — see design.md §9 T-2 path-A resolution. Reuses
+        //     the SAME IComposeService.ProjectDocument seam Upload (1) uses, so Browse renders
+        //     through the one reader (F-2) instead of the client mammoth fallback.
+        group.MapPost("/project", Project)
+            .WithName("ComposeProject")
+            .WithSummary("Stateless bytes->projection render for the Browse-local-file door (FR-03, no persistence)")
+            // Read-shaped, deterministic, in-memory CPU work — same bucket as sibling Upload/Load,
+            // not a persistence/ingest bucket (nothing is written).
+            .RequireRateLimiting("ai-context")
+            .Produces<ComposeProjectResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized);
+
         // (2) GET /api/compose/documents/{documentSpeId} — load DOCX bytes
         group.MapGet("/documents/{documentSpeId}", Load)
             .WithName("ComposeLoadDocument")
@@ -957,6 +975,54 @@ public static class ComposeEndpoints
     }
 
     /// <summary>
+    /// POST /api/compose/project — FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2 path-A
+    /// resolution): a stateless, read-only bytes-&gt;projection endpoint for the Browse-local-file
+    /// door. Unlike <see cref="Upload"/> (which reads PERSISTED retained bytes back out of
+    /// <c>ITenantCache</c>), this handler takes the caller-supplied bytes directly off the wire and
+    /// renders them — it writes NOTHING (no <c>ITenantCache</c> entry, no SPE call, no
+    /// <c>sprk_document</c> row, no session-ledger mutation). A repeated call for the same bytes
+    /// leaves zero cumulative server-side state (idempotent, stateless). This preserves the ADR-040 /
+    /// R4 I-2 invariant that the client authors no <c>.docx</c> bytes: the server only READS bytes
+    /// the client already holds locally and hands back a render; it never stores, echoes back as an
+    /// authored artifact, or otherwise retains what it was sent. Fail-closed like Load/Upload:
+    /// unreadable bytes yield <c>Status=Failed</c>/<c>CanEdit=false</c> in the 200 response body,
+    /// never a 500 (a malformed/non-.docx upload is a normal, expected input, not a server error).
+    /// </summary>
+    private static IResult Project(
+        [FromBody] ComposeProjectRequest? body,
+        IComposeService composeService,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (body is null) return BadRequest("Request body is required.");
+        if (body.Content is null || body.Content.Length == 0)
+            return BadRequest("content (the document's raw bytes) is required.");
+
+        // Pure, synchronous, no I/O (ADR-007/ADR-013) — the SAME builder instance LoadAsync/Upload
+        // use, so Browse renders through the one reader (F-2), not a forked projection path.
+        var projection = composeService.ProjectDocument(body.Content, ct);
+        if (projection.Status == ComposeProjectionStatus.Failed)
+        {
+            logger.LogWarning(
+                "Compose project: DOCX projection failed for file={FileName} (code={Code}); client will fail closed (read-only / Open in Word) TraceId={TraceId}",
+                body.FileName, projection.Warnings.FirstOrDefault()?.Code, httpContext.TraceIdentifier);
+        }
+        else if (projection.Warnings.Count > 0)
+        {
+            logger.LogInformation(
+                "Compose project: DOCX projection partial for file={FileName}; warnings={Warnings}",
+                body.FileName, string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+        }
+
+        return Results.Ok(new ComposeProjectResponse(
+            Projection: MapProjectionResponse(projection),
+            CorrelationId: httpContext.TraceIdentifier));
+    }
+
+    /// <summary>
     /// Probes the retained-binary cache under the likely session-id spellings (as-sent, then
     /// GUID "D"/"N" normalizations) so a Compose-mount seed carrying a differently-formatted
     /// session id still resolves the bytes the chat upload pipeline stored.
@@ -1848,6 +1914,30 @@ public sealed record ComposeUploadResponse(
     // mapped by the shared MapProjectionResponse helper below). The client upload effect hydrates
     // this into `mountTransient` so the editor mounts via the SAME projection branch as a
     // stored-document Load, instead of the client mammoth fallback (F-2 one reader).
+    [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
+    [property: JsonPropertyName("correlationId")] string CorrelationId);
+
+/// <summary>
+/// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
+/// T-2 path-A resolution). Carries the caller-supplied document bytes to project — NEVER persisted,
+/// NEVER written to <c>ITenantCache</c>, NEVER written to SPE. <c>Content</c> deserializes from the
+/// wire's base64 string (System.Text.Json <c>byte[]</c> convention), exactly like every other
+/// Compose byte-carrying request body (<see cref="ComposeUploadResponse.Content"/>,
+/// <c>SaveComposeDocumentBody.Content</c>). <see cref="FileName"/> is optional and used only for
+/// diagnostics/logging — it does not affect the projection.
+/// </summary>
+public sealed record ComposeProjectRequest(
+    [property: JsonPropertyName("content")] byte[] Content,
+    [property: JsonPropertyName("fileName")] string? FileName = null);
+
+/// <summary>
+/// Response shape for <c>POST /api/compose/project</c>. Carries ONLY the projection — unlike
+/// <see cref="ComposeUploadResponse"/> there is no echoed <c>content</c>/<c>size</c>/<c>sessionId</c>/
+/// <c>documentId</c>, because this door is stateless: the caller already holds the bytes it sent (a
+/// Browse-local file never leaves client memory except for this synchronous render), so there is
+/// nothing else for the server to hand back.
+/// </summary>
+public sealed record ComposeProjectResponse(
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
