@@ -88,14 +88,19 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalL,
     width: '100%',
   },
-  // UAT follow-up: the rotating "working…" phrase now trails the title AFTER the ellipsis (italic),
-  // e.g. "Reviewing your NDA… Scrutinizing the confidentiality term…" — instead of a separate line.
+  // UAT follow-up: a clean CENTERED title (no ellipsis, no appended phrase). The body already centers.
   title: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  titlePhrase: {
-    fontWeight: tokens.fontWeightRegular,
+  // UAT follow-up: the rotating "working…" phrase is its OWN second line — LEFT-aligned, ONE line, NO wrap
+  // (truncates with an ellipsis if a phrase is unusually long). Sits under the centered title.
+  workingLine: {
+    width: '100%',
+    textAlign: 'left',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
     color: tokens.colorNeutralForeground2,
   },
   // Vertical step list — left-aligned within the centered body, capped so it reads as a tidy column.
@@ -187,7 +192,7 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
   let activeStepId: string | null = null;
   let completedStepIds: string[] = [];
   let errorStepId: string | null = null;
-  let title = 'Reviewing your NDA…';
+  let title = 'Reviewing your agreement';
 
   if (status === 'running') {
     activeStepId = steps[activeIdx].id;
@@ -210,23 +215,22 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
       <DialogSurface className={styles.surface} data-testid="nda-review-progress-modal">
         <DialogBody>
           <div className={styles.body}>
-            {/* Title, with the rotating "working…" phrase trailing the ellipsis (italic) while running. */}
+            {/* Centered title (no ellipsis). */}
             <Text size={400} className={styles.title}>
-              <span>{title}</span>
-              {status === 'running' ? (
-                <Text
-                  as="span"
-                  size={400}
-                  italic
-                  className={styles.titlePhrase}
-                  aria-live="polite"
-                  data-testid="nda-review-progress-working"
-                >
-                  {' '}
-                  {NDA_REVIEW_WORKING_PHRASES[phraseIdx]}
-                </Text>
-              ) : null}
+              {title}
             </Text>
+            {/* Rotating "working…" phrase — own line, left-aligned, one line, no wrap (running only). */}
+            {status === 'running' ? (
+              <Text
+                size={200}
+                italic
+                className={styles.workingLine}
+                aria-live="polite"
+                data-testid="nda-review-progress-working"
+              >
+                {NDA_REVIEW_WORKING_PHRASES[phraseIdx]}
+              </Text>
+            ) : null}
 
             {/* VERTICAL step list — fits any width; the ACTIVE step carries the spinner so it's clear
                 which step is being worked on (completed = check, pending = hollow circle, error = ✕). */}

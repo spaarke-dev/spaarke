@@ -32,7 +32,7 @@ describe('NdaReviewProgressModal', () => {
   it('renders the center-screen stepper while running with the running title', () => {
     renderModal('running');
     expect(screen.getByTestId('nda-review-progress-modal')).toBeInTheDocument();
-    expect(screen.getByText('Reviewing your NDA…')).toBeInTheDocument();
+    expect(screen.getByText('Reviewing your agreement')).toBeInTheDocument();
     // The first real phase is shown.
     expect(screen.getByText(NDA_REVIEW_PROGRESS_STEPS[0].label)).toBeInTheDocument();
   });
