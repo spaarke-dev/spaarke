@@ -187,3 +187,65 @@ state):
 - **Pre-existing test debt** — 12 e2e failures on master (compose-session-routing / edit-controls /
   three-pane-coordination) confirmed independent of nda-r1 work; address in a remediation pass before or
   during this project.
+
+---
+
+## 11. Ground-truth reconciliation (2026-07-28, code-verified) — READ BEFORE `/design-to-spec`
+
+An Explore pass verified the design's load-bearing assumptions against the code + live spaarkedev1 metadata.
+**Five assumptions in §2–§8 are wrong or net-new.** Corrections (all with file:line evidence in the
+analysis-hub investigation):
+
+### 11.1 `sprk_analysis` — exists, but the "work-type spine" columns do NOT
+- **Exists** and is used server-side (`AnalysisEndpoints.cs`, `DataverseWebApiService.cs:258`, `Models.cs:393-403`).
+- **Actual columns**: `sprk_name`, `sprk_workingdocument`, `sprk_chathistory` (JSON blob), `statuscode`,
+  `_sprk_documentid_value` (lookup → `sprk_document`), `sprk_outputfileid`, `sprk_Playbook` lookup, N:N
+  `sprk_analysis_skill`/`_knowledge`/`_tool`, 1:N `sprk_analysisoutput`/`_workingversion`/`_emailmetadata`.
+- **NET-NEW (not "reconcile"):** `sprk_worktype` column, a **Matter/Project association lookup** (none today —
+  only `sprk_documentid`), a description column (unconfirmed). §2's central work-type field + association do
+  not exist. Client has NO `sprk_analysis` TS type — the surface is server + `sprk_analysisworkspace` web resource.
+
+### 11.2 🚨 `sprk_analysischatmessage` is a DEAD, EMPTY SHELL — do NOT build on it (§11 anti-pattern)
+- Metadata exists; **zero records; no code writes it**; its creation task was skipped. It is NOT the transcript store.
+- **The real, live chat store is `sprk_aichatsummary` (session metadata) + `sprk_aichatmessage` (per-message)**,
+  and **it already has the `sprk_sessionid` grouping key** the design wanted (`ChatDataverseRepository.cs:37-45,128-137`).
+- **Correction to §2/§3/§8**: "one Analysis → many sessions" must build on **`sprk_aichatsummary`/`sprk_aichatmessage`**
+  (add an analysis foreign key to `sprk_aichatsummary`), NOT extend the dead `sprk_analysischatmessage`. Reviving a
+  never-written entity when a working, sessionId-grouped one exists is exactly the §11 "default to reuse" violation.
+  **Recommendation: retire/supersede `sprk_analysischatmessage`; bind sessions to Analysis via a new
+  `sprk_aichatsummary → sprk_analysis` lookup.**
+
+### 11.3 Two disjoint session systems exist — the binding must pick ONE
+- **(a) Current**: `ChatEndpoints` (`/api/ai/chat/sessions`) → Redis(24h)→Cosmos→Dataverse `sprk_aichatsummary`;
+  session id is **BFF-minted GUID** (`ChatSessionManager.cs:108`). **(b) Legacy**: `AnalysisEndpoints`
+  `/{id}/resume` (in-memory) + `/{id}/continue` (writes `sprk_chathistory` JSON) — **explicitly deprecated**
+  (`AnalysisEndpoints.cs:64-66`). Neither binds a session to `sprk_analysis`.
+- **Recommendation**: standardize the hub on the **ChatEndpoints (Cosmos/Redis) path**; treat the legacy
+  AnalysisEndpoints session model + `sprk_chathistory` JSON as retired. Fork-on-analysis + session↔Analysis
+  binding is **100% net-new** on top of ChatEndpoints.
+
+### 11.4 SPE pointers live on `sprk_document`, not `sprk_analysis` (§4 correction)
+- `sprk_analysis` holds a **lookup to `sprk_document`**; the `speDriveItemId`/`GraphDriveId`/`GraphItemId` live on
+  `sprk_document`. Functionally one hop away — the "Analysis stores SPE pointers" wording is wrong; the Analysis
+  reaches files **through** the document lookup. Keep that indirection (reuse) rather than duplicating pointers.
+
+### 11.5 §7 "resolve stale session against durable transcript" presumes a store that isn't populated
+- The Dataverse **cold read path is stubbed** (`GetMessagesAsync` returns empty; Redis+Cosmos are authoritative,
+  `ChatDataverseRepository.cs:145-171`). So "reopen resolves against the durable `sprk_analysis` transcript" first
+  requires **building durable per-message persistence** (net-new), or the reopen contract must rely on Cosmos
+  (warm) durability. This is a real deliverable, not a "harden existing."
+
+### 11.6 What IS solid (reuse verified) — §5/§6 hub surfaces all real
+- DataGrid framework (`<DataGrid/>` + `sprk_gridconfiguration` + `ViewSelector`), `Create*Wizard` family +
+  `AssociateToStep`, Field Mapping engine, `WorkspaceWidgetRegistry` + PaneEventBus `widget_load` — all present
+  and reusable as §5/§6/§8 claim. The hub *shell* is largely composition; the *data spine + session binding* is
+  the net-new core.
+
+### 11.7 Readiness verdict
+**Not yet spec-ready without owner decisions.** The reuse inventory (§8) is mostly sound, but the durable spine
+(§2) and session model (§3) need the corrections above + these decisions locked before `/design-to-spec`:
+1. **Session store binding** — bind to `sprk_aichatsummary` + new analysis FK (recommended) vs revive `sprk_analysischatmessage`.
+2. **Legacy retirement** — retire the deprecated AnalysisEndpoints session path + `sprk_chathistory` JSON? (recommended yes.)
+3. **Association model** — polymorphic `sprk_analysis → Matter/Project/…` lookup shape (single polymorphic "regarding" vs per-type lookups).
+4. **Durable-transcript contract** — reopen relies on Cosmos warm durability vs true Dataverse cold persistence (net-new).
+5. **Scope boundary** — is the tabular doc×question review grid (§9 Q5) in THIS project or deferred?
