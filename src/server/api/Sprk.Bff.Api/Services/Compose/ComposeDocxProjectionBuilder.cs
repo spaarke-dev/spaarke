@@ -515,11 +515,16 @@ public sealed class ComposeDocxProjectionBuilder
         return false;
     }
 
-    /// <summary>A run carrying a complex/floating object (image/shape drawing or an OLE embed) — VML
-    /// <c>w:pict</c> is out of scope for Phase 1 (not present in the corpus; a candidate for future
-    /// coverage, noted rather than silently unhandled).</summary>
+    /// <summary>A run carrying a complex/floating object — DrawingML (<c>w:drawing</c>, image/shape), an
+    /// OLE embed (<c>w:object</c>), or a legacy VML fallback picture (<c>w:pict</c>, task 022 WS-2
+    /// construct audit: previously fell through <see cref="RenderRun"/>'s default case with zero HTML,
+    /// zero offset-table length, and no warning — a genuine silent drop per F-1; now the same non-editable
+    /// atom placeholder as <c>w:drawing</c>/<c>w:object</c>, since it is equally an opaque image/shape
+    /// construct, never opened for display (I-4)).</summary>
     private static bool IsComplexObjectRun(Run run) =>
-        run.GetFirstChild<Drawing>() is not null || run.GetFirstChild<EmbeddedObject>() is not null;
+        run.GetFirstChild<Drawing>() is not null
+        || run.GetFirstChild<EmbeddedObject>() is not null
+        || run.GetFirstChild<Picture>() is not null;
 
     /// <summary>
     /// The editor-visible display text an opaque atom shows — the SAME text/glyph counting convention as
@@ -538,7 +543,13 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     case Text t: sb.Append(t.Text); break;
                     case DeletedText dt: sb.Append(dt.Text); break;
-                    case Break or TabChar or NoBreakHyphen or CarriageReturn: sb.Append(' '); break;
+                    case Break or TabChar or NoBreakHyphen or CarriageReturn or PositionalTab: sb.Append(' '); break;
+                    case Ruby ruby:
+                        // Task 022 WS-2 construct audit: mirrors RenderRun's Ruby case — the base text is
+                        // real editor-visible prose (not the phonetic guide), so this atom-display-text path
+                        // must include it too, or a field/SDT wrapping a ruby run would silently drop it.
+                        sb.Append(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
+                        break;
                     case SymbolChar sym:
                         // FR-06: represent (mapped glyph or placeholder) rather than drop — same resolver
                         // RenderRun uses. This atom-display-text path has no BuildContext to raise a
@@ -614,7 +625,13 @@ public sealed class ComposeDocxProjectionBuilder
                 case NoBreakHyphen:
                 case CarriageReturn:
                 case SymbolChar:
+                case PositionalTab:
                     length += 1;
+                    break;
+                case Ruby ruby:
+                    // Task 022 WS-2 construct audit: the base text RenderRun now emits — kept length-aligned
+                    // with the offset-addressing table per this file's parallel-walk invariant.
+                    length += ExtractRunsDisplayText(RubyBaseRuns(ruby)).Length;
                     break;
                 default:
                     break;
@@ -623,6 +640,13 @@ public sealed class ComposeDocxProjectionBuilder
 
         return length;
     }
+
+    /// <summary>The <c>w:ruby</c> base-text runs (<c>w:rubyBase</c>'s direct <see cref="Run"/> children) —
+    /// the real editor-visible prose. The phonetic guide (<c>w:rt</c>) is deliberately excluded: it is a
+    /// supplementary pronunciation annotation, not the document's own text (task 022 WS-2 construct
+    /// audit).</summary>
+    private static IEnumerable<Run> RubyBaseRuns(Ruby ruby) =>
+        ruby.GetFirstChild<RubyBase>()?.Elements<Run>() ?? Enumerable.Empty<Run>();
 
     // ── inline (runs / marks / hyperlinks / revision flattening) ─────────────────────────────────────
 
@@ -707,10 +731,20 @@ public sealed class ComposeDocxProjectionBuilder
                     ctx.AppendEscaped(dt.Text); // F-02: deleted text present as plain text
                     break;
                 case TabChar:
+                case PositionalTab:
                     // Non-collapsing tab representation (GPT §9.1) — never a bare "\t".
                     ctx.Append("<span class=\"compose-tab\"> </span>");
                     break;
-                case Break:
+                case Break br:
+                    // Task 022 WS-2 construct audit (design section 4: "w:br type=page - currently a line
+                    // break"): a page/column break still renders as <br> (this editor has no
+                    // page/pagination concept - F-5/WS-5 is a separate, deferred spike) but the semantic
+                    // downgrade from "hard page/column break" to "soft line break" is now surfaced as a
+                    // warning rather than silently absorbed into the default TextWrapping-break case.
+                    if (br.Type?.Value == BreakValues.Page) ctx.AddWarning("page-break-rendered-as-line-break", 1);
+                    else if (br.Type?.Value == BreakValues.Column) ctx.AddWarning("column-break-rendered-as-line-break", 1);
+                    ctx.Append("<br>");
+                    break;
                 case CarriageReturn:
                     // FR-05: w:cr carries the same "line break, not a paragraph break" intent as w:br —
                     // mirror the existing Break handling exactly rather than dropping it (WS-2 fix; this
@@ -730,6 +764,30 @@ public sealed class ComposeDocxProjectionBuilder
                     var glyph = ResolveSymbolGlyph(sym, out var mapped);
                     ctx.AppendEscaped(glyph);
                     if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                    break;
+                case Ruby ruby:
+                    // Task 022 WS-2 construct audit: w:ruby (East-Asian phonetic-guide annotation) wraps TWO
+                    // text groups - w:rubyBase (the actual document prose) and w:rt (the phonetic guide).
+                    // Previously fell through to default (silently dropped BOTH - a genuine F-1 violation,
+                    // since rubyBase is real, verbatim, 100%-recoverable text, not a construct requiring
+                    // interpretation/guessing like w:sym). The base text is now rendered verbatim (same
+                    // AppendEscaped path as w:t); the phonetic guide is deliberately omitted (it is a
+                    // supplementary pronunciation annotation, not the document's own words) and that
+                    // omission is surfaced via a warning so the simplification stays auditable.
+                    ctx.AppendEscaped(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
+                    ctx.AddWarning("ruby-phonetic-guide-dropped", 1);
+                    break;
+                case FootnoteReference:
+                    // Task 022 WS-2 construct audit: the footnote reference mark carries no text of its own
+                    // (Word computes its displayed number from position in word/footnotes.xml, a separate
+                    // part this Phase-1 body-only projection does not open - the same architectural boundary
+                    // as headers/footers). Fabricating a number here risks the exact "wrong glyph in a legal
+                    // document" failure task 020's w:sym escalation reasoning warns against, so this is
+                    // warn-only (never a silent drop) rather than a guessed placeholder.
+                    ctx.AddWarning("unrepresented-footnote-reference", 1);
+                    break;
+                case EndnoteReference:
+                    ctx.AddWarning("unrepresented-endnote-reference", 1);
                     break;
                 default:
                     break;

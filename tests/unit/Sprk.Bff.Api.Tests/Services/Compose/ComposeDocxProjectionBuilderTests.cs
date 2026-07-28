@@ -920,4 +920,155 @@ public sealed class ComposeDocxProjectionBuilderTests
             "WS-2 FR-05: w:cr must emit a break the same way w:br (Break) already does — never a silent, " +
             "separator-less concatenation of the surrounding runs' text");
     }
+
+    // ── task 022 — full construct audit: additional silent-drop fixes found beyond 020/021 ────────────
+
+    [Fact]
+    public void Build_RunWithVmlPictureFallback_BecomesComplexObjectAtom_InsteadOfSilentlyVanishing()
+    {
+        // Task 022 construct audit: w:pict (legacy VML picture fallback) previously fell through
+        // RenderRun's default case — zero HTML, zero offset-table length, no warning — a genuine silent
+        // drop distinct from the pre-existing w:drawing/w:object coverage (Build_DrawingRunOutsideTextBox_...
+        // above). Now IsComplexObjectRun treats it identically: a non-editable atom placeholder.
+        var para = new Paragraph(
+            new Run(new Text("caption: ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new Picture()))
+        { ParagraphId = new HexBinaryValue("66660001") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("data-atom-kind=\"object\"").And.Contain("contenteditable=\"false\"");
+        var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "66660001");
+        map.Runs.Should().Contain(r => r.AtomKind == ComposeAtomKind.ComplexObject && r.Length == 1);
+    }
+
+    [Fact]
+    public void Build_ParagraphWithPositionalTab_RendersComposeTabSpanLikeRegularTab()
+    {
+        // Task 022 construct audit: w:ptab (positional/custom tab stop, e.g. TOC-style leaders) previously
+        // fell through to the default case (silently dropped — zero HTML, zero offset length). Now
+        // represented identically to w:tab (the established compose-tab, non-collapsing-space simplification).
+        var para = new Paragraph(
+            new Run(new Text("before") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new PositionalTab { Alignment = AbsolutePositionTabAlignmentValues.Right, RelativeTo = AbsolutePositionTabPositioningBaseValues.Margin, Leader = AbsolutePositionTabLeaderCharValues.Dot }),
+            new Run(new Text("after") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("66660002") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        // Note: the compose-tab span's interior character is U+2003 (EM SPACE, not a plain ASCII space) —
+        // a deliberate pre-existing choice (predates this task) so the placeholder can never collapse under
+        // HTML whitespace rules the way a literal U+0020 could.
+        projection.Html.Should().Contain("before<span class=\"compose-tab\"> </span>after");
+        var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "66660002");
+        map.TotalLength.Should().Be("before".Length + 1 + "after".Length,
+            "the ptab contributes exactly 1 editor-visible character, mirroring w:tab");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithFootnoteReference_RaisesWarning_NeverSilentlyVanishes()
+    {
+        // Task 022 construct audit: w:footnoteReference carries no text of its own (Word computes its
+        // displayed number from position in word/footnotes.xml, a part this body-only projection never
+        // opens). Previously fell through the default case with no HTML AND no warning — a genuine F-1
+        // violation (the reference marker vanishes with zero trace). Fabricating a guessed number is
+        // rejected per the same reasoning as w:sym's escalation trigger, so this is warn-only.
+        var para = new Paragraph(
+            new Run(new Text("as noted") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new RunProperties(new VerticalTextAlignment { Val = VerticalPositionValues.Superscript }), new FootnoteReference { Id = 1 }))
+        { ParagraphId = new HexBinaryValue("66660003") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Warnings.Should().ContainSingle(w => w.Code == "unrepresented-footnote-reference" && w.Count == 1);
+        projection.Status.Should().Be(ComposeProjectionStatus.Partial);
+        projection.Html.Should().Contain("as noted");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithEndnoteReference_RaisesWarning_NeverSilentlyVanishes()
+    {
+        var para = new Paragraph(
+            new Run(new Text("as noted") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new EndnoteReference { Id = 1 }))
+        { ParagraphId = new HexBinaryValue("66660004") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Warnings.Should().ContainSingle(w => w.Code == "unrepresented-endnote-reference" && w.Count == 1);
+        projection.Status.Should().Be(ComposeProjectionStatus.Partial);
+    }
+
+    [Fact]
+    public void Build_ParagraphWithRubyAnnotation_RendersBaseTextVerbatim_DropsPhoneticGuideWithWarning()
+    {
+        // Task 022 construct audit: w:ruby previously fell through the default case — silently dropping
+        // BOTH the base text (rubyBase, real recoverable prose) and the phonetic guide (rt). Unlike w:sym,
+        // the base text requires no interpretation/guessing (it is plain w:t content), so it is now
+        // rendered verbatim; only the supplementary phonetic guide is omitted, and that omission is warned.
+        var ruby = new Ruby(
+            new RubyProperties(),
+            new RubyContent(new Run(new Text("phonetic-guide-ignored"))),
+            new RubyBase(new Run(new Text("base text"))));
+        var para = new Paragraph(
+            new Run(new Text("prefix ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(ruby),
+            new Run(new Text(" suffix") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("66660005") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("prefix base text suffix",
+            "the ruby BASE text is real document prose and renders verbatim");
+        projection.Html.Should().NotContain("phonetic-guide-ignored",
+            "the phonetic guide is a supplementary pronunciation annotation, not the document's own words");
+        projection.Warnings.Should().ContainSingle(w => w.Code == "ruby-phonetic-guide-dropped" && w.Count == 1);
+    }
+
+    [Theory]
+    [InlineData("page", "page-break-rendered-as-line-break")]
+    [InlineData("column", "column-break-rendered-as-line-break")]
+    public void Build_ParagraphWithPageOrColumnBreak_RendersLineBreakAndWarnsOfFidelityDowngrade(
+        string breakTypeToken, string expectedWarningCode)
+    {
+        // Task 022 construct audit (design §4: "w:br type=page — currently a line break"): this editor has
+        // no page/pagination concept (F-5/WS-5 deferred), so a page/column break still renders as <br> —
+        // but the semantic downgrade is now surfaced as a warning instead of being silently absorbed into
+        // the default TextWrapping-break disposition.
+        BreakValues breakType = breakTypeToken switch
+        {
+            "page" => BreakValues.Page,
+            "column" => BreakValues.Column,
+            _ => throw new ArgumentOutOfRangeException(nameof(breakTypeToken)),
+        };
+        var para = new Paragraph(
+            new Run(new Text("before") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new Break { Type = breakType }),
+            new Run(new Text("after") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("66660006") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("before<br>after");
+        projection.Warnings.Should().ContainSingle(w => w.Code == expectedWarningCode && w.Count == 1);
+    }
+
+    [Fact]
+    public void Build_ParagraphWithDefaultTextWrappingBreak_RendersLineBreakWithNoWarning()
+    {
+        // Negative case / non-regression guard: an ordinary w:br (no @type, or @type="textWrapping" — the
+        // pre-existing, already-corpus-exercised case per corpus-manifest.md row 2's "w:br line breaks for
+        // the letterhead block") must NOT trip either new page/column warning.
+        var para = new Paragraph(
+            new Run(new Text("before") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new Break()),
+            new Run(new Text("after") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("66660007") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("before<br>after");
+        projection.Warnings.Should().NotContain(w =>
+            w.Code == "page-break-rendered-as-line-break" || w.Code == "column-break-rendered-as-line-break");
+    }
 }
