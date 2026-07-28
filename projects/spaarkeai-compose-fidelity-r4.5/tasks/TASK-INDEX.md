@@ -12,7 +12,7 @@
 | 002 | Read-fidelity harness — text-exact + numbering-exact golden | 0 Foundation | — | sonnet | high | FULL | 001 | ✔ | ✅ |
 | 010 | Upload path returns a projection | 1 One reader | WS-1 | sonnet | high | FULL | 002 | ✘ | ✅ (gate @ WS-1 boundary) |
 | 011 | Stateless `POST /api/compose/project` for browse | 1 One reader | WS-1 | sonnet | high | FULL | 010 | ✘ | ✅ (gate @ WS-1 boundary) |
-| 012 | Open-in-Compose transient projected server-side | 1 One reader | WS-1 | sonnet | high | FULL | 011 | ✘ | 🔲 |
+| 012 | Open-in-Compose transient projected server-side | 1 One reader | WS-1 | sonnet | high | FULL | 011 | ✘ | ✅ (FR-02 already met by 010+011; guards added) |
 | 013 | Delete mammoth fallback + `docxToTipTapHtml` | 1 One reader | WS-1 | sonnet | high | FULL | 012 | ✘ | 🔲 |
 | 014 | Deploy + UAT — one reader everywhere | 1 One reader | WS-1 | sonnet | med | STANDARD | 013 | ✘ | 🔲 |
 | 020 | Stop silent drops (`w:cr`, `w:sym`) + warning mechanism | 2 Harden read | WS-2 | sonnet | xhigh | FULL | 013 | ✘ | 🔲 |
