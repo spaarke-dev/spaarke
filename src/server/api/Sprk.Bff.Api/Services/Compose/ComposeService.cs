@@ -649,6 +649,44 @@ public class ComposeService : IComposeService
                 ResolveRevisionAuthor(httpContext),
                 observedAt);
         }
+        // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
+        // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
+        // DIRTY transient save (the reviewer's session goes dirty the moment the AI places comment marks)
+        // sends a rendered ContentModel instead — App Insights showed the NDA saving as
+        // transientCreate=True with a ContentModel, so its advisory comments were silently dropped (no
+        // native w:comment reached Word). The renderer (ComposeDocumentRenderer.SynthesizeDocument) stamps
+        // each block's CLIENT paraId into the rendered .docx (CarryClientParaId/AssignParaIds), and the
+        // comment anchors reference those SAME client-minted paraIds — so a comments-only patch resolves
+        // cleanly. Empty op-log + comments is a first-class ComposeShadowPatchEngine.Apply case; pass a
+        // fresh ComposeOperationLog() so its SchemaVersion matches. Runs BEFORE the SummaryPage append +
+        // SPE write, mirroring the loaded-doc block's ordering.
+        // FAIL-SOFT: a create-on-save currently succeeds WITHOUT comments; baking must never regress that
+        // to a hard failure. If a comment's paraId can't resolve (e.g. a non-hex editor id the renderer
+        // re-minted, or a range shifted by pending-insert exclusion), log it and persist the rendered
+        // bytes uncommented rather than throwing — the save still lands; the drop is visible in telemetry.
+        else if (request.ContentModel is not null && hasComments)
+        {
+            try
+            {
+                var withComments = _patchEngine.Apply(
+                    contentToPersist,
+                    new ComposeOperationLog(),
+                    request.Comments,
+                    ResolveRevisionAuthor(httpContext),
+                    observedAt);
+                contentToPersist = withComments;
+
+                _logger.LogInformation(
+                    "Compose save: baked {CommentCount} advisory comment(s) as native w:comment onto the rendered ContentModel (create-on-save path) (session={SessionId}).",
+                    request.Comments?.Count ?? 0, request.SessionId);
+            }
+            catch (ComposePatchException ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose save: could not bake {CommentCount} advisory comment(s) onto the rendered ContentModel ({Kind}) — persisting the document WITHOUT them so the save still succeeds (session={SessionId}).",
+                    request.Comments?.Count ?? 0, ex.Kind, request.SessionId);
+            }
+        }
 
         // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
         // result, append the Summary Page (TL;DR + flagged-section overview + recommendations) as a
@@ -667,9 +705,10 @@ public class ComposeService : IComposeService
         }
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
-            isTransientCreate, request.SessionId, request.DocumentRecordId, request.Content.Length);
+            isTransientCreate, request.ContentModel is not null, request.Comments?.Count ?? 0,
+            request.SessionId, request.DocumentRecordId, request.Content.Length);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 1 — container (FR-05, Fork A + Fork B).
@@ -1062,6 +1101,27 @@ public class ComposeService : IComposeService
             using var buffer = new MemoryStream();
             await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
             currentBytes = buffer.ToArray();
+        }
+
+        // Seam A (UAT round-2 item #4 — advisory comments must survive a STALE save and bake as native
+        // w:comment). The client's minted paraIds live only in request.ParaIdMap — physically absent from
+        // BOTH the retained baseline AND the freshly-fetched current bytes. Without them, an advisory
+        // comment's client-minted ParaId resolves to nothing in currentParaIds below → 0.0 re-anchor score
+        // → ORPHAN band → surfaced-but-never-baked (the exact "comments don't survive Save to Word" bug the
+        // non-stale path does NOT have, because it stamps first — see the sibling Stamp call in SaveAsync).
+        // Stamp both corpora with the SAME fail-open, count-gated, text-verified stamper: where the version
+        // bump was benign (unchanged paragraph structure + text — a metadata touch or an eTag-counter move
+        // that did not really edit content), the client paraId becomes physically present in currentBytes →
+        // ResolveByParaId hits confidence 1.0 → AUTO → the exact-paraId auto-apply gate below bakes the
+        // comment. Where the current bytes genuinely diverged (different paragraph count, or the anchored
+        // text changed), the stamper no-ops (count gate / text-verify) and the comment correctly stays
+        // ORPHAN — never a wrong-paragraph stamp. Stamping originalBaseline too repopulates each comment's
+        // TextPattern (via the IndexOfParaId hint below) so a text-drifted clause surfaces as REVIEW rather
+        // than a blind ORPHAN in the re-anchor banner.
+        if (request.ParaIdMap is { Count: > 0 })
+        {
+            originalBaseline = _baselineParaIdStamper.Stamp(originalBaseline, request.ParaIdMap);
+            currentBytes = _baselineParaIdStamper.Stamp(currentBytes, request.ParaIdMap);
         }
 
         IReadOnlyList<string> oldParagraphs;

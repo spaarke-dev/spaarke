@@ -57,6 +57,24 @@ export interface UseDocQaHighlightResult {
 /** How long an ephemeral highlight stays visible before auto-clearing. */
 const HIGHLIGHT_TTL_MS = 8000;
 
+/**
+ * Walk up from the editor's contenteditable to the nearest vertically-scrollable ancestor (the
+ * Compose `editorSurface`, `overflow-y: auto`). Used for the S5 manual scroll — ProseMirror's own
+ * scrollIntoView is unreliable inside that custom, scrollbar-hidden container. Returns null if none is
+ * found (e.g. a test/headless mount), in which case the caller falls back to the native scrollIntoView.
+ */
+function findScrollableAncestor(node: HTMLElement): HTMLElement | null {
+  let el: HTMLElement | null = node.parentElement;
+  while (el) {
+    const overflowY = getComputedStyle(el).overflowY;
+    if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight) {
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
 export function useDocQaHighlight(editor: Editor | null): UseDocQaHighlightResult {
   const [activeHighlight, setActiveHighlight] = React.useState<ActiveQaHighlight | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +107,25 @@ export function useDocQaHighlight(editor: Editor | null): UseDocQaHighlightResul
         editor.state.tr.setMeta(qaHighlightPluginKey, { type: 'set', from: span.from, to: span.to })
       );
       editor.chain().setTextSelection(span).scrollIntoView().run();
+
+      // UAT round-3 S5 — robust scroll for a target BELOW the fold. ProseMirror's own scrollIntoView
+      // under-scrolls inside the Compose editorSurface (a custom-overflow container that hides its
+      // scrollbar — FIX #9), so a summary link to a section outside the viewport appeared to do
+      // nothing. Explicitly bring the span into view by scrolling its scrollable ancestor via
+      // coordsAtPos (the same live-measurement technique the comment gutter uses), centering it in the
+      // upper third so it clears the sticky toolbar + review-summary panel.
+      try {
+        const scroller = findScrollableAncestor(editor.view.dom);
+        if (scroller) {
+          const coords = editor.view.coordsAtPos(span.from);
+          const rect = scroller.getBoundingClientRect();
+          const target = scroller.scrollTop + (coords.top - rect.top) - rect.height / 3;
+          scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        }
+      } catch {
+        // coordsAtPos measures real DOM layout and can throw in a detached/not-yet-painted view; the
+        // setTextSelection().scrollIntoView() above already ran as a best-effort fallback.
+      }
 
       setActiveHighlight({ sectionLabel });
       clearTimer();

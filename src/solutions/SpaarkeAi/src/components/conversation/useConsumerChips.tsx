@@ -57,6 +57,7 @@ import {
   buildDraftDocumentComposeSeed,
 } from "./DocumentUploadedEventStream";
 import { makeLocalAssistantMessage } from "./summarizeRouting";
+import { isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
 import {
   isLocalChip,
   buildPostDraftLocalChips,
@@ -121,6 +122,15 @@ export interface ConsumerChipsDeps {
    * action chips never reach here (they route through `onLocalChipAction`). Omitted → no usage tracking.
    */
   onChipDispatched?: (bindingId: string) => void;
+
+  /**
+   * nda-r1 follow-up: notified with the TERMINAL `dispatched.result` of each Binding dispatch on the
+   * chip/card path (the "Review an NDA" card dispatches through here, NOT through dispatchComposeAction).
+   * The host wires this to the NDA-REVIEW advisory-comments bridge (`emitFromResult`), which is a safe
+   * structural no-op for every non-NDA result shape — so the flagged clauses materialize as Compose
+   * document comments instead of only rendering as raw JSON in the transcript. Omitted → no projection.
+   */
+  onDispatchResult?: (result: unknown) => void;
 }
 
 export interface ConsumerChipsController {
@@ -162,6 +172,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     getActiveSourceFile,
     onLocalChipAction,
     getAppendedLocalChips,
+    onDispatchResult,
     onCorrespondenceDraft,
     chipDisplayPreference,
     onChipDispatched,
@@ -216,6 +227,10 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
         attachmentCount: sessionAttachmentCount,
       })
         .then((dispatched) => {
+          // nda-r1 follow-up: hand the terminal result to the host's advisory-comments bridge so the
+          // "Review an NDA" card path (which dispatches through here, not dispatchComposeAction) also
+          // materializes flagged clauses as Compose document comments. Safe no-op for non-NDA shapes.
+          onDispatchResult?.(dispatched.result);
           // UAT 2026-07-19: a surface-launch capability (create-matter / create-project) hands its
           // drafted output to the WIZARD — rendering that draft in the transcript dumped raw JSON
           // ("{matter_name:…, resolvedLookups:…}") into the chat. Suppress the transcript render for
@@ -233,6 +248,11 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
           // into chat. Same `compose.draft.html` seed the correspondence route uses (no shared-lib change).
           const isDraftDocument =
             !isSurfaceLaunch && !isCorrespondence && isComposeDraftDocument(dispatched.result);
+          // R7-7 (UAT 2026-07-21): an NDA-REVIEW result is a large `{overallRisk, flaggedSections[]}`
+          // JSON that the bridge materializes as in-document Review Notes + the Review Summary. Dumping
+          // that raw JSON into the transcript is noise — suppress it and post a short completion line.
+          const isNdaReview =
+            !isSurfaceLaunch && !isCorrespondence && !isDraftDocument && isNdaReviewResult(dispatched.result);
           if (isCorrespondence) {
             // R5-9: hand the raw draft to the host so a subsequent "Send as email" chip can seed
             // the Email Compose modal (subject / body / suggested recipients).
@@ -262,6 +282,14 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
             enqueueAssistantMessage(
               makeLocalAssistantMessage(
                 `"${title}" has been prepared in the Compose tab — review and edit it there.`
+              )
+            );
+          } else if (isNdaReview) {
+            // R7-7: never render the raw analysis JSON — the findings live in the Compose Review
+            // Notes + Review Summary. Just confirm completion in the transcript.
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(
+                "I've finished reviewing the NDA. Open the **Review Summary** and the in-document **Review Notes** in the Compose tab to see the flagged clauses and assessments."
               )
             );
           } else if (!isSurfaceLaunch && dispatched.result !== undefined && dispatched.result !== null) {
@@ -350,6 +378,7 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       onCorrespondenceDraft,
       getAppendedLocalChips,
       onChipDispatched,
+      onDispatchResult,
     ]
   );
 

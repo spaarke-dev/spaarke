@@ -12,13 +12,13 @@
  *     ADR-021 dark-mode check.
  */
 import * as React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, createEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, layoutCommentGutterCards } from './ComposeCommentGutter';
+import { ComposeCommentGutter, layoutCommentGutterCards, parseAdvisoryNote } from './ComposeCommentGutter';
 
 // ---------------------------------------------------------------------------
 // 1. layoutCommentGutterCards — pure collision/stacking
@@ -86,6 +86,43 @@ describe('layoutCommentGutterCards', () => {
 
   it('returns an empty layout for an empty input', () => {
     expect(layoutCommentGutterCards([], new Map())).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. parseAdvisoryNote — Grounded fact / Advisory judgment split (UAT round-5 #7)
+// ---------------------------------------------------------------------------
+
+describe('parseAdvisoryNote', () => {
+  it('splits a "Grounded fact: … Advisory judgment: …" note into two labelled segments (UAT round-6 #5 display labels)', () => {
+    const segments = parseAdvisoryNote(
+      'Grounded fact: The NDA imposes a best-efforts standard. Advisory judgment: The standard requires reasonable care.'
+    );
+    expect(segments).toEqual([
+      { label: 'Flagged clause', body: 'The NDA imposes a best-efforts standard.' },
+      { label: 'Assessment says', body: 'The standard requires reasonable care.' },
+    ]);
+  });
+
+  it('maps an older bare "Judgment" label to "Assessment says"', () => {
+    const segments = parseAdvisoryNote('Grounded fact — a fact. Judgment — a judgment.');
+    expect(segments.map(s => s.label)).toEqual(['Flagged clause', 'Assessment says']);
+  });
+
+  it('returns a single unlabelled segment when there are no recognized labels', () => {
+    expect(parseAdvisoryNote('Just a plain note with no aspect labels.')).toEqual([
+      { body: 'Just a plain note with no aspect labels.' },
+    ]);
+  });
+
+  it('keeps any lead prose before the first label as an unlabelled segment', () => {
+    const segments = parseAdvisoryNote('Preamble text. Grounded fact: the fact.');
+    expect(segments[0]).toEqual({ body: 'Preamble text.' });
+    expect(segments[1]).toEqual({ label: 'Flagged clause', body: 'the fact.' });
+  });
+
+  it('returns an empty array for empty input', () => {
+    expect(parseAdvisoryNote('')).toEqual([]);
   });
 });
 
@@ -159,6 +196,199 @@ describe('ComposeCommentGutter', () => {
     expect(card).toHaveTextContent('3.2');
     expect(card).toHaveTextContent('Standard: B3 - Retention');
     expect(card).toHaveTextContent('Indefinite retention deviates from the standard 3-year term.');
+
+    editor.destroy();
+  });
+
+  it('truncates a long comment; clicking the card block reveals the full text (UAT round-2 #5 / round-3 D2)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const longText =
+      'Indefinite retention deviates from the standard 3-year term, and this explanation is deliberately ' +
+      'long enough to exceed the collapsed body budget so the show-more affordance appears in the card.';
+    expect(longText.length).toBeGreaterThan(140);
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: longText })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    // Collapsed: the body is truncated (ellipsis), the tail hidden, the whole card is a button with
+    // the double-chevron expand cue (round-3 D2 — no separate "Show more" text button).
+    const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
+    expect(body.textContent).toContain('…');
+    expect(body).not.toHaveTextContent('affordance appears in the card');
+    const card = screen.getByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveAttribute('role', 'button');
+    expect(card).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByTestId('compose-comment-gutter-expand-thread-1')).toBeInTheDocument(); // chevron cue
+
+    // Clicking anywhere on the card expands it.
+    fireEvent.click(card);
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1')).toHaveTextContent(
+      'affordance appears in the card'
+    );
+    expect(screen.getByTestId('compose-comment-gutter-card-thread-1')).toHaveAttribute('aria-expanded', 'true');
+
+    editor.destroy();
+  });
+
+  it('resizes the pane when the left-edge handle is dragged left (UAT round-3 D1)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onWidthChange = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            width={220}
+            onWidthChange={onWidthChange}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const handle = await screen.findByTestId('compose-comment-gutter-resize');
+    // jsdom lacks the Pointer Capture API — stub it so the handlers don't throw.
+    handle.setPointerCapture = jest.fn();
+    handle.releasePointerCapture = jest.fn();
+    handle.hasPointerCapture = jest.fn().mockReturnValue(true);
+
+    // jsdom's PointerEvent does not carry clientX from the fireEvent init, so build the event and
+    // define clientX explicitly.
+    const firePointer = (type: 'pointerDown' | 'pointerMove' | 'pointerUp', clientX: number): void => {
+      const ev = createEvent[type](handle, { pointerId: 1 });
+      Object.defineProperty(ev, 'clientX', { get: () => clientX });
+      fireEvent(handle, ev);
+    };
+
+    // The gutter is on the RIGHT — dragging the handle LEFT (smaller clientX) widens it by the delta.
+    firePointer('pointerDown', 500);
+    firePointer('pointerMove', 440); // 60px left → +60 → 280
+    expect(onWidthChange).toHaveBeenLastCalledWith(280);
+
+    // Dragging far left clamps to the max bound (480).
+    firePointer('pointerMove', 0);
+    expect(onWidthChange).toHaveBeenLastCalledWith(480);
+
+    firePointer('pointerUp', 0);
+    editor.destroy();
+  });
+
+  it('renders no resize handle when onWidthChange is not wired (fixed-width mount)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(screen.queryByTestId('compose-comment-gutter-resize')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('opens a popover with the standard clause text when the "Standard" link is clicked (UAT round-3 D3)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const resolveStandardText = jest
+      .fn()
+      .mockResolvedValue('Required: use solely for the Purpose; protect with at least reasonable care.');
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ standardRef: 'B5 - Use & disclosure obligations' })]}
+            scrollContainerRef={scrollContainerRef}
+            resolveStandardText={resolveStandardText}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const link = await screen.findByTestId('compose-comment-gutter-standard-thread-1');
+    expect(link).toHaveTextContent('Standard: B5 - Use & disclosure obligations');
+
+    fireEvent.click(link);
+    await waitFor(() =>
+      expect(resolveStandardText).toHaveBeenCalledWith('B5 - Use & disclosure obligations')
+    );
+    expect(
+      await screen.findByText('Required: use solely for the Purpose; protect with at least reasonable care.')
+    ).toBeInTheDocument();
+
+    editor.destroy();
+  });
+
+  it('renders standardRef as plain text when no resolver is wired (UAT round-3 D3)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ standardRef: 'B5 - Use & disclosure obligations' })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveTextContent('Standard: B5 - Use & disclosure obligations');
+    // No resolver → no clickable link button.
+    expect(screen.queryByTestId('compose-comment-gutter-standard-thread-1')).not.toBeInTheDocument();
+
+    editor.destroy();
+  });
+
+  it('a short comment is not clickable and shows no expand cue (UAT round-2 #5)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    // The default thread text is short (< the collapsed budget) — not a button, no cue.
+    expect(card).not.toHaveAttribute('role', 'button');
+    expect(screen.queryByTestId('compose-comment-gutter-expand-thread-1')).not.toBeInTheDocument();
 
     editor.destroy();
   });
@@ -310,5 +540,248 @@ describe('ComposeCommentGutter', () => {
     expect(dark.container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     dark.unmount();
     editorDark.destroy();
+  });
+
+  // -------------------------------------------------------------------------
+  // UAT round-4 #8 — selection (bidirectional linked highlight; select-vs-expand)
+  // -------------------------------------------------------------------------
+
+  it('calls onSelectThread when a card is clicked (selection wired) — the card is a select button', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onSelectThread = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={onSelectThread}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    // With selection wired, even a SHORT (non-truncatable) card is a select button.
+    expect(card).toHaveAttribute('role', 'button');
+    expect(card).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(card);
+    expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+    editor.destroy();
+  });
+
+  it('renders the selected card with its selected (gray) state via aria-pressed', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={jest.fn()}
+            selectedThreadId="thread-1"
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    editor.destroy();
+  });
+
+  it('when selection is wired, a truncatable card SELECTS on card click and EXPANDS only via the cue button', async () => {
+    const longText =
+      'This advisory explanation is deliberately much longer than the collapsed body budget so the ' +
+      'card is truncatable and a distinct expand affordance appears in the card body region below.';
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onSelectThread = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: longText })]}
+            scrollContainerRef={scrollContainerRef}
+            onSelectThread={onSelectThread}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    const body = screen.getByTestId('compose-comment-gutter-body-thread-1');
+    expect(body.textContent).toContain('…'); // starts collapsed
+
+    // Clicking the card body SELECTS (does not expand).
+    fireEvent.click(card);
+    expect(onSelectThread).toHaveBeenCalledWith('thread-1');
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1').textContent).toContain('…');
+
+    // The cue is a real button; clicking it EXPANDS without also selecting.
+    onSelectThread.mockClear();
+    fireEvent.click(screen.getByTestId('compose-comment-gutter-expand-thread-1'));
+    expect(screen.getByTestId('compose-comment-gutter-body-thread-1')).toHaveTextContent(
+      'expand affordance appears in the card body'
+    );
+    expect(onSelectThread).not.toHaveBeenCalled();
+    editor.destroy();
+  });
+
+  // -------------------------------------------------------------------------
+  // UAT round-5 — location line (#6), Grounded fact / Advisory judgment (#7)
+  // -------------------------------------------------------------------------
+
+  it('renders a clear location line (Pg · Sec · Para) with no § / ¶ glyphs (UAT round-5 #6)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ sectionRef: 'Section 4.2, para 2 (p. 3)' })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const card = await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(card).toHaveTextContent('Pg 3 · Sec 4.2 · Para 2');
+    expect(card).not.toHaveTextContent('§');
+    expect(card).not.toHaveTextContent('¶');
+    editor.destroy();
+  });
+
+  it('renders Grounded fact / Advisory judgment as separate labelled paragraphs when expanded (UAT round-5 #7)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    // A short note (< collapse budget) renders structured immediately (no expand needed).
+    const note = 'Grounded fact: A best-efforts standard. Advisory judgment: Needs reasonable care.';
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: note })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
+    // UAT round-6 #5 — the reviewer's display labels.
+    expect(body).toHaveTextContent('Flagged clause');
+    expect(body).toHaveTextContent('A best-efforts standard.');
+    expect(body).toHaveTextContent('Assessment says');
+    expect(body).toHaveTextContent('Needs reasonable care.');
+    // The labels are rendered as their own (semibold) elements, not inline with the body text.
+    const labelEls = Array.from(body.querySelectorAll('*')).filter(
+      el => el.textContent === 'Flagged clause' || el.textContent === 'Assessment says'
+    );
+    expect(labelEls.length).toBeGreaterThanOrEqual(2);
+    editor.destroy();
+  });
+
+  it('renders a ⋮ AI-tools menu per note and runs a tool against the thread on click (UAT round-8 #3/#4)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onRunNoteTool = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            noteTools={[{ id: 'compose-draft-alternative', label: 'Draft compliant alternative' }]}
+            onRunNoteTool={onRunNoteTool}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const trigger = await screen.findByTestId('compose-comment-gutter-tools-thread-1');
+    fireEvent.click(trigger);
+    const item = await screen.findByTestId('compose-comment-gutter-tool-thread-1-compose-draft-alternative');
+    expect(item).toHaveTextContent('Draft compliant alternative');
+    fireEvent.click(item);
+    expect(onRunNoteTool).toHaveBeenCalledWith('thread-1', 'compose-draft-alternative');
+    editor.destroy();
+  });
+
+  it('renders no ⋮ menu when no note tools are wired', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(screen.queryByTestId('compose-comment-gutter-tools-thread-1')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
+  it('shows the RENAMED label ("Flagged clause") even when the note is COLLAPSED (UAT round-7 follow-up)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    // A LONG note (> collapse budget) so the card starts COLLAPSED — the collapsed preview must still use
+    // the renamed label, never the model's raw "Grounded fact".
+    const note =
+      'Grounded fact: ' +
+      'The NDA imposes a best-efforts protection standard which is materially weaker than the firm ' +
+      'standard and this sentence is deliberately long enough to exceed the collapse budget. ' +
+      'Advisory judgment: The standard requires at least reasonable care.';
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: note })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
+    // Collapsed: renamed label shown, raw model label never shown, and the "…" truncation cue present.
+    expect(body).toHaveTextContent('Flagged clause');
+    expect(body).not.toHaveTextContent('Grounded fact');
+    expect(body.textContent).toContain('…');
+    editor.destroy();
   });
 });

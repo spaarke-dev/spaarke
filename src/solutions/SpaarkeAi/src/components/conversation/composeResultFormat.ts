@@ -162,6 +162,19 @@ export function formatDraftAlternativeResult(payload: unknown): string | null {
   return parts.join('\n\n');
 }
 
+/**
+ * UAT round-8 #7 — extract JUST the model's explanation ("why the change was made") from a compose
+ * EDIT result, for the Assistant change-confirmation. Deliberately returns ONLY the rationale, never
+ * the proposed text (that IS the inline redline) — so the Assistant explains the edit (Copilot-style)
+ * without duplicating the redline. Covers the draft-alternative shape (`rationale`) and the
+ * revise-document shape (`summary`); `null` when no explanation is present.
+ */
+export function extractComposeEditExplanation(payload: unknown): string | null {
+  const record = asRecord(payload);
+  if (record === null) return null;
+  return asNonEmptyString(record.rationale) ?? asNonEmptyString(record.summary);
+}
+
 // ---------------------------------------------------------------------------
 // compose-summarize-word-changes — { summary, changes[] }
 // ---------------------------------------------------------------------------

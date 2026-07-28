@@ -60,7 +60,12 @@ public sealed partial class ReferenceRetrievalService
 
     // Semantic configuration name — matches the reference index definition.
     // Uses the same config name as the knowledge index (both created with the same schema).
-    private const string SemanticConfigurationName = "knowledge-semantic-config";
+    // Must match the semantic configuration defined on the spaarke-rag-references index by the ingest
+    // pipeline (Add-ReferenceToIndex.ps1 / ReferenceIndexingService). Verified 2026-07-27 against the
+    // live spaarkedev1 index: the config is "rag-references-semantic-config" — the previous
+    // "knowledge-semantic-config" literal (the OLDER knowledge-index convention) 400'd every reference
+    // query with "Unknown semantic configuration", silently zeroing grounding (caught, logged, ungrounded).
+    private const string SemanticConfigurationName = "rag-references-semantic-config";
 
     // Vector field name and dimensions (3072-dim text-embedding-3-large, same as RagService)
     private const string VectorFieldName = "contentVector3072";

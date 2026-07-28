@@ -37,6 +37,7 @@ export const LOCAL_CHIP = {
   saveToDocument: "local:save-to-document",
   askAboutFiles: "local:ask-about-files",
   reviseInCompose: "local:revise-in-compose",
+  ndaReview: "local:nda-review",
 } as const;
 
 export type LocalChipActionId = (typeof LOCAL_CHIP)[keyof typeof LOCAL_CHIP];
@@ -77,4 +78,17 @@ export function buildAskAboutFilesChip(): ConsumerChip {
 export function buildReviseInComposeChip(): ConsumerChip {
   // R6-1 (UAT 2026-07-21): labeled "Revise document" (was "Revise in Compose").
   return { label: "Revise document", bindingId: LOCAL_CHIP.reviseInCompose, requiresAttachments: true };
+}
+
+/**
+ * ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" as an in-line
+ * Suggested-Next-Steps card, alongside "Summarize this file / Revise document", instead of a
+ * separate top-of-pane notification card that read as "hidden". It rides the local-chip path
+ * because the click needs a client-side bridge (open the file in Compose + dispatch nda-review
+ * scoped to that file) rather than a bare server Binding dispatch — see the host's
+ * `handleReviewNda`. Only appended when the classifier flagged the upload as an NDA (host gates
+ * on `ndaReviewFileRef`); `requiresAttachments:true` because it acts on the uploaded file.
+ */
+export function buildNdaReviewChip(): ConsumerChip {
+  return { label: "Review an NDA", bindingId: LOCAL_CHIP.ndaReview, requiresAttachments: true };
 }
