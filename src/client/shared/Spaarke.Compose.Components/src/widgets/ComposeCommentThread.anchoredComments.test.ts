@@ -55,7 +55,10 @@ function thread(id: string): ComposeCommentThreadModel {
 function crossParagraphDoc(commentId: string): PMNode {
   const mark = schema.marks.commentAnchor.create({ commentId });
   const p1 = schema.nodes.paragraph.create({ paraId: '0A000001' }, schema.text('First clause excerpt', [mark]));
-  const p2 = schema.nodes.paragraph.create({ paraId: '0A000002' }, schema.text('spilling into the next paragraph', [mark]));
+  const p2 = schema.nodes.paragraph.create(
+    { paraId: '0A000002' },
+    schema.text('spilling into the next paragraph', [mark])
+  );
   return schema.nodes.doc.create(null, [p1, p2]);
 }
 

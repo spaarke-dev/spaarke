@@ -93,10 +93,31 @@ const useStyles = makeStyles({
     backgroundColor: tokens.colorNeutralBackground2,
     color: tokens.colorNeutralForeground1,
   },
-  headerRow: {
+  // Meta header ABOVE the card (§B UAT 2026-07-27 item 4) — mirrors
+  // MessageBubble's `header`: the single "Email" pill + privacy markers + sender
+  // + sent/received time sit OUTSIDE the bordered card so the email row matches
+  // the chat-bubble layout. The row's align-items (own→right / other→left) plus
+  // this maxWidth keep the header edge-aligned with the card below.
+  header: {
     display: 'flex',
     alignItems: 'center',
+    flexWrap: 'wrap',
     gap: tokens.spacingHorizontalXS,
+    marginBottom: tokens.spacingVerticalXXS,
+    maxWidth: '85%',
+  },
+  senderLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground2,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  },
+  headerTimestamp: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
   headerSpacer: {
     flex: 1,
@@ -136,11 +157,6 @@ const useStyles = makeStyles({
     lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground2,
     wordBreak: 'break-word',
-  },
-  // Sent/received date line (item 2).
-  dateLine: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
   },
 });
 
@@ -198,37 +214,35 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
 
   return (
     <div className={mergeClasses(styles.row, isOwn ? styles.rowOwn : styles.rowOther)}>
-      <div className={styles.block} role="group" aria-label={regionLabel}>
-        <div className={styles.headerRow}>
-          {/* The SINGLE "Email" indicator — one per block, never per-recipient (FR-04). */}
-          <ChannelBadge channelType="email" />
-          <PrivacyMarkers
-            privilege={message.privilege}
-            isInternalOnly={message.isInternalOnly}
-            isPrivate={message.isPrivate}
+      {/* Meta header OUTSIDE the card (§B UAT 2026-07-27 item 4) — mirrors
+          MessageBubble: the SINGLE "Email" pill (never per-recipient, FR-04) +
+          privacy markers + sender + sent/received time sit above the card, plus
+          the open-icon affordance. */}
+      <div className={styles.header}>
+        <ChannelBadge channelType="email" />
+        <PrivacyMarkers
+          privilege={message.privilege}
+          isInternalOnly={message.isInternalOnly}
+          isPrivate={message.isPrivate}
+        />
+        <Text className={styles.senderLabel} title={from}>
+          {from}
+        </Text>
+        {sentReceived && <Text className={styles.headerTimestamp}>{sentReceived}</Text>}
+        <span className={styles.headerSpacer} />
+        <Tooltip content="Open email" relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<OpenRegular />}
+            aria-label="Open email"
+            onClick={() => onOpen?.(message)}
           />
-          <span className={styles.headerSpacer} />
-          <Tooltip content="Open email" relationship="label">
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<OpenRegular />}
-              aria-label="Open email"
-              onClick={() => onOpen?.(message)}
-            />
-          </Tooltip>
-        </div>
+        </Tooltip>
+      </div>
 
+      <div className={styles.block} role="group" aria-label={regionLabel}>
         <Text className={styles.subject}>{subject}</Text>
-
-        <div className={styles.metaLine}>
-          <Text size={200} className={styles.metaLabel}>
-            From:
-          </Text>
-          <Text size={200} className={styles.metaValue} title={from}>
-            {from}
-          </Text>
-        </div>
 
         <div className={styles.metaLine}>
           <Text className={styles.metaLabel}>To:</Text>
@@ -239,9 +253,6 @@ export const EmailInFlowBlock: React.FC<IEmailInFlowBlockProps> = ({ message, is
 
         {/* ~100-char body preview (item 2) — replaces the removed attachment list. */}
         {preview && <Text className={styles.snippet}>{preview}</Text>}
-
-        {/* Sent/received date (item 2). */}
-        {sentReceived && <Text className={styles.dateLine}>{sentReceived}</Text>}
       </div>
     </div>
   );

@@ -2,6 +2,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication.Membership;
@@ -111,11 +112,14 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
         // NOTE: a transient read failure PROPAGATES (not swallowed) so the reconcile job retries rather than
         // computing an empty desired set — an empty set would make the reconcile mass-remove every ACS
         // participant (membership thrashing). Only a genuinely not-found thread returns null (→ empty set).
-        var thread = await _entityService.RetrieveAsync(
-            ThreadEntity,
-            threadId,
-            new[] { "sprk_threadtype", "sprk_privacystate", "sprk_regardingrecordid", "sprk_regardingrecordtype" },
-            ct);
+        // NOTE: sprk_communicationthread has NO 'sprk_regardingrecordtype' text attribute — requesting it in a
+        // ColumnSet raised the create-time FaultException that surfaced as a 500 on POST /api/communications/threads
+        // (RB R3 UAT 2026-07-27, membership-derivation path). The anchor TYPE comes from the TYPED ADR-024 lookups
+        // (RegardingFieldMap); the denormalized sprk_regardingrecordid carries the id. Mirrors ThreadResolver.
+        var columns = new List<string> { "sprk_threadtype", "sprk_privacystate", "sprk_regardingrecordid" };
+        columns.AddRange(RegardingFieldMap.AllRegardingFields);
+
+        var thread = await _entityService.RetrieveAsync(ThreadEntity, threadId, columns.ToArray(), ct);
 
         if (thread is null || thread.Id == Guid.Empty)
             return null;
@@ -128,13 +132,28 @@ public sealed class ThreadMembershipDerivationService : IThreadMembershipDerivat
             ? ThreadPrivacyState.Private
             : ThreadPrivacyState.Open;
 
+        // Resolve the anchor entity type from the first populated typed lookup (ADR-024 priority order). The id
+        // prefers the denormalized sprk_regardingrecordid, falling back to the typed lookup's own id.
+        var anchorRecordId = thread.GetAttributeValue<string>("sprk_regardingrecordid");
+        string? anchorRecordType = null;
+        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        {
+            if (thread.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
+            {
+                anchorRecordType = string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName;
+                if (string.IsNullOrWhiteSpace(anchorRecordId))
+                    anchorRecordId = er.Id.ToString();
+                break;
+            }
+        }
+
         return new ThreadMembershipContext
         {
             ThreadId = threadId,
             Topology = topology,
             Privacy = privacy,
-            AnchorRecordId = thread.GetAttributeValue<string>("sprk_regardingrecordid"),
-            AnchorRecordType = thread.GetAttributeValue<string>("sprk_regardingrecordtype"),
+            AnchorRecordId = anchorRecordId,
+            AnchorRecordType = anchorRecordType,
         };
     }
 

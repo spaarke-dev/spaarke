@@ -384,8 +384,8 @@ public class CommunicationWorkspaceReadSeamTests
         // First orphan for the record — Tier 1 (real strategy) Skips ⇒ Tier 2 lazily creates the per-record default.
         var firstRequest = MessageRequest(Guid.NewGuid());
         var firstComm = new DataverseEntity("sprk_communication") { Id = firstRequest.CommunicationId };
+        firstComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         firstComm["sprk_regardingrecordid"] = matterId.ToString();
-        firstComm["sprk_regardingrecordtype"] = "sprk_matter";
         firstComm["sprk_regardingrecordname"] = "Acme v Widgets";
         SetupRegardingRead(entity, firstRequest.CommunicationId, firstComm);
         SetupNoExistingDefaultThread(entity);
@@ -403,8 +403,8 @@ public class CommunicationWorkspaceReadSeamTests
         // REAL production types (not a stub standing in for Tier 1).
         var secondRequest = MessageRequest(Guid.NewGuid());
         var secondComm = new DataverseEntity("sprk_communication") { Id = secondRequest.CommunicationId };
+        secondComm["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId);
         secondComm["sprk_regardingrecordid"] = matterId.ToString();
-        secondComm["sprk_regardingrecordtype"] = "sprk_matter";
         SetupRegardingRead(entity, secondRequest.CommunicationId, secondComm);
         SetupExistingDefaultThread(entity, defaultThreadId);
 
@@ -436,7 +436,10 @@ public class CommunicationWorkspaceReadSeamTests
         firstResult.Should().Be(masterThreadId);
         created.Should().ContainSingle();
         created[0].GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeDirect);
-        created[0].GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("systemuser");
+        // Master keyed on the owning-user GUID via sprk_regardingrecordid (globally unique). No text type attr;
+        // "systemuser" is not an ADR-024 family, so no typed regarding lookup either.
+        created[0].GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ownerId.ToString());
+        created[0].Contains("sprk_regardingrecordtype").Should().BeFalse();
 
         // Second no-regarding orphan for the SAME owner — real strategy Skips again; the ladder JOINS the
         // existing master (ONE master per owning user) — idempotent, end-to-end, real production types.

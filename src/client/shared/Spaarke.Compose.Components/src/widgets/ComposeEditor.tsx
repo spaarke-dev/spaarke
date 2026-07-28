@@ -98,7 +98,11 @@ import {
 } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
-import { NdaReviewSummaryPanel, NDA_REVIEW_DISCLAIMER_TEXT, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
+import {
+  NdaReviewSummaryPanel,
+  NDA_REVIEW_DISCLAIMER_TEXT,
+  type NdaReviewFindingSummary,
+} from './NdaReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './ndaClauseLocation';
 import {
   composeSessionCommentThreadsToAnchoredComments,

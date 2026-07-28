@@ -815,7 +815,11 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         // otherwise it keeps the round-3 D2 behavior (card click toggles expand, truncatable only).
         const selectable = Boolean(onSelectThread);
         const isInteractive = selectable || isTruncatable;
-        const activate = selectable ? () => onSelectThread?.(thread.id) : isTruncatable ? () => toggleExpanded(thread.id) : undefined;
+        const activate = selectable
+          ? () => onSelectThread?.(thread.id)
+          : isTruncatable
+            ? () => toggleExpanded(thread.id)
+            : undefined;
         return (
           <div
             key={thread.id}

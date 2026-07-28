@@ -50,7 +50,8 @@ const COMMUNICATIONS_CONFIG_ID = "e1826c4c-9575-f111-ab0e-7ced8ddc4a05";
 
 export const communicationsRegistration: SectionRegistration = {
   id: "communications",
-  label: "Communications",
+  // Human-facing label (§B UAT 2026-07-27 item 1). Section `id` stays "communications".
+  label: "Messages",
   description: "Email, Teams, SMS, and notifications related to your work",
   icon: MailRegular,
   category: "data",
@@ -79,7 +80,7 @@ export const communicationsRegistration: SectionRegistration = {
     return {
       id: "communications",
       type: "content",
-      title: "Communications",
+      title: "Messages",
       style: { overflow: "hidden" },
       renderContent: () =>
         React.createElement(CommunicationsWorkspaceWidget, {
