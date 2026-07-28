@@ -1,12 +1,81 @@
-# Spaarke Email Intelligence — Design Charter
+# Email Communication Intelligence R1 — Design Charter
 
-> **Status**: DRAFT v0.1 — 2026-07-10. Grounded pass over the concept charter; ready for operator review before `/design-to-spec`.
-> **Authors**: Claude Opus 4.8 drafting from live-code investigation + operator scope rulings (2026-07-10, verbatim in §1.1).
-> **Predecessor concept**: [`EMAIL-TRIAGE-MODULE-DESIGN.md`](EMAIL-TRIAGE-MODULE-DESIGN.md) (concept/market survey, DRAFT r1). That document is a **general review, not code-grounded** — its component names are *indicative only*. This design supersedes its factual claims with the as-built inventory in §3.
-> **Authoritative as-built context**:
-> - [`docs/architecture/communication-service-architecture.md`](../../docs/architecture/communication-service-architecture.md) (Current, 2026-04-05) — **the canonical email substrate**
-> - [`docs/architecture/email-to-document-architecture.md`](../../docs/architecture/email-to-document-architecture.md) (v1.2, marked **superseded** by the Communication Service)
-> - `src/server/api/Sprk.Bff.Api/Services/Communication/**` · `Services/Ai/Jobs/EmailAnalysisJobHandler.cs` · `x-financial-intelligence-module-r1/` (reuse precedent)
+> **Status**: DRAFT **rev 2** — 2026-07-28. Rev-2 reconciles the original v0.1 charter against what shipped since (r4 engine, r5 client design, notification-spine delivery). **Read §0 first — it is the authoritative scope.** Sections §1–§13 below are the v0.1 charter, preserved for strategic rationale but **superseded on all as-built and scope claims by §0**.
+> **Project**: `email-communication-intelligence-r1` (renamed 2026-07-28 from `spaarke-email-intelligence-module` to sort with the `email-communication-*` line). Epic [#431 EMAIL & MESSAGING](https://github.com/spaarke-dev/spaarke/issues/431).
+> **Authors**: v0.1 — Claude Opus 4.8 from live-code investigation + operator scope rulings (2026-07-10, verbatim in §1.1). rev 2 — code-grounded reconciliation (9-area as-built audit, 2026-07-28).
+> **Predecessor concept**: [`EMAIL-TRIAGE-MODULE-DESIGN.md`](EMAIL-TRIAGE-MODULE-DESIGN.md) (concept/market survey, DRAFT r1). That document is a **general review, not code-grounded** — its component names are *indicative only*.
+> **Authoritative as-built context (refreshed rev 2)**:
+> - Sibling projects: `email-communication-solution-r4` (matching engine — **shipped, on dev**), `email-communication-solution-r5` (Outlook-style Email Workspace UI — **designed, not built**), `spaarke-notification-spine-r1` (action/notification delivery spine — **shipped, partially inert**), `messaging-communication-app-r1/r2/r3` (Teams-style channel).
+> - [`docs/architecture/communication-service-architecture.md`](../../docs/architecture/communication-service-architecture.md) — the canonical email substrate.
+> - Key as-built files cited inline in §0.2.
+
+---
+
+## 0. Reconciliation & Narrowed Scope (rev 2 — 2026-07-28) — AUTHORITATIVE
+
+> This section supersedes the v0.1 as-built inventory (§3) and scope (§2, §5) wherever they conflict. It is written to be read standalone: an operator can review §0 alone and understand what r1 is, what it is not, and where its boundaries sit against the sibling projects. The strategic sections (§1.4 thesis, §2.0 pillars, §2.0b IP docketing wedge, §D-5.5 trust model) remain valid and are the "why."
+
+### 0.1 What shipped since v0.1 (the ground moved)
+
+The 2026-07-10 charter assumed the matching engine, the client surface, and the delivery spine were all to-be-built by this module. Three sibling projects have since claimed those layers. r1 must build **on** them, not re-scope them.
+
+| Layer | Owner project | Status (verified 2026-07-28) | What r1 does with it |
+|---|---|---|---|
+| **Matching / Association Engine** (email → matter/project/invoice/org/contact; deterministic rungs 0–5 + AI rung, provenance, auto-file) | `email-communication-solution-r4` | ✅ Shipped, deployed to dev | **Consume** — r1 adds zero matching logic |
+| **Rich AI classification substrate** (`CommunicationClassificationResult`: category, urgency, obligations[], suggestedActions[], privilegeFlagged, rationale) | r4 (task 031, FR-15) | ✅ Built — but **passive**: emitted as `provenance.signals` only; **consumed by nothing** | **Activate** — this is r1's single biggest harvest |
+| **Reading / compose / association-review UI** (Outlook-style two-pane, `.eml` render, reply/forward, interactive Connections review) | `email-communication-solution-r5` | 📝 Designed, not built | **Coordinate** — r1's triage/priority/summary is a *mode/overlay* in r5's surface, not a second app |
+| **Action + notification delivery spine** (durable outbox, SignalR, `CreateNotificationAsync`, `notification` disposition) | `spaarke-notification-spine-r1` | ✅ Spine shipped; RI path **inert** (see 0.2) | **Feed** — r1 supplies the real intelligence + confidence the spine delivers |
+| **Messaging (Teams-style) channel** | `messaging-communication-app-r1/2/3` | Active | **Out of scope** — email-only |
+
+### 0.2 Corrected as-built claims (v0.1 §3 is now wrong in these specifics)
+
+Code-grounded audit, 2026-07-28. These correct both the v0.1 charter and the earlier "r4 wired responsive intelligence" assumption:
+
+1. **The AI classification is rich but dark.** `Models/Ai/Communication/CommunicationClassificationResult.cs` produces category/urgency/obligations/suggestedActions/privilegeFlagged/rationale, but `Engine/Rungs/AiClassificationRung.cs` emits them as **metadata-only provenance signals** (Target=null, fixed 0.60 conf) that never prioritize, summarize-for-a-human, or trigger anything. **The substrate exists; the product on top of it does not.**
+2. **Responsive-Intelligence fan-out was RE-HOMED, not built.** r4's W5 tasks 050–054 (FR-18 `record`/`notification` dispositions, FR-19 enrichment→EventRules→Create*, FR-20 "Communication Triage" JPS action) are all **⏭️ RE-HOMED / MOOT** in r4's `TASK-INDEX.md` — `EventRulesService` is SSE/session-shaped and "semantically wrong" for email.
+3. **notification-spine landed only a thin slice, currently inert.** `CommunicationEnrichmentService` step 5 emits a `CommunicationAssessedSignal`, but its **`Confidence` is hardcoded to 0** ("the enrichment pipeline does not yet compute an RI-confidence score") → it **denies under any positive threshold**. It creates an **appnotification only** — no Event, no Task — and does not carry category/urgency/obligations.
+4. **`record` disposition still throws.** `DispositionRoutability.cs` marks `record` non-routable; `OutputRouter.cs` throws `NotSupportedException`. Job B (record currency) has **no write path from email**.
+5. **The "Communication Triage" JPS Action / summary-checklist (FR-20) was never authored.** The only email AI today is `AppOnlyAnalysisService.AnalyzeEmailAsync`, which runs a **document-profile** "Email Analysis" playbook and writes TL;DR/summary/keywords back onto the `.eml` Document — not a triage classification, and it does not fan out.
+6. **`UpdateRecordActionCore` / `DataverseUpdateRecordHandler` exist but touch no email flow** — used by daily-briefing/finance/compose only.
+7. **No triage queue, no prioritized inbox, no per-email audit entity (`sprk_emailreviewlog`), no Daily Briefing email channel (still 6 channels), no docketing/deadline-cascade code.** All confirmed absent.
+
+### 0.3 What r1 IS — the intelligence layer (narrowed scope)
+
+r1 is the **intelligence and record-currency layer** that sits on the shipped engine (r4), renders in the client (r5), and delivers through the spine (notification-spine). Its four jobs, in priority order:
+
+1. **Activate the classification substrate (Pillar 1 — UNDERSTAND).** Consume the already-produced category/urgency/obligations, compute a **real RI-confidence score** (fixes the hardcoded-0 gap), and surface **prioritization + 2-line summary + extracted obligations** to the user. This is mostly *wiring dark capability to a surface*, not new AI.
+2. **Record currency (Pillar 2 — UPDATE / Job B).** Author the email-triage playbook leg that **proposes allow-listed field updates on the matched record** (dates/amounts/parties/status), human-confirmed, cited to source email, audited. Requires completing the **`record` disposition** (coordinate with the `Services/Ai` owner). *This is the differentiator no sibling owns.*
+3. **Email-triggered action (Pillar 3 — ACT / Job C).** Feed a real assessment (with confidence + obligations) into the notification-spine so it can create **Event/Task**, not just an appnotification. The flagship vertical is **IP Auto-Docketing** (Office Action → dated deadline cascade), §2.0b — entirely greenfield.
+4. **Defensibility & surfacing.** The per-email **review-audit** record (machine + human review), and the **Daily Briefing triage channel** (7th).
+
+### 0.4 Explicit boundary / coordination map (§11 anti-overlap)
+
+| Capability | r1 owns? | Boundary rule |
+|---|---|---|
+| Matching / association / auto-file | ❌ r4 | Consume `sprk_associationprovenance` + status; add no rung |
+| Reading pane / compose / `.eml` render / Connections review UI | ❌ r5 | r1's triage-priority/summary renders **inside r5's surface** as a mode/overlay; if r5 slips, r1 may ship a minimal queue view but must not fork r5's components |
+| Notification/action **delivery** (outbox, SignalR, dispositions) | ❌ notification-spine | r1 **feeds** the spine (real confidence + assessment); does not build delivery |
+| `record` disposition **implementation** | ⚠️ shared | Owned by `Services/Ai` (redesign-r2 / notification-spine); r1 drives the requirement + the email-side proposal payload — coordinate, do not fork |
+| RI-confidence scoring | ✅ r1 | The hardcoded-0 gap is r1's to close |
+| Email-triage playbook (category-for-human, summary, obligations→actions, proposed record updates) | ✅ r1 | New JPS Action(s) on the existing AI platform |
+| Job B record-currency proposal + confirm flow | ✅ r1 | New |
+| IP docketing / deadline cascade | ✅ r1 | Greenfield; the flagship wedge |
+| Per-email review-audit entity + Daily Briefing triage channel | ✅ r1 | New |
+| Messaging/Teams/SMS | ❌ messaging-app | Email-only |
+
+### 0.5 Coordination hazards (all BFF hot-path)
+
+- **`Services/Ai/` is owned by `spaarke-ai-architecture-redesign-r2`** — consume `Services/Ai/PublicContracts/` seams; the `record`-disposition completion must go through that owner (same gate r4's W5 hit). Run `/conflict-check` before every BFF PR.
+- **`Services/Communication/` persist path** is edited by notification-spine (step-5 emit), messaging-app r1/2/3, and r4 — `parallel-safe: false` on that path. r1's RI-confidence work touches exactly this seam → coordinate merge order.
+- **`@spaarke/notifications` build break** from notification-spine must be resolved before any SpaarkeAi deploy from tip.
+
+### 0.6 Open questions for operator review (rev 2)
+
+1. **Sequencing vs r5.** r1's Pillar-1 surface needs r5's client. Do we (a) gate r1's UI on r5, (b) run them together, or (c) let r1 ship a minimal standalone queue if r5 slips? *(Recommend b — shared contract, r1 provides the triage data behind r5's surface.)*
+2. **`record` disposition ownership.** Confirm with `spaarke-ai-architecture-redesign-r2` whether r1 or the AI-platform owner completes the `record` leg. Blocks Job B.
+3. **RI-confidence definition.** What computes the assessment confidence that notification-spine consumes — a field of the classification result, or a new scorer? *(Recommend: derive from the classification rung + deterministic-class agreement.)*
+4. **Scope of Phase 1.** Recommend Phase 1 = Pillar 1 (activate substrate + priority/summary surface) + the RI-confidence fix (unblocks notification-spine's Event/Task path). Defer Job B and IP docketing to Phase 2 — they are higher-value but need the `record` disposition and a docketing data model.
+5. **IP docketing as beachhead (D-12/D-13, still open).** Validate the competitive claim before committing the wedge as Phase-2 lead.
 
 ---
 
@@ -110,6 +179,8 @@ Competitive fit: IP docketing systems (Anaqua, Clarivate/CPA Global, Alt Legal, 
 ---
 
 ## 3. As-built foundation (grounded inventory — supersedes concept charter §4)
+
+> **⚠️ SUPERSEDED BY §0.2 (rev 2, 2026-07-28).** This inventory was accurate on 2026-07-10 but predates `email-communication-solution-r4` shipping the Association Engine + classification substrate, `r5` designing the client, and `notification-spine-r1` landing the delivery spine. Read §0.2 for the corrected as-built truth. The text below is retained for historical rationale only.
 
 **Two email stacks exist. This is the central architectural fact.**
 
