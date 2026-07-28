@@ -6,10 +6,25 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. **UAT round-7 COMPLETE — all items DEPLOYED**. Rounds 2/3/4A/4B/5/6 also deployed. Awaiting owner UAT. |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `aa355dec0`. Working tree CLEAN. |
-| **Deployed (2026-07-27 r7)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4927 KB, from HEAD aa355dec0. Master since base = only `0e1e30d95` (email-r5 docs) → no clobber. |
-| **Next Action** | Owner UAT of round-7. Then deferred (owner timing): takeaway-field re-seed (outward-facing Action change), over-broad allowsknowledge gate, merge/PR `work/ai-nda-r1-followups`. |
+| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 ready fixes DEPLOYED** (popup width, #1 scrollbar, #2 sort). Round-8 AI-tooling (#3–#7) = SCOPED, NOT started (needs server bindings). |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `d1be83701`. Working tree CLEAN. |
+| **Deployed (2026-07-27 r8a)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4926 KB, from HEAD d1be83701. Master since base = only `0e1e30d95` → no clobber. |
+| **Next Action** | Owner decision on round-8 AI-tooling (#3–#7 — see below; needs server bindings + `instruction` slot). Then deferred: takeaway-field re-seed, allowsknowledge gate, merge/PR. |
+
+### ✅ UAT round-8 ready fixes DEPLOYED (d1be83701)
+- **Popup width**: round-7's maxWidth:460 was narrower than the 4-step track (~400px, flex-shrink:0) → track overflowed the white surface. Now `width:560px, maxWidth:92vw`. `NdaReviewProgressModal.tsx`.
+- **#1** Review Summary: modern thin scrollbar (`scrollbarWidth:thin` + styled `::-webkit-scrollbar-thumb`), removed the down-arrow FAB + its scroll-measure state. `NdaReviewSummaryPanel.tsx`.
+- **#2** Summary "By section" sorts by resolved `docPosition` (true top→bottom doc order), not model emission order. New `docPosition?` on `NdaReviewFindingSummary`, threaded from `ComposeEditor` enrichment (the strict-match `pos`).
+
+### 🔴 UAT round-8 AI-tooling (#3–#7) — SCOPED, needs server bindings (owner decision)
+Word-Copilot-style per-clause AI edits. Investigation (Explore, this session) found the pipeline:
+- **BubbleMenu actions** (`ComposeAiToolbar.tsx` DEFAULT_ACTIONS ~L309): `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` (materializesInEditor:true), `compose-defined-terms` + Email stub. ALL ship `bindingId:''` (disabled) → real GUIDs injected at runtime via `registerComposeAiToolbarAction` (per-env catalog seed, task 047). Dispatch = `handleActionClick` (L607) builds `args.slots {selectionText, selectionAnchorStart/End, doc pointers, sessionId}` → `enqueueComposeAction` (type L200).
+- **Redline path** is ledger-mediated (not return-value): dispatch → `documentSessionId` routes write to doc session → `ComposeWorkspace.materializeComposeDraftFromLedger` (L1341) GETs `/compose-outputs` → `editor.materializeComposeDraft` → `usePendingRedline.materialize` (resolveTargetSpans + Insertion/Deletion marks). Draft-alternative plumbing WIRED; only binding stubbed.
+- **Free-text**: whole-doc `dispatchReviseDocument(intent, instruction, docSession)` exists (ConversationPane L1037). Selection free-text needs an added `instruction` slot in `handleActionClick` + a new binding.
+- **Assistant confirmation** exists: `ConversationPane.dispatchComposeAction` (L895) apply-leg → `injection.enqueue(makeComposeEditControlsMessage(text,{ledgerRef,bindingId}))` (L941) — summary-only BY DESIGN (COMPOSE_EDIT_CONFIRMATION L163). `PendingRedline.rationale` carries the model rationale (surfaced only in-editor today). #7 = thread that rationale into the confirmation.
+- **Gutter → dispatch**: `ComposeCommentGutter` is presentational; would add an `enqueueComposeAction`/`onRewriteThread` prop, resolve `span=findCommentAnchorRange`, build the same slots.
+- **What needs OWNER GO-AHEAD (outward-facing)**: seed bindings for draft-alternative (verify live), make-concise (new), describe-changes (new) + add an `instruction` input-schema slot. #6 also wants Explain/Email/Defined-terms REMOVED from the BubbleMenu (client-only, safe).
+- Full agent report saved conceptually; re-run Explore if needed.
 
 ### ✅ UAT round-7 DEPLOYED (aa355dec0) — review panel UX + JSON/warning suppression
 Client-only:
