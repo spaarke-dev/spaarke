@@ -1,0 +1,141 @@
+<task id="050" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-5 spike: LibreOffice-headless pagination prototype → page/line map + Word-divergence measurement</title>
+    <phase>5 Page/Line Spike</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Research spike producing a throwaway prototype + measurement notes, not production code — no `.cs`/`.ts` shipping surface, no cutover. STANDARD; Step 9.5 skipped by default (no test-modifying / hot-path shipping change here).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prototype + empirical measurement against a defined divergence rubric; the licensing/architecture judgment lives in tasks 051/052, not here.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Research/prototype only — touches `notes/` and a throwaway prototype, no shared `Services/Compose/` source; runs alongside W1–W4 per plan.md parallel strategy.</parallel-reason>
+    <deps>001</deps>
+    <tags>spike,research,pagination</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Prototype LibreOffice-headless pagination over the fidelity corpus, producing a page/line map, and MEASURE its
+    divergence from Word on the corpus — especially the line-numbered pleading fixture (task 001). Establish
+    empirically that page and line numbers are NOT stored in the `.docx` (design §5.5 / spec FR-19): they are
+    computed at layout/render time. LibreOffice (MPL-2.0/LGPL) MUST be invoked as a SEPARATE process, never linked
+    into the BFF (NFR-03 / NFR-04; ADR Tension T-1 Path A). Write findings to
+    `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-libreoffice-spike.md`. This is a research prototype — do
+    NOT add any pagination package to the BFF publish.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer running a bounded research spike. Understands F-5 (honest layout numbering): page/line
+    numbers are rendering artifacts, delivered only via an explicit pagination engine where in scope, never
+    fabricated from OOXML (design §2, §5.5). Comfortable driving LibreOffice headless (`soffice --headless`) as an
+    out-of-process converter and measuring layout divergence against Word's own pagination. Knows the NFR-03 hard
+    rule: LibreOffice permitted only as a separate process/service, never linked. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A written spike note `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-libreoffice-spike.md` containing: (a) a
+    working LibreOffice-headless prototype (out-of-process) that produces a page/line map over the corpus; (b) a
+    measured divergence-from-Word table on the corpus, with the line-numbered pleading called out; (c) an explicit
+    statement — evidenced from the OOXML — that page/line numbers are not in the file but computed at layout time;
+    and (d) confirmation that nothing was linked into the BFF and no pagination package was added to the publish.
+  </goal>
+
+  <context>
+    <background>
+      WS-5 asks whether Spaarke can deliver page/line references honestly (F-5). The hard truth (design §5.5): page
+      numbers and line numbers are NOT in the `.docx` — `w:lnNumType` only toggles line-numbering DISPLAY; the
+      content→line mapping is produced by a layout engine from page size, margins, fonts, and image/table flow.
+      Paragraph/clause/section numbering is 100% derivable from the file (WS-3); page/line is not. LibreOffice
+      headless is the leading NFR-03-compatible option (MPL-2.0/LGPL) BUT only as a separate process — it paginates
+      closely to Word yet can differ at the margins, a genuine fidelity ceiling to surface, not hide. This spike
+      prototypes that path and quantifies the divergence so task 052 can make a ship-vs-defer decision. It depends
+      on task 001's line-numbered pleading fixture as the primary measurement target.
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-libreoffice-spike.md — the spike findings: prototype description, page/line map samples, measured divergence table, OOXML evidence that page/line is not stored</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/line-numbered-pleading.docx — primary divergence-measurement target (task 001)</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/*.docx — the broader corpus to paginate + measure</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-19 (decision-record contents), NFR-03 (permissive-only, LibreOffice as separate process), NFR-04 (WS-5 engine is a sidecar, MUST NOT be added to BFF publish)</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5 (page/line = layout artifact; LibreOffice paginates closely but can differ), §9 T-1 (licensing tension)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Supplies the line-numbered pleading fixture (and the rest of the corpus) this spike paginates and measures against Word.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03 / ADR Tension T-1">LibreOffice MUST be invoked as a SEPARATE process (e.g. `soffice --headless`), never linked into the BFF and never added as a NuGet/runtime package. Scope: the prototype is a standalone converter invoked out-of-process; no commercial (Aspose/GemBox/Syncfusion) or AGPL paginator is used at all.</constraint>
+    <constraint source="NFR-04 / BFF §10">No pagination package is added to the BFF publish; this spike changes no `Services/Compose/` source and touches no `Sprk.Bff.Api` project reference. Scope: prototype + notes only — if any BFF file were touched, that is out of scope for a spike and an escalation.</constraint>
+    <constraint source="F-5 / design §5.5">The note MUST state, with OOXML evidence, that page/line numbers are computed at layout time and are NOT stored in the file. Scope: do not imply page/line can be derived from OOXML alone; frame LibreOffice's output as a close-but-not-Word-identical layout approximation.</constraint>
+    <constraint source="project">Measured divergence numbers MUST be empirical, not estimated. Scope: run the prototype over the corpus and record actual page/line deltas vs Word; if LibreOffice cannot be provisioned, record the blocker rather than fabricating numbers (see escalation).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>LibreOffice headless (`soffice --headless`) out-of-process document layout; OOXML `w:lnNumType` / `w:sectPr` layout semantics; Word vs LibreOffice pagination divergence; NFR-03 permissive-licensing boundary</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Separate-process pagination (not linked)" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5 / T-1">
+        LibreOffice (MPL-2.0/LGPL) is NFR-03-compatible ONLY as a separate process/service. Drive it via CLI/subprocess to render + page/line-map; never take a code dependency and never add it to the BFF publish.
+      </pattern>
+      <pattern name="Fidelity-ceiling honesty" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5">
+        Only Word's own layout is guaranteed Word-identical; open engines paginate closely but diverge at the margins. Measure and report the divergence rather than claiming 100%.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON: research spike, prototype + notes, no shipping surface / 📖 PROTOCOL STEPS). Load spec FR-19 + NFR-03/04 + design §5.5.</step>
+    <step order="1" name="Provision LibreOffice headless">Attempt to provision `soffice --headless` in the dev environment. If it cannot be provisioned → record the blocker in the note and proceed with the OOXML-evidence + evaluation-only portion (escalation path); do NOT fabricate divergence numbers.</step>
+    <step order="2" name="Prototype the page/line map">Drive LibreOffice headless (out-of-process) over the corpus to produce a page/line map (which paragraphs land on which page/line). Keep the prototype throwaway — no BFF integration.</step>
+    <step order="3" name="Measure Word divergence">Compare the prototype's page/line map to Word's own pagination on the corpus, focusing on the line-numbered pleading; record actual deltas in a table.</step>
+    <step order="4" name="Evidence the OOXML truth">From the OOXML, show that page/line numbers are not stored (`w:lnNumType` toggles display only; no content→line mapping in the file) — state this explicitly in the note.</step>
+    <step order="5" name="Write the spike note">Author `notes/ws5-libreoffice-spike.md` with prototype description, page/line-map samples, the divergence table, the OOXML-evidence statement, and confirmation that nothing was linked into the BFF / no pagination package added to the publish.</step>
+    <step order="6" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 050 status to ✅.</step>
+    <step order="7" name="Record deviations">Document any deviation or provisioning blocker in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If LibreOffice-headless cannot be provisioned in the dev environment, record the blocker in the note and proceed with the OOXML-evidence + evaluation-only portion — do NOT fabricate divergence numbers, and do NOT substitute a linked/commercial paginator to unblock (that would breach NFR-03).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No pagination capability exists in the codebase — page/line numbering is nowhere (`w:sectPr` skipped for output, `w:lnNumType` never read; design §1). Verified from the design's provoking-evidence audit.</existing>
+    <extension>No — this is a spike, not a shipped component; it produces a throwaway prototype + a decision-input note, extending nothing in `Services/Compose/`. The go/defer on any real component is task 052.</extension>
+    <cost-of-doing-nothing>Without a measured LibreOffice prototype, the WS-5 decision (task 052) has no empirical divergence data and the product cannot honestly state whether page/line references are deliverable — a legal pleading's line citations remain unquantified.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="soffice">LibreOffice headless, invoked out-of-process for pagination prototyping</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-libreoffice-spike.md (prototype + measured Word-divergence + OOXML evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the corpus, when the LibreOffice-headless prototype runs out-of-process, then a page/line map is produced and sampled in the note (or, if LibreOffice is unprovisionable, the blocker is recorded and the evaluation-only portion completed).</criterion>
+    <criterion testable="true">The note contains an EMPIRICAL Word-divergence table over the corpus with the line-numbered pleading called out — no estimated/fabricated numbers.</criterion>
+    <criterion testable="true">The note states, with OOXML evidence, that page/line numbers are computed at layout time and are NOT stored in the `.docx`.</criterion>
+    <criterion testable="true">Negative: no LibreOffice/pagination code is linked into the BFF and no pagination package is added to the publish; `Services/Compose/` source is unchanged (verified — spike touches only `notes/` + a throwaway prototype).</criterion>
+    <criterion testable="true">Negative: no commercial (Aspose/GemBox/Syncfusion) or AGPL paginator is used even to unblock (NFR-03 honored).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 050 as ✅ and any deviation/blocker is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Feeds the WS-5 decision (task 052) alongside the Word-service evaluation (task 051). The line-numbered pleading
+    (task 001) is the primary measurement target. Keep this bounded: prototype + measure + document; the ship-vs-defer
+    call is 052's, and any real pagination component would be an out-of-BFF-publish sidecar (NFR-04). TASK-INDEX.md
+    and current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

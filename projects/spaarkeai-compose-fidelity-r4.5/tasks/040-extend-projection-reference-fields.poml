@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-4: extend the projection with per-paragraph reference fields</title>
+    <phase>4 WS-4 Reference layer</phase>
+    <gate>blocked until 033</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` projection payload types (`ComposeDocxProjection` / `ParaIdMapEntry`) on the `bff-api` hot path and populates them from WS-3's numbering computation. FULL per root CLAUDE.md §8 (modifying `.cs`, tags include `bff-api`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Modify-only extension of fully-specified existing types (adds fields; populates from 031/032's already-computed numbers). No new abstraction or architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Compose/ComposeDocxProjection.cs` + `ComposeDocxProjectionBuilder.cs` (the projection population site) — the same files 041/042 touch. Sequential within group W4; also serialized behind WS-3 (033).</parallel-reason>
+    <deps>033</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend the projection output types `ComposeDocxProjection` / `ParaIdMapEntry` with per-paragraph reference
+    fields: `computedNumber` (e.g. `"4.2"`), `numberingLevel`, `listPath` (the ordinal chain `[4,2]`), and
+    `headingLevel` — alongside the existing `docOrderIndex` + `paraId`. Populate every field from WS-3's numbering
+    computation (tasks 031/032), which already computes the displayed label + level during the single document-order
+    walk. This is FR-16 and the first move toward F-4 (stable reference): the projection payload now exposes
+    `paraId → {computed number, level}` per paragraph so the reference map (041) and citation resolver (042) can be
+    built on it. Modify-only — add fields to the EXISTING types; do NOT introduce a new projection type or a new
+    component.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose). Expert in the R4 server projection payload (`ComposeDocxProjection` / `ParaIdMapEntry`), the single document-order walk in `ComposeDocxProjectionBuilder`, and the WS-3 numbering engine (031/032) whose computed labels this task surfaces. Follow ADRs strictly.</role>
+
+  <goal>
+    `ComposeDocxProjection` / `ParaIdMapEntry` carry `computedNumber`, `numberingLevel`, `listPath`, `headingLevel`
+    (+ existing `docOrderIndex` + `paraId`) per paragraph, populated from WS-3's computation during the existing
+    single doc-order walk. The projection payload exposes all reference fields per paragraph; a seam slice asserts
+    the fields are present and correct against corpus goldens (numbered/heading/multi-level paragraphs carry their
+    computed label + level; un-numbered paragraphs carry null/empty consistently).
+  </goal>
+
+  <context>
+    <background>
+      Per-paragraph identity today is the opaque random `w14:paraId` only (`ParaIdPreParser.cs:114-143`; projection
+      `:135-167`); there is NO `paraId`→section-number map anywhere on the read path. WS-3 (030–033) now computes the
+      displayed clause/section/heading/list number 100% server-side during the single document-order walk. This task
+      lifts that computed label + level onto the projection payload so it can be persisted (041) and resolved by human
+      citation (042). `ParaIdMapEntry` / `ComposeDocxProjection` already carry `paraId` + `docOrderIndex` — this task
+      ADDS fields to those existing types (§11 three-question gate: extend, do not create). Design §4 WS-4; spec
+      FR-16. Line numbers are indicative — RE-GREP before editing; a master merge or WS-3 edits may have shifted them.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs — add `computedNumber`/`numberingLevel`/`listPath`/`headingLevel` to `ComposeDocxProjection` / `ParaIdMapEntry` (existing types carry `paraId` + `docOrderIndex`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — populate the new fields from WS-3's computed label + level during the single doc-order walk (`:18-26`)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ParaIdPreParser.cs — per-paragraph `paraId` source (`:114-143`); projection map `:135-167`</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs — write-side numbering mirror WS-3 agrees with (context for `listPath`/`computedNumber` semantics)</file>
+      <file role="modify">tests/integration/seam/ — seam slice asserting the reference fields populate correctly per paragraph against corpus goldens (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">WS-3 numbering reconstruction + round-trip agreement — provides the computed clause/section/heading/list number + level per paragraph that this task surfaces onto the projection payload.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-16">The projection payload MUST expose `computedNumber`, `numberingLevel`, `listPath`, and `headingLevel` per paragraph, alongside the existing `docOrderIndex` + `paraId`. Scope: values come from WS-3's already-computed numbering — this task does NOT recompute numbering; it lifts WS-3's result onto the payload.</constraint>
+    <constraint source="project / §11">Add fields to the EXISTING `ComposeDocxProjection` / `ParaIdMapEntry` types — do NOT introduce a new projection type, DTO, or component (the existing types already carry `paraId` + `docOrderIndex`; extension test passes). Scope: modify-only.</constraint>
+    <constraint source="ADR-007">The projection stays `byte[]`-in / projection-out; no `Microsoft.Graph` type above `SpeFileStore`. Scope: field population happens entirely inside the `Services/Compose/` doc-order walk.</constraint>
+    <constraint source="ADR-013">No AI-internal type (`IOpenAiClient`/`IPlaybookService`/executor/routing) injected into the projection path — WS-4 EXPOSES reference data TO the analysis layer via the projection contract; it does NOT inject AI internals into `Services/Compose/`. Scope: `Services/Compose/` stays pure (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-038">Add/extend a seam slice for the reference-field population at its KEEP path (`tests/integration/seam/`); NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: the seam asserts each corpus paragraph carries the correct `computedNumber` + level (or consistent null for un-numbered).</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size and report absolute + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB (no new runtime package, pure OOXML on existing `DocumentFormat.OpenXml`). Scope: run `/conflict-check` before the PR (`Services/Compose/` overlaps sibling compose worktrees).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>R4 projection payload extension; WS-3 numbering result surfacing; paraId + doc-order-index reference layer; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing per-paragraph payload entry" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs">
+        `ParaIdMapEntry` / `ComposeDocxProjection` already carry `paraId` + `docOrderIndex` — add `computedNumber`/`numberingLevel`/`listPath`/`headingLevel` to these existing types (extend, do not create).
+      </pattern>
+      <pattern name="Single document-order walk" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs:18-26">
+        The one walk that already visits every paragraph in order — WS-3 computes the number here; this task attaches that number + level to the payload entry in the same pass.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-16, design §4 WS-4, `.claude/constraints/bff-extensions.md`, ADR-007/013/038.</step>
+    <step order="1" name="Re-grep the anchors">RE-GREP `ComposeDocxProjection.cs` (the `ParaIdMapEntry` / projection payload types carrying `paraId` + `docOrderIndex`) and the WS-3 population site in `ComposeDocxProjectionBuilder.cs` — line numbers may have shifted after WS-3 edits or a master merge. Confirm the exact type WS-3 emits the computed label + level from.</step>
+    <step order="2" name="Add the reference fields">Add `computedNumber` (string), `numberingLevel` (int), `listPath` (ordinal chain), and `headingLevel` to the existing `ComposeDocxProjection` / `ParaIdMapEntry` types — do NOT create a new type. Keep serialization additive/back-compatible.</step>
+    <step order="3" name="Populate from WS-3">In `ComposeDocxProjectionBuilder.cs`, populate the new fields from WS-3's computed label + level during the existing single doc-order walk. Un-numbered paragraphs carry a consistent null/empty (documented convention), not a fabricated number.</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Seam slice">Add/extend a seam slice (`tests/integration/seam/`) asserting each corpus paragraph carries the correct reference fields against goldens — numbered/heading/multi-level carry their `computedNumber` + level; un-numbered carry the consistent null (ADR-038; no banned mock/DI/ctor tests).</step>
+    <step order="6" name="Build + hygiene">Build BFF; run the Compose suite + new seam. Run `dotnet publish -c Release` and report compressed size + delta vs ~49.63 MB (incl. PDBs). Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 040 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If adding the reference fields to the projection payload breaks an existing consumer contract (a serialization/version incompatibility — a client or the session ledger cannot deserialize the extended payload) — STOP and surface per root CLAUDE.md §6.5 before shipping. A silently breaking payload change is forbidden; confirm the additive-only path or the required migration first.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs (reference fields added to existing types)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (fields populated from WS-3 computation)</output>
+    <output type="test">tests/integration/seam/ (reference-field population seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the corpus documents projected, when the payload is inspected, then each paragraph exposes `computedNumber`, `numberingLevel`, `listPath`, and `headingLevel` alongside the existing `docOrderIndex` + `paraId`.</criterion>
+    <criterion testable="true">Given a numbered / heading-style / multi-level paragraph, when projected, then its `computedNumber` + level equal WS-3's computed value (e.g. `"4.2"`, `listPath [4,2]`) — no recomputation divergence from 031/032.</criterion>
+    <criterion testable="true">Given an un-numbered paragraph, when projected, then its reference fields carry the documented consistent null/empty — NOT a fabricated number.</criterion>
+    <criterion testable="true">The fields are added to the EXISTING `ComposeDocxProjection` / `ParaIdMapEntry` types; no new projection type or component is introduced (§11 extend-not-create).</criterion>
+    <criterion testable="true">Negative: the projection payload path does NOT inject any AI-internal type into `Services/Compose/` and does NOT reach `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest stays green (ADR-007/013).</criterion>
+    <criterion testable="true">A seam slice at the `tests/integration/seam/` KEEP path asserts the reference fields populate correctly; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null test is added (ADR-038).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size reported with ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 040 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-16; design §4 WS-4. This is the payload-shape half of the reference layer: 041 persists the
+    `paraId → number` map (projection payload + session ledger); 042 builds the citation resolver on top. WS-3 (033)
+    already computes the numbers — this task only surfaces them; do NOT re-implement the numbering algorithm here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,157 @@
+<task id="031" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-3: deterministic numbering computation engine (replay Word's algorithm)</title>
+    <phase>3 WS-3 Numbering</phase>
+    <gate>blocked until 030</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` with `bff-api`/`compose` tags; THE flagship — numbering-exactness is a release blocker (NFR-02). Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Flagship, high-blast-radius: numbering-exactness is a release blocker and a wrong legal number is worse than an absent one. Requires a deterministic algorithm that reproduces Word EXACTLY across letters/roman/legal/multi-level/style-linked/interrupted schemes — architectural correctness judgment, not mechanical transcription → opus.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends shared `Services/Compose/ComposeDocxProjectionBuilder.cs` (consumes the 030 model, runs in the same single walk) — the same file 030/032 touch. WS-3 flagship sequential stretch per plan.md group W3.</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api,compose,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the deterministic numbering computation engine — the flagship of R4.5 (design §4 WS-3 algorithm; spec
+    FR-11/FR-12). Reusing the projection's SINGLE document-order walk (`:18-26`) over the numbering model from 030:
+    (1) maintain a counter per `(abstractNumId, level)`; (2) for each numbered paragraph (direct `w:numPr` OR
+    style-linked via `pStyle`), increment its level's counter, apply `w:start`/restart/`w:lvlOverride`/
+    `w:startOverride`, and reset deeper levels per `w:lvlRestart`; (3) format each level via `w:numFmt`
+    (decimal/lowerLetter/upperLetter/lowerRoman/upperRoman/…) and compose the label from `w:lvlText`
+    (multi-level "4.2.1"), honoring `w:isLgl` (legal → decimal); (4) emit the computed label EXPLICITLY (never
+    browser auto-count) and attach it to the paragraph node for display + the WS-4 reference map. Support sub-item
+    depth granularity (the citation model needs "4.2(b)(iii)"). An interrupted numbered run MUST NOT restart at 1.
+    Deterministic — identical inputs produce identical labels (NFR-06).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer building the read-side numbering computation — the heart of the legal-fidelity
+    thesis. Deep expert in Word's numbering algorithm: per-`(abstractNumId, level)` counters, `w:start`/
+    `w:lvlRestart`/`w:lvlOverride`/`w:startOverride` semantics, `w:numFmt` formatters (decimal, lowerLetter a/b/c,
+    upperLetter A/B/C, lowerRoman i/ii/iii, upperRoman I/II/III), `w:lvlText` template substitution (`%1.%2.%3`),
+    and `w:isLgl` (legal — force decimal in a mixed cascade). Understands that a wrong legal number is worse than
+    an absent one. Follow ADRs — `Services/Compose/` stays pure `byte[]`-in/projection-out; determinism (NFR-06)
+    is mandatory (no reliance on browser render order).
+  </role>
+
+  <goal>
+    A deterministic computation engine, running inside the projection's single doc-order walk, that produces for
+    every numbered paragraph the EXACT label Word displays — decimal, letters, roman, legal, multi-level "4.2.1",
+    style-linked headings, and sub-item depth "4.2(b)(iii)" — attached to the paragraph node for display (032) and
+    the reference map (WS-4). Interrupted numbered runs continue (never restart at 1); heading-style numbers are no
+    longer dropped. Identical inputs produce identical labels across runs (NFR-06).
+  </goal>
+
+  <context>
+    <background>
+      This is the defect at the center of R4.5: today the projection reads a single bullet-vs-ordered bit and lets
+      the browser `&lt;ol&gt;` auto-count the number, so a new `&lt;ol&gt;` opens whenever the numbered run is interrupted
+      (heading/body/table) and EVERY clause restarts at 1; multi-level is discarded to a warning count; heading-
+      style numbers are dropped (design §1). No displayed number is ever computed on the read path. WS-3 replaces
+      all of that with a server-side replay of Word's algorithm over the 030 model. The engine reuses the existing
+      single document-order walk invariant (`:18-26`) — one pass, counters carried forward, so an interruption does
+      not reset the count. The computed label is emitted EXPLICITLY (not CSS auto-count) — 032 renders it as a
+      non-editable atom. The label granularity must reach sub-item depth ("4.2(b)(iii)") because WS-4's citation
+      model (FR-18) resolves that shape. Read-time only — no auto-renumber on edit (that is R5 G3; FR-14).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — add the computation engine into the single doc-order walk (`:18-26`); consume the 030 model; attach the computed label to each paragraph node. RE-GREP the walk + the 030 model surface before editing.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs — the write-side mirror (`LevelText`/`StartNumberingValue`) whose authored cascade the engine must reproduce; the 033 round-trip proves agreement.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/{nda-interrupted-clauses,heading-style-numbering,multilevel-1-1-1}.docx — the exemplars with golden Word labels (manifest, task 001) the engine must equal.</file>
+      <file role="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs — add numbering-computation tests asserting computed label == golden Word label for interrupted / multi-level / style-linked / letter / roman / legal cases.</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-11 (algorithm), FR-12 (style-linked), FR-14 (read-time only; G3 coupling), NFR-02 (numbering-exact release blocker), NFR-06 (determinism).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-3 "Algorithm (deterministic, single document-order walk)".</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Provides the parsed numbering model (abstractNum/level fields + style-linked (numId, ilvl)) this engine replays Word's algorithm over.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-11">The engine MUST replay Word's algorithm in a SINGLE document-order walk: a counter per `(abstractNumId, level)`; increment the numbered paragraph's level; apply `w:start`/`w:lvlRestart`/`w:lvlOverride`/`w:startOverride`; reset deeper levels per `w:lvlRestart`; format via `w:numFmt`; compose from `w:lvlText`; honor `w:isLgl` (legal → decimal). Scope: reuse the existing single-walk invariant (`:18-26`) — no second full-document pass; deterministic (NFR-06).</constraint>
+    <constraint source="spec / FR-12">Style-linked numbered paragraphs (numbered by `pStyle`, e.g. Heading2) MUST be counted by the engine exactly like direct `w:numPr` paragraphs. Scope: use the 030 model's resolved `(numId, ilvl)` regardless of direct vs style-linked source.</constraint>
+    <constraint source="spec / FR-13 granularity">The computed label MUST support sub-item depth granularity ("4.2(b)(iii)") because WS-4's citation model resolves that shape. Scope: compose the full ordinal chain per `w:lvlText`, deep enough that WS-4 (042) can express sub-item labels — do NOT truncate to top-level.</constraint>
+    <constraint source="spec / FR-14">Read-time ONLY — the engine does NOT auto-renumber on edit within R4.5. Scope: compute the label as read; record in notes that live renumber-on-insert/delete is R5 G3 and that WS-3's engine is the shared model G3 builds on.</constraint>
+    <constraint source="project / interrupted runs">An interrupted numbered run MUST NOT restart at 1. Scope: counters persist across intervening headings/body/tables in the single walk; the NDA interrupted-clause exemplar's golden labels continue (1,2,3…) across the interruption.</constraint>
+    <constraint source="ADR-007 / ADR-013">`Services/Compose/` stays pure `byte[]`-in/projection-out; no `Microsoft.Graph`, no AI-internal type. Scope: the engine is pure OOXML computation.</constraint>
+    <constraint source="ADR-038">Tests are KEEP-path (computed label == golden Word label over corpus). Scope: no `Mock&lt;HttpMessageHandler&gt;`/DI/ctor-null tests.</constraint>
+    <constraint source="project / BFF Hygiene §10">Pure computation on the existing `DocumentFormat.OpenXml` dependency — expected ~0 MB publish delta. Scope: `dotnet publish -c Release`, report compressed size + diff vs ~49.63 MB baseline; `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Word numbering algorithm (per-level counters, start/restart/override, numFmt formatters decimal/letter/roman/legal, lvlText template substitution, isLgl); single-walk determinism (NFR-06); sub-item depth granularity for citations</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Single-walk counter replay" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (single doc-order walk :18-26)">
+        Carry a counter per `(abstractNumId, level)` through the existing single walk. On each numbered paragraph: increment its level, reset deeper levels per `w:lvlRestart`, apply overrides, then format + compose. Because the walk is one pass with persistent counters, an interruption does not reset — that is exactly what fixes the "restart at 1" defect.
+      </pattern>
+      <pattern name="numFmt formatters + lvlText substitution" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-3">
+        `w:numFmt`: decimal (1), lowerLetter (a/b/…/z/aa), upperLetter (A/B/…), lowerRoman (i/ii/iii), upperRoman (I/II/III), bullet (glyph). `w:lvlText` `%1.%2.%3` substitutes each level's formatted counter; `w:isLgl` forces decimal for all inserted levels in a legal cascade.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: flagship `.cs` change, NFR-02 release blocker, opus tier / 📖 PROTOCOL STEPS incl. Step 9.5). Load spec FR-11/12/13/14 + NFR-02/06 + design §4 WS-3 algorithm.</step>
+    <step order="1" name="RE-GREP the walk + model surface">Confirm the single doc-order walk (`:18-26`) and the 030 model exposure points before editing.</step>
+    <step order="2" name="Implement the counter + increment logic">Maintain a counter per `(abstractNumId, level)`; on each numbered paragraph increment its level, reset deeper levels per `w:lvlRestart`, apply `w:start`/`w:lvlOverride`/`w:startOverride`.</step>
+    <step order="3" name="Implement numFmt formatters">Implement decimal / lowerLetter / upperLetter / lowerRoman / upperRoman (+ bullet passthrough); handle multi-letter overflow (z→aa) and roman edge cases.</step>
+    <step order="4" name="Compose the label via lvlText">Substitute each level's formatted counter into `w:lvlText` (`%1.%2.%3` → "4.2.1"), honoring `w:isLgl`. Ensure the composed label reaches sub-item depth for WS-4 ("4.2(b)(iii)").</step>
+    <step order="5" name="Attach computed label to the node">Emit the computed label EXPLICITLY and attach it to the paragraph node (for 032 display + WS-4 reference map). No browser auto-count.</step>
+    <step order="6" name="Golden-label tests">Add tests asserting computed label == golden Word label for interrupted / multi-level / style-linked / letter / roman / legal cases over the corpus; assert determinism (same input → same output). No banned mock/DI/ctor tests.</step>
+    <step order="7" name="Build + publish-size check">`dotnet build` + `dotnet test` green; `dotnet publish -c Release` size + diff (~0). `/conflict-check` before PR.</step>
+    <step order="8" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 031 to ✅. Record the G3 coupling (FR-14) + any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the computed label for ANY corpus doc cannot be made to equal Word's displayed label — STOP and escalate per §6. Numbering-exactness (NFR-02) is a release blocker; a wrong legal number is worse than an absent one, so a divergence is a hard stop, not a "close enough" note. Surface which construct diverges and why before proceeding.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>NONE — no numbering computation exists on the read path (grep of `ComposeDocxProjectionBuilder.cs`: only `ResolveOrdered`'s bullet-vs-ordered bit; the number is left to the browser `&lt;ol&gt;`). `ComposeDocumentRenderer` computes on the WRITE side only.</existing>
+    <extension>Yes — a new read-side capability INSIDE the existing builder, running in the existing single walk; not a new service or abstraction. It is the read-side twin of the existing write-side renderer.</extension>
+    <cost-of-doing-nothing>Numbered clauses render "1." repeated on every interruption and heading-style numbers are dropped — the core legal-fidelity defect. A legal reader cannot trust "Section 4.2" if the tool renders it as "1." or drops it.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF Compose suite; `dotnet publish -c Release` for the size check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (deterministic numbering computation engine — counters, formatters, lvlText composition, explicit label on the paragraph node)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (golden-label tests: interrupted / multi-level / style-linked / letter / roman / legal + determinism)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the NDA interrupted-clause exemplar, when computed, then numbered clauses continue (1,2,3…) across an intervening heading/body/table — no restart at 1.</criterion>
+    <criterion testable="true">Given `multilevel-1-1-1.docx`, when computed, then labels render "1" / "1.1" / "1.1.1" via `w:lvlText` composition with correct per-level counters.</criterion>
+    <criterion testable="true">Given `heading-style-numbering.docx`, when computed, then the style-linked heading renders its style-derived number ("4.2") — heading-style numbers no longer dropped (FR-12).</criterion>
+    <criterion testable="true">Letter (a/b/c), roman (i/ii/iii, I/II/III), and legal (`w:isLgl` → decimal) schemes each compute identical to Word's golden label; the composed label reaches sub-item depth ("4.2(b)(iii)") for WS-4.</criterion>
+    <criterion testable="true">The computed label is emitted EXPLICITLY on the paragraph node (not browser `&lt;ol&gt;` auto-count); identical inputs produce identical labels across runs (NFR-06 determinism).</criterion>
+    <criterion testable="true">Negative: any corpus doc whose computed label ≠ Word's displayed label triggers the escalation (hard stop), not a "close enough" pass.</criterion>
+    <criterion testable="true">Read-time only — no auto-renumber on edit; the G3 coupling (FR-14) is recorded in notes. `Services/Compose/` stays pure (ADR-007/013); BFF build + Compose suite green; publish ~0 MB delta; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 031 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    THE flagship. The engine's output is the shared numbering model R5 G3 (edit-time live renumber) will build on —
+    record that coupling (FR-14) so R5 does not fork the model. 032 renders the computed label as a non-editable
+    atom; 033 proves the read-side engine agrees with the write-side renderer. TASK-INDEX.md + current-task.md are
+    owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

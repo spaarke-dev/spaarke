@@ -1,0 +1,132 @@
+<task id="051" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-5 spike: evaluate the Word-rendering-service path + NFR-03 licensing analysis</title>
+    <phase>5 Page/Line Spike</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Research/licensing evaluation producing a notes deliverable — no code, no shipping surface, no cutover. STANDARD; Step 9.5 skipped by default.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Licensing + ops/architecture judgment (the permissive-only constraint, the true-Word-identical vs cost/latency tradeoff) — high-blast-radius reasoning that warrants Opus per root §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W5</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Evaluation/notes only — no shared source; runs alongside 050 (∥) and the W1–W4 waves per plan.md.</parallel-reason>
+    <deps>none</deps>
+    <tags>spike,research,licensing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Evaluate the Word-rendering-service path (Graph/Office rendering) as the ONLY true-Word-identical pagination
+    source (design §5.5) — assessing ops cost, licensing, and latency. Deliver the full NFR-03 licensing analysis:
+    MIT/permissive engines only; no commercial (Aspose, GemBox, Syncfusion) or AGPL paginator may be linked into the
+    BFF (ADR Tension T-1). Write findings to
+    `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-word-service-eval.md`. This is a research/licensing
+    evaluation — no code, no BFF change.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with ops + software-licensing fluency. Understands that only Word's own layout
+    (headless Word / Office rendering) is guaranteed Word-identical, and that this fidelity comes with ops,
+    licensing, and latency cost (design §5.5). Knows the NFR-03 hard rule (permissive-only; no commercial/AGPL
+    linked into the BFF) and the CLAUDE.md §9 escalation duty for ambiguous licensing. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A written evaluation `projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-word-service-eval.md` covering: (a) the
+    Word-rendering-service (Graph/Office) path as the true-Word-identical pagination source, with its ops /
+    licensing / latency cost characterized; and (b) a full NFR-03 licensing analysis of the candidate engines
+    (permissive-only; commercial and AGPL excluded from linking into the BFF, LibreOffice permitted only
+    out-of-process). The note gives task 052 the licensing + ops half of the ship-vs-defer decision.
+  </goal>
+
+  <context>
+    <background>
+      WS-5 must resolve the page/line fidelity question honestly (F-5). Task 050 measures the open-engine
+      (LibreOffice) path; THIS task evaluates the other end — a Word-rendering service (Graph/Office rendering),
+      which is the ONLY path that is truly Word-identical because it uses Word's own layout, but carries ops,
+      licensing, and latency cost (design §5.5). It also carries the binding NFR-03 constraint (ADR Tension T-1):
+      MIT/permissive only, no commercial (Aspose/GemBox/Syncfusion) or AGPL paginator linked into the BFF;
+      LibreOffice is permitted only as a separate process. This evaluation is the licensing + ops input to the WS-5
+      decision (task 052); it produces analysis, not code.
+    </background>
+    <relevant-files>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-word-service-eval.md — the Word-rendering-service evaluation + NFR-03 licensing analysis</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-19(b/c) (Word-service evaluation + NFR-03 licensing analysis), NFR-03 (permissive-only), NFR-04 (WS-5 engine is out-of-BFF-publish sidecar)</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5 (Word-rendering service = only true-Word-identical path, ops/licensing/latency cost), §9 T-1 (licensing tension, Path A)</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md — BFF publish-size + dependency governance (why an engine must not be linked/added to publish)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No dependencies — pure evaluation; can start early and run parallel to 050 and the W1–W4 waves. Its output feeds 052.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-03 / ADR Tension T-1">The licensing analysis MUST conclude permissive-only for anything linked into the BFF — no commercial (Aspose, GemBox, Syncfusion) or AGPL paginator. Scope: LibreOffice (MPL-2.0/LGPL) is acceptable ONLY as a separate process (cross-reference task 050); a Word-rendering service is evaluated on ops/licensing/latency, not linked-code, terms.</constraint>
+    <constraint source="NFR-04 / BFF §10">Whatever engine is evaluated, the note MUST treat it as an out-of-BFF-publish sidecar/service with its own size + ops budget — never a linked package added to the BFF publish. Scope: this task touches no `Services/Compose/` source and adds no project reference.</constraint>
+    <constraint source="F-5 / design §5.5">The note MUST frame the Word-rendering service as the only true-Word-identical path and characterize its cost honestly (ops/licensing/latency); it MUST NOT overstate any open-engine alternative as Word-identical. Scope: analysis is comparative input to 052, not a decision.</constraint>
+    <constraint source="CLAUDE.md §9">If any candidate engine's license is ambiguous, the note MUST flag it for human sign-off rather than assuming permissive. Scope: licensing is security-sensitive; do not silently resolve an ambiguous license.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Word/Office rendering services (Graph/Office) for Word-identical pagination; software license taxonomy (MIT/permissive vs commercial vs AGPL vs MPL/LGPL); NFR-03 permissive-only BFF boundary; ops/latency cost of an out-of-process rendering service</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="True-Word-identical only via Word layout" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5.5">
+        Only Word's own layout (headless Word / Office rendering) is guaranteed Word-identical; this is the path to evaluate for maximum fidelity, weighed against its ops/licensing/latency cost.
+      </pattern>
+      <pattern name="Permissive-only linking boundary" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §9 T-1">
+        No commercial (Aspose/GemBox/Syncfusion) or AGPL paginator linked into the BFF; LibreOffice out-of-process only; a rendering service evaluated on ops/licensing terms, not linked-code terms.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON: research/licensing evaluation, notes output / 📖 PROTOCOL STEPS). Load spec FR-19 + NFR-03/04 + design §5.5 + §9 T-1.</step>
+    <step order="1" name="Characterize the Word-service path">Evaluate the Word-rendering-service (Graph/Office) path: what it renders, whether it yields a Word-identical page/line map, and its ops / licensing / latency cost.</step>
+    <step order="2" name="NFR-03 licensing analysis">Analyze candidate engines against NFR-03: classify each license (MIT/permissive / commercial / AGPL / MPL-LGPL); conclude which may be linked into the BFF (none commercial/AGPL) and which may run only out-of-process (LibreOffice). Flag any ambiguous license for human sign-off (§9).</step>
+    <step order="3" name="Sidecar framing">State that any chosen engine is an out-of-BFF-publish sidecar/service with its own size + ops budget (NFR-04) — never a linked package.</step>
+    <step order="4" name="Write the evaluation note">Author `notes/ws5-word-service-eval.md` with the Word-service characterization, the licensing table, the sidecar framing, and an honest fidelity-vs-cost summary for task 052.</step>
+    <step order="5" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 051 status to ✅.</step>
+    <step order="6" name="Record deviations">Document any deviation (e.g. a flagged ambiguous license) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>No hard escalation is required for the evaluation itself, but if any candidate engine's license is ambiguous (unclear whether linking into the BFF is permitted), FLAG it for human sign-off per CLAUDE.md §9 (security/licensing) rather than assuming it is permissive.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No pagination/rendering-service integration exists; the Word-service path has never been evaluated (design §5.5 names it as an open question). Verified from the design's WS-5 framing.</existing>
+    <extension>No — this is an evaluation, not a component; it extends nothing in `Services/Compose/` and adds no reference. The go/defer is task 052.</extension>
+    <cost-of-doing-nothing>Without the Word-service + licensing evaluation, task 052 cannot weigh the only true-Word-identical option against the open-engine path, and the project risks either over-claiming page/line fidelity or breaching NFR-03 by linking a barred paginator.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws5-word-service-eval.md (Word-rendering-service evaluation + NFR-03 licensing analysis)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note characterizes the Word-rendering-service (Graph/Office) path as the true-Word-identical pagination source, with its ops / licensing / latency cost stated.</criterion>
+    <criterion testable="true">The note contains an NFR-03 licensing table classifying candidate engines (MIT/permissive / commercial / AGPL / MPL-LGPL) and concludes: no commercial/AGPL paginator linked into the BFF; LibreOffice out-of-process only.</criterion>
+    <criterion testable="true">The note frames any chosen engine as an out-of-BFF-publish sidecar with its own size + ops budget (NFR-04).</criterion>
+    <criterion testable="true">Any ambiguous license is flagged for human sign-off (§9), not silently resolved as permissive.</criterion>
+    <criterion testable="true">Negative: this task changes no `Services/Compose/` source and adds no project/package reference — evaluation + notes only.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 051 as ✅ and any deviation/flag is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The licensing + ops half of the WS-5 decision; pairs with the LibreOffice measurement (task 050) and feeds the
+    decision record (task 052). Can start early (no deps). Keep it honest: only Word's own layout is Word-identical,
+    and that fidelity carries cost — do not let a lower-cost open engine be described as Word-identical. TASK-INDEX.md
+    and current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
