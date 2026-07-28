@@ -241,22 +241,22 @@ const TOOLBAR_SELECTION_TEXT_CAP = 16000;
 // ---------------------------------------------------------------------------
 
 /**
- * The UI surfaces on which a tool can appear (Contextual AI Tool Library, phase 1 —
+ * The UI surfaces on which a tool can appear (Contextual AI Tool Library —
  * see `projects/ai-advanced-capabilities-nda-r1/notes/contextual-ai-tool-library-design.md`).
  * A tool's `surfaces` is the FIRST of the two library dimensions (the second is
- * `domains`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
+ * `workTypes`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
  * `whole-document` / `assistant-chip` are declared for future surfaces.
  */
 export type ToolSurface = 'selection' | 'review-note' | 'whole-document' | 'assistant-chip';
 
 /**
  * Optional runtime context a tool's `appliesTo` predicate may inspect. Kept minimal
- * for phase 1 (no predicate ships yet); a future tool can gate on the selection text
+ * for now (no predicate ships yet); a future tool can gate on the selection text
  * or the active document.
  */
 export interface ToolContext {
   readonly selectionText?: string;
-  readonly activeDomain?: string;
+  readonly activeWorkType?: string;
 }
 
 /**
@@ -287,7 +287,7 @@ export interface ComposeAiToolbarAction {
    */
   readonly materializesInEditor?: boolean;
 
-  // --- Contextual AI Tool Library (phase 1) — surfacing dimensions ---
+  // --- Contextual AI Tool Library — surfacing dimensions ---
   /**
    * WHICH UI surfaces render this tool. Defaults to `['selection']` when omitted
    * (= today's behavior: BubbleMenu only). A single definition may list several
@@ -297,11 +297,14 @@ export interface ComposeAiToolbarAction {
    */
   readonly surfaces?: readonly ToolSurface[];
   /**
-   * WHICH analysis verticals surface this tool. `['*']` (default) = shared/agnostic,
-   * shown in every vertical; `['nda']` = shown only when NDA is the active analysis.
-   * The active vertical narrows the surface's tool set to `domains ∋ '*' || activeDomain`.
+   * WHICH WORK TYPES surface this tool — the product surface the user chose by intent
+   * (`'agreement-analysis'`, `'legal-research'`, …), NOT the knowledge sub-domain (NDA
+   * vs MSA is a grounding difference within a work type, not a tool-scoping axis).
+   * `['*']` (default) = a shared edit primitive shown in every work type (e.g. Draft
+   * alternative / Make concise); `['agreement-analysis']` = shown only in that surface.
+   * The active work type narrows the surface's tool set to `workTypes ∋ '*' || activeWorkType`.
    */
-  readonly domains?: readonly string[];
+  readonly workTypes?: readonly string[];
   /** Optional runtime predicate — return `false` to hide the tool for the given context. */
   readonly appliesTo?: (ctx: ToolContext) => boolean;
   /** Free-text prompt seed for instruction-style tools (e.g. "Describe a change…"). */
@@ -353,7 +356,7 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     placement: 'primary',
     // Round-8 #6 (UAT): RETIRED from the selection surface — the explain output was
     // not useful in practice. Definition kept so a future context can re-tag it
-    // (`surfaces: ['selection']`) without re-authoring. `domains: ['*']` when re-enabled.
+    // (`surfaces: ['selection']`) without re-authoring. `workTypes: ['*']` when re-enabled.
     surfaces: [],
   },
   {
@@ -364,7 +367,7 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     placement: 'primary',
     // Round-8 #6 (UAT): RETIRED from the selection surface — redundant with the NDA
     // Review Notes (which already carry per-clause playbook comparison). Re-tag per
-    // domain if a non-advisory Compose context wants inline clause comparison.
+    // work type if a non-advisory Compose context wants inline clause comparison.
     surfaces: [],
   },
   {
@@ -378,7 +381,7 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     materializesInEditor: true,
     // Contextual AI Tool Library: the reusable edit primitive — shown on BOTH the
     // BubbleMenu and each Review Note's ⋮ menu, from this ONE definition (round-8 #4).
-    // `domains` defaults to ['*'] (available in every analysis vertical).
+    // `workTypes` defaults to ['*'] (a shared primitive, available in every work type).
     surfaces: ['selection', 'review-note'],
   },
   {
@@ -471,28 +474,30 @@ export function getComposeAiToolbarActions(): readonly ComposeAiToolbarAction[] 
 }
 
 /**
- * Contextual AI Tool Library selector (phase 1). Returns the tools that render on a
- * given `surface` for the `activeDomain`, applying both library dimensions plus the
+ * Contextual AI Tool Library selector. Returns the tools that render on a given
+ * `surface` for the `activeWorkType`, applying both library dimensions plus the
  * optional `appliesTo` predicate:
  *
- *   surfaces ∋ surface   AND   (domains ∋ '*' OR domains ∋ activeDomain)   AND   appliesTo(ctx) !== false
+ *   surfaces ∋ surface   AND   (workTypes ∋ '*' OR workTypes ∋ activeWorkType)   AND   appliesTo(ctx) !== false
  *
  * Defaults preserve today's behavior: a tool with no `surfaces` is treated as
- * `['selection']`; a tool with no `domains` is treated as `['*']` (agnostic). This is
- * how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu (`'review-note'`)
- * draw from ONE registry — a single definition surfaces in the contexts it declares.
+ * `['selection']`; a tool with no `workTypes` is treated as `['*']` (a shared primitive).
+ * This is how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu
+ * (`'review-note'`) draw from ONE registry — a single definition surfaces in the
+ * contexts it declares. `activeWorkType` is the product surface the user chose
+ * (`'agreement-analysis'` / `'legal-research'`), NOT the knowledge sub-domain.
  */
 export function getToolsForSurface(
   surface: ToolSurface,
-  activeDomain: string,
+  activeWorkType: string,
   ctx?: ToolContext
 ): readonly ComposeAiToolbarAction[] {
   return getComposeAiToolbarActions().filter(a => {
     const surfaces = a.surfaces ?? ['selection'];
     if (!surfaces.includes(surface)) return false;
-    const domains = a.domains ?? ['*'];
-    if (!domains.includes('*') && !domains.includes(activeDomain)) return false;
-    if (a.appliesTo && a.appliesTo(ctx ?? { activeDomain }) === false) return false;
+    const workTypes = a.workTypes ?? ['*'];
+    if (!workTypes.includes('*') && !workTypes.includes(activeWorkType)) return false;
+    if (a.appliesTo && a.appliesTo(ctx ?? { activeWorkType }) === false) return false;
     return true;
   });
 }
@@ -524,13 +529,14 @@ export interface ComposeAiToolbarProps {
    */
   actions?: ReadonlyArray<ComposeAiToolbarAction>;
   /**
-   * Contextual AI Tool Library (phase 1) — the ACTIVE analysis vertical, used to
-   * narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
-   * Defaults to `'*'` (agnostic): only `domains: ['*']` tools show. A host that runs
-   * a specific vertical (e.g. NDA review) passes its domain (`'nda'`) so
-   * domain-scoped tools also appear. Ignored when `actions` is supplied.
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user
+   * chose), used to narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
+   * Defaults to `'*'`: only shared `workTypes: ['*']` primitives show. A host running a
+   * specific work type (e.g. Agreement Analysis) passes its id (`'agreement-analysis'`)
+   * so work-type-scoped tools also appear. Knowledge sub-domain (NDA vs MSA) does NOT
+   * belong here — it only affects grounding. Ignored when `actions` is supplied.
    */
-  activeAnalysisDomain?: string;
+  activeWorkType?: string;
   /**
    * Contextual AI Tool Library (phase 3) — free-text tool prompt. When an action declares
    * an `inputPrompt` (e.g. "Describe a change…"), the toolbar calls this to collect the
@@ -675,7 +681,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     bffBaseUrl,
     dispatch,
     actions,
-    activeAnalysisDomain = '*',
+    activeWorkType = '*',
     onRequestInstruction,
     enqueueComposeAction,
     dispatchConsumerOverride,
@@ -869,12 +875,12 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const reviewItems = aiApplyValidation?.reviewQueue ?? [];
   if (!showActionToolbar && reviewItems.length === 0) return null;
 
-  // Contextual AI Tool Library (phase 1): the BubbleMenu IS the `selection` surface,
-  // so draw from `getToolsForSurface('selection', …)` — this is what drops the tools
-  // retired via `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and
-  // narrows to the active analysis vertical. `placement` remains the intra-surface
-  // primary-vs-overflow ORDERING. Tests may still inject a fixed `actions` list.
-  const allActions = actions ?? getToolsForSurface('selection', activeAnalysisDomain);
+  // Contextual AI Tool Library: the BubbleMenu IS the `selection` surface, so draw from
+  // `getToolsForSurface('selection', …)` — this is what drops the tools retired via
+  // `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and narrows to the
+  // active work type. `placement` remains the intra-surface primary-vs-overflow ORDERING.
+  // Tests may still inject a fixed `actions` list.
+  const allActions = actions ?? getToolsForSurface('selection', activeWorkType);
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 

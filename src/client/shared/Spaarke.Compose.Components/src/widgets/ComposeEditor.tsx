@@ -368,12 +368,13 @@ const NOTE_TOOL_SURFACE_LABELS: Record<string, string> = {
 };
 
 /**
- * Phase 1 uses the agnostic domain `'*'` for the Review-Note surface — every phase-1 tool
- * (Draft alternative) is `domains: ['*']`, so it shows regardless. The first DOMAIN-SCOPED note
- * tool (phase 3: `compose-draft-compliant-alternative`, `domains: ['nda']`) is what will require
- * threading the ACTIVE analysis domain here from the host session context (design decision #2).
+ * Fallback work type for the Review-Note surface when the host does not pass one. All shared
+ * edit primitives (Draft alternative / Make concise / Describe a change) are `workTypes: ['*']`,
+ * so they show regardless. A WORK-TYPE-SCOPED note tool (e.g. an agreement-analysis-only tool)
+ * shows only when the host threads `activeWorkType='agreement-analysis'` (via the ComposeEditor
+ * prop). Knowledge sub-domain (NDA vs MSA) is NOT this — it only affects grounding.
  */
-const NOTE_TOOL_ACTIVE_DOMAIN = '*';
+const NOTE_TOOL_FALLBACK_WORKTYPE = '*';
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -634,6 +635,14 @@ export interface ComposeEditorProps {
     /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
     placementFailureCount?: number;
   };
+  /**
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
+   * `'agreement-analysis'` (NDA/MSA/employment review), `'legal-research'`, … The host passes
+   * this so the BubbleMenu + Review-Note ⋮ menu surface work-type-scoped tools in addition to the
+   * shared `['*']` primitives. Defaults to `'*'` (shared primitives only). Knowledge sub-domain
+   * (NDA vs MSA) is NOT this — it only affects grounding. See the tool-library design doc.
+   */
+  activeWorkType?: string;
 }
 
 /**
@@ -1531,6 +1540,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       isSaving,
       commentAuthor = 'You',
       reviewSummary,
+      activeWorkType = '*',
     } = props;
 
     const styles = useStyles();
@@ -2230,10 +2240,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // BubbleMenu — a tool appears here because its definition declares `surfaces ∋ 'review-note'`
         // (round-8 #4: one Draft-alternative definition, two surfaces). `bindingId` filters out
         // still-stubbed tools; the label may be surface-overridden (NOTE_TOOL_SURFACE_LABELS).
-        getToolsForSurface('review-note', NOTE_TOOL_ACTIVE_DOMAIN)
+        getToolsForSurface('review-note', activeWorkType || NOTE_TOOL_FALLBACK_WORKTYPE)
           .filter(a => a.bindingId)
           .map(a => ({ id: a.id, label: NOTE_TOOL_SURFACE_LABELS[a.id] ?? a.label })),
-      []
+      [activeWorkType]
     );
     const [noteTools, setNoteTools] = React.useState(readNoteTools);
     React.useEffect(() => {
@@ -2693,6 +2703,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
               forceVisible
@@ -2954,6 +2965,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
             />
