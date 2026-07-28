@@ -264,3 +264,56 @@ analysis-hub investigation):
 structured deliverables (memo, outputs) → **Dataverse** (`sprk_analysis` / `sprk_analysisoutput`).
 
 **Next step:** run `/design-to-spec` → `/project-pipeline` on this design.
+
+---
+
+## 12. Surface + entry model (owner, 2026-07-28) — LOCKED
+
+**The working surface for an Analysis is the SpaarkeAi code page (the three-pane).** There is ONE Analysis
+experience; it renders in two hosting contexts — the SpaarkeAi workspace, or a **code-page modal** launched from
+a record form. The hub widget + wizard feed into that same surface.
+
+### 12.1 Entry / open matrix
+
+| # | Trigger | Behavior |
+|---|---|---|
+| **2a** | **New** analysis started in the **SpaarkeAi workspace** | Runs in the SpaarkeAi surface (exactly as NDA does today) — Assistant + Compose three-pane. |
+| **2b** | **New** analysis started **in a record** | The **analysis-type wizard opens** → user steps through → the analysis opens in the **code-page modal (three-pane)** with **regarding pre-set to the parent record** and the **"Create new" cards showing**. |
+| **2c** | **Existing** analysis opened from the **SpaarkeAi workspace dataset grid** | Opens in the SpaarkeAi surface/context. |
+| **2d** | **Existing** analysis opened **in a record** (from its Analysis subgrid) | Opens as a **code-page modal** (three-pane). |
+
+So: **new-in-record → wizard first, then modal**; **existing → straight to the surface** (workspace or modal by
+context). The modal host = the code-page-modal pattern (`navigateTo` + embedded-mode contract); investigate the
+exact reuse path (see §13 retirement/reuse investigation).
+
+### 12.2 Record ↔ Analysis relationship (LOCKED)
+- A record (Matter/Project/…) has a **tab/subgrid of its Analysis records**.
+- **A record can have MANY analyses; an Analysis belongs to exactly ONE record.** → the regarding is
+  **single-valued** (one populated regarding field per Analysis), which the RegardingResolver field-set pattern
+  models exactly (`sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingdocument` — one populated).
+  This is a clean 1:N record→analysis; the subgrid is the record-side view of that relationship.
+
+### 12.3 Analysis is a Dataverse record; the wizard populates it
+- Creating an Analysis = creating the `sprk_analysis` **Dataverse record**; the **create wizard populates its
+  fields** (name, description, work-type, regarding = parent record, access, next-steps) before the analysis runs.
+- 2b's "regarding pre-set to the parent record" = the wizard is launched *from* the record, so the parent is known
+  and the regarding field is pre-filled (the user doesn't pick it).
+
+### 12.4 Implication for scope
+The hub must deliver: **(i)** the SpaarkeAi-hosted hub widget (2a/2c) · **(ii)** the record-form **Analysis
+subgrid/tab** + a **"new analysis" launch → wizard → code-page modal** path (2b) · **(iii)** an **open-existing →
+code-page modal** path (2d) with regarding context. (i) is workspace-hosted; (ii)/(iii) are record-form-hosted via
+the code-page modal. Both host the same three-pane Analysis surface.
+
+---
+
+## 13. Existing-Analysis retirement + reuse investigation (IN PROGRESS 2026-07-28)
+
+Owner (critical): thoroughly investigate existing 'Analysis' components and where previous ones must be REMOVED —
+**especially the `sprk_analysisworkspace` HTML code-page web resource** (has a chat, document preview, analysis
+output). Likely retire, but understand fully first. Two Explore agents dispatched:
+1. `sprk_analysisworkspace` deep-dive — source, contents, invocation, dependencies, live-vs-legacy, retirement verdict.
+2. Analysis component landscape (server + client) — KEEP/RETIRE/MIGRATE map; record-subgrid reality; code-page-modal
+   reuse path for 2b/2d.
+
+Findings + the retirement/reuse map fold in here before `/design-to-spec`.
