@@ -834,6 +834,10 @@ public static class ComposeEndpoints
     private static async Task<IResult> Upload(
         [FromBody] ComposeUploadRequest? body,
         ITenantCache cache,
+        // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): project the retained bytes through the
+        // SAME builder LoadAsync uses (IComposeService.ProjectDocument), so this door renders via the
+        // one-reader projection branch instead of the client mammoth fallback (F-2).
+        IComposeService composeService,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -910,6 +914,28 @@ public static class ComposeEndpoints
                 _ => "application/octet-stream"
             };
 
+            // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): run the
+            // retained bytes through the SAME projection builder LoadAsync uses (via
+            // IComposeService.ProjectDocument) so the assistant-upload door renders through the one
+            // reader (F-2) instead of the client mammoth fallback. Fail-closed + best-effort — a
+            // non-.docx upload (e.g. a retained .pdf/.txt) or an unreadable source yields
+            // Status=Failed/CanEdit=false (never throws); the client keys off Status/CanEdit, not
+            // Html.Length, so this never fails the upload-mount itself (mirrors Load's own contract).
+            var projection = composeService.ProjectDocument(binary, ct);
+            if (projection.Status == ComposeProjectionStatus.Failed)
+            {
+                logger.LogWarning(
+                    "Compose upload-mount: DOCX projection failed for tenant={TenantId} session={SessionId} document={DocumentId} (code={Code}); client will fail closed (read-only / Open in Word) TraceId={TraceId}",
+                    tenantId, body.SessionId, body.DocumentId, projection.Warnings.FirstOrDefault()?.Code, httpContext.TraceIdentifier);
+            }
+            else if (projection.Warnings.Count > 0)
+            {
+                logger.LogInformation(
+                    "Compose upload-mount: DOCX projection partial for tenant={TenantId} session={SessionId} document={DocumentId}; warnings={Warnings}",
+                    tenantId, body.SessionId, body.DocumentId,
+                    string.Join(",", projection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+            }
+
             return Results.Ok(new ComposeUploadResponse(
                 SessionId: body.SessionId,
                 DocumentId: body.DocumentId,
@@ -917,6 +943,7 @@ public static class ComposeEndpoints
                 ContentType: contentType,
                 Content: binary,
                 Size: binary.Length,
+                Projection: MapProjectionResponse(projection),
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (Exception ex)
@@ -959,6 +986,27 @@ public static class ComposeEndpoints
 
         return (null, null);
     }
+
+    /// <summary>
+    /// Maps a <see cref="ComposeDocxProjection"/> (the service-level shape both <c>LoadAsync</c> and
+    /// <c>ProjectDocument</c> return) onto its wire DTO. FR-01 (task 010, spaarkeai-compose-fidelity-r4.5):
+    /// extracted from the Load response construction so the Upload endpoint reuses the IDENTICAL
+    /// mapping — one wire shape for every entry path (F-2 one reader), not a forked projection type.
+    /// </summary>
+    private static ComposeProjectionResponse MapProjectionResponse(ComposeDocxProjection projection) =>
+        new(
+            Status: projection.Status switch
+            {
+                ComposeProjectionStatus.Success => "success",
+                ComposeProjectionStatus.Partial => "partial",
+                _ => "failed",
+            },
+            CanEdit: projection.CanEdit,
+            Html: projection.Html,
+            Warnings: projection.Warnings
+                .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
+                .ToList(),
+            SchemaVersion: projection.SchemaVersion);
 
     private static async Task<IResult> Load(
         string documentSpeId,
@@ -1063,19 +1111,10 @@ public static class ComposeEndpoints
                 ImportedRevisions: result.ImportedRevisions,
                 ImportedComments: result.ImportedComments,
                 // Phase-1 mammoth removal: the server-side projection (paraId-tagged HTML + fail-closed status).
-                Projection: new ComposeProjectionResponse(
-                    Status: result.Projection.Status switch
-                    {
-                        ComposeProjectionStatus.Success => "success",
-                        ComposeProjectionStatus.Partial => "partial",
-                        _ => "failed",
-                    },
-                    CanEdit: result.Projection.CanEdit,
-                    Html: result.Projection.Html,
-                    Warnings: result.Projection.Warnings
-                        .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
-                        .ToList(),
-                    SchemaVersion: result.Projection.SchemaVersion),
+                // FR-01 (task 010): mapping extracted to the shared MapProjectionResponse helper so the
+                // Upload endpoint (below) reuses the IDENTICAL wire-shape mapping instead of forking it
+                // (root CLAUDE.md §11 — extend, don't duplicate).
+                Projection: MapProjectionResponse(result.Projection),
                 CorrelationId: httpContext.TraceIdentifier));
         }
         catch (ArgumentException ex)
@@ -1792,7 +1831,9 @@ public sealed record ComposeUploadRequest(
 /// <summary>
 /// Response shape for <c>POST /api/compose/upload</c>. <c>Content</c> serializes as a base64
 /// string (System.Text.Json byte[] convention) — the client decodes it into the editor's
-/// <c>docxBytes</c> transient-mount seam, exactly like the Load endpoint's <c>content</c>.
+/// <c>docxBytes</c> transient-mount seam, exactly like the Load endpoint's <c>content</c>. Retained
+/// so a later Save (create-on-save) can still send the baseline bytes — FR-01 ADDS
+/// <see cref="Projection"/> alongside it; it does not replace it.
 /// </summary>
 public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("sessionId")] string SessionId,
@@ -1801,6 +1842,13 @@ public sealed record ComposeUploadResponse(
     [property: JsonPropertyName("contentType")] string ContentType,
     [property: JsonPropertyName("content")] byte[] Content,
     [property: JsonPropertyName("size")] long Size,
+    // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): the server
+    // DOCX→editor projection built from these SAME Content bytes via ComposeDocxProjectionBuilder —
+    // the IDENTICAL shape LoadComposeDocumentResponse.Projection carries (ComposeProjectionResponse,
+    // mapped by the shared MapProjectionResponse helper below). The client upload effect hydrates
+    // this into `mountTransient` so the editor mounts via the SAME projection branch as a
+    // stored-document Load, instead of the client mammoth fallback (F-2 one reader).
+    [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
     [property: JsonPropertyName("correlationId")] string CorrelationId);
 
 /// <summary>

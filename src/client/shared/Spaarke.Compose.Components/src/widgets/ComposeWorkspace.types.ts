@@ -185,7 +185,21 @@ export type ComposeWorkspaceAction =
   // the caller MINTS a client-generated document session id and threads it here. When omitted
   // (the upload path's `mountTransient`, which follows `requestUploadMount`) the reducer
   // preserves the sessionId already on state — INVARIANT: no mount leaves state.sessionId empty.
-  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string; sessionId?: string }
+  //
+  // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): `projection`, when supplied, is the SAME
+  // ComposeServerProjection shape the stored-doc Load path hydrates (see the `loadSucceeded`
+  // action above) — the assistant-upload door (POST /api/compose/upload) now runs the uploaded
+  // bytes through the server projection builder too. Undefined/omitted (the Browse-direct-upload
+  // door, not yet wired — task 011) normalizes to `null` in the reducer, preserving the existing
+  // mammoth-fallback behavior for that door unchanged.
+  | {
+      kind: 'mountTransient';
+      docxBytes: ArrayBuffer;
+      fileName?: string;
+      containerId?: string;
+      sessionId?: string;
+      projection?: ComposeServerProjection | null;
+    }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
   // (inline draft / Blank page / Open template). Without it state.sessionId stays '', which makes the
@@ -333,8 +347,13 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
-        // No server round-trip → no projection; the editor falls back to the client mammoth convert.
-        projection: null,
+        // FR-01 (task 010): the assistant-upload door now supplies a server projection built from
+        // the SAME uploaded bytes (POST /api/compose/upload runs them through
+        // ComposeDocxProjectionBuilder) — hydrate it so the editor mounts via the projection branch,
+        // identical to stored-doc Load. The Browse-direct-upload door (task 011, not yet wired)
+        // still omits `action.projection`, which normalizes to `null` here — unchanged mammoth
+        // fallback for that door until 011 lands.
+        projection: action.projection ?? null,
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE

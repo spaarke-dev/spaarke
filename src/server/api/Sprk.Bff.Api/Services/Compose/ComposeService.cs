@@ -218,6 +218,12 @@ public class ComposeService : IComposeService
     }
 
     /// <inheritdoc />
+    // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): reuses the SAME _projectionBuilder instance
+    // LoadAsync builds the Load-path projection from — one builder, one shape, both doorways (F-2).
+    public ComposeDocxProjection ProjectDocument(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+        => _projectionBuilder.Build(content, cancellationToken);
+
+    /// <inheritdoc />
     public async Task<LoadComposeDocumentResult> LoadAsync(
         LoadComposeDocumentRequest request,
         HttpContext httpContext,

@@ -1975,6 +1975,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           content: string;
           fileName?: string;
           size?: number;
+          // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5): the server DOCX→editor projection,
+          // built from these SAME uploaded bytes via ComposeDocxProjectionBuilder — the identical
+          // shape the stored-doc Load response carries. Optional so an older BFF (no projection
+          // field) still mounts via the mammoth fallback (backward compatible).
+          projection?: {
+            status?: 'success' | 'partial' | 'failed';
+            canEdit?: boolean;
+            html?: string;
+            warnings?: { code: string; count: number }[];
+            schemaVersion?: string;
+          };
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -1986,6 +1997,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }
         if (ac.signal.aborted) return;
 
+        // Normalize the server projection defensively — same shape/defaults as the Load effect
+        // above. An older BFF (no projection field) → null → the editor falls back to mammoth.
+        const up = payload.projection;
+        const hydratedUploadProjection = up
+          ? {
+              status: up.status ?? 'failed',
+              canEdit: up.canEdit ?? false,
+              html: up.html ?? '',
+              warnings: Array.isArray(up.warnings) ? up.warnings : [],
+              schemaVersion: up.schemaVersion ?? 'compose-html-v1',
+            }
+          : null;
+
         // An upload mount has no SPE drive — clear any stale Search-resolved drive id
         // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
         setSearchResolvedDriveId(null);
@@ -1995,6 +2019,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           fileName: payload.fileName ?? uploadRef.fileName,
           // FR-05 (task 100): thread the host-resolved BU container for create-on-save.
           containerId: containerIdRef.current,
+          projection: hydratedUploadProjection,
         });
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
