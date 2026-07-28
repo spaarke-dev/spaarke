@@ -1688,6 +1688,78 @@ public sealed class ComposeDocxProjectionBuilderTests
         labels.Should().Equal("5.", "6.", "7.");
     }
 
+    // ── multiple w:num over ONE w:abstractNum: instance-scoped counters (ECMA-376) — task-035/DEF-03 ──
+    // The golden corpus never exercised this (every corpus doc uses a single numId per abstractNum), yet
+    // the WRITE side (ComposeDocumentRenderer) authors exactly this shape: every ordered list broken by a
+    // non-list block gets a FRESH w:num instance + w:startOverride=1 so it "Restart[s] at 1". These two
+    // tests permanently cover that blind spot — the read-side counter is keyed by (numId, level), NOT the
+    // shared (abstractNumId, level), so two instances keep INDEPENDENT counters per ECMA-376.
+
+    [Fact]
+    public void Compute_TwoNumIdsSharingOneAbstractNumWithStartOverride_SecondListRestartsAt1()
+    {
+        // The exact DEF-03 shape at the engine unit level: numId 1 and numId 2 both reference abstractNum 8
+        // ("%1." decimal, start=1); numId 2 carries a level-0 w:startOverride=1 (the standard "Restart at 1"
+        // idiom the renderer emits for the second list). Two clauses on numId 1, an intervening paragraph,
+        // then two clauses on numId 2. The second list MUST read "1.", "2." — NOT "3.", "4." (the pre-fix
+        // (abstractNumId, level)-keyed engine continued list 1's count into list 2).
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = "%1." })
+                { LevelIndex = 0 })
+            { AbstractNumberId = 8 },
+            new NumberingInstance(new AbstractNumId { Val = 8 }) { NumberID = 1 },
+            new NumberingInstance(
+                new AbstractNumId { Val = 8 },
+                new LevelOverride(new StartOverrideNumberingValue { Val = 1 }) { LevelIndex = 0 })
+            { NumberID = 2 });
+
+        var labels = ComputedNumbers(numbering,
+            NumberedPara("0P1A0001", "First A", numId: 1),
+            NumberedPara("0P1A0002", "First B", numId: 1),
+            Para("0P1A0003", "Some intervening prose that breaks the ordered run."),
+            NumberedPara("0P2A0001", "Second A", numId: 2),
+            NumberedPara("0P2A0002", "Second B", numId: 2));
+
+        labels.Should().Equal(new string?[] { "1.", "2.", null, "1.", "2." },
+            "a second w:num instance sharing the abstractNum keeps an INDEPENDENT counter (ECMA-376) and " +
+            "its w:startOverride=1 restarts the list — it must NOT continue the first list's count");
+    }
+
+    [Fact]
+    public void Compute_TwoIndependentNumIdsInterleaved_EachMaintainsItsOwnCounterIndependently()
+    {
+        // ECMA-376 instance-scoping proven without ANY startOverride: numId 1 and numId 2 both reference
+        // abstractNum 8. Two items on numId 1, two on numId 2, then RESUME numId 1. numId 2 must start
+        // fresh at "1." (its own abstractNum start, independent counter), while numId 1 CONTINUES to "3."
+        // after the numId-2 interruption — a single test that guards BOTH the restart (independence) and
+        // the continue-within-a-single-numId (no false restart) behaviors the fix must satisfy together.
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = "%1." })
+                { LevelIndex = 0 })
+            { AbstractNumberId = 8 },
+            new NumberingInstance(new AbstractNumId { Val = 8 }) { NumberID = 1 },
+            new NumberingInstance(new AbstractNumId { Val = 8 }) { NumberID = 2 });
+
+        var labels = ComputedNumbers(numbering,
+            NumberedPara("0Q1A0001", "list1 a", numId: 1),
+            NumberedPara("0Q1A0002", "list1 b", numId: 1),
+            NumberedPara("0Q2A0001", "list2 a", numId: 2),
+            NumberedPara("0Q2A0002", "list2 b", numId: 2),
+            NumberedPara("0Q1A0003", "list1 c", numId: 1));
+
+        labels.Should().Equal(new string?[] { "1.", "2.", "1.", "2.", "3." },
+            "numId 2 keeps its own counter (restarts at 1) while numId 1 continues its own count (to 3) " +
+            "across the interleaving — counters are instance-scoped, never shared via the abstractNum");
+    }
+
     // ── style-linked headings (FR-12) ───────────────────────────────────────────────────────────────
 
     [Fact]

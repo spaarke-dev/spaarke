@@ -152,7 +152,7 @@ public sealed class ComposeDocxProjectionBuilder
                 var numberingDiagnostics = new List<string>();
 
                 // Task 031 (WS-3, FR-11..FR-14): the deterministic numbering COMPUTATION engine — replays
-                // Word's per-(abstractNumId, level) counter algorithm over the 030 model IN THIS SAME
+                // Word's per-(numId, level) instance-scoped counter algorithm over the 030 model IN THIS SAME
                 // document-order Pass-1 walk. Because counters are carried forward across the whole pass, an
                 // interrupted numbered run (heading/body/table between clauses) does NOT reset to 1 — the
                 // core defect this fixes. Read-time only (no auto-renumber on edit; that is R5 G3 / FR-14).
@@ -197,7 +197,7 @@ public sealed class ComposeDocxProjectionBuilder
 
                         // Task 031: advance the counters (in doc order) and compute the displayed label.
                         // MUST run for EVERY numbered paragraph in order — including style-linked headings
-                        // ListInfo excludes from list treatment — so the single per-(abstractNumId, level)
+                        // ListInfo excludes from list treatment — so the per-(numId, level) instance-scoped
                         // counter is exact (FR-11/FR-12). The engine mutates its counters here; the returned
                         // label is attached to this paragraph's ParaIdMap entry for 032 render + WS-4 (FR-13).
                         computedNumber = numberingEngine.Compute(numberingRef);
@@ -1309,9 +1309,12 @@ public sealed class ComposeDocxProjectionBuilder
     /// continues (never restarts at 1). Stateful within one <c>Build</c> call, never shared across documents.
     /// </summary>
     /// <remarks>
-    /// <para><b>Counter model.</b> One running counter per <c>(abstractNumId, level)</c> (design §4 WS-3
-    /// step 1). On each numbered paragraph the paragraph's level increments (or initializes to
-    /// <c>w:start</c> / <c>w:startOverride</c> on first use since a reset), then all DEEPER levels reset per
+    /// <para><b>Counter model.</b> One running counter per <c>(numId, level)</c> — scoped to the numbering
+    /// INSTANCE (<c>w:num</c>) per ECMA-376, NOT the shared <c>w:abstractNum</c> (task-035 / DEF-03 fix;
+    /// two <c>w:num</c> over one <c>w:abstractNum</c> keep independent counters, so a fresh instance's
+    /// <c>w:startOverride</c> restarts at 1). On each numbered paragraph the paragraph's level increments
+    /// (or initializes to <c>w:start</c> / <c>w:startOverride</c> on first use since a reset), then all
+    /// DEEPER levels reset per
     /// Word's default (a more-significant level increment restarts deeper levels) as modified by
     /// <c>w:lvlRestart</c> (<c>0</c> ⇒ never restart). The label is then composed from the level's
     /// <c>w:lvlText</c> template, substituting each <c>%n</c> with the counter at level <c>n-1</c> formatted
@@ -1325,10 +1328,20 @@ public sealed class ComposeDocxProjectionBuilder
     {
         private readonly NumberingModel _model;
 
-        // The running ordinal per (abstractNumId, level) — the spec/design "counter per (abstractNumId,
-        // level)". Absence of a key means the level has not been used since its last reset (next use
-        // initializes to w:start / w:startOverride).
-        private readonly Dictionary<(int AbstractNumId, int Level), int> _counters = new();
+        // The running ordinal per (numId, level). Per ECMA-376 a numbering counter is scoped to the
+        // numbering-definition INSTANCE (w:num / numId), NOT the shared abstract definition
+        // (w:abstractNum / abstractNumId): two independent w:num referencing one w:abstractNum have
+        // INDEPENDENT counters by construction, which is exactly why a w:startOverride on a fresh
+        // instance is the standard Word "Restart at 1" idiom (authored by ComposeDocumentRenderer for
+        // every ordered list broken by a non-list block). Keying by (abstractNumId, level) — the task-031
+        // original — silently continued the second list's count instead of restarting it (DEF-03 /
+        // task-035 fix). Corpus-safe: every corpus doc uses a single numId per abstractNum, so numId and
+        // abstractNumId are in 1:1 correspondence there — the 24-case golden Theory is bit-identical under
+        // this keying; only the multi-numId-per-abstractNum case (which the write side authors and the
+        // corpus never contained) changes, and changes to the CORRECT ECMA-376 behavior. Absence of a
+        // key means the level has not been used since its last reset (next use initializes to
+        // w:start / w:startOverride).
+        private readonly Dictionary<(int NumId, int Level), int> _counters = new();
 
         // (numId, level) whose numId-scoped w:startOverride has already been consumed. A w:startOverride
         // seeds the FIRST use of that numId's level; after a subsequent reset the level falls back to the
@@ -1355,8 +1368,11 @@ public sealed class ComposeDocxProjectionBuilder
 
             var levelDef = _model.ResolveLevel(numId, ilvl);
 
-            // 1) increment this level's counter (initialize on first use since the last reset).
-            var key = (abstractNumId, ilvl);
+            // 1) increment this numId-instance's counter for this level (initialize on first use since the
+            //    last reset). A FRESH numId sharing an already-warm abstractNum has NO key yet, so it
+            //    initializes via InitialValue (honoring its own w:startOverride) rather than continuing the
+            //    prior numId's count — the ECMA-376 instance-scoped restart (DEF-03 fix).
+            var key = (numId, ilvl);
             if (_counters.TryGetValue(key, out var current))
             {
                 _counters[key] = current + 1;
@@ -1366,8 +1382,9 @@ public sealed class ComposeDocxProjectionBuilder
                 _counters[key] = InitialValue(numId, ilvl, levelDef);
             }
 
-            // 2) reset deeper levels of this abstractNum (Word default, honoring w:lvlRestart).
-            ResetDeeperLevels(abstractNumId, ilvl);
+            // 2) reset deeper levels of THIS numId instance (Word default, honoring w:lvlRestart). Only this
+            //    instance's deeper levels reset — a sibling numId sharing the abstractNum is independent.
+            ResetDeeperLevels(numId, abstractNumId, ilvl);
 
             // 3) format + compose the displayed label.
             return ComposeLabel(numId, abstractNumId, ilvl, levelDef);
@@ -1385,12 +1402,14 @@ public sealed class ComposeDocxProjectionBuilder
             return levelDef?.Start ?? 1; // w:start default is 1 (ECMA-376 §17.9.25).
         }
 
-        private void ResetDeeperLevels(int abstractNumId, int incrementedLevel)
+        private void ResetDeeperLevels(int numId, int abstractNumId, int incrementedLevel)
         {
             // Snapshot the keys first (cannot mutate _counters while enumerating). Removal order is
-            // irrelevant to the result — determinism holds regardless of hash-iteration order.
+            // irrelevant to the result — determinism holds regardless of hash-iteration order. Only THIS
+            // numId instance's deeper levels reset (w:lvlRestart is defined on the shared abstractNum's
+            // level, so ShouldRestart still consults abstractNumId).
             var deeper = _counters.Keys
-                .Where(k => k.AbstractNumId == abstractNumId && k.Level > incrementedLevel)
+                .Where(k => k.NumId == numId && k.Level > incrementedLevel)
                 .ToList();
             foreach (var k in deeper)
             {
@@ -1432,7 +1451,7 @@ public sealed class ComposeDocxProjectionBuilder
             // No template (rare/malformed): fall back to the bare formatted current counter.
             if (string.IsNullOrEmpty(lvlText))
             {
-                var v = _counters.TryGetValue((abstractNumId, ilvl), out var cv) ? cv : 1;
+                var v = _counters.TryGetValue((numId, ilvl), out var cv) ? cv : 1;
                 return FormatCounter(v, numFmt);
             }
 
@@ -1457,7 +1476,7 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     var refLevel = (lvlText[i + 1] - '0') - 1; // %n references level n-1 (0-based)
                     var refDef = _model.ResolveLevel(numId, refLevel);
-                    var value = _counters.TryGetValue((abstractNumId, refLevel), out var cv)
+                    var value = _counters.TryGetValue((numId, refLevel), out var cv)
                         ? cv
                         : (refDef?.Start ?? 1); // a not-yet-counted referenced level shows its start (valid docs reference only 0..current)
                     var fmt = legal ? NumberFormatValues.Decimal : refDef?.NumFmt;

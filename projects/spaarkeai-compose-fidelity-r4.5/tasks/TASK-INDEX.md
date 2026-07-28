@@ -21,8 +21,8 @@
 | 030 | Numbering-model reader (numbering.xml + style-linked) | 3 Numbering | WS-3 | sonnet | xhigh | FULL | 022 | ✘ | ✅ (model exposed for 031; HTML byte-identical) |
 | 031 | **Numbering computation engine (replay Word)** | 3 Numbering | WS-3 | **opus** | xhigh | FULL | 030 | ✘ | ✅ **NFR-02 GREEN — 24/24 golden = Word; theory live** |
 | 032 | Render computed label as non-editable number-atom | 3 Numbering | WS-3 | sonnet | high | FULL | 031 | ✘ | ✅ (widget-decoration; text-exact + numbering-exact green) |
-| 033 | Round-trip agreement test (write-side ↔ read-side) | 3 Numbering | WS-3 | sonnet | high | FULL | 032 | ✘ | ✅ (caught **DEF-03**; test red until 035) |
-| 035 | **Fix DEF-03**: numId-aware counter/reset in NumberingComputationEngine | 3 Numbering | WS-3 | **opus** | xhigh | FULL | 033 | ✘ | 🔄 |
+| 033 | Round-trip agreement test (write-side ↔ read-side) | 3 Numbering | WS-3 | sonnet | high | FULL | 032 | ✘ | ✅ (caught **DEF-03**; now green) |
+| 035 | **Fix DEF-03**: numId-aware counter/reset in NumberingComputationEngine | 3 Numbering | WS-3 | **opus** | xhigh | FULL | 033 | ✘ | ✅ (counter re-keyed (numId,level); 694 pass/0 fail) |
 | 034 | Deploy + UAT — numbering identical to Word | 3 Numbering | WS-3 | sonnet | med | STANDARD | 033 | ✘ | 🔲 |
 | 040 | Extend projection with reference fields | 4 Reference | WS-4 | sonnet | high | FULL | 033 | ✘ | 🔲 |
 | 041 | Persist `paraId → number` (payload + session ledger) | 4 Reference | WS-4 | sonnet | high | FULL | 040 | ✘ | 🔲 |
