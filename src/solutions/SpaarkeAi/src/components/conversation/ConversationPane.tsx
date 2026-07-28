@@ -87,7 +87,7 @@ import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./compos
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown, toDisplayList, type EventClassificationData } from "./DocumentUploadedEventStream";
-import { formatComposeActionResultMarkdown } from "./composeResultFormat";
+import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
@@ -934,10 +934,17 @@ export function ConversationPane(): React.JSX.Element {
             // to a plain confirmation (no controls — there is no addressable edit to act on).
             // DEF-11: a whole-document revise uses the document-scoped confirmation copy; a
             // selection edit (DEF-09, unchanged) keeps the original wording. Same controls either way.
-            const confirmationText =
+            const baseConfirmation =
               request.revisionScope === "whole-document"
                 ? COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION
                 : COMPOSE_EDIT_CONFIRMATION;
+            // UAT round-8 #7 — the reviewer asked for a Copilot-style explanation of WHAT/WHY changed
+            // (the summary-only confirmation gave no detail). Append the model's own rationale/summary
+            // from the edit result — the explanation ONLY, never the proposed text (that IS the redline).
+            const explanation = extractComposeEditExplanation(dispatched.result);
+            const confirmationText = explanation
+              ? `${baseConfirmation}\n\n**What I changed:** ${explanation}`
+              : baseConfirmation;
             injection.enqueue(
               ledgerRef
                 ? makeComposeEditControlsMessage(confirmationText, {
