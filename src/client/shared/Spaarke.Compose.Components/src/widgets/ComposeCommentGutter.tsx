@@ -71,11 +71,18 @@ import {
   Popover,
   PopoverTrigger,
   PopoverSurface,
+  Menu,
+  MenuTrigger,
+  MenuPopover,
+  MenuList,
+  MenuItem,
+  Button,
+  Tooltip,
   makeStyles,
   mergeClasses,
   tokens,
 } from '@fluentui/react-components';
-import { ChevronDoubleDown16Regular } from '@fluentui/react-icons';
+import { ChevronDoubleDown16Regular, MoreVertical20Regular, SparkleRegular } from '@fluentui/react-icons';
 import { findCommentAnchorRange, type ComposeCommentThreadModel } from './ComposeCommentThread.types';
 import { riskBadgeColor, formatClauseLocation } from './NdaReviewSummaryPanel';
 import { deriveClauseLocationLabel } from './ndaClauseLocation';
@@ -191,6 +198,19 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'space-between',
     columnGap: tokens.spacingHorizontalXS,
+  },
+  // UAT round-8 #3 — the risk badge + the ⋮ tools menu sit together on the header's right.
+  cardHeaderRight: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXXS,
+    flexShrink: 0,
+  },
+  toolsButton: {
+    minWidth: '24px',
+    width: '24px',
+    height: '24px',
+    padding: 0,
   },
   sectionRef: {
     color: tokens.colorNeutralForeground2,
@@ -397,6 +417,22 @@ export interface ComposeCommentGutterProps {
    * original expand/collapse behavior.
    */
   onSelectThread?: (threadId: string) => void;
+  /**
+   * UAT round-8 #3/#4/#5 — the AI edit tools offered per Review Note (a ⋮ overflow menu), e.g. "Draft
+   * compliant alternative". Driven by the host from the binding-wired compose edit actions, so the list
+   * grows automatically as more tools are seeded (extensibility #5). Omit / empty → no ⋮ menu.
+   */
+  noteTools?: readonly NoteTool[];
+  /** UAT round-8 #4 — run a note tool against the thread's clause span (host dispatches the AI edit). */
+  onRunNoteTool?: (threadId: string, toolId: string) => void;
+}
+
+/** One AI edit tool offered on a Review Note's ⋮ menu (UAT round-8 #3/#4). */
+export interface NoteTool {
+  /** The compose action id (e.g. `compose-draft-alternative`). */
+  id: string;
+  /** The menu label shown to the reviewer (e.g. "Draft compliant alternative"). */
+  label: string;
 }
 
 /**
@@ -511,6 +547,8 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
     resolveStandardText,
     selectedThreadId = null,
     onSelectThread,
+    noteTools,
+    onRunNoteTool,
   } = props;
   const styles = useStyles();
   const railRef = React.useRef<HTMLDivElement | null>(null);
@@ -825,16 +863,55 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
               <Text weight="semibold" size={200} className={styles.sectionRef}>
                 {loc ?? 'Comment'}
               </Text>
-              {thread.riskLevel ? (
-                <Badge
-                  appearance="tint"
-                  size="small"
-                  color={riskBadgeColor(thread.riskLevel)}
-                  data-testid={`compose-comment-gutter-risk-${thread.id}`}
-                >
-                  {thread.riskLevel}
-                </Badge>
-              ) : null}
+              <div className={styles.cardHeaderRight}>
+                {thread.riskLevel ? (
+                  <Badge
+                    appearance="tint"
+                    size="small"
+                    color={riskBadgeColor(thread.riskLevel)}
+                    data-testid={`compose-comment-gutter-risk-${thread.id}`}
+                  >
+                    {thread.riskLevel}
+                  </Badge>
+                ) : null}
+                {/* UAT round-8 #3/#4/#5 — the ⋮ AI-tools menu for THIS Review Note. stopPropagation keeps
+                    opening the menu from selecting/expanding the card. */}
+                {onRunNoteTool && noteTools && noteTools.length > 0 ? (
+                  <Menu positioning="below-end">
+                    <MenuTrigger disableButtonEnhancement>
+                      <Tooltip content="AI tools for this note" relationship="label" withArrow>
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={<MoreVertical20Regular />}
+                          className={styles.toolsButton}
+                          aria-label="AI tools for this note"
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => e.stopPropagation()}
+                          data-testid={`compose-comment-gutter-tools-${thread.id}`}
+                        />
+                      </Tooltip>
+                    </MenuTrigger>
+                    <MenuPopover onClick={e => e.stopPropagation()}>
+                      <MenuList>
+                        {noteTools.map(tool => (
+                          <MenuItem
+                            key={tool.id}
+                            icon={<SparkleRegular />}
+                            onClick={e => {
+                              e.stopPropagation();
+                              onRunNoteTool(thread.id, tool.id);
+                            }}
+                            data-testid={`compose-comment-gutter-tool-${thread.id}-${tool.id}`}
+                          >
+                            {tool.label}
+                          </MenuItem>
+                        ))}
+                      </MenuList>
+                    </MenuPopover>
+                  </Menu>
+                ) : null}
+              </div>
             </div>
             {/* UAT round-5 #7 / round-6 #5 / round-7 — ALWAYS split into the renamed "Flagged clause" /
                 "Assessment says" labelled paragraphs, collapsed (first segment, truncated) AND expanded

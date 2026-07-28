@@ -89,7 +89,12 @@ import {
   DocumentProhibited24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
-import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
+import {
+  ComposeAiToolbar,
+  type ComposeActionEnqueue,
+  getComposeAiToolbarActions,
+  subscribeComposeAiToolbarActions,
+} from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import { NdaReviewSummaryPanel, NDA_REVIEW_DISCLAIMER_TEXT, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
@@ -325,6 +330,19 @@ const SELECTION_TEXT_CAP = 2000;
  */
 const DEFERRED_FORMAT_NOTICE =
   "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied. Your text edits are still saved.";
+
+/**
+ * UAT round-8 #3/#4/#5 — the compose EDIT-action ids offered on a Review Note's ⋮ menu, mapped to their
+ * note-menu label. An explicit allow-list (NOT `materializesInEditor` off the registry — the runtime
+ * catalog seed may re-register an action WITHOUT that flag) keeps detection deterministic; add an id +
+ * label here as each edit binding is seeded (extensibility #5). Every entry is an in-editor edit action,
+ * so `runNoteTool` always routes to the document session (redline materialization).
+ */
+const NOTE_TOOL_LABELS: Record<string, string> = {
+  'compose-draft-alternative': 'Draft compliant alternative',
+  // 'compose-make-concise': 'Make more concise',        // pending seeded binding (round-8 #4)
+  // 'compose-rewrite-instruction': 'Describe a change…', // pending seeded binding + instruction slot
+};
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -2171,6 +2189,59 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       [qaHighlight]
     );
 
+    // ----- UAT round-8 #3/#4/#5 — per-Review-Note AI edit tools (the gutter ⋮ menu) --------------
+    // The tools are the binding-wired compose EDIT actions (materializesInEditor) from the shared
+    // AI-toolbar registry — "Draft compliant alternative" today; the list grows automatically as more
+    // edit bindings are seeded (extensibility #5). Reactive to registry changes.
+    const readNoteTools = React.useCallback(
+      () =>
+        getComposeAiToolbarActions()
+          .filter(a => a.bindingId && a.id in NOTE_TOOL_LABELS)
+          .map(a => ({ id: a.id, label: NOTE_TOOL_LABELS[a.id] })),
+      []
+    );
+    const [noteTools, setNoteTools] = React.useState(readNoteTools);
+    React.useEffect(() => {
+      setNoteTools(readNoteTools());
+      return subscribeComposeAiToolbarActions(() => setNoteTools(readNoteTools()));
+    }, [readNoteTools]);
+    const noteToolSeqRef = React.useRef(0);
+
+    // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
+    // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
+    // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
+    // the model's rationale (round-8 #7).
+    const runNoteTool = React.useCallback(
+      (threadId: string, toolId: string): void => {
+        if (!editor || !enqueueComposeAction || !sessionId) return;
+        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
+        if (!action?.bindingId || !(action.id in NOTE_TOOL_LABELS)) return;
+        const span = findCommentAnchorRange(editor.state.doc, threadId);
+        if (!span) return;
+        const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
+        const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+        void enqueueComposeAction({
+          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
+          bindingId: action.bindingId,
+          args: {
+            slots: {
+              selectionText,
+              selectionAnchorStart: span.from,
+              selectionAnchorEnd: span.to,
+              documentSpeId: documentRef?.speDriveItemId,
+              documentRecordId: documentRef?.sprkDocumentId,
+              sessionId,
+            },
+          },
+          // Every note tool is an in-editor EDIT action, so ALWAYS route to the document session (DEF-09)
+          // so the result materializes as an inline redline — independent of the registry's
+          // `materializesInEditor` flag (which the catalog seed may not preserve).
+          documentSessionId: sessionId,
+        }).catch(() => undefined);
+      },
+      [editor, enqueueComposeAction, sessionId, documentRef]
+    );
+
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
     // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
@@ -2761,6 +2832,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             resolveStandardText={bffBaseUrl ? resolveStandardText : undefined}
             selectedThreadId={selectedThreadId}
             onSelectThread={selectThread}
+            noteTools={enqueueComposeAction ? noteTools : undefined}
+            onRunNoteTool={enqueueComposeAction ? runNoteTool : undefined}
           />
           {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
               REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the

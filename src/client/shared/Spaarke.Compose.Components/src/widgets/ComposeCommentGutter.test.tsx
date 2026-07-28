@@ -705,6 +705,53 @@ describe('ComposeCommentGutter', () => {
     editor.destroy();
   });
 
+  it('renders a ⋮ AI-tools menu per note and runs a tool against the thread on click (UAT round-8 #3/#4)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const onRunNoteTool = jest.fn();
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread()]}
+            scrollContainerRef={scrollContainerRef}
+            noteTools={[{ id: 'compose-draft-alternative', label: 'Draft compliant alternative' }]}
+            onRunNoteTool={onRunNoteTool}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const trigger = await screen.findByTestId('compose-comment-gutter-tools-thread-1');
+    fireEvent.click(trigger);
+    const item = await screen.findByTestId('compose-comment-gutter-tool-thread-1-compose-draft-alternative');
+    expect(item).toHaveTextContent('Draft compliant alternative');
+    fireEvent.click(item);
+    expect(onRunNoteTool).toHaveBeenCalledWith('thread-1', 'compose-draft-alternative');
+    editor.destroy();
+  });
+
+  it('renders no ⋮ menu when no note tools are wired', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter editor={editor} threads={[makeThread()]} scrollContainerRef={scrollContainerRef} />
+        </div>
+      </FluentProvider>
+    );
+    await screen.findByTestId('compose-comment-gutter-card-thread-1');
+    expect(screen.queryByTestId('compose-comment-gutter-tools-thread-1')).not.toBeInTheDocument();
+    editor.destroy();
+  });
+
   it('shows the RENAMED label ("Flagged clause") even when the note is COLLAPSED (UAT round-7 follow-up)', async () => {
     const editor = makeEditor();
     applyCommentAnchor(editor, 'thread-1', 1, 20);
