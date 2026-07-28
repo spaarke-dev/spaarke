@@ -65,7 +65,6 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
-  MenuItemCheckbox,
   Popover,
   PopoverTrigger,
   PopoverSurface,
@@ -87,6 +86,7 @@ import {
   ArrowUndo24Regular,
   ArrowRedo24Regular,
   Info24Regular,
+  CommentMultiple24Regular,
   ChevronDown16Regular,
   DocumentEdit24Regular,
   OpenRegular,
@@ -760,48 +760,39 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       {/* Spacer — pushes Review + Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
 
-      {/* ---- Review (UAT round-2 items #1/#2) — icon-only dropdown; shows/hides the review-summary
-             panel and the right-gutter advisory comments. Rendered ONLY when an NDA advisory review is
-             present (hasReview) and both toggle handlers are wired — a plain document never shows it.
-             Controlled MenuItemCheckbox: the checked set is derived from the two visibility booleans;
-             a change diffs the new set against the current one to fire exactly the toggled handler. ---- */}
-      {hasReview && onToggleReviewSummary && onToggleReviewNotes ? (
-        <Menu
-          checkedValues={{
-            review: [
-              ...(reviewSummaryOpen ? ['summary'] : []),
-              ...(reviewNotesOpen ? ['notes'] : []),
-            ],
-          }}
-          onCheckedValueChange={(_e, data) => {
-            if (data.name !== 'review') return;
-            const wantSummary = data.checkedItems.includes('summary');
-            const wantNotes = data.checkedItems.includes('notes');
-            if (wantSummary !== Boolean(reviewSummaryOpen)) onToggleReviewSummary();
-            if (wantNotes !== Boolean(reviewNotesOpen)) onToggleReviewNotes();
-          }}
+      {/* ---- Review Summary + Review Notes (UAT round-7 #5) — TWO SEPARATE icon toggles (the former
+             single dropdown was split per reviewer request). Each shows/hides its own surface; the
+             primary/subtle appearance + aria-pressed carry the on/off state. Rendered ONLY when an NDA
+             advisory review is present. ---- */}
+      {hasReview && onToggleReviewSummary ? (
+        <Tooltip
+          content={reviewSummaryOpen ? 'Hide Review Summary' : 'Show Review Summary'}
+          relationship="label"
+          withArrow
         >
-          <MenuTrigger disableButtonEnhancement>
-            <ToolbarButton
-              appearance={reviewSummaryOpen || reviewNotesOpen ? 'primary' : 'subtle'}
-              icon={<ClipboardTaskListLtr24Regular />}
-              aria-label="Review"
-              title="Review"
-              disabled={controlDisabled}
-              data-testid="compose-format-review-menu"
-            />
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItemCheckbox name="review" value="summary" data-testid="compose-format-review-summary-toggle">
-                Review Summary
-              </MenuItemCheckbox>
-              <MenuItemCheckbox name="review" value="notes" data-testid="compose-format-review-notes-toggle">
-                Review Notes
-              </MenuItemCheckbox>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
+          <ToolbarButton
+            appearance={reviewSummaryOpen ? 'primary' : 'subtle'}
+            icon={<ClipboardTaskListLtr24Regular />}
+            aria-label="Toggle Review Summary"
+            aria-pressed={Boolean(reviewSummaryOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewSummary}
+            data-testid="compose-format-review-summary-toggle"
+          />
+        </Tooltip>
+      ) : null}
+      {hasReview && onToggleReviewNotes ? (
+        <Tooltip content={reviewNotesOpen ? 'Hide Review Notes' : 'Show Review Notes'} relationship="label" withArrow>
+          <ToolbarButton
+            appearance={reviewNotesOpen ? 'primary' : 'subtle'}
+            icon={<CommentMultiple24Regular />}
+            aria-label="Toggle Review Notes"
+            aria-pressed={Boolean(reviewNotesOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewNotes}
+            data-testid="compose-format-review-notes-toggle"
+          />
+        </Tooltip>
       ) : null}
 
       {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.

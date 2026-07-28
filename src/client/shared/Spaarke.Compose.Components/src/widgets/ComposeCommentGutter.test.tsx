@@ -704,4 +704,37 @@ describe('ComposeCommentGutter', () => {
     expect(labelEls.length).toBeGreaterThanOrEqual(2);
     editor.destroy();
   });
+
+  it('shows the RENAMED label ("Flagged clause") even when the note is COLLAPSED (UAT round-7 follow-up)', async () => {
+    const editor = makeEditor();
+    applyCommentAnchor(editor, 'thread-1', 1, 20);
+    jest.spyOn(editor.view, 'coordsAtPos').mockReturnValue({ top: 100, bottom: 120, left: 0, right: 0 });
+    // A LONG note (> collapse budget) so the card starts COLLAPSED — the collapsed preview must still use
+    // the renamed label, never the model's raw "Grounded fact".
+    const note =
+      'Grounded fact: ' +
+      'The NDA imposes a best-efforts protection standard which is materially weaker than the firm ' +
+      'standard and this sentence is deliberately long enough to exceed the collapse budget. ' +
+      'Advisory judgment: The standard requires at least reasonable care.';
+
+    const scrollContainerRef = React.createRef<HTMLDivElement>();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <div ref={scrollContainerRef}>
+          <ComposeCommentGutter
+            editor={editor}
+            threads={[makeThread({ text: note })]}
+            scrollContainerRef={scrollContainerRef}
+          />
+        </div>
+      </FluentProvider>
+    );
+
+    const body = await screen.findByTestId('compose-comment-gutter-body-thread-1');
+    // Collapsed: renamed label shown, raw model label never shown, and the "…" truncation cue present.
+    expect(body).toHaveTextContent('Flagged clause');
+    expect(body).not.toHaveTextContent('Grounded fact');
+    expect(body.textContent).toContain('…');
+    editor.destroy();
+  });
 });

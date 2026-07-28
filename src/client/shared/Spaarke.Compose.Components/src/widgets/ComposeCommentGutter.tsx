@@ -751,9 +751,17 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         const fullText = thread.text.trim();
         const isExpanded = expandedIds.has(thread.id);
         const isTruncatable = fullText.length > COLLAPSED_BODY_MAX_CHARS;
-        const showStructured = isExpanded || !isTruncatable; // #7: structured aspects when fully shown
-        const bodyText = showStructured ? fullText : truncate(fullText, COLLAPSED_BODY_MAX_CHARS);
-        const segments = showStructured ? parseAdvisoryNote(fullText) : null; // UAT round-5 #7
+        const showStructured = isExpanded || !isTruncatable;
+        // UAT round-6 #5 + round-7 follow-up: ALWAYS render the structured "Flagged clause" / "Assessment
+        // says" segments (with the renamed labels) — including when COLLAPSED (the reviewer saw the raw
+        // model labels "Grounded fact" / "Advisory judgment" in the collapsed preview). Collapsed shows
+        // just the FIRST segment with a truncated body; expanding reveals every segment in full.
+        const allSegments = parseAdvisoryNote(fullText);
+        const segments = showStructured
+          ? allSegments
+          : allSegments.length > 0
+            ? [{ ...allSegments[0], body: truncate(allSegments[0].body, COLLAPSED_BODY_MAX_CHARS) }]
+            : [{ body: truncate(fullText, COLLAPSED_BODY_MAX_CHARS) }];
         // UAT round-5 #6/#1 — the note's location, resolved from the LIVE document (section heading +
         // ordinal that the model's sectionRef lacks) via the thread's current anchor. Identical to the
         // summary row. Only advisory notes carry a `sectionRef`; a plain session comment has none and
@@ -828,28 +836,23 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
                 </Badge>
               ) : null}
             </div>
-            {/* UAT round-5 #7 — when fully shown, split "Grounded fact" / "Advisory judgment" into
-                separate labelled paragraphs; collapsed shows a plain truncated preview. */}
-            {segments ? (
-              <div className={styles.noteSegments} data-testid={`compose-comment-gutter-body-${thread.id}`}>
-                {segments.map((seg, i) => (
-                  <div key={i} className={styles.noteSegment}>
-                    {seg.label ? (
-                      <Text size={200} weight="semibold" className={styles.noteSegmentLabel}>
-                        {seg.label}
-                      </Text>
-                    ) : null}
-                    <Text size={200} className={styles.noteSegmentBody}>
-                      {seg.body}
+            {/* UAT round-5 #7 / round-6 #5 / round-7 — ALWAYS split into the renamed "Flagged clause" /
+                "Assessment says" labelled paragraphs, collapsed (first segment, truncated) AND expanded
+                (every segment, full). The reviewer must never see the model's raw labels. */}
+            <div className={styles.noteSegments} data-testid={`compose-comment-gutter-body-${thread.id}`}>
+              {segments.map((seg, i) => (
+                <div key={i} className={styles.noteSegment}>
+                  {seg.label ? (
+                    <Text size={200} weight="semibold" className={styles.noteSegmentLabel}>
+                      {seg.label}
                     </Text>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <Text size={200} className={styles.body} data-testid={`compose-comment-gutter-body-${thread.id}`}>
-                {bodyText}
-              </Text>
-            )}
+                  ) : null}
+                  <Text size={200} className={styles.noteSegmentBody}>
+                    {seg.body}
+                  </Text>
+                </div>
+              ))}
+            </div>
             {thread.standardRef ? (
               resolveStandardText ? (
                 <StandardRefChip

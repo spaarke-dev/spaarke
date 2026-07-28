@@ -1540,7 +1540,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
-      setReviewSummaryOpen(true);
+      // UAT round-7 #4 — the Review Summary now DEFAULTS COLLAPSED; a completed review no longer
+      // auto-opens it. The reviewer opens it on demand via the toolbar's Review Summary toggle. (The
+      // right-gutter Review Notes still show by default — ComposeEditor's `reviewNotesVisible`.)
     },
   });
 
@@ -2325,6 +2327,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutLockedBy={state.checkoutLockedBy}
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
+            // UAT round-7 #8 — suppress the "Some formatting was simplified" banner per reviewer request.
+            hideImportWarnings
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the

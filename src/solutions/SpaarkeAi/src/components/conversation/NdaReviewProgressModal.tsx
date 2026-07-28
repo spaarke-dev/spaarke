@@ -71,15 +71,28 @@ const COMPLETE_LINGER_MS = 900;
 const ERROR_LINGER_MS = 3200;
 
 const useStyles = makeStyles({
+  // UAT round-7 #1 — a compact, CENTERED popup: constrain the surface width and center every child
+  // (the stepper's own track is already centered; the title + working line were left-aligned).
+  surface: {
+    maxWidth: '460px',
+  },
   body: {
     display: 'flex',
     flexDirection: 'column',
+    alignItems: 'center',
+    textAlign: 'center',
     rowGap: tokens.spacingVerticalM,
+    width: '100%',
   },
-  // The rotating status line (round-6 #7).
+  title: {
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  // The rotating status line (round-6 #7) — centered under the stepper (round-7 #1).
   workingLine: {
     display: 'flex',
     alignItems: 'center',
+    justifyContent: 'center',
     columnGap: tokens.spacingHorizontalSNudge,
     color: tokens.colorNeutralForeground2,
     fontStyle: 'italic',
@@ -151,12 +164,17 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
     // on the real outcome. DialogSurface brings the elevated background + the Dialog brings the scrim
     // (round-6 #6). `open` is always true here; the parent conditionally renders this component.
     <Dialog open modalType="alert">
-      <DialogSurface data-testid="nda-review-progress-modal">
+      <DialogSurface className={styles.surface} data-testid="nda-review-progress-modal">
         <DialogBody>
           <div className={styles.body}>
+            {/* Own, CENTERED title (round-7 #1) — the stepper's built-in title is suppressed (title="") so
+                it doesn't render a second, left-aligned heading. */}
+            <Text size={400} className={styles.title}>
+              {title}
+            </Text>
             <AiProgressStepper
               variant="inline"
-              title={title}
+              title=""
               steps={steps}
               activeStepId={activeStepId}
               completedStepIds={completedStepIds}

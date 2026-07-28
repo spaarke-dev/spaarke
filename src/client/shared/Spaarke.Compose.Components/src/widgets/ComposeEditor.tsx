@@ -2447,7 +2447,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
             past the disabled toolbar controls). Informs only; the representable edits still save. */}
-        {deferralNotice ? (
+        {/* UAT round-7 #8 — the "Some formatting … isn't saved yet" deferral banner is SUPPRESSED per
+            reviewer request (it read as noise). The deferral BEHAVIOR is unchanged (unrepresentable
+            edits are still deferred + the op-log still records them); only the banner no longer renders.
+            `deferralNotice`/`setDeferralNotice` remain wired so it can be re-surfaced trivially later. */}
+        {false && deferralNotice ? (
           <div className={styles.deferralNotice} role="status" aria-live="polite" data-testid="compose-deferral-notice">
             <Text size={200} className={styles.deferralNoticeText}>
               {deferralNotice}

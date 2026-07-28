@@ -74,25 +74,27 @@ const useStyles = makeStyles({
   // toolbar), IN-FLOW: opening the Review Summary EXPANDS this area and pushes the document down;
   // closing removes it. `position: relative` makes it the containing block for the absolutely-positioned
   // down-arrow FAB (so the FAB stays pinned at the panel's bottom edge, not scrolling with the findings).
+  // UAT round-7 #6 — a clearly DISTINCT floating card, plainly separate from the document below: a
+  // brand accent strip, a full border, rounded corners, an inset margin, and a strong shadow, on a
+  // tinted surface. Reads unmistakably as "the review panel", not part of the document.
   wrapper: {
     position: 'relative',
     flexShrink: 0,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-    // UAT round-4 #1 — a clear visual anchor: a brand accent strip on the left + a soft shadow so the
-    // summary reads as a distinct panel rather than blending into the document.
-    borderLeft: `3px solid ${tokens.colorBrandStroke1}`,
-    boxShadow: tokens.shadow4,
+    margin: tokens.spacingHorizontalS,
+    backgroundColor: tokens.colorNeutralBackground3,
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    borderLeft: `4px solid ${tokens.colorBrandStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow16,
+    overflow: 'hidden', // keep the sticky header's corners inside the rounded card
   },
   panel: {
     display: 'flex',
     flexDirection: 'column',
     rowGap: tokens.spacingVerticalXS,
     padding: tokens.spacingHorizontalS,
-    // UAT round-2 item #3: a compact TL;DR strip, not a full findings dump — keep it short so the
-    // reader can orient at a glance, then scroll the document (which scrolls INSIDE the editor below).
+    // UAT round-7 #3 — height is applied inline (user-resizable via the bottom handle); this is the
+    // default cap. A compact TL;DR strip, not a full findings dump.
     maxHeight: '32vh',
     overflowY: 'auto',
     // UAT round-4 #5 — hide the native scrollbar; the down-arrow FAB is the scroll affordance instead
@@ -100,8 +102,12 @@ const useStyles = makeStyles({
     scrollbarWidth: 'none',
     '::-webkit-scrollbar': { display: 'none' },
   },
-  // UAT round-4 #2 — the title + sort control sit in a light-gray header bar.
+  // UAT round-4 #2 / round-7 #2 — the title + sort control sit in a STICKY light-gray header bar that
+  // stays pinned at the top of the card while the findings scroll beneath it.
   headerBar: {
+    position: 'sticky',
+    top: `calc(-1 * ${tokens.spacingHorizontalS})`, // cancel the scroller's top padding so it pins flush
+    zIndex: 2,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -112,6 +118,17 @@ const useStyles = makeStyles({
     marginBlockStart: `calc(-1 * ${tokens.spacingHorizontalS})`,
     backgroundColor: tokens.colorNeutralBackground3,
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  // UAT round-7 #3 — the bottom drag strip to resize the Review Summary height.
+  bottomResizeHandle: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: '6px',
+    cursor: 'row-resize',
+    zIndex: 4,
+    ':hover': { backgroundColor: tokens.colorNeutralStroke1 },
   },
   headerActions: {
     display: 'flex',
@@ -235,6 +252,10 @@ const useStyles = makeStyles({
 export const NDA_REVIEW_DISCLAIMER_TEXT =
   'AI-generated advisory review — not legal advice. Verify every finding before relying on it; ' +
   'only High/Critical items are the attorney-review signal.';
+
+/** UAT round-7 #3 — minimum draggable height + sessionStorage key for the Review Summary. */
+const MIN_SUMMARY_HEIGHT_PX = 96;
+const SUMMARY_HEIGHT_STORAGE_KEY = 'spaarke.compose.reviewSummaryHeight';
 
 /** Closed severity order the Action's rubric uses ("at least as severe as the most severe finding"). */
 const RISK_SEVERITY_ORDER = ['Low', 'Medium', 'High', 'Critical'] as const;
@@ -473,6 +494,32 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
     el.scrollTo({ top: Math.min(el.scrollHeight, el.scrollTop + el.clientHeight * 0.8), behavior: 'smooth' });
   }, []);
 
+  // UAT round-7 #3 — the Review Summary is resizable from the bottom (like the Review Notes). `null` =
+  // the default 32vh cap; a number caps the scroller height. Persisted in sessionStorage.
+  const [panelHeight, setPanelHeight] = React.useState<number | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const stored = window.sessionStorage.getItem(SUMMARY_HEIGHT_STORAGE_KEY);
+    const parsed = stored ? Number.parseInt(stored, 10) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : null;
+  });
+  const heightDragRef = React.useRef<{ startY: number; startHeight: number } | null>(null);
+  const onHeightPointerDown = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    heightDragRef.current = { startY: e.clientY, startHeight: scrollRef.current?.offsetHeight ?? 0 };
+  }, []);
+  const onHeightPointerMove = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    const drag = heightDragRef.current;
+    if (!drag) return;
+    const next = Math.max(MIN_SUMMARY_HEIGHT_PX, drag.startHeight + (e.clientY - drag.startY));
+    setPanelHeight(next);
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(SUMMARY_HEIGHT_STORAGE_KEY, String(next));
+  }, []);
+  const onHeightPointerUp = React.useCallback((e: React.PointerEvent<HTMLDivElement>): void => {
+    heightDragRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
+
   if (!open) return null;
 
   // UAT round-4 #2/#4 — sort by document position (default) or by risk severity. Both are stable on the
@@ -493,6 +540,7 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
       <div
         ref={scrollRef}
         className={styles.panel}
+        style={panelHeight != null ? { maxHeight: `${panelHeight}px` } : undefined}
         role="complementary"
         aria-label="NDA review summary"
         data-testid="nda-review-summary-panel"
@@ -628,6 +676,17 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
           data-testid="nda-review-summary-scroll-down"
         />
       ) : null}
+      {/* UAT round-7 #3 — drag the bottom edge to resize the Review Summary height. */}
+      <div
+        className={styles.bottomResizeHandle}
+        onPointerDown={onHeightPointerDown}
+        onPointerMove={onHeightPointerMove}
+        onPointerUp={onHeightPointerUp}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize the Review Summary height"
+        data-testid="nda-review-summary-resize-bottom"
+      />
     </div>
   );
 }

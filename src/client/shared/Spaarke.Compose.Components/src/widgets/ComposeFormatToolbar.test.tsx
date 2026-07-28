@@ -488,7 +488,7 @@ describe('ComposeFormatToolbar — sticky pin, global disable, dark mode', () =>
 // Review dropdown (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2)
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Review dropdown', () => {
+describe('ComposeFormatToolbar — Review Summary / Notes toggles (UAT round-7 #5: two separate icons)', () => {
   const reviewProps = (over: Partial<ComposeFormatToolbarProps> = {}): Partial<ComposeFormatToolbarProps> => ({
     hasReview: true,
     reviewSummaryOpen: false,
@@ -500,42 +500,47 @@ describe('ComposeFormatToolbar — Review dropdown', () => {
 
   it('is hidden when no review is present (hasReview falsy)', () => {
     renderFormatToolbar({}, { props: reviewProps({ hasReview: false }) });
-    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
   });
 
   it('is hidden when the toggle handlers are not wired', () => {
     renderFormatToolbar({}, { props: { hasReview: true } });
-    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-summary-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-format-review-notes-toggle')).not.toBeInTheDocument();
   });
 
-  it('shows the icon-only Review trigger when a review is present and handlers are wired', () => {
+  it('shows two separate icon toggles (no dropdown) when a review is present and handlers are wired', () => {
     renderFormatToolbar({}, { props: reviewProps() });
-    const trigger = screen.getByTestId('compose-format-review-menu');
-    expect(trigger).toBeInTheDocument();
-    expect(trigger).toHaveAttribute('aria-label', 'Review');
+    expect(screen.queryByTestId('compose-format-review-menu')).not.toBeInTheDocument(); // the dropdown is gone
+    const summary = screen.getByTestId('compose-format-review-summary-toggle');
+    const notes = screen.getByTestId('compose-format-review-notes-toggle');
+    expect(summary).toHaveAttribute('aria-label', 'Toggle Review Summary');
+    expect(notes).toHaveAttribute('aria-label', 'Toggle Review Notes');
+    // Pressed state reflects the visibility booleans (summary closed, notes open).
+    expect(summary).toHaveAttribute('aria-pressed', 'false');
+    expect(notes).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('toggling "Review Summary" fires onToggleReviewSummary (and not Notes)', async () => {
+  it('clicking the Review Summary icon fires onToggleReviewSummary (and not Notes)', async () => {
     const user = userEvent.setup();
     const onToggleReviewSummary = jest.fn();
     const onToggleReviewNotes = jest.fn();
     renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
 
-    await user.click(screen.getByTestId('compose-format-review-menu'));
-    await user.click(await screen.findByTestId('compose-format-review-summary-toggle'));
+    await user.click(screen.getByTestId('compose-format-review-summary-toggle'));
 
     expect(onToggleReviewSummary).toHaveBeenCalledTimes(1);
     expect(onToggleReviewNotes).not.toHaveBeenCalled();
   });
 
-  it('toggling "Review Notes" fires onToggleReviewNotes (and not Summary)', async () => {
+  it('clicking the Review Notes icon fires onToggleReviewNotes (and not Summary)', async () => {
     const user = userEvent.setup();
     const onToggleReviewSummary = jest.fn();
     const onToggleReviewNotes = jest.fn();
     renderFormatToolbar({}, { props: reviewProps({ onToggleReviewSummary, onToggleReviewNotes }) });
 
-    await user.click(screen.getByTestId('compose-format-review-menu'));
-    await user.click(await screen.findByTestId('compose-format-review-notes-toggle'));
+    await user.click(screen.getByTestId('compose-format-review-notes-toggle'));
 
     expect(onToggleReviewNotes).toHaveBeenCalledTimes(1);
     expect(onToggleReviewSummary).not.toHaveBeenCalled();
