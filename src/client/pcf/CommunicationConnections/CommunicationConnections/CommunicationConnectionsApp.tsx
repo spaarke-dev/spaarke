@@ -56,17 +56,15 @@ import {
   connectionTarget,
   COMMUNICATION_REGARDING_FIELDS,
   type Connection,
-} from './provenance';
-import { ConnectionsEditor } from './ConnectionsEditor';
-import { resolveTitle } from './title';
-import {
   applyRegardingSelection,
   advanceAssociationStatus,
   persistOverrideReason,
   unlinkRegarding,
   type IResolverWriteContext,
   type IRegardingSelection,
-} from './handlers/ConnectionsWriteHandler';
+} from '@spaarke/communication-components/logic/connections';
+import { ConnectionsEditor } from './ConnectionsEditor';
+import { resolveTitle } from './title';
 
 const useStyles = makeStyles({
   root: { height: '100%', width: '100%', display: 'flex', flexDirection: 'column' },

@@ -10,10 +10,10 @@
 
 | # | Task | Phase | Status | Rigor | Tier/Effort | Group | Safe | Deps |
 |---|---|---|---|---|---|---|---|---|
-| 001 | Shared hardened `sanitizeEmailHtml` + retrofit `MessageRow`/`MessageBubble` | 0 | 🔲 | FULL | opus/high | P0 | ✅ | — |
-| 002 | Archiving default-on (`ArchiveIncomingOptIn`, monitored accounts) | 0 | 🔲 | FULL | opus/high | — | ❌ | — |
+| 001 | Shared hardened `sanitizeEmailHtml` + retrofit `MessageRow`/`MessageBubble` | 0 | ✅ | FULL | opus/high | P0 | ✅ | — |
+| 002 | Archiving default-on (`ArchiveIncomingOptIn`, monitored accounts) | 0 | ✅ | FULL | opus/high | — | ❌ | — |
 | 010 | `GET /api/documents/{id}/eml-render` (MimeKit + sanitize + cache + tests) | 1 | 🔲 | FULL | opus/xhigh | — | ❌ | 002 |
-| 020 | Extract production `ConnectionsEditor` Layer-1 logic (additive write) | 2 | 🔲 | FULL | opus/xhigh | — | ❌ | — |
+| 020 | Extract production `ConnectionsEditor` Layer-1 logic (additive write) | 2 | ✅ | FULL | opus/xhigh | — | ❌ | — |
 | 021 | Extract `CommunicationAttachments` Layer-1 + promote `AttachmentList` | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
 | 022 | Extract `CommunicationActions` Layer-1 (action-bar logic) | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
 | 023 | Lift `TrackingFieldTrio` generic core → `@spaarke/ui-components` | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |

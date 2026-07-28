@@ -8,7 +8,10 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./widgets": "./src/widgets/index.ts"
+    "./widgets": "./src/widgets/index.ts",
+    "./logic": "./src/logic/index.ts",
+    "./logic/connections": "./src/logic/connections/index.ts",
+    "./logic/connections/provenance": "./src/logic/connections/provenance.ts"
   },
   "scripts": {
     "build": "tsc",

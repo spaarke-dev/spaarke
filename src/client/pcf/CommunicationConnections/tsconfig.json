@@ -8,7 +8,16 @@
       "@spaarke/ui-components": [
         "../../shared/Spaarke.UI.Components/dist/index"
       ],
-      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"],
+      "@spaarke/communication-components/logic/connections": [
+        "../../shared/Spaarke.Communication.Components/src/logic/connections/index"
+      ],
+      "@spaarke/communication-components/logic/connections/provenance": [
+        "../../shared/Spaarke.Communication.Components/src/logic/connections/provenance"
+      ],
+      "@spaarke/communication-components/*": [
+        "../../shared/Spaarke.Communication.Components/src/*"
+      ]
     },
     "baseUrl": "."
   },
