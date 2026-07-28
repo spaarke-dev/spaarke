@@ -9,3 +9,7 @@ export * from './AttachmentList';
 export * from './EmailCardList';
 export * from './EmailViewSelector';
 export * from './EmailReadingPaneShell';
+export * from './EmailBody';
+export * from './EmailReadingHeader';
+export * from './EmailAssociationsAndTracking';
+export * from './EmailComposeActions';

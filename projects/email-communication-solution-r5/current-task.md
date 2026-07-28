@@ -6,28 +6,27 @@
 
 ## Active Task
 
-- **Task**: none (project initialized 2026-07-27 via `/project-pipeline`)
+- **Task**: none (between waves — Phase 3 complete)
 - **Status**: not-started
-- **Next Action**: Execute **task 001** (Phase 0 — shared `sanitizeEmailHtml` util + retrofit)
+- **Next Action**: Execute **task 040** (assemble the shared `EmailWorkspace` component — Pattern D source of truth)
 
-## Steps Completed
+## Progress
 
-*(none — no active task)*
+- ✅ Phase 0: 001 (sanitizer), 002 (archiving contract)
+- ✅ Phase 1: 010 (eml-render endpoint + Ganss.Xss §6.5 Path-A)
+- ✅ Phase 2: 020, 021, 022, 023 (Layer-1 extractions)
+- ✅ Phase 3: 030, 031, 032 (list + view-selector + shell), 033, 034, 035, 036 (reading-pane sub-views)
+- ⏭️ Phase 4: 040 (assembly) → 041 (widget) ‖ 042 (code page)
+- ⏭️ Phase 5: 050 (verify) → 051 (deploy) → 090 (wrap-up)
 
-## Files Modified
+## Deferrals accumulated (sync via /defer at task 090)
 
-*(none)*
-
-## Decisions
-
-*(none — see design.md §Resolved Decisions for the design-time set)*
-
-## Parallel Execution
-
-*(none active)*
+- **031**: List/Thread toggle omitted (spec "only if cheap" — thread field not guaranteed in maker FetchXML).
+- **034**: promote a shared `CommunicationHeader` into `@spaarke/communication-components` (currently private to `communication-page`, wrong dep direction per ADR-012).
+- **036**: add `initialCc?: string[]` to `ISendEmailDialogProps` in `@spaarke/ui-components` (composer supports it; dialog type doesn't declare it).
 
 ---
 
-## How to start
+## How to continue
 
-Say **"continue"** or **"work on task 001"**. This invokes `task-execute`, which loads knowledge files, tracks state here, and runs the quality gates. See `CLAUDE.md` §Task Execution Protocol.
+Say **"continue"** — invokes `task-execute` on task 040. See `CLAUDE.md` §Task Execution Protocol.

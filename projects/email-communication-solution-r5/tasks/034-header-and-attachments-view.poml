@@ -4,7 +4,7 @@
     <title>FR-11/FR-12: reading-pane envelope header (CommunicationHeader reuse) + attachments view (AttachmentList) with preview</title>
     <phase>3 Layer-2 React 19 views + reading-pane shell</phase>
     <gate>after:021,032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Composition of already-reviewed reused components (CommunicationHeader, promoted AttachmentList, RichFilePreviewDialog) into the reading-pane shell; no new business logic, no security boundary, no BFF touch. STANDARD (Step 9.5 gate skipped), but ui-tests + dark-mode check apply per the frontend/fluent-ui tags.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -115,4 +115,22 @@
   <notes>Reference spec FR-11, FR-12; design.md Lens 2 (reading-pane composition). Pure reuse — the §11-justified surface is the shell (task 032). Run `/conflict-check` before PR (touches `@spaarke/communication-components`). Completion summary appended here when done.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <completion-notes>
+    Built in `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingHeader/**`
+    (NOT the POML's original `reading-pane/` path — task 032 landed the shell at
+    `src/components/EmailReadingPaneShell/**` with a `render*`-slot contract instead; see
+    `notes/task-032-reading-pane-shell.md`). `CommunicationHeader` lives in the private
+    `communication-page` package (wrong dependency direction to import into this shared
+    package — ADR-012), so `EmailReadingHeader` is a fresh implementation matching its visual
+    language, extended with Cc/Bcc + independent Sent/Received rows per FR-11. Attachments view
+    reuses the promoted (task 021) `CommunicationAttachmentsService` + `AttachmentList` +
+    `RichFilePreviewDialog` verbatim — inline-image filtering happens inside the reused service,
+    not re-implemented. Full deviation + quality-gate write-up:
+    `projects/email-communication-solution-r5/notes/task-034-header-and-attachments-view.md`.
+    10/10 new Jest tests green; `tsc --noEmit` clean for all new files (package-wide `npm run
+    build` blocked only by task 033's concurrently in-progress `EmailBodyView.tsx`, out of
+    scope). Barrel export owed to `src/components/index.ts`:
+    `export * from './EmailReadingHeader';` (not applied here per orchestrator convention).
+  </completion-notes>
 </task>
