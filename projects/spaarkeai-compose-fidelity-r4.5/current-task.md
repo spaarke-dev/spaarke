@@ -4,8 +4,17 @@
 
 ## Active Task
 
-**Status**: none (project initialized — no task started yet)
-**Next action**: Start **task 001** (extend fidelity corpus with legal-numbering exemplars) — say "continue" or "work on task 001".
+**Status**: in-progress (autonomous parallel execution)
+**Mode**: autonomous, parallel-where-possible; `/conflict-check` before every BFF PR.
+
+### Wave A (in progress)
+- **001** corpus legal-numbering fixtures — 🔄 subagent (sonnet)
+- **051** WS-5 Word-service eval + NFR-03 licensing — 🔄 subagent (opus)
+
+### Wave plan
+- Wave B (after 001): 002 harness ∥ 050 LibreOffice spike
+- Then sequential BFF main line 010→011→012→013 (**run `/conflict-check` before 010**), 020→022, 030→033, 040→042; 052 parallel after 050+051.
+- Deploy/UAT (014, 034) + fired escalation triggers → STOP for human.
 
 ## Project state
 

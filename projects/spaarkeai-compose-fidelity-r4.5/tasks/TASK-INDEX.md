@@ -8,8 +8,8 @@
 
 | # | Task | Phase | WS | Model | Effort | Rigor | Deps | ∥-safe | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| 001 | Extend fidelity corpus — legal-numbering exemplars | 0 Foundation | — | sonnet | med | STANDARD | — | ✔ | 🔲 |
-| 002 | Read-fidelity harness — text-exact + numbering-exact golden | 0 Foundation | — | sonnet | high | FULL | 001 | ✔ | 🔲 |
+| 001 | Extend fidelity corpus — legal-numbering exemplars | 0 Foundation | — | sonnet | med | STANDARD | — | ✔ | ✅ |
+| 002 | Read-fidelity harness — text-exact + numbering-exact golden | 0 Foundation | — | sonnet | high | FULL | 001 | ✔ | 🔄 |
 | 010 | Upload path returns a projection | 1 One reader | WS-1 | sonnet | high | FULL | 002 | ✘ | 🔲 |
 | 011 | Stateless `POST /api/compose/project` for browse | 1 One reader | WS-1 | sonnet | high | FULL | 010 | ✘ | 🔲 |
 | 012 | Open-in-Compose transient projected server-side | 1 One reader | WS-1 | sonnet | high | FULL | 011 | ✘ | 🔲 |
@@ -26,8 +26,8 @@
 | 040 | Extend projection with reference fields | 4 Reference | WS-4 | sonnet | high | FULL | 033 | ✘ | 🔲 |
 | 041 | Persist `paraId → number` (payload + session ledger) | 4 Reference | WS-4 | sonnet | high | FULL | 040 | ✘ | 🔲 |
 | 042 | **Citation resolver (single / sub-item / range)** | 4 Reference | WS-4 | **opus** | xhigh | FULL | 041 | ✘ | 🔲 |
-| 050 | WS-5 spike — LibreOffice-headless pagination + divergence | 5 Page/Line | WS-5 | sonnet | high | STANDARD | 001 | ✔ | 🔲 |
-| 051 | WS-5 spike — Word-service eval + NFR-03 licensing | 5 Page/Line | WS-5 | opus | high | STANDARD | — | ✔ | 🔲 |
+| 050 | WS-5 spike — LibreOffice-headless pagination + divergence | 5 Page/Line | WS-5 | sonnet | high | STANDARD | 001 | ✔ | 🔄 |
+| 051 | WS-5 spike — Word-service eval + NFR-03 licensing | 5 Page/Line | WS-5 | opus | high | STANDARD | — | ✔ | ✅ (2 license items → human sign-off @ 052) |
 | 052 | WS-5 decision record — ship vs fast-follow | 5 Page/Line | WS-5 | opus | high | STANDARD | 050,051 | ✘ | 🔲 |
 | 090 | Project wrap-up (status / lessons / test-diet / archive) | 9 Wrap-up | — | sonnet | med | MINIMAL | all | ✘ | 🔲 |
 
