@@ -135,17 +135,25 @@ the confirmation formatting (#4). PDF ingest (#1) is out of scope → compose-r5
 
 ---
 
-## 4. Open questions for design
+## 4. Design decisions — ✅ ALL RESOLVED (owner, 2026-07-28) → SPEC-READY
 
-1. **PDF placement** — confirm `compose-r5` (recommended) vs a foundational agreements-r1 task.
-2. **#3 batch concurrency** — sequential-with-progress vs bounded-parallel (ADR-016 rate limits)? Any cap.
-3. **Memo storage shape** — `sprk_analysisoutput` child + JSON body (recommended reuse) vs a dedicated `sprk_reviewmemo`
-   entity. (§11: prefer reuse unless the memo needs its own lifecycle/security.)
-4. **After-text capture (#5)** — the memo's "what changed / after" needs the accepted redline text. Capture at
-   accept-time (per-section) vs re-derive from the saved document diff at memo-generation time?
-5. **Work-type generalization scope** — does r1 add a second *knowledge sub-domain* (MSA/employment) or stay
-   NDA-only and focus on the review-depth + memo features above? (The list is all UX/output depth — no new
-   sub-domain requested yet. Confirm NDA-only for r1.)
+1. **PDF placement** — ✅ **Move to `compose-r5`** (platform project). OUT of agreements-r1 scope. This project
+   builds/validates on DOCX and inherits PDF ingest when compose-r5 lands.
+2. **#3 batch concurrency** — ✅ **Batch confirmed; sequential-with-progress** (respects ADR-016 rate limits; the
+   progress bar covers the wait). Each note's outcome surfaces in the Assistant exactly as an individual run does.
+3. **Memo storage shape** — ✅ **Reuse `sprk_analysisoutput`** (child of `sprk_analysis`) + JSON body for the
+   section array. No new entity for r1.
+4. **Memo before/after semantics** — ✅ **No timestamp / accept-time capture needed.** The memo derives from the
+   document's final change-disposition state: **before = original text**, **after = whatever was accepted (or the
+   rejected outcome)**. So each memo row = {location, before(original), after(accepted result / rejected), why,
+   golden-ref}, assembled at generation time from the tracked-change dispositions — not a per-accept event capture.
+5. **Work-type scope** — ✅ **General across ALL agreement types — NOT per-type specialized.** Owner: "not sure
+   there will be a difference between agreement types; should support any/all agreements analyzed." So r1 is a
+   **single general Agreement Analysis review capability** that works for any agreement; knowledge sub-domains
+   (NDA/MSA/employment) vary GROUNDING only, not the UX/tools/memo. Do NOT build per-type branches. (This is the
+   work-type model working as intended: Agreement Analysis = one surface + one tool palette; sub-domain = grounding.)
+
+**Spec-ready.** Next: `/design-to-spec` → `/project-pipeline` (after the analysis-hub, per owner sequencing).
 
 ---
 
