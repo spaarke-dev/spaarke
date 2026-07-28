@@ -1,0 +1,9 @@
+Archived: 2026-07-28
+Final status: Completed
+Tasks: 22/22 ✅ (deployed to spaarkedev1, UAT-approved)
+Closeout gates: code-review clean (docs-only closeout diff) · /test-diet clean (40 files, all MAINTAIN — notes/test-diet-report.md)
+Closing PR: #692 (https://github.com/spaarke-dev/spaarke/pull/692) — closeout docs commit
+Worktree: c:/code_files/spaarke-wt-ai-advanced-capabilities-nda-r1 (PRESERVED — not removed by archive; clean up separately if desired)
+Remote branch: work/ai-nda-r1-followups (on origin)
+Portfolio (Project #2): NOT REGISTERED — project shipped outside the portfolio board; no GitHub Issue was created for it. Register+close retroactively only if portfolio completeness is desired (see /devops-project-register --from-folder).
+Follow-on: analysis-hub-r1 + agreements-r1 (worktrees created 2026-07-28; design specs pending).
