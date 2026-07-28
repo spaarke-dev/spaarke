@@ -65,6 +65,10 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
 } from '@fluentui/react-components';
 import {
   TextBold24Regular,
@@ -81,6 +85,8 @@ import {
   TextAlignRight24Regular,
   ArrowUndo24Regular,
   ArrowRedo24Regular,
+  Info24Regular,
+  CommentMultiple24Regular,
   ChevronDown16Regular,
   DocumentEdit24Regular,
   OpenRegular,
@@ -92,6 +98,7 @@ import {
   TableDeleteRow24Regular,
   TableDeleteColumn24Regular,
   TableDismiss24Regular,
+  ClipboardTaskListLtr24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -136,6 +143,11 @@ const useStyles = makeStyles({
   // Pushes Save + Undo/Redo to the right edge of the single row.
   spacer: {
     flexGrow: 1,
+  },
+  // UAT round-6 #4 — the not-legal-advice disclaimer popover (opened from the toolbar info button).
+  disclaimerPopover: {
+    maxWidth: '320px',
+    color: tokens.colorNeutralForeground2,
   },
   // task 039 P3: the Word dropdown is now a VERTICAL, labelled list (was a horizontal icon-only
   // palette) — each action reads as a full-width menu row with an icon + text label. Semantic tokens only.
@@ -206,6 +218,28 @@ export interface ComposeFormatToolbarProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+
+  // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
+  //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
+  //      toggles: "Review Summary" (the docked TL;DR panel) and "Review Notes" (the right-gutter
+  //      advisory comment cards). Both surfaces already exist; this is a single toolbar control that
+  //      shows/hides each without dismissing the review data. ----
+  /** True when an NDA advisory review has run (summary findings or in-document advisory comments exist). */
+  hasReview?: boolean;
+  /** Whether the review-summary docked panel is currently shown. */
+  reviewSummaryOpen?: boolean;
+  /** Toggle the review-summary panel. */
+  onToggleReviewSummary?: () => void;
+  /** Whether the right-gutter advisory comment cards ("Review Notes") are currently shown. */
+  reviewNotesOpen?: boolean;
+  /** Toggle the right-gutter advisory comments. */
+  onToggleReviewNotes?: () => void;
+  /**
+   * UAT round-6 #4 — the not-legal-advice warning text. When provided (an NDA advisory review is
+   * present), an info (ⓘ) button appears at the far right of the toolbar; clicking it shows this text in
+   * a popover. Replaces the standing disclaimer banner that used to sit inside the Review Summary.
+   */
+  reviewDisclaimer?: string;
 }
 
 /**
@@ -315,6 +349,12 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     isSaving,
     trackChangesEnabled,
     onToggleTrackChanges,
+    hasReview,
+    reviewSummaryOpen,
+    onToggleReviewSummary,
+    reviewNotesOpen,
+    onToggleReviewNotes,
+    reviewDisclaimer,
   } = props;
 
   // Re-render on selection/transaction to keep the "active" highlight in sync.
@@ -717,8 +757,43 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </Menu>
       ) : null}
 
-      {/* Spacer — pushes Track Changes + Save + Undo/Redo to the right edge. */}
+      {/* Spacer — pushes Review + Track Changes + Save + Undo/Redo to the right edge. */}
       <div className={styles.spacer} />
+
+      {/* ---- Review Summary + Review Notes (UAT round-7 #5) — TWO SEPARATE icon toggles (the former
+             single dropdown was split per reviewer request). Each shows/hides its own surface; the
+             primary/subtle appearance + aria-pressed carry the on/off state. Rendered ONLY when an NDA
+             advisory review is present. ---- */}
+      {hasReview && onToggleReviewSummary ? (
+        <Tooltip
+          content={reviewSummaryOpen ? 'Hide Review Summary' : 'Show Review Summary'}
+          relationship="label"
+          withArrow
+        >
+          <ToolbarButton
+            appearance={reviewSummaryOpen ? 'primary' : 'subtle'}
+            icon={<ClipboardTaskListLtr24Regular />}
+            aria-label="Toggle Review Summary"
+            aria-pressed={Boolean(reviewSummaryOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewSummary}
+            data-testid="compose-format-review-summary-toggle"
+          />
+        </Tooltip>
+      ) : null}
+      {hasReview && onToggleReviewNotes ? (
+        <Tooltip content={reviewNotesOpen ? 'Hide Review Notes' : 'Show Review Notes'} relationship="label" withArrow>
+          <ToolbarButton
+            appearance={reviewNotesOpen ? 'primary' : 'subtle'}
+            icon={<CommentMultiple24Regular />}
+            aria-label="Toggle Review Notes"
+            aria-pressed={Boolean(reviewNotesOpen)}
+            disabled={controlDisabled}
+            onClick={onToggleReviewNotes}
+            data-testid="compose-format-review-notes-toggle"
+          />
+        </Tooltip>
+      ) : null}
 
       {/* ---- Track Changes toggle (item 4, UAT round-4) — task 039 P1: ICON-ONLY, right-aligned.
              The visible "Track changes" text label was dropped for an icon-only toggle; the accessible
@@ -778,6 +853,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         onClick={() => editor.chain().focus().redo().run()}
         data-testid="compose-format-redo"
       />
+
+      {/* UAT round-6 #4 — the not-legal-advice warning, moved OUT of the Review Summary body to a far-
+          right info (ⓘ) button. Shown only when an NDA advisory review is present (reviewDisclaimer set). */}
+      {hasReview && reviewDisclaimer ? (
+        <Popover withArrow positioning="below-end" size="small">
+          <PopoverTrigger disableButtonEnhancement>
+            <ToolbarButton
+              appearance="subtle"
+              icon={<Info24Regular />}
+              aria-label="About this review"
+              data-testid="compose-format-review-info"
+            />
+          </PopoverTrigger>
+          <PopoverSurface data-testid="compose-format-review-info-popover">
+            <Text size={200} className={styles.disclaimerPopover}>
+              {reviewDisclaimer}
+            </Text>
+          </PopoverSurface>
+        </Popover>
+      ) : null}
     </Toolbar>
   );
 }

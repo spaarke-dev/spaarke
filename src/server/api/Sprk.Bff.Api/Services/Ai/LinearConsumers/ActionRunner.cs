@@ -1,6 +1,8 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Schemas;
@@ -28,6 +30,15 @@ public sealed class ActionRunner : IActionRunner
     private readonly PromptSchemaRenderer _promptRenderer;
     private readonly ILogger<ActionRunner> _logger;
     private readonly DocumentIntelligenceOptions _modelOptions;
+    private readonly ReferenceRetrievalService? _referenceRetrieval;
+
+    /// <summary>
+    /// TopK for linear-path reference grounding. The <c>spaarke-rag-references</c> corpus is small and
+    /// curated; a generous cap pulls the whole relevant standard (e.g. all KNW-011 clauses) rather than
+    /// only the top-5 nearest — omissions (standard clauses the operand does NOT match) are exactly what
+    /// an advisory review must be able to flag.
+    /// </summary>
+    private const int ReferenceGroundingTopK = 12;
 
     private const string PlaceholderExtractedText = "{{document.extractedText}}";
 
@@ -52,7 +63,8 @@ public sealed class ActionRunner : IActionRunner
         IOpenAiClient openAi,
         PromptSchemaRenderer promptRenderer,
         ILogger<ActionRunner> logger,
-        IOptions<DocumentIntelligenceOptions>? modelOptions = null)
+        IOptions<DocumentIntelligenceOptions>? modelOptions = null,
+        ReferenceRetrievalService? referenceRetrieval = null)
     {
         _openAi = openAi;
         _promptRenderer = promptRenderer;
@@ -61,6 +73,11 @@ public sealed class ActionRunner : IActionRunner
         // 3-arg constructor call sites already in the seam-test suite (which do not exercise model-tier
         // resolution) keep compiling unchanged; production DI always resolves the real bound options.
         _modelOptions = modelOptions?.Value ?? new DocumentIntelligenceOptions();
+        // nda-r1 follow-up: reference grounding for AllowsKnowledge Actions on the linear path (the
+        // linear-path equivalent of the playbook node executor's L1 retrieval). Optional/nullable —
+        // registered only when DocumentIntelligence:Enabled (AiModule), and left null for the seam-test
+        // constructor call sites; a null instance simply means "no grounding" (graceful degrade).
+        _referenceRetrieval = referenceRetrieval;
     }
 
     /// <summary>
@@ -116,7 +133,16 @@ public sealed class ActionRunner : IActionRunner
         // argument), just for `model` instead of `temperature`.
         var deploymentName = ModelTierDeploymentResolver.Resolve(action.ModelTier, _modelOptions);
 
-        var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand);
+        // nda-r1 follow-up: reference-knowledge grounding for AllowsKnowledge Actions (e.g. NDA Review vs
+        // the firm standard KNW-011). Retrieved from spaarke-rag-references BEFORE the completion and
+        // injected into the prompt below — without this the advisory review runs UNGROUNDED (the model has
+        // no firm standard to compare against, so it returns empty findings). This is the linear-path
+        // equivalent of the playbook node executor's L1 retrieval (AiAnalysisNodeExecutor).
+        var referenceKnowledge = action.AllowsKnowledge
+            ? await RetrieveReferenceGroundingAsync(action, inputs, context, cancellationToken)
+            : null;
+
+        var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand, referenceKnowledge);
         // D6 / PE-D8(b) (F-1/F-2/F-7 envelope-convergence task): render the bound envelope's grounding
         // context into the dispatched capability's prompt — the SAME BoundInputs the dispatch path already
         // binds (no second bind). Deterministic position: the stable-prefix additions (User + Business,
@@ -134,9 +160,11 @@ public sealed class ActionRunner : IActionRunner
         _logger.LogInformation(
             "Linear run: consumer={ConsumerType} action={ActionName} operandChannel={OperandChannel} " +
             "operandKind={OperandKind} promptLen={PromptLen} temp={Temperature} modelTier={ModelTier} " +
-            "deployment={Deployment} context=[{ContextSummary}]",
+            "deployment={Deployment} allowsKnowledge={AllowsKnowledge} groundingChars={GroundingChars} " +
+            "context=[{ContextSummary}]",
             context.ConsumerType, action.Name, inputs.Operand.Channel, inputs.Operand.Kind,
             prompt.Length, temperature, action.ModelTier, deploymentName,
+            action.AllowsKnowledge, referenceKnowledge?.Length ?? 0,
             ContextEnvelopeReferenceConsumer.RenderPresenceSummary(inputs.Context));
 
         // FR-P3-01 (task 040): the per-consumer ModelDeployments/MaxOutputTokens config map was retired
@@ -199,19 +227,122 @@ public sealed class ActionRunner : IActionRunner
         return parts.Count == 0 ? prompt : string.Join("\n\n", parts) + "\n\n" + prompt;
     }
 
-    private string BuildPrompt(string systemPrompt, ResolvedOperand operand) => operand.Channel switch
+    /// <summary>
+    /// nda-r1 follow-up: retrieve reference-knowledge grounding for an <c>AllowsKnowledge</c> Action from
+    /// the <c>spaarke-rag-references</c> corpus (the linear-path equivalent of the playbook node executor's
+    /// L1 retrieval). The query is the operand document (the material to measure against the standard),
+    /// falling back to the Action's own description for prompt-only runs. <see cref="ReferenceRetrievalService"/>
+    /// unions the caller tenant with the <c>"system"</c> tenant (NFR-06 pin), so Spaarke-seeded golden
+    /// references (e.g. KNW-011) are retrievable under any execution tenant. Never throws — a null return
+    /// means "no grounding available", and the Action's own prompt instructs the model to decline/omit
+    /// rather than fabricate when the standard was not supplied (grounding is mode-independent, ADR-039).
+    /// </summary>
+    private async Task<string?> RetrieveReferenceGroundingAsync(
+        AnalysisAction action,
+        BoundInputs inputs,
+        LinearRunContext context,
+        CancellationToken cancellationToken)
     {
-        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand)),
-        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand)),
-        _ => BuildNoOperandPrompt(systemPrompt),
+        if (_referenceRetrieval is null)
+        {
+            _logger.LogWarning(
+                "Action {ActionName} allows knowledge but ReferenceRetrievalService is not registered " +
+                "(DocumentIntelligence:Enabled=false?); running UNGROUNDED.", action.Name);
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(context.TenantId))
+        {
+            _logger.LogWarning(
+                "Action {ActionName} allows knowledge but LinearRunContext.TenantId is null; running UNGROUNDED.",
+                action.Name);
+            return null;
+        }
+
+        var query = inputs.Operand.Document?.ExtractedText;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            query = string.IsNullOrWhiteSpace(action.Description) ? action.Name : action.Description;
+        }
+        // Bound the embedding input (text-embedding-3-large accepts ~8k tokens; keep well under).
+        if (query.Length > 8000)
+        {
+            query = query[..8000];
+        }
+
+        try
+        {
+            var response = await _referenceRetrieval.SearchReferencesAsync(
+                query,
+                new ReferenceSearchOptions
+                {
+                    TenantId = context.TenantId!,
+                    TopK = ReferenceGroundingTopK,
+                    // Never drop a standard clause the operand does not resemble — omissions (clauses the
+                    // NDA is MISSING) are exactly what an advisory review must be able to flag.
+                    MinScore = 0.0f,
+                },
+                cancellationToken);
+
+            if (response.Results.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Reference grounding for action {ActionName} tenant {TenantId} returned ZERO chunks — " +
+                    "the run will be ungrounded (check RAG ingest + NFR-06 tenant pin).",
+                    action.Name, context.TenantId);
+                return null;
+            }
+
+            var sb = new StringBuilder();
+            foreach (var r in response.Results
+                         .OrderBy(r => r.KnowledgeSourceName, StringComparer.Ordinal)
+                         .ThenBy(r => r.ChunkIndex))
+            {
+                sb.Append('[').Append(r.KnowledgeSourceName).Append("] ").AppendLine(r.Content.Trim());
+                sb.AppendLine();
+            }
+
+            _logger.LogInformation(
+                "Reference grounding: action={ActionName} tenant={TenantId} chunks={Count} sources={Sources} chars={Chars}",
+                action.Name, context.TenantId, response.Results.Count,
+                response.Results.Select(r => r.KnowledgeSourceId).Distinct().Count(), sb.Length);
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Reference grounding failed for action {ActionName} tenant {TenantId}; running UNGROUNDED.",
+                action.Name, context.TenantId);
+            return null;
+        }
+    }
+
+    private string BuildPrompt(string systemPrompt, ResolvedOperand operand, string? knowledgeContext) => operand.Channel switch
+    {
+        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand), knowledgeContext),
+        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand), knowledgeContext),
+        _ => BuildNoOperandPrompt(systemPrompt, knowledgeContext),
     };
+
+    /// <summary>
+    /// nda-r1 follow-up: the labeled reference-standard block injected into the flat-text (non-JPS) prompt
+    /// paths for an <c>AllowsKnowledge</c> Action. Empty when there is no retrieved grounding, so the
+    /// prompt is byte-identical to the pre-change flat-text output for non-knowledge Actions. (JPS Actions
+    /// route the same string through the renderer's <c>knowledgeContext</c> "Reference Knowledge" section.)
+    /// </summary>
+    private static string ReferenceBlock(string? knowledgeContext) =>
+        string.IsNullOrWhiteSpace(knowledgeContext)
+            ? string.Empty
+            : "\n\n## Reference Standard (grounding — every finding MUST cite the clause it is measured against)\n\n"
+                + knowledgeContext.Trim();
 
     /// <summary>
     /// The pre-E-10 document-operand prompt build, preserved verbatim (non-regression). JPS renders the
     /// document under <c>## Document</c>; flat text appends the "Document:" block or substitutes the
     /// <c>{{document.extractedText}}</c> placeholder. Empty extracted text is a hard error (unchanged).
     /// </summary>
-    private string BuildDocumentPrompt(string systemPrompt, DocumentText documentText)
+    private string BuildDocumentPrompt(string systemPrompt, DocumentText documentText, string? knowledgeContext)
     {
         if (string.IsNullOrWhiteSpace(documentText.ExtractedText))
         {
@@ -222,7 +353,7 @@ public sealed class ActionRunner : IActionRunner
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
             skillContext: null,
-            knowledgeContext: null,
+            knowledgeContext: knowledgeContext,
             documentText: documentText.ExtractedText,
             templateParameters: null,
             downstreamNodes: null);
@@ -232,16 +363,19 @@ public sealed class ActionRunner : IActionRunner
             return rendered.PromptText;
         }
 
-        // Flat-text path — original single-placeholder substitution.
+        // Flat-text path — the renderer only injects knowledgeContext for JPS prompts, so the reference
+        // standard is appended here (between the instruction and the document under review).
         if (!systemPrompt.Contains(PlaceholderExtractedText, StringComparison.Ordinal))
         {
             return systemPrompt +
+                ReferenceBlock(knowledgeContext) +
                 "\n\n## Input\n\n" +
                 "Document: " + documentText.FileName + "\n\n" +
                 documentText.ExtractedText;
         }
 
-        return systemPrompt.Replace(PlaceholderExtractedText, documentText.ExtractedText, StringComparison.Ordinal);
+        return systemPrompt.Replace(PlaceholderExtractedText, documentText.ExtractedText, StringComparison.Ordinal)
+            + ReferenceBlock(knowledgeContext);
     }
 
     /// <summary>
@@ -250,12 +384,12 @@ public sealed class ActionRunner : IActionRunner
     /// action (e.g. compose actions) appends the single-source <see cref="PromptInputSection"/> directly —
     /// so both formats emit byte-identical <c>## Input</c> (the frozen, golden-pinned producer).
     /// </summary>
-    private string BuildInputPrompt(string systemPrompt, JsonElement input)
+    private string BuildInputPrompt(string systemPrompt, JsonElement input, string? knowledgeContext)
     {
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
             skillContext: null,
-            knowledgeContext: null,
+            knowledgeContext: knowledgeContext,
             documentText: null,
             templateParameters: null,
             downstreamNodes: null,
@@ -266,27 +400,28 @@ public sealed class ActionRunner : IActionRunner
             return rendered.PromptText;
         }
 
-        // Flat-text action — append the single-source `## Input` section after the instruction prompt.
-        return systemPrompt + "\n\n" + PromptInputSection.Render(input);
+        // Flat-text action — append the reference standard (flat path only) then the single-source
+        // `## Input` section after the instruction prompt.
+        return systemPrompt + ReferenceBlock(knowledgeContext) + "\n\n" + PromptInputSection.Render(input);
     }
 
     /// <summary>
     /// The prompt-only build (no operand — the relaxed no-file / args-less run). JPS renders the
     /// instruction sections; flat text returns the prompt unchanged.
     /// </summary>
-    private string BuildNoOperandPrompt(string systemPrompt)
+    private string BuildNoOperandPrompt(string systemPrompt, string? knowledgeContext)
     {
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
             skillContext: null,
-            knowledgeContext: null,
+            knowledgeContext: knowledgeContext,
             documentText: null,
             templateParameters: null,
             downstreamNodes: null);
 
         return rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText)
             ? rendered.PromptText
-            : systemPrompt;
+            : systemPrompt + ReferenceBlock(knowledgeContext);
     }
 
     private static DocumentText RequireDocument(ResolvedOperand operand) =>

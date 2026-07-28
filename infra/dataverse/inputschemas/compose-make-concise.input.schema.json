@@ -1,0 +1,18 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-make-concise (ai-advanced-capabilities-nda-r1, Contextual AI Tool Library phase 3). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). Consumes the compose-selection JPS scope — the inline AI toolbar / Review-Note tools menu dispatches { selectionText, ... } via the shipped session-dispatch seam; selectionText is the load-bearing LLM input and the anchor the emitted target_text is copied from. Matter/firm playbook + precedent grounding is supplied by the retrieval layer (not a maker-provided input field). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). Custom keywords elicitation_prompt / ledger_resolution are maker metadata (OpenAI-tolerated unknown keywords). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix.",
+  "actionCode": "compose-make-concise",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["selectionText"],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The selected contract clause (or clause fragment) to condense. The clause the attorney highlighted in the Compose editor (or the clause a Review Note anchors to); the emitted target_text MUST be copied verbatim from this so the editor can locate and apply the edit. Capped upstream at the compose-selection scope's authored budget.",
+        "maxLength": 16000,
+        "elicitation_prompt": "Which clause would you like me to make more concise? Select it in the document first.",
+        "ledger_resolution": "compose.selectionText — the current editor selection dispatched by the FR-14 inline AI toolbar (compose-selection scope), or the Review Note's anchored clause span. Matter/firm playbook + precedent grounding is supplied by the retrieval layer at dispatch time."
+      }
+    }
+  }
+}

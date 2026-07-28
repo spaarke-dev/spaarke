@@ -129,10 +129,9 @@ import {
   Info24Regular,
   ArrowSwapRegular,
   DocumentEdit24Regular,
+  TextGrammarArrowLeft24Regular,
+  Wand24Regular,
   MoreVertical20Regular,
-  Mail24Regular,
-  Open24Regular,
-  Send24Regular,
   Dismiss16Regular,
 } from '@fluentui/react-icons';
 import { useAuth } from '@spaarke/auth';
@@ -242,6 +241,25 @@ const TOOLBAR_SELECTION_TEXT_CAP = 16000;
 // ---------------------------------------------------------------------------
 
 /**
+ * The UI surfaces on which a tool can appear (Contextual AI Tool Library —
+ * see `projects/ai-advanced-capabilities-nda-r1/notes/contextual-ai-tool-library-design.md`).
+ * A tool's `surfaces` is the FIRST of the two library dimensions (the second is
+ * `workTypes`). `selection` = the BubbleMenu; `review-note` = a Review Note's ⋮ menu;
+ * `whole-document` / `assistant-chip` are declared for future surfaces.
+ */
+export type ToolSurface = 'selection' | 'review-note' | 'whole-document' | 'assistant-chip';
+
+/**
+ * Optional runtime context a tool's `appliesTo` predicate may inspect. Kept minimal
+ * for now (no predicate ships yet); a future tool can gate on the selection text
+ * or the active document.
+ */
+export interface ToolContext {
+  readonly selectionText?: string;
+  readonly activeWorkType?: string;
+}
+
+/**
  * One inline AI toolbar action. `bindingId: ''` is the Phase-4 stub sentinel
  * (see file header "PHASE-4 STUB BOUNDARY") — a stubbed action renders
  * disabled rather than silently failing on click.
@@ -255,7 +273,7 @@ export interface ComposeAiToolbarAction {
   readonly tooltip: string;
   /** `sprk_playbookconsumer` Binding row GUID. `''` = not yet wired (Phase 4 gate). */
   readonly bindingId: string;
-  /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". */
+  /** `'primary'` renders as an always-visible button; `'overflow'` lands in "More actions…". Selection-surface ORDERING hint only. */
   readonly placement: 'primary' | 'overflow';
   /**
    * DEF-09: `true` for a compose-DISPOSITION EDIT action whose result materializes
@@ -268,6 +286,29 @@ export interface ComposeAiToolbarAction {
    * which keep chat-session dispatch + Assistant-rendered prose.
    */
   readonly materializesInEditor?: boolean;
+
+  // --- Contextual AI Tool Library — surfacing dimensions ---
+  /**
+   * WHICH UI surfaces render this tool. Defaults to `['selection']` when omitted
+   * (= today's behavior: BubbleMenu only). A single definition may list several
+   * surfaces (e.g. Draft alternative on `['selection','review-note']`). An empty
+   * array RETIRES the tool from every surface without deleting its definition — used
+   * to remove non-functional tools (round-8 #6) so they can be re-tagged later.
+   */
+  readonly surfaces?: readonly ToolSurface[];
+  /**
+   * WHICH WORK TYPES surface this tool — the product surface the user chose by intent
+   * (`'agreement-analysis'`, `'legal-research'`, …), NOT the knowledge sub-domain (NDA
+   * vs MSA is a grounding difference within a work type, not a tool-scoping axis).
+   * `['*']` (default) = a shared edit primitive shown in every work type (e.g. Draft
+   * alternative / Make concise); `['agreement-analysis']` = shown only in that surface.
+   * The active work type narrows the surface's tool set to `workTypes ∋ '*' || activeWorkType`.
+   */
+  readonly workTypes?: readonly string[];
+  /** Optional runtime predicate — return `false` to hide the tool for the given context. */
+  readonly appliesTo?: (ctx: ToolContext) => boolean;
+  /** Free-text prompt seed for instruction-style tools (e.g. "Describe a change…"). */
+  readonly inputPrompt?: string;
 }
 
 /**
@@ -313,6 +354,10 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: EXPLAIN_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — the explain output was
+    // not useful in practice. Definition kept so a future context can re-tag it
+    // (`surfaces: ['selection']`) without re-authoring. `workTypes: ['*']` when re-enabled.
+    surfaces: [],
   },
   {
     id: 'compose-compare-to-playbook',
@@ -320,6 +365,10 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     tooltip: COMPARE_TOOLTIP,
     bindingId: '',
     placement: 'primary',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — redundant with the NDA
+    // Review Notes (which already carry per-clause playbook comparison). Re-tag per
+    // work type if a non-advisory Compose context wants inline clause comparison.
+    surfaces: [],
   },
   {
     id: 'compose-draft-alternative',
@@ -330,16 +379,48 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     // DEF-09: the ONLY compose-disposition EDIT action — its alternative renders as an
     // inline redline in the document, so route to the DOCUMENT session + confirm-only.
     materializesInEditor: true,
+    // Contextual AI Tool Library: the reusable edit primitive — shown on BOTH the
+    // BubbleMenu and each Review Note's ⋮ menu, from this ONE definition (round-8 #4).
+    // `workTypes` defaults to ['*'] (a shared primitive, available in every work type).
+    surfaces: ['selection', 'review-note'],
   },
   {
-    // gap 2.3 — the defined-terms scan (FR-11). Overflow-menu trigger per the
-    // authored Binding row ("overflow-menu trigger"); results surface read-only
-    // in the Context pane.
+    // Contextual AI Tool Library phase 3 (round-8 #4) — one-click "make more concise".
+    // Same structured-edit → redline path as draft-alternative; different prompt intent.
+    // Catalog: infra/dataverse/actions/compose-make-concise.action.json (+ binding row).
+    id: 'compose-make-concise',
+    label: 'Make more concise',
+    tooltip: 'Rewrite this clause to be more concise, preserving its exact legal meaning. Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+  },
+  {
+    // Contextual AI Tool Library phase 3 (round-8 #4) — free-text "describe a change".
+    // The ONLY current tool with an `inputPrompt`: the host collects the user's
+    // instruction before dispatch and passes it as the `instruction` slot.
+    // Catalog: infra/dataverse/actions/compose-rewrite-instruction.action.json (+ binding row).
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip: 'Describe a change in your own words (e.g. "make this mutual", "add a 30-day cure period"). Produces a pending track-change you can accept or reject.',
+    bindingId: '',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change you’d like to make to this clause.',
+  },
+  {
+    // gap 2.3 — the defined-terms scan (FR-11).
     id: 'compose-defined-terms',
     label: 'Defined terms',
     tooltip: DEFINED_TERMS_TOOLTIP,
     bindingId: '',
     placement: 'overflow',
+    // Round-8 #6 (UAT): RETIRED from the selection surface — it did not work usefully
+    // from the clause toolbar. Belongs to a future `whole-document` surface; re-tag
+    // `surfaces: ['whole-document']` when that surface ships.
+    surfaces: [],
   },
 ];
 
@@ -392,6 +473,35 @@ export function getComposeAiToolbarActions(): readonly ComposeAiToolbarAction[] 
   return [...DEFAULT_ACTIONS.filter(a => !overriddenIds.has(a.id)), ...registeredActions];
 }
 
+/**
+ * Contextual AI Tool Library selector. Returns the tools that render on a given
+ * `surface` for the `activeWorkType`, applying both library dimensions plus the
+ * optional `appliesTo` predicate:
+ *
+ *   surfaces ∋ surface   AND   (workTypes ∋ '*' OR workTypes ∋ activeWorkType)   AND   appliesTo(ctx) !== false
+ *
+ * Defaults preserve today's behavior: a tool with no `surfaces` is treated as
+ * `['selection']`; a tool with no `workTypes` is treated as `['*']` (a shared primitive).
+ * This is how the BubbleMenu (`'selection'`) and each Review Note's ⋮ menu
+ * (`'review-note'`) draw from ONE registry — a single definition surfaces in the
+ * contexts it declares. `activeWorkType` is the product surface the user chose
+ * (`'agreement-analysis'` / `'legal-research'`), NOT the knowledge sub-domain.
+ */
+export function getToolsForSurface(
+  surface: ToolSurface,
+  activeWorkType: string,
+  ctx?: ToolContext
+): readonly ComposeAiToolbarAction[] {
+  return getComposeAiToolbarActions().filter(a => {
+    const surfaces = a.surfaces ?? ['selection'];
+    if (!surfaces.includes(surface)) return false;
+    const workTypes = a.workTypes ?? ['*'];
+    if (!workTypes.includes('*') && !workTypes.includes(activeWorkType)) return false;
+    if (a.appliesTo && a.appliesTo(ctx ?? { activeWorkType }) === false) return false;
+    return true;
+  });
+}
+
 /** Test-only — clears registrations between test files/cases. */
 export function __resetComposeAiToolbarActionsForTests(): void {
   registeredActions = [];
@@ -418,6 +528,23 @@ export interface ComposeAiToolbarProps {
    * another; hosts should generally leave this undefined.
    */
   actions?: ReadonlyArray<ComposeAiToolbarAction>;
+  /**
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user
+   * chose), used to narrow the selection surface's tools (`getToolsForSurface('selection', …)`).
+   * Defaults to `'*'`: only shared `workTypes: ['*']` primitives show. A host running a
+   * specific work type (e.g. Agreement Analysis) passes its id (`'agreement-analysis'`)
+   * so work-type-scoped tools also appear. Knowledge sub-domain (NDA vs MSA) does NOT
+   * belong here — it only affects grounding. Ignored when `actions` is supplied.
+   */
+  activeWorkType?: string;
+  /**
+   * Contextual AI Tool Library (phase 3) — free-text tool prompt. When an action declares
+   * an `inputPrompt` (e.g. "Describe a change…"), the toolbar calls this to collect the
+   * user's free-text `instruction` BEFORE dispatch; the host renders the input UI and
+   * resolves the entered text (or `null` if cancelled). Absent ⇒ an `inputPrompt` tool
+   * cannot dispatch (no-op) — the host that wants free-text tools MUST provide this.
+   */
+  onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
   /**
    * FR-18 host serialization seam (see `ComposeActionEnqueue`). When provided,
    * every action dispatch routes through the host's serial queue instead of the
@@ -554,6 +681,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
     bffBaseUrl,
     dispatch,
     actions,
+    activeWorkType = '*',
+    onRequestInstruction,
     enqueueComposeAction,
     dispatchConsumerOverride,
     forceVisible,
@@ -605,7 +734,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   );
 
   const handleActionClick = React.useCallback(
-    (action: ComposeAiToolbarAction): void => {
+    async (action: ComposeAiToolbarAction): Promise<void> => {
       if (!editor) return;
       if (!action.bindingId) {
         // Phase-4 catalog gate — see file header "PHASE-4 STUB BOUNDARY".
@@ -619,6 +748,17 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
       const rawText = editor.state.doc.textBetween(from, to, ' ');
       const selectionText =
         rawText.length > TOOLBAR_SELECTION_TEXT_CAP ? rawText.slice(0, TOOLBAR_SELECTION_TEXT_CAP) : rawText;
+
+      // Contextual AI Tool Library (phase 3): a free-text tool (`inputPrompt`, e.g. "Describe a
+      // change…") collects the user's instruction via the host dialog BEFORE dispatch. Selection
+      // is already captured above (from/to/selectionText), so it survives the modal. Cancel/empty
+      // ⇒ abort. The `instruction` becomes a dispatch slot the Action's inputSchema declares.
+      let instruction: string | undefined;
+      if (action.inputPrompt) {
+        const entered = onRequestInstruction ? await onRequestInstruction(action) : null;
+        if (!entered || !entered.trim()) return;
+        instruction = entered.trim();
+      }
 
       // FR-07 (task 040) — GENERATE-WINDOW BOOKMARK (opt-in via `aiGenerateBookmark`; drops only
       // for a `materializesInEditor` Generate action). Drop a request-scoped bookmark at the
@@ -648,6 +788,8 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           // dropped AND the caret sat in a paraId-bearing block). The model returns JSON operations
           // referencing this paraId, not free text to search (I-7).
           ...(useBookmark && bookmarkContext?.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
+          // Contextual AI Tool Library (phase 3): the free-text instruction for an `inputPrompt` tool.
+          ...(instruction ? { instruction } : {}),
         },
       };
 
@@ -705,40 +847,22 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
           });
       }
     },
-    [editor, dispatchConsumer, enqueueComposeAction, documentRef, sessionId, aiGenerateBookmark, aiApplyValidation]
+    [
+      editor,
+      dispatchConsumer,
+      enqueueComposeAction,
+      documentRef,
+      sessionId,
+      aiGenerateBookmark,
+      aiApplyValidation,
+      onRequestInstruction,
+    ]
   );
 
-  // FIX #10b (UAT) — "Email" affordance. Compose is the default drafting
-  // surface; an explicit email path is a STUB for now. Both menu items open a
-  // new STUB email widget tab by dispatching a `workspace` `widget_load` on the
-  // EXISTING PaneEventBus (ADR-030; NO new bus, NO dispatch endpoint). The
-  // contract MATCHES the chat "email" chip another agent emits:
-  //   workspace / widget_load, widgetType 'email', displayName 'Email',
-  //   widgetData { layoutName: 'Email', mode: 'open' | 'send', ... }.
-  // WorkspacePane resolves the EmailStubWidget for `widgetType === 'email'`.
-  //   - Open in Email → mode 'open', carries the drafted body text.
-  //   - Send in Email → mode 'send', carries the current file as an attachment.
-  const handleEmailAction = React.useCallback(
-    (mode: 'open' | 'send'): void => {
-      if (!editor) return;
-      // Clean the drafted body so pending redlines email as their ACCEPTED text, not the garbled
-      // struck-original + proposed-insertion concatenation `textBetween` produces.
-      const draftedText = extractCleanDraftText(editor.getJSON() as TipTapNode);
-      const attachmentFileName = documentRef?.fileName ?? 'Untitled.docx';
-      dispatch('workspace', {
-        type: 'widget_load',
-        widgetType: 'email',
-        displayName: 'Email',
-        widgetData: {
-          layoutName: 'Email',
-          mode,
-          ...(mode === 'open' ? { bodyText: draftedText } : {}),
-          ...(mode === 'send' ? { attachmentFileName } : {}),
-        },
-      });
-    },
-    [editor, documentRef, dispatch]
-  );
+  // Round-8 #6 (UAT): the "Email" split-menu was REMOVED from the selection toolbar —
+  // it launched the EmailStubWidget from the clause BubbleMenu, which the review UX did
+  // not want. The EmailStubWidget itself is unchanged; it is simply no longer launched
+  // from here. `extractCleanDraftText` stays exported for any future email path.
 
   if (!editor) return null;
 
@@ -751,7 +875,12 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
   const reviewItems = aiApplyValidation?.reviewQueue ?? [];
   if (!showActionToolbar && reviewItems.length === 0) return null;
 
-  const allActions = actions ?? getComposeAiToolbarActions();
+  // Contextual AI Tool Library: the BubbleMenu IS the `selection` surface, so draw from
+  // `getToolsForSurface('selection', …)` — this is what drops the tools retired via
+  // `surfaces: []` (round-8 #6: Explain / Compare / Defined-terms) and narrows to the
+  // active work type. `placement` remains the intra-surface primary-vs-overflow ORDERING.
+  // Tests may still inject a fixed `actions` list.
+  const allActions = actions ?? getToolsForSurface('selection', activeWorkType);
   const primaryActions = allActions.filter(a => a.placement === 'primary');
   const overflowActions = allActions.filter(a => a.placement === 'overflow');
 
@@ -777,45 +906,12 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                 disabled={!action.bindingId}
                 aria-label={action.label}
                 data-testid={`compose-ai-toolbar-${action.id}`}
-                onClick={() => handleActionClick(action)}
+                onClick={() => void handleActionClick(action)}
               />
             </Tooltip>
           ))}
 
-          {/* FIX #10b — Email split-menu (STUB target). Consistent with the primary
-          labelled buttons; both items dispatch a workspace/widget_load that opens
-          the EmailStubWidget tab (see handleEmailAction). */}
-          <Menu positioning="below-end">
-            <MenuTrigger disableButtonEnhancement>
-              <Tooltip content="Email" relationship="description" withArrow>
-                <ToolbarButton
-                  appearance="subtle"
-                  icon={<Mail24Regular />}
-                  aria-label="Email"
-                  data-testid="compose-ai-toolbar-email"
-                />
-              </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItem
-                  icon={<Open24Regular />}
-                  data-testid="compose-ai-toolbar-email-open"
-                  onClick={() => handleEmailAction('open')}
-                >
-                  Open in Email
-                </MenuItem>
-                <MenuItem
-                  icon={<Send24Regular />}
-                  data-testid="compose-ai-toolbar-email-send"
-                  onClick={() => handleEmailAction('send')}
-                >
-                  Send in Email
-                </MenuItem>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-
+          {/* Round-8 #6 (UAT): the Email split-menu was removed from this toolbar. */}
           <Menu positioning="below-end">
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="More actions" relationship="description" withArrow>
@@ -841,7 +937,7 @@ export function ComposeAiToolbar(props: ComposeAiToolbarProps): React.JSX.Elemen
                       disabled={!action.bindingId}
                       title={action.tooltip}
                       data-testid={`compose-ai-toolbar-overflow-${action.id}`}
-                      onClick={() => handleActionClick(action)}
+                      onClick={() => void handleActionClick(action)}
                     >
                       {action.label}
                     </MenuItem>
@@ -895,6 +991,10 @@ function actionIcon(actionId: string): React.JSX.Element {
       return <ArrowSwapRegular />;
     case 'compose-draft-alternative':
       return <DocumentEdit24Regular />;
+    case 'compose-make-concise':
+      return <TextGrammarArrowLeft24Regular />;
+    case 'compose-rewrite-instruction':
+      return <Wand24Regular />;
     default:
       return <DocumentEdit24Regular />;
   }

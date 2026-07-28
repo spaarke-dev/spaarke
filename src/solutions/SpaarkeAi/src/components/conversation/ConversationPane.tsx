@@ -59,11 +59,12 @@ import { useConsumerChips } from "./useConsumerChips";
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
 import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
-import { SuggestionCard } from "./SuggestionCard";
 import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
-import { useNdaReviewAdvisoryCommentsBridge } from "./useNdaReviewAdvisoryCommentsBridge";
+import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
+import { useNdaReviewRunProgress } from "./useNdaReviewRunProgress";
+import { NdaReviewProgressModal } from "./NdaReviewProgressModal";
 import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
@@ -86,11 +87,11 @@ import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./compos
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
 import type { ComposeAssistantToWorkspaceFlow } from "@spaarke/compose-components/types/compose-contracts";
 import { formatEventOutputMarkdown, toDisplayList, type EventClassificationData } from "./DocumentUploadedEventStream";
-import { formatComposeActionResultMarkdown } from "./composeResultFormat";
+import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from "./composeResultFormat";
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip } from "./localActionChips";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip } from "./localActionChips";
 import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
@@ -416,6 +417,14 @@ export function ConversationPane(): React.JSX.Element {
     fileId: string;
     fileName: string;
   } | null>(null);
+  // ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): render-free mirror of ndaReviewFile so
+  // the stable-`[]`-deps `getAppendedLocalChips` callback (below) can read the current NDA state when
+  // `acceptChips` builds the Suggested-Next-Steps strip. Kept in sync at render (auto-tracks set AND
+  // every clear site) and set synchronously in handleNdaClassified so it is already populated if the
+  // classification and the chips frame land in the same tick (the pipeline order — promote → classify →
+  // chips — normally sets it a frame earlier, but this makes the append race-free either way).
+  const ndaReviewFileRef = React.useRef<{ fileId: string; fileName: string } | null>(null);
+  ndaReviewFileRef.current = ndaReviewFile;
   const handleNdaClassified = React.useCallback((data: EventClassificationData): void => {
     const docType = typeof data.docType === "string" ? data.docType.trim().toLowerCase() : "";
     // Negative case (task 022 acceptance criterion 3): any docType other than "nda" — including
@@ -424,7 +433,9 @@ export function ConversationPane(): React.JSX.Element {
     // Kick off the deferred capability-discovery fetch NOW (well before the user reads the
     // card and clicks it) so ndaReviewBindingId is resolved by dispatch time.
     setNdaReviewCapabilityNeeded(true);
-    setNdaReviewFile({ fileId: data.fileId, fileName: data.fileName ?? "the document" });
+    const file = { fileId: data.fileId, fileName: data.fileName ?? "the document" };
+    ndaReviewFileRef.current = file; // same-tick guarantee for getAppendedLocalChips (see ref note above)
+    setNdaReviewFile(file);
   }, []);
 
   // Stable-ref indirection keeps eventBatch → chips composition acyclic.
@@ -459,6 +470,19 @@ export function ConversationPane(): React.JSX.Element {
   // files) route here. `handleDocAction` (the reused editor/email bridges) is declared further
   // below, so the chip strip reaches it through a ref rather than reordering hook declarations.
   const localChipActionRef = React.useRef<(actionId: string) => void>(() => undefined);
+  // nda-r1 follow-up: the NDA-REVIEW advisory-comments bridge (`emitFromResult`, defined further below
+  // with the other Compose bridges) is reached from the chips controller through this ref so the "Review
+  // an NDA" card path also materializes flagged clauses as Compose comments (not just raw JSON).
+  const ndaReviewEmitRef = React.useRef<(result: unknown) => void>(() => undefined);
+  // UAT round-5 #9 — center-screen progress modal for a running NDA review. Driven by the three real
+  // client transitions: dispatch-start (onChipDispatched, gated to the NDA binding), NDA-shaped terminal
+  // result (onDispatchResult), and dispatch-settle-without-result (a chips.dispatching effect → fail).
+  // Refs let the stable []-deps chip callbacks reach the current hook + binding id without re-subscribing.
+  const ndaRun = useNdaReviewRunProgress();
+  const ndaRunRef = React.useRef(ndaRun);
+  ndaRunRef.current = ndaRun;
+  const ndaReviewBindingIdRef = React.useRef<string | null>(null);
+  ndaReviewBindingIdRef.current = ndaReviewBindingId;
   // R5-9 (UAT 2026-07-20): "Send as email" / Quick Start "Send Email" open the shared Email Compose
   // modal (SendEmailDialog / EmailComposer). `emailSeed` non-null = open; it carries the pre-fill
   // (subject / body / suggested recipients) captured from the last "Draft a response" result.
@@ -505,10 +529,24 @@ export function ConversationPane(): React.JSX.Element {
     openLibraryModal: React.useCallback(() => openLibraryModalRef.current(), []),
     // UAT R4-6 / R4-11: local-action chips route through the ref to `handleLocalChipAction` (below).
     onLocalChipAction: React.useCallback((actionId: string) => localChipActionRef.current(actionId), []),
+    // nda-r1 follow-up: every Binding dispatch result on the chip/card path flows to the NDA-REVIEW
+    // advisory-comments bridge (via ref — defined below). Materializes flagged clauses as Compose
+    // comments for the "Review an NDA" card; safe no-op for every non-NDA result shape.
+    onDispatchResult: React.useCallback((result: unknown) => {
+      ndaReviewEmitRef.current(result);
+      // UAT round-5 #9 — an NDA-shaped terminal result completes the progress modal.
+      if (isNdaReviewResult(result)) ndaRunRef.current.complete();
+    }, []),
     // R5-1: append "Revise in Compose" as an in-line card alongside the post-attach cards, once at
     // least one file is indexed. Reads the promoted-files ref so it reflects current state.
+    // nda-r1 follow-up (UAT 2026-07-26): also append "Review an NDA" (FIRST — the primary action for a
+    // just-classified NDA) when the classifier flagged the upload, replacing the old top-of-pane
+    // notification card. Both read refs so this stays a stable `[]`-deps callback.
     getAppendedLocalChips: React.useCallback(
-      () => (promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      () => [
+        ...(ndaReviewFileRef.current ? [buildNdaReviewChip()] : []),
+        ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+      ],
       []
     ),
     // R5-9: remember the last drafted correspondence so "Send as email" can seed the modal.
@@ -533,9 +571,23 @@ export function ConversationPane(): React.JSX.Element {
     onChipDispatched: React.useCallback((bindingId: string) => {
       recordChipUsage(bindingId);
       setChipUsageTick((t) => t + 1);
+      // UAT round-5 #9 — when the NDA-review binding is the one dispatched (from the "Review an NDA"
+      // card OR its chip), open the center-screen progress modal.
+      if (ndaReviewBindingIdRef.current && bindingId === ndaReviewBindingIdRef.current) {
+        ndaRunRef.current.begin();
+      }
     }, []),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // UAT round-5 #9 — when a dispatch settles WITHOUT an NDA result having completed the run, mark it
+  // failed. `fail` no-ops unless the run is still `running` (a successful `complete` already won, since
+  // `onDispatchResult` runs before the dispatch's `.finally` clears `dispatching`). `ndaRun.fail` is a
+  // stable callback, so this effect only re-runs when `chips.dispatching` actually flips.
+  const ndaRunFail = ndaRun.fail;
+  React.useEffect(() => {
+    if (!chips.dispatching) ndaRunFail();
+  }, [chips.dispatching, ndaRunFail]);
 
   // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
   // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
@@ -836,6 +888,9 @@ export function ConversationPane(): React.JSX.Element {
   // useComposeWorkspaceReceivers materializes a comment thread per flagged clause. See
   // useNdaReviewAdvisoryCommentsBridge.ts for the full rationale.
   const ndaReviewAdvisoryComments = useNdaReviewAdvisoryCommentsBridge({ dispatch, getSessionId });
+  // nda-r1 follow-up: publish emitFromResult to the ref the chips controller reaches (declared above the
+  // useConsumerChips call), so the "Review an NDA" card dispatch materializes flagged clauses as comments.
+  ndaReviewEmitRef.current = ndaReviewAdvisoryComments.emitFromResult;
 
   const dispatchComposeAction = React.useCallback(
     (request: ComposeActionRequest): Promise<DispatchConsumerResult> => {
@@ -879,10 +934,17 @@ export function ConversationPane(): React.JSX.Element {
             // to a plain confirmation (no controls — there is no addressable edit to act on).
             // DEF-11: a whole-document revise uses the document-scoped confirmation copy; a
             // selection edit (DEF-09, unchanged) keeps the original wording. Same controls either way.
-            const confirmationText =
+            const baseConfirmation =
               request.revisionScope === "whole-document"
                 ? COMPOSE_WHOLE_DOCUMENT_EDIT_CONFIRMATION
                 : COMPOSE_EDIT_CONFIRMATION;
+            // UAT round-8 #7 — the reviewer asked for a Copilot-style explanation of WHAT/WHY changed
+            // (the summary-only confirmation gave no detail). Append the model's own rationale/summary
+            // from the edit result — the explanation ONLY, never the proposed text (that IS the redline).
+            const explanation = extractComposeEditExplanation(dispatched.result);
+            const confirmationText = explanation
+              ? `${baseConfirmation}\n\n**What I changed:** ${explanation}`
+              : baseConfirmation;
             injection.enqueue(
               ledgerRef
                 ? makeComposeEditControlsMessage(confirmationText, {
@@ -1139,11 +1201,16 @@ export function ConversationPane(): React.JSX.Element {
           // R5-1: same on-demand open-in-Compose the files tray used to trigger.
           handleReviseInCompose();
           return;
+        case LOCAL_CHIP.ndaReview:
+          // nda-r1 follow-up (UAT 2026-07-26): the "Review an NDA" Suggested-Next-Steps card runs the
+          // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
+          handleReviewNda();
+          return;
         default:
           return;
       }
     },
-    [handleDocAction, injection, handleReviseInCompose]
+    [handleDocAction, injection, handleReviseInCompose, handleReviewNda]
   );
   localChipActionRef.current = handleLocalChipAction;
 
@@ -1850,6 +1917,9 @@ export function ConversationPane(): React.JSX.Element {
 
   return (
     <div className={styles.root}>
+      {/* UAT round-5 #9 — center-screen live-progress popup while an NDA review runs (portals to
+          document.body, so its placement in the tree is immaterial). */}
+      <NdaReviewProgressModal status={ndaRun.status} onClose={ndaRun.close} />
       <PaneHeader
         title="Assistant"
         icon={<ChatRegular />}
@@ -1943,26 +2013,11 @@ export function ConversationPane(): React.JSX.Element {
             transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
         {suggestions.suggestionSlot}
 
-        {/* task 022 — "Review an NDA" action CARD (ASSISTANT-UI-ELEMENT-CRITERIA: a persistent
-            act-on item, not tied to the current turn, → Card, not a chip). Reuses the existing
-            stateless SuggestionCard presentational component (clickable region + dismiss 'x',
-            Fluent v9 tokens, dark-mode safe) rather than a new card component (CLAUDE.md §11).
-            Renders only when the ONE existing classifier (chat-classify) flagged the most
-            recently uploaded file as an NDA — a non-NDA upload renders nothing here (negative
-            case, task 022 acceptance criterion 3). */}
-        {ndaReviewFile && (
-          <SuggestionCard
-            suggestion={{
-              suggestionId: `nda-review:${ndaReviewFile.fileId}`,
-              title: "Review an NDA",
-              snippet: ndaReviewFile.fileName,
-              actionHint: "nda-review",
-            }}
-            disabled={chips.dispatching}
-            onAction={handleReviewNda}
-            onDismiss={() => setNdaReviewFile(null)}
-          />
-        )}
+        {/* nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" moved OUT of this top-of-pane
+            notification slot (it read as "hidden" above the fold) and INTO the Suggested-Next-Steps
+            strip as an in-line card, alongside "Summarize this file / Revise document". See
+            getAppendedLocalChips + LOCAL_CHIP.ndaReview → handleReviewNda. Rendered only when the
+            classifier flagged the upload as an NDA (host gates on ndaReviewFileRef). */}
 
         {showWelcomePanel && <WelcomePanel />}
         {showWelcomeCards && (

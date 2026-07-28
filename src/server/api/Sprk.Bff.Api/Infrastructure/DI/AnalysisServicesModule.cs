@@ -93,6 +93,10 @@ public static class AnalysisServicesModule
         // AiSearchOptions binding is preserved by JobProcessingModule.
         services.AddSingleton<IAllowedIndexesProvider, DataverseAllowedIndexesProvider>();
 
+        // UAT round-3 D3 (ai-advanced-capabilities-nda-r1): the NDA-standard clause-text lookup behind
+        // the review comment's standardRef hover. Stateless, in-memory, no I/O — a plain singleton.
+        services.AddSingleton<Services.Ai.NdaStandard.NdaStandardClauseProvider>();
+
         // multi-container-multi-index-r1 upload-indexing-centralization (scope extension) — TRULY UNCONDITIONAL.
         // IPostUploadIndexingEnqueuer is the single seam for post-upload RAG indexing.
         // Phase 3 (2026-06-08) — dispatches sync OBO indexing via IFileIndexingService.IndexFileAsync

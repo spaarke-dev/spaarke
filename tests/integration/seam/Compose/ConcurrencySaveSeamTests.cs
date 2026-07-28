@@ -289,6 +289,138 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 2b. Seam A (ai-advanced-capabilities-nda-r1 UAT round-2 item #4) — a STALE-base save whose
+    //     advisory comment is anchored to a CLIENT-MINTED paraId (present only in the save's paraIdMap,
+    //     physically ABSENT from the docx — the uploaded-NDA case) is STAMPED into the current bytes in
+    //     the re-anchor path, so the comment re-anchors AUTO (exact paraId) and BAKES as a native
+    //     w:comment. Before the fix this exact case orphaned every advisory comment ("comments don't
+    //     survive Save to Word"): the client-minted paraId matched nothing in the re-downloaded current
+    //     bytes → 0.0 score → ORPHAN → surfaced-but-never-baked. This test fails without the Stamp call
+    //     added to ReanchorStaleSaveAsync.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_StaleBase_ClientMintedComment_StampsAndBakesNativeComment_ThroughTheWire()
+    {
+        const string speId = "spe-item-nda-stale-minted-comment";
+        const string driveId = "drive-nda-stale-minted-comment";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        // An UPLOADED NDA carries NO physical w14:paraIds — every editor id is client-minted and travels
+        // ONLY in the save's paraIdMap (never physically in the bytes). Build the doc id-less to model
+        // exactly that (the case the non-stale path already handles via its own Stamp, but the stale
+        // re-anchor path did not until Seam A).
+        var original = BuildDocxWithoutParaIds(Paragraphs);
+
+        // The client's load-time paraId map: one entry per body paragraph, in document order.
+        var mintedParaIds = new[] { "0A000001", "0A000002", "0A000003" };
+        var paraIdMap = new object[]
+        {
+            new { index = 0, paraId = mintedParaIds[0], text = Paragraphs[0] },
+            new { index = 1, paraId = mintedParaIds[1], text = Paragraphs[1] },
+            new { index = 2, paraId = mintedParaIds[2], text = Paragraphs[2] },
+        };
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // ── Save #1 — seed the version stamp at v1 (no ops/comments; persists the id-less original). ──
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the seeding save must succeed — body: {await firstSave.Content.ReadAsStringAsync()}");
+
+        // ── A BENIGN external version bump: the live SPE eTag moves (v2 ≠ the v1 stamp → STALE) but the
+        //    re-downloaded bytes are the SAME id-less content (the exact "opened in Word / re-saved,
+        //    version counter moved, content effectively unchanged" case the UAT hit). ────────────────
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag-external\""));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(original.ToArray()));
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
+
+        // ── Save #2 — an advisory comment anchored to paragraph 1's CLIENT-MINTED paraId, plus the
+        //    paraIdMap. Stale path fires → Seam A stamps the minted ids into the current bytes → the
+        //    comment re-anchors AUTO (confidence 1.0) → bakes as a native w:comment. ────────────────────
+        const string commentBody = "Flag: this confidentiality carve-out is broader than the firm standard.";
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            paraIdMap,
+            comments = new object[]
+            {
+                new
+                {
+                    paraId = mintedParaIds[1],
+                    range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 10 } },
+                    commentText = commentBody,
+                    author = "AI Advisory Review",
+                    date = new DateTime(2026, 7, 27, 12, 0, 0, DateTimeKind.Utc),
+                },
+            },
+        });
+
+        var secondBody = await secondSave.Content.ReadAsStringAsync();
+        secondSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a stale-base comment save must re-anchor and complete — NEVER an eTag 500 — body: {secondBody}");
+
+        var saveResult = await secondSave.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult.Should().NotBeNull();
+        saveResult!.ReanchorSummary.Should().NotBeNull("a stale-base save surfaces the re-anchor summary");
+        saveResult.ReanchorSummary!.Total.Should().Be(1);
+        saveResult.ReanchorSummary.AutoCount.Should().Be(1,
+            "Seam A stamped the client-minted paraId into the current bytes → the comment re-anchors as an exact-paraId AUTO match (was ORPHAN before the fix)");
+        saveResult.ReanchorSummary.OrphanCount.Should().Be(0,
+            "the advisory comment must NOT orphan on a stale save — that was the 'comments don't survive Save to Word' bug");
+
+        persisted.Should().NotBeNull("the SPE facade must have captured the re-anchored, patched bytes");
+        using var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        var commentedPara = patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+            .Single(p => string.Equals(p.ParagraphId?.Value, mintedParaIds[1], StringComparison.OrdinalIgnoreCase));
+        commentedPara.Descendants<CommentRangeStart>().Should().NotBeEmpty(
+            "the stamped paragraph must carry the native w:comment range markers after the stale save");
+        var commentsPart = patchedDoc.MainDocumentPart!.WordprocessingCommentsPart;
+        commentsPart.Should().NotBeNull("a native w:comment part must exist after the advisory comment bakes");
+        commentsPart!.Comments!.Descendants<Comment>()
+            .SelectMany(c => c.Descendants<Text>())
+            .Select(t => t.Text)
+            .Should().Contain(t => t.Contains("broader than the firm standard", StringComparison.Ordinal),
+                "the advisory comment body must be emitted natively — the whole point of 'comments travel with the file'");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // 3. NEGATIVE — an unrelated, non-lock, non-precondition failure during the SPE write still
     //    surfaces as a GENERIC 500 ProblemDetails — proving the DEF-14/051 typed catches for 423/412
     //    do not swallow or misclassify an unrelated failure as a lock/precondition.
@@ -383,6 +515,28 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
                     ParagraphId = new HexBinaryValue(paraIds[i]),
                 };
                 body.AppendChild(p);
+            }
+            body.AppendChild(new SectionProperties());
+            mainPart.Document.Save();
+        }
+        return stream.ToArray();
+    }
+
+    /// <summary>Builds a valid DOCX whose paragraphs carry NO physical w14:paraId — the shape an UPLOADED
+    /// document has (every editor id is client-minted at load and travels only in the save's paraIdMap,
+    /// never physically in the bytes). Used by the Seam A stale-comment test to prove the re-anchor path
+    /// stamps those minted ids into the current bytes so an advisory comment bakes instead of orphaning.</summary>
+    private static byte[] BuildDocxWithoutParaIds(IReadOnlyList<string> paragraphs)
+    {
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document))
+        {
+            var mainPart = doc.AddMainDocumentPart();
+            mainPart.Document = new Document();
+            var body = mainPart.Document.AppendChild(new Body());
+            foreach (var text in paragraphs)
+            {
+                body.AppendChild(new Paragraph(new Run(new Text(text) { Space = SpaceProcessingModeValues.Preserve })));
             }
             body.AppendChild(new SectionProperties());
             mainPart.Document.Save();

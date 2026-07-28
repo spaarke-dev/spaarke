@@ -19,6 +19,7 @@ import {
   formatDraftAlternativeResult,
   formatSummarizeWordChangesResult,
   formatDefinedTermsResult,
+  extractComposeEditExplanation,
 } from '../composeResultFormat';
 import { createConsumerDispatcher } from '@spaarke/ui-components';
 import { TextEncoder as NodeTextEncoder, TextDecoder as NodeTextDecoder } from 'util';
@@ -103,6 +104,30 @@ describe('formatDraftAlternativeResult', () => {
 
   it('returns null when the required triad (target_text/new_text/match_mode) is incomplete', () => {
     expect(formatDraftAlternativeResult({ new_text: 'x', match_mode: 'strict' })).toBeNull();
+  });
+});
+
+describe('extractComposeEditExplanation (UAT round-8 #7 — Assistant change-explanation)', () => {
+  it('returns the draft-alternative rationale, WITHOUT the proposed text', () => {
+    const explanation = extractComposeEditExplanation({
+      target_text: 'old',
+      new_text: 'THE PROPOSED REDLINE TEXT',
+      match_mode: 'strict',
+      rationale: 'Caps liability at 12-month fees to match the firm standard.',
+    });
+    expect(explanation).toBe('Caps liability at 12-month fees to match the firm standard.');
+    expect(explanation).not.toContain('PROPOSED REDLINE');
+  });
+
+  it('falls back to a whole-document revise `summary`', () => {
+    expect(extractComposeEditExplanation({ summary: 'Aligned all clauses to the playbook.' })).toBe(
+      'Aligned all clauses to the playbook.'
+    );
+  });
+
+  it('returns null when there is no explanation', () => {
+    expect(extractComposeEditExplanation({ new_text: 'x' })).toBeNull();
+    expect(extractComposeEditExplanation(null)).toBeNull();
   });
 });
 

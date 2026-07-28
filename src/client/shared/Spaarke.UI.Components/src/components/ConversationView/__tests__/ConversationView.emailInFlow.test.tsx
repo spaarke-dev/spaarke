@@ -101,8 +101,11 @@ describe('ConversationView email-in-flow (FR-04)', () => {
 
     // The email block region (aria-label starts "Email: <subject>...").
     const block = await screen.findByRole('group', { name: /^Email: Quarterly Review/ });
+    // The row wraps the header (pill/sender/time — OUTSIDE the card, item 4) + the card.
+    const row = block.parentElement as HTMLElement;
     expect(within(block).getByText('Quarterly Review')).toBeInTheDocument();
-    expect(within(block).getByText('alice@example.com')).toBeInTheDocument();
+    // Sender now sits in the meta header ABOVE the card (item 4), not in the card.
+    expect(within(row).getByText('alice@example.com')).toBeInTheDocument();
     expect(within(block).getByText('bob@example.com, carol@example.com')).toBeInTheDocument();
 
     // The email is NOT rendered as a bubble (role="article"); the MESSAGE is.
@@ -126,8 +129,10 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     renderView({ authenticatedFetch: buildFetch(messages) as unknown as ConversationViewProps['authenticatedFetch'] });
 
     const block = await screen.findByRole('group', { name: /^Email: Kickoff/ });
-    // Exactly one "Email" ChannelBadge inside the block — never one-per-recipient.
-    expect(within(block).getAllByText('Email')).toHaveLength(1);
+    const row = block.parentElement as HTMLElement;
+    // Exactly one "Email" ChannelBadge per email — in the meta header (item 4),
+    // never one-per-recipient.
+    expect(within(row).getAllByText('Email')).toHaveLength(1);
   });
 
   it('fires onOpenEmail with the email message when the open-icon is activated', async () => {
@@ -141,7 +146,9 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     });
 
     const block = await screen.findByRole('group', { name: /^Email: Please review/ });
-    const openButton = within(block).getByRole('button', { name: 'Open email' });
+    // Open-icon now lives in the meta header (item 4), a sibling of the card.
+    const row = block.parentElement as HTMLElement;
+    const openButton = within(row).getByRole('button', { name: 'Open email' });
     await userEvent.click(openButton);
 
     expect(onOpenEmail).toHaveBeenCalledTimes(1);
@@ -179,10 +186,11 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     render(<Host />);
 
     const block = await screen.findByRole('group', { name: /^Email: Contract draft/ });
+    const row = block.parentElement as HTMLElement;
     // Dialog is closed before the open-icon is clicked.
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    await userEvent.click(within(block).getByRole('button', { name: 'Open email' }));
+    await userEvent.click(within(row).getByRole('button', { name: 'Open email' }));
 
     // The extended dialog appears, carrying the regarding record (folded into
     // the composer's association chips) — proving thread + regarding context.
@@ -196,8 +204,10 @@ describe('ConversationView email-in-flow (FR-04)', () => {
 
     // aria-label uses the fallbacks: "Email: (no subject), from Unknown sender".
     const block = await screen.findByRole('group', { name: /^Email: \(no subject\), from Unknown sender/ });
+    const row = block.parentElement as HTMLElement;
     expect(within(block).getByText('(no subject)')).toBeInTheDocument();
-    expect(within(block).getByText('Unknown sender')).toBeInTheDocument();
+    // Sender fallback now renders in the meta header (item 4).
+    expect(within(row).getByText('Unknown sender')).toBeInTheDocument();
     expect(within(block).getByText('—')).toBeInTheDocument();
   });
 
@@ -219,12 +229,13 @@ describe('ConversationView email-in-flow (FR-04)', () => {
     renderView({ authenticatedFetch: buildFetch(messages) as unknown as ConversationViewProps['authenticatedFetch'] });
 
     const block = await screen.findByRole('group', { name: /^Email: Status/ });
-    // HTML-stripped, ellipsised body preview.
+    const row = block.parentElement as HTMLElement;
+    // HTML-stripped, ellipsised body preview (stays in the card).
     const snippet = within(block).getByText(/^Lorem ipsum dolor sit amet/);
     expect(snippet.textContent).toMatch(/…$/);
     expect(snippet.textContent).not.toContain('<'); // tags stripped
-    // Sent/received date line (verb from direction; year always present).
-    expect(within(block).getByText(/2026/)).toBeInTheDocument();
+    // Sent/received time now sits in the meta header ABOVE the card (item 4).
+    expect(within(row).getByText(/2026/)).toBeInTheDocument();
     // The attachment list was removed from the card (item 2) — no attachment chips.
     expect(within(block).queryByText(/attachment/i)).not.toBeInTheDocument();
   });

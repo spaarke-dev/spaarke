@@ -167,6 +167,8 @@ public static class EndpointMappingExtensions
 
         app.MapRagEndpoints();
         app.MapKnowledgeBaseEndpoints();
+        // UAT round-3 D3: NDA-standard clause text by ref (KNW-011 Part B) for the review comment hover.
+        app.MapNdaStandardEndpoints();
         // AIPU2-035: Prompt Library — Personal, Team, Org, System template CRUD + render
         app.MapPromptLibraryEndpoints();
         // AIPU2-036: Feedback — per-response thumbs up/down submit + aggregation by playbook/capability

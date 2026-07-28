@@ -6,6 +6,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
@@ -161,7 +162,11 @@ public class ThreadMembershipDerivationServiceTests
             ["sprk_privacystate"] = new OptionSetValue((int)privacy),
         };
         if (anchorId is { } id) thread["sprk_regardingrecordid"] = id.ToString();
-        if (anchorType is { } t) thread["sprk_regardingrecordtype"] = t;
+        // The anchor TYPE now comes from the TYPED ADR-024 lookup (RegardingFieldMap:
+        // sprk_matter → sprk_regardingmatter), NOT the non-existent sprk_regardingrecordtype
+        // text attr that raised the create/read FaultException (RB R3 UAT 2026-07-27).
+        if (anchorType is { } t && RegardingFieldMap.FieldFor(t) is { } regardingField && anchorId is { } anchorGuid)
+            thread[regardingField] = new EntityReference(t, anchorGuid);
 
         _entityService
             .Setup(s => s.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))

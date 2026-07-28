@@ -1044,16 +1044,29 @@ export function WorkspacePane(): React.JSX.Element {
           typeof widgetData === "object" &&
           typeof (widgetData as { compose?: unknown }).compose === "object" &&
           (widgetData as { compose?: unknown }).compose !== null;
+        // UAT (tab independence): the seedless-reuse-active branch below must fire ONLY for the
+        // KNOWN source-only re-activation flows (add-to-DMS / reporting-email / welcome-compose),
+        // which carry an explicit `widgetData.source` marker and legitimately act on the CURRENT
+        // compose doc's tab. WITHOUT this gate, ANY seedless compose open adopted whatever compose
+        // tab was active and OVERWROTE it — e.g. opening a new file clobbered an open NDA analysis.
+        // A seedless open with no `source` marker is an ambiguous/new open → mint a NEW tab (below),
+        // keeping every analysis tab independent.
+        const hasSourceReactivationMarker =
+          widgetData != null &&
+          typeof widgetData === "object" &&
+          typeof (widgetData as { source?: unknown }).source === "string" &&
+          ((widgetData as { source?: string }).source ?? "").length > 0;
 
         const snapshot0 = manager.getSnapshot();
         const composeTabs = snapshot0.tabs.filter((t) => t.widgetType === "compose");
         let reuseTab: (typeof composeTabs)[number] | undefined;
         if (instanceKey) {
           reuseTab = composeTabs.find((t) => composeTabInstanceKey(t) === instanceKey);
-        } else if (!hasComposeSeed && !isComposeLayoutLoad) {
-          // Seedless source-only re-activation — reuse the ACTIVE compose tab, else the first open
-          // one. Never mints a duplicate (source-only opens carry no new document). A blank menu
-          // "Compose" open (isComposeLayoutLoad) is EXCLUDED here so it mints a new tab below.
+        } else if (!hasComposeSeed && !isComposeLayoutLoad && hasSourceReactivationMarker) {
+          // Source-only re-activation (explicit `widgetData.source`) — reuse the ACTIVE compose tab,
+          // else the first open one. Never mints a duplicate (source-only opens carry no new
+          // document + intentionally target the current doc). A blank menu "Compose" open
+          // (isComposeLayoutLoad) and any UN-marked seedless open both fall through to a NEW tab.
           reuseTab =
             composeTabs.find((t) => t.id === snapshot0.activeTabId) ?? composeTabs[0];
         }

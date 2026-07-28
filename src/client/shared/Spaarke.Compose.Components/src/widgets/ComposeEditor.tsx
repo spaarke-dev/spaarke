@@ -80,7 +80,23 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, mergeClasses, tokens, Spinner, Text, Button, Tooltip, Badge } from '@fluentui/react-components';
+import {
+  makeStyles,
+  mergeClasses,
+  tokens,
+  Spinner,
+  Text,
+  Button,
+  Tooltip,
+  Badge,
+  Dialog,
+  DialogSurface,
+  DialogBody,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Textarea,
+} from '@fluentui/react-components';
 import {
   ArrowDown20Regular,
   Checkmark16Regular,
@@ -89,19 +105,35 @@ import {
   DocumentProhibited24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
-import { ComposeAiToolbar, type ComposeActionEnqueue } from './ComposeAiToolbar';
+import {
+  ComposeAiToolbar,
+  type ComposeAiToolbarAction,
+  type ComposeActionEnqueue,
+  getComposeAiToolbarActions,
+  getToolsForSurface,
+  subscribeComposeAiToolbarActions,
+} from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
+  NdaReviewSummaryPanel,
+  NDA_REVIEW_DISCLAIMER_TEXT,
+  type NdaReviewFindingSummary,
+} from './NdaReviewSummaryPanel';
+import { deriveClauseLocationLabel } from './ndaClauseLocation';
+import {
   composeSessionCommentThreadsToAnchoredComments,
+  findCommentAnchorRange,
   type ComposeCommentThreadModel,
 } from './ComposeCommentThread.types';
-import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import { ComposeCommentGutter, COMMENT_GUTTER_WIDTH_PX, MAX_COMMENT_GUTTER_WIDTH_PX } from './ComposeCommentGutter';
+import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
+import { SelectedCommentExtension, selectedCommentPluginKey } from './marks/SelectedCommentExtension';
 import {
   usePendingRedline,
   resolveTargetSpans,
@@ -262,6 +294,14 @@ const COMPOSE_R2_MARKS = [InsertionMark, DeletionMark, CommentAnchorMark];
 const COMPOSE_R2_QA_HIGHLIGHT = [QaHighlightExtension];
 
 /**
+ * ai-advanced-capabilities-nda-r1 UAT round-4 #8 — the "selected advisory comment" highlight, another
+ * single ProseMirror VIEW-DECORATION plugin (NOT a Mark; same DOCX-safety rationale as
+ * {@link COMPOSE_R2_QA_HIGHLIGHT}). Paints the currently-selected advisory thread's clause the SELECTED
+ * colour (yellow); the base anchor stays light blue via the `compose-mark-comment-anchor` mark class.
+ */
+const COMPOSE_NDA_SELECTED_COMMENT = [SelectedCommentExtension];
+
+/**
  * FR-17 in-editor find/replace (task 040) — another single ProseMirror VIEW-DECORATION plugin (NOT
  * a Mark, same rationale as {@link COMPOSE_R2_QA_HIGHLIGHT}: find highlighting never appears in
  * `editor.getHTML()`/`getJSON()` and never serializes to DOCX). Kept as its own additive array for
@@ -312,6 +352,29 @@ const SELECTION_TEXT_CAP = 2000;
  */
 const DEFERRED_FORMAT_NOTICE =
   "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied. Your text edits are still saved.";
+
+/**
+ * Contextual AI Tool Library (phase 1): the SET of tools a Review Note's ⋮ menu shows is now
+ * driven by the library — `getToolsForSurface('review-note', …)` — NOT by this map (that replaces the
+ * round-8 `NOTE_TOOL_LABELS` allow-list, which was doing double duty as both selector and labeller).
+ * This map now carries ONLY per-surface LABEL OVERRIDES: a tool may read differently in the note menu
+ * than on the BubbleMenu (e.g. "Draft alternative" → "Draft compliant alternative" for the advisory
+ * context, round-8 #4). A tool with no entry here falls back to its own `label`.
+ */
+const NOTE_TOOL_SURFACE_LABELS: Record<string, string> = {
+  'compose-draft-alternative': 'Draft compliant alternative',
+  'compose-make-concise': 'Make more concise',
+  'compose-rewrite-instruction': 'Describe a change…',
+};
+
+/**
+ * Fallback work type for the Review-Note surface when the host does not pass one. All shared
+ * edit primitives (Draft alternative / Make concise / Describe a change) are `workTypes: ['*']`,
+ * so they show regardless. A WORK-TYPE-SCOPED note tool (e.g. an agreement-analysis-only tool)
+ * shows only when the host threads `activeWorkType='agreement-analysis'` (via the ComposeEditor
+ * prop). Knowledge sub-domain (NDA vs MSA) is NOT this — it only affects grounding.
+ */
+const NOTE_TOOL_FALLBACK_WORKTYPE = '*';
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -547,6 +610,39 @@ export interface ComposeEditorProps {
    * defaults to `'You'` when omitted (standalone/library mounts).
    */
   commentAuthor?: string;
+
+  /**
+   * ai-advanced-capabilities-nda-r1 (UAT round-2 items #1/#2) — the review-summary panel's
+   * visibility state, threaded from the host (`ComposeWorkspace`) so the editor's own "Review"
+   * toolbar dropdown can toggle it alongside the right-gutter "Review Notes". The host owns the
+   * panel (it renders `NdaReviewSummaryPanel`); the editor owns the gutter. Omitted for a mount with
+   * no NDA advisory review — the "Review" control then never appears.
+   */
+  reviewSummary?: {
+    /** Whether the review-summary panel is currently shown. */
+    open: boolean;
+    /** True once a review has produced findings (gates whether the "Review" control appears at all). */
+    hasFindings: boolean;
+    /** Toggle the review-summary panel's visibility. */
+    onToggle: () => void;
+    /**
+     * UAT round-5 #1 — the flagged-section findings, so the editor can render the Review Summary panel
+     * INSIDE its own top region (below the toolbar), replacing the former host-rendered docked panel.
+     * The editor enriches each finding with a doc-derived `locationLabel` (section heading + ordinal —
+     * {@link ../widgets/ndaClauseLocation.ts}) before rendering.
+     */
+    findings: readonly NdaReviewFindingSummary[];
+    /** Count of advisory comments that couldn't be anchored (passed through to the panel's notice). */
+    placementFailureCount?: number;
+  };
+  /**
+   * Contextual AI Tool Library — the ACTIVE work type (the product surface the user chose):
+   * `'agreement-analysis'` (NDA/MSA/employment review), `'legal-research'`, … The host passes
+   * this so the BubbleMenu + Review-Note ⋮ menu surface work-type-scoped tools in addition to the
+   * shared `['*']` primitives. Defaults to `'*'` (shared primitives only). Knowledge sub-domain
+   * (NDA vs MSA) is NOT this — it only affects grounding. See the tool-library design doc.
+   */
+  activeWorkType?: string;
 }
 
 /**
@@ -895,7 +991,18 @@ const useStyles = makeStyles({
     '& .compose-mark-deletion + .compose-mark-insertion::before': {
       content: 'none', // the pair's cue already sits on the leading deletion span
     },
+    // UAT round-5 #5 — the BASE advisory comment anchor is LIGHT GRAY; it turns YELLOW only when its
+    // thread is selected (the `compose-mark-comment-anchor-selected` view decoration below, painted by
+    // SelectedCommentExtension) — coordinated with the selected review note (also yellow). This makes
+    // "highlighted (a finding is here)" clearly distinct from "selected (this is the one I'm on)".
     '& .compose-mark-comment-anchor': {
+      backgroundColor: tokens.colorNeutralBackground3,
+      color: tokens.colorNeutralForeground1,
+      borderRadius: tokens.borderRadiusSmall,
+    },
+    // The SELECTED advisory anchor (view decoration, never serialized) overrides the base blue with
+    // yellow. Higher specificity than the base rule so it wins wherever both classes apply.
+    '& .compose-mark-comment-anchor.compose-mark-comment-anchor-selected, & .compose-mark-comment-anchor-selected': {
       backgroundColor: tokens.colorPaletteYellowBackground2,
       color: tokens.colorNeutralForeground1,
       borderRadius: tokens.borderRadiusSmall,
@@ -1336,6 +1443,59 @@ function useSelectionEventDispatch(
 }
 
 // ---------------------------------------------------------------------------
+// Advisory-comment anchor resolution (UAT round-3 S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * A distinctive leading fragment of an excerpt — likelier to be VERBATIM (and unique) than the full,
+ * possibly lightly-paraphrased/truncated excerpt. First-sentence within a window, min ~24 chars so it
+ * stays distinctive, capped ~120 at a word boundary.
+ */
+function distinctiveAnchorPrefix(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= 40) return trimmed;
+  const window = trimmed.slice(0, 120);
+  const sentenceEnd = window.search(/[.;]\s/);
+  if (sentenceEnd >= 24) return window.slice(0, sentenceEnd);
+  const cap = trimmed.slice(0, 100);
+  const lastSpace = cap.lastIndexOf(' ');
+  return lastSpace >= 24 ? cap.slice(0, lastSpace) : cap;
+}
+
+/**
+ * UAT round-3 S1 — resolve an advisory comment's anchor with graceful fallbacks so a flagged clause is
+ * still highlighted/commented when its verbatim `targetText` doesn't STRICTLY resolve (the model lightly
+ * paraphrased or truncated it, it spans a paragraph boundary, or it recurs in the document). Unlike a
+ * redline EDIT — which MUST stay strict, since a wrong anchor corrupts the document — an advisory COMMENT
+ * only needs to sit on the flagged text, so anchoring to a verbatim PREFIX or the FIRST occurrence is a
+ * safe, useful fallback, NOT a blind guess (the prefix / first match is real document text that actually
+ * appears). Returns null only when even a distinctive prefix cannot be located — the finding then stays
+ * in the Review Summary, unanchored (surfaced via the placement-failure count), never silently forced
+ * onto the wrong text.
+ */
+function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): { from: number; to: number } | null {
+  const strict = resolveTargetSpans(editor, targetText, 'strict');
+  if (strict.ok) return strict.spans[0];
+  // Recurs verbatim (ambiguous) → anchor the FIRST occurrence of the flagged clause.
+  if (strict.kind === 'ambiguous') {
+    const first = resolveTargetSpans(editor, targetText, 'first');
+    if (first.ok) return first.spans[0];
+  }
+  // Paraphrased / truncated / cross-paragraph (not_found) → retry with a distinctive verbatim PREFIX,
+  // which anchors the comment at the flagged clause's start.
+  const prefix = distinctiveAnchorPrefix(targetText);
+  if (prefix && prefix !== targetText) {
+    const p = resolveTargetSpans(editor, prefix, 'strict');
+    if (p.ok) return p.spans[0];
+    if (p.kind === 'ambiguous') {
+      const pf = resolveTargetSpans(editor, prefix, 'first');
+      if (pf.ok) return pf.spans[0];
+    }
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // ComposeEditor — the component
 // ---------------------------------------------------------------------------
 
@@ -1379,6 +1539,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       canSave,
       isSaving,
       commentAuthor = 'You',
+      reviewSummary,
+      activeWorkType = '*',
     } = props;
 
     const styles = useStyles();
@@ -1503,6 +1665,50 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // yields `null` and the panel shows a "select text" hint instead of guessing an anchor.
     const [commentsOpen, setCommentsOpen] = React.useState<boolean>(false);
     const [pendingCommentRange, setPendingCommentRange] = React.useState<ComposeCommentPendingRange | null>(null);
+    // ai-advanced-capabilities-nda-r1 (UAT round-2 item #2) — "Review Notes" visibility: whether the
+    // right-gutter advisory comment cards are shown. Defaults ON (the prior always-on-when-threads-exist
+    // behavior); the "Review" toolbar dropdown toggles it without discarding the placed threads.
+    const [reviewNotesVisible, setReviewNotesVisible] = React.useState<boolean>(true);
+    // UAT round-3 D1 — user-resizable comment-pane width, persisted for the session so it survives tab
+    // switches. The gutter's left-edge drag handle reports the new (clamped) width here.
+    const [gutterWidth, setGutterWidth] = React.useState<number>(() => {
+      // UAT round-4 #7 — DEFAULT the review-notes pane to its widest so cards sit closer to their
+      // corresponding sections; a saved (user-dragged) width still wins.
+      try {
+        const saved = sessionStorage.getItem('spaarke.compose.commentGutterWidth');
+        const n = saved ? parseInt(saved, 10) : Number.NaN;
+        return Number.isFinite(n) ? n : MAX_COMMENT_GUTTER_WIDTH_PX;
+      } catch {
+        return MAX_COMMENT_GUTTER_WIDTH_PX;
+      }
+    });
+    const handleGutterWidthChange = React.useCallback((w: number): void => {
+      setGutterWidth(w);
+      try {
+        sessionStorage.setItem('spaarke.compose.commentGutterWidth', String(w));
+      } catch {
+        // sessionStorage unavailable (private mode) — width still applies for this session.
+      }
+    }, []);
+    // UAT round-3 D3 — fetch the full standard-clause text behind a review comment's standardRef on
+    // demand (GET /api/ai/nda-standard/clauses/{ref}). Only wired when a bffBaseUrl is present; a
+    // standalone/library mount without a backend renders standardRef as plain text.
+    const resolveStandardText = React.useCallback(
+      async (standardRef: string): Promise<string | null> => {
+        if (!bffBaseUrl) return null;
+        try {
+          const url = `${bffBaseUrl}/api/ai/nda-standard/clauses/${encodeURIComponent(standardRef)}`;
+          const res = await authenticatedFetch(url, { method: 'GET' });
+          const data = (await res.json()) as { text?: string };
+          return typeof data.text === 'string' ? data.text : null;
+        } catch {
+          // authenticatedFetch throws ApiError on non-2xx (e.g. an unknown ref → 404) — treat as
+          // "unavailable" so the popover shows a graceful message rather than crashing the gutter.
+          return null;
+        }
+      },
+      [bffBaseUrl]
+    );
 
     // ----- Task 051 — FR-25 imported Word comments, seeded into the FR-23 thread panel --------------
     // PURE grouping (no editor dependency) so the threads are ready for `ComposeCommentThread`'s
@@ -1607,6 +1813,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...LOCKED_EXTENSIONS,
         ...COMPOSE_R2_MARKS,
         ...COMPOSE_R2_QA_HIGHLIGHT,
+        ...COMPOSE_NDA_SELECTED_COMMENT,
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
@@ -1663,6 +1870,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             if (ledgerRef) {
               setRedlineClickAnchor({ x: event.clientX, y: event.clientY, ledgerRef });
             }
+            // UAT round-4 #8 — a click on a highlighted advisory clause SELECTS that thread (the linked
+            // gutter card turns gray; this anchor turns yellow). A click that lands on NO advisory
+            // anchor deselects (the card returns to its base state) — so the selection follows where the
+            // reviewer is looking. Uses the anchor mark's `data-comment-id` provenance attribute.
+            const anchor = target?.closest?.('[data-compose-mark="comment-anchor"]') as HTMLElement | null;
+            const commentId = anchor?.getAttribute('data-comment-id') ?? '';
+            setSelectedThreadId(commentId || null);
             // Return false: never swallow the click — the caret still moves and normal editing works.
             return false;
           },
@@ -1931,6 +2145,185 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // ComposeEditorHandle for why the two stay independent.
     const advisoryComments = useComposeCommentThreads(editor, 'AI Advisory Review');
 
+    // ----- UAT round-4 #8 — bidirectional linked highlight (doc anchor ↔ gutter card) --------------
+    // A single "selected advisory thread" id, shared between the in-document anchor (turns yellow via
+    // SelectedCommentExtension) and the right-rail gutter card (turns gray). Set from EITHER side: a
+    // click on a gutter card (`selectThread`) or on a highlighted clause in the document (the editor
+    // `click` DOM handler below). `null` = nothing selected (every anchor stays base light-blue).
+    const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(null);
+    // Mirror the current selection into a ref so the stable `selectThread` callback can toggle without
+    // re-subscribing (avoids churning the gutter's `onSelectThread` identity every selection change).
+    const selectedThreadIdRef = React.useRef<string | null>(null);
+    React.useEffect(() => {
+      selectedThreadIdRef.current = selectedThreadId;
+    }, [selectedThreadId]);
+
+    // Push the selection into the ProseMirror decoration plugin whenever it changes (the plugin paints
+    // the selected clause yellow; clearing repaints it base blue). A no-op meta dispatch is cheap and
+    // keeps React state as the single source of truth.
+    React.useEffect(() => {
+      if (!editor) return;
+      editor.view.dispatch(
+        editor.state.tr.setMeta(
+          selectedCommentPluginKey,
+          selectedThreadId ? { type: 'select', commentId: selectedThreadId } : { type: 'clear' }
+        )
+      );
+    }, [editor, selectedThreadId]);
+
+    // Gutter-card click → TOGGLE selection (re-clicking the selected card deselects; clicking another
+    // switches). On SELECT, scroll the document to the clause so the linked yellow anchor is in view —
+    // reusing the coordsAtPos ancestor-scroll technique useDocQaHighlight/the gutter already use.
+    const selectThread = React.useCallback(
+      (threadId: string): void => {
+        const willSelect = selectedThreadIdRef.current !== threadId;
+        setSelectedThreadId(willSelect ? threadId : null);
+        if (!willSelect || !editor) return;
+        const span = findCommentAnchorRange(editor.state.doc, threadId);
+        const scroller = editorScrollRef.current;
+        if (!span || !scroller) return;
+        try {
+          const coords = editor.view.coordsAtPos(span.from);
+          const rect = scroller.getBoundingClientRect();
+          const target = scroller.scrollTop + (coords.top - rect.top) - rect.height / 3;
+          scroller.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+        } catch {
+          // coordsAtPos measures real DOM layout and can throw in a detached/not-yet-painted view —
+          // selection still applied above; the next paint shows the highlight without the scroll.
+        }
+      },
+      [editor]
+    );
+
+    // ----- UAT round-5 #1 — Review Summary hosted INSIDE the editor -----------------------------
+    // Enrich each finding with a doc-derived location label (section heading + ordinal, which the
+    // model's sectionRef lacks — ndaClauseLocation.ts) by strict-resolving its quotedText to a document
+    // position, then walking to the governing heading. Recomputed only when the finding set changes
+    // (a snapshot at review time — a later edit that shifts headings does not re-label, which is fine
+    // for an advisory digest). Falls back to the model-only label when a quote can't be resolved.
+    const reviewFindings = reviewSummary?.findings;
+    const enrichedReviewFindings = React.useMemo((): readonly NdaReviewFindingSummary[] => {
+      if (!reviewFindings || reviewFindings.length === 0) return reviewFindings ?? [];
+      if (!editor) return reviewFindings;
+      return reviewFindings.map(finding => {
+        let pos: number | null = null;
+        if (finding.quotedText) {
+          const resolved = resolveTargetSpans(editor, finding.quotedText, 'strict');
+          if (resolved.ok) pos = resolved.spans[0].from;
+        }
+        return {
+          ...finding,
+          locationLabel: deriveClauseLocationLabel(editor.state.doc, pos, finding.sectionRef),
+          // UAT round-8 #2 — the resolved document position drives the summary's "by section" sort.
+          docPosition: pos ?? undefined,
+        };
+      });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional review-time snapshot (see note)
+    }, [editor, reviewFindings]);
+
+    // Summary-row navigation: reuse the editor's own cited-span primitive (strict resolve + ephemeral
+    // highlight + scrollIntoView), the SAME anchoring the gutter comment uses — no host round-trip.
+    const handleReviewNavigate = React.useCallback(
+      (finding: NdaReviewFindingSummary): void => {
+        if (finding.quotedText) qaHighlight.highlight(finding.quotedText, finding.sectionRef);
+      },
+      [qaHighlight]
+    );
+
+    // ----- UAT round-8 #3/#4/#5 — per-Review-Note AI edit tools (the gutter ⋮ menu) --------------
+    // The tools are the binding-wired compose EDIT actions (materializesInEditor) from the shared
+    // AI-toolbar registry — "Draft compliant alternative" today; the list grows automatically as more
+    // edit bindings are seeded (extensibility #5). Reactive to registry changes.
+    const readNoteTools = React.useCallback(
+      () =>
+        // Contextual AI Tool Library: the review-note ⋮ menu draws from the SAME registry as the
+        // BubbleMenu — a tool appears here because its definition declares `surfaces ∋ 'review-note'`
+        // (round-8 #4: one Draft-alternative definition, two surfaces). `bindingId` filters out
+        // still-stubbed tools; the label may be surface-overridden (NOTE_TOOL_SURFACE_LABELS).
+        getToolsForSurface('review-note', activeWorkType || NOTE_TOOL_FALLBACK_WORKTYPE)
+          .filter(a => a.bindingId)
+          .map(a => ({ id: a.id, label: NOTE_TOOL_SURFACE_LABELS[a.id] ?? a.label })),
+      [activeWorkType]
+    );
+    const [noteTools, setNoteTools] = React.useState(readNoteTools);
+    React.useEffect(() => {
+      setNoteTools(readNoteTools());
+      return subscribeComposeAiToolbarActions(() => setNoteTools(readNoteTools()));
+    }, [readNoteTools]);
+    const noteToolSeqRef = React.useRef(0);
+
+    // ----- Contextual AI Tool Library (phase 3) — free-text instruction dialog -------------
+    // ONE shared dialog serves BOTH the BubbleMenu (ComposeAiToolbar via `onRequestInstruction`)
+    // and the Review-Note ⋮ menu (runNoteTool). A tool that declares `inputPrompt` (e.g. "Describe
+    // a change…") opens this dialog to collect the user's free-text `instruction` before dispatch;
+    // it resolves to the entered text, or `null` if cancelled.
+    const [instructionPrompt, setInstructionPrompt] = React.useState<{
+      open: boolean;
+      action: ComposeAiToolbarAction | null;
+      value: string;
+    }>({ open: false, action: null, value: '' });
+    const instructionResolveRef = React.useRef<((v: string | null) => void) | null>(null);
+
+    const promptForInstruction = React.useCallback(
+      (action: ComposeAiToolbarAction): Promise<string | null> =>
+        new Promise<string | null>(resolve => {
+          instructionResolveRef.current = resolve;
+          setInstructionPrompt({ open: true, action, value: '' });
+        }),
+      []
+    );
+    const settleInstruction = React.useCallback((result: string | null): void => {
+      setInstructionPrompt(prev => ({ ...prev, open: false }));
+      const resolve = instructionResolveRef.current;
+      instructionResolveRef.current = null;
+      resolve?.(result);
+    }, []);
+
+    // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
+    // slot shape `ComposeAiToolbar.handleActionClick` builds for a selection — routed to the document
+    // session so the result materializes as an inline redline (DEF-09) and the Assistant confirms with
+    // the model's rationale (round-8 #7).
+    const runNoteTool = React.useCallback(
+      async (threadId: string, toolId: string): Promise<void> => {
+        if (!editor || !enqueueComposeAction || !sessionId) return;
+        const action = getComposeAiToolbarActions().find(a => a.id === toolId);
+        // Guard: must be a wired tool that declares the review-note surface (Contextual AI Tool Library).
+        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
+        // Free-text tool (inputPrompt): collect the instruction BEFORE resolving the span/dispatch.
+        let instruction: string | undefined;
+        if (action.inputPrompt) {
+          const entered = await promptForInstruction(action);
+          if (!entered || !entered.trim()) return;
+          instruction = entered.trim();
+        }
+        const span = findCommentAnchorRange(editor.state.doc, threadId);
+        if (!span) return;
+        const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
+        const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+        void enqueueComposeAction({
+          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
+          bindingId: action.bindingId,
+          args: {
+            slots: {
+              selectionText,
+              selectionAnchorStart: span.from,
+              selectionAnchorEnd: span.to,
+              documentSpeId: documentRef?.speDriveItemId,
+              documentRecordId: documentRef?.sprkDocumentId,
+              sessionId,
+              // Contextual AI Tool Library (phase 3): the free-text instruction for an inputPrompt tool.
+              ...(instruction ? { instruction } : {}),
+            },
+          },
+          // Every note tool is an in-editor EDIT action, so ALWAYS route to the document session (DEF-09)
+          // so the result materializes as an inline redline — independent of the registry's
+          // `materializesInEditor` flag (which the catalog seed may not preserve).
+          documentSessionId: sessionId,
+        }).catch(() => undefined);
+      },
+      [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]
+    );
+
     // ----- Task 044 — FR-23 "Comments" panel toggle -------------------------
     // Toggling OPEN captures the editor's live selection at click time (see the state declaration
     // above); toggling CLOSED just hides the panel — thread state persists (ComposeCommentThread
@@ -2087,12 +2480,16 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           let placed = 0;
           const failed: AdvisoryCommentFailure[] = [];
           for (const item of items) {
-            const resolved = resolveTargetSpans(editor, item.targetText, 'strict');
-            if (!resolved.ok) {
-              failed.push({ targetText: item.targetText, kind: resolved.kind });
+            // UAT round-3 S1: strict-first, then graceful fallbacks (first-occurrence / verbatim prefix)
+            // so a finding whose excerpt lightly diverges or recurs still highlights instead of being
+            // dropped — see resolveAdvisoryAnchorSpan. A comment mis-anchor is non-destructive (unlike a
+            // redline edit), so this is a safe relaxation of strict placement, scoped to advisory comments.
+            const span = resolveAdvisoryAnchorSpan(editor, item.targetText);
+            if (!span) {
+              failed.push({ targetText: item.targetText, kind: 'not_found' });
               continue;
             }
-            const threadId = advisoryComments.createThread(item.explanation, resolved.spans[0], {
+            const threadId = advisoryComments.createThread(item.explanation, span, {
               riskLevel: item.riskLevel,
               sectionRef: item.sectionRef,
               standardRef: item.standardRef,
@@ -2191,11 +2588,28 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
+          // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
+          // present (in-document advisory threads OR summary findings the host reports). "Review Summary"
+          // toggles the host's docked panel; "Review Notes" toggles the right-gutter cards (local state).
+          hasReview={advisoryComments.threads.length > 0 || Boolean(reviewSummary?.hasFindings)}
+          // UAT round-6 #4 — the not-legal-advice warning behind the toolbar's info button (moved out of
+          // the Review Summary body); present only when an NDA advisory review is.
+          reviewDisclaimer={
+            advisoryComments.threads.length > 0 || reviewSummary?.hasFindings ? NDA_REVIEW_DISCLAIMER_TEXT : undefined
+          }
+          reviewSummaryOpen={reviewSummary?.open ?? false}
+          onToggleReviewSummary={reviewSummary?.onToggle}
+          reviewNotesOpen={reviewNotesVisible}
+          onToggleReviewNotes={() => setReviewNotesVisible(v => !v)}
         />
         {/* task 038 (spaarkeai-compose-r4 zero-error guardrails) — non-blocking, dismissible notice for a
             deferred/unrepresentable/refused step (most importantly formatted or linked PASTE that slips
             past the disabled toolbar controls). Informs only; the representable edits still save. */}
-        {deferralNotice ? (
+        {/* UAT round-7 #8 — the "Some formatting … isn't saved yet" deferral banner is SUPPRESSED per
+            reviewer request (it read as noise). The deferral BEHAVIOR is unchanged (unrepresentable
+            edits are still deferred + the op-log still records them); only the banner no longer renders.
+            `deferralNotice`/`setDeferralNotice` remain wired so it can be re-surfaced trivially later. */}
+        {false && deferralNotice ? (
           <div className={styles.deferralNotice} role="status" aria-live="polite" data-testid="compose-deferral-notice">
             <Text size={200} className={styles.deferralNoticeText}>
               {deferralNotice}
@@ -2209,6 +2623,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               data-testid="compose-deferral-notice-dismiss"
             />
           </div>
+        ) : null}
+        {/* UAT round-5 #1 — the Review Summary now lives HERE, inside the editor's top region (below the
+            toolbar), replacing the former host-rendered docked panel. Toggling "Review Summary" in the
+            toolbar's Review dropdown expands/collapses this in-flow area. The editor owns navigation
+            (its own highlightCitedSpan primitive) and enriches each finding's location with the section
+            heading/ordinal from the live document (ndaClauseLocation.ts). */}
+        {reviewSummary ? (
+          <NdaReviewSummaryPanel
+            open={reviewSummary.open}
+            onClose={reviewSummary.onToggle}
+            findings={enrichedReviewFindings}
+            placementFailureCount={reviewSummary.placementFailureCount}
+            onNavigate={handleReviewNavigate}
+          />
         ) : null}
         {/* ===================================================================
             FR-17 in-editor find/replace panel — task 040. Toggled by Ctrl/Cmd+F
@@ -2275,6 +2703,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
+              onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
               forceVisible
             />
@@ -2459,36 +2889,41 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         <div className={styles.editorScrollWrap}>
           <div
             ref={editorScrollRef}
-            className={mergeClasses(
-              styles.editorSurface,
-              advisoryComments.threads.length > 0 ? styles.editorSurfaceWithGutter : undefined
-            )}
+            className={styles.editorSurface}
+            // UAT round-3 D1: reserve room on the right for the (resizable) comment rail so document
+            // text never runs under the cards. Dynamic width replaces the former fixed
+            // `editorSurfaceWithGutter` padding class.
+            style={
+              advisoryComments.threads.length > 0 && reviewNotesVisible
+                ? { paddingRight: `calc(${gutterWidth}px + ${tokens.spacingHorizontalL})` }
+                : undefined
+            }
             data-testid="compose-editor-surface"
           >
             <EditorContent editor={editor} />
           </div>
           {/* task 032 (right-gutter comment layout, FR-16) — NDA-REVIEW advisory comment cards,
               vertically aligned to their live anchor position (coordsAtPos), right of the document.
-              Renders nothing while there are no advisory comment threads. */}
+              Renders nothing while there are no advisory comment threads. UAT round-2 item #2: the
+              "Review" toolbar dropdown's "Review Notes" toggle hides them without discarding the placed
+              threads — passing an empty list makes the gutter render null while the threads persist. */}
           <ComposeCommentGutter
             editor={editor}
-            threads={advisoryComments.threads}
+            threads={reviewNotesVisible ? advisoryComments.threads : []}
             scrollContainerRef={editorScrollRef}
+            width={gutterWidth}
+            onWidthChange={handleGutterWidthChange}
+            resolveStandardText={bffBaseUrl ? resolveStandardText : undefined}
+            selectedThreadId={selectedThreadId}
+            onSelectThread={selectThread}
+            noteTools={enqueueComposeAction ? noteTools : undefined}
+            onRunNoteTool={enqueueComposeAction ? runNoteTool : undefined}
           />
-          {/* FR-23 (task 044) — "Comments" panel toggle, pinned top-right (see `commentsToggleFab`). */}
-          <Tooltip content={commentsOpen ? 'Hide comments' : 'Show comments'} relationship="description" withArrow>
-            <Button
-              appearance={commentsOpen ? 'primary' : 'secondary'}
-              shape="circular"
-              size="large"
-              className={styles.commentsToggleFab}
-              icon={<CommentMultiple20Regular />}
-              aria-label="Toggle comments panel"
-              aria-pressed={commentsOpen}
-              onClick={handleToggleComments}
-              data-testid="compose-comments-toggle"
-            />
-          </Tooltip>
+          {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
+              REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the
+              advisory Review Notes gutter is the comment surface). The ComposeCommentThread panel +
+              useComposeCommentThreads instance remain in the codebase (now unreachable from the UI) so
+              the capability can be re-exposed later without re-plumbing. */}
           {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
               styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
               ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}
@@ -2530,10 +2965,66 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               sessionId={sessionId}
               bffBaseUrl={bffBaseUrl}
               dispatch={dispatch}
+              activeWorkType={activeWorkType}
+              onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
             />
           </BubbleMenu>
         ) : null}
+
+        {/* ===================================================================
+            Contextual AI Tool Library (phase 3) — shared free-text INSTRUCTION
+            dialog. Opened by any `inputPrompt` tool from EITHER the BubbleMenu
+            (ComposeAiToolbar.onRequestInstruction) or a Review Note's ⋮ menu
+            (runNoteTool). Resolves the promise from `promptForInstruction` with
+            the entered text (Apply) or null (Cancel / dismiss).
+            =================================================================== */}
+        <Dialog
+          open={instructionPrompt.open}
+          onOpenChange={(_, data) => {
+            if (!data.open) settleInstruction(null);
+          }}
+        >
+          <DialogSurface aria-describedby={undefined} data-testid="compose-instruction-dialog">
+            <DialogBody>
+              <DialogTitle>{instructionPrompt.action?.label ?? 'Describe a change'}</DialogTitle>
+              <DialogContent>
+                <Textarea
+                  value={instructionPrompt.value}
+                  placeholder={instructionPrompt.action?.inputPrompt}
+                  onChange={(_, data) => setInstructionPrompt(prev => ({ ...prev, value: data.value }))}
+                  resize="vertical"
+                  textarea={{ 'aria-label': 'Change instruction', autoFocus: true }}
+                  style={{ width: '100%', minHeight: '96px' }}
+                  data-testid="compose-instruction-input"
+                  onKeyDown={e => {
+                    // Ctrl/Cmd+Enter submits (a plain Enter inserts a newline in the textarea).
+                    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && instructionPrompt.value.trim()) {
+                      settleInstruction(instructionPrompt.value);
+                    }
+                  }}
+                />
+              </DialogContent>
+              <DialogActions>
+                <Button
+                  appearance="secondary"
+                  onClick={() => settleInstruction(null)}
+                  data-testid="compose-instruction-cancel"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  appearance="primary"
+                  disabled={!instructionPrompt.value.trim()}
+                  onClick={() => settleInstruction(instructionPrompt.value)}
+                  data-testid="compose-instruction-submit"
+                >
+                  Apply
+                </Button>
+              </DialogActions>
+            </DialogBody>
+          </DialogSurface>
+        </Dialog>
       </div>
     );
   }

@@ -62,7 +62,7 @@ import { ComposeBannerStack } from './ComposeBannerStack';
 // ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07). Mirrors the
 // ComposeCommentThread/ComposeFindReplace docked-panel convention; mounted below alongside the
 // SAME `compose_advisory_comments` data task 031's onAdvisoryComments handler already receives.
-import { NdaReviewSummaryPanel, type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
+import { type NdaReviewFindingSummary } from './NdaReviewSummaryPanel';
 import {
   ComposeEditor,
   type ComposeEditorHandle,
@@ -1461,11 +1461,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
   const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
   const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
-  // task 032 (right-gutter comment layout) — the Action's own server-asserted overallRisk, now
-  // threaded across the `compose_advisory_comments` event's `overallRisk` field (see
-  // useNdaReviewAdvisoryCommentsBridge.ts). `undefined` until the first review completes, or for an
-  // older emitter that hasn't wired the field — NdaReviewSummaryPanel falls back to deriving it.
-  const [reviewSummaryOverallRisk, setReviewSummaryOverallRisk] = React.useState<string | undefined>(undefined);
+  // UAT round-5 #2 — the "Overall risk" banner was removed from the summary, so the host no longer
+  // tracks `overallRisk` (the event still carries it; we simply don't render it anymore).
 
   useComposeWorkspaceReceivers({
     // Flow 3 — Context → Workspace: insert the precedent/library clause into the
@@ -1543,8 +1540,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         }))
       );
       setReviewSummaryFailedCount(result?.failed.length ?? 0);
-      setReviewSummaryOverallRisk(event.overallRisk);
-      setReviewSummaryOpen(true);
+      // UAT round-7 #4 — the Review Summary now DEFAULTS COLLAPSED; a completed review no longer
+      // auto-opens it. The reviewer opens it on demand via the toolbar's Review Summary toggle. (The
+      // right-gutter Review Notes still show by default — ComposeEditor's `reviewNotesVisible`.)
     },
   });
 
@@ -2329,6 +2327,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutLockedBy={state.checkoutLockedBy}
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
+            // UAT round-7 #8 — suppress the "Some formatting was simplified" banner per reviewer request.
+            hideImportWarnings
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
@@ -2337,20 +2337,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // success signal (saveSuccessToken) but no longer carries the preview link.
           />
 
-          {/* ai-advanced-capabilities-nda-r1 task 030 — review-summary docked panel (FR-07, single
-              surface — NO separate Analysis widget). Mirrors the ComposeCommentThread/
-              ComposeFindReplace docked-panel convention; renders overallRisk (the real, server-
-              asserted field — task 032 — falling back to a client-side derivation when absent) + the
-              cited flagged-section findings from the SAME ledgered NDA-REVIEW result task 031
-              materializes as in-document advisory Comments. Auto-opens when a review completes;
-              dismissible via its own close button (re-opens on the next review). */}
-          <NdaReviewSummaryPanel
-            open={reviewSummaryOpen && reviewSummaryFindings.length > 0}
-            onClose={() => setReviewSummaryOpen(false)}
-            findings={reviewSummaryFindings}
-            placementFailureCount={reviewSummaryFailedCount}
-            overallRisk={reviewSummaryOverallRisk}
-          />
+          {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
+              INTO the editor's top region (ComposeEditor renders it below the toolbar, in-flow). The
+              host still OWNS the review data (captured from the ledgered `compose_advisory_comments`
+              event) + the open/toggle state, and threads it down via the `reviewSummary` prop; the
+              editor renders the panel, derives each finding's location from the live doc, and wires
+              navigation to its own cited-span primitive. */}
 
           {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
           {composeDraftError ? (
@@ -2402,6 +2394,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               }}
               canSave={canSaveNow}
               isSaving={isSavingNow}
+              // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
+              // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
+              // the panel's real render gate; `hasFindings` gates whether the "Review" control appears.
+              reviewSummary={{
+                open: reviewSummaryOpen && reviewSummaryFindings.length > 0,
+                hasFindings: reviewSummaryFindings.length > 0,
+                onToggle: () => setReviewSummaryOpen(o => !o),
+                // UAT round-5 #1 — the editor now renders the panel; feed it the data + failure count.
+                findings: reviewSummaryFindings,
+                placementFailureCount: reviewSummaryFailedCount,
+              }}
             />
           </div>
         </>
