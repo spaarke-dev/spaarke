@@ -674,4 +674,141 @@ public sealed class ComposeDocxProjectionBuilderTests
         }
         return ms.ToArray();
     }
+
+    // ── FR-09 construct audit — alignment / ordered-list / symbol tests (task 002, spaarkeai-compose-
+    //    fidelity-r4.5). None of these existed before this task (verified: this class had zero
+    //    Justification/NumberingProperties/SymbolChar/CarriageReturn fixtures until now). ──────────────
+
+    private static byte[] BuildDocxWithNumbering(NumberFormatValues format, Paragraph paragraph)
+    {
+        using var ms = new MemoryStream();
+        using (var wordDoc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = wordDoc.AddMainDocumentPart();
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(
+                        new NumberingFormat { Val = format },
+                        new LevelText { Val = format == NumberFormatValues.Bullet ? "•" : "%1." })
+                    { LevelIndex = 0 })
+                { AbstractNumberId = 1 },
+                new NumberingInstance(new AbstractNumId { Val = 1 }) { NumberID = 1 });
+            numberingPart.Numbering.Save();
+
+            main.Document = new Document(new Body(paragraph));
+            main.Document.Save();
+        }
+        return ms.ToArray();
+    }
+
+    private static Paragraph NumberedPara(string? paraId, string text, int ilvl = 0, int numId = 1)
+    {
+        var p = Para(paraId, text);
+        p.ParagraphProperties = new ParagraphProperties(
+            new NumberingProperties(
+                new NumberingLevelReference { Val = ilvl },
+                new NumberingId { Val = numId }));
+        return p;
+    }
+
+    [Fact]
+    public void Build_ParagraphWithDecimalNumPr_RendersInsideOrderedList()
+    {
+        // FR-09: no ordered-list construct test existed before this task.
+        var docx = BuildDocxWithNumbering(NumberFormatValues.Decimal, NumberedPara("00A00001", "First clause"));
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        projection.Html.Should().Contain("<ol>").And.Contain("<li>").And.NotContain("<ul>");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithBulletNumPr_RendersInsideUnorderedList()
+    {
+        // FR-09: no bullet/unordered-list construct test existed before this task.
+        var docx = BuildDocxWithNumbering(NumberFormatValues.Bullet, NumberedPara("00B00001", "Bulleted item"));
+
+        var projection = new ComposeDocxProjectionBuilder().Build(docx);
+
+        projection.Html.Should().Contain("<ul>").And.Contain("<li>").And.NotContain("<ol>");
+    }
+
+    [Theory]
+    [InlineData("center", "center")]
+    [InlineData("right", "right")]
+    [InlineData("both", "justify")]
+    public void Build_ParagraphWithJustification_EmitsTextAlignStyle(string justificationToken, string expectedCss)
+    {
+        // FR-09: no alignment construct test existed before this task (AppendAlignment, :816-830).
+        // JustificationValues is not a compile-time-constant attribute argument type, so the [Theory]
+        // carries a string token and maps it to the OOXML enum value here.
+        JustificationValues justification = justificationToken switch
+        {
+            "center" => JustificationValues.Center,
+            "right" => JustificationValues.Right,
+            "both" => JustificationValues.Both,
+            _ => throw new ArgumentOutOfRangeException(nameof(justificationToken)),
+        };
+        var para = Para("00C00001", "Aligned text");
+        para.ParagraphProperties = new ParagraphProperties(new Justification { Val = justification });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain($"style=\"text-align:{expectedCss}\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithLeftJustification_EmitsNoTextAlignStyle()
+    {
+        // AppendAlignment only emits a style for center/right/both — left (Word's default) emits nothing.
+        var para = Para("00C00002", "Left text");
+        para.ParagraphProperties = new ParagraphProperties(new Justification { Val = JustificationValues.Left });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().NotContain("text-align");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithSymbolCharRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr06()
+    {
+        // Characterization baseline (WS-2 FR-06 target, spaarkeai-compose-fidelity-r4.5 task 002):
+        // w:sym (e.g. Symbol-font F0A7 -> section-mark) is NOT yet mapped to its Unicode equivalent —
+        // ComposeDocxProjectionBuilder.RenderRun has no case for SymbolChar, so the whole run silently
+        // contributes nothing (no glyph, no placeholder, no warning). This test PINS that current gap;
+        // when WS-2 lands FR-06, update (not delete) this test to assert the mapped glyph IS present.
+        var para = new Paragraph(
+            new Run(new SymbolChar { Font = "Symbol", Char = "F0A7" }),
+            new Run(new Text("Confidentiality") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("00D00001") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("Confidentiality");
+        projection.Html.Should().NotContain("§",
+            "WS-2 FR-06 target: the Symbol-font glyph (section mark) is currently dropped silently, not mapped or placeholdered");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithCarriageReturnRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr05()
+    {
+        // Characterization baseline (WS-2 FR-05 target, spaarkeai-compose-fidelity-r4.5 task 002): w:cr
+        // is a break with the same intent as w:br, but ComposeDocxProjectionBuilder.RenderRun has no
+        // case for CarriageReturn — it silently contributes nothing (no <br>, no separator at all),
+        // unlike Break (w:br) which correctly emits <br> today. This test PINS that current gap; update
+        // (not delete) it when WS-2 lands FR-05.
+        var para = new Paragraph(
+            new Run(new Text("before") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new CarriageReturn()),
+            new Run(new Text("after") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("00E00001") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().NotContain("<br>",
+            "WS-2 FR-05 target: w:cr does not yet emit a break representation the way w:br (Break) does");
+        projection.Html.Should().Contain("beforeafter",
+            "today the two runs' text is concatenated with NO separator at all — the w:cr break is fully invisible, not merely unstyled");
+    }
 }
