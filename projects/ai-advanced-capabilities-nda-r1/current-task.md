@@ -7,8 +7,8 @@
 | Field | Value |
 |-------|-------|
 | **State** | **NDA r1 UAT COMPLETE — all fixes live in spaarkedev1 + merged to master.** Everything in the §SESSION-2026-07-28 recap below is done. Awaiting owner UAT of the last batch. Two follow-on projects scaffolded on master. |
-| **Branch** | `work/ai-nda-r1-followups`. HEAD `556d6e913`. **behind/ahead of origin/master = 0/0; branch = origin/branch = master; main repo `C:\code_files\spaarke` synced. Working tree CLEAN. Fully pushed + merged.** |
-| **Deployed** | `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), ~4930 KB, client-only (no BFF). Latest deploy = popup UAT (556d6e913). Compose bindings SEEDED to Dataverse (see §SEEDED). |
+| **Branch** | `work/ai-nda-r1-followups`. HEAD `3a1886511`. **behind/ahead of origin/master = 0/0; branch = origin/branch = master; main repo `C:\code_files\spaarke` synced. Working tree CLEAN. Fully pushed + merged.** |
+| **Deployed** | `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), ~4930 KB, client-only (no BFF). Latest deploy = progress-popup title one-line-centered fix (`3a1886511`); prior popup UAT (556d6e913: centered "Reviewing your agreement", left-aligned single-line rotating phrase). Compose bindings SEEDED to Dataverse (see §SEEDED). |
 | **Next Action** | **Owner is UAT-ing.** Then: **(1)** create the **Agreement Analysis** project (owner's "nda-r2" enhancement list — name it for the WORK TYPE, e.g. `ai-agreement-analysis-r1`, NOT nda-r2; NDA = first knowledge sub-domain) — owner to paste the enhancement list → capture → `/design-to-spec` → new worktree. **(2)** formalize **`analysis-hub-r1`** (platform: `sprk_analysis` spine + session persistence + hub widget + wizard — design-discussion.md written, ready for `/design-to-spec`). **(3)** **`research-r1`** (Legal Research work type — notes written). **(4)** the 12 pre-existing e2e failures on master (compose-session-routing / edit-controls / three-pane-coordination) need a remediation pass — CONFIRMED independent of all this branch's work. |
 
 ## 📓 SESSION 2026-07-28 recap (what shipped — all merged to master + deployed)
