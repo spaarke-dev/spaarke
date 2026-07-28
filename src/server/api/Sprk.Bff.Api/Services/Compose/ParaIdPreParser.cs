@@ -177,12 +177,30 @@ public sealed class ParaIdPreParser
 
 /// <summary>
 /// One entry in the ordered paraId map: the paragraph's zero-based document-order
-/// <paramref name="Index"/>, its <paramref name="ParaId"/> (<c>w14:paraId</c>, 8-hex uppercase), and
+/// <paramref name="Index"/>, its <paramref name="ParaId"/> (<c>w14:paraId</c>, 8-hex uppercase),
 /// whether it was <paramref name="IsMinted"/> at Load (true) or collected verbatim from the source
-/// (false). Serializes to <c>{ index, paraId, isMinted }</c> — the shape the client contract mirrors
-/// (task 011 consumes it as hidden node attributes).
+/// (false), and (WS-3, task 031) the DETERMINISTIC computed numbering label
+/// (<paramref name="ComputedNumber"/>) Word displays for this paragraph — <c>null</c> for a
+/// non-numbered paragraph. Serializes to <c>{ index, paraId, isMinted, computedNumber }</c>.
 /// </summary>
-public sealed record ParaIdMapEntry(int Index, string ParaId, bool IsMinted);
+/// <remarks>
+/// <para>
+/// <b>WS-3 / <see cref="ComputedNumber"/> (task 031, FR-11..FR-14).</b> This is the EXACT label Word's
+/// numbering algorithm computes for the paragraph — decimal "4.", letters "a)", roman "iv.", legal
+/// "1.1.1", multi-level "4.2.1", style-linked heading "4.2", or a bullet glyph — replayed server-side
+/// from the OOXML numbering model by <c>ComposeDocxProjectionBuilder</c>'s
+/// <c>NumberingComputationEngine</c> in the SINGLE document-order walk, so an interrupted numbered run
+/// continues (never restarts at 1) and heading-style numbers are no longer dropped. It is the read-side
+/// twin of <c>ComposeDocumentRenderer</c>'s write-side authoring. Attached here so the editor (task 032)
+/// can render it as an explicit non-editable number-atom (never a browser <c>&lt;ol&gt;</c> auto-count,
+/// FR-13) and WS-4 (task 040) can build the <c>paraId → legal-number</c> citation map on it. Only
+/// populated on the projection Build() path; the Load-side <c>ParaIdPreParser</c> leaves it <c>null</c>
+/// (numbering is a projection concern, not an identity-stamping concern). Read-time only — WS-3 does NOT
+/// auto-renumber on edit within R4.5; live renumber-on-insert/delete is R5 G3 (FR-14), which builds on
+/// this same computed model.
+/// </para>
+/// </remarks>
+public sealed record ParaIdMapEntry(int Index, string ParaId, bool IsMinted, string? ComputedNumber = null);
 
 /// <summary>
 /// FR-08 result: the ordered <c>paraId</c> map for a loaded document, one <see cref="ParaIdMapEntry"/>

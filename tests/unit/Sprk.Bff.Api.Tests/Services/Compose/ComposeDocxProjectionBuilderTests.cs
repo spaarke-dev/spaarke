@@ -1348,4 +1348,346 @@ public sealed class ComposeDocxProjectionBuilderTests
                 $"{fileName} does not use either construct — the model reader must not false-positive escalate");
         }
     }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 031 (WS-3, FR-11..FR-14) — the deterministic numbering COMPUTATION engine. Asserts the
+    // computed label == the label Word displays, per numbered paragraph. THE flagship / NFR-02 release
+    // blocker. Synthetic fixtures cover the schemes the decimal-only corpus does not (letters, roman,
+    // legal); the interrupted / multi-level / style-linked cases are asserted BOTH over synthetic
+    // fixtures here and over the real corpus exemplars (golden labels from corpus-manifest.md §1.5).
+    // KEEP-path: pure domain logic over real in-memory .docx (ADR-038 — no Mock<HttpMessageHandler>/DI/
+    // ctor tests). The Build() path exercises the engine end-to-end via ParaIdMapEntry.ComputedNumber.
+    // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+    // ── engine fixture builders ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>Build a docx carrying an explicit numbering definition + body children, then project it
+    /// and return each paragraph's computed label (null for a non-numbered paragraph), in doc order.</summary>
+    private static List<string?> ComputedNumbers(Numbering numbering, params OpenXmlElement[] bodyChildren)
+    {
+        using var ms = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            var np = main.AddNewPart<NumberingDefinitionsPart>();
+            np.Numbering = numbering;
+            np.Numbering.Save();
+            var body = new Body();
+            foreach (var c in bodyChildren) body.Append(c);
+            main.Document = new Document(body);
+            main.Document.Save();
+        }
+        return new ComposeDocxProjectionBuilder().Build(ms.ToArray()).ParaIdMap.Select(e => e.ComputedNumber).ToList();
+    }
+
+    /// <summary>A single-level numbering instance (numId → abstractNumId) with one <c>w:lvl</c>.</summary>
+    private static Numbering SingleLevel(int numId, int abstractNumId, NumberFormatValues fmt, string lvlText, int start = 1) =>
+        new(
+            new AbstractNum(
+                new Level(
+                    new StartNumberingValue { Val = start },
+                    new NumberingFormat { Val = fmt },
+                    new LevelText { Val = lvlText })
+                { LevelIndex = 0 })
+            { AbstractNumberId = abstractNumId },
+            new NumberingInstance(new AbstractNumId { Val = abstractNumId }) { NumberID = numId });
+
+    private static List<string?> ComputedNumbersForCorpus(string fileName) =>
+        new ComposeDocxProjectionBuilder()
+            .Build(ComposeCorpusFixtureLocator.LoadVerifiedBytes(CorpusDocPath(fileName)))
+            .ParaIdMap.Select(e => e.ComputedNumber).ToList();
+
+    // ── decimal + the interrupted-run defect (the heart of R4.5) ────────────────────────────────────
+
+    [Fact]
+    public void Compute_DecimalClausesInterruptedByHeadingBodyAndTable_ContinuesTheCountNeverRestartsAt1()
+    {
+        // FR-11 / project "interrupted runs": clauses 1..5 with a heading, a plain body paragraph AND a
+        // table (all non-numbered) between clause 3 and clause 4. The count MUST continue 4,5 — a naive
+        // <ol>-per-run reader would restart at 1. Same numId throughout (single per-numId counter).
+        var labels = ComputedNumbers(
+            SingleLevel(numId: 1, abstractNumId: 1, NumberFormatValues.Decimal, "%1."),
+            NumberedPara("0C1A0001", "Confidentiality", numId: 1),
+            NumberedPara("0C1A0002", "Term", numId: 1),
+            NumberedPara("0C1A0003", "Definitions", numId: 1),
+            Heading("0C1A0004", 1, "SCHEDULE A"),           // interruption 1: heading
+            Para("0C1A0005", "Some intervening prose."),     // interruption 2: body paragraph
+            new Table(new TableRow(new TableCell(Para("0C1A0006", "cell")))), // interruption 3: table
+            NumberedPara("0C1A0007", "Remedies", numId: 1),
+            NumberedPara("0C1A0008", "Miscellaneous", numId: 1));
+
+        // Doc order: clause,clause,clause,heading,body,(table cell para),clause,clause.
+        labels[0].Should().Be("1.");
+        labels[1].Should().Be("2.");
+        labels[2].Should().Be("3.");
+        labels[3].Should().BeNull("a Heading is not a numbered paragraph");
+        labels[4].Should().BeNull("a plain body paragraph is not numbered");
+        labels[5].Should().BeNull("the table cell paragraph is not numbered");
+        labels[6].Should().Be("4.", "the numbered run CONTINUES across the interruption — no restart at 1");
+        labels[7].Should().Be("5.");
+    }
+
+    // ── numFmt formatters: letters, roman ───────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Compute_LowerLetterScheme_FormatsAThroughCAndOverflowsZToAa()
+    {
+        // FR-11 lowerLetter incl. the z→aa overflow. 27 items: a..z (26) then aa (27).
+        var paras = Enumerable.Range(1, 27)
+            .Select(i => (OpenXmlElement)NumberedPara($"0A{i:X6}", $"item {i}", numId: 1)).ToArray();
+        var labels = ComputedNumbers(SingleLevel(1, 1, NumberFormatValues.LowerLetter, "%1)"), paras);
+
+        labels[0].Should().Be("a)");
+        labels[1].Should().Be("b)");
+        labels[2].Should().Be("c)");
+        labels[25].Should().Be("z)");
+        labels[26].Should().Be("aa)", "bijective base-26 overflow: the 27th letter is aa");
+    }
+
+    [Fact]
+    public void Compute_UpperLetterScheme_FormatsAThroughC()
+    {
+        var labels = ComputedNumbers(
+            SingleLevel(1, 1, NumberFormatValues.UpperLetter, "%1."),
+            NumberedPara("0B1A0001", "one", numId: 1),
+            NumberedPara("0B1A0002", "two", numId: 1),
+            NumberedPara("0B1A0003", "three", numId: 1));
+
+        labels.Should().Equal("A.", "B.", "C.");
+    }
+
+    [Fact]
+    public void Compute_LowerRomanScheme_FormatsIThroughIvWithSubtractiveNotation()
+    {
+        var paras = Enumerable.Range(1, 4)
+            .Select(i => (OpenXmlElement)NumberedPara($"0R{i:X6}", $"item {i}", numId: 1)).ToArray();
+        var labels = ComputedNumbers(SingleLevel(1, 1, NumberFormatValues.LowerRoman, "%1."), paras);
+
+        labels.Should().Equal("i.", "ii.", "iii.", "iv.");
+    }
+
+    [Fact]
+    public void Compute_UpperRomanScheme_FormatsIThroughIv()
+    {
+        var paras = Enumerable.Range(1, 4)
+            .Select(i => (OpenXmlElement)NumberedPara($"0S{i:X6}", $"item {i}", numId: 1)).ToArray();
+        var labels = ComputedNumbers(SingleLevel(1, 1, NumberFormatValues.UpperRoman, "%1."), paras);
+
+        labels.Should().Equal("I.", "II.", "III.", "IV.");
+    }
+
+    // ── multi-level composition + reset-deeper-on-higher-increment ───────────────────────────────────
+
+    [Fact]
+    public void Compute_MultiLevelDecimal_ComposesNestedLabelsAndResetsDeeperCountersOnHigherIncrement()
+    {
+        // FR-11 lvlText composition + the standard reset rule (design §4 WS-3): 1 / 1.1 / 1.1.1 / 1.1.2
+        // / 1.2 / 2 / 2.1 — the level-1/2 counters reset when a new level-0 paragraph appears.
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2" }) { LevelIndex = 1 },
+                new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2.%3" }) { LevelIndex = 2 })
+            { AbstractNumberId = 2 },
+            new NumberingInstance(new AbstractNumId { Val = 2 }) { NumberID = 1 });
+
+        var labels = ComputedNumbers(numbering,
+            NumberedPara("0M1A0001", "Introduction", ilvl: 0, numId: 1),
+            NumberedPara("0M1A0002", "Background", ilvl: 1, numId: 1),
+            NumberedPara("0M1A0003", "History", ilvl: 2, numId: 1),
+            NumberedPara("0M1A0004", "Current State", ilvl: 2, numId: 1),
+            NumberedPara("0M1A0005", "Scope", ilvl: 1, numId: 1),
+            NumberedPara("0M1A0006", "Definitions", ilvl: 0, numId: 1),
+            NumberedPara("0M1A0007", "Key Terms", ilvl: 1, numId: 1));
+
+        labels.Should().Equal("1", "1.1", "1.1.1", "1.1.2", "1.2", "2", "2.1");
+    }
+
+    [Fact]
+    public void Compute_SubItemDepth_ComposesFourLevelLabelForWs4CitationGranularity()
+    {
+        // FR-13 granularity: WS-4's citation model resolves "4.2(b)(iii)". Mixed-format cascade:
+        // level0 decimal, level1 decimal, level2 lowerLetter, level3 lowerRoman.
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2" }) { LevelIndex = 1 },
+                new Level(new NumberingFormat { Val = NumberFormatValues.LowerLetter }, new LevelText { Val = "%1.%2(%3)" }) { LevelIndex = 2 },
+                new Level(new NumberingFormat { Val = NumberFormatValues.LowerRoman }, new LevelText { Val = "%1.%2(%3)(%4)" }) { LevelIndex = 3 })
+            { AbstractNumberId = 3 },
+            new NumberingInstance(new AbstractNumId { Val = 3 }) { NumberID = 1 });
+
+        // Walk to 4 at level0, 2 at level1, b at level2, iii at level3 → "4.2(b)(iii)".
+        var body = new List<OpenXmlElement>();
+        for (var i = 0; i < 4; i++) body.Add(NumberedPara($"0D0{i:X5}", $"top {i}", ilvl: 0, numId: 1)); // →4
+        body.Add(NumberedPara("0D100001", "s1", ilvl: 1, numId: 1)); // 4.1
+        body.Add(NumberedPara("0D100002", "s2", ilvl: 1, numId: 1)); // 4.2
+        body.Add(NumberedPara("0D200001", "a", ilvl: 2, numId: 1));  // 4.2(a)
+        body.Add(NumberedPara("0D200002", "b", ilvl: 2, numId: 1));  // 4.2(b)
+        body.Add(NumberedPara("0D300001", "i", ilvl: 3, numId: 1));  // 4.2(b)(i)
+        body.Add(NumberedPara("0D300002", "ii", ilvl: 3, numId: 1)); // 4.2(b)(ii)
+        body.Add(NumberedPara("0D300003", "iii", ilvl: 3, numId: 1)); // 4.2(b)(iii)
+
+        var labels = ComputedNumbers(numbering, body.ToArray());
+
+        labels[^1].Should().Be("4.2(b)(iii)", "the composed label must reach sub-item depth for WS-4 citations");
+    }
+
+    // ── w:isLgl (legal) — forces decimal for EVERY inserted level reference ──────────────────────────
+
+    [Fact]
+    public void Compute_LegalNumbering_ForcesDecimalForAllInsertedLevelReferencesInThatLabel()
+    {
+        // FR-11 w:isLgl: level0 is upperRoman, level1 is decimal WITH w:isLgl. The level-1 label inserts
+        // its parent (%1) — isLgl forces THAT reference to decimal too, so "I" becomes "1": label "1.1",
+        // NOT "I.1". This is the "wrong legal number is worse than absent" case the flagship guards.
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(new NumberingFormat { Val = NumberFormatValues.UpperRoman }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                new Level(
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = "%1.%2" },
+                    new IsLegalNumberingStyle())
+                { LevelIndex = 1 })
+            { AbstractNumberId = 4 },
+            new NumberingInstance(new AbstractNumId { Val = 4 }) { NumberID = 1 });
+
+        var labels = ComputedNumbers(numbering,
+            NumberedPara("0L1A0001", "Article", ilvl: 0, numId: 1),
+            NumberedPara("0L1A0002", "Legal sub", ilvl: 1, numId: 1));
+
+        labels[0].Should().Be("I", "level 0 is upperRoman → I");
+        labels[1].Should().Be("1.1", "w:isLgl on level 1 forces the inserted upperRoman parent reference to decimal");
+    }
+
+    // ── w:startOverride ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Compute_StartOverride_SeedsTheNumIdsFirstCounterValueThenIncrementsNormally()
+    {
+        // FR-11 w:lvlOverride/w:startOverride: this numId restarts level 0 at 5 (independent of the
+        // abstractNum's own w:start=1). First clause → 5., then 6., 7.
+        var numbering = new Numbering(
+            new AbstractNum(
+                new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = "%1." })
+                { LevelIndex = 0 })
+            { AbstractNumberId = 5 },
+            new NumberingInstance(
+                new AbstractNumId { Val = 5 },
+                new LevelOverride(new StartOverrideNumberingValue { Val = 5 }) { LevelIndex = 0 })
+            { NumberID = 1 });
+
+        var labels = ComputedNumbers(numbering,
+            NumberedPara("0O1A0001", "a", numId: 1),
+            NumberedPara("0O1A0002", "b", numId: 1),
+            NumberedPara("0O1A0003", "c", numId: 1));
+
+        labels.Should().Equal("5.", "6.", "7.");
+    }
+
+    // ── style-linked headings (FR-12) ───────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Compute_StyleLinkedHeadings_NumbersHeadingsByStyleExactlyLikeDirectNumPr()
+    {
+        // FR-12: numId/ilvl live on the Heading1/Heading2 STYLES (styles.xml), not on any paragraph.
+        // The engine must count style-linked headings identically to direct w:numPr — H1 → 1, 2; the H2
+        // under heading 2 → 2.1, 2.2. Proves heading-style numbers are no longer dropped.
+        using var ms = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(ms, WordprocessingDocumentType.Document))
+        {
+            var main = doc.AddMainDocumentPart();
+            var np = main.AddNewPart<NumberingDefinitionsPart>();
+            np.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1" }) { LevelIndex = 0 },
+                    new Level(new NumberingFormat { Val = NumberFormatValues.Decimal }, new LevelText { Val = "%1.%2" }) { LevelIndex = 1 })
+                { AbstractNumberId = 9 },
+                new NumberingInstance(new AbstractNumId { Val = 9 }) { NumberID = 4 });
+            np.Numbering.Save();
+
+            var stylesPart = main.AddNewPart<StyleDefinitionsPart>();
+            stylesPart.Styles = new Styles(
+                new Style(new StyleParagraphProperties(new NumberingProperties(
+                    new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 4 })))
+                { Type = StyleValues.Paragraph, StyleId = "Heading1" },
+                new Style(new StyleParagraphProperties(new NumberingProperties(
+                    new NumberingLevelReference { Val = 1 }, new NumberingId { Val = 4 })))
+                { Type = StyleValues.Paragraph, StyleId = "Heading2" });
+            stylesPart.Styles.Save();
+
+            main.Document = new Document(new Body(
+                Heading("0H1A0001", 1, "Recitals"),          // 1
+                Heading("0H1A0002", 1, "Definitions"),        // 2
+                Heading("0H1A0003", 2, "Purpose"),            // 2.1
+                Heading("0H1A0004", 2, "Confidentiality")));  // 2.2
+            main.Document.Save();
+        }
+        var labels = new ComposeDocxProjectionBuilder().Build(ms.ToArray()).ParaIdMap.Select(e => e.ComputedNumber).ToList();
+
+        labels.Should().Equal("1", "2", "2.1", "2.2");
+    }
+
+    // ── golden labels over the REAL corpus exemplars (NFR-02 acceptance, per-doc) ────────────────────
+
+    [Fact]
+    public void Compute_OverNdaInterruptedClausesCorpusDoc_ProducesContinuousGoldenLabels1Through6()
+    {
+        // corpus-manifest.md row 9: clauses continue 1..6 across the heading/body/table interruption.
+        var labels = ComputedNumbersForCorpus("nda-interrupted-clauses.docx");
+        labels[2].Should().Be("1.");
+        labels[3].Should().Be("2.");
+        labels[4].Should().Be("3.");
+        labels[12].Should().Be("4.", "post-interruption clause 4 CONTINUES the count (same numId)");
+        labels[13].Should().Be("5.");
+        labels[14].Should().Be("6.");
+    }
+
+    [Fact]
+    public void Compute_OverHeadingStyleNumberingCorpusDoc_RendersTheFr12Example4Point2()
+    {
+        // corpus-manifest.md row 10 — the literal FR-12 acceptance example "4.2 Confidentiality".
+        var labels = ComputedNumbersForCorpus("heading-style-numbering.docx");
+        labels[0].Should().Be("1");
+        labels[6].Should().Be("4");
+        labels[7].Should().Be("4.1");
+        labels[9].Should().Be("4.2", "the FR-12 acceptance example — style-linked heading numbering resolved");
+    }
+
+    [Fact]
+    public void Compute_OverMultilevelCorpusDoc_RendersGolden1Point1Point1Cascade()
+    {
+        // corpus-manifest.md row 11.
+        var labels = ComputedNumbersForCorpus("multilevel-1-1-1.docx");
+        labels[1].Should().Be("1.");
+        labels[2].Should().Be("1.1.");
+        labels[3].Should().Be("1.1.1.");
+        labels[4].Should().Be("1.1.2.");
+        labels[5].Should().Be("1.2.");
+        labels[6].Should().Be("2.");
+        labels[7].Should().Be("2.1.");
+    }
+
+    // ── determinism (NFR-06) ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void Compute_OverEveryNumberingExemplar_ProducesIdenticalLabelsAcrossTwoRuns()
+    {
+        // NFR-06: identical inputs → identical labels, no reliance on render/hash order. Run the whole
+        // projection twice over each corpus exemplar and compare the full computed-label sequence.
+        foreach (var fileName in new[]
+        {
+            "nda-interrupted-clauses.docx", "heading-style-numbering.docx",
+            "multilevel-1-1-1.docx", "line-numbered-pleading.docx",
+        })
+        {
+            var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(CorpusDocPath(fileName));
+            var run1 = new ComposeDocxProjectionBuilder().Build(bytes).ParaIdMap.Select(e => e.ComputedNumber).ToList();
+            var run2 = new ComposeDocxProjectionBuilder().Build(bytes).ParaIdMap.Select(e => e.ComputedNumber).ToList();
+            run2.Should().Equal(run1, $"numbering computation must be deterministic for {fileName} (NFR-06)");
+        }
+    }
 }

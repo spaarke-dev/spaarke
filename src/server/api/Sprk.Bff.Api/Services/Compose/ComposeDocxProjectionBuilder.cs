@@ -146,6 +146,13 @@ public sealed class ComposeDocxProjectionBuilder
                 var numberingByParagraph = new Dictionary<Paragraph, ParagraphNumberingRef>(ReferenceEqualityComparer.Instance);
                 var numberingDiagnostics = new List<string>();
 
+                // Task 031 (WS-3, FR-11..FR-14): the deterministic numbering COMPUTATION engine — replays
+                // Word's per-(abstractNumId, level) counter algorithm over the 030 model IN THIS SAME
+                // document-order Pass-1 walk. Because counters are carried forward across the whole pass, an
+                // interrupted numbered run (heading/body/table between clauses) does NOT reset to 1 — the
+                // core defect this fixes. Read-time only (no auto-renumber on edit; that is R5 G3 / FR-14).
+                var numberingEngine = new NumberingComputationEngine(numberingModel);
+
                 var map = new List<ParaIdMapEntry>(paragraphs.Count);
                 var offsetTable = new List<ParaOffsetMap>(paragraphs.Count);
                 var idByParagraph = new Dictionary<Paragraph, string>(ReferenceEqualityComparer.Instance);
@@ -165,7 +172,6 @@ public sealed class ComposeDocxProjectionBuilder
                         seen.Add(id);
                         minted = true;
                     }
-                    map.Add(new ParaIdMapEntry(i, id, minted));
                     idByParagraph[paragraphs[i]] = id;
 
                     // FR-01 (task 011): emit this paragraph's intra-paragraph offset-addressing entry in the
@@ -178,10 +184,19 @@ public sealed class ComposeDocxProjectionBuilder
                     // genuinely OUTSIDE the model (an actually-used numStyleLink chain or picture bullet) —
                     // never for numbering.xml cruft a paragraph never references (common in Word-authored
                     // docs and not itself a fidelity defect).
+                    string? computedNumber = null;
                     var numberingRef = ResolveParagraphNumbering(paragraphs[i], numberingModel);
                     if (numberingRef is not null)
                     {
                         numberingByParagraph[paragraphs[i]] = numberingRef;
+
+                        // Task 031: advance the counters (in doc order) and compute the displayed label.
+                        // MUST run for EVERY numbered paragraph in order — including style-linked headings
+                        // ListInfo excludes from list treatment — so the single per-(abstractNumId, level)
+                        // counter is exact (FR-11/FR-12). The engine mutates its counters here; the returned
+                        // label is attached to this paragraph's ParaIdMap entry for 032 render + WS-4 (FR-13).
+                        computedNumber = numberingEngine.Compute(numberingRef);
+
                         if (numberingModel.AbstractNumIdByNumId.TryGetValue(numberingRef.NumId, out var absId))
                         {
                             if (numberingModel.UnresolvedNumStyleLinkAbstractNumIds.Contains(absId))
@@ -194,6 +209,8 @@ public sealed class ComposeDocxProjectionBuilder
                             }
                         }
                     }
+
+                    map.Add(new ParaIdMapEntry(i, id, minted, computedNumber));
                 }
 
                 // Pass 2 (render): ONE structural tree walk emits HTML, pulling each paragraph's id by instance.
@@ -1261,6 +1278,240 @@ public sealed class ComposeDocxProjectionBuilder
         }
 
         return null;
+    }
+
+    // ── numbering computation engine (task 031, spaarkeai-compose-fidelity-r4.5 WS-3, FR-11..FR-14) ────
+    // THE flagship of R4.5. Replays Word's numbering algorithm over the task-030 model (design §4 WS-3),
+    // producing the EXACT displayed label per numbered paragraph — decimal / lowerLetter / upperLetter /
+    // lowerRoman / upperRoman / bullet formats, multi-level "%1.%2.%3" composition, w:isLgl (legal →
+    // decimal), w:start / w:lvlRestart / w:lvlOverride / w:startOverride. Deterministic (NFR-06): identical
+    // inputs → identical labels, no reliance on render order. Read-time only (FR-14): computes the label as
+    // READ; it does NOT auto-renumber on edit — live renumber-on-insert/delete is R5 G3, which builds on
+    // THIS shared engine (recorded so R5 does not fork the model). It is the read-side twin of the write-side
+    // ComposeDocumentRenderer (task 033 proves the two agree).
+
+    /// <summary>
+    /// Deterministic replay of Word's numbering algorithm (FR-11) over a <see cref="NumberingModel"/>, run
+    /// once per document across the projection's SINGLE document-order Pass-1 walk. A single instance is
+    /// created before the walk and <see cref="Compute"/> is called — in document order — for each numbered
+    /// paragraph; the instance carries the running counters forward, so an interrupted numbered run
+    /// continues (never restarts at 1). Stateful within one <c>Build</c> call, never shared across documents.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Counter model.</b> One running counter per <c>(abstractNumId, level)</c> (design §4 WS-3
+    /// step 1). On each numbered paragraph the paragraph's level increments (or initializes to
+    /// <c>w:start</c> / <c>w:startOverride</c> on first use since a reset), then all DEEPER levels reset per
+    /// Word's default (a more-significant level increment restarts deeper levels) as modified by
+    /// <c>w:lvlRestart</c> (<c>0</c> ⇒ never restart). The label is then composed from the level's
+    /// <c>w:lvlText</c> template, substituting each <c>%n</c> with the counter at level <c>n-1</c> formatted
+    /// per that level's <c>w:numFmt</c> — unless the current level is <c>w:isLgl</c> (legal), which forces
+    /// EVERY inserted level reference to decimal.</para>
+    /// <para><b>Purity / determinism (NFR-06 / ADR-007/013).</b> Pure OOXML computation over the model — no
+    /// I/O, no Graph, no AI type, no RNG. Deeper-level resets remove dictionary keys (order-independent), so
+    /// the emitted label depends only on document-order inputs, never on hash-iteration order.</para>
+    /// </remarks>
+    internal sealed class NumberingComputationEngine
+    {
+        private readonly NumberingModel _model;
+
+        // The running ordinal per (abstractNumId, level) — the spec/design "counter per (abstractNumId,
+        // level)". Absence of a key means the level has not been used since its last reset (next use
+        // initializes to w:start / w:startOverride).
+        private readonly Dictionary<(int AbstractNumId, int Level), int> _counters = new();
+
+        // (numId, level) whose numId-scoped w:startOverride has already been consumed. A w:startOverride
+        // seeds the FIRST use of that numId's level; after a subsequent reset the level falls back to the
+        // abstractNum's own w:start (Word's common behavior). Tracked so the override applies exactly once.
+        private readonly HashSet<(int NumId, int Level)> _appliedStartOverrides = new();
+
+        public NumberingComputationEngine(NumberingModel model) => _model = model;
+
+        /// <summary>
+        /// Advances the counters for one numbered paragraph (in document order) and returns the label Word
+        /// displays for it, or <c>null</c> when the numbering is unresolvable (the <c>numId</c> is not in the
+        /// model — no corpus doc hits this; it is the escalation-relevant "construct outside the model" case,
+        /// already surfaced as a warning by <see cref="Build"/>). Must be called exactly once per numbered
+        /// paragraph, in document order, for the single-counter replay to be exact.
+        /// </summary>
+        public string? Compute(ParagraphNumberingRef numbering)
+        {
+            var numId = numbering.NumId;
+            var ilvl = numbering.Ilvl;
+            if (!_model.AbstractNumIdByNumId.TryGetValue(numId, out var abstractNumId))
+            {
+                return null; // unresolvable numId — cannot compute a faithful label; do not fabricate one.
+            }
+
+            var levelDef = _model.ResolveLevel(numId, ilvl);
+
+            // 1) increment this level's counter (initialize on first use since the last reset).
+            var key = (abstractNumId, ilvl);
+            if (_counters.TryGetValue(key, out var current))
+            {
+                _counters[key] = current + 1;
+            }
+            else
+            {
+                _counters[key] = InitialValue(numId, ilvl, levelDef);
+            }
+
+            // 2) reset deeper levels of this abstractNum (Word default, honoring w:lvlRestart).
+            ResetDeeperLevels(abstractNumId, ilvl);
+
+            // 3) format + compose the displayed label.
+            return ComposeLabel(numId, abstractNumId, ilvl, levelDef);
+        }
+
+        private int InitialValue(int numId, int ilvl, NumberingLevelDef? levelDef)
+        {
+            // A numId-scoped w:startOverride seeds the FIRST use of this level (once), independent of the
+            // abstractNum's own w:start. HashSet.Add returns false if already applied — then fall through.
+            var startOverride = _model.ResolveStartOverride(numId, ilvl);
+            if (startOverride.HasValue && _appliedStartOverrides.Add((numId, ilvl)))
+            {
+                return startOverride.Value;
+            }
+            return levelDef?.Start ?? 1; // w:start default is 1 (ECMA-376 §17.9.25).
+        }
+
+        private void ResetDeeperLevels(int abstractNumId, int incrementedLevel)
+        {
+            // Snapshot the keys first (cannot mutate _counters while enumerating). Removal order is
+            // irrelevant to the result — determinism holds regardless of hash-iteration order.
+            var deeper = _counters.Keys
+                .Where(k => k.AbstractNumId == abstractNumId && k.Level > incrementedLevel)
+                .ToList();
+            foreach (var k in deeper)
+            {
+                if (ShouldRestart(abstractNumId, k.Level, incrementedLevel))
+                {
+                    _counters.Remove(k);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Whether a deeper level restarts when <paramref name="incrementedLevel"/> increments. Default
+        /// (no <c>w:lvlRestart</c>): a deeper level restarts whenever ANY more-significant level increments
+        /// (Word's behavior; the corpus exemplars use exactly this). <c>w:lvlRestart="0"</c> ⇒ the level
+        /// NEVER restarts. A specific value <c>N</c> (1-based level number) ⇒ restart only when a level
+        /// whose 1-based number is ≤ <c>N</c> increments (reduces to default when <c>N</c> equals the
+        /// deeper level's own number).
+        /// </summary>
+        private bool ShouldRestart(int abstractNumId, int deeperLevel, int incrementedLevel)
+        {
+            var lvlRestart = _model.Levels.TryGetValue((abstractNumId, deeperLevel), out var def) ? def.LvlRestart : null;
+            if (lvlRestart is null) return true;      // default: restart on any more-significant increment
+            if (lvlRestart.Value <= 0) return false;  // w:lvlRestart="0" ⇒ never restart
+            return (incrementedLevel + 1) <= lvlRestart.Value;
+        }
+
+        private string ComposeLabel(int numId, int abstractNumId, int ilvl, NumberingLevelDef? levelDef)
+        {
+            var numFmt = levelDef?.NumFmt;
+            var lvlText = levelDef?.LvlText;
+
+            // Bullet: the lvlText IS the literal marker glyph (no %n substitution) — return it verbatim
+            // (the displayed marker; WS-4 treats a non-numeric marker as a non-citation).
+            if (numFmt == NumberFormatValues.Bullet)
+            {
+                return lvlText ?? string.Empty;
+            }
+
+            // No template (rare/malformed): fall back to the bare formatted current counter.
+            if (string.IsNullOrEmpty(lvlText))
+            {
+                var v = _counters.TryGetValue((abstractNumId, ilvl), out var cv) ? cv : 1;
+                return FormatCounter(v, numFmt);
+            }
+
+            var legal = levelDef?.IsLgl == true; // legal (w:isLgl) forces decimal for EVERY inserted level ref.
+            return SubstituteLvlText(lvlText!, numId, abstractNumId, legal);
+        }
+
+        /// <summary>
+        /// Substitutes each <c>%n</c> (n = 1..9) placeholder in a <c>w:lvlText</c> template with the counter
+        /// at level <c>n-1</c>, formatted per that level's <c>w:numFmt</c> (or decimal when
+        /// <paramref name="legal"/>). Literal characters (".", "(", ")", spaces, "Article ", …) are copied
+        /// verbatim — so "%1.%2.%3" → "4.2.1", "(%2)" → "(b)", "Article %1" → "Article IV". Depth reaches
+        /// the current level, giving WS-4 the sub-item granularity it needs ("4.2(b)(iii)").
+        /// </summary>
+        private string SubstituteLvlText(string lvlText, int numId, int abstractNumId, bool legal)
+        {
+            var sb = new StringBuilder(lvlText.Length + 4);
+            for (var i = 0; i < lvlText.Length; i++)
+            {
+                var c = lvlText[i];
+                if (c == '%' && i + 1 < lvlText.Length && lvlText[i + 1] is >= '1' and <= '9')
+                {
+                    var refLevel = (lvlText[i + 1] - '0') - 1; // %n references level n-1 (0-based)
+                    var refDef = _model.ResolveLevel(numId, refLevel);
+                    var value = _counters.TryGetValue((abstractNumId, refLevel), out var cv)
+                        ? cv
+                        : (refDef?.Start ?? 1); // a not-yet-counted referenced level shows its start (valid docs reference only 0..current)
+                    var fmt = legal ? NumberFormatValues.Decimal : refDef?.NumFmt;
+                    sb.Append(FormatCounter(value, fmt));
+                    i++; // consume the digit
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>Formats one level's counter per <c>w:numFmt</c> (design §4 WS-3 step 3). The five named
+        /// legal schemes plus decimal; any other format (decimalZero, ordinal, cardinalText, …) is not used
+        /// by the legal corpus and degrades to decimal — the honest, never-throw fallback.</summary>
+        private static string FormatCounter(int value, NumberFormatValues? fmt)
+        {
+            if (fmt == NumberFormatValues.LowerLetter) return ToLetters(value, upper: false);
+            if (fmt == NumberFormatValues.UpperLetter) return ToLetters(value, upper: true);
+            if (fmt == NumberFormatValues.LowerRoman) return ToRoman(value, upper: false);
+            if (fmt == NumberFormatValues.UpperRoman) return ToRoman(value, upper: true);
+            return value.ToString(CultureInfo.InvariantCulture); // decimal + safe fallback
+        }
+
+        /// <summary>Bijective base-26 spreadsheet-style letters: 1→a, 26→z, 27→aa, 28→ab, … (FR-11
+        /// lowerLetter/upperLetter, incl. the z→aa overflow). Non-positive input degrades to decimal.</summary>
+        internal static string ToLetters(int n, bool upper)
+        {
+            if (n <= 0) return n.ToString(CultureInfo.InvariantCulture);
+            var baseChar = upper ? 'A' : 'a';
+            var sb = new StringBuilder(4);
+            while (n > 0)
+            {
+                n--;
+                sb.Insert(0, (char)(baseChar + (n % 26)));
+                n /= 26;
+            }
+            return sb.ToString();
+        }
+
+        private static readonly (int Value, string Upper, string Lower)[] RomanNumerals =
+        {
+            (1000, "M", "m"), (900, "CM", "cm"), (500, "D", "d"), (400, "CD", "cd"),
+            (100, "C", "c"), (90, "XC", "xc"), (50, "L", "l"), (40, "XL", "xl"),
+            (10, "X", "x"), (9, "IX", "ix"), (5, "V", "v"), (4, "IV", "iv"), (1, "I", "i"),
+        };
+
+        /// <summary>Standard subtractive roman numerals: 1→i, 4→iv, 9→ix, 40→xl, … (FR-11 lowerRoman/
+        /// upperRoman). Out-of-range input (≤0 or &gt;3999) degrades to decimal.</summary>
+        internal static string ToRoman(int n, bool upper)
+        {
+            if (n <= 0 || n > 3999) return n.ToString(CultureInfo.InvariantCulture);
+            var sb = new StringBuilder(8);
+            foreach (var (value, u, l) in RomanNumerals)
+            {
+                while (n >= value)
+                {
+                    sb.Append(upper ? u : l);
+                    n -= value;
+                }
+            }
+            return sb.ToString();
+        }
     }
 
     /// <summary>

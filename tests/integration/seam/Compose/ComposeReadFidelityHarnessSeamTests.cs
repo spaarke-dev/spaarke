@@ -272,14 +272,17 @@ public sealed class ComposeReadFidelityHarnessSeamTests
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// WS-3 flip point (tasks 031/032). Today the projection computes NO per-paragraph displayed
-    /// number at all — <see cref="ParaIdMapEntry"/> carries only Index/ParaId/IsMinted
-    /// (ParaIdPreParser.cs:185); there is no field this helper can read. Once WS-3 adds a computed
-    /// label to the projection (FR-11/FR-16), replace this stub's body with a read of that field and
-    /// remove the <c>Skip</c> from <see cref="NumberingExactness_OnLegalNumberingExemplars_ComputedLabelMatchesGoldenWordLabel"/>
-    /// below — that one-line swap is what turns this Theory's ❌s into ✅s.
+    /// WS-3 flip point (tasks 031/032) — NOW LIVE. Task 031 landed the deterministic numbering
+    /// computation engine and attaches the computed label to <see cref="ParaIdMapEntry.ComputedNumber"/>
+    /// (ParaIdPreParser.cs) in the projection's single document-order walk. This reads that field for the
+    /// paragraph's <c>paraId</c> — the one-line flip that turned
+    /// <see cref="NumberingExactness_OnLegalNumberingExemplars_ComputedLabelMatchesGoldenWordLabel"/> from
+    /// a <c>[Skip]</c>ped target into the live NFR-02 acceptance proof.
     /// </summary>
-    private static string? GetCurrentComputedNumber(ComposeDocxProjection projection, string paraId) => null;
+    private static string? GetCurrentComputedNumber(ComposeDocxProjection projection, string paraId) =>
+        projection.ParaIdMap
+            .FirstOrDefault(e => string.Equals(e.ParaId, paraId, StringComparison.OrdinalIgnoreCase))
+            ?.ComputedNumber;
 
     public static IEnumerable<object[]> LegalNumberingExemplars()
     {
@@ -322,8 +325,7 @@ public sealed class ComposeReadFidelityHarnessSeamTests
     /// across the interrupted/heading-style/multi-level/pleading exemplars. See
     /// <see cref="GetCurrentComputedNumber"/> remarks for the one-line flip that unblocks this Theory.
     /// </summary>
-    [Theory(Skip = "numbering-exactness target — unblocked by WS-3 tasks 031/032 (projection does not " +
-        "yet compute a per-paragraph displayed number; see GetCurrentComputedNumber remarks)")]
+    [Theory]
     [MemberData(nameof(LegalNumberingExemplars))]
     public void NumberingExactness_OnLegalNumberingExemplars_ComputedLabelMatchesGoldenWordLabel(
         string docFileName, int paragraphOrdinalIndex, string goldenLabel)
