@@ -7,14 +7,19 @@
 **Status**: in-progress (autonomous parallel execution)
 **Mode**: autonomous, parallel-where-possible; `/conflict-check` before every BFF PR.
 
-### Wave A (in progress)
-- **001** corpus legal-numbering fixtures — 🔄 subagent (sonnet)
-- **051** WS-5 Word-service eval + NFR-03 licensing — 🔄 subagent (opus)
+### Completed (11/21)
+- Phase 0: **001** fixtures ✅ · **002** harness ✅
+- WS-5: **050** ✅ · **051** ✅ · **052** ✅ (DEFER pagination to fast-follow; 2 licensing sign-offs pending @ fast-follow)
+- **WS-1 CODE COMPLETE**: **010** upload→projection ✅ · **011** browse `/project` endpoint ✅ · **012** transient (FR-02 already met; guards) ✅ · **013** delete mammoth ✅
+- **WS-1 boundary gate ✅ PASS** (0 Critical; DEF-01 pre-existing test → 031; DEF-02 payload-size hardening — see `notes/defer-issues.md`).
 
-### Wave plan
-- Wave B (after 001): 002 harness ∥ 050 LibreOffice spike
-- Then sequential BFF main line 010→011→012→013 (**run `/conflict-check` before 010**), 020→022, 030→033, 040→042; 052 parallel after 050+051.
-- Deploy/UAT (014, 034) + fired escalation triggers → STOP for human.
+### Deploys queued for HUMAN
+- **014** (WS-1 deploy+UAT) + **034** (WS-3 deploy+UAT) — batched; need Compose deploy to shared `sprk_spaarkeai` + manual UAT. Code proceeds without them (020 deps 013, not 014).
+
+### In progress / next
+- **020** WS-2 stop-silent-drops (`w:cr`/`w:sym`) — dispatching (sonnet, FULL, xhigh).
+- Then WS-2 021→022, WS-3 030→033 (flagship 031 opus), WS-4 040→042, wrap-up 090.
+- STOP-for-human: the queued deploys; 031 numbering-divergence hard-stop; 042 citation-contract question; 052 licensing (fast-follow).
 
 ## Project state
 
