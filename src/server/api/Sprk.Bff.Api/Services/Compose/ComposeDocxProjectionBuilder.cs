@@ -538,7 +538,16 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     case Text t: sb.Append(t.Text); break;
                     case DeletedText dt: sb.Append(dt.Text); break;
-                    case Break or TabChar or NoBreakHyphen: sb.Append(' '); break;
+                    case Break or TabChar or NoBreakHyphen or CarriageReturn: sb.Append(' '); break;
+                    case SymbolChar sym:
+                        // FR-06: represent (mapped glyph or placeholder) rather than drop — same resolver
+                        // RenderRun uses. This atom-display-text path has no BuildContext to raise a
+                        // warning through (documented limitation, same shape as this file's other
+                        // "not exercised by the corpus" simplifications, e.g. FieldScanState remarks); an
+                        // unmapped w:sym inside a field RESULT/SDT display text is not present in the
+                        // corpus today.
+                        sb.Append(ResolveSymbolGlyph(sym, out _));
+                        break;
                     default: break;
                 }
             }
@@ -581,8 +590,11 @@ public sealed class ComposeDocxProjectionBuilder
 
     /// <summary>
     /// The number of editor-visible characters a run contributes to the paragraph offset space: its
-    /// <c>w:t</c>/<c>w:delText</c> text length, plus one per <c>w:br</c>/<c>w:tab</c>/<c>w:noBreakHyphen</c>
-    /// glyph — mirroring exactly what <see cref="RenderRun"/> emits (each maps to one editor position).
+    /// <c>w:t</c>/<c>w:delText</c> text length, plus one per <c>w:br</c>/<c>w:cr</c>/<c>w:tab</c>/
+    /// <c>w:noBreakHyphen</c>/<c>w:sym</c> glyph — mirroring exactly what <see cref="RenderRun"/> emits
+    /// (each maps to one editor position). A <c>w:sym</c> contributes exactly 1 regardless of whether it
+    /// resolves to a mapped Unicode glyph or an unmapped placeholder (FR-06/FR-10) — both are ONE
+    /// editor-visible character, so the offset table never diverges from the HTML render either way.
     /// </summary>
     private static int RunEditorLength(Run run)
     {
@@ -600,6 +612,8 @@ public sealed class ComposeDocxProjectionBuilder
                 case Break:
                 case TabChar:
                 case NoBreakHyphen:
+                case CarriageReturn:
+                case SymbolChar:
                     length += 1;
                     break;
                 default:
@@ -697,10 +711,25 @@ public sealed class ComposeDocxProjectionBuilder
                     ctx.Append("<span class=\"compose-tab\"> </span>");
                     break;
                 case Break:
+                case CarriageReturn:
+                    // FR-05: w:cr carries the same "line break, not a paragraph break" intent as w:br —
+                    // mirror the existing Break handling exactly rather than dropping it (WS-2 fix; this
+                    // was previously the FR-05 characterization gap pinned by
+                    // ComposeDocxProjectionBuilderTests.Build_ParagraphWithCarriageReturnRun_..., now flipped).
                     ctx.Append("<br>");
                     break;
                 case NoBreakHyphen:
                     ctx.Append("‑");
+                    break;
+                case SymbolChar sym:
+                    // FR-06/FR-10: map the symbol-font code point to its Unicode equivalent where a
+                    // VERIFIED mapping exists (ResolveSymbolGlyph / KnownSymbolGlyphMap); otherwise emit a
+                    // visible placeholder (U+FFFD) AND raise the intra-run glyph-loss warning — F-1 never
+                    // allows a silent drop. This was previously the FR-06 characterization gap pinned by
+                    // ComposeDocxProjectionBuilderTests.Build_ParagraphWithSymbolCharRun_..., now flipped.
+                    var glyph = ResolveSymbolGlyph(sym, out var mapped);
+                    ctx.AppendEscaped(glyph);
+                    if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
                     break;
                 default:
                     break;
@@ -711,6 +740,44 @@ public sealed class ComposeDocxProjectionBuilder
         if (underline) ctx.Append("</u>");
         if (italic) ctx.Append("</em>");
         if (bold) ctx.Append("</strong>");
+    }
+
+    /// <summary>
+    /// FR-06 symbol-font → Unicode mapping (verified, HAND-CURATED, deliberately small). Today covers
+    /// only the corpus's confirmed case — Symbol-font PUA code point <c>F0A7</c> maps to § (U+00A7, the
+    /// legal section mark; corpus-manifest.md row 12). Deliberately does NOT include an algorithmic
+    /// "subtract 0xF000 and treat the remainder as a Latin-1/legacy-Symbol-charset code point" fallback:
+    /// that heuristic holds for SOME Symbol-font glyphs but is unverified across the font, and a WRONG
+    /// mapped glyph in a legal document is worse than an honest, warned placeholder (F-1 / this task's
+    /// escalation trigger — a wrong § is a wrong legal document, same failure class as a missing one).
+    /// Extend this table only with entries verified against a real corpus/owner document. Mirrors the
+    /// identically-scoped map in <c>ComposeReadFidelityHarnessSeamTests.KnownSymbolGlyphMap</c> — keep
+    /// the two in sync if either changes.
+    /// </summary>
+    private static readonly Dictionary<(string Font, string Char), string> KnownSymbolGlyphMap = new()
+    {
+        [("Symbol", "F0A7")] = "§",
+    };
+
+    /// <summary>
+    /// Resolves a <c>w:sym</c> run child to its display glyph. <paramref name="mapped"/> is <c>true</c>
+    /// when <see cref="KnownSymbolGlyphMap"/> has a verified entry for the run's <c>(font, char)</c> pair
+    /// (the returned glyph IS the correct Unicode target); <c>false</c> means no verified mapping exists
+    /// and the caller must treat the returned replacement character as a placeholder, never as content —
+    /// FR-06/FR-10 require the caller to also raise a warning in that branch.
+    /// </summary>
+    private static string ResolveSymbolGlyph(SymbolChar sym, out bool mapped)
+    {
+        var font = sym.Font?.Value;
+        var code = sym.Char?.Value;
+        if (font is not null && code is not null && KnownSymbolGlyphMap.TryGetValue((font, code), out var glyph))
+        {
+            mapped = true;
+            return glyph;
+        }
+
+        mapped = false;
+        return "�"; // REPLACEMENT CHARACTER — visible placeholder, never a silent drop (FR-06).
     }
 
     private void RenderHyperlink(Hyperlink h, BuildContext ctx)

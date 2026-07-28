@@ -70,14 +70,34 @@ public sealed class ComposeReadFidelityHarnessSeamTests
 
     /// <summary>
     /// NFR-01: for every corpus doc, per paragraph, the projected text must equal the source run text
-    /// character-for-character (only &amp;/&lt;/&gt; HTML-structural encoding reversed) — UNLESS the
-    /// paragraph carries a construct the projection does not yet represent at all (w:sym / w:cr — WS-2
-    /// FR-05/FR-06), in which case the CURRENT drop is characterized explicitly (not silently masked)
-    /// so success is measured, not asserted (design §5), and a WS-2 fix is a visible ❌→✅ diff.
+    /// character-for-character (only &amp;/&lt;/&gt; HTML-structural encoding reversed).
     /// </summary>
+    /// <remarks>
+    /// WS-2 flip (task 020, spaarkeai-compose-fidelity-r4.5): task 002 originally special-cased any
+    /// paragraph carrying a <c>w:sym</c>/<c>w:cr</c> descendant as a KNOWN, characterized drop (FR-05/
+    /// FR-06 were not yet implemented — <c>ComposeDocxProjectionBuilder.RenderRun</c> had no case for
+    /// <c>SymbolChar</c>/<c>CarriageReturn</c> and fell through to <c>default: break</c>). Task 020
+    /// implemented both: <c>w:cr</c> now emits <c>&lt;br&gt;</c> (mirrors <c>w:br</c>); <c>w:sym</c> now
+    /// maps to its verified Unicode glyph (Symbol F0A7 → §) or, for an unmapped code point, a visible
+    /// U+FFFD placeholder + an intra-run glyph-loss warning (never a silent drop). Every corpus
+    /// <c>w:sym</c> occurrence (<c>symbol-section-mark.docx</c>'s 2 body-run instances — corpus-
+    /// manifest.md row 12) resolves through the VERIFIED mapping, and the corpus carries zero <c>w:cr</c>
+    /// occurrences (WS-0 baseline note), so with the fix landed every paragraph in every corpus doc is
+    /// text-exact — the "characterized drop" branch this Theory used to need is gone; a straight
+    /// exact-match assertion now holds unconditionally. (The corpus's OTHER <c>symbol-section-mark.docx</c>
+    /// negative case — 2 Wingdings-bullet paragraphs whose PUA glyph has no canonical Unicode target — is
+    /// NOT a body-run <c>w:sym</c> at all: it is defined on the numbering LEVEL's <c>lvlText</c>, a list
+    /// MARKER the browser's default <c>&lt;ul&gt;</c> styling renders, never emitted as paragraph run
+    /// text; per the task 002 WS-0 baseline note it is untestable via this projected-HTML-text comparison
+    /// and was already, and remains, text-exact here — the unmapped-placeholder+warning behavior for a
+    /// genuinely unmapped <paramref name="run"/>-level <c>w:sym</c> is covered instead by
+    /// <c>ComposeDocxProjectionBuilderTests.Build_ParagraphWithSymbolCharRun_UnmappedSymbolFont_...</c>,
+    /// a synthetic fixture — there is no real corpus document exercising that branch to assert against
+    /// here without fabricating one, which root CLAUDE.md §11 forbids absent a concrete gap.)
+    /// </remarks>
     [Theory]
     [MemberData(nameof(CorpusDocuments))]
-    public void TextExactness_OnEveryCorpusDoc_MatchesSourceRunTextOrCharacterizesKnownDrop(string corpusDocPath)
+    public void TextExactness_OnEveryCorpusDoc_MatchesSourceRunTextExactly(string corpusDocPath)
     {
         var bytes = ComposeCorpusFixtureLocator.LoadVerifiedBytes(corpusDocPath);
         var docName = Path.GetFileName(corpusDocPath);
@@ -93,42 +113,20 @@ public sealed class ComposeReadFidelityHarnessSeamTests
             $"the paraId map must be index-aligned, one entry per source paragraph, for '{docName}' (F-01 single-walk invariant)");
 
         var textExactCount = 0;
-        var characterizedDropCount = 0;
 
         for (var i = 0; i < sourceParagraphs.Count; i++)
         {
             var paraId = projection.ParaIdMap[i].ParaId;
             var golden = ExtractGoldenParagraphText(sourceParagraphs[i]);
             var projected = ExtractProjectedParagraphText(projection.Html, paraId);
-            var hasUnrepresentedConstruct = sourceParagraphs[i].Descendants<SymbolChar>().Any()
-                || sourceParagraphs[i].Descendants<CarriageReturn>().Any();
 
-            if (hasUnrepresentedConstruct)
-            {
-                // Characterization baseline (WS-2 FR-05 w:cr / FR-06 w:sym target): today these
-                // constructs are silently dropped by ComposeDocxProjectionBuilder.RenderRun (no case
-                // for SymbolChar/CarriageReturn — falls through to `default: break`), so the projected
-                // text necessarily diverges from the NFR-01-correct golden text. If this paragraph now
-                // MATCHES, WS-2 has landed the fix for it — promote it out of this branch (delete the
-                // construct check for that paragraph, or the whole branch once WS-2 is fully done).
-                projected.Should().NotBe(golden,
-                    $"paraId '{paraId}' in '{docName}' carries a w:sym/w:cr construct — WS-2 FR-05/FR-06 target; " +
-                    $"today's (broken) projected text is '{projected}' vs the NFR-01-correct golden text '{golden}'");
-                characterizedDropCount++;
-            }
-            else
-            {
-                projected.Should().Be(golden,
-                    $"NFR-01: paraId '{paraId}' in '{docName}' must emit source run text character-for-character " +
-                    "(only &/</> HTML-structural encoding reversed) — no trimming/collapsing/normalization permitted");
-                textExactCount++;
-            }
+            projected.Should().Be(golden,
+                $"NFR-01: paraId '{paraId}' in '{docName}' must emit source run text character-for-character " +
+                "(only &/</> HTML-structural encoding reversed) — no trimming/collapsing/normalization permitted");
+            textExactCount++;
         }
 
-        var textExact = characterizedDropCount == 0;
-        _output.WriteLine(
-            $"[text-exact {(textExact ? "✅" : "❌")}] {docName}: {textExactCount} exact, " +
-            $"{characterizedDropCount} characterized-drop (WS-2 target) of {sourceParagraphs.Count} paragraphs");
+        _output.WriteLine($"[text-exact ✅] {docName}: {textExactCount} of {sourceParagraphs.Count} paragraphs exact");
     }
 
     // ── golden (source) extraction — mirrors ComposeDocxProjectionBuilder.RenderInline/RenderRun's

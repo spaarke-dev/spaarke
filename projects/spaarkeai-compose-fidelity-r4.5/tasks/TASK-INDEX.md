@@ -15,7 +15,7 @@
 | 012 | Open-in-Compose transient projected server-side | 1 One reader | WS-1 | sonnet | high | FULL | 011 | ✘ | ✅ (FR-02 already met by 010+011; guards added) |
 | 013 | Delete mammoth fallback + `docxToTipTapHtml` | 1 One reader | WS-1 | sonnet | high | FULL | 012 | ✘ | ✅ (null→error-state; pre-existing advisoryComments fail → 031) |
 | 014 | Deploy + UAT — one reader everywhere | 1 One reader | WS-1 | sonnet | med | STANDARD | 013 | ✘ | ⛔ HUMAN (deploy+UAT — batched w/ 034) |
-| 020 | Stop silent drops (`w:cr`, `w:sym`) + warning mechanism | 2 Harden read | WS-2 | sonnet | xhigh | FULL | 013 | ✘ | 🔲 |
+| 020 | Stop silent drops (`w:cr`, `w:sym`) + warning mechanism | 2 Harden read | WS-2 | sonnet | xhigh | FULL | 013 | ✘ | ✅ (8/8 text-exact; gate @ WS-2 boundary) |
 | 021 | Emit `w:ind` indentation + `white-space:pre-wrap` | 2 Harden read | WS-2 | sonnet | high | FULL | 020 | ✘ | 🔲 |
 | 022 | OOXML construct audit + missing projection tests | 2 Harden read | WS-2 | sonnet | high | FULL | 021 | ✘ | 🔲 |
 | 030 | Numbering-model reader (numbering.xml + style-linked) | 3 Numbering | WS-3 | sonnet | xhigh | FULL | 022 | ✘ | 🔲 |

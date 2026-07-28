@@ -771,13 +771,12 @@ public sealed class ComposeDocxProjectionBuilderTests
     }
 
     [Fact]
-    public void Build_ParagraphWithSymbolCharRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr06()
+    public void Build_ParagraphWithSymbolCharRun_MappedSymbolFont_RendersUnicodeGlyphWithNoWarning()
     {
-        // Characterization baseline (WS-2 FR-06 target, spaarkeai-compose-fidelity-r4.5 task 002):
-        // w:sym (e.g. Symbol-font F0A7 -> section-mark) is NOT yet mapped to its Unicode equivalent —
-        // ComposeDocxProjectionBuilder.RenderRun has no case for SymbolChar, so the whole run silently
-        // contributes nothing (no glyph, no placeholder, no warning). This test PINS that current gap;
-        // when WS-2 lands FR-06, update (not delete) this test to assert the mapped glyph IS present.
+        // WS-2 FR-06 flip (spaarkeai-compose-fidelity-r4.5 task 020) of the task 002 characterization
+        // Build_ParagraphWithSymbolCharRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr06: a
+        // VERIFIED symbol-font mapping (Symbol F0A7 -> section mark, corpus-manifest.md row 12) now
+        // renders its Unicode glyph verbatim, in place, with no intra-run glyph-loss warning.
         var para = new Paragraph(
             new Run(new SymbolChar { Font = "Symbol", Char = "F0A7" }),
             new Run(new Text("Confidentiality") { Space = SpaceProcessingModeValues.Preserve }))
@@ -785,19 +784,44 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().Contain("Confidentiality");
-        projection.Html.Should().NotContain("§",
-            "WS-2 FR-06 target: the Symbol-font glyph (section mark) is currently dropped silently, not mapped or placeholdered");
+        projection.Html.Should().Contain("§Confidentiality",
+            "WS-2 FR-06: the mapped Symbol-font glyph (section mark, U+00A7) renders immediately before " +
+            "the following run's text, verbatim — no separator invented, no glyph dropped");
+        projection.Warnings.Should().NotContain(w => w.Code == "unmapped-symbol-char",
+            "a VERIFIED mapping must never raise the unmapped-glyph warning");
     }
 
     [Fact]
-    public void Build_ParagraphWithCarriageReturnRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr05()
+    public void Build_ParagraphWithSymbolCharRun_UnmappedSymbolFont_RendersPlaceholderAndRaisesWarning()
     {
-        // Characterization baseline (WS-2 FR-05 target, spaarkeai-compose-fidelity-r4.5 task 002): w:cr
-        // is a break with the same intent as w:br, but ComposeDocxProjectionBuilder.RenderRun has no
-        // case for CarriageReturn — it silently contributes nothing (no <br>, no separator at all),
-        // unlike Break (w:br) which correctly emits <br> today. This test PINS that current gap; update
-        // (not delete) it when WS-2 lands FR-05.
+        // FR-06 negative case + FR-10 warning mechanism: a symbol-font code point with NO verified
+        // mapping (e.g. a Wingdings PUA glyph — corpus-manifest.md row 12's deliberate negative case)
+        // must NEVER silently vanish. It renders a visible U+FFFD placeholder in place AND raises the
+        // intra-run glyph-loss warning ("unmapped-symbol-char") — represent-or-warn, never silent drop.
+        var para = new Paragraph(
+            new Run(new Text("Item ") { Space = SpaceProcessingModeValues.Preserve }),
+            new Run(new SymbolChar { Font = "Wingdings", Char = "F0A8" }),
+            new Run(new Text(" text") { Space = SpaceProcessingModeValues.Preserve }))
+        { ParagraphId = new HexBinaryValue("00D00002") };
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("Item � text",
+            "an unmapped w:sym renders a visible U+FFFD placeholder in place — never a silent gap");
+        projection.Warnings.Should().ContainSingle(w => w.Code == "unmapped-symbol-char" && w.Count == 1,
+            "FR-10: the intra-run glyph-loss warning must fire exactly once for the one unmapped w:sym run " +
+            "— the placeholder and the warning always co-occur, never one without the other");
+        projection.Status.Should().Be(ComposeProjectionStatus.Partial,
+            "any raised warning demotes the projection to Partial per the existing status contract");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithCarriageReturnRun_RendersBreakLikeExistingWBr()
+    {
+        // WS-2 FR-05 flip (spaarkeai-compose-fidelity-r4.5 task 020) of the task 002 characterization
+        // Build_ParagraphWithCarriageReturnRun_CurrentlyDropsGlyphSilently_CharacterizationForWS2Fr05:
+        // w:cr now emits <br>, mirroring the pre-existing w:br (Break) handling exactly, instead of
+        // vanishing with no separator at all.
         var para = new Paragraph(
             new Run(new Text("before") { Space = SpaceProcessingModeValues.Preserve }),
             new Run(new CarriageReturn()),
@@ -806,9 +830,8 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().NotContain("<br>",
-            "WS-2 FR-05 target: w:cr does not yet emit a break representation the way w:br (Break) does");
-        projection.Html.Should().Contain("beforeafter",
-            "today the two runs' text is concatenated with NO separator at all — the w:cr break is fully invisible, not merely unstyled");
+        projection.Html.Should().Contain("before<br>after",
+            "WS-2 FR-05: w:cr must emit a break the same way w:br (Break) already does — never a silent, " +
+            "separator-less concatenation of the surrounding runs' text");
     }
 }
