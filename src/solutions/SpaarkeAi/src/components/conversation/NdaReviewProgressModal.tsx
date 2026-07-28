@@ -30,7 +30,8 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { AiProgressStepper, type AiProgressStep } from '@spaarke/ui-components';
+import { CheckmarkCircle20Filled, Circle20Regular, ErrorCircle20Filled } from '@fluentui/react-icons';
+import type { AiProgressStep } from '@spaarke/ui-components';
 import type { NdaRunStatus } from './useNdaReviewRunProgress';
 
 /** The real phases an NDA review performs, in order. `analyzing` is the hold point (the long call). */
@@ -71,12 +72,12 @@ const COMPLETE_LINGER_MS = 900;
 const ERROR_LINGER_MS = 3200;
 
 const useStyles = makeStyles({
-  // UAT round-7 #1 + follow-up — a CENTERED popup. The surface must be WIDE ENOUGH to contain the whole
-  // 4-step flow diagram: the track's chips + connectors are `flex-shrink: 0` (≈400px total), so a too-
-  // narrow surface let the track overflow past the white background. Give it comfortable room + let it
-  // grow with content so the background always covers the entire diagram.
+  // UAT follow-up: the flow diagram is now VERTICAL (one step per row) so it ALWAYS fits the popup
+  // width regardless of label length — the prior horizontal track's `flex-shrink:0` chips overflowed
+  // the surface. A vertical list also lets the active step carry its OWN spinner (see stepRow), so the
+  // reviewer sees exactly which step is being worked on. The surface can therefore be comfortably narrow.
   surface: {
-    width: '560px',
+    width: '440px',
     maxWidth: '92vw',
   },
   body: {
@@ -84,21 +85,60 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     alignItems: 'center',
     textAlign: 'center',
-    rowGap: tokens.spacingVerticalM,
+    rowGap: tokens.spacingVerticalL,
     width: '100%',
   },
+  // UAT follow-up: the rotating "working…" phrase now trails the title AFTER the ellipsis (italic),
+  // e.g. "Reviewing your NDA… Scrutinizing the confidentiality term…" — instead of a separate line.
   title: {
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },
-  // The rotating status line (round-6 #7) — centered under the stepper (round-7 #1).
-  workingLine: {
+  titlePhrase: {
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+  },
+  // Vertical step list — left-aligned within the centered body, capped so it reads as a tidy column.
+  steps: {
+    display: 'flex',
+    flexDirection: 'column',
+    rowGap: tokens.spacingVerticalM,
+    width: '100%',
+    maxWidth: '340px',
+    textAlign: 'left',
+  },
+  stepRow: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalM,
+  },
+  // Fixed-size leading slot so the label column stays aligned across checkmark / spinner / circle.
+  stepIcon: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    columnGap: tokens.spacingHorizontalSNudge,
+    width: '20px',
+    height: '20px',
+    flexShrink: 0,
+  },
+  stepLabel: {
+    color: tokens.colorNeutralForeground3,
+  },
+  stepLabelActive: {
+    color: tokens.colorNeutralForeground1,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  stepLabelDone: {
     color: tokens.colorNeutralForeground2,
-    fontStyle: 'italic',
+  },
+  iconDone: {
+    color: tokens.colorStatusSuccessForeground1,
+  },
+  iconPending: {
+    color: tokens.colorNeutralForeground4,
+  },
+  iconError: {
+    color: tokens.colorStatusDangerForeground1,
   },
 });
 
@@ -170,28 +210,56 @@ export function NdaReviewProgressModal(props: NdaReviewProgressModalProps): Reac
       <DialogSurface className={styles.surface} data-testid="nda-review-progress-modal">
         <DialogBody>
           <div className={styles.body}>
-            {/* Own, CENTERED title (round-7 #1) — the stepper's built-in title is suppressed (title="") so
-                it doesn't render a second, left-aligned heading. */}
+            {/* Title, with the rotating "working…" phrase trailing the ellipsis (italic) while running. */}
             <Text size={400} className={styles.title}>
-              {title}
-            </Text>
-            <AiProgressStepper
-              variant="inline"
-              title=""
-              steps={steps}
-              activeStepId={activeStepId}
-              completedStepIds={completedStepIds}
-              errorStepId={errorStepId}
-              isStreaming={status === 'running'}
-            />
-            {status === 'running' ? (
-              <div className={styles.workingLine} aria-live="polite" data-testid="nda-review-progress-working">
-                <Spinner size="tiny" />
-                <Text size={200} italic>
+              <span>{title}</span>
+              {status === 'running' ? (
+                <Text
+                  as="span"
+                  size={400}
+                  italic
+                  className={styles.titlePhrase}
+                  aria-live="polite"
+                  data-testid="nda-review-progress-working"
+                >
+                  {' '}
                   {NDA_REVIEW_WORKING_PHRASES[phraseIdx]}
                 </Text>
-              </div>
-            ) : null}
+              ) : null}
+            </Text>
+
+            {/* VERTICAL step list — fits any width; the ACTIVE step carries the spinner so it's clear
+                which step is being worked on (completed = check, pending = hollow circle, error = ✕). */}
+            <div className={styles.steps} role="status" aria-live="polite">
+              {steps.map(step => {
+                const isCompleted = completedStepIds.includes(step.id);
+                const isActive = step.id === activeStepId;
+                const isError = step.id === errorStepId;
+                return (
+                  <div key={step.id} className={styles.stepRow} data-testid={`nda-review-step-${step.id}`}>
+                    <span className={styles.stepIcon}>
+                      {isError ? (
+                        <ErrorCircle20Filled className={styles.iconError} data-testid="nda-review-step-icon-error" />
+                      ) : isCompleted ? (
+                        <CheckmarkCircle20Filled className={styles.iconDone} />
+                      ) : isActive ? (
+                        <Spinner size="tiny" data-testid="nda-review-step-active-spinner" />
+                      ) : (
+                        <Circle20Regular className={styles.iconPending} />
+                      )}
+                    </span>
+                    <Text
+                      size={300}
+                      className={
+                        isActive ? styles.stepLabelActive : isCompleted ? styles.stepLabelDone : styles.stepLabel
+                      }
+                    >
+                      {step.label}
+                    </Text>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </DialogBody>
       </DialogSurface>
