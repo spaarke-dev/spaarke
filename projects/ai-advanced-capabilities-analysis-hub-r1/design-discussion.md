@@ -369,13 +369,15 @@ analysis belongs to one record) requires the new regarding field-set + subgrids 
    (`AnalysisEndpoints.cs:783`) → target `sprk_spaarkeai` via `openSpaarkeAi` deep-link shape.
 2. **Repoint client launch points**: `sprk_analysis` form OnLoad/ribbon launcher + PlaybookLibrary navigateTo →
    `openSpaarkeAi`. Remove the dead custom-page path in `sprk_analysis_commands.js`.
-3. **Confirm SpaarkeAi parity** for the 4 capabilities (13.6) before cutover.
+3. **Parity — RESOLVED (no migration needed):** redlines/export/auto-save covered; side-by-side source preview not
+   needed (owner). See §13.6.
 4. **Delete** the web resources + `Deploy-AnalysisWorkspace.ps1` + the `AnalysisWorkspace/` source tree; reconcile
    the casing so nothing dangles.
 
-### 13.6 The one capability GAP to verify before cutover
-SpaarkeAi/Compose covers: accept/reject redlines ✅, export (the `/export` endpoint is KEEP) ✅, auto-save ✅ (to
-SPE). **The likely gap = side-by-side ORIGINAL-SOURCE preview** (`SourceViewerPanel`: PDF iframe / Office embed) —
-Compose shows the *working* doc, not necessarily the *original source* beside it. **Verify; if absent, it's
-migration scope** (a source-preview pane in the three-pane), not deletion. (Also the PDF-preview tie-in to the
-agreements-r1 `compose-r5` question — this proves read-only PDF preview already exists as a pattern.)
+### 13.6 Capability parity — RESOLVED, no gap → CLEAN RETIREMENT
+SpaarkeAi/Compose covers: accept/reject redlines ✅, export (the `/export` endpoint is KEEP) ✅, auto-save ✅ (to SPE).
+The one candidate gap — **side-by-side ORIGINAL-SOURCE preview** (`SourceViewerPanel`) — is **NOT NEEDED per owner
+(2026-07-28): retire it.** So there is **no capability-migration scope**: the retirement is purely (1) repoint the
+invocation points (§13.5 steps 1–2) → (2) delete (step 4). `SourceViewerPanel` + its PDF-iframe/Office-embed move
+firmly to **RETIRE**. (Note the PDF-preview *pattern* it demonstrated is still useful reference for the separate
+agreements-r1 `compose-r5` PDF work, but nothing is carried forward from this code page.)
