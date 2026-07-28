@@ -7,3 +7,5 @@
 
 export * from './AttachmentList';
 export * from './EmailCardList';
+export * from './EmailViewSelector';
+export * from './EmailReadingPaneShell';

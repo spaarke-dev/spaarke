@@ -18,8 +18,8 @@
 | 022 | Extract `CommunicationActions` Layer-1 (action-bar logic) | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
 | 023 | Lift `TrackingFieldTrio` generic core → `@spaarke/ui-components` | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
 | 030 | `EmailCardList` flat card list + loading/empty states | 3 | ✅ | FULL | sonnet/high | P3a | ✅ | 001 |
-| 031 | `ViewSelector` over `sprk_communication` saved views + List/Thread toggle | 3 | 🔲 | STANDARD | sonnet/high | P3a | ✅ | — |
-| 032 | Reading-pane shell (`PanelSplitter` 2-pane + full-width toolbar) | 3 | 🔲 | FULL | sonnet/high | — | ❌ | 030 |
+| 031 | `ViewSelector` over `sprk_communication` saved views + List/Thread toggle | 3 | ✅ | STANDARD | sonnet/high | P3a | ✅ | — |
+| 032 | Reading-pane shell (`PanelSplitter` 2-pane + full-width toolbar) | 3 | ✅ | FULL | sonnet/high | — | ❌ | 030 |
 | 033 | `.eml` render branch — sandboxed iframe + `sprk_body` degradation | 3 | 🔲 | FULL | opus/xhigh | P3b | ✅ | 010, 032 |
 | 034 | Envelope header (`CommunicationHeader`) + attachments view | 3 | 🔲 | STANDARD | sonnet/high | P3b | ✅ | 021, 032 |
 | 035 | Associations review (interactive/additive) + tracking view | 3 | 🔲 | FULL | sonnet/high | P3b | ✅ | 020, 023, 032 |
