@@ -46,9 +46,9 @@
 | 054 | Concurrency + import seam slices (NFR-06/08) | 5 Concurrency | sonnet / high | FULL | 050,051,052,053 | done | ✅ |
 | 060 | Hard-replace cutover completion (FR-12); **KEEP renderer (C-revised)** | 6 Hardening | opus / high | FULL | 032,034,**006,036,038** | ✅ done-with-exception: writers gone; mammoth retained for transient mounts → R5 G6 (§6.5 Path-A) | ✅ |
 | 061 | Corpus proof + size + CVE + NetArch (NFR-01/04/05) | 6 Hardening | sonnet / high | FULL | 060 | ✅ all green (0a9710cd1): 28/28 byte-diff, 515+531 tests, 46.11 MB, no new CVE, ADR-013 green | ✅ |
-| 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | 🔔 **READY — owner-orchestrated deploy (deploy boundary)** | 🔲 |
-| 063 | **Flagship gate G — all 8 criteria green** | 6 Hardening | opus / high | FULL | 062 | blocked | 🔲 |
-| 090 | Project wrap-up (+ /test-diet gate) | Wrap-up | sonnet / medium | STANDARD | 063 | blocked | 🔲 |
+| 062 | Deploy full R4 + CIPO operator UAT | 6 Hardening | sonnet / high | FULL | 060,061 | ✅ **DEV-deployed + UAT'd 2026-07-28** (BFF + sprk_spaarkeai; NDA/Medical-doc UAT rounds). Production + CIPO-specific UAT = owner follow-up. | ✅ |
+| 063 | Flagship gate G | 6 Hardening | opus / high | FULL | 062 | ✅ **CLOSED green-with-exceptions 2026-07-28**: Criterion 7 (one byte-author) via **C-revised** 2-author decision; read-fidelity (numbering/mammoth) → **R4.5**; accept-reconciliation → **R5 G12**; Word-comment export → **nda/agreements**. All exceptions tracked. | ✅ |
+| 090 | Project wrap-up (+ /test-diet gate) | Wrap-up | sonnet / medium | STANDARD | 063 | ✅ **CLOSED 2026-07-28**: code on master; tests gated at dev Step 9.5 + merged (test-diet N/A on doc-only close); INDEX.md archived; follow-ons documented (R4.5 / R5 / nda-agreements). | ✅ |
 
 ---
 
