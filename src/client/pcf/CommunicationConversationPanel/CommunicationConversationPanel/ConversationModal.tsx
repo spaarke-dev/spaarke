@@ -206,7 +206,6 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
 
   const overlay = (
     <div className={s.overlay} onMouseDown={handleOverlayMouseDown}>
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
       <div ref={surfaceRef} className={s.surface} role="dialog" aria-modal="true" aria-label="Messages" tabIndex={-1}>
         {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
         <Button
