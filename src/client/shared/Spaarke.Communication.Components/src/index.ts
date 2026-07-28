@@ -21,10 +21,17 @@
  * `./logic` (added email-communication-solution-r5 task 020) is the React-agnostic
  * Layer-1 logic shared across the PCF ↔ code-page boundary (ADR-022 slim-first).
  * PCF consumers deep-import the specific sub-barrel (e.g.
- * `@spaarke/communication-components/logic/connections`) to avoid pulling the
+ * `@spaarke/communication-components/logic/connections`,
+ * `@spaarke/communication-components/logic/attachments`) to avoid pulling the
  * React-19 widget graph; the barrel re-export below is for React-19 code-page /
  * Vite consumers.
+ *
+ * `./components` (added task 021) holds Layer-2 presentational components that
+ * are React-version-agnostic (no React-18/19-only runtime API, no
+ * `as React.ComponentType` cast) — e.g. `AttachmentList`, reused by the
+ * OOB-form PCF (deep-imported source) and the Phase-3 reading-pane view.
  */
 
 export * from './widgets';
 export * from './logic';
+export * from './components';

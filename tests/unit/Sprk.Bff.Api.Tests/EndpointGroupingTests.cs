@@ -164,6 +164,20 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
         }
     }
 
+    [Fact]
+    public async Task EmlRenderEndpoint_Unauthenticated_Returns401AndLeaksNoHtml()
+    {
+        // Fail-closed (task 010 / FR-07 / NFR-03): the /api/documents group RequireAuthorization() rejects an
+        // unauthenticated caller BEFORE the handler runs — so no sanitized .eml HTML is ever produced or leaked.
+        var response = await _client.GetAsync($"/api/documents/{Guid.NewGuid()}/eml-render");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var content = await response.Content.ReadAsStringAsync();
+        content.Should().NotContain("<html", "no email HTML body may be returned on the unauthorized path");
+        content.Should().NotContain("<script", "no email HTML body may be returned on the unauthorized path");
+    }
+
     [Theory]
     [InlineData("/api/me")]
     [InlineData("/api/me/capabilities")]

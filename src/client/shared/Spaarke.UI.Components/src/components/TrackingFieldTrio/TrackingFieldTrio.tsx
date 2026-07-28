@@ -1,0 +1,230 @@
+/**
+ * TrackingFieldTrio — entity-agnostic shared core (FR-14, task 023).
+ *
+ * Renders and read/writes three tracking flags: a Monitor toggle, a High
+ * Priority toggle, and an access-permission segmented picker. Lifted from
+ * the `TrackingFieldTrio` PCF's `TrackingFieldTrioApp.tsx` into
+ * `@spaarke/ui-components` so both the OOB-form PCF (React 16/17) and the
+ * Phase-3 reading-pane tracking view (React 19, task 035) can consume ONE
+ * shared component.
+ *
+ * Entity-agnostic (FR-14): the shared core bakes in NO `sprk_communication`
+ * option integers, labels, or field-display strings. Every access-permission
+ * segment (value + label + color) and every field label is passed IN via
+ * props (`ITrackingFieldTrioProps`, see `types.ts`). The caller (the PCF's
+ * `index.ts`) supplies its own entity-specific values.
+ *
+ * v1.0.1-v1.0.5 layout history preserved verbatim from the PCF original —
+ * CSS Grid with EXPLICIT rows so captions and controls always line up:
+ *   Row 1 (optional): caption | caption | caption
+ *   Row 2:             Switch  | Switch  | segmented buttons
+ * Grid columns: `1fr 1fr auto`. `alignItems: 'center'` in row 2 vertically
+ * centers each control against its row.
+ *
+ * Standards: Fluent UI v9 tokens only (ADR-021, incl. dark mode — no
+ * hardcoded light-only colors). No React-18/19-only runtime API and no
+ * `as React.ComponentType` cast (NFR-05) — a plain `React.FC` using only
+ * `useMemo`-free, React-16-safe primitives, so it renders under the PCF's
+ * platform React 16/17 AND the code page's React 19.
+ */
+
+import * as React from 'react';
+import { makeStyles, tokens, Switch, Text, Button, shorthands, mergeClasses } from '@fluentui/react-components';
+import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
+
+/**
+ * Position-based (NOT value-keyed) fallback pale backgrounds used when a
+ * caller-injected segment has no `color`. Indexed by the segment's POSITION
+ * in the injected `accessPermissionOptions` array (idx % length), not by any
+ * entity-specific option value — this is what makes the default legitimate
+ * per FR-14 ("a `FALLBACK_SEGMENT_COLORS`-style default is allowed only as a
+ * prop default, not entity-specific hardcoding"). Text always uses
+ * `colorNeutralForeground1` (near-black) for consistent readability
+ * regardless of tint, in both light and dark themes.
+ */
+const DEFAULT_SEGMENT_FALLBACK_COLORS: { bg: string; fg: string }[] = [
+  { bg: tokens.colorPaletteLightGreenBackground2, fg: tokens.colorNeutralForeground1 },
+  { bg: tokens.colorPaletteYellowBackground2, fg: tokens.colorNeutralForeground1 },
+  { bg: tokens.colorPaletteRedBackground2, fg: tokens.colorNeutralForeground1 },
+];
+
+/**
+ * Convert a hex color (e.g., "#00B050") to rgba with alpha, giving a pale
+ * tint suitable for a segmented-button background. Falls back to the input
+ * string when parsing fails (accepts named colors, rgba(), etc.).
+ */
+function hexToRgba(hex: string, alpha: number): string {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const r = parseInt(m[1], 16);
+  const g = parseInt(m[2], 16);
+  const b = parseInt(m[3], 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/**
+ * Resolve the pale bg + readable fg for a selected segment. Prefers the
+ * caller-injected per-option color (blended pale via alpha 0.28); falls back
+ * to the position-based default palette, then a neutral Fluent token if the
+ * palette runs out (more segments than default colors).
+ */
+function getSelectedSegmentColors(idx: number, option: IAccessPermissionOption): { bg: string; fg: string } {
+  if (option.color) {
+    return { bg: hexToRgba(option.color, 0.28), fg: tokens.colorNeutralForeground1 };
+  }
+  return (
+    DEFAULT_SEGMENT_FALLBACK_COLORS[idx % DEFAULT_SEGMENT_FALLBACK_COLORS.length] || {
+      bg: tokens.colorNeutralBackground4,
+      fg: tokens.colorNeutralForeground1,
+    }
+  );
+}
+
+const useStyles = makeStyles({
+  container: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr auto',
+    columnGap: tokens.spacingHorizontalS,
+    rowGap: tokens.spacingVerticalXS,
+    alignItems: 'center',
+    width: '100%',
+    boxSizing: 'border-box',
+    // Zero top/bottom padding so the caption row sits directly under the
+    // form section title, matching the vertical rhythm of adjacent cards.
+    ...shorthands.padding(0, tokens.spacingHorizontalXL),
+  },
+  caption: {
+    // Matches the standard Dataverse form field label style: Segoe UI 14px,
+    // regular weight, secondary foreground color.
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: '14px',
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+    lineHeight: '20px',
+    alignSelf: 'end',
+  },
+  controlCell: {
+    display: 'flex',
+    alignItems: 'center',
+    // Common min-height so Switch (~24px) and button group (~32px) stabilize
+    // vertically within the row and their baselines line up.
+    minHeight: '32px',
+  },
+  segmentGroup: {
+    display: 'flex',
+    flexDirection: 'row',
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.overflow('hidden'),
+  },
+  segment: {
+    ...shorthands.borderRadius(0),
+    ...shorthands.border(0),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
+    minWidth: '76px',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase200,
+    minHeight: '28px',
+  },
+  segmentUnselected: {
+    backgroundColor: tokens.colorNeutralBackground4,
+    color: tokens.colorNeutralForeground2,
+    ':hover': {
+      backgroundColor: tokens.colorNeutralBackground4Hover,
+      color: tokens.colorNeutralForeground2,
+    },
+  },
+  segmentSeparator: {
+    borderLeftWidth: '1px',
+    borderLeftStyle: 'solid',
+    borderLeftColor: tokens.colorNeutralStroke2,
+  },
+  versionFooter: {
+    gridColumn: '1 / -1',
+    fontSize: '10px',
+    color: tokens.colorNeutralForeground4,
+    textAlign: 'right',
+    marginTop: tokens.spacingVerticalXS,
+  },
+});
+
+export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
+  monitor,
+  highPriority,
+  accessPermission,
+  showTitle = true,
+  showVersion = false,
+  versionText,
+  accessPermissionOptions,
+  monitorLabel,
+  highPriorityLabel,
+  accessPermissionLabel,
+  onMonitorChange,
+  onHighPriorityChange,
+  onAccessPermissionChange,
+}) => {
+  const styles = useStyles();
+
+  return (
+    <div className={styles.container}>
+      {/* Row 1 (only rendered when showTitle=true) — field labels, sourced
+          from the caller's own field metadata (entity-agnostic). */}
+      {showTitle && (
+        <>
+          <Text className={styles.caption}>{monitorLabel}</Text>
+          <Text className={styles.caption}>{highPriorityLabel}</Text>
+          <Text className={styles.caption}>{accessPermissionLabel}</Text>
+        </>
+      )}
+
+      {/* Row 2 (or row 1 when captions hidden) — controls */}
+      <div className={styles.controlCell}>
+        <Switch
+          checked={monitor}
+          onChange={(_, data) => onMonitorChange(data.checked)}
+          label={monitor ? 'Yes' : 'No'}
+          labelPosition="after"
+        />
+      </div>
+      <div className={styles.controlCell}>
+        <Switch
+          checked={highPriority}
+          onChange={(_, data) => onHighPriorityChange(data.checked)}
+          label={highPriority ? 'Yes' : 'No'}
+          labelPosition="after"
+        />
+      </div>
+      <div
+        className={mergeClasses(styles.controlCell, styles.segmentGroup)}
+        role="radiogroup"
+        aria-label={accessPermissionLabel}
+      >
+        {accessPermissionOptions.map((opt, idx) => {
+          const isSelected = accessPermission === opt.value;
+          const selectedColors = isSelected ? getSelectedSegmentColors(idx, opt) : null;
+          return (
+            <Button
+              key={opt.value}
+              appearance="subtle"
+              role="radio"
+              aria-checked={isSelected}
+              onClick={() => onAccessPermissionChange(opt.value)}
+              className={mergeClasses(
+                styles.segment,
+                !isSelected && styles.segmentUnselected,
+                idx > 0 && !isSelected && styles.segmentSeparator
+              )}
+              // Selected background/foreground come from the injected option's
+              // color (pale via rgba(alpha=0.28)) or the position-based
+              // fallback palette.
+              style={selectedColors ? { backgroundColor: selectedColors.bg, color: selectedColors.fg } : undefined}
+            >
+              {opt.label}
+            </Button>
+          );
+        })}
+      </div>
+
+      {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}
+    </div>
+  );
+};

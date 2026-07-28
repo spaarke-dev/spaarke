@@ -1,5 +1,7 @@
 /**
- * Local types for the CommunicationAttachments PCF.
+ * Layer-1 (React-agnostic) attachment types — promoted verbatim from the
+ * `CommunicationAttachments` PCF (email-communication-solution-r5 task 021,
+ * per spec FR-12/FR-18 two-layer split + design Lens 4).
  *
  * Narrowed to what the attachment list surface reads from
  * `sprk_communicationattachment` rows + what the preview modal needs.

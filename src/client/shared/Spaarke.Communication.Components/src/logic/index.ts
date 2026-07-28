@@ -7,3 +7,4 @@
  */
 
 export * from './connections';
+export * from './attachments';

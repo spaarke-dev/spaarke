@@ -1,19 +1,25 @@
 /**
  * AttachmentList — presentational attachment list (no PCF / generated-types
- * dependency, so it is unit-testable in isolation and reusable).
+ * dependency, so it is unit-testable in isolation and reusable). Promoted
+ * verbatim from the `CommunicationAttachments` PCF (email-communication-solution-r5
+ * task 021, per spec FR-12/FR-18 two-layer split + design Lens 4).
  *
  * Renders each `IAttachmentItem` as name + type. Inline-image attachments are
  * expected to be filtered out UPSTREAM (by `filterFileAttachments`); this
  * component renders whatever it is given. `.eml`/`.msg` rows are badged "Email"
  * as a type label but otherwise behave like any other attachment — the parent
  * opens them in the same in-modal preview (UAT R4 B12-4).
+ *
+ * React-version note (ADR-022): uses only `React.FC` + standard event types —
+ * no React-18/19-only runtime API (`createRoot`, `use()`, Actions) and no
+ * `as React.ComponentType` cast, so it renders under both the PCF's platform
+ * React 16/17 AND a React 19 code-page host.
  */
 
 import * as React from 'react';
 import { makeStyles, mergeClasses, tokens, shorthands, Text, Link, Badge, Tooltip } from '@fluentui/react-components';
 import { CloudCheckmark20Filled, CloudDismiss20Filled } from '@fluentui/react-icons';
-import { IAttachmentItem } from './types';
-import { isEmailMessageAttachment, fileTypeLabel } from './services/CommunicationAttachmentsService';
+import { IAttachmentItem, isEmailMessageAttachment, fileTypeLabel } from '../../logic/attachments';
 
 /**
  * Maps a row's `uploaded` boolean to its Fluent color token (B12-3 contract):

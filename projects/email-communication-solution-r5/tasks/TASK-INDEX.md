@@ -12,11 +12,11 @@
 |---|---|---|---|---|---|---|---|---|
 | 001 | Shared hardened `sanitizeEmailHtml` + retrofit `MessageRow`/`MessageBubble` | 0 | ✅ | FULL | opus/high | P0 | ✅ | — |
 | 002 | Archiving default-on (`ArchiveIncomingOptIn`, monitored accounts) | 0 | ✅ | FULL | opus/high | — | ❌ | — |
-| 010 | `GET /api/documents/{id}/eml-render` (MimeKit + sanitize + cache + tests) | 1 | 🔲 | FULL | opus/xhigh | — | ❌ | 002 |
+| 010 | `GET /api/documents/{id}/eml-render` (MimeKit + sanitize + cache + tests) | 1 | ✅ | FULL | opus/xhigh | — | ❌ | 002 |
 | 020 | Extract production `ConnectionsEditor` Layer-1 logic (additive write) | 2 | ✅ | FULL | opus/xhigh | — | ❌ | — |
-| 021 | Extract `CommunicationAttachments` Layer-1 + promote `AttachmentList` | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
+| 021 | Extract `CommunicationAttachments` Layer-1 + promote `AttachmentList` | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
 | 022 | Extract `CommunicationActions` Layer-1 (action-bar logic) | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
-| 023 | Lift `TrackingFieldTrio` generic core → `@spaarke/ui-components` | 2 | 🔲 | FULL | sonnet/high | P2 | ✅ | 020 |
+| 023 | Lift `TrackingFieldTrio` generic core → `@spaarke/ui-components` | 2 | ✅ | FULL | sonnet/high | P2 | ✅ | 020 |
 | 030 | `EmailCardList` flat card list + loading/empty states | 3 | 🔲 | FULL | sonnet/high | P3a | ✅ | 001 |
 | 031 | `ViewSelector` over `sprk_communication` saved views + List/Thread toggle | 3 | 🔲 | STANDARD | sonnet/high | P3a | ✅ | — |
 | 032 | Reading-pane shell (`PanelSplitter` 2-pane + full-width toolbar) | 3 | 🔲 | FULL | sonnet/high | — | ❌ | 030 |

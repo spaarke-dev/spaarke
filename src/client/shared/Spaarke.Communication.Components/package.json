@@ -11,7 +11,10 @@
     "./widgets": "./src/widgets/index.ts",
     "./logic": "./src/logic/index.ts",
     "./logic/connections": "./src/logic/connections/index.ts",
-    "./logic/connections/provenance": "./src/logic/connections/provenance.ts"
+    "./logic/connections/provenance": "./src/logic/connections/provenance.ts",
+    "./logic/attachments": "./src/logic/attachments/index.ts",
+    "./components": "./src/components/index.ts",
+    "./components/AttachmentList": "./src/components/AttachmentList/index.ts"
   },
   "scripts": {
     "build": "tsc",

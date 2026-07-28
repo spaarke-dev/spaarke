@@ -4,7 +4,7 @@
     <title>FR-14/FR-18: Lift the `TrackingFieldTrio` generic core (options injected, entity-agnostic) to `@spaarke/ui-components`; PCF consumes; view/behavior unchanged</title>
     <phase>2 Layer-1 extraction</phase>
     <gate>after:020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield lift into the shared `@spaarke/ui-components` library consumed by many surfaces + a live PCF; NFR-04 (PCF + OOB form regression-free) is non-negotiable; the core must be made entity-agnostic (options injected) without changing flag read/write semantics; modifies `.tsx`, tags refactor/shared-lib/fluent-ui. FULL gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,7 +112,24 @@
     <criterion testable="true">Shared lib build + PCF `build:prod` both green; existing `TrackingFieldTrio` unit tests pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Cite spec FR-18 + FR-14 + NFR-04 + NFR-05 + ADR-021 in the PR. EXTRACTION/lift of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` (modify/refactor exempt). Targets `@spaarke/ui-components` (generic), a DIFFERENT barrel from 021/022 — no P2 barrel contention. Run `/conflict-check` before the PR (shared `@spaarke/ui-components`). Completion summary appended here when done.</notes>
+  <notes>Cite spec FR-18 + FR-14 + NFR-04 + NFR-05 + ADR-021 in the PR. EXTRACTION/lift of existing code (COMPLETE-class) — no §11 `&lt;justification&gt;` (modify/refactor exempt). Targets `@spaarke/ui-components` (generic), a DIFFERENT barrel from 021/022 — no P2 barrel contention. Run `/conflict-check` before the PR (shared `@spaarke/ui-components`).
+
+**Completion summary (2026-07-28)**: Lifted the generic core to
+`src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/` (`TrackingFieldTrio.tsx` +
+`types.ts` + `index.ts` + `__tests__/TrackingFieldTrio.test.tsx`), exported from the `@spaarke/ui-components`
+barrel. Completed the entity-agnostic transformation: the shared core's render loop now iterates the
+INJECTED `accessPermissionOptions` array (value+label+color) instead of a hardcoded `sprk_communication`
+segment list; the color fallback moved from value-keyed to position-based (`idx % length`). The PCF's
+`index.ts` is now the sole holder of `sprk_communication`'s Access Permission integers/labels, with a
+fallback triple preserving pre-lift behavior when OptionSet metadata is unavailable (NFR-04). Avoided the
+`as React.ComponentType` cast (NFR-05) via a `tsconfig.json` `paths` remap pinning react/react-dom to the
+PCF's local React-16 types (mirrors the existing `MatterHeader` PCF pattern) — verified via a clean
+`npm run build:prod` with zero TS2786. Shared lib `npm run build` clean; 7/7 new unit tests pass
+(91.66%/95.45% coverage); PCF `build:prod` + lint clean (bundle 7.63 KiB). `/code-review` + `/adr-check`:
+0 Critical/Warning/Violation. Full writeup:
+`projects/email-communication-solution-r5/notes/task-023-trackingfieldtrio-core-lift.md`. Deviation: PCF
+manifest version bumped 1.0.5 → 1.0.6 (not in the POML's literal steps, but matches repo convention;
+packaged `Solution/` folder intentionally left untouched — deployment is out of this task's scope).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
 </task>

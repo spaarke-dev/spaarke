@@ -1,5 +1,7 @@
 /**
- * CommunicationAttachmentsService
+ * CommunicationAttachmentsService — Layer-1 (React-agnostic) logic, promoted
+ * verbatim from the `CommunicationAttachments` PCF (email-communication-solution-r5
+ * task 021, per spec FR-12/FR-18 two-layer split + design Lens 4).
  *
  * Reads the current communication's `sprk_communicationattachment` rows via the
  * host `context.webAPI` and projects them into `IAttachmentItem`s.
@@ -27,7 +29,7 @@
  * OUT — they render in the email body, not as downloadable file attachments.
  */
 
-import { AttachmentType, IAttachmentItem, IAttachmentRecord, IDocumentRecord } from '../types';
+import { AttachmentType, IAttachmentItem, IAttachmentRecord, IDocumentRecord } from './types';
 
 const DOC_VALUE = '_sprk_document_value';
 const DOC_FORMATTED = '_sprk_document_value@OData.Community.Display.V1.FormattedValue';
