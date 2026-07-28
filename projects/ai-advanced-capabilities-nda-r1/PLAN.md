@@ -3,7 +3,7 @@
 > **Project**: `ai-advanced-capabilities-nda-r1` · **Source**: `spec.md` (43 FRs, 6 NFRs) · **Created**: 2026-07-25
 > **Program**: ai-advanced-capabilities-development — first analysis/advisory vertical.
 > **North star**: Claude/ChatGPT-level advisory output; relax deterministic guardrails (ADR-039 amendment) while staying cited + human-verified.
-> **Status**: Planning artifacts generated; task decomposition pending (`/task-create`).
+> **Status**: ✅ COMPLETE (2026-07-28) — all 22 tasks ✅, deployed to spaarkedev1, UAT-approved. See README "Build status (CLOSED 2026-07-28)".
 
 ---
 
