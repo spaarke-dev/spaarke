@@ -1,15 +1,42 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-27 (UAT round-4 batch B IMPLEMENTED + TESTED + DEPLOYED; awaiting owner UAT). **Read this block first.**
+> **Last Updated**: 2026-07-27 (by context-handoff — round-8 mostly deployed; CONTEXTUAL AI TOOL LIBRARY architecture agreed with owner, see §ARCHITECTURE below; pre-compaction). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 mostly DEPLOYED**: popup width, #1 scrollbar, #2 sort, #7 Assistant explanation, #3/#4/#5 Review-Note ⋮ menu. Remaining: #6 BubbleMenu cleanup + Make-concise/Describe-changes (need bindings). |
-| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `c9b57fc1f`. Working tree CLEAN. |
+| **State** | NDA advisory review LIVE in spaarkedev1. Rounds 2–7 deployed. **Round-8 mostly DEPLOYED**: popup width, #1 scrollbar, #2 sort, #7 Assistant explanation, #3/#4/#5 Review-Note ⋮ menu. Remaining: #6 BubbleMenu cleanup + Make-concise/Describe-changes (need bindings). **NEW: owner + I agreed on the CONTEXTUAL AI TOOL LIBRARY pattern — see the §ARCHITECTURE block below.** |
+| **Branch** | `work/ai-nda-r1-followups` (off master 751532d7e; pushed; **NOT merged/PR'd**). HEAD `c9b57fc1f` (code) / latest = checkpoint commit. Working tree CLEAN. |
 | **Deployed (2026-07-27 r8, 3 commits)** | Code page ONLY (client-only, no BFF) → `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), 4928 KB. d1be83701 (popup/#1/#2) → 488113b59 (#7) → c9b57fc1f (#3/#4/#5). Master since base = only `0e1e30d95` → no clobber. |
-| **Next Action** | Owner UAT of round-8. Remaining: #6 BubbleMenu cleanup (client-only, deferred for shared-component care), Make-concise/Describe-changes tools (need seeded bindings + `instruction` slot — owner go-ahead). Then takeaway re-seed, allowsknowledge, merge/PR. |
+| **Next Action** | **Write the design doc for the CONTEXTUAL AI TOOL LIBRARY (§ARCHITECTURE below) — owner asked for it; lock the model, then refactor the registry.** Also round-8 remaining: #6 BubbleMenu cleanup (client-only), Make-concise/Describe-changes tools (need seeded bindings + `instruction` slot). Then takeaway re-seed, allowsknowledge, merge/PR. |
+
+## 🏛️ ARCHITECTURE — Contextual AI Tool Library (agreed with owner 2026-07-27, DESIGN-DOC PENDING)
+
+**The ask (owner):** a reusable **library of AI "tools"** surfaced in relevant contexts. NDA analysis surfaces the NDA-relevant subset of inline BubbleMenu / Review-Note tools; a FUTURE analysis (e.g. "Case-law research") surfaces a DIFFERENT subset — same surfaces, different tool set per analysis vertical.
+
+**Agreed model — a tool has TWO context dimensions:**
+1. **UI surface** — WHERE it appears: `selection` (BubbleMenu), `review-note` (gutter ⋮), future `whole-document`, `assistant-chip`.
+2. **Analysis domain** — WHICH vertical it belongs to: `nda`, `case-law`, `contract-review`, … (`'*'` = shared/agnostic).
+
+Active analysis picks the domain subset; the surface picks the UI subset; **the intersection renders**.
+
+**Descriptor shape (client):**
+```
+tool = { id, label, tooltip, bindingId,     // behavior lives in the server Action+Binding
+         surfaces: ['selection','review-note'], domains: ['nda'] | ['*'],
+         appliesTo?(ctx), icon?, inputPrompt? }  // inputPrompt for free-text tools ("Describe a change…")
+```
+
+**Two-layer library:**
+- **Server (capability):** each tool = one JPS **Action + Binding** (prompt + `sprk_inputschema` + grounding). Author once = source of truth for what it DOES.
+- **Client (surfacing):** the registry descriptor (id/label/surfaces/domains/binding ref). Each surface renders `getTools().filter(t => t.surfaces.includes(surface) && (t.domains.includes(activeDomain) || t.domains.includes('*')) && t.appliesTo?.(ctx) !== false)`.
+
+**Where "which tools belong to an analysis" lives:** the CATALOG — each analysis LINKS to its tool bindings (SAME shape as the per-Action *knowledge-source* link that is the proper fix for the over-broad `allowsknowledge` gate). So an analysis vertical = its playbook Action(s) + its tool bindings + its knowledge sources, all catalog-linked. Client registry populated per-active-analysis from that link.
+
+**Substrate already exists** (round-8 proved multi-surface): `ComposeAiToolbar.tsx` registry — `registerComposeAiToolbarAction` / `getComposeAiToolbarActions` / `subscribeComposeAiToolbarActions`; descriptor today `{id,label,tooltip,bindingId,placement,materializesInEditor}`. Round-8 repointed the Review-Note ⋮ menu to read the SAME registry (via `NOTE_TOOL_LABELS` allow-list in `ComposeEditor.tsx`) → same tool in 2 surfaces from 1 definition. The refactor = add `surfaces`/`domains`/`appliesTo` to the descriptor + filter per surface + per active analysis.
+
+**Recommendation given to owner:** design doc FIRST (descriptor shape + 2 dims + catalog linkage; NDA as worked example / consumer #1), THEN registry refactor. Owner leaning question posed: ship the pattern INSIDE this NDA project (NDA = consumer #1, documented so Case-law is a drop-in) vs its own platform project — my lean = **build here with NDA as consumer #1**. Round-8 leftovers fold in: #6 = "don't tag Explain/Email/Defined-terms for `selection`"; Make-concise/Describe-changes = new library entries (`surfaces:['selection','review-note'], domains:['nda']`) once bindings seeded. **Owner had NOT yet answered "write the design doc now?" when we paused to compact.**
 
 ### ✅ UAT round-8 DEPLOYED (d1be83701, 488113b59, c9b57fc1f)
 - **Popup width** 460→560 (bg covers the 4-step track). **#1** modern thin scrollbar, removed the FAB. **#2** summary "By section" sorts by resolved `docPosition` (true doc order). `NdaReviewSummaryPanel`/`ComposeEditor`.
