@@ -6,6 +6,16 @@
 > *"For R4 keep the two byte-authors separate and ship with no errors, albeit known functional limits; defer
 > the limits to R5 and fully document them here."*
 > **Not yet piped** — this is a scoping/requirements capture, the seed for a future `/project-pipeline` run.
+>
+> **⚠️ 2026-07-28 — G6 + numbering pulled into a priority interstitial project.** Dev UAT of a real NDA showed
+> the **read/reference** fidelity gaps (mammoth on upload, no computed numbering, no `paraId→section-number`
+> reference) are load-bearing for a legal tool. These were split out into **`spaarkeai-compose-fidelity-r4.5`**
+> ([`../spaarkeai-compose-fidelity-r4.5/design.md`](../spaarkeai-compose-fidelity-r4.5/design.md)), which
+> **absorbs G6** (transient-mount projection unification / mammoth removal) plus new read-fidelity work
+> (verbatim text + silent-drop fixes, deterministic clause/section/heading numbering, a `paraId→legal-number`
+> citation layer, and a page/line-numbering spike). The **remaining** R5 items below (G1/G2/G3/G4/G5/G7/G8/G9/G10)
+> stay here — they are **edit / lifecycle / UX**, not read/reference fidelity. Note G3 (edit-path
+> heading/list/alignment numbering) will build on R4.5's numbering engine — coupling flagged in the R4.5 design.
 
 ---
 
