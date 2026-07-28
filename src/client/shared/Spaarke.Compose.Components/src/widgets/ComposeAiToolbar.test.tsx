@@ -29,6 +29,7 @@ import type { Editor } from '@tiptap/react';
 import {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
+  getToolsForSurface,
   __resetComposeAiToolbarActionsForTests,
   extractCleanDraftText,
   type ComposeAiToolbarAction,
@@ -137,14 +138,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ComposeAiToolbar — render on selection', () => {
-  it('renders the Explain/Compare/Draft buttons and the overflow trigger on a non-collapsed selection', () => {
+  it('renders only the Draft-alternative button + overflow trigger on a non-collapsed selection (round-8 #6: Explain/Compare/Defined-terms/Email retired from the selection surface)', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
 
     expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
+    // Contextual AI Tool Library: the default selection surface now carries ONLY the
+    // reusable Draft-alternative edit primitive; the three retired tools carry `surfaces: []`.
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-explain-clause')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-compare-to-playbook')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-email')).not.toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
   });
 
@@ -160,11 +164,9 @@ describe('ComposeAiToolbar — render on selection', () => {
     expect(screen.queryByTestId('compose-ai-toolbar')).not.toBeInTheDocument();
   });
 
-  it('the default (Phase-4-stubbed) primary buttons render disabled — no Binding wired yet', () => {
+  it('the default (Phase-4-stubbed) Draft-alternative button renders disabled — no Binding wired yet', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeDisabled();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
   });
 });
@@ -207,8 +209,6 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spa
     renderToolbar({ editor, forceVisible: true });
 
     expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
   });
@@ -237,24 +237,20 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spa
 // ---------------------------------------------------------------------------
 
 describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
-  it('primary action buttons + Email + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
+  it('primary action button + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
     const toolbar = screen.getByTestId('compose-ai-toolbar');
 
-    // No visible label text on the primary buttons (icon-only). The names live in
+    // No visible label text on the primary button (icon-only). The name lives in
     // the hover Tooltip + aria-label, not as button text.
-    expect(within(toolbar).queryByText('Explain')).not.toBeInTheDocument();
-    expect(within(toolbar).queryByText('Compare to playbook')).not.toBeInTheDocument();
     expect(within(toolbar).queryByText('Draft alternative')).not.toBeInTheDocument();
-    expect(within(toolbar).queryByText('Email')).not.toBeInTheDocument();
 
-    // Each still renders its icon (an svg) and keeps its accessible name.
-    const explain = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
-    expect(explain.querySelector('svg')).not.toBeNull();
-    expect(explain.textContent).toBe('');
-    expect(screen.getByLabelText('Explain')).toBeInTheDocument();
-    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    // The Draft-alternative button renders its icon (an svg) and keeps its accessible name.
+    const draft = screen.getByTestId('compose-ai-toolbar-compose-draft-alternative');
+    expect(draft.querySelector('svg')).not.toBeNull();
+    expect(draft.textContent).toBe('');
+    expect(screen.getByLabelText('Draft alternative')).toBeInTheDocument();
     // Overflow trigger renders an icon (vertical three-dots) with no text.
     const more = screen.getByTestId('compose-ai-toolbar-more');
     expect(more.querySelector('svg')).not.toBeNull();
@@ -277,8 +273,8 @@ describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
 
-    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Explain');
+    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative'));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Draft alternative');
   });
 });
 
@@ -340,7 +336,7 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     const dispatchConsumerOverride = jest.fn();
     renderToolbar({ editor, dispatchConsumerOverride }); // default actions — all bindingId: ''
 
-    const button = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
+    const button = screen.getByTestId('compose-ai-toolbar-compose-draft-alternative');
     expect(button).toBeDisabled();
     expect(dispatchConsumerOverride).not.toHaveBeenCalled();
   });
@@ -376,25 +372,21 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     );
   });
 
-  it('FIX #5: the defined-terms whole-document action is in the overflow; summarize-word-changes is NOT (removed from the selection toolbar)', async () => {
+  it('round-8 #6: the defined-terms action is RETIRED from the selection surface — the default overflow is empty', async () => {
     const user = userEvent.setup();
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
 
-    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS. FIX #5 removed
-    // `compose-summarize-word-changes` (a RETURN-FROM-WORD action that has no
-    // tracked-change data on the selection toolbar and made the LLM fabricate a
-    // phantom "[Insertion]"). Only `defined-terms` remains as an overflow action.
+    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS. Contextual AI Tool
+    // Library (round-8 #6): `compose-defined-terms` now carries `surfaces: []`, so it
+    // no longer appears on the selection toolbar's overflow (it belongs to a future
+    // `whole-document` surface). With Explain/Compare/Defined-terms all retired, the
+    // default selection overflow is empty.
     renderToolbar({ editor });
 
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
 
-    const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
-    expect(definedTerms).toBeInTheDocument();
-    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
-
-    // Phase-4 stub: disabled until the seeded Binding GUID is registered
-    // (button ENABLEMENT is E2E-pending on task 047).
-    expect(definedTerms).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
   });
 
   it('the overflow menu shows a placeholder when no overflow actions are registered', async () => {
@@ -454,5 +446,80 @@ describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
       ],
     };
     expect(extractCleanDraftText(doc)).toBe('A drafted sentence.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contextual AI Tool Library (phase 1) — getToolsForSurface: the two-dimension
+// (surface × domain) selector + the surface/domain defaults.
+// ---------------------------------------------------------------------------
+
+describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
+  it('default DEFAULT_ACTIONS: only Draft-alternative is on the selection surface (Explain/Compare/Defined-terms retired, #6)', () => {
+    const ids = getToolsForSurface('selection', '*').map(a => a.id);
+    expect(ids).toEqual(['compose-draft-alternative']);
+  });
+
+  it('Draft-alternative is the ONE definition shown on both selection AND review-note surfaces', () => {
+    expect(getToolsForSurface('selection', '*').map(a => a.id)).toContain('compose-draft-alternative');
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(['compose-draft-alternative']);
+  });
+
+  it('retired tools (surfaces: []) appear on NO surface even though they remain in the registry', () => {
+    for (const surface of ['selection', 'review-note', 'whole-document', 'assistant-chip'] as const) {
+      const ids = getToolsForSurface(surface, '*').map(a => a.id);
+      expect(ids).not.toContain('compose-explain-clause');
+      expect(ids).not.toContain('compose-compare-to-playbook');
+      expect(ids).not.toContain('compose-defined-terms');
+    }
+  });
+
+  it('domain narrowing: a domains:[nda] tool shows ONLY for activeDomain nda, while a domains:[*] tool shows for any domain', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-nda-only',
+      label: 'NDA compliant alternative',
+      tooltip: 'NDA-only.',
+      bindingId: 'b-nda',
+      placement: 'primary',
+      surfaces: ['review-note'],
+      domains: ['nda'],
+    });
+
+    // Agnostic domain '*' → the nda-only tool is hidden; the '*' Draft primitive still shows.
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(['compose-draft-alternative']);
+    // Active domain 'nda' → BOTH the '*' primitive and the nda-only tool surface.
+    const ndaIds = getToolsForSurface('review-note', 'nda').map(a => a.id);
+    expect(ndaIds).toContain('compose-draft-alternative');
+    expect(ndaIds).toContain('test-nda-only');
+    // A DIFFERENT vertical (case-law) → the nda-only tool is hidden again.
+    expect(getToolsForSurface('review-note', 'case-law').map(a => a.id)).toEqual(['compose-draft-alternative']);
+  });
+
+  it('a registered action with NO surfaces defaults to the selection surface (backward-compatible)', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-legacy-shape',
+      label: 'Legacy',
+      tooltip: 'No surfaces field.',
+      bindingId: 'b-legacy',
+      placement: 'overflow',
+    });
+    expect(getToolsForSurface('selection', '*').map(a => a.id)).toContain('test-legacy-shape');
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-legacy-shape');
+  });
+
+  it('appliesTo predicate can hide a tool for a given context', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-gated',
+      label: 'Gated',
+      tooltip: 'Predicate-gated.',
+      bindingId: 'b-gated',
+      placement: 'primary',
+      surfaces: ['selection'],
+      appliesTo: ctx => (ctx.selectionText?.length ?? 0) > 5,
+    });
+    expect(getToolsForSurface('selection', '*', { selectionText: 'short' }).map(a => a.id)).not.toContain('test-gated');
+    expect(getToolsForSurface('selection', '*', { selectionText: 'a longer selection' }).map(a => a.id)).toContain(
+      'test-gated'
+    );
   });
 });

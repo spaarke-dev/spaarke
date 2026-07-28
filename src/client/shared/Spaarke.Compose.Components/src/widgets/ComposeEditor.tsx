@@ -93,6 +93,7 @@ import {
   ComposeAiToolbar,
   type ComposeActionEnqueue,
   getComposeAiToolbarActions,
+  getToolsForSurface,
   subscribeComposeAiToolbarActions,
 } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
@@ -332,17 +333,26 @@ const DEFERRED_FORMAT_NOTICE =
   "Some formatting (links, headings, lists, alignment) isn't saved yet and was not applied. Your text edits are still saved.";
 
 /**
- * UAT round-8 #3/#4/#5 — the compose EDIT-action ids offered on a Review Note's ⋮ menu, mapped to their
- * note-menu label. An explicit allow-list (NOT `materializesInEditor` off the registry — the runtime
- * catalog seed may re-register an action WITHOUT that flag) keeps detection deterministic; add an id +
- * label here as each edit binding is seeded (extensibility #5). Every entry is an in-editor edit action,
- * so `runNoteTool` always routes to the document session (redline materialization).
+ * Contextual AI Tool Library (phase 1): the SET of tools a Review Note's ⋮ menu shows is now
+ * driven by the library — `getToolsForSurface('review-note', …)` — NOT by this map (that replaces the
+ * round-8 `NOTE_TOOL_LABELS` allow-list, which was doing double duty as both selector and labeller).
+ * This map now carries ONLY per-surface LABEL OVERRIDES: a tool may read differently in the note menu
+ * than on the BubbleMenu (e.g. "Draft alternative" → "Draft compliant alternative" for the advisory
+ * context, round-8 #4). A tool with no entry here falls back to its own `label`.
  */
-const NOTE_TOOL_LABELS: Record<string, string> = {
+const NOTE_TOOL_SURFACE_LABELS: Record<string, string> = {
   'compose-draft-alternative': 'Draft compliant alternative',
-  // 'compose-make-concise': 'Make more concise',        // pending seeded binding (round-8 #4)
+  // 'compose-make-concise': 'Make more concise',        // shown automatically once the binding is seeded (surfaces ∋ 'review-note')
   // 'compose-rewrite-instruction': 'Describe a change…', // pending seeded binding + instruction slot
 };
+
+/**
+ * Phase 1 uses the agnostic domain `'*'` for the Review-Note surface — every phase-1 tool
+ * (Draft alternative) is `domains: ['*']`, so it shows regardless. The first DOMAIN-SCOPED note
+ * tool (phase 3: `compose-draft-compliant-alternative`, `domains: ['nda']`) is what will require
+ * threading the ACTIVE analysis domain here from the host session context (design decision #2).
+ */
+const NOTE_TOOL_ACTIVE_DOMAIN = '*';
 
 // ---------------------------------------------------------------------------
 // Props + imperative handle
@@ -2195,9 +2205,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // edit bindings are seeded (extensibility #5). Reactive to registry changes.
     const readNoteTools = React.useCallback(
       () =>
-        getComposeAiToolbarActions()
-          .filter(a => a.bindingId && a.id in NOTE_TOOL_LABELS)
-          .map(a => ({ id: a.id, label: NOTE_TOOL_LABELS[a.id] })),
+        // Contextual AI Tool Library: the review-note ⋮ menu draws from the SAME registry as the
+        // BubbleMenu — a tool appears here because its definition declares `surfaces ∋ 'review-note'`
+        // (round-8 #4: one Draft-alternative definition, two surfaces). `bindingId` filters out
+        // still-stubbed tools; the label may be surface-overridden (NOTE_TOOL_SURFACE_LABELS).
+        getToolsForSurface('review-note', NOTE_TOOL_ACTIVE_DOMAIN)
+          .filter(a => a.bindingId)
+          .map(a => ({ id: a.id, label: NOTE_TOOL_SURFACE_LABELS[a.id] ?? a.label })),
       []
     );
     const [noteTools, setNoteTools] = React.useState(readNoteTools);
@@ -2215,7 +2229,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       (threadId: string, toolId: string): void => {
         if (!editor || !enqueueComposeAction || !sessionId) return;
         const action = getComposeAiToolbarActions().find(a => a.id === toolId);
-        if (!action?.bindingId || !(action.id in NOTE_TOOL_LABELS)) return;
+        // Guard: must be a wired tool that declares the review-note surface (Contextual AI Tool Library).
+        if (!action?.bindingId || !(action.surfaces ?? ['selection']).includes('review-note')) return;
         const span = findCommentAnchorRange(editor.state.doc, threadId);
         if (!span) return;
         const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
