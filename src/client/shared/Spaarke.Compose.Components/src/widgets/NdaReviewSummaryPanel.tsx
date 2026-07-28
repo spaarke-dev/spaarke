@@ -511,8 +511,7 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
   // section" now orders on each finding's resolved `docPosition` (top→bottom in the real document), NOT
   // the model's emission order (which is out of document order). Findings whose clause couldn't be
   // resolved (no docPosition) fall to the end, stable on emission index. Non-mutating.
-  const docOrder = (f: NdaReviewFindingSummary): number =>
-    f.docPosition ?? Number.MAX_SAFE_INTEGER;
+  const docOrder = (f: NdaReviewFindingSummary): number => f.docPosition ?? Number.MAX_SAFE_INTEGER;
   const sortedFindings = findings
     .map((finding, index) => ({ finding, index }))
     .sort((a, b) => {
@@ -538,120 +537,120 @@ export function NdaReviewSummaryPanel(props: NdaReviewSummaryPanelProps): React.
         data-testid="nda-review-summary-panel"
       >
         <div className={styles.headerBar}>
-        <Text weight="semibold">Review Summary</Text>
-        <div className={styles.headerActions}>
-          {/* UAT round-4 #2 — sort by section (default) or risk. */}
-          <Menu
-            checkedValues={{ sort: [sortBy] }}
-            onCheckedValueChange={(_e, data) => {
-              const next = data.checkedItems[0];
-              if (next === 'section' || next === 'risk') setSortBy(next);
-            }}
-          >
-            <MenuTrigger disableButtonEnhancement>
-              <Tooltip content={`Sort by ${sortBy === 'risk' ? 'risk' : 'section'}`} relationship="label" withArrow>
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<ArrowSort16Regular />}
-                  aria-label="Sort findings"
-                  data-testid="nda-review-summary-sort"
-                />
-              </Tooltip>
-            </MenuTrigger>
-            <MenuPopover>
-              <MenuList>
-                <MenuItemRadio name="sort" value="section" data-testid="nda-review-summary-sort-section">
-                  By section / paragraph
-                </MenuItemRadio>
-                <MenuItemRadio name="sort" value="risk" data-testid="nda-review-summary-sort-risk">
-                  By risk
-                </MenuItemRadio>
-              </MenuList>
-            </MenuPopover>
-          </Menu>
-          <Tooltip content="Close review summary" relationship="description" withArrow>
-            <Button
-              appearance="subtle"
-              size="small"
-              icon={<Dismiss16Regular />}
-              aria-label="Close review summary"
-              onClick={onClose}
-              data-testid="nda-review-summary-close"
-            />
-          </Tooltip>
+          <Text weight="semibold">Review Summary</Text>
+          <div className={styles.headerActions}>
+            {/* UAT round-4 #2 — sort by section (default) or risk. */}
+            <Menu
+              checkedValues={{ sort: [sortBy] }}
+              onCheckedValueChange={(_e, data) => {
+                const next = data.checkedItems[0];
+                if (next === 'section' || next === 'risk') setSortBy(next);
+              }}
+            >
+              <MenuTrigger disableButtonEnhancement>
+                <Tooltip content={`Sort by ${sortBy === 'risk' ? 'risk' : 'section'}`} relationship="label" withArrow>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<ArrowSort16Regular />}
+                    aria-label="Sort findings"
+                    data-testid="nda-review-summary-sort"
+                  />
+                </Tooltip>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  <MenuItemRadio name="sort" value="section" data-testid="nda-review-summary-sort-section">
+                    By section / paragraph
+                  </MenuItemRadio>
+                  <MenuItemRadio name="sort" value="risk" data-testid="nda-review-summary-sort-risk">
+                    By risk
+                  </MenuItemRadio>
+                </MenuList>
+              </MenuPopover>
+            </Menu>
+            <Tooltip content="Close review summary" relationship="description" withArrow>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss16Regular />}
+                aria-label="Close review summary"
+                onClick={onClose}
+                data-testid="nda-review-summary-close"
+              />
+            </Tooltip>
+          </div>
         </div>
-      </div>
 
-      {/* UAT round-6 #4 — the not-legal-advice disclaimer banner was REMOVED from the panel body; the
+        {/* UAT round-6 #4 — the not-legal-advice disclaimer banner was REMOVED from the panel body; the
           warning now lives behind the info (ⓘ) button on the far right of the editor toolbar (the
           `NDA_REVIEW_DISCLAIMER_TEXT` constant is still exported for it). */}
 
-      {placementFailureCount && placementFailureCount > 0 ? (
-        <Text size={200} className={styles.failureNotice} data-testid="nda-review-summary-placement-failures">
-          {placementFailureCount} finding{placementFailureCount === 1 ? '' : 's'} could not be anchored as an
-          in-document comment — the citation below still shows what was flagged.
-        </Text>
-      ) : null}
-
-      <div className={styles.list}>
-        {sortedFindings.length === 0 ? (
-          <Text size={200} className={styles.empty} data-testid="nda-review-summary-empty">
-            No flagged sections yet. Run NDA Review on this document to see findings here.
+        {placementFailureCount && placementFailureCount > 0 ? (
+          <Text size={200} className={styles.failureNotice} data-testid="nda-review-summary-placement-failures">
+            {placementFailureCount} finding{placementFailureCount === 1 ? '' : 's'} could not be anchored as an
+            in-document comment — the citation below still shows what was flagged.
           </Text>
-        ) : (
-          sortedFindings.map(({ finding, index }) => {
-            // Concise TL;DR row: section + risk on line 1, a 2-line-clamped explanation on line 2. The
-            // full quote + firm-standard citation live on the in-document Review Note (gutter card) —
-            // the summary is a scan strip, deliberately NOT a second copy of the comments (item #3).
-            const navigable = Boolean(onNavigate && finding.quotedText);
-            // UAT round-5 #3 — one clear location line (no § / ¶ glyph soup); #4 — no chevron (the
-            // whole row is obviously clickable). Uses the SAME formatter the gutter notes use (#6).
-            const header = (
-              <div className={styles.findingHeader}>
-                <Text weight="semibold" size={200} className={styles.sectionRef}>
-                  {finding.locationLabel ?? formatClauseLocation(finding.sectionRef)}
+        ) : null}
+
+        <div className={styles.list}>
+          {sortedFindings.length === 0 ? (
+            <Text size={200} className={styles.empty} data-testid="nda-review-summary-empty">
+              No flagged sections yet. Run NDA Review on this document to see findings here.
+            </Text>
+          ) : (
+            sortedFindings.map(({ finding, index }) => {
+              // Concise TL;DR row: section + risk on line 1, a 2-line-clamped explanation on line 2. The
+              // full quote + firm-standard citation live on the in-document Review Note (gutter card) —
+              // the summary is a scan strip, deliberately NOT a second copy of the comments (item #3).
+              const navigable = Boolean(onNavigate && finding.quotedText);
+              // UAT round-5 #3 — one clear location line (no § / ¶ glyph soup); #4 — no chevron (the
+              // whole row is obviously clickable). Uses the SAME formatter the gutter notes use (#6).
+              const header = (
+                <div className={styles.findingHeader}>
+                  <Text weight="semibold" size={200} className={styles.sectionRef}>
+                    {finding.locationLabel ?? formatClauseLocation(finding.sectionRef)}
+                  </Text>
+                  {finding.riskLevel ? (
+                    <Badge appearance="tint" color={riskBadgeColor(finding.riskLevel)}>
+                      {finding.riskLevel}
+                    </Badge>
+                  ) : null}
+                </div>
+              );
+              // S2/S3/S4: render the short takeaway (model-supplied when available, else derived) — NOT
+              // the full grounded-fact+judgment explanation, which lives on the in-document comment.
+              const explanation = (
+                <Text size={200} className={styles.explanation}>
+                  {finding.takeaway ?? deriveTakeaway(finding.explanation)}
                 </Text>
-                {finding.riskLevel ? (
-                  <Badge appearance="tint" color={riskBadgeColor(finding.riskLevel)}>
-                    {finding.riskLevel}
-                  </Badge>
-                ) : null}
-              </div>
-            );
-            // S2/S3/S4: render the short takeaway (model-supplied when available, else derived) — NOT
-            // the full grounded-fact+judgment explanation, which lives on the in-document comment.
-            const explanation = (
-              <Text size={200} className={styles.explanation}>
-                {finding.takeaway ?? deriveTakeaway(finding.explanation)}
-              </Text>
-            );
-            const testId = `nda-review-summary-finding-${index}`;
-            const isActive = activeIndex === index; // UAT round-4 #6
-            return navigable ? (
-              <button
-                key={index}
-                type="button"
-                className={`${styles.findingRow} ${styles.findingRowClickable}${isActive ? ` ${styles.findingRowActive}` : ''}`}
-                onClick={() => {
-                  setActiveIndex(index); // UAT round-4 #6 — mark this the active/navigated-to row
-                  onNavigate?.(finding);
-                }}
-                aria-current={isActive ? 'true' : undefined}
-                aria-label={`Go to ${finding.sectionRef ?? 'flagged section'} in the document`}
-                data-testid={testId}
-              >
-                {header}
-                {explanation}
-              </button>
-            ) : (
-              <div key={index} className={styles.findingRow} data-testid={testId}>
-                {header}
-                {explanation}
-              </div>
-            );
-          })
-        )}
+              );
+              const testId = `nda-review-summary-finding-${index}`;
+              const isActive = activeIndex === index; // UAT round-4 #6
+              return navigable ? (
+                <button
+                  key={index}
+                  type="button"
+                  className={`${styles.findingRow} ${styles.findingRowClickable}${isActive ? ` ${styles.findingRowActive}` : ''}`}
+                  onClick={() => {
+                    setActiveIndex(index); // UAT round-4 #6 — mark this the active/navigated-to row
+                    onNavigate?.(finding);
+                  }}
+                  aria-current={isActive ? 'true' : undefined}
+                  aria-label={`Go to ${finding.sectionRef ?? 'flagged section'} in the document`}
+                  data-testid={testId}
+                >
+                  {header}
+                  {explanation}
+                </button>
+              ) : (
+                <div key={index} className={styles.findingRow} data-testid={testId}>
+                  {header}
+                  {explanation}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
       {/* UAT round-8 #1 — the down-arrow FAB was REMOVED; the panel now shows a modern thin scrollbar. */}

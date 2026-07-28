@@ -335,9 +335,7 @@ describe('ComposeCommentGutter', () => {
     expect(link).toHaveTextContent('Standard: B5 - Use & disclosure obligations');
 
     fireEvent.click(link);
-    await waitFor(() =>
-      expect(resolveStandardText).toHaveBeenCalledWith('B5 - Use & disclosure obligations')
-    );
+    await waitFor(() => expect(resolveStandardText).toHaveBeenCalledWith('B5 - Use & disclosure obligations'));
     expect(
       await screen.findByText('Required: use solely for the Purpose; protect with at least reasonable care.')
     ).toBeInTheDocument();

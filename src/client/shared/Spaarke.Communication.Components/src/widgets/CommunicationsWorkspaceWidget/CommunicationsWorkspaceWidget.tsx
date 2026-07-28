@@ -208,7 +208,7 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         // sprk_communication GUID) — open it as a centred record modal via the
         // SAME Xrm-backed navigation adapter the shell already uses (§B UAT
         // 2026-07-27 item 3; no second mechanism, root CLAUDE.md §11).
-        onOpenEmail={(msg) => {
+        onOpenEmail={msg => {
           void navigationService.openRecordModal?.('sprk_communication', msg.id);
         }}
       />
