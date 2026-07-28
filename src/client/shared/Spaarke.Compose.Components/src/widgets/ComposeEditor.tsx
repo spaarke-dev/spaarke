@@ -146,6 +146,7 @@ import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighl
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
 import { COMPOSE_R3_STYLES } from './hooks/useComposeDocumentStyles';
+import { COMPOSE_INDENT } from './composeIndentExtension';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
 // registration (`register-workspace-widgets.ts` transitively pulls in
@@ -315,6 +316,12 @@ const COMPOSE_R3_FIND_REPLACE = [ComposeFindReplaceExtension];
 // hook file alongside the hook that reads/applies it (same file-organization precedent as
 // `COMPOSE_R3_FIND_REPLACE` above: schema + hook co-located). Registered additively below, same as
 // every other array here — never mutates the LOCKED Spike #1 list.
+
+// FR-07 indentation-preservation extension (task 021, fidelity-r4.5) — `COMPOSE_INDENT`, factored into
+// `./composeIndentExtension` as a pure headless schema piece (see that module's header). Mirrors the
+// LOCKED TextAlign registration for the SAME node types (`paragraph`/`heading`) so the server
+// projection's `margin-left`/`text-indent` (AppendIndentDeclarations) round-trips through
+// setContent/getHTML instead of being silently stripped by the base Paragraph/Heading node schema.
 
 // R3 FR-09/FR-10 paraId identity extension (task 011) — factored into
 // `./paraIdExtension` as a pure headless schema piece (see that module's header).
@@ -928,6 +935,19 @@ const useStyles = makeStyles({
       outline: 'none',
       minHeight: '100%',
       color: tokens.colorNeutralForeground1,
+      // FR-08 (task 021, WS-2): xml:space="preserve" runs + consecutive spaces are stored verbatim by the
+      // server projection (F-1 text exactness) but the browser's default `white-space: normal` collapses
+      // runs of spaces at RENDER time — a purely visual loss, not a data loss (the reader already stores
+      // the characters correctly; see task 021 notes). `pre-wrap` preserves consecutive spaces AND line
+      // breaks in the source markup while still soft-wrapping at the container width (unlike `pre`, which
+      // never wraps and would overflow the editor). Scoped to `.ProseMirror` only — this is the same rule
+      // `prosemirror-view`'s own bundled `style/prosemirror.css` ships by default (this app does not import
+      // that stylesheet, so the rule was previously absent here). Verified NOT to regress `.compose-tab`
+      // (a single preserved space per tab — pre-wrap renders a lone space identically to `normal`),
+      // `.compose-atom`/`.compose-atom-block` (block layout is orthogonal to white-space; pre-wrap still
+      // wraps, it does not suppress wrapping like `pre` would), or `text-align`/`margin-left`/`text-indent`
+      // (orthogonal CSS properties).
+      whiteSpace: 'pre-wrap',
     },
     '& .ProseMirror a': {
       color: tokens.colorBrandForegroundLink,
@@ -1847,6 +1867,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         ...COMPOSE_R3_PARAID,
         ...COMPOSE_R3_FIND_REPLACE,
         ...COMPOSE_R3_STYLES,
+        ...COMPOSE_INDENT,
         ...COMPOSE_R4_OPAQUE_ATOMS,
         opLogExtension, // R4 FR-03/FR-06 (task 020/022/032) — the WIRED rebased op-log (supersedes the bare
         // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds

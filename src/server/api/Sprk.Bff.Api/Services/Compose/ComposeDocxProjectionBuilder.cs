@@ -271,7 +271,7 @@ public sealed class ComposeDocxProjectionBuilder
             if (listInfo.Level > 0) ctx.AddWarning("multi-level-numbering", 1);
             ctx.Append("<li><p");
             ctx.AppendParaIdAttr(paraId);
-            AppendAlignment(p, ctx);
+            AppendParagraphStyle(p, ctx);
             ctx.Append(">");
             RenderInline(p, ctx);
             ctx.Append("</p></li>");
@@ -284,7 +284,7 @@ public sealed class ComposeDocxProjectionBuilder
         var tag = headingLevel is int lvl ? $"h{lvl}" : "p";
         ctx.Append($"<{tag}");
         ctx.AppendParaIdAttr(paraId);
-        AppendAlignment(p, ctx);
+        AppendParagraphStyle(p, ctx);
         ctx.Append(">");
         RenderInline(p, ctx);
         ctx.Append($"</{tag}>");
@@ -880,21 +880,86 @@ public sealed class ComposeDocxProjectionBuilder
         }
     }
 
-    private static void AppendAlignment(Paragraph p, BuildContext ctx)
+    /// <summary>
+    /// FR-09's alignment emit (was <c>AppendAlignment</c>) plus FR-07 (task 021) <c>w:ind</c> emit, combined
+    /// into ONE <c>style="…"</c> attribute — an HTML element cannot carry two <c>style</c> attributes, so
+    /// alignment and indentation MUST share a single call site here rather than each appending their own.
+    /// Called once per projected paragraph (both the plain/heading path and the list-item path).
+    /// </summary>
+    private static void AppendParagraphStyle(Paragraph p, BuildContext ctx)
     {
+        List<string>? decls = null;
+
         var just = p.ParagraphProperties?.Justification?.Val?.Value;
-        if (just is null) return;
-        string? css = null;
-        if (just.Value == JustificationValues.Center) css = "center";
-        else if (just.Value == JustificationValues.Right) css = "right";
-        else if (just.Value == JustificationValues.Both) css = "justify";
-        if (css is not null)
+        if (just is not null)
         {
-            ctx.Append(" style=\"text-align:");
-            ctx.Append(css);
+            string? align = null;
+            if (just.Value == JustificationValues.Center) align = "center";
+            else if (just.Value == JustificationValues.Right) align = "right";
+            else if (just.Value == JustificationValues.Both) align = "justify";
+            if (align is not null) (decls ??= new List<string>(2)).Add($"text-align:{align}");
+        }
+
+        AppendIndentDeclarations(p, ref decls);
+
+        if (decls is { Count: > 0 })
+        {
+            ctx.Append(" style=\"");
+            ctx.Append(string.Join(";", decls));
             ctx.Append("\"");
         }
     }
+
+    /// <summary>
+    /// FR-07 (task 021): emits <c>w:ind</c> (<c>@w:left</c>/<c>@w:firstLine</c>/<c>@w:hanging</c>, all
+    /// stored in twips — 1/1440 inch) as <c>margin-left</c>/<c>text-indent</c> CSS on the projected
+    /// paragraph. Today <c>w:ind</c> is dropped entirely, so indented legal clauses render flush-left
+    /// (design §1/§4 WS-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Unit choice — pt, not px.</b> OOXML twips convert EXACTLY to CSS points: 1pt == 20 twips by
+    /// definition (both are point-based units), so <c>twips / 20.0</c> is a lossless conversion with no
+    /// assumed reference DPI — unlike px, which would require picking a DPI (96 is the common web default
+    /// but is not itself part of the OOXML unit system, so it would be an added assumption, not a fact).
+    /// </para>
+    /// <para>
+    /// <b>OOXML semantics mirrored:</b> <c>w:left</c> is the paragraph's base left indent, emitted as
+    /// <c>margin-left</c>. <c>w:firstLine</c> is an ADDITIONAL positive offset applied only to the first
+    /// line, emitted as a positive <c>text-indent</c> (on top of <c>margin-left</c>, matching CSS
+    /// <c>text-indent</c>'s own semantics). <c>w:hanging</c> is the inverse — the first line is OUTDENTED
+    /// relative to the rest of the paragraph — emitted as a NEGATIVE <c>text-indent</c> equal to
+    /// <c>-hanging</c>. Per ECMA-376 §17.3.1.12, <c>w:hanging</c> and <c>w:firstLine</c> are mutually
+    /// exclusive on one <c>w:ind</c>; if a malformed source somehow carries both, <c>w:hanging</c> takes
+    /// precedence (Word's own resolution), so it is checked first.
+    /// </para>
+    /// </remarks>
+    private static void AppendIndentDeclarations(Paragraph p, ref List<string>? decls)
+    {
+        var ind = p.ParagraphProperties?.Indentation;
+        if (ind is null) return;
+
+        var leftPt = TwipsToPoints(ind.Left?.Value);
+        if (leftPt is not null) (decls ??= new List<string>(2)).Add($"margin-left:{FormatPt(leftPt.Value)}");
+
+        var hangingPt = TwipsToPoints(ind.Hanging?.Value);
+        if (hangingPt is not null)
+        {
+            (decls ??= new List<string>(2)).Add($"text-indent:{FormatPt(-hangingPt.Value)}");
+        }
+        else
+        {
+            var firstLinePt = TwipsToPoints(ind.FirstLine?.Value);
+            if (firstLinePt is not null) (decls ??= new List<string>(2)).Add($"text-indent:{FormatPt(firstLinePt.Value)}");
+        }
+    }
+
+    private static double? TwipsToPoints(string? twips) =>
+        !string.IsNullOrEmpty(twips) && int.TryParse(twips, NumberStyles.Integer, CultureInfo.InvariantCulture, out var v)
+            ? v / 20.0
+            : null;
+
+    private static string FormatPt(double pt) => pt.ToString("0.##", CultureInfo.InvariantCulture) + "pt";
 
     private static bool IsOn(OnOffType? toggle)
     {

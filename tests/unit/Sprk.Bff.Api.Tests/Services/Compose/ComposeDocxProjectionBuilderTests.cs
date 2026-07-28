@@ -771,6 +771,92 @@ public sealed class ComposeDocxProjectionBuilderTests
     }
 
     [Fact]
+    public void Build_ParagraphWithLeftIndent_EmitsMarginLeftStyle()
+    {
+        // FR-07 (task 021): w:ind/@w:left (twips) -> margin-left (pt). AppendIndentDeclarations,
+        // TwipsToPoints: 720 twips / 20 = 36pt exactly (1pt == 20 twips is an OOXML unit identity, not an
+        // approximation) — no w:ind construct test existed before this task.
+        var para = Para("00E00001", "Indented clause");
+        para.ParagraphProperties = new ParagraphProperties(new Indentation { Left = "720" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("style=\"margin-left:36pt\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithFirstLineIndent_EmitsPositiveTextIndentAlongsideMarginLeft()
+    {
+        // FR-07: w:ind/@w:firstLine is an ADDITIONAL positive offset for the first line only, on top of
+        // @w:left — emitted as a positive text-indent alongside margin-left (720 twips = 36pt left;
+        // 240 twips = 12pt first-line offset).
+        var para = Para("00E00002", "First-line indented clause");
+        para.ParagraphProperties = new ParagraphProperties(new Indentation { Left = "720", FirstLine = "240" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("style=\"margin-left:36pt;text-indent:12pt\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithHangingIndent_EmitsNegativeTextIndentAlongsideMarginLeft()
+    {
+        // FR-07: w:ind/@w:hanging outdents the FIRST line relative to the rest of the paragraph — the
+        // inverse of firstLine — emitted as a NEGATIVE text-indent (720 twips = 36pt left; 360 twips =
+        // 18pt hanging outdent, so the first line starts at 36pt - 18pt = 18pt).
+        var para = Para("00E00003", "Hanging indented clause");
+        para.ParagraphProperties = new ParagraphProperties(new Indentation { Left = "720", Hanging = "360" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("style=\"margin-left:36pt;text-indent:-18pt\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithHangingAndFirstLineBothPresent_HangingTakesPrecedence()
+    {
+        // FR-07 edge case: per ECMA-376 §17.3.1.12, w:hanging and w:firstLine are mutually exclusive on one
+        // w:ind. If a malformed source somehow carries both, w:hanging wins (Word's own resolution) — the
+        // firstLine value here (999 twips) must NOT appear in the output.
+        var para = Para("00E00004", "Conflicting indent attributes");
+        para.ParagraphProperties = new ParagraphProperties(new Indentation { Hanging = "360", FirstLine = "999" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("text-indent:-18pt").And.NotContain("999");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithAlignmentAndIndent_CombinesIntoOneStyleAttribute()
+    {
+        // FR-07/FR-09: an HTML element cannot carry two `style` attributes — AppendParagraphStyle MUST
+        // combine alignment (FR-09, pre-existing) and indentation (FR-07, this task) into ONE style
+        // attribute, semicolon-joined, rather than emitting two separate style="..." attributes.
+        var para = Para("00E00005", "Aligned and indented clause");
+        para.ParagraphProperties = new ParagraphProperties(
+            new Justification { Val = JustificationValues.Center },
+            new Indentation { Left = "720" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("style=\"text-align:center;margin-left:36pt\"");
+        Regex.Matches(projection.Html, "style=\"").Count.Should().Be(1,
+            "alignment and indentation must share a single style attribute per paragraph");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithNoIndentation_EmitsNoMarginOrTextIndentStyle()
+    {
+        // Negative case: a paragraph with no w:ind at all emits neither margin-left nor text-indent —
+        // AppendIndentDeclarations is a no-op when ParagraphProperties.Indentation is null.
+        var para = Para("00E00006", "Unindented clause");
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().NotContain("margin-left").And.NotContain("text-indent");
+    }
+
+    [Fact]
     public void Build_ParagraphWithSymbolCharRun_MappedSymbolFont_RendersUnicodeGlyphWithNoWarning()
     {
         // WS-2 FR-06 flip (spaarkeai-compose-fidelity-r4.5 task 020) of the task 002 characterization
