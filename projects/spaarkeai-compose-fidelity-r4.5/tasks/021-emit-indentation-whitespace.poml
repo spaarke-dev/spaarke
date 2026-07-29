@@ -1,0 +1,154 @@
+<task id="021" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-2: emit w:ind indentation + white-space:pre-wrap for preserved whitespace</title>
+    <phase>2 WS-2 Harden read</phase>
+    <gate>blocked until 020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (projection builder) AND `.tsx` (editor surface CSS) with `bff-api`/`compose`/`frontend` tags; the frontend tag triggers `&lt;ui-tests&gt;`. Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified, bounded read-side change (emit `w:ind` as margin styles; apply `white-space:pre-wrap`) mirroring existing style-emit patterns; no architectural judgment or high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Compose/ComposeDocxProjectionBuilder.cs` (paragraph-property emit) plus the shared `ComposeEditor.tsx` editor surface — the same files 020/022/030/031/032 touch. WS-2/WS-3 tasks run sequentially per plan.md group W2/W3.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api,compose,docx,frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Preserve paragraph indentation and authored whitespace on the read path (design §4 WS-2; spec FR-07/FR-08).
+    Emit `w:ind` (left / first-line / hanging) from the paragraph properties as `style="margin-left/…"` (or an
+    indent class) on the projected paragraph — today `w:ind` is dropped, so indented clauses render flush-left.
+    Apply `white-space:pre-wrap` (or an equivalent) on the editor surface so `xml:space="preserve"` runs and
+    consecutive spaces render as authored — today they store faithfully but collapse under default CSS
+    `white-space:normal`. Add projection tests asserting the emitted indent style; add a `&lt;ui-tests&gt;` check that
+    indentation renders and preserved whitespace is not collapsed (incl. ADR-021 dark-mode).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer working both the BFF Compose projection (`w:ind` emit) and the client editor surface
+    (`white-space` CSS). Expert in OOXML paragraph-property markup (`w:ind` `@w:left`/`@w:firstLine`/`@w:hanging`,
+    twips → CSS units) and TipTap/React editor-surface styling. Understands the R4.5 F-1 invariant (authored
+    spacing renders as authored). Follow ADRs strictly — `Services/Compose/` stays pure; the client authors no bytes.
+  </role>
+
+  <goal>
+    The projection emits `w:ind` (left / first-line / hanging) as a margin style / indent class on each paragraph
+    (dropped today), and the editor surface applies `white-space:pre-wrap` (or equivalent) so preserved-whitespace
+    runs and consecutive spaces render verbatim. Projection tests assert the emitted indent style; a `&lt;ui-tests&gt;`
+    check confirms indented paragraphs render at authored indentation and preserved whitespace is not collapsed, in
+    both light and dark themes (ADR-021).
+  </goal>
+
+  <context>
+    <background>
+      Paragraph indentation (`w:ind`) is not emitted by the projection today — indented legal clauses render
+      flush-left (design §1). Separately, `xml:space="preserve"` runs and consecutive spaces are stored faithfully
+      by the reader but COLLAPSE at render time under default CSS `white-space:normal`, so authored legal spacing
+      is lost visually (design §4 WS-2). Both are read-fidelity gaps that WS-2 closes: emit `w:ind` on the BFF side
+      and apply `white-space:pre-wrap` on the editor surface. The whitespace fix is on the CSS/editor surface — the
+      reader already stores the characters correctly, so this must NOT regress how existing R4 constructs (tabs →
+      `compose-tab`, atoms) render.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — paragraph-property emit path (near `AppendAlignment` `:816-830`, list emit `:268-280`). RE-GREP before editing. Read `w:ind` `@w:left`/`@w:firstLine`/`@w:hanging` (twips) and emit `margin-left`/`text-indent` (or an indent class) alongside the existing alignment style.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the editor surface; apply `white-space:pre-wrap` (or equivalent) so preserved whitespace + consecutive spaces render as authored. RE-GREP the mount/surface CSS before editing.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs `AppendAlignment` (`:816-830`) — the existing paragraph-level style-emit pattern to mirror for `w:ind`.</file>
+      <file role="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs — add the indentation projection test (assert the emitted margin/indent style); the suite has no indentation test today.</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-07 (`w:ind` → margin/indent style), FR-08 (`white-space:pre-wrap` for preserved whitespace).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-2 (preserve indentation; whitespace display).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">WS-2 silent-drop fixes landed on the same builder file — sequential to avoid `Services/Compose/` conflict.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-07">`w:ind` (left / first-line / hanging) MUST be emitted as `style="margin-left/…"` (or an indent class). Scope: read the twips values from the paragraph's `w:ind` and emit the corresponding CSS on the projected paragraph, mirroring the existing `AppendAlignment` style-emit; a projection test asserts the emitted style.</constraint>
+    <constraint source="spec / FR-08">The editor surface MUST apply `white-space:pre-wrap` (or equivalent) so `xml:space="preserve"` runs and consecutive spaces render as authored. Scope: CSS/editor-surface change only — the reader already stores the characters; do not re-transform run text.</constraint>
+    <constraint source="project / no-regression">The `pre-wrap` change MUST NOT regress existing R4 rendering of tabs (`compose-tab`), atoms, or alignment. Scope: verify the corpus renders unchanged for those constructs before shipping; whitespace fidelity must not trade off other constructs.</constraint>
+    <constraint source="ADR-007">The projection stays `byte[]`-in / projection-out; no `Microsoft.Graph`. Scope: BFF change reads only OOXML paragraph properties.</constraint>
+    <constraint source="ADR-021">Editor-surface CSS MUST honor dark-mode. Scope: the `&lt;ui-tests&gt;` include a dark-mode check that indentation + preserved whitespace render correctly in both themes.</constraint>
+    <constraint source="ADR-038">Add tests at the KEEP path. Scope: no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null tests; the indentation test exercises the real builder over a corpus doc.</constraint>
+    <constraint source="project / BFF Hygiene §10">Pure-OOXML read change — expected ~0 MB publish delta. Scope: run `dotnet publish -c Release` and report compressed size + diff vs ~49.63 MB baseline; `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML `w:ind` (twips → CSS margin/text-indent); `white-space:pre-wrap` for preserved-whitespace runs; editor-surface CSS + ADR-021 dark-mode; F-1 authored-spacing fidelity</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Paragraph-level style emit" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs AppendAlignment (:816-830)">
+        Alignment is emitted as a paragraph style today. Mirror this to emit `w:ind` as `margin-left` (left indent), `text-indent` (first-line), and hanging-indent handling (negative text-indent + matching margin) — twips ÷ 20 = points, or convert to a rem/px indent class.
+      </pattern>
+      <pattern name="Editor-surface whitespace" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx">
+        Default CSS collapses runs of spaces. Apply `white-space:pre-wrap` on the paragraph/editor surface so preserved-whitespace runs render verbatim while still wrapping — verify tabs (`compose-tab`) and atoms are unaffected.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: modifies `.cs` + `.tsx` with `bff-api`/`compose`/`frontend` tags / 📖 PROTOCOL STEPS incl. Step 9.5 + `&lt;ui-tests&gt;`). Load spec FR-07/08 + design §4 WS-2.</step>
+    <step order="1" name="RE-GREP the emit path">Grep the paragraph-property emit in `ComposeDocxProjectionBuilder.cs` (near `AppendAlignment`) and the editor-surface CSS in `ComposeEditor.tsx` to confirm current line numbers before editing.</step>
+    <step order="2" name="Emit w:ind">Read `w:ind` `@w:left`/`@w:firstLine`/`@w:hanging` (twips) and emit `margin-left`/`text-indent` (or an indent class), mirroring `AppendAlignment`. Handle the hanging-indent case correctly.</step>
+    <step order="3" name="Apply pre-wrap">Apply `white-space:pre-wrap` (or equivalent) on the editor surface so preserved-whitespace runs + consecutive spaces render as authored. Verify tabs/atoms/alignment are unaffected.</step>
+    <step order="4" name="Add projection test + ui-tests">Add a projection test asserting the emitted indent style for an indented corpus paragraph. Run the `&lt;ui-tests&gt;` (indentation renders; preserved whitespace not collapsed; dark-mode) via the `ui-test` skill.</step>
+    <step order="5" name="Build + publish-size check">`dotnet build` + `dotnet test` green; client build green; run `dotnet publish -c Release` and record compressed size + diff (~0). `/conflict-check` before PR.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 021 to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If applying `white-space:pre-wrap` on the editor surface breaks existing R4 rendering (tabs → `compose-tab`, atoms, alignment) — STOP and surface before shipping. Whitespace fidelity (FR-08) must not regress other read constructs; if the two conflict, escalate per §6 rather than trading one fidelity for another.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Indentation renders at authored depth">
+      <steps><step>Open an indented-clause corpus doc in Compose via the server projection.</step><step>Compare the rendered left/first-line/hanging indent to Word.</step></steps>
+      <expected>Indented paragraphs render at their authored indentation (not flush-left); hanging indents show the correct hanging offset.</expected>
+    </test>
+    <test name="Preserved whitespace not collapsed">
+      <steps><step>Open a preserved-whitespace corpus doc (consecutive spaces, `xml:space="preserve"`).</step><step>Inspect the rendered spacing.</step></steps>
+      <expected>Consecutive spaces render verbatim (not collapsed to one); tabs (`compose-tab`) and atoms render unchanged.</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Toggle dark mode.</step><step>Re-check indentation + preserved whitespace.</step></steps>
+      <expected>Both render correctly in light and dark themes; no contrast/regression issue.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF Compose suite; `dotnet publish -c Release` for the size check.</tool>
+    <tool name="npm">Build the Compose client (`build:prod` where applicable).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (w:ind → margin/indent style)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (white-space:pre-wrap on the editor surface)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (indentation projection test)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a paragraph with `w:ind` (left/first-line/hanging), when projected, then the corresponding `margin-left`/`text-indent` (or indent class) is emitted; a projection test asserts the emitted style.</criterion>
+    <criterion testable="true">Given a preserved-whitespace corpus doc, when rendered on the editor surface, then consecutive spaces render verbatim (not collapsed) — the `&lt;ui-tests&gt;` confirm it.</criterion>
+    <criterion testable="true">Negative: existing R4 constructs (tabs `compose-tab`, atoms, alignment) render unchanged after the `pre-wrap` change — no regression.</criterion>
+    <criterion testable="true">Indentation + preserved whitespace render correctly in both light and dark themes (ADR-021).</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure (ADR-007/013); BFF build + Compose suite + client build green; publish ~0 MB delta vs ~49.63 MB baseline; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 021 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Second WS-2 task. The whitespace fix is on the editor surface (the reader already stores characters correctly) —
+    keep the change to CSS/surface, do not re-transform run text (that would risk F-1). Indentation is a BFF-side
+    emit mirroring `AppendAlignment`. TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

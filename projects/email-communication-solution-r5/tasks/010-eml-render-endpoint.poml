@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-07 / NFR-01 / NFR-03: `GET /api/documents/{id}/eml-render` — MimeKit HTML-preserving parse + `cid:`→`data:` rewrite + server-side sanitize + immutable cache + tests</title>
+    <phase>1 BFF eml-render endpoint</phase>
+    <gate>after:002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>NEW security-critical BFF endpoint on the untrusted-email-HTML path; brownfield MimeKit parse (reverses an existing writer); server-side sanitization is the authoritative XSS boundary (NFR-03); fail-closed authorization is non-negotiable; BFF-touching (publish-size + CVE + endpoint-test gates). FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Server-side sanitization of untrusted email HTML + `cid:`→`data:` rewrite + fail-closed authz is exactly the correctness/security reasoning Opus is tiered for: an under-scoped sanitizer or a leaked HTML body on an unauthorized document is a real vulnerability, and the MimeKit multipart/related traversal must reverse `GraphMessageToEmlConverter` precisely (project CLAUDE.md — security-sensitive `eml-render` endpoint).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>New endpoint + handler in the BFF `Api/FileAccessEndpoints.cs` area (shared file/route group `/api/documents`); brownfield edit near contested Communication services. Serialize; run `/conflict-check` before PR.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api, backend, security, endpoint</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add `GET /api/documents/{documentId}/eml-render` to the BFF. It resolves the document, downloads the `.eml` bytes from SPE via the EXISTING download facade (`SpeFileStore.DownloadFileAsync` — NO new download method), parses the MIME with MimeKit PRESERVING the HTML body (`MimeMessage.HtmlBody`, not the text-stripped path `TextExtractorService` uses), rewrites every inline `cid:` reference to a `data:` URI resolved from the `multipart/related` parts (reverse of `GraphMessageToEmlConverter`), SANITIZES the resulting HTML server-side (authoritative XSS boundary), and returns ready-to-render safe HTML marked immutable / long-lived cacheable. Authorization fails CLOSED — an unauthorized/inaccessible document returns 403/404 with NO HTML body leaked. Add endpoint unit tests in `tests/unit/Sprk.Bff.Api.Tests/`.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, MimeKit MIME parsing, SharePoint Embedded file access, and server-side HTML sanitization. Follow ADRs strictly.</role>
+  <goal>A new `GET /api/documents/{documentId}/eml-render` mapped in `FileAccessEndpoints.cs` (the `/api/documents` group, `.RequireAuthorization()` + `DocumentAuthorizationFilter` for per-document fail-closed authz), delegating to a handler that: (1) resolves the document + validates SPE pointers (reusing the existing `GetDownload` resolution pattern); (2) streams the `.eml` via `speFileStore.DownloadFileAsync(driveId, itemId, ct)`; (3) `MimeMessage.LoadAsync` → takes `HtmlBody` (falls back to text→HTML if no HTML part); (4) walks the `multipart/related` parts, builds a `Content-Id → data:` map, and rewrites `src="cid:..."` to the matching `data:` URI; (5) sanitizes the HTML server-side with a hardened allow-list (no scripts/`on*`/`iframe`; http/https/mailto/data schemes); (6) returns `Results.Content(html, "text/html")` (or a typed DTO) with `Cache-Control: public, max-age=&lt;long&gt;, immutable`. Unauthorized/no-access documents fail closed (403/404, no HTML). Unit tests in `tests/unit/Sprk.Bff.Api.Tests/` prove sanitization, `cid:`→`data:` resolution, fail-closed authz, and the cache header.</goal>
+
+  <context>
+    <background>Spec FR-07 + design Lens 4 ("`.eml` → sanitized-HTML render" = BUILD) + Lens 2. The reading pane shows the email "as sent" — the full quoted history + inline images — which lives in the archived `.eml` (`sprk_body` holds only Graph's stripped `uniqueBody`). No endpoint renders `.eml` as email today: `TextExtractorService.ExtractFromEmlAsync` deliberately STRIPS HTML→text for AI (`body = message.TextBody ?? StripHtml(message.HtmlBody)`), and `/preview-url` is a generic SPE iframe that cannot render a raw `.eml` as email. This task builds the HTML-preserving reverse of `GraphMessageToEmlConverter` (which writes the self-contained multipart/related + `ContentId`). Server-side sanitize is the authoritative XSS boundary for the `.eml` path (NFR-03); the client renders the returned HTML in a sandboxed iframe as defense-in-depth (task 033). Depends on task 002 so an `.eml` exists to render.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/** (eml-render endpoint tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Archiving default-on guarantees an `.eml` exists to render; without it the endpoint has no forward-mail input.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">SCOPE = the new endpoint. It MUST require auth (mapped under the existing `/api/documents` group `.RequireAuthorization()`); the caller is resolved server-side (never client-supplied). Per-document authorization MUST fail closed — an unauthorized or inaccessible document returns 403/404 with NO HTML body in the response (no partial leak).</constraint>
+    <constraint source="ADR-008">SCOPE = the new endpoint. Use the endpoint-filter pattern for resource authorization (`.AddEndpointFilter&lt;DocumentAuthorizationFilter&gt;()`), consistent with the sibling `/api/documents/{id}/*` routes — do NOT hand-roll authz in the handler or use global middleware.</constraint>
+    <constraint source="ADR-007">SCOPE = SPE access. Download the `.eml` via the `SpeFileStore` facade `DownloadFileAsync(driveId, itemId, ct)` — do NOT inject `GraphServiceClient` and do NOT add a new download method to the facade.</constraint>
+    <constraint source="project">SCOPE = server-side sanitization (NFR-03, authoritative). The returned HTML MUST contain no `&lt;script&gt;`/`&lt;iframe&gt;`/`&lt;object&gt;` and no `on*` event-handler attributes; URL schemes restricted to http/https/mailto (+`data:` for the inline `cid:`-resolved images). Use a server-side HTML sanitizer already available in the BFF (e.g. an existing HtmlAgilityPack/AngleSharp/Ganss.Xss dependency) — do NOT add a new NuGet package solely for this; if no sanitizer is present, escalate rather than pulling a new package.</constraint>
+    <constraint source="bff-extensions">SCOPE = this BFF-touching task (§10). State the Placement Justification in the PR citing `.claude/constraints/bff-extensions.md` (the `.eml`→HTML render belongs server-side: MimeKit + the SPE facade are server-side, and server sanitize is the trusted single point for untrusted email HTML). MimeKit is ALREADY referenced — no new package. Verify publish ≤60 MB compressed (baseline ~49.63 MB incl. PDBs); report absolute size + delta. Verify 0 new HIGH CVE. Add endpoint tests in `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+    <constraint source="ADR-038">SCOPE = DoD. The endpoint's tests are the Definition of Done: exercise the handler with real `.eml` fixtures (a quoted-history + inline-image `.eml`, a malicious-payload `.eml`, an archive-less/unauthorized case). No `Mock&lt;HttpMessageHandler&gt;`; use the existing test harness/fixtures for document resolution + SPE stream.</constraint>
+    <constraint source="project">Single-endpoint boundary (spec MUST NOT): add ONLY this one endpoint — no other new BFF surface. Response marked immutable / long-lived cacheable (`Cache-Control: public, max-age, immutable`) — the archived `.eml` is immutable, so repeat opens hit HTTP cache; NO bespoke server-side render cache in r5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Server-side `.eml` → sanitized-HTML render (MimeKit + SPE + fail-closed authz)</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Document resolve + SPE download + validate pointers" location="src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs">The `GetDownload` handler (route mapped at line ~86; body ~712–772): resolves the document, `ValidateSpePointers(GraphDriveId, GraphItemId, ...)`, then `await speFileStore.DownloadFileAsync(driveId, itemId, ct)` with 404 on missing. Reuse this shape; swap the response for parse+sanitize+HTML instead of a file stream.</pattern>
+      <pattern name="MimeKit load + body access" location="src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs">`ExtractFromEmlAsync` (line ~398): `var message = await MimeMessage.LoadAsync(fileStream, ct);` then it uses `message.TextBody ?? StripHtml(message.HtmlBody)`. The new path takes `message.HtmlBody` and PRESERVES it (opposite of `StripHtml`); walk `message.BodyParts`/related parts for `ContentId`.</pattern>
+      <pattern name="The writer we reverse (cid + multipart/related)" location="src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs">Confirms the archived `.eml` is a self-contained `multipart/related` with inline parts carrying `Content-Id`. Reverse it: map each related part's `Content-Id` → base64 `data:` URI and rewrite `src="cid:&lt;id&gt;"`.</pattern>
+      <pattern name="Route group + Produces" location="src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs">`var docs = app.MapGroup("/api/documents").RequireAuthorization();` (line 29) then `docs.MapGet("/{documentId}/eml-render", GetEmlRender)` with `.AddEndpointFilter&lt;DocumentAuthorizationFilter&gt;()` and `.Produces&lt;...&gt;(200)/.Produces(400/401/403/404/500)` mirroring the sibling routes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + spec FR-07/NFR-01/NFR-03 + the ADR-028/008/029 + bff-extensions + ADR-038 knowledge files. Declare RIGOR LEVEL FULL, model-tier opus, effort xhigh. Confirm task 002 landed (an `.eml` exists to render).</step>
+    <step order="1">Confirm a server-side HTML sanitizer is already available in the BFF dependency set (grep `Directory.Packages.props` / usings for Ganss.Xss / AngleSharp / HtmlAgilityPack). If none exists, STOP and escalate (do NOT add a new package unilaterally — see escalation).</step>
+    <step order="2">Add the `GetEmlRender` handler near `GetDownload` in `FileAccessEndpoints.cs`: resolve the document, `ValidateSpePointers`, `await speFileStore.DownloadFileAsync(GraphDriveId!, GraphItemId!, ct)`; 404 if the document/file is absent.</step>
+    <step order="3">Parse with MimeKit: `MimeMessage.LoadAsync(stream, ct)`; take `HtmlBody`. If no HTML part, synthesize minimal HTML from `TextBody` (preserving line breaks) so the pane still renders. Do NOT strip HTML.</step>
+    <step order="4">Resolve inline images: enumerate the `multipart/related` parts, build a `Content-Id → data:` map (base64 of the part content with its media type), and rewrite every `src="cid:&lt;id&gt;"` in the HTML to the matching `data:` URI. Drop unresolved `cid:` refs safely.</step>
+    <step order="5">Sanitize server-side (authoritative): run the HTML through the hardened allow-list (no `script`/`iframe`/`object`/`on*`; schemes http/https/mailto/data). This is the trusted XSS boundary for the `.eml` path.</step>
+    <step order="6">Map the route: `docs.MapGet("/{documentId}/eml-render", GetEmlRender).AddEndpointFilter&lt;DocumentAuthorizationFilter&gt;().WithName(...).WithTags("File Access").Produces(200)/.Produces(400/401/403/404/500)`. Return `Results.Content(sanitizedHtml, "text/html")` and set `Cache-Control: public, max-age=&lt;long&gt;, immutable` on the response.</step>
+    <step order="7">Verify fail-closed authz: an unauthorized/inaccessible document is rejected by `DocumentAuthorizationFilter` (403) or resolves to 404 — in neither case is any HTML body returned.</step>
+    <step order="8">Write endpoint unit tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) quoted-history + inline-image `.eml` → sanitized HTML with `cid:` resolved to `data:`; (b) malicious `.eml` (`&lt;script&gt;`, `onerror=`, `javascript:` link) → neutralized; (c) unauthorized/no-access document → 403/404, no HTML body; (d) archive-less/missing file → 404 (pane will degrade to `sprk_body`); (e) response carries the immutable cache header.</step>
+    <step order="9">Build `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; `dotnet publish -c Release ... -o deploy/api-publish/`, measure compressed size, report absolute + delta; run the CVE scan.</step>
+    <step order="10">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 010 status to ✅.</step>
+    <step order="11">Document the endpoint contract (route, response shape, cache header, sanitizer used, `cid:` resolution semantics) + publish delta in `projects/email-communication-solution-r5/notes/` for task 033 (client render branch).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If NO server-side HTML sanitizer is already present in the BFF dependency set, STOP and escalate per root CLAUDE.md §6 / §6.5 (§10 forbids adding packages casually; adding a sanitizer NuGet is a placement/dependency decision needing sign-off, not an in-task adaptation). Also escalate if the archived `.eml` structure differs from `GraphMessageToEmlConverter`'s multipart/related + `Content-Id` writer such that `cid:` resolution cannot be done reliably.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`TextExtractorService.ExtractFromEmlAsync` (`Services/Ai/TextExtractorService.cs:398`) — the only existing `.eml` MimeKit path; it STRIPS HTML→text (`message.TextBody ?? StripHtml(message.HtmlBody)`) for AI. `/api/documents/{id}/preview-url` (`FileAccessEndpoints.cs:32`) — a generic SPE iframe preview.</existing>
+    <extension>No — `ExtractFromEmlAsync` discards exactly the HTML this feature must preserve (opposite intent), and the preview iframe cannot render a raw `.eml` as an email. A new HTML-preserving handler is required; it REUSES the document-resolution + `SpeFileStore.DownloadFileAsync` + `DocumentAuthorizationFilter` pipeline (not forked).</extension>
+    <cost-of-doing-nothing>Without this endpoint the reading pane cannot show the email "as sent" — the full quoted history + inline images live only in the `.eml`, and no surface can render them. The core FR-06 reading-pane requirement fails; every email degrades to the stripped `sprk_body`.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build, test, publish (size measurement)</tool><tool name="terminal">shell (CVE scan, conflict-check)</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** (eml-render endpoint tests + `.eml` fixtures)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authorized document whose `.eml` has quoted history + inline `cid:` images, when `GET /api/documents/{id}/eml-render` is called, then it returns sanitized HTML with the full body and every inline image resolved from `cid:` to a `data:` URI.</criterion>
+    <criterion testable="true">Given an `.eml` containing `&lt;script&gt;`, `onerror=`, and a `javascript:` link, when rendered, then the returned HTML contains no `&lt;script&gt;`/`on*` handler and the `javascript:` scheme is neutralized (server-side sanitize is authoritative).</criterion>
+    <criterion testable="true">Negative (fail closed): Given a document the caller is not authorized for (or that does not exist), when the endpoint is called, then it returns 403/404 with NO HTML body in the response (no leak).</criterion>
+    <criterion testable="true">Negative (archive-less): Given a document with no `.eml` file in SPE, when the endpoint is called, then it returns 404 (the client degrades to `sprk_body`) — not a 500/unhandled error.</criterion>
+    <criterion testable="true">Given a successful render, when the response is inspected, then it carries `Cache-Control: public, max-age=&lt;long&gt;, immutable` (long-lived cacheable; no bespoke server cache added).</criterion>
+    <criterion testable="true">The download reuses `SpeFileStore.DownloadFileAsync` (no new facade download method) and the route uses `.AddEndpointFilter&lt;DocumentAuthorizationFilter&gt;()` under the authorized `/api/documents` group.</criterion>
+    <criterion testable="true">No new NuGet package added (MimeKit + the server sanitizer already referenced); BFF publish ≤60 MB compressed with absolute size + delta reported.</criterion>
+    <criterion testable="true">The endpoint has unit tests in `tests/unit/Sprk.Bff.Api.Tests/` covering the cases above; all tests pass; build green; 0 new HIGH CVE.</criterion>
+    <criterion testable="true">Exactly one new endpoint is added (no other new BFF surface — spec MUST NOT).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 + NFR-01 + NFR-03; design Lens 4 ("`.eml` → sanitized-HTML render" = BUILD). Placement Justification MUST be stated in the PR (cite `.claude/constraints/bff-extensions.md`): the render belongs server-side (MimeKit + SPE facade + trusted sanitize point); MimeKit already referenced (no new package); tests + publish-size report required. The client-side sandboxed iframe (task 033) is defense-in-depth on top of this authoritative server sanitize. Run `/conflict-check` before PR (BFF endpoint area near shared Communication services).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute (FULL rigor — code-review + adr-check at Step 9.5).</protocol></execution>
+</task>

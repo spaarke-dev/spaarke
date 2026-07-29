@@ -15,8 +15,11 @@ import {
   isDocumentUploaded,
   fileTypeLabel,
   cleanGuid,
-} from '../CommunicationAttachments/services/CommunicationAttachmentsService';
-import { AttachmentType, IAttachmentItem, IAttachmentRecord, IDocumentRecord } from '../CommunicationAttachments/types';
+  AttachmentType,
+  IAttachmentItem,
+  IAttachmentRecord,
+  IDocumentRecord,
+} from '@spaarke/communication-components/logic/attachments';
 
 const DOC = '_sprk_document_value';
 const DOC_FMT = '_sprk_document_value@OData.Community.Display.V1.FormattedValue';

@@ -3,6 +3,7 @@ export * from './lookupMatching';
 export * from './parseDataParams';
 export * from './quoteBody';
 export * from './safeRegister';
+export * from './sanitizeEmailHtml';
 export * from './themeDetection';
 export * from './themeStorage';
 export * from './xrmContext';

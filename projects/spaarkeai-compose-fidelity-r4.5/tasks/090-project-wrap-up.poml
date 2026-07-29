@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>Project wrap-up — status, lessons-learned, test-diet, publish-size, archive</title>
+    <phase>9 Wrap-up</phase>
+    <gate>blocked until all prior tasks</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + reconciliation only — README status, lessons-learned, success-criteria verification, publish-size report, archive. No `.cs`/`.ts` implementation. MINIMAL per root CLAUDE.md §8. (Invokes `/test-diet` per root §7 project-close gate — a read-only reconciliation, not implementation.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reconciliation + documentation against a closed checklist (6 success criteria, test-diet classifier, publish-size); no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W9</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wrap-up depends on every prior task being complete and reconciles project-wide state (TASK-INDEX, README, notes, test-diet) — runs last, alone.</parallel-reason>
+    <deps>all prior tasks</deps>
+    <tags>wrapup,test-diet,docs</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out the R4.5 project: update the project README status to Complete, verify all 6 spec success criteria pass,
+    write `notes/lessons-learned.md`, invoke `/test-diet` (root §7 project-close gate) to reconcile tests added/modified
+    during the project against the ADR-038 build-vs-maintain classifier, produce the final publish-size report, confirm
+    `/conflict-check` clean + no new HIGH CVE, and archive per repo-cleanup. This is documentation + reconciliation only
+    — no implementation. If ANY spec success criterion is still ❌, do NOT mark the project complete (see escalation).
+  </prompt>
+
+  <role>SPAARKE platform developer running project close-out. Knows the root §7 project-close test-diet gate, the ADR-038 build-vs-maintain classifier, the BFF publish-size verification rule (§10), and the repo-cleanup archive procedure. Follow ADRs strictly.</role>
+
+  <goal>
+    The R4.5 project is formally closed: README status = Complete; all 6 spec success criteria verified pass (or the
+    open one is surfaced, not silently marked done); `notes/lessons-learned.md` written; `/test-diet` run with
+    `notes/test-diet-report.md` produced; a final publish-size report (≤60 MB; WS-1..4 ~0 delta; WS-5 sidecar
+    out-of-publish); `/conflict-check` clean + no new HIGH CVE confirmed; repo archived per repo-cleanup.
+  </goal>
+
+  <context>
+    <background>
+      This is the `090-wrapup-*` task, so `task-execute` Step 11 invokes `/test-diet` BEFORE marking the project
+      complete (root CLAUDE.md §7 project-close test-diet gate, binding per `ci-cd-unit-test-remediation-r1` CICD-081).
+      `/test-diet` reconciles tests added/modified during R4.5 (WS-2/WS-3/WS-4 fidelity + seam slices) against the
+      ADR-038 build-vs-maintain classifier: MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are
+      emitted as `git rm`/`git mv` suggestions for the reviewer (the skill is read-only — it does not auto-execute).
+      The 6 spec success criteria (spec §Success Criteria) are the closed checklist this task verifies. WS-5 (page/line
+      spike) delivers a decision record, not shipped pagination — its engine, if pursued, is an out-of-publish sidecar.
+    </background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-compose-fidelity-r4.5/README.md — set project status to Complete</file>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/lessons-learned.md — what worked / what surprised / follow-ons (esp. R5 G3 numbering-model coupling, WS-5 decision outcome)</file>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/test-diet-report.md — `/test-diet` output (git rm / git mv suggestions for the reviewer)</file>
+      <file role="modify">projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md — confirm every prior task ✅ before closing</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-fidelity-r4.5/spec.md — the 6 success criteria this task verifies (§Success Criteria)</file>
+      <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md — build-vs-maintain classifier `/test-diet` applies</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="all prior tasks" status="pending">Every WS-1..WS-5 + corpus/harness task complete — the wrap-up reconciles project-wide state and cannot close until all are ✅.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root / §7">This is a `090-wrapup-*` task — `/test-diet` MUST be invoked BEFORE the project is marked complete (project-close gate). Scope: `/test-diet` is read-only; it emits `git rm`/`git mv` suggestions to `notes/test-diet-report.md` for the reviewer — it does NOT auto-delete/move tests.</constraint>
+    <constraint source="spec / Success Criteria">All 6 spec success criteria (one reader / text-exact / numbering-exact / referenceable / page-line honest / hygiene) MUST be verified. Scope: if any is still ❌, do NOT mark the project complete — surface the open criterion (escalation).</constraint>
+    <constraint source="project / BFF Hygiene §10">The final publish-size report MUST state absolute compressed size + delta vs ~49.63 MB baseline (incl. PDBs); WS-1..WS-4 expect ~0 MB delta, and WS-5's pagination engine (if pursued) MUST NOT be in the BFF publish (out-of-publish sidecar). Scope: confirm ≤60 MB ceiling; confirm no new HIGH CVE via `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="project">Run `/conflict-check` to confirm clean before close (`Services/Compose/` overlaps sibling compose worktrees). Scope: report the result in the wrap-up notes.</constraint>
+    <constraint source="root / repo-cleanup">Archive per the repo-cleanup procedure — remove ephemeral files, validate structure. Scope: preserve project artifacts (spec/design/plan/tasks/notes); do NOT delete deliverables.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out; project-close test-diet gate; ADR-038 build-vs-maintain classifier; BFF publish-size verification; repo-cleanup archive</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Project-close test-diet gate" location="docs/adr/ADR-038-testing-strategy.md">
+        `/test-diet` reconciles project tests vs the build-vs-maintain classifier; MAINTAIN stays at KEEP path, SCAFFOLDING is suggested for removal; read-only, reviewer executes.
+      </pattern>
+      <pattern name="Success-criteria verification" location="projects/spaarkeai-compose-fidelity-r4.5/spec.md">
+        The 6 closed success criteria — each verified pass before the project closes; an open ❌ blocks completion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: MINIMAL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec §Success Criteria, root §7 (project-close gate), ADR-038.</step>
+    <step order="1" name="Confirm all prior tasks ✅">Verify `tasks/TASK-INDEX.md` shows every prior task ✅. If any is not complete, STOP — the wrap-up cannot close an unfinished project.</step>
+    <step order="2" name="Verify the 6 success criteria">Verify each of the 6 spec success criteria (one reader / text-exact / numbering-exact / referenceable / page-line honest / hygiene). If ANY is still ❌, STOP and surface per the escalation trigger — do NOT proceed to mark complete.</step>
+    <step order="3" name="Invoke /test-diet">Run `/test-diet` (root §7 project-close gate) — reconcile tests added/modified during R4.5 vs the ADR-038 build-vs-maintain classifier; write `notes/test-diet-report.md` (git rm / git mv suggestions for the reviewer; read-only).</step>
+    <step order="4" name="Final publish-size + CVE report">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report absolute compressed size + delta vs ~49.63 MB baseline (incl. PDBs; WS-1..4 ~0 delta; WS-5 sidecar out-of-publish; ≤60 MB ceiling). Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE. Run `/conflict-check` — confirm clean.</step>
+    <step order="5" name="Write lessons-learned + README status">Write `notes/lessons-learned.md` (what worked / surprises / follow-ons — esp. the R5 G3 numbering-model coupling and the WS-5 decision outcome). Set the project README status to Complete.</step>
+    <step order="6" name="Archive">Archive per the repo-cleanup procedure — validate structure, remove ephemeral files, preserve deliverables.</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 090 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY of the 6 spec success criteria is still ❌ at wrap-up — do NOT mark the project complete. Surface the open criterion per root CLAUDE.md §6 (Human Escalation) and stop; the wrap-up must not paper over an unmet release blocker (text-exact and numbering-exact are release blockers per spec NFR-01/NFR-02).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/README.md (status → Complete)</output>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/test-diet-report.md (/test-diet output)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`tasks/TASK-INDEX.md` shows every prior task ✅ before the project is marked complete.</criterion>
+    <criterion testable="true">All 6 spec success criteria are verified pass; if any is ❌ the escalation fired and the project was NOT marked complete.</criterion>
+    <criterion testable="true">`/test-diet` was invoked and `notes/test-diet-report.md` exists with git rm / git mv suggestions (read-only; not auto-executed).</criterion>
+    <criterion testable="true">The final publish-size report states absolute compressed size + delta vs ~49.63 MB baseline (≤60 MB; WS-1..4 ~0 delta; WS-5 sidecar out-of-publish); `dotnet list package --vulnerable` shows no new HIGH CVE; `/conflict-check` clean.</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` is written (incl. R5 G3 numbering-model coupling + WS-5 decision outcome) and the README status is Complete.</criterion>
+    <criterion testable="true">The repo is archived per repo-cleanup — ephemeral files removed, deliverables (spec/design/plan/tasks/notes) preserved.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 090 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Root §7 project-close gate — `/test-diet` runs before completion; skipping is a HARD WARNING and the wrap-up PR must
+    cite the report or document the skip rationale. Text-exact (NFR-01) + numbering-exact (NFR-02) are release blockers
+    — a ❌ on either blocks project completion. WS-5 delivers a decision record only; do NOT claim shipped pagination.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

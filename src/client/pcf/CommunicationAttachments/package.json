@@ -18,6 +18,7 @@
     "test:watch": "jest --watch"
   },
   "dependencies": {
+    "@spaarke/communication-components": "file:../../shared/Spaarke.Communication.Components",
     "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {

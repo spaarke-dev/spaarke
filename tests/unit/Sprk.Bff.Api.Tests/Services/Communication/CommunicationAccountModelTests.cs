@@ -183,6 +183,56 @@ public class CommunicationAccountModelTests
 
     #endregion
 
+    #region ShouldArchiveIncoming (FR-17 default-on, forward-only)
+
+    // These pin the FR-17 contract: incoming mail to a MONITORED (receive-enabled) account is
+    // archived as a full-body .eml by DEFAULT (default-on), unless the account EXPLICITLY opts out.
+    // The predicate is the single source of truth for the archive gate in
+    // IncomingCommunicationProcessor Step 6. If someone were to flip default-on to opt-IN
+    // (e.g. `== true`), these tests break loudly — which is their whole purpose.
+
+    private static CommunicationAccount CreateMonitoredAccount(bool? archiveIncomingOptIn) =>
+        new()
+        {
+            Name = "Monitored",
+            EmailAddress = "shared@contoso.com",
+            AccountType = AccountType.SharedAccount,
+            ReceiveEnabled = true,          // "monitored"
+            MonitorFolder = "Inbox",
+            ArchiveIncomingOptIn = archiveIncomingOptIn
+        };
+
+    [Fact]
+    public void ShouldArchiveIncoming_WhenFlagUnset_ReturnsTrue()
+    {
+        // Monitored account, sprk_archiveincomingoptin unset (null) → default-on.
+        var account = CreateMonitoredAccount(archiveIncomingOptIn: null);
+
+        account.ShouldArchiveIncoming().Should().BeTrue(
+            "an unset opt-in flag is the intended default-on for monitored accounts (FR-17)");
+    }
+
+    [Fact]
+    public void ShouldArchiveIncoming_WhenFlagExplicitlyTrue_ReturnsTrue()
+    {
+        var account = CreateMonitoredAccount(archiveIncomingOptIn: true);
+
+        account.ShouldArchiveIncoming().Should().BeTrue(
+            "an explicit opt-in archives");
+    }
+
+    [Fact]
+    public void ShouldArchiveIncoming_WhenExplicitlyOptedOut_ReturnsFalse()
+    {
+        // Negative: explicit opt-out (false) MUST be honored — default-on does NOT override it.
+        var account = CreateMonitoredAccount(archiveIncomingOptIn: false);
+
+        account.ShouldArchiveIncoming().Should().BeFalse(
+            "an explicit opt-out (sprk_archiveincomingoptin = false) must be honored, not force-archived");
+    }
+
+    #endregion
+
     #region VerificationStatus Enum Values
 
     [Fact]

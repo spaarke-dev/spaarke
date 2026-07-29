@@ -123,13 +123,13 @@ export interface ComposeWorkspaceState {
    */
   importedComments: readonly ImportedComment[];
   /**
-   * Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
-   * DOCX→editor projection from a STORED-DOCUMENT Load response. When present, the editor mounts
-   * `projection.html` directly (the paraId extension parses `data-paraid`) instead of running mammoth +
-   * position-stamping ids — eliminating the two-engine drift. Fail-closed: `canEdit === false` ⇒ the editor
-   * renders a read-only / "Open in Word" state, NEVER a blank editable doc. Null for a transient (Browse /
-   * assistant-upload / AI-draft) mount or an older BFF that predates the projection field — those fall back
-   * to the client mammoth convert.
+   * The server-side DOCX→editor projection from a STORED-DOCUMENT Load response. When present, the
+   * editor mounts `projection.html` directly (the paraId extension parses `data-paraid`). Fail-closed:
+   * `canEdit === false` ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank editable
+   * doc. Null for an older BFF that predates the projection field, or (task 013, F-2 "one reader") a
+   * transient (Browse / assistant-upload / AI-draft) mount whose projection round-trip failed/was
+   * unreachable — the client-side mammoth fallback reader is DELETED, so a docx mount with a null
+   * projection now renders an explicit error/unavailable state instead.
    */
   projection: ComposeServerProjection | null;
   /** User-facing error message (NOT a Tier 3 sink). */
@@ -168,8 +168,8 @@ export type ComposeWorkspaceAction =
       paraIdMap?: readonly ParaIdMapEntry[];
       importedRevisions?: readonly ImportedRevision[];
       importedComments?: readonly ImportedComment[];
-      // Phase-1 mammoth removal: the server DOCX→editor projection. Undefined (older BFF) → null in the
-      // reducer → the editor falls back to the client mammoth convert (backward compatible).
+      // The server DOCX→editor projection. Undefined (older BFF) → null in the reducer → (task 013,
+      // F-2) the editor renders an explicit error/unavailable state — no client fallback reader remains.
       projection?: ComposeServerProjection | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
@@ -185,7 +185,23 @@ export type ComposeWorkspaceAction =
   // the caller MINTS a client-generated document session id and threads it here. When omitted
   // (the upload path's `mountTransient`, which follows `requestUploadMount`) the reducer
   // preserves the sessionId already on state — INVARIANT: no mount leaves state.sessionId empty.
-  | { kind: 'mountTransient'; docxBytes: ArrayBuffer; fileName?: string; containerId?: string; sessionId?: string }
+  //
+  // FR-01/FR-03 (tasks 010/011, spaarkeai-compose-fidelity-r4.5): `projection`, when supplied, is
+  // the SAME ComposeServerProjection shape the stored-doc Load path hydrates (see the
+  // `loadSucceeded` action above) — the assistant-upload door (POST /api/compose/upload) AND the
+  // Browse-direct-upload door (POST /api/compose/project, task 011, T-2 path-A) both run their
+  // bytes through the server projection builder now. Undefined/omitted (an older BFF, or a failed/
+  // unreachable projection call) normalizes to `null` in the reducer. Task 013 (F-2 "one reader"):
+  // the client mammoth fallback is DELETED, so a null projection on a docx mount now renders an
+  // explicit error/unavailable state (never a silent blank or degraded editor).
+  | {
+      kind: 'mountTransient';
+      docxBytes: ArrayBuffer;
+      fileName?: string;
+      containerId?: string;
+      sessionId?: string;
+      projection?: ComposeServerProjection | null;
+    }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
   // (inline draft / Blank page / Open template). Without it state.sessionId stays '', which makes the
@@ -276,7 +292,7 @@ export function composeWorkspaceReducer(
         paraIdMap: action.paraIdMap ?? [],
         importedRevisions: action.importedRevisions ?? [],
         importedComments: action.importedComments ?? [],
-        // Phase-1 mammoth removal: the server projection (null for an older BFF → mammoth fallback).
+        // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
         documentRef: state.documentRef
           ? {
@@ -333,8 +349,14 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
-        // No server round-trip → no projection; the editor falls back to the client mammoth convert.
-        projection: null,
+        // FR-01/FR-03 (tasks 010/011): both the assistant-upload door (POST /api/compose/upload)
+        // AND the Browse-direct-upload door (POST /api/compose/project, T-2 path-A) now supply a
+        // server projection built from the SAME mounted bytes (ComposeDocxProjectionBuilder) —
+        // hydrate it so the editor mounts via the projection branch, identical to stored-doc Load.
+        // `action.projection` normalizes to `null` here when omitted (an older BFF) or when the
+        // caller's projection round-trip failed/was unreachable — task 013 (F-2): the editor now
+        // renders an explicit error/unavailable state for that case (no client fallback reader).
+        projection: action.projection ?? null,
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -357,7 +379,9 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
-        // No server round-trip → no projection; the editor falls back to the client mammoth convert.
+        // No server round-trip → no projection. `docxBytes` is also null for this mount kind (the
+        // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
+        // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
         projection: null,
         errorMessage: null,
       };

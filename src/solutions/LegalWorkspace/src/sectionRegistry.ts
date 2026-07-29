@@ -57,6 +57,10 @@ import { communicationsRegistration } from "./sections/communications.registrati
 // by the "Compose" workspace layout (system row, task 010). Renders an inline
 // Skeleton placeholder in R1; task 042 swaps in the real TipTap widget.
 import { composeEditorRegistration } from "./sections/composeEditor.registration";
+// email-communication-solution-r5 task 041 (FR-01, 2026-07-28): Email section —
+// Outlook-style reading pane over sprk_communication. Pattern D dual-use with
+// the `email` direct widget in @spaarke/ai-widgets/register-workspace-widgets.
+import { emailRegistration } from "./sections/email.registration";
 
 /**
  * Per-widget customization options for the LegalWorkspace section registry.
@@ -121,6 +125,7 @@ export function createLegalWorkspaceSectionRegistry(
     createLegalWorkspaceDailyBriefingRegistration(options.dailyBriefing ?? {}),
     calendarRegistration,
     composeEditorRegistration,
+    emailRegistration,
   ] as const;
 
   if (process.env.NODE_ENV !== "production") {

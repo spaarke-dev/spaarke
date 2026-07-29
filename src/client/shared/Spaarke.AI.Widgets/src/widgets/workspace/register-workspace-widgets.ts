@@ -787,6 +787,36 @@ registerWorkspaceWidget(
 );
 
 // ---------------------------------------------------------------------------
+// email-communication-solution-r5 task 041 (FR-01, 2026-07-28): Email direct
+// widget. Pattern D dual-use with the `email` section in LegalWorkspace
+// (`email.registration.ts`). BOTH mounts render the SAME shared
+// `EmailWorkspace` composition root (task 040) from
+// `@spaarke/communication-components`, unchanged — dual-mount-parity per that
+// component's own docblock. `EmailWorkspaceWidget.tsx` (this package) is a
+// thin host-adapter wrapper: Xrm-backed `dataverseClient`/`dataService`/
+// `navigationService`/`webApi` + `useAiSession()` for `authenticatedFetch`/
+// `bffBaseUrl` — mirrors `DataverseEntityViewWidget.tsx`'s Xrm-adapter
+// pattern. Type string `email` is distinct from `communications-list`,
+// `email-compose`, and the LegalWorkspace section id `communications`
+// (ADR-039 Path C — no collision, no server-side surface identity).
+safeRegisterWidget(
+  'email',
+  {
+    displayName: 'Email',
+    category: 'data',
+    icon: 'MailRegular',
+    allowMultiple: true,
+    // defaultOrder=245: positioned immediately after Communications (240),
+    // before the metrics dashboards (300+).
+    defaultOrder: 245,
+  },
+  () =>
+    import('./EmailWorkspaceWidget').then(m => ({
+      default: m.EmailWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+// ---------------------------------------------------------------------------
 // ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
 //
 // Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is

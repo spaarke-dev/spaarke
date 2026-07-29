@@ -13,14 +13,17 @@
  * supplied, so standalone/test usage of `MessageRow` is unaffected.
  *
  * HTML bodies come from persisted email content (external senders included)
- * and are UNTRUSTED — sanitized via DOMPurify before `dangerouslySetInnerHTML`
- * (same library `renderMarkdown.ts` uses elsewhere in this package). Plain-text
- * bodies render as React text content (auto-escaped, no sanitization needed).
+ * and are UNTRUSTED — sanitized via the shared hardened `sanitizeEmailHtml`
+ * util (allow-list DOMPurify: no script/iframe/object, no `on*` handlers,
+ * schemes restricted to http/https/mailto, anchors forced to
+ * `rel="noopener noreferrer" target="_blank"`; task 001 / FR-16 / NFR-03)
+ * before `dangerouslySetInnerHTML`. Plain-text bodies render as React text
+ * content (auto-escaped, no sanitization needed).
  */
 import * as React from 'react';
 import { Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
 import { ChatRegular, MailRegular } from '@fluentui/react-icons';
-import DOMPurify from 'dompurify';
+import { sanitizeEmailHtml } from '../../../utils/sanitizeEmailHtml';
 import { ChannelBadge } from './ChannelBadge';
 import { PrivacyMarkers } from './PrivacyMarkers';
 import { MessageAttachments } from './MessageAttachments';
@@ -108,7 +111,7 @@ export const MessageRow: React.FC<IMessageRowProps> = ({
 
   const sanitizedHtml = React.useMemo(() => {
     if (message.bodyFormat !== 'html' || !message.body) return '';
-    return DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } });
+    return sanitizeEmailHtml(message.body);
   }, [message.bodyFormat, message.body]);
 
   const timestampLabel = message.sentOn ? new Date(message.sentOn).toLocaleString() : '';

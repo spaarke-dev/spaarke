@@ -1,0 +1,154 @@
+<task id="002" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>Extend the read-fidelity harness: text-exactness + numbering-exactness golden assertions</title>
+    <phase>0 Foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `tests/**` — the TEST-MODIFYING override (root CLAUDE.md §8) forces FULL: Step 9.5 (code-review + adr-check) runs UNCONDITIONALLY. This task also establishes the acceptance gate for spec success criteria 2+3 (release blockers), so correctness of the harness itself is load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Test-harness extension against a fully-specified assertion contract (character-for-character equality + golden-label compare); mechanical once the corpus + golden values exist (task 001).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Extends the test suite / seam harness only — different files from 001. No shared `Services/Compose/` source is modified (characterization baselines capture CURRENT behavior; no builder change here).</parallel-reason>
+    <deps>001</deps>
+    <tags>testing,seam,docx</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend the R4 byte-diff/seam fidelity harness (design §5) with two golden assertions over the corpus:
+    (a) a TEXT-EXACTNESS assertion — for each corpus doc, source run text equals projected text character-for-character,
+    per paragraph; and (b) a NUMBERING-EXACTNESS assertion — the computed displayed label equals the golden label Word
+    displays (recorded in task 001's manifest). Capture the CURRENT (broken) behavior as characterization baselines
+    so WS-2/WS-3 regressions AND fixes are visible: today numbers collapse to "1." on interruption, heading-style
+    numbers drop, and `w:sym`/`w:cr` drop silently. Follow ADR-038 (seam/KEEP-path; NO `Mock&lt;HttpMessageHandler&gt;`,
+    DI-registration, or ctor-null tests). Reference the existing suite `ComposeDocxProjectionBuilderTests.cs`, which
+    today has NO alignment / ordered-list / symbol tests.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with OOXML + xUnit fluency. Understands the R4.5 acceptance model: "success is
+    measured, not asserted" (design §5) — every corpus doc reports text-exact ✅/❌ and numbering-exact ✅/❌, and any
+    ❌ is a release blocker (NFR-01, NFR-02). Knows how to drive `ComposeDocxProjectionBuilder` headlessly over a
+    fixture and how to author characterization tests that lock in current (even wrong) behavior so a later fix is a
+    visible, intentional diff. Follow ADRs strictly — especially ADR-038's banned test shapes.
+  </role>
+
+  <goal>
+    An extended fidelity harness in the projection test surface with: (a) a per-paragraph text-exactness assertion
+    (source runs == projected text, character-for-character) parameterized over every corpus doc; (b) a
+    numbering-exactness assertion (computed label == golden label from task 001's manifest) parameterized over the
+    legal-numbering exemplars; and (c) characterization baselines that document the CURRENT broken behavior (numbers
+    collapse to "1.", heading numbers drop, `w:sym`/`w:cr` drop silently) so the WS-2/WS-3 fixes flip them from ❌ to
+    ✅ visibly. Build is green with the harness reporting the current state honestly (broken cases expected-fail /
+    characterized, not hidden).
+  </goal>
+
+  <context>
+    <background>
+      R4 shipped a byte-diff/seam harness for the projection but no character-for-character text-equality or
+      numbering-golden assertion — spec success criteria 2 (text-exact) and 3 (numbering-exact) are release blockers
+      that currently have NO measurement (design §5: "Success is measured, not asserted"). The existing projection
+      test suite `ComposeDocxProjectionBuilderTests.cs` has no alignment, ordered-list, or symbol tests (design §4
+      WS-2). This task builds the measurement layer FIRST — before the WS-2/WS-3 fixes — so the broken behavior is
+      captured as characterization baselines and the subsequent fixes are visible diffs, not silent changes. The
+      corpus inputs come from task 001; the numbering golden values are the labels Word displays, recorded in
+      `corpus-manifest.md`. Per NFR-01, the only permitted text transform is lossless HTML-structural encoding
+      (`&amp;`/`&lt;`/`&gt;`) — no trimming, collapsing, smart-quote rewriting, or silent glyph drops — so the
+      text-exactness assertion must decode that encoding before comparing.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the reader under test; single doc-order walk (`:18-26`), `AppendEscaped` (`:689-693`) is the verbatim text emit the text-exactness assertion mirrors; `ResolveOrdered` (`:791-814`) is the single-bit bullet-vs-ordered read that WS-3 replaces (numbering currently NOT computed)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs — extend with text-exactness + numbering-exactness + characterization tests (no alignment/ordered-list/symbol tests exist today)</file>
+      <file role="modify">tests/integration/seam/ — the byte-diff/seam vertical slice the fidelity harness extends (ADR-038 KEEP path)</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md — source of the golden numbering labels (produced by task 001)</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/*.docx — the corpus the harness parameterizes over (task 001 fixtures)</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — NFR-01 (text exactness / release blocker), NFR-02 (numbering exactness / release blocker), FR-09 (construct audit tests: alignment, ordered-list, symbol), ADR-038 constraint</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5 (read-fidelity harness — text-exactness + numbering-exactness golden)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Supplies the legal-numbering exemplars + the golden numbering labels in `corpus-manifest.md` the harness asserts against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">The fidelity harness is an integration/seam vertical slice at a KEEP path. Scope: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration test, NO ctor-null-check test; drive the real `ComposeDocxProjectionBuilder` over a real fixture and assert on the projection output.</constraint>
+    <constraint source="spec / NFR-01">The text-exactness assertion MUST compare source run text to projected text character-for-character, per paragraph, permitting ONLY reversal of lossless HTML-structural encoding (`&amp;`/`&lt;`/`&gt;`). Scope: no trimming, whitespace collapsing, smart-quote normalization, or Unicode folding in the comparison — those would mask exactly the drops WS-2 must fix.</constraint>
+    <constraint source="spec / NFR-02">The numbering-exactness assertion MUST compare the computed displayed label to the golden label Word displays (from task 001's manifest), per numbered paragraph. Scope: the golden value is the Word-displayed string; the assertion is release-blocking on ❌.</constraint>
+    <constraint source="project">Capture CURRENT broken behavior as characterization baselines, not as silent skips. Scope: today numbers collapse to "1." on interruption, heading-style numbers drop, and `w:sym`/`w:cr` drop silently — assert those current outcomes explicitly (or mark them expected-fail with a WS-2/WS-3 reference) so the later fix is a visible, intentional diff.</constraint>
+    <constraint source="project">This task writes TEST code only — it MUST NOT modify `ComposeDocxProjectionBuilder.cs` or any `Services/Compose/` source. Scope: the fixes belong to WS-2 (tasks 020-022) and WS-3 (tasks 030-033); keeping this task test-only preserves parallel-safety and a clean before/after diff.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xUnit characterization + golden-value testing; ADR-038 seam/KEEP-path DoD + banned test shapes; OOXML run-text extraction (w:t/w:sym/w:cr) for the source side of the equality; the R4.5 text-exact + numbering-exact acceptance model</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Characterization baseline before fix" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5">
+        Lock in the current (broken) projection output as a baseline so WS-2/WS-3 fixes flip ❌→✅ as a visible diff. A silent behavior change with no failing test is exactly what the harness exists to prevent.
+      </pattern>
+      <pattern name="Seam vertical slice (KEEP path)" location="tests/integration/seam/">
+        Drive the real reader over a real corpus fixture and assert on the projection — no HTTP-handler mock, no DI-registration assertion, no ctor null-check (ADR-038 bans).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON incl. the TEST-MODIFYING override → Step 9.5 unconditional / 📖 PROTOCOL STEPS). Load spec NFR-01/NFR-02/FR-09 + design §5 + ADR-038.</step>
+    <step order="1" name="Confirm headless invocation">Verify `ComposeDocxProjectionBuilder` can be driven headlessly over a corpus fixture (read bytes → projection) inside the test host. If it CANNOT read a corpus doc headlessly → STOP (escalation), surface the harness gap before writing assertions.</step>
+    <step order="2" name="Author the text-exactness assertion">Add a per-paragraph assertion parameterized over every corpus doc: extract source run text from the OOXML (w:t + the glyphs WS-2 will represent), decode the projection's HTML-structural encoding, and assert character-for-character equality per paragraph. Broken docs (e.g. `w:sym`/`w:cr` drops) are captured as characterization baselines / expected-fail with a WS-2 reference.</step>
+    <step order="3" name="Author the numbering-exactness assertion">Add an assertion parameterized over the legal-numbering exemplars: compare the computed displayed label to the golden label from `corpus-manifest.md`, per numbered paragraph. Since WS-3 is not yet built, capture the CURRENT output ("1." collapse, dropped heading numbers) as characterization baselines so WS-3 flips them to ✅.</step>
+    <step order="4" name="Add the missing construct tests">Add the alignment, ordered-list, and symbol projection tests that FR-09 notes are absent today, at characterization level.</step>
+    <step order="5" name="Report state honestly">Ensure the harness reports text-exact ✅/❌ and numbering-exact ✅/❌ per doc; build is green; broken cases are visible (characterized/expected-fail), not hidden by a lenient comparison.</step>
+    <step order="6" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 002 status to ✅.</step>
+    <step order="7" name="Record deviations">Document any deviation (e.g. a harness gap found in step 1) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the current projection cannot be invoked headlessly over a fixture (the harness cannot read a corpus doc into a projection inside the test host), STOP and surface the harness gap per CLAUDE.md §6 before writing any assertion — a green harness built on an un-runnable reader is worse than no harness.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The projection test suite `ComposeDocxProjectionBuilderTests.cs` exists but has NO character-for-character text-equality assertion and NO numbering golden-value assertion (and no alignment/ordered-list/symbol tests) — verified by inspecting the test file (grep for text-exact / golden / numbering assertions returns none; FR-09 records the absence).</existing>
+    <extension>Yes — extend the existing projection test suite + seam slice with new assertions; no new test project or harness abstraction is introduced.</extension>
+    <cost-of-doing-nothing>Spec success criteria 2 (text-exact) and 3 (numbering-exact) are release blockers with NO measurement — "success is measured, not asserted" (design §5); without this harness the WS-2/WS-3 fixes cannot be proven and a silent text-drop or numbering regression ships undetected.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/run the projection + seam tests (`dotnet test`)</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (text-exactness + numbering-exactness + alignment/ordered-list/symbol characterization tests)</output>
+    <output type="test">tests/integration/seam/ (fidelity harness slice extended with the two golden assertions over the corpus)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each corpus doc, when projected, then a per-paragraph text-exactness assertion compares source run text to projected text character-for-character (only HTML-structural encoding reversed); docs that currently drop glyphs are captured as characterization baselines / expected-fail with a WS-2 reference.</criterion>
+    <criterion testable="true">Given each legal-numbering exemplar, when projected, then a numbering-exactness assertion compares the computed label to the golden label in `corpus-manifest.md`; the CURRENT broken output ("1." collapse, dropped heading numbers) is captured as a baseline that WS-3 will flip to ✅.</criterion>
+    <criterion testable="true">Alignment, ordered-list, and symbol projection tests now exist (FR-09) where none did before.</criterion>
+    <criterion testable="true">The harness reports text-exact ✅/❌ and numbering-exact ✅/❌ per doc; no lenient comparison (trim/collapse/normalize) masks a drop.</criterion>
+    <criterion testable="true">No `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null-check test is introduced (ADR-038); tests drive the real reader over real fixtures.</criterion>
+    <criterion testable="true">Negative: this task modifies no `Services/Compose/` source — `ComposeDocxProjectionBuilder.cs` is unchanged; the harness change is test-only and `dotnet test` builds green.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 002 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This harness is the acceptance gate for the flagship (WS-3) and the read-hardening (WS-2). Building it FIRST,
+    with characterization baselines, is deliberate: it makes every subsequent projection change a visible ❌→✅ diff
+    rather than a silent behavior change. Text-exactness follows NFR-01 (verbatim, only HTML-structural encoding
+    permitted); numbering-exactness follows NFR-02 (golden label == Word display). Do NOT touch
+    `ComposeDocxProjectionBuilder.cs` — the fixes are WS-2 (020-022) and WS-3 (030-033). TASK-INDEX.md and
+    current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

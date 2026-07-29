@@ -686,8 +686,12 @@ export const ConversationView = React.forwardRef<ConversationViewHandle, Convers
     sinceCursorRef.current = newest;
   }, [state.messages]);
 
-  const handleMessages = React.useCallback((incoming: TimelineMessage[]) => {
-    dispatch({ type: 'MERGE_POLL', messages: incoming });
+  const handleMessages = React.useCallback((incoming: TimelineMessage[], isInitialLoad: boolean) => {
+    // Initial load (mount OR threadId change) REPLACES — the batch is the full,
+    // authoritative message set for this thread. Merging it instead would union
+    // the new thread's messages into the previous thread's when switching threads
+    // (RB R3 UAT 2026-07-28: a fresh thread showed every message on the record).
+    dispatch(isInitialLoad ? { type: 'SET_THREAD', messages: incoming } : { type: 'MERGE_POLL', messages: incoming });
   }, []);
 
   // ConversationView renders no unread badge of its own — that affordance belongs to the

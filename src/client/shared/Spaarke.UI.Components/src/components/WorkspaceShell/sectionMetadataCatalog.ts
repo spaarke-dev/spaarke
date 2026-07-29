@@ -228,7 +228,8 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   // rows via Layout 1 per the Phase-1 framework unification (FR-03/FR-20).
   {
     id: 'communications',
-    label: 'Communications',
+    // Human-facing label (§B UAT 2026-07-28 item 1). Section `id` stays "communications".
+    label: 'Messages',
     description: 'Email, Teams, SMS, and notifications related to your work',
     category: 'data',
     icon: MailRegular,
@@ -265,6 +266,21 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'productivity',
     icon: EditRegular,
     defaultHeight: '720px',
+  },
+  // email-communication-solution-r5 task 041 (FR-01, 2026-07-28): Email
+  // section — Outlook-style two-pane reading surface over sprk_communication
+  // (`EmailWorkspace`, task 040). Pattern D dual-use with the `email` direct
+  // widget in `@spaarke/ai-widgets/register-workspace-widgets.ts`. Distinct
+  // from the existing `communications` (dense list) section — see
+  // `email.registration.ts` module docblock + task 041 justification.
+  {
+    id: 'email',
+    label: 'Email',
+    description: 'Outlook-style reading pane for your email communications',
+    category: 'data',
+    icon: MailRegular,
+    defaultHeight: '720px',
+    entityName: 'sprk_communication',
   },
 ] as const;
 

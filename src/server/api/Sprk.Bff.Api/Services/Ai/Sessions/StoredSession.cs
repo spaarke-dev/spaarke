@@ -218,4 +218,18 @@ public class StoredSession
     /// </summary>
     [JsonPropertyName("activeDocument")]
     public ActiveDocumentIdentity? ActiveDocument { get; set; }
+
+    /// <summary>
+    /// R4.5 WS-4 (spaarkeai-compose-fidelity-r4.5 task 041, spec FR-17) — the persisted
+    /// <c>paraId -&gt; legal-number</c> reference map. Stored as the domain record directly
+    /// (same reuse rationale as <see cref="AnchoredAnnotations"/> — no parallel Stored* shape
+    /// where the record round-trips cleanly, root CLAUDE.md §11). Carried through the warm
+    /// tier so a Redis eviction / cold restore does not silently drop the reference map (the
+    /// same ADR-040 document-reference-survival MUST the sibling fields above document).
+    /// Empty for sessions with no reference map yet or for Cosmos documents that pre-date
+    /// this field (additive schema evolution per ADR-015; partition key unchanged). Tier 3
+    /// user-owned / GDPR-erased with the session document.
+    /// </summary>
+    [JsonPropertyName("referenceMap")]
+    public List<ParaReferenceMapEntry> ReferenceMap { get; set; } = [];
 }
