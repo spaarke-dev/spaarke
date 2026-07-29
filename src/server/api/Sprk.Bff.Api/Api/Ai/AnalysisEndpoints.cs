@@ -103,23 +103,6 @@ public static class AnalysisEndpoints
             .ProducesProblem(500)
             .ProducesProblem(503);
 
-        // DEPRECATED: Being replaced by ChatEndpoints (/api/ai/chat/sessions/{id}/messages).
-        // Kept for backward compatibility with useLegacyChat=true. Will be removed in future release.
-        // POST /api/ai/analysis/{analysisId}/continue - Continue analysis via chat
-        group.MapPost("/{analysisId:guid}/continue", ContinueAnalysis)
-            .AddAnalysisRecordAuthorizationFilter()
-            .RequireRateLimiting("ai-stream")
-            .WithName("ContinueAnalysis")
-            .WithSummary("Continue analysis via conversational chat")
-            .WithDescription("Continues an existing analysis using conversational refinement. Streams updated working document via SSE.")
-            .Produces(200, contentType: "text/event-stream")
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(404)
-            .ProducesProblem(429)
-            .ProducesProblem(500);
-
         // POST /api/ai/analysis/{analysisId}/save - Save working document to SPE
         group.MapPost("/{analysisId:guid}/save", SaveWorkingDocument)
             .AddAnalysisRecordAuthorizationFilter()
@@ -160,18 +143,6 @@ public static class AnalysisEndpoints
             .ProducesProblem(401)
             .ProducesProblem(403)
             .ProducesProblem(404);
-
-        // POST /api/ai/analysis/{analysisId}/resume - Resume existing analysis session
-        group.MapPost("/{analysisId:guid}/resume", ResumeAnalysis)
-            .AddAnalysisRecordAuthorizationFilter()
-            .WithName("ResumeAnalysis")
-            .WithSummary("Resume an existing analysis session")
-            .WithDescription("Creates an in-memory session for an existing analysis. Call this before /continue when reopening an analysis from Dataverse.")
-            .Produces<AnalysisResumeResult>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(500);
 
         return app;
     }
@@ -590,69 +561,6 @@ public static class AnalysisEndpoints
     }
 
     /// <summary>
-    /// [DEPRECATED] Continue an existing analysis via conversational chat.
-    /// Being replaced by ChatEndpoints. Kept for useLegacyChat=true backward compatibility.
-    /// POST /api/ai/analysis/{analysisId}/continue
-    /// </summary>
-    private static async Task ContinueAnalysis(
-        Guid analysisId,
-        AnalysisContinueRequest request,
-        IAnalysisOrchestrationService orchestrationService,
-        HttpContext context,
-        ILogger<AnalysisOrchestrationService> logger)
-    {
-        var cancellationToken = context.RequestAborted;
-        var response = context.Response;
-
-        // Set SSE headers + disable response buffering for real-time streaming
-        response.ContentType = "text/event-stream";
-        response.Headers.CacheControl = "no-cache";
-        response.Headers.Connection = "keep-alive";
-        response.Headers["X-Accel-Buffering"] = "no";
-
-        var bufferingFeature = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpResponseBodyFeature>();
-        bufferingFeature?.DisableBuffering();
-
-        logger.LogInformation(
-            "Continuing analysis {AnalysisId} with message, TraceId={TraceId}",
-            analysisId, context.TraceIdentifier);
-
-        try
-        {
-            await foreach (var chunk in orchestrationService.ContinueAnalysisAsync(analysisId, request.Message, context, cancellationToken))
-            {
-                await WriteSSEAsync(response, chunk, cancellationToken);
-            }
-
-            await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
-            await response.Body.FlushAsync(cancellationToken);
-
-            logger.LogInformation("Analysis continuation completed for {AnalysisId}", analysisId);
-        }
-        catch (OperationCanceledException)
-        {
-            logger.LogInformation(
-                "Client disconnected during analysis continuation, AnalysisId={AnalysisId}",
-                analysisId);
-        }
-        catch (KeyNotFoundException)
-        {
-            response.StatusCode = StatusCodes.Status404NotFound;
-            await response.WriteAsJsonAsync(new { error = $"Analysis {analysisId} not found" }, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Error during analysis continuation, AnalysisId={AnalysisId}", analysisId);
-
-            if (!cancellationToken.IsCancellationRequested)
-            {
-                var errorChunk = new AnalysisStreamChunk("error", null, true, Error: ex.Message);
-                await WriteSSEAsync(response, errorChunk, CancellationToken.None);
-            }
-        }
-    }
-
-    /// <summary>
     /// Save working document to SPE and create Document record.
     /// POST /api/ai/analysis/{analysisId}/save
     /// </summary>
@@ -766,35 +674,6 @@ public static class AnalysisEndpoints
         {
             return Results.NotFound(new { error = $"Analysis {analysisId} not found" });
         }
-    }
-
-    /// <summary>
-    /// Resume an existing analysis by creating an in-memory session.
-    /// POST /api/ai/analysis/{analysisId}/resume
-    /// </summary>
-    private static async Task<IResult> ResumeAnalysis(
-        Guid analysisId,
-        AnalysisResumeRequest request,
-        HttpContext httpContext,
-        IAnalysisOrchestrationService orchestrationService,
-        ILogger<AnalysisOrchestrationService> logger,
-        CancellationToken cancellationToken)
-    {
-        logger.LogInformation("Resuming analysis {AnalysisId}, IncludeChatHistory={IncludeChatHistory}",
-            analysisId, request.IncludeChatHistory);
-
-        var result = await orchestrationService.ResumeAnalysisAsync(analysisId, request, httpContext, cancellationToken);
-
-        if (!result.Success)
-        {
-            logger.LogWarning("Failed to resume analysis {AnalysisId}: {Error}", analysisId, result.Error);
-            return Results.BadRequest(new { error = result.Error });
-        }
-
-        logger.LogInformation("Analysis {AnalysisId} resumed: {ChatMessages} messages restored",
-            analysisId, result.ChatMessagesRestored);
-
-        return Results.Ok(result);
     }
 
     /// <summary>

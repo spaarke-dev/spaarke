@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
 
-// Note: AnalysisResumeResult is in Sprk.Bff.Api.Models.Ai namespace
-
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
@@ -17,22 +15,11 @@ public interface IAnalysisOrchestrationService
     // Sole production caller (AnalysisEndpoints.ExecuteAnalysis) was migrated by task 041 to
     // IPlaybookOrchestrationService.ExecuteAsync per ADR-013 Invariant 1 (the facade triangle
     // is the canonical AI invocation surface). No transition shim per spec NFR-06.
-
-    /// <summary>
-    /// Continue existing analysis via conversational chat.
-    /// Loads analysis context + chat history and streams updated output.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="userMessage">User's refinement message.</param>
-    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Async enumerable of stream chunks for SSE response.</returns>
-    /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
-    IAsyncEnumerable<AnalysisStreamChunk> ContinueAnalysisAsync(
-        Guid analysisId,
-        string userMessage,
-        HttpContext httpContext,
-        CancellationToken cancellationToken);
+    //
+    // ai-advanced-capabilities-analysis-hub-r1 task 062 (spec §13.5 / FR-20, 2026-07-29) —
+    // ContinueAnalysisAsync + ResumeAnalysisAsync (legacy in-memory session path, superseded by
+    // ChatEndpoints Redis→Cosmos model per task 020) were DELETED here. AnalysisResumeRequest /
+    // AnalysisResumeResult / AnalysisContinueRequest removed with them (no other consumers).
 
     /// <summary>
     /// Save working document to SPE and create Document record.
@@ -70,20 +57,6 @@ public interface IAnalysisOrchestrationService
     /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
     Task<AnalysisDetailResult> GetAnalysisAsync(
         Guid analysisId,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Resume an analysis session, restoring context and chat history.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="request">Resume request with document ID and chat history options.</param>
-    /// <param name="httpContext">HTTP context for OBO authentication when downloading files from SPE.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Resume result with restored context.</returns>
-    Task<AnalysisResumeResult> ResumeAnalysisAsync(
-        Guid analysisId,
-        AnalysisResumeRequest request,
-        HttpContext httpContext,
         CancellationToken cancellationToken);
 
     /// <summary>

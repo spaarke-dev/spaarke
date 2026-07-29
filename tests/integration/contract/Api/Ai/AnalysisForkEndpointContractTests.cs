@@ -281,9 +281,11 @@ public sealed class AnalysisForkEndpointTestFixture : IAsyncLifetime, IDisposabl
         builder.Services.AddSingleton(AnalysisServiceMock.Object);
         builder.Services.AddSingleton(EntityServiceMock.Object);
 
-        // ── Sibling endpoints in the same MapAnalysisEndpoints group (create/execute/continue/
-        //    save/export/get/resume) — service types must be registered so minimal-API parameter
+        // ── Sibling endpoints in the same MapAnalysisEndpoints group (create/execute/save/
+        //    export/get) — service types must be registered so minimal-API parameter
         //    inference treats them as services at map time even though these tests never invoke them.
+        //    (continue/resume retired — ai-advanced-capabilities-analysis-hub-r1 task 062, spec
+        //    §13.5/FR-20, 2026-07-29.)
         builder.Services.AddHttpContextAccessor();
         builder.Services.AddSingleton(Options.Create(new AnalysisOptions { Enabled = true }));
         builder.Services.AddSingleton(Mock.Of<IPlaybookOrchestrationService>());

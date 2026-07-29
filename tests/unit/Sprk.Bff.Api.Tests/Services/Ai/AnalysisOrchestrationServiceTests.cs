@@ -139,29 +139,12 @@ public class AnalysisOrchestrationServiceTests
     // (which now exercises `IPlaybookOrchestrationService.ExecuteAsync` via the migrated
     // endpoint). See task 040 audit for the deletion-scope inventory.
 
-    #region ContinueAnalysisAsync Tests
-
-    [Fact]
-    public async Task ContinueAnalysisAsync_AnalysisNotFound_ThrowsKeyNotFoundException()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-
-        // Act & Assert
-        var chunks = new List<AnalysisStreamChunk>();
-        var act = async () =>
-        {
-            await foreach (var chunk in _service.ContinueAnalysisAsync(analysisId, "Continue", _mockHttpContext, CancellationToken.None))
-            {
-                chunks.Add(chunk);
-            }
-        };
-
-        await act.Should().ThrowAsync<KeyNotFoundException>()
-            .WithMessage($"*{analysisId}*not found*");
-    }
-
-    #endregion
+    // ai-advanced-capabilities-analysis-hub-r1 task 062 (spec §13.5 / FR-20, 2026-07-29) — the
+    // ContinueAnalysisAsync Tests region (1 test) was DELETED here: the legacy in-memory session
+    // production method was deleted in the same task (superseded by ChatEndpoints Redis→Cosmos
+    // model per task 020), so the test could no longer defend any contract. Per ADR-038 §7
+    // build-vs-maintain criteria — this test lived outside the 7 KEEP paths (build-class), so no
+    // same-PR replacement is required.
 
     #region SaveWorkingDocumentAsync Tests
 

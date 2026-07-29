@@ -81,16 +81,9 @@ public class AnalysisEndpointsTests
         attr.Should().NotBeEmpty();
     }
 
-    [Fact]
-    public void AnalysisContinueRequest_MessageIsRequired()
-    {
-        // Assert
-        var attr = typeof(AnalysisContinueRequest)
-            .GetProperty(nameof(AnalysisContinueRequest.Message))!
-            .GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute), false);
-
-        attr.Should().NotBeEmpty();
-    }
+    // ai-advanced-capabilities-analysis-hub-r1 task 062 (spec §13.5 / FR-20, 2026-07-29) —
+    // AnalysisContinueRequest_MessageIsRequired was DELETED here: AnalysisContinueRequest.cs
+    // (the legacy /continue request model) was deleted in the same task.
 
     #endregion
 

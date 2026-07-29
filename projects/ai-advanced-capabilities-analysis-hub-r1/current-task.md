@@ -3,7 +3,9 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W6 — 062 (retire legacy session path), ORDERED retirement (prescriptive, ESCALATION-GUARDED on sprk_chathistory provenance)
+**Active task**: W6 — 063 (delete web resources + AnalysisWorkspace tree + reconcile casing), ORDERED retirement (prescriptive)
+
+> **064 owes (062 hand-off, notes/task-062-handoff-to-064.md)**: the `sprk_chathistory` WRITE cleanup (`IWorkingDocumentService.UpdateChatHistoryAsync` impl, `AnalysisResultPersistence` if provably dead after GET/save read-drop, and the 3-file Dataverse column plumbing) — deferred because the reader is live until 064 drops the GET/save `sprk_chathistory` read.
 **Next action**: W6 060 → 061 → 062 → 063; 064 after 062 (repoint BEFORE delete, §13.5) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 050 ✅ 051–053 ✅ (19/28). Phases 1–5 COMPLETE. Publish 46.16 MB.
 
 > **W6 is the ordered/prescriptive retirement (§13.5)** — MUST run serially: repoint server deep-links (060) → repoint client launch points (061) → retire legacy session path (062, escalation-guarded on sprk_chathistory provenance) → delete web resources + tree (063); 064 (migrate save/get + generalize hooks + fold 3-pane) after 062. Nothing dangles.
