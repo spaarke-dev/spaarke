@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: 011 - Client sprk_analysis TypeScript type (net-new)
-**Next action**: task 011 running (W2a); on completion → W2b (012 ∥ 013 parallel). 010 ✅ (schema verified present via MCP).
+**Active task**: W2b — 012 (regarding field-set) ∥ 013 (file SPE hop), parallel
+**Next action**: 012 + 013 running in parallel; on completion → W3 (session phase, serial). Done: 001 ✅ 010 ✅ 011 ✅.
 
 ## Pipeline progress (2026-07-28)
 

@@ -4,7 +4,7 @@
     <title>Client `sprk_analysis` TypeScript type (net-new)</title>
     <phase>1 Data spine</phase>
     <gate>blocked-until-010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (a net-new type surface) with a fixed schema contract; no runtime behavior or ADR-blast-radius — STANDARD per the rigor tree.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -122,4 +122,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge files. Follow task-execute (STANDARD rigor; Step 9.5 gates skipped).</protocol>
   </execution>
+
+  <completion-note date="2026-07-28">
+    Created `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts` — first client `sprk_analysis` type
+    (`ISprkAnalysisRecord` + `SprkAnalysisWorkType`/`SprkAnalysisStatus` enums + `AnalysisWorkTypeId`
+    closed kebab union + `SPRK_ANALYSIS_SELECT`). Field shapes verified against
+    `docs/data-model/field-mapping-reference.md` (Analysis domain) +
+    `notes/schema-prerequisites.md` VERIFIED PRESENT section. First `types/` folder in SpaarkeAi
+    solution (precedented by sibling `code-pages/CommunicationPage/src/types/`); no barrel added,
+    matching that sibling's direct-import convention. No SPE pointer fields added (ADR-007
+    compliant); no `any`. `npm run typecheck` (tsc-surface-gate) → 0 surface-owned errors. Full
+    deviation rationale in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-011-sprk-analysis-type.md`.
+  </completion-note>
 </task>
