@@ -83,9 +83,10 @@ export const EmailReadingAttachments: React.FC<IEmailReadingAttachmentsProps> = 
 }) => {
   const s = useStyles();
 
-  const service = React.useMemo(() => new CommunicationAttachmentsService(toAttachmentsWebApi(dataService)), [
-    dataService,
-  ]);
+  const service = React.useMemo(
+    () => new CommunicationAttachmentsService(toAttachmentsWebApi(dataService)),
+    [dataService]
+  );
   const apiService = React.useMemo(() => new AttachmentApiService(apiBaseUrl), [apiBaseUrl]);
 
   const [items, setItems] = React.useState<IAttachmentItem[]>([]);

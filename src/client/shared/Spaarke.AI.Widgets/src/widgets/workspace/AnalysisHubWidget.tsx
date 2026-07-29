@@ -112,11 +112,7 @@ const WORK_TYPE_AGREEMENT_REVIEW = 100000000;
  * The hub only pre-sets regarding=parent (entry case 2b) when the launch's record
  * context is one of these; any other host entity opens the hub unforced.
  */
-const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set([
-  'sprk_matter',
-  'sprk_project',
-  'sprk_document',
-]);
+const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set(['sprk_matter', 'sprk_project', 'sprk_document']);
 
 // ---------------------------------------------------------------------------
 // Grid configuration — sprk_gridconfiguration for the hub's Analysis grid
@@ -175,9 +171,7 @@ interface AnalysisSessionLookupResponse {
  * `null` when the Analysis has no linked document — callers MUST treat that as "no file",
  * never fabricate a pointer.
  */
-function resolveRowDocumentInfo(
-  record: Record<string, unknown>
-): { documentId: string; documentName: string } | null {
+function resolveRowDocumentInfo(record: Record<string, unknown>): { documentId: string; documentName: string } | null {
   const documentId = record['_sprk_documentid_value'];
   if (typeof documentId !== 'string' || documentId.length === 0) {
     return null;
@@ -412,10 +406,7 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
       void (async (): Promise<void> => {
         let session: AnalysisSessionLookupResponse;
         try {
-          const lookupUrl = buildBffApiUrl(
-            bffBaseUrl,
-            `/ai/chat/sessions/by-analysis/${encodeURIComponent(recordId)}`
-          );
+          const lookupUrl = buildBffApiUrl(bffBaseUrl, `/ai/chat/sessions/by-analysis/${encodeURIComponent(recordId)}`);
           const response = await authenticatedFetch(lookupUrl, { headers: { Accept: 'application/json' } });
 
           if (response.status === 404) {
@@ -514,12 +505,7 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
           Analyses
         </Text>
         {reopenNotice && (
-          <Text
-            size={200}
-            className={styles.reopenNotice}
-            role="status"
-            data-testid="analysis-hub-reopen-notice"
-          >
+          <Text size={200} className={styles.reopenNotice} role="status" data-testid="analysis-hub-reopen-notice">
             {reopenNotice}
           </Text>
         )}

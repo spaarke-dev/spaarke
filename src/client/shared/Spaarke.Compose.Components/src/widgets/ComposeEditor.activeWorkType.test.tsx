@@ -22,10 +22,7 @@ import { render, screen, within, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 import { ComposeEditor } from './ComposeEditor';
-import {
-  registerComposeAiToolbarAction,
-  __resetComposeAiToolbarActionsForTests,
-} from './ComposeAiToolbar';
+import { registerComposeAiToolbarAction, __resetComposeAiToolbarActionsForTests } from './ComposeAiToolbar';
 
 // ComposeAiToolbar's `useAuth()` throws outside a real `initAuth()` bootstrap (MSAL) — same
 // stub as the sibling `ComposeEditor.aiToolbarTriggers.test.tsx` mock (no action is dispatched
@@ -40,10 +37,7 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-function renderComposeEditor(
-  activeWorkType: string | undefined,
-  theme: typeof webLightTheme = webLightTheme
-) {
+function renderComposeEditor(activeWorkType: string | undefined, theme: typeof webLightTheme = webLightTheme) {
   return render(
     <FluentProvider theme={theme}>
       <PaneEventBusProvider>
@@ -110,7 +104,7 @@ describe('ComposeEditor — activeWorkType host prop (task 041, FR-13)', () => {
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
   });
 
-  it('Negative: an unrecognized activeWorkType value scopes to shared \'*\' tools only (no throw, no partial match)', async () => {
+  it("Negative: an unrecognized activeWorkType value scopes to shared '*' tools only (no throw, no partial match)", async () => {
     registerAgreementOnlyTool();
     const { container } = renderComposeEditor('some-unregistered-work-type');
     await screen.findByRole('textbox');

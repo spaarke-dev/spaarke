@@ -89,14 +89,17 @@ export function mapRowToEmailCardItem(row: Record<string, unknown>): EmailCardIt
   const rawBody = asString(row['sprk_body']);
   const preview = rawBody ? htmlToPlainTextPreview(sanitizeEmailHtml(rawBody)) : '';
   const communicationType =
-    typeof row['sprk_communicationtype'] === 'number' ? (row['sprk_communicationtype'] as number) : EMAIL_COMMUNICATION_TYPE;
+    typeof row['sprk_communicationtype'] === 'number'
+      ? (row['sprk_communicationtype'] as number)
+      : EMAIL_COMMUNICATION_TYPE;
 
   return {
     id: asString(row['sprk_communicationid']),
     from: asString(row['sprk_from']),
     subject: asString(row['sprk_subject']) || '(no subject)',
     preview,
-    date: asNullableString(row['sprk_receiveddate']) ?? asNullableString(row['sprk_sentat']) ?? asString(row['createdon']),
+    date:
+      asNullableString(row['sprk_receiveddate']) ?? asNullableString(row['sprk_sentat']) ?? asString(row['createdon']),
     isUnread: false,
     communicationType,
   };

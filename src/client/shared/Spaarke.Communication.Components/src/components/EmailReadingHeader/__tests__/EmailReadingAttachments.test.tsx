@@ -200,9 +200,7 @@ describe('EmailReadingAttachments', () => {
       />
     );
 
-    await waitFor(() =>
-      expect(screen.getByText('Could not load attachments for this email.')).toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.getByText('Could not load attachments for this email.')).toBeInTheDocument());
     errorSpy.mockRestore();
   });
 

@@ -1719,102 +1719,105 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     browseFileInputRef.current?.click();
   }, [onBrowseRequested]);
 
-  const handleBrowseFileSelected = React.useCallback((event: React.ChangeEvent<HTMLInputElement>): void => {
-    const file = event.target.files?.[0] ?? null;
-    // Reset the input value so re-selecting the same file still fires a change event.
-    event.target.value = '';
-    if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
+  const handleBrowseFileSelected = React.useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>): void => {
+      const file = event.target.files?.[0] ?? null;
+      // Reset the input value so re-selecting the same file still fires a change event.
+      event.target.value = '';
+      if (!file) return; // user cancelled the picker — empty state unchanged, nothing mounts
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (!(result instanceof ArrayBuffer)) return;
-      // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
-      // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
-      setSearchResolvedDriveId(null);
-      // Wave 2 (UAT-R3 Test #3 fix): mint the tab's DOCUMENT session id here. Unlike the
-      // assistant-upload path (which gets a server sessionId via requestUploadMount), a Browse
-      // mount never hits the server for its identity, so its `mountTransient` reducer previously
-      // left state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId:
-      // ''`, which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
-      // EDIT (redline). A minted, tab-lifetime id restores EDIT routing (DEF-09/DEF-11) and the
-      // redline-from-ledger materialization (which aborts on empty state.sessionId).
-      const browseDocumentSessionId = mintDocumentSessionId();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        if (!(result instanceof ArrayBuffer)) return;
+        // A Browse mount has no SPE drive — clear any stale Search-resolved drive id
+        // (FR-02/task 011) so a later Save doesn't key off the WRONG drive.
+        setSearchResolvedDriveId(null);
+        // Wave 2 (UAT-R3 Test #3 fix): mint the tab's DOCUMENT session id here. Unlike the
+        // assistant-upload path (which gets a server sessionId via requestUploadMount), a Browse
+        // mount never hits the server for its identity, so its `mountTransient` reducer previously
+        // left state.sessionId ''. That empty id caused the AI toolbar to thread `documentSessionId:
+        // ''`, which ConversationPane reclassified as INFORMATIONAL (prose card) instead of a compose
+        // EDIT (redline). A minted, tab-lifetime id restores EDIT routing (DEF-09/DEF-11) and the
+        // redline-from-ledger materialization (which aborts on empty state.sessionId).
+        const browseDocumentSessionId = mintDocumentSessionId();
 
-      // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2 path-A resolution): project the
-      // browsed bytes through the SAME stateless server reader Load/Upload use (POST
-      // /api/compose/project) so Browse renders via the one-reader projection branch (F-2). This is a
-      // READ-only round-trip: the server returns a projection and persists NOTHING (no ITenantCache
-      // write, no SPE write, no sprk_document row) — it does NOT violate ADR-040 / R4 I-2 (the client
-      // still authors no .docx bytes; it merely asks the server to render bytes it already holds
-      // locally, and the server hands back a render without storing or echoing them as an authored
-      // artifact).
-      //
-      // Task 013 (F-2 "one reader") RECONCILIATION: the client mammoth fallback reader has been
-      // DELETED, so Browse now HARD-REQUIRES this round-trip to produce an editable surface. The
-      // fetch below stays best-effort at the NETWORK layer (unconfigured `bffBaseUrl` / thrown fetch
-      // still fall through with `projection: null`, and `mountTransient` still dispatches so the tab
-      // navigates and the file is registered with the active chat session) — but a null projection no
-      // longer degrades to a lossy mammoth render. `ComposeEditor` now renders an explicit "couldn't
-      // prepare this document for editing" error/unavailable state for a docx mount with no
-      // projection (see `ComposeEditor.tsx`'s `projectionUnavailable` state) — never a silent blank or
-      // degraded editor.
-      void (async () => {
-        let projection: ComposeServerProjection | null = null;
-        if (bffBaseUrl) {
-          try {
-            const response = await authenticatedFetch(`${bffBaseUrl}/api/compose/project`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
-            });
-            if (response.ok) {
-              const payload = (await response.json()) as { projection?: RawComposeProjectionPayload };
-              projection = normalizeProjection(payload.projection);
+        // FR-03 (task 011, spaarkeai-compose-fidelity-r4.5, T-2 path-A resolution): project the
+        // browsed bytes through the SAME stateless server reader Load/Upload use (POST
+        // /api/compose/project) so Browse renders via the one-reader projection branch (F-2). This is a
+        // READ-only round-trip: the server returns a projection and persists NOTHING (no ITenantCache
+        // write, no SPE write, no sprk_document row) — it does NOT violate ADR-040 / R4 I-2 (the client
+        // still authors no .docx bytes; it merely asks the server to render bytes it already holds
+        // locally, and the server hands back a render without storing or echoing them as an authored
+        // artifact).
+        //
+        // Task 013 (F-2 "one reader") RECONCILIATION: the client mammoth fallback reader has been
+        // DELETED, so Browse now HARD-REQUIRES this round-trip to produce an editable surface. The
+        // fetch below stays best-effort at the NETWORK layer (unconfigured `bffBaseUrl` / thrown fetch
+        // still fall through with `projection: null`, and `mountTransient` still dispatches so the tab
+        // navigates and the file is registered with the active chat session) — but a null projection no
+        // longer degrades to a lossy mammoth render. `ComposeEditor` now renders an explicit "couldn't
+        // prepare this document for editing" error/unavailable state for a docx mount with no
+        // projection (see `ComposeEditor.tsx`'s `projectionUnavailable` state) — never a silent blank or
+        // degraded editor.
+        void (async () => {
+          let projection: ComposeServerProjection | null = null;
+          if (bffBaseUrl) {
+            try {
+              const response = await authenticatedFetch(`${bffBaseUrl}/api/compose/project`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
+              });
+              if (response.ok) {
+                const payload = (await response.json()) as { projection?: RawComposeProjectionPayload };
+                projection = normalizeProjection(payload.projection);
+              }
+            } catch {
+              // Network/parse failure — fall through with projection: null. The MOUNT itself still
+              // proceeds (dispatch below), but per task 013 (F-2) the editor renders the explicit
+              // error/unavailable state rather than a degraded render — there is no fallback reader.
+              projection = null;
             }
-          } catch {
-            // Network/parse failure — fall through with projection: null. The MOUNT itself still
-            // proceeds (dispatch below), but per task 013 (F-2) the editor renders the explicit
-            // error/unavailable state rather than a degraded render — there is no fallback reader.
-            projection = null;
           }
-        }
 
-        // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
-        // knows which SPE container to mint the new sprk_document's drive-item in.
+          // FR-05 (task 100): carry the host-resolved BU container so the first Save (create-on-save)
+          // knows which SPE container to mint the new sprk_document's drive-item in.
+          dispatch({
+            kind: 'mountTransient',
+            docxBytes: result,
+            fileName: file.name,
+            containerId: containerIdRef.current,
+            sessionId: browseDocumentSessionId,
+            projection,
+          });
+          // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
+          // (create-on-save, task 013) is enabled immediately.
+          setIsDirty(true);
+          // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
+          // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
+          // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
+          // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
+          // the PaneEventBus (ADR-015 keeps the bus content-free).
+          // Wave 3 Part 2: thread the tab's minted document session id so the server sets
+          // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
+          void registerActiveDocumentRef.current?.({
+            docxBytes: result,
+            fileName: file.name,
+            documentSessionId: browseDocumentSessionId,
+          });
+        })();
+      };
+      reader.onerror = () => {
         dispatch({
-          kind: 'mountTransient',
-          docxBytes: result,
-          fileName: file.name,
-          containerId: containerIdRef.current,
-          sessionId: browseDocumentSessionId,
-          projection,
+          kind: 'loadFailed',
+          errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
         });
-        // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
-        // (create-on-save, task 013) is enabled immediately.
-        setIsDirty(true);
-        // task 113 (UAT defect 4): register this Browse/direct mount with the active chat session so
-        // chat "summarize this document" + a later "edit in Compose" resolve THIS file. Fire-and-
-        // forget; the host lands the bytes as a ChatSessionFile + marks the active document. Null
-        // (no-op) on a standalone LegalWorkspace mount. Bytes travel by a direct function call — never
-        // the PaneEventBus (ADR-015 keeps the bus content-free).
-        // Wave 3 Part 2: thread the tab's minted document session id so the server sets
-        // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
-        void registerActiveDocumentRef.current?.({
-          docxBytes: result,
-          fileName: file.name,
-          documentSessionId: browseDocumentSessionId,
-        });
-      })();
-    };
-    reader.onerror = () => {
-      dispatch({
-        kind: 'loadFailed',
-        errorMessage: `Failed to read "${file.name}". The file may be corrupted or unreadable.`,
-      });
-    };
-    reader.readAsArrayBuffer(file);
-  }, [bffBaseUrl]);
+      };
+      reader.readAsArrayBuffer(file);
+    },
+    [bffBaseUrl]
+  );
 
   // -------------------------------------------------------------------------
   // Item 7 (UAT round-4) — Blank page / Open template born-in-editor mounts

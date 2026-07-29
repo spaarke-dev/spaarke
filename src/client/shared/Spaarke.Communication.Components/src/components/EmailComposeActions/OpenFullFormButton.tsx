@@ -39,12 +39,7 @@ export const OpenFullFormButton: React.FC<OpenFullFormButtonProps> = ({
 
   return (
     <Tooltip content="Open full form" relationship="label">
-      <ToolbarButton
-        icon={<Open20Regular />}
-        aria-label="Open full form"
-        disabled={disabled}
-        onClick={handleClick}
-      />
+      <ToolbarButton icon={<Open20Regular />} aria-label="Open full form" disabled={disabled} onClick={handleClick} />
     </Tooltip>
   );
 };

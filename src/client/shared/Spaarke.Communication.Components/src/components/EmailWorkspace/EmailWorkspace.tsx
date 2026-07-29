@@ -52,7 +52,11 @@ import { EmailBodyView } from '../EmailBody';
 import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHeader';
 import { EmailConnectionsReview, EmailTrackingPanel } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions, OpenFullFormButton } from '../EmailComposeActions';
-import { COMMUNICATION_ENTITY, DEFAULT_ACCESS_PERMISSION_OPTIONS, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
+import {
+  COMMUNICATION_ENTITY,
+  DEFAULT_ACCESS_PERMISSION_OPTIONS,
+  mapRowToEmailCardItem,
+} from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
 

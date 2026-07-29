@@ -185,8 +185,14 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
           <div key={`email-skeleton-${index}`} className={styles.skeletonCard}>
             <Skeleton aria-label="Loading email">
               <SkeletonItem shape="rectangle" style={{ width: '40%', height: '12px' }} />
-              <SkeletonItem shape="rectangle" style={{ width: '70%', height: '12px', marginTop: tokens.spacingVerticalXS }} />
-              <SkeletonItem shape="rectangle" style={{ width: '90%', height: '10px', marginTop: tokens.spacingVerticalXS }} />
+              <SkeletonItem
+                shape="rectangle"
+                style={{ width: '70%', height: '12px', marginTop: tokens.spacingVerticalXS }}
+              />
+              <SkeletonItem
+                shape="rectangle"
+                style={{ width: '90%', height: '10px', marginTop: tokens.spacingVerticalXS }}
+              />
             </Skeleton>
           </div>
         ))}
@@ -225,20 +231,16 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
             onBlur={() => setFocusedId(prev => (prev === item.id ? undefined : prev))}
           >
             <div className={styles.cardHeaderRow}>
-              {unread && (
-                <span
-                  className={styles.unreadDot}
-                  role="img"
-                  aria-label="Unread"
-                  title="Unread"
-                />
-              )}
+              {unread && <span className={styles.unreadDot} role="img" aria-label="Unread" title="Unread" />}
               <Text className={mergeClasses(styles.from, unread ? styles.fromUnread : undefined)} title={item.from}>
                 {item.from}
               </Text>
               <Text className={styles.date}>{formatCardDate(item.date)}</Text>
             </div>
-            <Text className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)} title={item.subject}>
+            <Text
+              className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)}
+              title={item.subject}
+            >
               {item.subject}
             </Text>
             <Text className={styles.preview} title={item.preview}>
