@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Ai.Communication;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Engine;
@@ -39,6 +42,40 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// grounding for email triage; read-only reference to the shared field map (Engine/RegardingFieldMap.cs
     /// is not modified by this task).</summary>
     private static readonly string MatterRegardingField = RegardingFieldMap.FieldFor("sprk_matter")!;
+
+    /// <summary>
+    /// Task 025 (FR-07) — as-built <c>sprk_triagepriority</c> CHOICE integer values on
+    /// <c>sprk_communication</c>, per <c>notes/schema-to-create.md</c> ("AS-BUILT option-set values,
+    /// confirmed by operator 2026-07-29 — AUTHORITATIVE for implementation") and re-confirmed by
+    /// <c>notes/011-triage-fields-verified.md</c>. Maps the TRIAGE-EMAIL Action's raw <c>Priority</c> label
+    /// (task 022/023's <c>$choices</c> contract) to the Dataverse option-set integer. An unrecognized or
+    /// missing label is intentionally absent from this map — <see cref="PersistTriageResultAsync"/> leaves
+    /// <c>sprk_triagepriority</c> unset rather than guessing (best-effort, no fabricated value).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, int> TriagePriorityOptionSetValues =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Urgent"] = 100000000,
+            ["High"] = 100000001,
+            ["Medium"] = 100000002,
+            ["Low"] = 100000003,
+        };
+
+    /// <summary>
+    /// Task 025 (FR-07) — as-built <c>sprk_reviewoutcome</c> CHOICE integer values on
+    /// <c>sprk_communication</c> (D-05 "review outcome", never "disposition"), per
+    /// <c>notes/schema-to-create.md</c>. Maps the TRIAGE-EMAIL Action's raw <c>ReviewOutcome</c> label to the
+    /// Dataverse option-set integer; an unrecognized/missing label leaves <c>sprk_reviewoutcome</c> unset.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, int> ReviewOutcomeOptionSetValues =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["File"] = 100000000,
+            ["Update"] = 100000001,
+            ["Route"] = 100000002,
+            ["Dismiss"] = 100000003,
+            ["Pending"] = 100000004,
+        };
 
     public CommunicationEnrichmentService(
         IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
@@ -258,12 +295,13 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// fails capture or send.
     /// </para>
     /// <para>
-    /// <b>Persistence is task 025's job.</b> This step logs the produced
+    /// <b>Persistence (task 025, FR-07).</b> This step logs the produced
     /// <see cref="CommunicationTriageResult"/> (closed-set label fields only — summary/obligations are
-    /// free text and are NOT logged, per ADR-015) but does NOT write any <c>sprk_communication</c> triage
-    /// field. Task 025 extends this method (immediately after the <c>_triageAi.TriageAsync</c> call below)
-    /// to add the field writes, mapping the five result fields to the as-built columns documented in
-    /// <c>notes/022-triage-email-action.md</c> §2.
+    /// free text and are NOT logged, per ADR-015) and then persists it to the <c>sprk_communication</c>
+    /// triage fields via <see cref="PersistTriageResultAsync"/> — the SAME <see cref="IGenericEntityService"/>
+    /// write path already used throughout this class (no new write mechanism). Persistence is itself
+    /// best-effort (NFR-04): a write/resolve failure degrades + logs and never prevents the already-produced
+    /// <see cref="CommunicationTriageResult"/> from being returned/hoisted for task 024's RI-confidence step.
     /// </para>
     /// <para>
     /// <b>Result is hoisted for task 024 (FR-04).</b> Returns the produced <see cref="CommunicationTriageResult"/>
@@ -327,8 +365,146 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             "Enrichment[email-triage] produced triage result | CommunicationId: {CommunicationId}, Category: {Category}, Priority: {Priority}, ReviewOutcome: {ReviewOutcome}, ObligationCount: {ObligationCount}, MatterGrounded: {MatterGrounded}.",
             communicationId, result.Category, result.Priority, result.ReviewOutcome, result.Obligations.Count, matterRef is not null);
 
-        // Task 025 persists `result` to sprk_communication's triage fields here.
+        // Task 025 (FR-07): persist the produced result to sprk_communication's triage fields. Best-effort
+        // (NFR-04) — its own try/catch means a persistence failure never prevents `result` from being
+        // returned/hoisted for task 024's RI-confidence step, and RunStepAsync's outer guard on the
+        // "email-triage" step is defense-in-depth on top of that.
+        await PersistTriageResultAsync(communicationId, result, classification, provenanceJson, ct).ConfigureAwait(false);
+
         return result;
+    }
+
+    // ── Task 025 (FR-07): persist the triage output to sprk_communication ───────
+    /// <summary>
+    /// Persists the TRIAGE-EMAIL Action's five-field output (task 022/023) — plus the FR-04 RI-confidence
+    /// (task 024) — onto the <c>sprk_communication</c> triage fields (task 011), via the SAME
+    /// <see cref="IGenericEntityService.UpdateAsync"/> write path already used throughout this class (no
+    /// new write mechanism, no second resolver).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Category → lookup resolution (ADR-024).</b> <paramref name="result"/>'s <c>Category</c> is the
+    /// Action's raw taxonomy-label string (task 013's seeded <c>sprk_triagecategory</c> rows, e.g.
+    /// <c>"Court / Filing"</c>) — this method resolves the NAME to the taxonomy row's GUID via
+    /// <see cref="ResolveTriageCategoryIdAsync"/> and writes a typed <see cref="EntityReference"/>, never
+    /// free text. An unmatched category (no seeded row with that <c>sprk_name</c>) degrades gracefully:
+    /// <c>sprk_triagecategory</c> is left unset and the miss is logged — this method never fabricates a
+    /// taxonomy row.
+    /// </para>
+    /// <para>
+    /// <b>RI-confidence parity with task 024.</b> Computes <c>sprk_riconfidence</c> via the SAME
+    /// <see cref="RiConfidenceScorer.Compute"/> formula and the SAME inputs
+    /// <see cref="ComputeRiConfidenceAsync"/> uses for the <c>communication_assessed</c> signal — urgency
+    /// preferring <paramref name="result"/>.<c>Priority</c>, falling back to
+    /// <paramref name="classification"/>.<c>Urgency</c> (the SAME reconstructed signal
+    /// <see cref="RunEmailTriageAsync"/> already produced), and deterministic agreement from
+    /// <see cref="Engine.AssociationDecisionTrace.TopDeterministicConfidence"/> reconstructed from the SAME
+    /// <paramref name="provenanceJson"/> string this method's caller already read. Reusing identical inputs
+    /// (not re-reading Dataverse a third time) guarantees the persisted value matches the emitted signal's
+    /// confidence exactly.
+    /// </para>
+    /// <para>
+    /// <b>Best-effort (NFR-04).</b> The ENTIRE method is wrapped in try/catch — any failure (category
+    /// resolution query, the Dataverse update itself) degrades to a logged warning and returns without
+    /// throwing. This is independent, inner defense-in-depth on top of <see cref="RunStepAsync"/>'s outer
+    /// guard on the "email-triage" step; either layer alone is sufficient to keep a persistence failure from
+    /// ever reaching the capture/send path.
+    /// </para>
+    /// <para>
+    /// <b>Idempotent / additive-only.</b> The update dictionary carries ONLY the six triage fields — it
+    /// never touches association/regarding fields or any field another enrichment step owns.
+    /// </para>
+    /// </remarks>
+    private async Task PersistTriageResultAsync(
+        Guid communicationId,
+        CommunicationTriageResult result,
+        CommunicationClassificationResult classification,
+        string? provenanceJson,
+        CancellationToken ct)
+    {
+        try
+        {
+            var fields = new Dictionary<string, object>();
+
+            // category → sprk_triagecategory (LOOKUP → sprk_triagecategory taxonomy; ADR-024 — a resolved
+            // reference, never free text). No match → leave unset (best-effort, never fabricate a row).
+            if (!string.IsNullOrWhiteSpace(result.Category))
+            {
+                var categoryId = await ResolveTriageCategoryIdAsync(result.Category, ct).ConfigureAwait(false);
+                if (categoryId.HasValue)
+                {
+                    fields["sprk_triagecategory"] = new EntityReference("sprk_triagecategory", categoryId.Value);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Enrichment[email-triage] persist: no sprk_triagecategory taxonomy row matches category {Category} — leaving sprk_triagecategory unset | CommunicationId: {CommunicationId}.",
+                        result.Category, communicationId);
+                }
+            }
+
+            // priority → sprk_triagepriority (CHOICE; as-built integers). Unrecognized/missing → unset.
+            if (TriagePriorityOptionSetValues.TryGetValue(result.Priority ?? string.Empty, out var priorityValue))
+            {
+                fields["sprk_triagepriority"] = new OptionSetValue(priorityValue);
+            }
+
+            // summary → sprk_triagesummary (multiline text).
+            fields["sprk_triagesummary"] = result.Summary ?? string.Empty;
+
+            // obligations[] → sprk_triageobligation (SINGULAR — as-built name; D-06 lean JSON string array).
+            fields["sprk_triageobligation"] = JsonSerializer.Serialize(result.Obligations ?? Array.Empty<string>());
+
+            // reviewOutcome → sprk_reviewoutcome (CHOICE; as-built integers). Unrecognized/missing → unset.
+            if (ReviewOutcomeOptionSetValues.TryGetValue(result.ReviewOutcome ?? string.Empty, out var outcomeValue))
+            {
+                fields["sprk_reviewoutcome"] = new OptionSetValue(outcomeValue);
+            }
+
+            // RI-confidence → sprk_riconfidence: SAME formula + SAME inputs as ComputeRiConfidenceAsync
+            // (task 024), so the persisted value matches the communication_assessed signal's confidence.
+            var provenance = PersistedClassificationSignalReader.TryDeserializeProvenance(provenanceJson);
+            var deterministicAgreement = provenance?.Decision.TopDeterministicConfidence ?? 0.0;
+            var urgencyWeight = !string.IsNullOrWhiteSpace(result.Priority)
+                ? RiConfidenceScorer.UrgencyWeightFromPriority(result.Priority)
+                : RiConfidenceScorer.UrgencyWeightFromClassification(classification.Urgency);
+            fields["sprk_riconfidence"] = RiConfidenceScorer.Compute(urgencyWeight, deterministicAgreement);
+
+            await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Enrichment[email-triage] persisted triage output to sprk_communication | CommunicationId: {CommunicationId}, FieldCount: {FieldCount}.",
+                communicationId, fields.Count);
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: a persistence failure MUST NOT fail capture/enrichment — degrade + log, never throw.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-triage] failed to persist triage output to sprk_communication (non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves a TRIAGE-EMAIL Action <c>category</c> NAME (e.g. <c>"Court / Filing"</c>) to its task-013
+    /// seeded <c>sprk_triagecategory</c> row id via the SAME <see cref="IGenericEntityService.RetrieveMultipleAsync(QueryExpression, CancellationToken)"/>
+    /// read path other services in this codebase already use for name lookups (no new query mechanism).
+    /// Returns <c>null</c> when no row matches — the caller degrades gracefully rather than fabricating a
+    /// taxonomy row (ADR-024).
+    /// </summary>
+    private async Task<Guid?> ResolveTriageCategoryIdAsync(string categoryName, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_triagecategory")
+        {
+            ColumnSet = new ColumnSet(false),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, categoryName);
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
     }
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────

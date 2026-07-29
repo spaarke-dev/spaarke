@@ -3,7 +3,7 @@
     <title>Persist triage output to `sprk_communication` triage fields on the enrichment path</title>
     <phase>P2 — Lean intelligence spine</phase>
     <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>011, 022</dependencies>
     <deps>011, 022</deps>
