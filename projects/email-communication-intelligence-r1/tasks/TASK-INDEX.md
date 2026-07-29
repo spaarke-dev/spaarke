@@ -28,7 +28,7 @@
 | 041 | Attachment-grounded action extraction — ground Action on extracted attachment text, gated to action-triggers | P4 | bff-api, catalog | FR-13 | 040 | P4 | **false** (shared) | FULL | opus/high | 🔲 |
 | 042 | Regarding-vs-related intent — classify file/update/new-related; demote identifier on "new filing based on X"; propose create-record linked as related | P4 | bff-api, catalog, communication | FR-12 | 020, 022 | P4 | **false** (shared) | FULL | opus/xhigh | 🔲 |
 | 050 | SPIKE: shared vs M365-group mailbox Graph subscription + Exchange `ApplicationAccessPolicy` model; `GraphSubscriptionManager` delta (FR-15 sizing) | P5 | investigation, spike | FR-15 | — | P5 | true | STANDARD | opus/high | ✅ (escalation FIRED) |
-| 051a | Shared-mailbox capture coverage — verify `SharedAccount` subscription + exactly-once + operator runbook line (XS, no code) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | 🔲 |
+| 051a | Shared-mailbox capture coverage — verify `SharedAccount` subscription + exactly-once + operator runbook line (XS, no code) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | ✅ (no code; verified + runbook) |
 | 051b | M365-group-mailbox capture — forked pipeline (**BLOCKED: owner decision A-descope / B-build / C-defer; needs `Group.Read.All` + security sign-off**) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | ⛔ |
 | 060 | Deploy BFF + Dataverse to `spaarkedev1` | P6 | deploy | — | 010–051 (all impl) | P6 | **false** | STANDARD | sonnet/medium | 🔲 |
 | 061 | Operator browser UAT — success criteria 1–9 | P6 | ui-test | (all) | 060 | P6 | true | MINIMAL | sonnet/low | 🔲 |
