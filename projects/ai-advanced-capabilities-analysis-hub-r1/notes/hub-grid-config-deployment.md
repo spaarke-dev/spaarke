@@ -23,6 +23,25 @@ const ANALYSIS_HUB_GRID_CONFIG_ID = '00000000-0000-0000-0000-000000000000'; // P
 No `sprk_gridconfiguration` row over `sprk_analysis` exists yet in any environment. Handed to
 task 071 (deploy) to seed + replace this constant.
 
+## ✅ SEEDED in spaarkedev1 (2026-07-29, front-door wiring)
+
+All records below created via the Dataverse MCP against `spaarkedev1`. The widget constant is now
+baked: `ANALYSIS_HUB_GRID_CONFIG_ID = 'e7c8126a-968b-f111-8077-7ced8ddc4a05'`.
+
+| Artifact | Name | GUID |
+|---|---|---|
+| savedquery (default) | Analysis Hub — All Analyses | `f6252a4e-968b-f111-8077-7ced8ddc4a05` |
+| savedquery | Analysis Hub — Agreement Review (`sprk_worktype=100000000`) | `50130256-968b-f111-8077-7ced8ddc4a05` |
+| savedquery | Analysis Hub — Legal Research (`sprk_worktype=100000001`) | `53130256-968b-f111-8077-7ced8ddc4a05` |
+| savedquery | Analysis Hub — Patent Application (`sprk_worktype=100000002`) | `58130256-968b-f111-8077-7ced8ddc4a05` |
+| sprk_gridconfiguration | Analysis Hub (→ sprk_analysis; `source.availableViews` allowlist = the 4 views above) | `e7c8126a-968b-f111-8077-7ced8ddc4a05` |
+| sprk_workspacelayout | Analysis (single-column, sectionId `analysis`, isSystem=true, sortOrder 11) | `666ce576-968b-f111-8077-7ced8ddc4a05` |
+
+Columns on all 4 views: `sprk_name`, `sprk_worktype`, `statuscode`, `createdon`. The gridconfig's
+`availableViews` allowlist scopes the DataGrid `ViewSelector` dropdown to exactly these 4 (not every
+sibling `sprk_analysis` savedquery). Views are live immediately (no publish needed — the DataGrid
+framework reads `savedquery` records directly via the BFF/Web API).
+
 ## What must be created (one row + four saved queries)
 
 Unlike the 6 pre-existing `ENTITY_VIEW_CONFIG_IDS` entries (each pointing at ONE saved query), the

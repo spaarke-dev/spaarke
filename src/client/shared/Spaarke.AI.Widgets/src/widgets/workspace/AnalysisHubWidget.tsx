@@ -142,7 +142,7 @@ const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set([
  * (via `DataverseEntityViewWidget` → `fetchConfigRecord`) renders a clear empty state —
  * no production crash.
  */
-const ANALYSIS_HUB_GRID_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
+const ANALYSIS_HUB_GRID_CONFIG_ID = 'e7c8126a-968b-f111-8077-7ced8ddc4a05';
 
 /** Widget-type string passed to the nested `DataverseEntityViewWidget` for debug/sub-routing only. */
 const ANALYSIS_HUB_GRID_WIDGET_TYPE = 'analysis-hub-grid';
