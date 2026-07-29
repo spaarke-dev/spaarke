@@ -60,4 +60,14 @@ export interface EmailTrackingPanelProps {
   accessPermissionLabel?: string;
   /** Disables the controls (visual + pointer-events) — no write affordance. */
   readOnly?: boolean;
+  /**
+   * Compact rendering for placement in the reading-pane HEADER BAND
+   * (email-communication-solution-r5, layout redesign): hides the "Tracking"
+   * section label and the `TrackingFieldTrio` field-caption row, so only the
+   * Monitor/High-priority switches + Access segmented control render — no
+   * behavior change, purely a tighter visual footprint. Default `false`
+   * (the original full section rendering, unused by any current caller now
+   * that tracking lives in the header band, but preserved for reuse).
+   */
+  compact?: boolean;
 }

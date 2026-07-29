@@ -323,6 +323,18 @@ describe('EmailTrackingPanel', () => {
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
+
+  it('compact mode (reading-pane header band placement) hides the "Tracking" label and field captions, but keeps the controls read/write functional', () => {
+    const onAccessPermissionChange = jest.fn();
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ compact: true, onAccessPermissionChange })} />);
+
+    expect(screen.queryByText('Tracking')).not.toBeInTheDocument();
+    expect(screen.queryByText('Monitor')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('switch')).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
+    expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
+  });
 });
 
 describe('Negative: production logic, not the stale stub', () => {

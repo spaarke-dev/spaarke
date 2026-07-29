@@ -8,31 +8,40 @@
  * component UNCHANGED. This is the dual-mount-parity guarantee: a bug fixed
  * here fixes both surfaces; there is no second copy of the wiring.
  *
- * Composition (Outlook-style two-pane, design Lens 2):
+ * Composition (Outlook-style, one-column compose-style reading pane —
+ * reading-pane layout redesign):
  *   - Top: `EmailViewSelector` (031) over `sprk_communication` saved views,
  *     driving `EmailCardList` (030) via the task-031 `useEmailViews` hook.
- *   - Right pane: `EmailReadingPaneShell` (032) with all five `render*` slots
- *     filled —
- *       renderHeader      → `EmailReadingHeader` (034) + `OpenFullFormButton`
- *                            (036, FR-15) rendered directly above it, near
- *                            the shell's own full-width toolbar.
- *       renderBody        → `EmailBodyView` (033), fed `sprk_body` + the
- *                            resolved `.eml` archive document id from this
- *                            component's own per-selection record read.
- *       renderAttachments → `EmailReadingAttachments` (034).
- *       renderConnections → `EmailConnectionsReview` (035), fed the
- *                            association state from the same per-selection
- *                            read; `onAssociationsChanged` re-reads it.
- *       renderTracking    → `EmailTrackingPanel` (035), fed tracking values
- *                            + write callbacks from the same read.
- *     actions             → `useEmailComposeActions` (036) — Reply/Reply
- *                            All/Forward/New open the ONE canonical
- *                            `SendEmailDialog`/`EmailComposer`, never forked.
+ *   - Right pane: `EmailReadingPaneShell` (032) with its two `render*` slots
+ *     filled, top → bottom:
+ *       1. renderHeader → `EmailReadingHeader` — the HEADER BAND: subject
+ *          (left) + compact tracking trio + demoted "Open full form" icon
+ *          button (right). Rendered ABOVE the toolbar.
+ *       2. (the shell's own full-width `EmailToolbar` — Reply/Reply All/
+ *          Forward/New/Archive/Create — unchanged.)
+ *       3-6. renderBody → this component composes, in order:
+ *            - `EmailRecipients` — labeled From/To (always) + Cc/Bcc (only
+ *              when present), compose-style.
+ *            - `EmailBodyView` (033), fed `sprk_body` + the resolved `.eml`
+ *              archive document id from this component's own per-selection
+ *              record read.
+ *            - Attachments section — bold "Attachments" header +
+ *              `EmailReadingAttachments` (034).
+ *            - "Related to" section — bold header + `EmailConnectionsReview`
+ *              (035, the association resolver — confirm/change/dismiss/
+ *              link-another), fed the association state from the same
+ *              per-selection read; `onAssociationsChanged` re-reads it.
+ *     actions → `useEmailComposeActions` (036) — Reply/Reply All/Forward/New
+ *               open the ONE canonical `SendEmailDialog`/`EmailComposer`,
+ *               never forked.
  *
- * This component owns the ONE per-selection Dataverse read shared by the
- * connections/tracking/body slots (`useEmailWorkspaceRecord`) — the header
- * and attachments sub-views do their OWN internal reads (task 034's existing
- * design), so nothing here duplicates or forks that behavior.
+ * This component owns the ONE per-selection Dataverse read shared by every
+ * slot (`useEmailWorkspaceRecord` — no `$select`, so a field absent on a
+ * given deployment degrades to `null`/`false`, never a throw). The header
+ * band used to run its OWN internal `retrieveRecord(..., $select)` read —
+ * that second, redundant read failed at runtime ("Could not load this email
+ * header."); it has been REMOVED as part of this redesign. There is exactly
+ * one per-selection Dataverse read left in this tree.
  *
  * NFR-06 (binding): NO per-mount conditional branch (widget-vs-code-page, or
  * equivalent) anywhere in this file. Every dependency arrives as a host-
@@ -45,13 +54,14 @@
  * `React.FC` + standard hooks only, no `as React.ComponentType` cast.
  */
 import * as React from 'react';
-import { makeStyles, tokens, Toolbar } from '@fluentui/react-components';
+import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailBodyView } from '../EmailBody';
 import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHeader';
-import { EmailConnectionsReview, EmailTrackingPanel } from '../EmailAssociationsAndTracking';
-import { useEmailComposeActions, OpenFullFormButton } from '../EmailComposeActions';
+import { EmailRecipients } from '../EmailRecipients';
+import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
+import { useEmailComposeActions } from '../EmailComposeActions';
 import { COMMUNICATION_ENTITY, DEFAULT_ACCESS_PERMISSION_OPTIONS, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
@@ -83,42 +93,27 @@ const useStyles = makeStyles({
     minHeight: 0,
     overflow: 'hidden',
   },
-  headerRow: {
+  bodyRegion: {
     display: 'flex',
     flexDirection: 'column',
   },
-  openFullFormRow: {
+  section: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalS,
+    paddingBlock: tokens.spacingVerticalL,
     paddingInline: tokens.spacingHorizontalXL,
-    paddingTop: tokens.spacingVerticalXS,
+    borderTopWidth: tokens.strokeWidthThin,
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+  },
+  sectionTitle: {
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
   },
 });
-
-/** Header slot content: `OpenFullFormButton` (FR-15) rendered near the shell's toolbar, directly above `EmailReadingHeader`. */
-const EmailWorkspaceHeaderRow: React.FC<{
-  selectedId: string;
-  dataService: EmailWorkspaceProps['dataService'];
-  onOpenFullForm: (communicationId: string) => Promise<void>;
-}> = ({ selectedId, dataService, onOpenFullForm }) => {
-  const s = useStyles();
-  return (
-    <div className={s.headerRow}>
-      <div className={s.openFullFormRow}>
-        {/* `OpenFullFormButton` wraps a Fluent `ToolbarButton` (task 036) — hosting
-            it inside its own single-button `Toolbar` matches Fluent's expected
-            parent context (the shell's OWN `EmailToolbar` is a separate, sibling
-            `Toolbar` instance; task 036's component is intentionally NOT edited
-            here, per this task's "consume, don't modify" guardrail). */}
-        <Toolbar aria-label="Record actions">
-          <OpenFullFormButton communicationId={selectedId} onOpenFullForm={onOpenFullForm} />
-        </Toolbar>
-      </div>
-      <EmailReadingHeader selectedId={selectedId} dataService={dataService} />
-    </div>
-  );
-};
-EmailWorkspaceHeaderRow.displayName = 'EmailWorkspaceHeaderRow';
 
 export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   dataverseClient,
@@ -178,41 +173,9 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           onSelectedIdChange={setSelectedId}
           actions={actions}
           renderHeader={id => (
-            <EmailWorkspaceHeaderRow selectedId={id} dataService={dataService} onOpenFullForm={openFullForm} />
-          )}
-          renderBody={id => (
-            <EmailBodyView
-              selectedId={id}
-              emlDocumentId={record.emlDocumentId}
-              body={record.recordState?.sprk_body ?? ''}
-              recordLoadError={record.recordLoadError}
-              onRetryRecord={record.retry}
-              authenticatedFetch={authenticatedFetch}
-            />
-          )}
-          renderAttachments={id => (
-            <EmailReadingAttachments
-              selectedId={id}
-              dataService={dataService}
-              navigation={navigationService}
-              apiBaseUrl={bffBaseUrl}
-            />
-          )}
-          renderConnections={id => (
-            <EmailConnectionsReview
+            <EmailReadingHeader
               communicationId={id}
-              associationStatus={record.recordState?.associationStatus ?? null}
-              associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
-              regardingRecordName={record.recordState?.regardingRecordName ?? null}
-              filedAssociations={record.recordState?.filedAssociations ?? []}
-              writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
-              pickerWebApi={webApi}
-              linkAnotherCatalog={linkAnotherCatalog}
-              onAssociationsChanged={record.reload}
-            />
-          )}
-          renderTracking={() => (
-            <EmailTrackingPanel
+              subject={record.recordState?.subject ?? null}
               monitor={record.recordState?.monitor ?? false}
               highPriority={record.recordState?.highPriority ?? false}
               accessPermission={record.recordState?.accessPermission ?? null}
@@ -220,7 +183,52 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
               onMonitorChange={record.updateMonitor}
               onHighPriorityChange={record.updateHighPriority}
               onAccessPermissionChange={record.updateAccessPermission}
+              onOpenFullForm={openFullForm}
             />
+          )}
+          renderBody={id => (
+            <div className={s.bodyRegion}>
+              <EmailRecipients
+                from={record.recordState?.from ?? null}
+                to={record.recordState?.to ?? null}
+                cc={record.recordState?.cc ?? null}
+                bcc={record.recordState?.bcc ?? null}
+              />
+
+              <EmailBodyView
+                selectedId={id}
+                emlDocumentId={record.emlDocumentId}
+                body={record.recordState?.sprk_body ?? ''}
+                recordLoadError={record.recordLoadError}
+                onRetryRecord={record.retry}
+                authenticatedFetch={authenticatedFetch}
+              />
+
+              <section className={s.section}>
+                <Text className={s.sectionTitle}>Attachments</Text>
+                <EmailReadingAttachments
+                  selectedId={id}
+                  dataService={dataService}
+                  navigation={navigationService}
+                  apiBaseUrl={bffBaseUrl}
+                />
+              </section>
+
+              <section className={s.section}>
+                <Text className={s.sectionTitle}>Related to</Text>
+                <EmailConnectionsReview
+                  communicationId={id}
+                  associationStatus={record.recordState?.associationStatus ?? null}
+                  associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
+                  regardingRecordName={record.recordState?.regardingRecordName ?? null}
+                  filedAssociations={record.recordState?.filedAssociations ?? []}
+                  writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
+                  pickerWebApi={webApi}
+                  linkAnotherCatalog={linkAnotherCatalog}
+                  onAssociationsChanged={record.reload}
+                />
+              </section>
+            </div>
           )}
         />
       </div>

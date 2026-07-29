@@ -137,8 +137,28 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
   return filed;
 }
 
-/** Envelope/association/tracking fields this workspace derives from one `retrieveRecord` (no `$select`) call per selection. */
+/**
+ * Envelope/association/tracking fields this workspace derives from one
+ * `retrieveRecord` (no `$select`) call per selection.
+ *
+ * `subject`/`from`/`to`/`cc`/`bcc`/`sentAt`/`receivedDate` were added
+ * (email-communication-solution-r5, reading-pane layout redesign) to retire
+ * `EmailReadingHeader`'s OWN internal `retrieveRecord(..., HEADER_SELECT)`
+ * call — that second read used a `$select` string against `sprk_communication`
+ * and failed at runtime ("Could not load this email header"). These fields
+ * are read DEFENSIVELY (`asNullableString`) from the SAME no-`$select` record
+ * this hook already fetches, so a field absent on a given deployment degrades
+ * to `null` rather than throwing — there is exactly ONE per-selection read in
+ * this component tree now.
+ */
 export interface EmailWorkspaceRecordState {
+  subject: string | null;
+  from: string | null;
+  to: string | null;
+  cc: string | null;
+  bcc: string | null;
+  sentAt: string | null;
+  receivedDate: string | null;
   sprk_body: string;
   regardingRecordName: string | null;
   associationStatus: number | null;
@@ -152,6 +172,13 @@ export interface EmailWorkspaceRecordState {
 /** Derive the full workspace record state from one raw `retrieveRecord` payload. */
 export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorkspaceRecordState {
   return {
+    subject: asNullableString(raw['sprk_subject']),
+    from: asNullableString(raw['sprk_from']),
+    to: asNullableString(raw['sprk_to']),
+    cc: asNullableString(raw['sprk_cc']),
+    bcc: asNullableString(raw['sprk_bcc']),
+    sentAt: asNullableString(raw['sprk_sentat']),
+    receivedDate: asNullableString(raw['sprk_receiveddate']),
     sprk_body: asString(raw['sprk_body']),
     regardingRecordName: asNullableString(raw['sprk_regardingrecordname']),
     associationStatus: asNullableNumber(raw['sprk_associationstatus']),

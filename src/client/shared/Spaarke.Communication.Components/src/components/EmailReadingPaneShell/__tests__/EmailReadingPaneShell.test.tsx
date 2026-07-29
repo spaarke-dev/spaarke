@@ -2,12 +2,14 @@
  * EmailReadingPaneShell.test.tsx
  *
  * Unit/RTL tests for `<EmailReadingPaneShell />` (email-communication-solution-r5
- * task 032). Covers the closed acceptance set from the task POML: two-pane
- * layout with the reused `PanelSplitter` (FR-05), selection driving the right
- * pane's slot renderers, the "Select an email" empty state (FR-19), splitter
- * width persistence across remounts, the full-width toolbar's six actions
- * dispatching through host-supplied handlers (FR-08), and dark-mode theming
- * (ADR-021).
+ * task 032; reworked for the reading-pane layout redesign's two-slot contract
+ * — `renderHeader` rendered ABOVE the toolbar, `renderBody` rendered BELOW
+ * it). Covers the closed acceptance set from the task POML: two-pane layout
+ * with the reused `PanelSplitter` (FR-05), selection driving the right
+ * pane's slot renderers in the header-then-toolbar-then-body order, the
+ * "Select an email" empty state (FR-19), splitter width persistence across
+ * remounts, the full-width toolbar's six actions dispatching through
+ * host-supplied handlers (FR-08), and dark-mode theming (ADR-021).
  */
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -45,9 +47,6 @@ function renderShell(overrides: Partial<EmailReadingPaneShellProps> = {}, theme 
       items={items}
       renderHeader={id => <div data-testid="header-slot">header:{id}</div>}
       renderBody={id => <div data-testid="body-slot">body:{id}</div>}
-      renderAttachments={id => <div data-testid="attachments-slot">attachments:{id}</div>}
-      renderConnections={id => <div data-testid="connections-slot">connections:{id}</div>}
-      renderTracking={id => <div data-testid="tracking-slot">tracking:{id}</div>}
       {...overrides}
     />,
     theme
@@ -76,7 +75,7 @@ describe('EmailReadingPaneShell', () => {
     expect(screen.queryByRole('toolbar')).not.toBeInTheDocument();
   });
 
-  it('selecting a card drives the right pane: header/body/attachments/connections/tracking slots are invoked with the selected id', () => {
+  it('selecting a card drives the right pane: header + body slots are invoked with the selected id, header rendered ABOVE the toolbar', () => {
     renderShell();
 
     fireEvent.click(screen.getByText('Email one'));
@@ -84,9 +83,15 @@ describe('EmailReadingPaneShell', () => {
     expect(screen.queryByText('Select an email')).not.toBeInTheDocument();
     expect(screen.getByTestId('header-slot')).toHaveTextContent('header:e1');
     expect(screen.getByTestId('body-slot')).toHaveTextContent('body:e1');
-    expect(screen.getByTestId('attachments-slot')).toHaveTextContent('attachments:e1');
-    expect(screen.getByTestId('connections-slot')).toHaveTextContent('connections:e1');
-    expect(screen.getByTestId('tracking-slot')).toHaveTextContent('tracking:e1');
+
+    // Layout order: header band, then the full-width toolbar, then the body region.
+    const readingPane = screen.getByTestId('email-reading-pane');
+    const nodes = Array.from(readingPane.querySelectorAll('[data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'));
+    expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
+      'header-slot',
+      'toolbar',
+      'body-slot',
+    ]);
   });
 
   it('notifies the host of selection changes via onSelectedIdChange without controlling selection', () => {

@@ -10,15 +10,19 @@
  * which drives the right pane; the splitter width persists across sessions
  * via `localStorage` (the hook's own persistence, keyed by `storageKey`).
  *
- * This is the COMPOSITION ROOT for the P3b wave — it does NOT implement the
- * body/header/attachments/connections/tracking sub-views. Those are supplied
- * by the host as `render*` slot props (tasks 033/034/035/036 fill them in
- * without editing this file — the slot contract this task establishes; see
- * `EmailReadingPaneShell.types.ts`). The full-width `<EmailToolbar/>` spans
- * the reading-pane width and dispatches Reply/Reply All/Forward/New/Archive/
- * Create through the host-supplied `actions` handlers — the shell never
- * re-implements action-bar/compose logic itself (task 022's extracted
- * `logic/actions` is the canonical source; task 036 owns the real dispatch).
+ * This is the COMPOSITION ROOT for the reading pane — it does NOT implement
+ * the header band/body/attachments/connections/tracking sub-views. Those are
+ * supplied by the host as two `render*` slot props — `renderHeader` (the
+ * subject + compact tracking trio + "Open full form" band, rendered ABOVE the
+ * toolbar) and `renderBody` (the composed recipients/body/attachments/
+ * related-to region, rendered BELOW the toolbar) — see
+ * `EmailReadingPaneShell.types.ts` for the full slot contract (reworked for
+ * the Outlook-style one-column layout redesign). The full-width
+ * `<EmailToolbar/>` spans the reading-pane width and dispatches Reply/Reply
+ * All/Forward/New/Archive/Create through the host-supplied `actions`
+ * handlers — the shell never re-implements action-bar/compose logic itself
+ * (task 022's extracted `logic/actions` is the canonical source; task 036
+ * owns the real dispatch).
  *
  * When nothing is selected, the right pane shows the "Select an email"
  * placeholder (FR-19 empty state).
@@ -97,9 +101,6 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
   actions,
   renderHeader,
   renderBody,
-  renderAttachments,
-  renderConnections,
-  renderTracking,
   storageKey = DEFAULT_STORAGE_KEY,
   defaultReadingPaneWidth = DEFAULT_READING_PANE_WIDTH_PX,
   minListWidth = DEFAULT_MIN_LIST_WIDTH_PX,
@@ -149,14 +150,9 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
       <div className={s.readingPane} style={{ width: detailWidth }} data-testid="email-reading-pane">
         {selectedId ? (
           <React.Fragment key={selectedId}>
+            {renderHeader?.(selectedId)}
             <EmailToolbar selectedId={selectedId} actions={actions} />
-            <div className={s.readingPaneScroll}>
-              {renderHeader?.(selectedId)}
-              {renderBody?.(selectedId)}
-              {renderAttachments?.(selectedId)}
-              {renderConnections?.(selectedId)}
-              {renderTracking?.(selectedId)}
-            </div>
+            <div className={s.readingPaneScroll}>{renderBody?.(selectedId)}</div>
           </React.Fragment>
         ) : (
           <div className={s.placeholder} role="status">

@@ -173,17 +173,29 @@ describe('EmailWorkspace', () => {
 
     fireEvent.click(await screen.findByText('Quarterly filing update'));
 
-    // Header paints from the record (EmailReadingHeader) — subject appears in the reading pane too.
+    // Header band paints from the record (EmailReadingHeader) — subject appears
+    // prominently in the reading pane (no from/to/cc/bcc in the header band anymore).
     await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
+    // Recipients block reflects the record's From/To — Cc/Bcc rows are absent
+    // since FULL_RECORD carries neither (the bug-fix mapping reads them
+    // defensively from the same no-`$select` read, never throwing).
+    const recipients = await screen.findByTestId('email-recipients');
+    expect(within(recipients).getByText('jane.doe@example.com')).toBeInTheDocument();
+    expect(within(recipients).getByText('legal-team@example.com')).toBeInTheDocument();
+    expect(within(recipients).queryByText('Cc')).not.toBeInTheDocument();
+    expect(within(recipients).queryByText('Bcc')).not.toBeInTheDocument();
     // Body degrades to sanitized `sprk_body` (no `.eml` archive in this fixture — a normal
     // state) — scope to the reading pane since the left card list's preview text also
     // contains a snippet of the same sentence.
     const readingPane = screen.getByTestId('email-reading-pane');
     await waitFor(() => expect(within(readingPane).getByText(/latest draft/i)).toBeInTheDocument());
-    // FR-15 "Open full form" trigger is rendered near the toolbar.
+    // FR-15 "Open full form" trigger is rendered near the toolbar (now inside the header band).
     expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
-    // Tracking panel reflects the record's tracking values.
+    // Tracking panel (compact) reflects the record's tracking values, in the header band.
     expect(await screen.findByTestId('email-tracking-panel')).toBeInTheDocument();
+    // Attachments + "Related to" sections render with bold section headers.
+    expect(screen.getByText('Attachments')).toBeInTheDocument();
+    expect(screen.getByText('Related to')).toBeInTheDocument();
     // Associations review renders (no engine provenance in this fixture → review-only empty state, no crash).
     expect(screen.getByTestId('email-connections-review')).toBeInTheDocument();
   });

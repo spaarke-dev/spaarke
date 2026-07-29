@@ -1,59 +1,49 @@
 /**
  * EmailReadingHeader.types.ts
  *
- * Type contract for `<EmailReadingHeader />` + `<EmailReadingAttachments />`
- * (email-communication-solution-r5 task 034, spec FR-11/FR-12). These are the
- * two sub-views that fill the `EmailReadingPaneShell` (task 032) `renderHeader`
- * / `renderAttachments` slots — see
- * `projects/email-communication-solution-r5/notes/task-032-reading-pane-shell.md`.
+ * Type contract for `<EmailReadingHeader />` (the reading-pane HEADER BAND —
+ * subject + compact tracking trio + "Open full form") + `<EmailReadingAttachments />`
+ * (email-communication-solution-r5 task 034, spec FR-11/FR-12; reworked for the
+ * reading-pane layout redesign — see `EmailReadingHeader.tsx` docblock).
  *
- * Both components are host-agnostic (ADR-012): they take the portable
- * `IDataService` / `INavigationService` abstractions from `@spaarke/ui-components`
- * (NOT `ComponentFramework.WebApi` / raw `Xrm`) so the eventual `EmailWorkspace`
- * composition root (task 040) can inject either the Xrm-backed or BFF-backed
- * adapter without this view knowing which host it's running under.
+ * `EmailReadingHeader` is PURELY presentational now: it owns NO data fetch.
+ * Earlier it ran its own `retrieveRecord('sprk_communication', id, $select)`
+ * — a second, redundant per-selection read (the composition root,
+ * `EmailWorkspace`, already owns the ONE per-selection read via
+ * `useEmailWorkspaceRecord`) — and that `$select` call failed at runtime
+ * ("Could not load this email header."). It now takes every value as a prop,
+ * fed by the host from `EmailWorkspaceRecordState` (`EmailWorkspace.mapping.ts`).
+ *
+ * `EmailReadingAttachments` is unchanged — still host-agnostic (ADR-012),
+ * still takes the portable `IDataService` / `INavigationService`
+ * abstractions from `@spaarke/ui-components` (NOT `ComponentFramework.WebApi`
+ * / raw `Xrm`).
  */
+import type { IAccessPermissionOption } from '@spaarke/ui-components';
 
-/**
- * Subset of a `sprk_communication` record this header reads. Field names
- * verified against `docs/data-model/sprk_communication.md` (also mirrored by
- * `ICommunicationRecord` in the `CommunicationPage` code page — see
- * deviation note in `EmailReadingHeader.tsx`).
- */
-export interface IEmailHeaderRecord {
-  sprk_communicationid?: string;
-  sprk_subject?: string | null;
-  sprk_from?: string | null;
-  sprk_to?: string | null;
-  sprk_cc?: string | null;
-  sprk_bcc?: string | null;
-  sprk_sentat?: string | null;
-  sprk_receiveddate?: string | null;
-}
-
-/** Props for `<EmailReadingHeader />` — the envelope header sub-view (FR-11). */
+/** Props for `<EmailReadingHeader />` — the reading-pane HEADER BAND. Purely presentational: every value + callback arrives from the host (`EmailWorkspace`), fed by the shared `EmailWorkspaceRecordState` + `useEmailWorkspaceRecord` read/write pair. No internal data fetch. */
 export interface IEmailReadingHeaderProps {
-  /** The selected `sprk_communication` id (from the reading-pane shell's `renderHeader` slot). */
-  selectedId: string;
-  /**
-   * Host-injected data adapter (Xrm or BFF — ADR-012 portability). Retrieves
-   * the record's envelope fields via `retrieveRecord('sprk_communication', selectedId, select)`.
-   */
-  dataService: IEmailHeaderDataService;
-}
-
-/**
- * Minimal `retrieveRecord` surface this header consumes — a structural subset
- * of `@spaarke/ui-components` `IDataService` so tests can supply a lightweight
- * double without implementing the full 5-method contract.
- */
-export interface IEmailHeaderDataService {
-  retrieveRecord(entityName: string, id: string, options?: string): Promise<Record<string, unknown>>;
+  /** The selected `sprk_communication` id — forwarded to the "Open full form" trigger. */
+  communicationId: string;
+  /** `EmailWorkspaceRecordState.subject` — `null` while loading or when the field is absent on this deployment. Renders "(no subject)" when falsy. */
+  subject: string | null;
+  /** Tracking trio values (`EmailWorkspaceRecordState.monitor/highPriority/accessPermission`) — rendered compactly via `EmailTrackingPanel`. */
+  monitor: boolean;
+  highPriority: boolean;
+  accessPermission: number | null;
+  /** Injected access-permission segments (value + label + optional color) — entity-agnostic (task 023, FR-14). */
+  accessPermissionOptions: IAccessPermissionOption[];
+  /** Tracking write callbacks — same `useEmailWorkspaceRecord.updateMonitor/updateHighPriority/updateAccessPermission` the host already owns. */
+  onMonitorChange: (value: boolean) => void | Promise<void>;
+  onHighPriorityChange: (value: boolean) => void | Promise<void>;
+  onAccessPermissionChange: (value: number) => void | Promise<void>;
+  /** "Open full form" (FR-15) — opens the OOB Email main form as an 85% `navigateTo` modal (`useEmailComposeActions().openFullForm`). */
+  onOpenFullForm: (communicationId: string) => Promise<void> | void;
 }
 
 /** Props for `<EmailReadingAttachments />` — the attachments sub-view (FR-12). */
 export interface IEmailReadingAttachmentsProps {
-  /** The selected `sprk_communication` id (from the reading-pane shell's `renderAttachments` slot). */
+  /** The selected `sprk_communication` id (from the reading-pane shell's `renderBody` slot). */
   selectedId: string;
   /**
    * Host-injected data adapter (Xrm or BFF — ADR-012 portability). Adapted

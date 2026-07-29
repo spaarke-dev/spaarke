@@ -10,11 +10,24 @@
  *   - the full-width toolbar dispatch seam (Reply / Reply All / Forward / New /
  *     Archive / Create).
  *
- * It does NOT implement the body/header/attachments/connections/tracking
- * sub-views — those are supplied by the host as render-slot props so tasks
- * 033 (.eml body), 034 (header + attachments), 035 (connections + tracking),
- * and 036 (compose wiring + "Open full form") can compose in WITHOUT editing
- * this file (the slot contract this task establishes).
+ * It does NOT implement the header band/body/attachments/connections/tracking
+ * sub-views — those are supplied by the host as TWO render-slot props:
+ *   - `renderHeader` — the HEADER BAND (subject + compact tracking trio +
+ *     "Open full form"), rendered ABOVE the full-width `EmailToolbar`.
+ *   - `renderBody` — the entire scrollable composed region BELOW the
+ *     toolbar: recipients block, email body, attachments section, "Related
+ *     to" (associations) section, in that order. The host (`EmailWorkspace`)
+ *     composes all four pieces into one node it hands back from this single
+ *     slot call — the shell does not know about (or render) each piece
+ *     individually.
+ *
+ * (Reading-pane layout redesign, email-communication-solution-r5: previously
+ * five slots — `renderHeader`/`renderBody`/`renderAttachments`/
+ * `renderConnections`/`renderTracking` — rendered as five siblings below the
+ * toolbar. Collapsed to two slots + a reordered header-above-toolbar layout
+ * per the Outlook-style one-column redesign. No other consumer exists outside
+ * this package's own `EmailWorkspace` composition root, so this is a safe
+ * internal contract change.)
  */
 
 import type * as React from 'react';
@@ -64,16 +77,10 @@ export interface EmailReadingPaneShellProps {
   onSelectedIdChange?: (id: string | undefined) => void;
   /** Toolbar dispatch handlers (FR-08). Omitted handlers no-op with a console warning. */
   actions?: EmailToolbarActionHandlers;
-  /** Header slot (task 034) — invoked with the selected id whenever a card is selected. */
+  /** Header BAND slot — subject + compact tracking trio + "Open full form"; rendered ABOVE the toolbar. Invoked with the selected id whenever a card is selected. */
   renderHeader?: EmailPaneSlotRenderer;
-  /** Body slot (task 033, `.eml` render) — invoked with the selected id whenever a card is selected. */
+  /** Composed BODY-REGION slot — recipients block + email body + attachments section + "Related to" section, in that order (the host composes all four; the shell just renders the one returned node inside the scrollable region below the toolbar). Invoked with the selected id whenever a card is selected. */
   renderBody?: EmailPaneSlotRenderer;
-  /** Attachments slot (task 034) — invoked with the selected id whenever a card is selected. */
-  renderAttachments?: EmailPaneSlotRenderer;
-  /** Connections slot (task 035) — invoked with the selected id whenever a card is selected. */
-  renderConnections?: EmailPaneSlotRenderer;
-  /** Tracking slot (task 035) — invoked with the selected id whenever a card is selected. */
-  renderTracking?: EmailPaneSlotRenderer;
   /** localStorage key the splitter width persists under (default: a stable shell-scoped key). */
   storageKey?: string;
   /** Initial/reset reading-pane width in pixels (default 480). */
