@@ -546,10 +546,72 @@ async function bootstrap(): Promise<void> {
   // task 041 (FR-13): active work type (e.g. "agreement-analysis") — scopes the Compose AI
   // toolbar via getToolsForSurface. Compose-only; falls through to undefined (ComposeEditor's
   // own '*' default) for every non-work-type-scoped launch.
-  const activeWorkType =
+  const activeWorkTypeParam =
     searchParams.get("activeWorkType") ??
     dataParams.get("activeWorkType") ??
     undefined;
+
+  // -------------------------------------------------------------------------
+  // Analysis entry-matrix params (task 050 — spec §12 / FR-14; consumes the
+  // params task 052's ribbon launcher emits per §13.3 / FR-16).
+  //
+  // The FOUR entry cases route to ONE Analysis experience (this three-pane) in
+  // two hosting contexts — the SpaarkeAi workspace and a code-page modal —
+  // discriminated purely by which params are present (no new URL-param
+  // convention; mirrors the `composeMode` read above):
+  //   - `analysisId` present  → EXISTING analysis (2d in-record modal / 2c URL
+  //                             open): resolve its bound session + open it, NO
+  //                             "Create new" cards.
+  //   - `worktype`  present   → NEW analysis (2a in-workspace / 2b in-record):
+  //                             open the Analysis hub (Create-new cards). When a
+  //                             record context is ALSO present (entityLogicalName
+  //                             + entityId, threaded by the 052 ribbon), the hub
+  //                             pre-sets regarding=parent (2b); with no record
+  //                             context the hub opens unforced (2a).
+  //
+  // These are READ here and threaded through App → ThreePaneShell → an
+  // AnalysisLaunchContext consumed by WorkspacePane. ADR-039 / §13.3: this is
+  // the deterministic CODE path (openSpaarkeAi deep-link + main.tsx mode
+  // routing), NOT the reactive in-chat surface-launch registry.
+  // -------------------------------------------------------------------------
+  const analysisId =
+    searchParams.get("analysisId") ??
+    dataParams.get("analysisId") ??
+    undefined;
+
+  const worktype =
+    searchParams.get("worktype") ??
+    dataParams.get("worktype") ??
+    undefined;
+
+  // `regarding` is the parent-record shorthand the 052 ribbon may pass for
+  // symmetry with `openSpaarkeAiCompose`. The regarding PRE-SET the hub applies
+  // is driven by entityLogicalName/entityId (already parsed above, the canonical
+  // entity-context channel AiSessionProvider consumes); `regarding` is parsed
+  // for completeness but the entity-context path is authoritative.
+  const regarding =
+    searchParams.get("regarding") ??
+    dataParams.get("regarding") ??
+    undefined;
+  void regarding;
+
+  // task 041 (FR-13) live dispatch site (task 050 thread 3): map the Agreement
+  // Review work-type Choice value (100000000 — SprkAnalysisWorkType.AgreementAnalysis,
+  // src/types/sprkAnalysis.ts) to the `agreement-analysis` activeWorkType string so
+  // an Agreement analysis launch scopes the Compose AI toolbar via getToolsForSurface
+  // IF a Compose surface is opened during that analysis. An explicit `activeWorkType`
+  // param always wins; every non-Agreement / non-analysis launch is unaffected.
+  const WORK_TYPE_AGREEMENT_REVIEW = "100000000";
+  const activeWorkType =
+    activeWorkTypeParam ??
+    (worktype === WORK_TYPE_AGREEMENT_REVIEW ? "agreement-analysis" : undefined);
+
+  // Derive the analysis entry mode from the params above (existing wins).
+  const analysisMode: "new" | "existing" | undefined = analysisId
+    ? "existing"
+    : worktype
+      ? "new"
+      : undefined;
 
   // -------------------------------------------------------------------------
   // 4. Render the app
@@ -575,6 +637,9 @@ async function bootstrap(): Promise<void> {
           speDriveId={speDriveId}
           speFileName={speFileName}
           activeWorkType={activeWorkType}
+          analysisMode={analysisMode}
+          analysisId={analysisId}
+          worktype={worktype}
         />
       </AppErrorBoundary>
     </React.StrictMode>

@@ -83,7 +83,7 @@ import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } fr
 import type { FluentIcon } from '@fluentui/react-icons';
 
 import { ActionCard } from '@spaarke/ui-components';
-import type { ActionCardProps } from '@spaarke/ui-components';
+import type { ActionCardProps, AssociationResult } from '@spaarke/ui-components';
 import { buildBffApiUrl } from '@spaarke/auth';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
@@ -105,6 +105,18 @@ import type { DocumentViewerWidgetData } from './DocumentViewerWidget';
  * `CreateAnalysisWizardWidget`'s identical `DEFAULT_WORK_TYPE_VALUE` restatement.
  */
 const WORK_TYPE_AGREEMENT_REVIEW = 100000000;
+
+/**
+ * Regarding entity types the Analysis wizard can pre-set (mirrors the wizard's
+ * own `ANALYSIS_REGARDING_ENTITY_TYPES` — Matter / Project / Document; ADR-024).
+ * The hub only pre-sets regarding=parent (entry case 2b) when the launch's record
+ * context is one of these; any other host entity opens the hub unforced.
+ */
+const SUPPORTED_REGARDING_ENTITY_TYPES: ReadonlySet<string> = new Set([
+  'sprk_matter',
+  'sprk_project',
+  'sprk_document',
+]);
 
 // ---------------------------------------------------------------------------
 // Grid configuration — sprk_gridconfiguration for the hub's Analysis grid
@@ -311,9 +323,25 @@ const useStyles = makeStyles({
 export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetData>> = ({ data, className }) => {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
-  const { bffBaseUrl, authenticatedFetch } = useAiSession();
+  const { bffBaseUrl, authenticatedFetch, entityContext } = useAiSession();
 
   const gridConfigId = data?.configId ?? ANALYSIS_HUB_GRID_CONFIG_ID;
+
+  // Entry case 2b (new-in-record, spec §12 / FR-14): when the hub is opened in a
+  // record context (a Matter/Project modal launched via openSpaarkeAi — task 050
+  // host routing + task 052 ribbon), pre-set the wizard's regarding lookup to that
+  // parent record. In entry case 2a (new-in-workspace) there is no record context,
+  // so `initialAssociation` is undefined and the wizard opens with an empty regarding
+  // — only 2b forces the parent (project constraint: do not cross-wire the cases).
+  // entityContext carries no display name, so the record id is used as the label
+  // fallback (the wizard shows it pre-selected; the user may change or clear it).
+  const initialAssociation = useMemo<AssociationResult | undefined>(() => {
+    const entityType = entityContext?.entityType;
+    const recordId = entityContext?.entityId;
+    if (!entityType || !recordId) return undefined;
+    if (!SUPPORTED_REGARDING_ENTITY_TYPES.has(entityType)) return undefined;
+    return { entityType, recordId, recordName: recordId };
+  }, [entityContext?.entityType, entityContext?.entityId]);
 
   // Transient status line for the row-reopen flow (task 031) — cleared on every new attempt,
   // only ever set on a graceful degrade (no session bound / lookup failure). Never blocks the
@@ -327,10 +355,15 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
       widgetData: {
         workTypeValue: WORK_TYPE_AGREEMENT_REVIEW,
         workTypeLabel: 'Agreement Review',
+        // 2b regarding pre-set (undefined in 2a → no forced regarding). The deep
+        // Dataverse services (dataService/navigationService/searchUsers/
+        // authenticatedFetch/bffBaseUrl) are injected by the SpaarkeAi shell
+        // (WorkspacePane) at widget_load time — see task 050 thread 1.
+        ...(initialAssociation ? { initialAssociation } : {}),
       } as CreateAnalysisWizardData,
       displayName: 'Create Agreement Review Analysis',
     });
-  }, [dispatch]);
+  }, [dispatch, initialAssociation]);
 
   // Stable per-card click handler map. Only the actionable (non-comingSoon) card gets a
   // real handler — disabled ActionCard instances already ignore onClick internally, but

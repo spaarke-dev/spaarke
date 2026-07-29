@@ -27,7 +27,7 @@
 | **031** | Reopen from grid → rehydrate session + review state + files | 3 Hub | FULL | sonnet / high | 030,020,025 | false | frontend, spaarkeai, session | ✅ |
 | **040** | Per-type creation wizard (3 steps; `Create*Wizard` + Field Mapping) | 4 Wizard | FULL | sonnet / high | 011,012 | true (P4) | frontend, spaarkeai, wizard, fluent-ui, field-mapping | ✅ |
 | **041** | Wire `activeWorkType` host prop → `getToolsForSurface` scoping | 4 Wizard | STANDARD | sonnet / high | 040 | true (P4) | frontend, spaarkeai | ✅ |
-| **050** | Entry matrix 2a–2d host routing + context pre-set | 5 Entry | FULL | sonnet / high | 030,040 | false | frontend, spaarkeai, launch | 🔲 |
+| **050** | Entry matrix 2a–2d host routing + context pre-set | 5 Entry | FULL | opus / high | 030,040 | false | frontend, spaarkeai, launch | ✅ |
 | **051** | Record→analysis 1:N + Analysis subgrid/tab on Matter/Project forms | 5 Entry | FULL | sonnet / high | 012 | true (P5a) | dataverse, forms, ribbon | ✅ |
 | **052** | Extend `openSpaarkeAi` (`analysisId`/`worktype`/`regarding`) + ribbon launcher | 5 Entry | FULL | sonnet / high | 050,051 | false | frontend, spaarkeai, ribbon, launch | 🔲 |
 | **053** | Enforce record-driven opens via `openSpaarkeAi`, not `surfaceLaunchRegistry` | 5 Entry | STANDARD | sonnet / medium | 052 | false | frontend, spaarkeai, adr-039 | 🔲 |

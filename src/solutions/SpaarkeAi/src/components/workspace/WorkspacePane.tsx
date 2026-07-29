@@ -30,7 +30,12 @@
 import * as React from "react";
 import { makeStyles, tokens, Spinner } from "@fluentui/react-components";
 import { AppsListRegular } from "@fluentui/react-icons";
-import { PaneHeader } from "@spaarke/ui-components";
+import {
+  PaneHeader,
+  createXrmDataService,
+  createXrmNavigationService,
+  searchUsersAndContacts,
+} from "@spaarke/ui-components";
 import {
   usePaneEvent,
   useDispatchPaneEvent,
@@ -51,7 +56,7 @@ import type {
 // (the shared dispatchConsumer helper via its `workspaceTarget` arg +
 // FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
-import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
+import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from "../shell/ThreePaneShell";
 // R3 ("Visible to assistant") — deep-import the cross-pane bridge hook (not the
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
 // TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
@@ -276,6 +281,42 @@ export function WorkspacePane(): React.JSX.Element {
 
   const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated, entityContext } =
     useAiSession();
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix launch (task 050 — spec §12 / FR-14)
+  //
+  // Published by ThreePaneShell from the URL params (openSpaarkeAi analysis
+  // deep-link, ADR-039 CODE path — NOT surfaceLaunchRegistry). Null unless the
+  // app was launched into an analysis entry mode. Drives the analysis
+  // auto-install effect below (hub for 'new'; existing analysis for 'existing').
+  // ---------------------------------------------------------------------------
+  const analysisLaunch = useAnalysisLaunch();
+
+  // ---------------------------------------------------------------------------
+  // Host-coupled Dataverse services for the Analysis creation wizard (task 050
+  // thread 1 — spec FR-12/FR-14).
+  //
+  // `create-analysis-wizard` (@spaarke/ai-widgets, task 040) is context-agnostic
+  // by design (ADR-012): it accepts `dataService`/`navigationService`/`searchUsers`
+  // as injected props and MUST NOT construct Xrm-coupled services itself. The
+  // SpaarkeAi SOLUTION is the correct layer to resolve them from the Xrm host
+  // context — the SAME `createXrmDataService()` / `createXrmNavigationService()` /
+  // `searchUsersAndContacts()` factories ConversationPane already uses (per
+  // DATA-ACCESS-DECISION-CRITERIA: host-context Xrm.WebApi, no BFF/OBO). Injected
+  // into the wizard's `widgetData` in the workspace `widget_load` handler below, so
+  // EVERY dispatcher of that type (the hub Agreement Review card in 2a, the
+  // record-driven modal in 2b) gets a fully-wired wizard — closing the interim
+  // "Connecting to workspace services…" gap task 030 deferred here.
+  // ---------------------------------------------------------------------------
+  const analysisWizardDataService = React.useMemo(() => createXrmDataService(), []);
+  const analysisWizardNavigationService = React.useMemo(
+    () => createXrmNavigationService(),
+    [],
+  );
+  const analysisWizardSearchUsers = React.useCallback(
+    (query: string) => searchUsersAndContacts(analysisWizardDataService, query),
+    [analysisWizardDataService],
+  );
 
   // Task 025 (FR-09): the Analysis-record anchor tab persistence keys on — see the
   // module-scope block above. Memoized on the entity identity fields (entityContext
@@ -716,6 +757,11 @@ export function WorkspacePane(): React.JSX.Element {
     // auto-install entirely so we don't ALSO open the BFF default layout behind
     // the Compose tab (the ribbon user must land ONLY on the editor).
     if (isComposeLaunch) return;
+    // task 050 (spec §12 / FR-14): in an analysis entry mode the dedicated
+    // analysis auto-install effect below owns the cold-load tab (the hub for
+    // 'new', the existing analysis for 'existing') — skip the BFF default layout
+    // so the analysis user lands ONLY on the analysis surface.
+    if (analysisLaunch) return;
     // R3-3 (2026-07-07): wait for the NFR-09 tab restore to settle so the
     // `alreadyOpen` check below sees the RESTORED tabs. Without this gate the
     // default-tab addTab raced restore, no-op'd it (hasNonHomeTab guard) and
@@ -776,7 +822,7 @@ export function WorkspacePane(): React.JSX.Element {
     // ready; the ref guard prevents re-runs on subsequent dependency changes
     // (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, isComposeLaunch, tabRestoreSettled, layoutForAutoInstall]);
+  }, [isAuthenticated, isComposeLaunch, analysisLaunch, tabRestoreSettled, layoutForAutoInstall]);
 
   // ---------------------------------------------------------------------------
   // spaarkeai-compose-r2 UNIFY — compose-launch auto-install (DIRECT 'compose')
@@ -820,6 +866,92 @@ export function WorkspacePane(): React.JSX.Element {
     // this once per mount; the seed is stable for the life of a compose launch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isComposeLaunch, isAuthenticated, tabRestoreSettled]);
+
+  // ---------------------------------------------------------------------------
+  // Analysis entry-matrix auto-install (task 050 — spec §12 / FR-14)
+  //
+  // When the app is launched into an analysis entry mode (analysisLaunch != null),
+  // this effect owns the cold-load surface (the layout + pin auto-installs above
+  // early-return on `analysisLaunch`):
+  //   - mode='new'      → open the Analysis hub tab ('analysis-hub'). The hub
+  //                       renders the "Create new" work-type cards; when a record
+  //                       context is present (entityContext, threaded by the 052
+  //                       ribbon's entityLogicalName/entityId) the hub's card
+  //                       dispatch pre-sets regarding=parent (2b). With no record
+  //                       context the hub opens unforced (2a).
+  //   - mode='existing' → resolve the analysis's bound session via the task-031
+  //                       `GET /ai/chat/sessions/by-analysis/{id}` endpoint and
+  //                       dispatch `conversation.session_switch` so the modal
+  //                       opens on the existing analysis's transcript (2d/2c),
+  //                       with NO hub cards. A 404 (no session ever bound) is a
+  //                       graceful no-op — never mints an empty session (mirrors
+  //                       the hub's own reopen escalation contract, task 031).
+  //
+  // Same macrotask deferral + tabRestoreSettled gate + run-once ref guard as the
+  // layout/compose auto-install effects above (subscription-race + restore
+  // sequencing). ADR-039 / §13.3: this is the deterministic CODE routing path,
+  // not the reactive in-chat surface-launch registry.
+  // ---------------------------------------------------------------------------
+  const autoInstalledAnalysisRef = React.useRef<boolean>(false);
+  React.useEffect(() => {
+    if (!analysisLaunch) return;
+    if (!isAuthenticated) return;
+    if (!tabRestoreSettled) return;
+    if (autoInstalledAnalysisRef.current) return; // run once per mount
+    autoInstalledAnalysisRef.current = true;
+
+    if (analysisLaunch.mode === "new") {
+      const timerId = window.setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.info("[WorkspacePane] Auto-installing Analysis hub (entry matrix 2a/2b)");
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "analysis-hub",
+          widgetData: null,
+          displayName: "Analysis",
+        });
+      }, 0);
+      return () => window.clearTimeout(timerId);
+    }
+
+    // mode === 'existing' — resolve the bound session, then switch to it in place.
+    const analysisId = analysisLaunch.analysisId;
+    if (!analysisId || !bffBaseUrl) return;
+    let cancelled = false;
+    const timerId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const lookupUrl = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/by-analysis/${encodeURIComponent(analysisId)}`,
+          );
+          const response = await authenticatedFetch(lookupUrl, {
+            headers: { Accept: "application/json" },
+          });
+          if (cancelled) return;
+          // 404 (no session ever bound) / any non-OK → graceful no-op. The modal
+          // renders the default welcome; never mint an empty session (task 031
+          // escalation contract).
+          if (!response.ok) return;
+          const session = (await response.json()) as { sessionId?: string };
+          if (cancelled || !session.sessionId) return;
+          dispatch("conversation", {
+            type: "session_switch",
+            sessionId: session.sessionId,
+          });
+        } catch {
+          // Network/parse failure — graceful no-op (the modal shows the default surface).
+        }
+      })();
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+    // Run once per mount when auth + restore are ready; the ref guard prevents
+    // re-runs. authenticatedFetch is a stable module-level reference.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisLaunch, isAuthenticated, tabRestoreSettled, bffBaseUrl]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -1272,8 +1404,29 @@ export function WorkspacePane(): React.JSX.Element {
         return;
       }
 
+      // ── Analysis wizard host-service injection (task 050 thread 1) ──────────
+      // The context-agnostic `create-analysis-wizard` needs Xrm-coupled Dataverse
+      // services the shared-lib widget MUST NOT construct itself (ADR-012). The
+      // SpaarkeAi solution injects them here from the Xrm host context, merging
+      // OVER the dispatcher-supplied widgetData (e.g. the hub card's workTypeValue
+      // + 2b initialAssociation) so pre-set context is preserved. Every other
+      // widgetType flows through unchanged.
+      const effectiveWidgetData =
+        widgetType === "create-analysis-wizard"
+          ? {
+              ...((widgetData as Record<string, unknown> | null) ?? {}),
+              dataService: analysisWizardDataService,
+              navigationService: analysisWizardNavigationService,
+              searchUsers: analysisWizardSearchUsers,
+              searchAssignees: analysisWizardSearchUsers,
+              authenticatedFetch,
+              bffBaseUrl,
+              ...(chatSessionId ? { sessionId: chatSessionId } : {}),
+            }
+          : widgetData;
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
-      const tabId = manager.addTab(widgetType, widgetData, displayName);
+      const tabId = manager.addTab(widgetType, effectiveWidgetData, displayName);
       syncState();
 
       // Lazy-resolve the widget component; update the tab once resolved.
