@@ -246,12 +246,18 @@ public sealed class ComposeShadowPatchEngine
                         break;
 
                     // setBlockAttr (alignment/style/list block application) is outside task 031's four-op scope.
-                    case SetBlockAttrOperation:
+                    // R5 task 010 (G3) fills the Alignment case; Style/ListOrdered/ListLevel remain deferred to
+                    // task 011 (G3 heading/list — reuses NumberingComputationEngine).
+                    case SetBlockAttrOperation setAttr when setAttr.Attr == ComposeBlockAttr.Alignment:
+                        ApplySetBlockAttrAlignment(setAttr);
+                        break;
+
+                    case SetBlockAttrOperation setAttr:
                         throw new ComposePatchException(
                             ComposePatchErrorKind.StructuralOpNotYetImplemented,
-                            $"Operation 'setBlockAttr' (paraId {op.ParaId}) — paragraph block-attribute application " +
-                            "(alignment/style/list) is outside task 031's four structural-paragraph-op scope; it routes " +
-                            "to its own later applier extension.");
+                            $"Operation 'setBlockAttr' (paraId {op.ParaId}, attr {setAttr.Attr}) — paragraph " +
+                            "block-attribute application (style/list) is not yet implemented (R5 task 011); only " +
+                            "Alignment is implemented (R5 task 010).");
 
                     default:
                         throw new ComposePatchException(
@@ -560,6 +566,119 @@ public sealed class ComposeShadowPatchEngine
             }
 
             MarkParagraphMark(para, inserted: false);
+        }
+
+        // -- setBlockAttr: Alignment (R5 G3, task 010) -------------------------------------------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.Alignment"/> op: resolves the target
+        /// paragraph by <see cref="ComposeOperation.ParaId"/> ONLY (no run offset — paragraph-scoped, I-7
+        /// compliant) and records the change as a tracked <c>w:pPrChange</c> — the paragraph-property analogue
+        /// of <see cref="MarkParagraphMark"/>'s paragraph-MARK tracked change. The <c>w:pPrChange</c> snapshots
+        /// the PRIOR <c>w:jc</c> (or none, if the paragraph inherited alignment from its style) into a nested
+        /// <c>w:pPr</c> (modeled by <see cref="ParagraphPropertiesExtended"/> — the OpenXml SDK's
+        /// schema-contextual type for a <c>w:pPrChange</c> child, confirmed by round-tripping through
+        /// <c>WordprocessingDocument.Open</c> rather than assumed from the class name) BEFORE the new value is
+        /// written, so Word's "Reject Formatting Change" restores exactly what was there.
+        /// </summary>
+        /// <remarks>
+        /// This is the TRACKED path — the only path this engine has today (the imported/tracked path is the
+        /// engine's sole caller; G2's clean-apply branch, task 021, is additive and does not change this
+        /// method). A future <c>trackChanges:false</c> mode (R5-D2, notes/g2-clean-apply-decision.md) would add
+        /// a sibling branch that sets <c>w:jc</c> directly with NO <see cref="ParagraphPropertiesChange"/> — this
+        /// method is kept self-contained (its own resolve + its own mutation) precisely so that branch point is
+        /// easy to add later without touching this tracked path.
+        /// </remarks>
+        private void ApplySetBlockAttrAlignment(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+
+            if (!TryParseAlignmentValue(op.Value, out var newJc))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidBlockAttrValue,
+                    $"setBlockAttr Alignment on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' " +
+                    "— expected one of Default/Left/Center/Right/Justify (null/'Default' clears to the style default).");
+            }
+
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+
+            // Snapshot the PRIOR alignment BEFORE mutating anything — this is what Word shows as the
+            // "changed from" state on Reject Formatting Change. No prior <w:jc> (style-inherited alignment)
+            // snapshots as an empty ParagraphPropertiesExtended, matching Word's own pPrChange shape.
+            var previousJc = pPr.GetFirstChild<Justification>();
+            var previousProps = new ParagraphPropertiesExtended();
+            if (previousJc is not null)
+            {
+                previousProps.AppendChild((Justification)previousJc.CloneNode(true));
+            }
+
+            // w:pPrChange never stacks (mirrors MarkParagraphMark's "never stack two revisions" rule) — an
+            // earlier change to THIS paragraph within the SAME Apply() call is superseded by recording the
+            // state immediately before the newest value, not the doc's original on-disk state.
+            pPr.RemoveAllChildren<ParagraphPropertiesChange>();
+
+            // Replace the live <w:jc> with the new value; null/Default clears it (inherit from style).
+            previousJc?.Remove();
+            if (newJc is { } jcValue)
+            {
+                InsertJustificationInOrder(pPr, new Justification { Val = jcValue });
+            }
+
+            var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            pPrChange.AppendChild(previousProps);
+            pPr.AppendChild(pPrChange); // w:pPrChange is always the LAST child of CT_PPr.
+        }
+
+        /// <summary>Maps a <see cref="SetBlockAttrOperation.Value"/> string (the <c>ComposeParagraphAlignment</c>
+        /// member name) to the OOXML <see cref="JustificationValues"/> to write, or <c>null</c> to clear the
+        /// paragraph's explicit alignment back to its style default. Mirrors
+        /// <see cref="ComposeDocumentRenderer"/>'s <c>ApplyAlignment</c> value vocabulary exactly (both byte-authors
+        /// agree on what each alignment name means). Returns <c>false</c> for a value outside the closed set.</summary>
+        private static bool TryParseAlignmentValue(string? value, out JustificationValues? justification)
+        {
+            switch (value)
+            {
+                case null:
+                case "Default":
+                    justification = null;
+                    return true;
+                case "Left":
+                    justification = JustificationValues.Left;
+                    return true;
+                case "Center":
+                    justification = JustificationValues.Center;
+                    return true;
+                case "Right":
+                    justification = JustificationValues.Right;
+                    return true;
+                case "Justify":
+                    justification = JustificationValues.Both;
+                    return true;
+                default:
+                    justification = null;
+                    return false;
+            }
+        }
+
+        /// <summary>Inserts <paramref name="justification"/> at its schema-correct CT_PPr position: immediately
+        /// before <see cref="ParagraphMarkRunProperties"/> / <see cref="SectionProperties"/> when either is
+        /// present (both sort AFTER <c>w:jc</c> in the CT_PPr sequence), otherwise appended at the end. Callers
+        /// remove any prior <see cref="ParagraphPropertiesChange"/> before calling this (that element sorts LAST
+        /// and is re-appended by the caller afterward, so it never becomes a stale insertion anchor here).</summary>
+        private static void InsertJustificationInOrder(ParagraphProperties pPr, Justification justification)
+        {
+            OpenXmlElement? anchor = pPr.GetFirstChild<ParagraphMarkRunProperties>();
+            anchor ??= pPr.GetFirstChild<SectionProperties>();
+
+            if (anchor is not null)
+            {
+                pPr.InsertBefore(justification, anchor);
+            }
+            else
+            {
+                pPr.AppendChild(justification);
+            }
         }
 
         // -- structural helpers -----------------------------------------------------------------------
@@ -1436,6 +1555,10 @@ public enum ComposePatchErrorKind
     /// <summary>A block-attr op (<c>setBlockAttr</c>) was supplied — outside task 031's four structural-paragraph
     /// ops; routes to its own later applier extension → 501/422.</summary>
     StructuralOpNotYetImplemented,
+
+    /// <summary>A <c>setBlockAttr</c> op's <c>Value</c> is not a recognized member of the attribute's closed
+    /// value set (e.g. an Alignment value outside Default/Left/Center/Right/Justify) → 422.</summary>
+    InvalidBlockAttrValue,
 }
 
 /// <summary>

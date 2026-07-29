@@ -269,13 +269,16 @@ public sealed class ComposeShadowPatchEngineTests
         result.Should().BeSameAs(docx); // true no-op passthrough — never re-serialized
     }
 
-    // ── seam: setBlockAttr is outside the four structural ops ───────────────────────────────────────
+    // ── seam: setBlockAttr Style/ListOrdered/ListLevel are outside the four structural ops (R5 task 011 scope) ──
+    // NOTE: setBlockAttr Alignment moved OFF this seam in R5 task 010 (G3 alignment applier) — it now applies
+    // as a tracked w:pPrChange; see ComposeAlignmentApplierSeamTests (tests/integration/seam/Compose/) for its
+    // coverage. This test narrows to the attrs still deferred to task 011.
 
-    [Fact(DisplayName = "Apply: a setBlockAttr op is refused at its own (non-task-031) seam")]
+    [Fact(DisplayName = "Apply: a setBlockAttr Style op is refused at its own (non-task-031, non-task-010) seam")]
     public void Apply_SetBlockAttrOp_RefusedAtSeam()
     {
         var docx = Pack(Para("AAAA0001", TextRun("para")));
-        var log = Log(new SetBlockAttrOperation { ParaId = "AAAA0001", Attr = ComposeBlockAttr.Alignment, Value = "Center" });
+        var log = Log(new SetBlockAttrOperation { ParaId = "AAAA0001", Attr = ComposeBlockAttr.Style, Value = "Heading1" });
 
         var act = () => _engine.Apply(docx, log, timestamp: When);
 

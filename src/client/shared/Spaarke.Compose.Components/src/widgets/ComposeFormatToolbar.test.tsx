@@ -338,10 +338,12 @@ describe('ComposeFormatToolbar — Table insert INVERTED to born-in-editor-only 
 });
 
 // ---------------------------------------------------------------------------
-// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — alignment /
-//     heading / list disabled on a LOADED doc, enabled born-in-editor; hyperlink
-//     disabled in BOTH modes. Maps to failure modes ET-1 (alignment), SDL-1/2
-//     (heading/list), SDL-4/5 (hyperlink).
+// 5c. Deferred edit-path controls (task 038 zero-error guardrails) — heading /
+//     list disabled on a LOADED doc, enabled born-in-editor; hyperlink disabled
+//     in BOTH modes. Maps to failure modes SDL-1/2 (heading/list), SDL-4/5
+//     (hyperlink). ET-1 (alignment) was RE-ENABLED on loaded docs by R5 task 010
+//     (G3 alignment applier — ComposeShadowPatchEngine now emits a tracked
+//     w:pPrChange) — see the alignment-specific describe block below.
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED doc (task 038)', () => {
@@ -360,16 +362,7 @@ describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED
     expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
   });
 
-  it('on a LOADED doc, the alignment buttons are DISABLED (ET-1)', async () => {
-    const user = userEvent.setup();
-    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
-    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
-    expect(screen.getByTestId('compose-format-align-left')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-align-center')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-align-right')).toBeDisabled();
-  });
-
-  it('on a BORN-IN-EDITOR doc, heading / list / alignment are all ENABLED', async () => {
+  it('on a BORN-IN-EDITOR doc, heading / list are ENABLED', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
     // Heading renders as an openable menu trigger (not the disabled loaded-doc button).
@@ -401,6 +394,46 @@ describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
     await user.click(screen.getByTestId('compose-format-paragraph-menu'));
     expect(screen.getByTestId('compose-format-blockquote')).not.toBeDisabled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5d. Alignment re-enabled on a LOADED doc (R5 task 010 — G3 alignment applier,
+//     removes the R4 ET-1 guard). ComposeShadowPatchEngine now applies a
+//     setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment
+//     buttons are gated ONLY by the read-only `disabled` prop, independent of
+//     `hasLoadedBaseline` — unlike heading/list/table (still deferred to 011/014).
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard removed)', () => {
+  it('on a LOADED doc, the alignment buttons are ENABLED', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+    // Heading/list stay deferred on the SAME loaded doc — alignment's re-enable is independent.
+    expect(screen.getByTestId('compose-format-bullet-list')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
+  });
+
+  it('on a BORN-IN-EDITOR doc, the alignment buttons are ENABLED (unchanged)', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false } });
+    await user.click(screen.getByTestId('compose-format-paragraph-menu'));
+    expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
+  });
+
+  it('the alignment buttons are unreachable when the toolbar is read-only (Paragraph trigger itself disabled), on either doc mode', () => {
+    const { unmount } = renderFormatToolbar({}, { props: { hasLoadedBaseline: true, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
+    unmount();
+
+    renderFormatToolbar({}, { props: { hasLoadedBaseline: false, disabled: true } });
+    expect(screen.getByTestId('compose-format-paragraph-menu')).toBeDisabled();
   });
 });
 

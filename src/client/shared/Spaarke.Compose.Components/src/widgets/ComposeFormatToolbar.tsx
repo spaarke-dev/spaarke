@@ -450,22 +450,28 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
   // ---- task 038 (spaarkeai-compose-r4 zero-error guardrail pass) --------------------------------
-  // The tracked-edit path (loaded/imported docs) has NO representation for alignment (the engine throws
-  // StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits (silently deferred).
-  // On a LOADED doc (`hasLoadedBaseline === true`) DISABLE those controls; a BORN-IN-EDITOR draft
-  // (blank / AI-draft, `hasLoadedBaseline` falsy) keeps them (the ComposeDocumentRenderer authors them
-  // cleanly). This SUPERSEDES + INVERTS task 037's table gating: the renderer authors born-in-editor
-  // tables cleanly, but the engine has no table op and would silently drop a loaded-doc table — so
-  // table-insert is ENABLED born-in-editor and DISABLED loaded (the exact opposite of what 037 shipped).
-  // Hyperlinks are unrepresentable in BOTH modes in R4 (no mark op, no content-model href). Every
-  // deferred feature is documented in projects/spaarkeai-compose-r5 (G3 alignment/heading/list, G4
-  // tables, G5 hyperlinks). The read-only gate (`controlDisabled`) is OR'd in — preserved, not replaced.
+  // The tracked-edit path (loaded/imported docs) originally had NO representation for alignment (the
+  // engine threw StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits
+  // (silently deferred). On a LOADED doc (`hasLoadedBaseline === true`) those controls were DISABLED; a
+  // BORN-IN-EDITOR draft (blank / AI-draft, `hasLoadedBaseline` falsy) kept them (the
+  // ComposeDocumentRenderer authors them cleanly). This SUPERSEDES + INVERTS task 037's table gating:
+  // the renderer authors born-in-editor tables cleanly, but the engine has no table op and would
+  // silently drop a loaded-doc table — so table-insert is ENABLED born-in-editor and DISABLED loaded
+  // (the exact opposite of what 037 shipped). Hyperlinks are unrepresentable in BOTH modes in R4 (no
+  // mark op, no content-model href). Heading/list/table remain deferred (R5 tasks 011/014).
+  //
+  // R5 task 010 (G3 alignment applier) RE-ENABLES alignment on loaded docs: ComposeShadowPatchEngine now
+  // applies a setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment buttons are gated by
+  // `alignmentEditDisabled` (controlDisabled only) — independent of `structuralEditDisabled`, which still
+  // gates heading/list/table until 011/014 land. See projects/spaarkeai-compose-r5 (G3/G4/G5 gap ledger).
   const isLoadedBaseline = hasLoadedBaseline === true;
   /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
   const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
   const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
-  // Alignment + heading + bullet/ordered list — deferred on loaded docs.
+  // Heading + bullet/ordered list — still deferred on loaded docs (R5 task 011).
   const structuralEditDisabled = controlDisabled || isLoadedBaseline;
+  // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
+  const alignmentEditDisabled = controlDisabled;
   // INVERTED from task 037: enabled born-in-editor, disabled loaded.
   const tableInsertDisabled = controlDisabled || isLoadedBaseline;
   // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
@@ -560,8 +566,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignLeft24Regular />}
               label="Align left"
               active={editor.isActive({ textAlign: 'left' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('left').run()}
               testId="compose-format-align-left"
             />
@@ -569,8 +574,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignCenter24Regular />}
               label="Align center"
               active={editor.isActive({ textAlign: 'center' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('center').run()}
               testId="compose-format-align-center"
             />
@@ -578,8 +582,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextAlignRight24Regular />}
               label="Align right"
               active={editor.isActive({ textAlign: 'right' })}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={alignmentEditDisabled}
               onClick={() => editor.chain().focus().setTextAlign('right').run()}
               testId="compose-format-align-right"
             />
