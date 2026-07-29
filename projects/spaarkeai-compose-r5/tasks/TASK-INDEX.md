@@ -17,7 +17,7 @@
 |----|-------|-------|--------|-------|-------------|------|---------------|
 | 001 | Confirm R4.5 merge + green baseline | 0 Gate | ✅ | STANDARD | sonnet/high | none | ✅ true |
 | 002 | 🔔 G1 Dataverse origin field (`sprk_composeorigin`) — HUMAN GATE | 0 Gate | ✅ | FULL | sonnet/high | none | ✅ true |
-| 003 | G2 clean-apply spike (R5-D2 decision) | 0 Gate | 🔲 | FULL | opus/xhigh | none | ✅ true |
+| 003 | G2 clean-apply spike (R5-D2 decision) | 0 Gate | ✅ | FULL | opus/xhigh | none | ✅ true |
 | 004 | Op-schema extension design (table/acceptRevision/rejectRevision) | 0 Gate | ✅ | FULL | opus/high | none | ✅ true |
 | 005 | NumberingComputationEngine reuse decision (extract vs reference) | 0 Gate | ✅ | STANDARD | sonnet/high | none | ✅ true |
 | 006 | Reciprocal R4.5 coordination note (optional courtesy) | 0 Gate | ✅ | MINIMAL | sonnet/high | none | ✅ true |
