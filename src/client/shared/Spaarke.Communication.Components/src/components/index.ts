@@ -13,3 +13,4 @@ export * from './EmailBody';
 export * from './EmailReadingHeader';
 export * from './EmailAssociationsAndTracking';
 export * from './EmailComposeActions';
+export * from './EmailWorkspace';

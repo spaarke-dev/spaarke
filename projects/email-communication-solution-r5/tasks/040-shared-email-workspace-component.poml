@@ -4,7 +4,7 @@
     <title>FR-01 / NFR-06: Assemble the single shared React 19 `EmailWorkspace` component (dual-mount source of truth)</title>
     <phase>4 Dual-use surface</phase>
     <gate>after:033,034,035,036</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Composition root that both mounts (widget + code page) render — the load-bearing dual-mount parity contract (NFR-06). Modifies `.tsx`; composes all Phase-3 sub-views; a defect here propagates to both surfaces. FULL gate.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -113,7 +113,9 @@
     <criterion testable="true">All shared-lib unit tests pass; the lib build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference spec FR-01 + NFR-06 + Success Criterion 1; design Lens 2 (target surfaces, Pattern D). This is `parallel-safe:false` — the composition root 041/042 consume. Run `/conflict-check` before opening the PR (shared `@spaarke/communication-components`). Completion summary appended here when done.</notes>
+  <notes>Reference spec FR-01 + NFR-06 + Success Criterion 1; design Lens 2 (target surfaces, Pattern D). This is `parallel-safe:false` — the composition root 041/042 consume. Run `/conflict-check` before opening the PR (shared `@spaarke/communication-components`).
+
+  COMPLETED 2026-07-28. Full details: `projects/email-communication-solution-r5/notes/task-040-email-workspace-assembly.md`. Summary: built `EmailWorkspace` composition root under `src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/**` (types + mapping helpers + `useEmailWorkspaceRecord` hook + the component + barrel + 7 tests), wiring `EmailViewSelector`/`EmailCardList` (030/031) into `EmailReadingPaneShell` (032) with all 5 render slots filled by the Phase-3 sub-views (033/034/035) and `useEmailComposeActions`/`OpenFullFormButton` (036). Appended one barrel line to `src/components/index.ts`. All acceptance criteria verified (incl. the `.eml`-archive-present path via a dedicated test). Build/lint/tests all green (14/14 suites, 97/97 tests package-wide). Quality gates (code-review + adr-check) run: 0 Critical/Violations. One test-infra fix required (documented as Deviation 1 in the notes file): extended `jest.config.cjs`'s existing React/ReactDOM dedup pattern to also dedupe `@fluentui/react-components`/`@fluentui/react-tabster`/`tabster`, root-causing a cross-package Fluent version-mismatch crash discovered while testing the composition (not a defect in any consumed sub-view). One flagged-not-invented gap carried forward: the three tracking fields (`monitor`/`highPriority`/`accessPermission`) use placeholder Dataverse logical names pending schema creation (design.md already flags this form placement as "net-new") — file via `/defer` before task 090.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
 </task>
