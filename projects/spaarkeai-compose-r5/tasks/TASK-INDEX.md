@@ -15,12 +15,12 @@
 
 | ID | Title | Phase | Status | Rigor | Tier/Effort | Deps | Parallel-safe |
 |----|-------|-------|--------|-------|-------------|------|---------------|
-| 001 | Confirm R4.5 merge + green baseline | 0 Gate | 🔲 | STANDARD | sonnet/high | none | ✅ true |
+| 001 | Confirm R4.5 merge + green baseline | 0 Gate | ✅ | STANDARD | sonnet/high | none | ✅ true |
 | 002 | 🔔 G1 Dataverse origin field (`sprk_composeorigin`) — HUMAN GATE | 0 Gate | ✅ | FULL | sonnet/high | none | ✅ true |
 | 003 | G2 clean-apply spike (R5-D2 decision) | 0 Gate | 🔲 | FULL | opus/xhigh | none | ✅ true |
-| 004 | Op-schema extension design (table/acceptRevision/rejectRevision) | 0 Gate | 🔲 | FULL | opus/high | none | ✅ true |
-| 005 | NumberingComputationEngine reuse decision (extract vs reference) | 0 Gate | 🔲 | STANDARD | sonnet/high | none | ✅ true |
-| 006 | Reciprocal R4.5 coordination note (optional courtesy) | 0 Gate | 🔲 | MINIMAL | sonnet/high | none | ✅ true |
+| 004 | Op-schema extension design (table/acceptRevision/rejectRevision) | 0 Gate | ✅ | FULL | opus/high | none | ✅ true |
+| 005 | NumberingComputationEngine reuse decision (extract vs reference) | 0 Gate | ✅ | STANDARD | sonnet/high | none | ✅ true |
+| 006 | Reciprocal R4.5 coordination note (optional courtesy) | 0 Gate | ✅ | MINIMAL | sonnet/high | none | ✅ true |
 | 010 | G3 alignment applier (`Alignment`→`w:pPrChange`) | 1 Edit-path ops | 🔲 | FULL | sonnet/high | 001 | ❌ shared engine |
 | 011 | G3 heading/list applier (reuse numbering engine) | 1 Edit-path ops | 🔲 | FULL | opus/high | 005,010 | ❌ shared engine |
 | 012 | G12 accept/reject-revision single-by-id (ET-2) | 1 Edit-path ops | 🔲 | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
@@ -39,6 +39,8 @@
 | 090 | Project wrap-up (/test-diet + review + close) | 4 Wrap-up | 🔲 | FULL | sonnet/high | 042 | ❌ terminal |
 
 Status legend: 🔲 not-started · 🔄 in-progress/retry · ✅ completed · ⛔ blocked.
+
+> **Baseline (task 001, 2026-07-29):** GREEN — 739/739 Compose unit + 208/208 seam + **24/24 byte-diff (8-doc corpus)**; publish **46.70 MB** excl PDBs (ceiling 60). The corpus is 8 docs → **24/24** is the correct no-regression figure (the earlier "28/28" was a stale headline; corrected across spec/plan/POMLs 2026-07-29). R4.5 outputs + docxBridge state confirmed. See `../notes/baseline-verification.md`.
 
 ## Dependency DAG (critical path)
 

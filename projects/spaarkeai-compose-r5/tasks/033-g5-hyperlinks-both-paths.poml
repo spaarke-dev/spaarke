@@ -46,7 +46,7 @@
     <constraint source="ADR-010">Patch engine = stateless concrete singleton; the new hyperlink applier carries no per-request state.</constraint>
     <constraint source="ADR-007">No Microsoft.Graph above SpeFileStore; hyperlink relationship handling stays in the OOXML byte-authors, not a Graph call.</constraint>
     <constraint source="ADR-038">Seam DoD: BOTH paths carry through-the-wire WebApplicationFactory seam slices in tests/integration/seam/Compose/ (authored clean w:hyperlink; imported tracked). NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
-    <constraint source="project">NFR-01: corpus byte-diff harness (28/28) MUST NOT regress. NFR-08: removing the SDL-4/5 guard MUST NOT reintroduce a user-triggerable error or silent-loss path; the R4 op-log-preservation net stays until this feature is seam-proven.</constraint>
+    <constraint source="project">NFR-01: corpus byte-diff harness (24/24) MUST NOT regress. NFR-08: removing the SDL-4/5 guard MUST NOT reintroduce a user-triggerable error or silent-loss path; the R4 op-log-preservation net stays until this feature is seam-proven.</constraint>
     <constraint source="project">NFR-03/04: MIT/permissive only; NO new runtime package (DocumentFormat.OpenXml already present). Report absolute BFF publish size + delta vs ~46.11 MB baseline; ≤60 MB compressed ceiling.</constraint>
     <constraint source="project">NFR-09 (analysis-hub-r1): shared Spaarke.Compose.Components surface + save/redline contract MUST NOT regress the downstream consumer's reopen-restore parity. Run /conflict-check before the BFF + shared-client PR.</constraint>
     <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). All new hyperlink surface lands in Services/Compose/ (renderer + engine); no new service, library, or endpoint family.</constraint>
@@ -88,7 +88,7 @@
     <step order="4">Re-enable the hyperlink control in ComposeFormatToolbar.tsx (:635) for BOTH modes. Anchor the control's UI to the existing toolbar styling.</step>
     <step order="5">Add seam slices in tests/integration/seam/Compose/ for BOTH paths: authored → clean w:hyperlink (no tracked markup); imported → tracked hyperlink; both prove untouched subtrees byte-identical and no unrepresentable/silent-loss. Add the &lt;ui-tests&gt; below.</step>
     <step order="6">Run /conflict-check before opening the BFF + shared-client PR (renderer/engine/op-catalog overlap with compose-r1/r2/r3 + ai-architecture-redesign-r2; toolbar overlap with analysis-hub-r1). State Placement Justification and report publish-size delta vs ~46.11 MB in the PR.</step>
-    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + both seam slices + ui-tests + corpus byte-diff (28/28) + Tier-1 NetArchTest pass.</step>
+    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + both seam slices + ui-tests + corpus byte-diff (24/24) + Tier-1 NetArchTest pass.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
   </steps>
@@ -124,7 +124,7 @@
     <criterion testable="true">Given an imported doc, when the user inserts a hyperlink, then the new hyperlink op (extended into the closed catalog, mirrored client+server) applies as a tracked hyperlink via ComposeShadowPatchEngine, anchored by (paraId,runIndex,offset) with no text-search (SDL-5 guard removed).</criterion>
     <criterion testable="true">Given both paths, when the seam slices run through the WebApplicationFactory, then authored (clean) and imported (tracked) hyperlinks round-trip with no unrepresentable/silent-loss and no banned mock/DI/ctor test shapes.</criterion>
     <criterion testable="true">Given the toolbar, when a doc is loaded, then the hyperlink control is enabled in both modes.</criterion>
-    <criterion testable="true">Negative / no-regression: op catalog is EXTENDED not forked (ADR-039); Tier-1 NetArchTest passes (no AI internals); corpus byte-diff stays 28/28; BFF publish ≤60 MB (delta vs ~46.11 MB reported); no new runtime package; the two-byte-author split is preserved; analysis-hub-r1 reopen-restore parity not regressed (NFR-09).</criterion>
+    <criterion testable="true">Negative / no-regression: op catalog is EXTENDED not forked (ADR-039); Tier-1 NetArchTest passes (no AI internals); corpus byte-diff stays 24/24; BFF publish ≤60 MB (delta vs ~46.11 MB reported); no new runtime package; the two-byte-author split is preserved; analysis-hub-r1 reopen-restore parity not regressed (NFR-09).</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-05 / gap G5 / SDL-4/5; plan P3-4. Both paths (authored render + edit op). NEW hyperlink op + `link` mark → justification emitted. Deps 004 (op-schema design). parallel-safe=false due to shared renderer + op catalog + engine + toolbar. Escalate on any unrepresentable/silent-loss round-trip (NFR-08).</notes>

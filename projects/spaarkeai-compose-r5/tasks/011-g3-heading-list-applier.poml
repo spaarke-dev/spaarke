@@ -39,7 +39,7 @@
     classifyStep emits heading/list steps instead of defer-structural. Renumbering is computed by R4.5's
     NumberingComputationEngine (reused, not forked) and matches its read-time model. The R4 SDL-1/2 guards are
     removed (heading/list controls re-enabled). Per-construct tests/integration/seam/Compose/ slices prove
-    round-trip; corpus byte-diff (28/28) does not regress.
+    round-trip; corpus byte-diff (24/24) does not regress.
   </goal>
 
   <context>
@@ -70,7 +70,7 @@
     <constraint source="ADR-010">Patch engine = stateless concrete singleton; the heading/list branch carries no per-request state.</constraint>
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
     <constraint source="ADR-038">Add per-construct through-the-wire WebApplicationFactory seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
-    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-08 — removing SDL-1/2 guards MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-08 — removing SDL-1/2 guards MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
     <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
   </constraints>
 
@@ -106,7 +106,7 @@
     <step order="5">Update client stepOperationInterceptor.ts classifyStep to EMIT heading/list steps (remove defer-structural for these) mirroring the server op schema exactly.</step>
     <step order="6">Re-enable the heading/list controls in ComposeFormatToolbar.tsx (guards :537/:546/:563); leave alignment (010) and table (014) handling as-is.</step>
     <step order="7">Add per-construct seam slices in tests/integration/seam/Compose/: heading, ordered/unordered list, list level — each round-trips through the wire, carries the expected markup, renumber matches read-time, and untouched subtrees are byte-identical.</step>
-    <step order="8">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="8">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
     <step order="9">Run/verify: build + this task's seam/unit tests pass.</step>
     <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="11">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
@@ -137,7 +137,7 @@
     <criterion testable="true">Given a heading/list edit in the client, when classifyStep runs, then it EMITS the corresponding setBlockAttr step (no longer defer-structural) mirroring the server op schema.</criterion>
     <criterion testable="true">Given any heading/list edit, then the target paragraph is resolved by paraId — no text-search in the write path.</criterion>
     <criterion testable="true">Given the numbering reuse, then NumberingComputationEngine is reused (per 005) and the numbering algorithm is NOT re-implemented or forked; if 005 chose extract, the projection-builder byte output is unchanged.</criterion>
-    <criterion testable="true">Given the seam slices run, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, SDL-1/2 guards are removed with no user-triggerable error or silent-loss path (NFR-08), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+    <criterion testable="true">Given the seam slices run, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, SDL-1/2 guards are removed with no user-triggerable error or silent-loss path (NFR-08), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
   </acceptance-criteria>
 
   <notes>

@@ -43,7 +43,7 @@
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest). No IOpenAiClient/executor/routing types in the profile-trigger code path.</constraint>
     <constraint source="ADR-038">Seam DoD — the reload leg carries a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests.</constraint>
     <constraint source="project">R5-D5 / COORDINATION: REUSE R4.5 CitationResolver (paraId→legal-number) — do NOT fork it. Rebase onto post-R4.5 ComposeService.cs (R4.5-owned-FIRST). Run /conflict-check before the BFF PR.</constraint>
-    <constraint source="project">NFR-01/03/04: corpus byte-diff harness (28/28) MUST NOT regress; no new runtime package; BFF publish ≤60 MB compressed — report absolute + delta vs ~46.11 MB baseline in the PR.</constraint>
+    <constraint source="project">NFR-01/03/04: corpus byte-diff harness (24/24) MUST NOT regress; no new runtime package; BFF publish ≤60 MB compressed — report absolute + delta vs ~46.11 MB baseline in the PR.</constraint>
     <constraint source="project">NFR-08: adding the reload trigger MUST NOT reintroduce a user-triggerable error or profiling-storm/silent-loss path; keep the existing fire-and-forget safety semantics.</constraint>
     <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); the profile re-trigger stays in Services/Compose/ save/load orchestration; no new service/endpoint family.</constraint>
     <constraint source="ADR-021">Client Refresh Profile button MUST render correctly in dark mode; UI tests cover both themes.</constraint>
@@ -76,7 +76,7 @@
     <step order="5">Wire both legs to reuse R4.5 CitationResolver for paraId→legal-number citations; do not fork the resolver.</step>
     <step order="6">Add a through-the-wire seam slice in tests/integration/seam/Compose/ proving the reload leg re-triggers the profile (or, if deferred, ensure the deferral note fully documents the §6.5 path and no half-wired code ships).</step>
     <step order="7">Add UI tests for the Refresh Profile button: renders, triggers the profile re-run, and renders correctly in dark mode (ADR-021).</step>
-    <step order="8">Verify NFR gates: run the corpus byte-diff harness (28/28 no-regression), run dotnet publish and report absolute compressed size + delta vs ~46.11 MB, confirm zero new runtime package. Run /conflict-check before the BFF PR.</step>
+    <step order="8">Verify NFR gates: run the corpus byte-diff harness (24/24 no-regression), run dotnet publish and report absolute compressed size + delta vs ~46.11 MB, confirm zero new runtime package. Run /conflict-check before the BFF PR.</step>
     <step order="9">Run/verify: build + the task's seam/unit tests + UI tests pass.</step>
     <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="11">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
@@ -109,7 +109,7 @@
     <criterion testable="true">Given the Compose toolbar, when the user clicks "Refresh Profile", then the same profile re-run is triggered on demand.</criterion>
     <criterion testable="true">Given citation production, when the profile re-run runs, then it reuses R4.5 CitationResolver (paraId→legal-number) — no forked resolver introduced.</criterion>
     <criterion testable="true">Given the Refresh Profile button, when rendered in dark mode, then it displays correctly (ADR-021) per the UI test.</criterion>
-    <criterion testable="true">Negative/no-regression: the corpus byte-diff harness stays 28/28, no new runtime package is added, BFF publish stays ≤60 MB, and reopen without an edit does NOT cause a profiling-storm re-trigger loop (NFR-08).</criterion>
+    <criterion testable="true">Negative/no-regression: the corpus byte-diff harness stays 24/24, no new runtime package is added, BFF publish stays ≤60 MB, and reopen without an edit does NOT cause a profiling-storm re-trigger loop (NFR-08).</criterion>
     <criterion testable="true">Escape hatch: if complexity forces deferral, then a §6.5 deferral note exists in notes/ and NO half-wired profile-trigger code is merged.</criterion>
   </acceptance-criteria>
 

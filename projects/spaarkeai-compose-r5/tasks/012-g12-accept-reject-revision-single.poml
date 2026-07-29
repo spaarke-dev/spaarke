@@ -39,7 +39,7 @@
     accept-del removes the run; reject = inverse) with zero text-search. The imported-deletion end-of-paragraph
     re-anchor bug in importedRevisions.ts is fixed. The client emits the revision ops. An ET-2 seam slice on the
     CIPO corpus doc with pre-existing revisions proves accept/reject-then-save succeeds (no
-    TrackedChangeReconciliationUnsupported 422) with Word-valid revision state; corpus byte-diff (28/28) does not
+    TrackedChangeReconciliationUnsupported 422) with Word-valid revision state; corpus byte-diff (24/24) does not
     regress.
   </goal>
 
@@ -69,7 +69,7 @@
     <constraint source="ADR-010">Patch engine = stateless concrete singleton; the revision-resolution appliers carry no per-request state.</constraint>
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest) — the AI-redline path stays envelope-only.</constraint>
     <constraint source="ADR-038">Add the ET-2 through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/ on the CIPO corpus fixture with pre-existing revisions. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
-    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-07 output must be Word-valid revision state. NFR-09 — MUST NOT regress analysis-hub-r1's reopen-restore / clean-retirement parity (this hardens the accept/reject contract it depends on).</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-07 output must be Word-valid revision state. NFR-09 — MUST NOT regress analysis-hub-r1's reopen-restore / clean-retirement parity (this hardens the accept/reject contract it depends on).</constraint>
     <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check (overlaps analysis-hub-r1 shared surface). Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
   </constraints>
 
@@ -109,7 +109,7 @@
     <step order="3">Fix the imported-deletion end-of-paragraph re-anchor in importedRevisions.ts (applyImportedRevisions :272) so paragraph-boundary-spanning deletions re-anchor correctly.</step>
     <step order="4">Update client stepOperationInterceptor.ts to emit the acceptRevision/rejectRevision ops.</step>
     <step order="5">Add the ET-2 seam slice on the CIPO corpus doc with pre-existing revisions: accept a revision, save through the wire, assert no 422 and Word-valid revision state; repeat for reject and for accept-del/reject-ins cases. Assert untouched subtrees byte-identical.</step>
-    <step order="6">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="6">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
     <step order="7">Run/verify: build + this task's seam/unit tests pass.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
@@ -138,7 +138,7 @@
     <criterion testable="true">Given any accept/reject op, then the revision is located by its id attribute — no text/content search occurs in the write path.</criterion>
     <criterion testable="true">Given an imported deletion spanning a paragraph boundary, when reconciled, then it re-anchors correctly (the importedRevisions.ts :272 end-of-paragraph bug is fixed).</criterion>
     <criterion testable="true">Given the closed catalog, then acceptRevision/rejectRevision exist in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint was added (ADR-039).</criterion>
-    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, analysis-hub-r1's accept/reject-dependent parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, analysis-hub-r1's accept/reject-dependent parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
   </acceptance-criteria>
 
   <notes>

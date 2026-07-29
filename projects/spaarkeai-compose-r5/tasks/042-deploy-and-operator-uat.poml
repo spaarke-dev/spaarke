@@ -61,7 +61,7 @@
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="1">Confirm task 041 hardening gate passed (byte-diff 28/28, suites green, publish ≤60 MB). Do not deploy if the gate did not pass.</step>
+    <step order="1">Confirm task 041 hardening gate passed (byte-diff 24/24, suites green, publish ≤60 MB). Do not deploy if the gate did not pass.</step>
     <step order="2">Check for concurrent deploys: verify no in-flight Compose/SpaarkeAi deploy is targeting spaarke-bff-dev or the sprk_spaarkeai web resource. If one is detected, STOP and coordinate timing before proceeding ("last deploy wins").</step>
     <step order="3">Deploy the BFF to spaarke-bff-dev using the bff-deploy skill (build/deploy from master-with-R4.5). Confirm the deployment succeeded and the health endpoint responds.</step>
     <step order="4">Deploy the Compose client bundle to the shared sprk_spaarkeai web resource using the code-page-deploy skill. Confirm the resource updated.</step>

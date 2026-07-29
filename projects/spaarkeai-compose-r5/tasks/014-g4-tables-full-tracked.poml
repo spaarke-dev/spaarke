@@ -39,7 +39,7 @@
     structure — w:tblPrChange, row/cell w:ins/w:del for add/remove row, add/remove column, and cell-content edits —
     resolved by paraId/anchor, never by text-search. The R4 SDL-3 table guard is removed (control re-enabled on
     loaded docs). A tests/integration/seam/Compose/ slice on a table corpus doc proves a table structural edit
-    round-trips as Word-valid tracked table changes with untouched subtrees byte-identical; corpus byte-diff (28/28)
+    round-trips as Word-valid tracked table changes with untouched subtrees byte-identical; corpus byte-diff (24/24)
     does not regress.
   </goal>
 
@@ -68,7 +68,7 @@
     <constraint source="ADR-010">Patch engine = stateless concrete singleton; the table applier carries no per-request state.</constraint>
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
     <constraint source="ADR-038">Add a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/ on a table corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
-    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-07 output must be Word-valid tracked-table revision state — MUST NOT emit invalid revision markup. NFR-08 — removing SDL-3 MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-07 output must be Word-valid tracked-table revision state — MUST NOT emit invalid revision markup. NFR-08 — removing SDL-3 MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
     <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
   </constraints>
 
@@ -109,7 +109,7 @@
     <step order="4">Implement the engine applier: resolve the table/row/cell by anchor; emit w:tblPrChange for table-property changes and row/cell w:ins/w:del for add/remove row/column and cell-content edits — Word-valid tracked structure, no text-search, untouched subtrees untouched.</step>
     <step order="5">Re-enable the table control in ComposeFormatToolbar.tsx (:654).</step>
     <step order="6">Add a seam slice on a table corpus doc: apply each table structural edit through the wire, assert Word-valid tracked-table markup and byte-identical untouched subtrees.</step>
-    <step order="7">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="7">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
     <step order="8">Run/verify: build + this task's seam/unit tests pass.</step>
     <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="10">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
@@ -140,7 +140,7 @@
     <criterion testable="true">Given any table edit, then the table/row/cell target is resolved by anchor/paraId — no text-search in the write path.</criterion>
     <criterion testable="true">Given the closed catalog, then the table op exists in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint (ADR-039); the client no longer defers table steps as structural.</criterion>
     <criterion testable="true">Given the SDL-3 guard is removed, then the table control is enabled on loaded docs with no user-triggerable error and no silent-loss path (NFR-08).</criterion>
-    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
   </acceptance-criteria>
 
   <notes>

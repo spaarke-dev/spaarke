@@ -4,7 +4,7 @@
     <title>NumberingComputationEngine reuse decision — extract-to-standalone vs reference-in-place (G3)</title>
     <phase>0 Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Decision/analysis task producing a note; if extraction is chosen it must be a pure refactor, but the deliverable here is the decision + evidence, not the refactor itself (that lands in G3 task 011).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,7 +89,9 @@
     <criterion testable="true">Negative: the decision does NOT propose re-implementing or forking the numbering algorithm (R5-D4).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-03 + Affected Areas note (b), design R5-D4, plan P0-5. Dependency for task 011. Decision-only; the actual extraction/visibility change (if any) lands in G3.</notes>
+  <notes>Spec FR-03 + Affected Areas note (b), design R5-D4, plan P0-5. Dependency for task 011. Decision-only; the actual extraction/visibility change (if any) lands in G3.
+
+Completed 2026-07-29. Decision: (B) reference-in-place — AND static analysis found no visibility change is even required. `NumberingComputationEngine` is a nested `internal sealed class` inside `public sealed class ComposeDocxProjectionBuilder` (`:1357`); C# nested-`internal` visibility is assembly-wide, and `ComposeShadowPatchEngine.cs` is in the same namespace + same project (`Sprk.Bff.Api.Services.Compose` / `Sprk.Bff.Api.csproj`). Task 011 references `ComposeDocxProjectionBuilder.NumberingComputationEngine` (+ `.BuildNumberingModel`, `.ParagraphNumberingRef`, `.ResolveParagraphNumbering`, `.NumberingComputationResult`) by fully-qualified nested name — zero lines of `ComposeDocxProjectionBuilder.cs` change, zero byte-risk to the projection path. Full contract + coupling analysis + hand-off in `projects/spaarkeai-compose-r5/notes/numbering-engine-reuse-decision.md`. Escalation trigger NOT fired (no extraction attempted; reference-in-place cleanly enables reuse). Verification deviation: per orchestrator directive for this Wave-0 parallel batch, no `dotnet build/test/publish` was run (avoids obj/bin contention with task 001); the numbering round-trip seam test (`tests/integration/seam/Compose/ComposeNumberingRoundTripSeamTests.cs`) was verified by static inspection only (exists, targets the right production types, no Skip markers) — task 011 must run it fresh before relying on it as baseline. TASK-INDEX.md intentionally NOT edited by this task per orchestrator instruction (main-session aggregates Wave-0 results).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

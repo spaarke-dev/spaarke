@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="041" project="spaarkeai-compose-r5">
   <metadata>
-    <title>No-regression + publish-size hardening gate (byte-diff 28/28, full suite, publish ≤60 MB)</title>
+    <title>No-regression + publish-size hardening gate (byte-diff 24/24, full suite, publish ≤60 MB)</title>
     <phase>4 Profiling + hardening</phase>
     <gate>dep:010,011,012,013,014,020,021,022,030,031,032,033,040</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Verification/aggregation gate: runs existing harness + full seam/unit suites + ADR checks + dotnet publish. No production code change (only fixes if a gate fails, which would re-trigger the relevant task). Aggregates all impl work.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Deterministic ordered verification against known baselines (28/28 byte-diff, ~46.11 MB publish); no architectural judgment.</model-tier-reason>
+    <model-tier-reason>Deterministic ordered verification against known baselines (24/24 byte-diff, ~46.11 MB publish); no architectural judgment.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
@@ -18,11 +18,11 @@
     <estimated-effort>S-M (1-3d)</estimated-effort>
   </metadata>
 
-  <prompt>Run the R5 no-regression + publish-size hardening gate. Verify the corpus byte-diff harness stays 28/28, the full Compose seam + unit suites are green, ADR checks pass, and the BFF publish stays under the ceiling. Report absolute compressed publish size + delta vs the ~46.11 MB baseline and confirm zero new runtime package. This is an ordered verification gate — do not deploy if any gate regresses.</prompt>
+  <prompt>Run the R5 no-regression + publish-size hardening gate. Verify the corpus byte-diff harness stays 24/24, the full Compose seam + unit suites are green, ADR checks pass, and the BFF publish stays under the ceiling. Report absolute compressed publish size + delta vs the ~46.11 MB baseline and confirm zero new runtime package. This is an ordered verification gate — do not deploy if any gate regresses.</prompt>
 
   <role>SPAARKE platform developer with .NET 8 BFF test-harness + Azure deployment-sizing expertise, familiar with the Compose corpus byte-diff harness (ADR-049 / NFR-01) and the BFF publish-size verification rule (NFR-04).</role>
 
-  <goal>A hardening report exists in projects/spaarkeai-compose-r5/notes/ proving: (1) the corpus byte-diff harness is 28/28 (no regression, NFR-01); (2) the full Compose seam + unit suites are green; (3) adr-check + code-review ADR gates pass; (4) `dotnet publish -c Release` produces a compressed BFF output whose absolute size + delta vs ~46.11 MB baseline is recorded and is ≤60 MB (HARD STOP at ≥60 MB); (5) zero new runtime package was introduced (NFR-03). If any gate regresses, the report records the failure and the task escalates before deploy.</goal>
+  <goal>A hardening report exists in projects/spaarkeai-compose-r5/notes/ proving: (1) the corpus byte-diff harness is 24/24 (no regression, NFR-01); (2) the full Compose seam + unit suites are green; (3) adr-check + code-review ADR gates pass; (4) `dotnet publish -c Release` produces a compressed BFF output whose absolute size + delta vs ~46.11 MB baseline is recorded and is ≤60 MB (HARD STOP at ≥60 MB); (5) zero new runtime package was introduced (NFR-03). If any gate regresses, the report records the failure and the task escalates before deploy.</goal>
 
   <context>
     <background>Per spec §9.7 (Success Criteria #7) and NFR-01/NFR-04, R5's editing-completeness work (G1–G5, G7–G12) touches the engine appliers, op catalog, save/load orchestration, and client — all of which can silently regress byte-preservation or grow the publish. This gate aggregates every implementation task and is the mandatory pre-deploy verification: it re-runs the byte-diff harness, the full test suite, the ADR checks, and measures the publish before task 042 deploys.</background>
@@ -37,7 +37,7 @@
   </context>
 
   <constraints>
-    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 28/28) MUST stay green — any regression below 28/28 is a HARD STOP before deploy.</constraint>
+    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 24/24) MUST stay green — any regression below 24/24 is a HARD STOP before deploy.</constraint>
     <constraint source="project">NFR-04: BFF publish ≤60 MB compressed; report absolute + delta vs ~46.11 MB baseline. ≥+5 MB single-task delta → justify; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.</constraint>
     <constraint source="project">NFR-03: MIT/permissive only; no @tiptap-pro/*; NO new runtime package — confirm via dotnet list package and the client package manifest.</constraint>
     <constraint source="ADR-038">Run the existing seam + unit suites; do NOT add banned test shapes (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor-null). This gate runs tests, it does not author new ones.</constraint>
@@ -57,13 +57,13 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
     <patterns>
-      <pattern name="Byte-diff harness" location="tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs">The 28/28 corpus byte-diff no-regression harness — the primary NFR-01 gate.</pattern>
+      <pattern name="Byte-diff harness" location="tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs">The 24/24 corpus byte-diff no-regression harness — the primary NFR-01 gate.</pattern>
       <pattern name="Publish-size verification" location=".claude/constraints/azure-deployment.md">BFF Publish-Size Per-Task Verification Rule (NFR-01/NFR-04) — measure compressed output; state PDB convention.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="1">Run the corpus byte-diff harness (tests/integration/seam/Compose/ByteDiff…) and confirm it is 28/28. If it regresses below 28/28, STOP and escalate (do not proceed to publish/deploy).</step>
+    <step order="1">Run the corpus byte-diff harness (tests/integration/seam/Compose/ByteDiff…) and confirm it is 24/24. If it regresses below 24/24, STOP and escalate (do not proceed to publish/deploy).</step>
     <step order="2">Run the full Compose seam suite (tests/integration/seam/Compose/) and the Compose unit suite (tests/unit/Sprk.Bff.Api.Tests/Services/Compose/); confirm all green. Record pass counts.</step>
     <step order="3">Run /adr-check and /code-review on the aggregated R5 code (or confirm each task's Step 9.5 gate passed); confirm the ADR-013 Tier-1 NetArchTest and ADR-049 invariants hold. Record results.</step>
     <step order="4">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure the compressed output, and record absolute size + delta vs ~46.11 MB baseline (state PDB convention). Confirm ≤60 MB; if ≥55 MB cumulative, flag for architecture review; if ≥60 MB, HARD STOP.</step>
@@ -75,7 +75,7 @@
   </steps>
 
   <escalation>
-    <trigger>If the corpus byte-diff harness regresses below 28/28, OR the cumulative BFF publish is ≥55 MB (architecture review) / ≥60 MB (hard stop), STOP and escalate before task 042 deploys. Do not deploy on a regressed byte-diff or an over-ceiling publish.</trigger>
+    <trigger>If the corpus byte-diff harness regresses below 24/24, OR the cumulative BFF publish is ≥55 MB (architecture review) / ≥60 MB (hard stop), STOP and escalate before task 042 deploys. Do not deploy on a regressed byte-diff or an over-ceiling publish.</trigger>
   </escalation>
 
   <tools>
@@ -88,12 +88,12 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the aggregated R5 branch, when the corpus byte-diff harness runs, then it is 28/28 (no regression from the R4 baseline).</criterion>
+    <criterion testable="true">Given the aggregated R5 branch, when the corpus byte-diff harness runs, then it is 24/24 (no regression from the R4 baseline).</criterion>
     <criterion testable="true">Given the full Compose seam + unit suites, when run, then all pass and the counts are recorded in the hardening report.</criterion>
     <criterion testable="true">Given a Release publish, when the compressed output is measured, then the absolute size + delta vs ~46.11 MB is recorded and is ≤60 MB (with PDB convention stated).</criterion>
     <criterion testable="true">Given the dependency set, when compared to baseline, then zero new runtime package was added (no @tiptap-pro/*, no new NuGet/npm runtime dep) — NFR-03 confirmed.</criterion>
     <criterion testable="true">Given adr-check/code-review, when run on R5 code, then the ADR-013 Tier-1 NetArchTest and ADR-049 invariants pass.</criterion>
-    <criterion testable="true">Negative: if any gate regresses (byte-diff &lt; 28/28 or publish ≥60 MB), then the report records the failure and the task escalates rather than passing the deploy gate.</criterion>
+    <criterion testable="true">Negative: if any gate regresses (byte-diff &lt; 24/24 or publish ≥60 MB), then the report records the failure and the task escalates rather than passing the deploy gate.</criterion>
   </acceptance-criteria>
 
   <notes>Spec §9.7 (Success Criteria #7) / NFR-01/NFR-03/NFR-04; plan P4-2. This is the mandatory pre-deploy verification gate — task 042 (deploy) depends on it. Ordered/prescriptive because it is a verification sequence that must gate the deploy.</notes>

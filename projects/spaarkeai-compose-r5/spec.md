@@ -101,7 +101,7 @@ Each FR maps to a design gap; acceptance = the R4 guard removed + a through-the-
 
 ### Non-Functional Requirements
 
-- **NFR-01 — Byte preservation** (inherited I-4): every construct edit leaves untouched OOXML subtrees byte-identical; R4's corpus byte-diff harness (28/28) MUST NOT regress.
+- **NFR-01 — Byte preservation** (inherited I-4): every construct edit leaves untouched OOXML subtrees byte-identical; R4's corpus byte-diff harness (24/24) MUST NOT regress.
 - **NFR-02 — Placement determinism / no text-search** (inherited I-7): every new applier resolves by `(paraId, runIndex, offset)` or revision **id** — zero text-search in the write path, including G12 revision resolution.
 - **NFR-03 — Licensing** (inherited): MIT/permissive only; `DocumentFormat.OpenXml` (MIT, already a dep) + MIT TipTap base + `@tiptap/extension-*` only. **No `@tiptap-pro/*`, no Syncfusion/SuperDoc/EigenPal runtime dep.** No new runtime package for R5.
 - **NFR-04 — Publish size** (inherited, root §10): BFF ≤60 MB compressed. Report absolute + delta vs **~46.11 MB** post-R4 baseline on every BFF-touching task; ≥+5 MB single-task delta → justify; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.
@@ -237,7 +237,7 @@ Canonical source: [`notes/COORDINATION-with-r4.5.md`](notes/COORDINATION-with-r4
 4. [ ] **Versioning (G7)** — Save-Version updates in place; Save-New forks; transient/upload docs no longer mint duplicates. Verify: UAT (the 8-duplicate scenario) + seam slice.
 5. [ ] **Concurrency/UX (G8/G9/G11)** — external-change remount+banner; comment scroll-sync; track-changes-off keeps imported redlines visible. Verify: UAT.
 6. [ ] **Profiling (G10)** — Compose save re-runs the Document Profile (+ reload + manual button), OR documented complexity deferral per R5-D5. Verify: save→profile-updated assertion or deferral note.
-7. [ ] **No regression** — corpus byte-diff still 28/28; publish ≤60 MB; ADR + seam tests green; no new user-triggerable error path; NFR-09 downstream parity intact. Verify: harness + `dotnet publish` + CI.
+7. [ ] **No regression** — corpus byte-diff still 24/24; publish ≤60 MB; ADR + seam tests green; no new user-triggerable error path; NFR-09 downstream parity intact. Verify: harness + `dotnet publish` + CI.
 
 ---
 

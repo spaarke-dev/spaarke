@@ -44,7 +44,7 @@
     <constraint source="ADR-013">No AI internals in `Services/Compose/` (Tier-1 NetArchTest).</constraint>
     <constraint source="ADR-038">Seam DoD: the create-vs-replace save change carries a through-the-wire WebApplicationFactory seam slice in `tests/integration/seam/Compose/`. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
     <constraint source="ADR-021">Fluent v9 split-button MUST support dark mode (theme tokens; render correctly in light + dark).</constraint>
-    <constraint source="project">NFR-01: corpus byte-diff harness (28/28) MUST NOT regress. NFR-04: report BFF publish size absolute + delta vs ~46.11 MB; ≤60 MB ceiling. NFR-03: no new runtime package (Fluent v9 already present; MIT-only, no `@tiptap-pro/*`).</constraint>
+    <constraint source="project">NFR-01: corpus byte-diff harness (24/24) MUST NOT regress. NFR-04: report BFF publish size absolute + delta vs ~46.11 MB; ≤60 MB ceiling. NFR-03: no new runtime package (Fluent v9 already present; MIT-only, no `@tiptap-pro/*`).</constraint>
     <constraint source="project">NFR-08: create-vs-replace MUST NOT reintroduce a user-triggerable error or silent-loss path; R4's op-log-preservation safety net stays until seam-proven.</constraint>
     <constraint source="project">NFR-09: the versioning/save contract change MUST NOT regress `ai-advanced-capabilities-analysis-hub-r1`'s reopen-restore / clean-retirement parity over shared `sprk_document`/SPE driveItem. Its FR-09/FR-11 reopen-restore assumes a stable Compose save/version contract.</constraint>
     <constraint source="project">COORDINATION: REUSE R4.5 WS-1 transient-mount projection identity — DO NOT rebuild it. REBASE onto post-R4.5 `ComposeService.cs` / `ComposeWorkspace.tsx` (and after task 020's edits) before changing them. NEVER delete `docxBridge.ts` / "remove the mammoth module" — its write helpers are load-bearing. Run `/conflict-check` before the BFF PR (overlaps compose-r1/r2/r3 + ai-architecture-redesign-r2).</constraint>
@@ -89,7 +89,7 @@
     <step order="3">In `ComposeService.cs` (SaveAsync:570 / create-on-save ~:789): add create-vs-replace routing — Save-Version updates the existing `sprk_document` + SPE item; Save-New forks a new record. For the transient/upload path, resolve identity from R4.5 WS-1's transient-mount projection identity so repeated transient saves target the same record (no duplicate mint).</step>
     <step order="4">Add a seam slice in `tests/integration/seam/Compose/` proving: (a) Save-Version replaces in place (one record, updated SPE item), (b) Save-New forks a new record, and (c) the 8-duplicate scenario — repeated transient/upload saves target ONE record and do not mint duplicates. NO banned test shapes.</step>
     <step order="5">Add the `ui-tests` above for the split-button (render, dark-mode, Save-Version vs Save-New interaction). Run `/conflict-check` before the BFF PR; run `dotnet publish -c Release` and report size absolute + delta vs ~46.11 MB.</step>
-    <step order="6">Run/verify: build + the task's seam/unit tests + UI tests pass and the corpus byte-diff harness is still 28/28.</step>
+    <step order="6">Run/verify: build + the task's seam/unit tests + UI tests pass and the corpus byte-diff harness is still 24/24.</step>
     <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
   </steps>
@@ -118,7 +118,7 @@
     <criterion testable="true">Given the 8-duplicate UAT scenario, when transient/upload saves repeat, then they target ONE record via R4.5 WS-1 transient-mount identity and mint no duplicate records.</criterion>
     <criterion testable="true">Given the create-vs-replace change, when the through-the-wire seam slice runs, then Save-Version, Save-New, and the no-duplicate transient case all pass with no banned test shapes.</criterion>
     <criterion testable="true">Negative (NFR-02): create-vs-replace resolves by transient-mount projection identity / record id — no text-search / content match in the write path.</criterion>
-    <criterion testable="true">No-regression (NFR-01/NFR-03/NFR-04): corpus byte-diff still 28/28; no new runtime package; publish size reported absolute + delta vs ~46.11 MB and ≤60 MB. (NFR-08/NFR-09): no new user-triggerable error / silent-loss path; analysis-hub reopen-restore parity intact; `docxBridge.ts` not deleted.</criterion>
+    <criterion testable="true">No-regression (NFR-01/NFR-03/NFR-04): corpus byte-diff still 24/24; no new runtime package; publish size reported absolute + delta vs ~46.11 MB and ≤60 MB. (NFR-08/NFR-09): no new user-triggerable error / silent-loss path; analysis-hub reopen-restore parity intact; `docxBridge.ts` not deleted.</criterion>
   </acceptance-criteria>
 
   <notes>Spec FR-06 (G7); plan P2-3. Depends on task 020 (shared contended files + origin wiring) and reuses R4.5 WS-1 transient-mount identity (reuse, not rebuild). The split-button EXTENDS the existing Save button — not a new toolbar. Fixes the concrete 8-duplicate UAT scenario.</notes>

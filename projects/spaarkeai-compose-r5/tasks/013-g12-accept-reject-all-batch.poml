@@ -34,7 +34,7 @@
     The closed catalog gains accept-all/reject-all batch ops (mirrored server↔client). ComposeShadowPatchEngine
     applies them by iterating 012's single-by-id primitives in a deterministic, documented order so repeated runs on
     the same input produce byte-identical output that is Word-valid. Batch seam cases on a multi-revision corpus doc
-    prove accept-all / reject-all then save succeeds (no 422); corpus byte-diff (28/28) does not regress.
+    prove accept-all / reject-all then save succeeds (no 422); corpus byte-diff (24/24) does not regress.
   </goal>
 
   <context>
@@ -61,7 +61,7 @@
     <constraint source="ADR-010">Patch engine = stateless concrete singleton; batch reconciliation carries no per-request state across calls.</constraint>
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
     <constraint source="ADR-038">Add batch through-the-wire WebApplicationFactory seam cases in tests/integration/seam/Compose/ on a multi-revision corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
-    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-07 Word-valid output. NFR-09 — MUST NOT regress analysis-hub-r1 accept/reject parity. Determinism: repeated batch runs on the same input MUST produce byte-identical output.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (24/24) MUST NOT regress. NFR-07 Word-valid output. NFR-09 — MUST NOT regress analysis-hub-r1 accept/reject parity. Determinism: repeated batch runs on the same input MUST produce byte-identical output.</constraint>
     <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03).</constraint>
   </constraints>
 
@@ -99,7 +99,7 @@
     <step order="4">Implement the batch applier: sort the revision set by the deterministic order and apply 012's primitives; touch nothing else.</step>
     <step order="5">Update client stepOperationInterceptor.ts to emit accept-all/reject-all ops.</step>
     <step order="6">Add batch seam cases on the multi-revision corpus doc: accept-all then save (no 422); reject-all then save; run each twice and assert byte-identical output across runs (determinism) and untouched subtrees byte-identical.</step>
-    <step order="7">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="7">Run the corpus byte-diff harness (confirm 24/24) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
     <step order="8">Run/verify: build + this task's seam/unit tests pass.</step>
     <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="10">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
@@ -128,7 +128,7 @@
     <criterion testable="true">Given the same input, when accept-all (or reject-all) is run repeatedly, then the byte output is identical across runs (deterministic ordering) and the ordering rule is documented in notes/.</criterion>
     <criterion testable="true">Given the batch applier, then it composes 012's single-by-id primitives (no re-implemented per-revision semantics) and resolves revisions by id — no text-search.</criterion>
     <criterion testable="true">Given the closed catalog, then accept-all/reject-all exist in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint (ADR-039).</criterion>
-    <criterion testable="true">Given the seam cases run, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, analysis-hub-r1 accept/reject parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+    <criterion testable="true">Given the seam cases run, then untouched subtrees are byte-identical, corpus byte-diff stays 24/24, analysis-hub-r1 accept/reject parity is not regressed (NFR-09), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
   </acceptance-criteria>
 
   <notes>

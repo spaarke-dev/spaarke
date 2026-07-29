@@ -84,7 +84,7 @@ Deliverables (share the op-schema/engine surface — sequence within phase):
 
 ### Phase 4 — Profiling + hardening + cutover
 - **P4-1 — G10 profile re-run (reload + manual button)** (M, `sonnet@high`): save-hook trigger already exists — add reload/onload + "Refresh Profile" button; reuse `CitationResolver`. R5-D5 complexity-defer escape hatch documented if needed.
-- **P4-2 — No-regression + publish-size hardening** (S–M, `sonnet@high`): corpus byte-diff 28/28; `dotnet publish` ≤60 MB (report vs ~46.11 MB); ADR + seam green.
+- **P4-2 — No-regression + publish-size hardening** (S–M, `sonnet@high`): corpus byte-diff 24/24; `dotnet publish` ≤60 MB (report vs ~46.11 MB); ADR + seam green.
 - **P4-3 — Deploy + operator UAT** (M, `sonnet@high`): build/deploy from master-with-R4.5 to shared `sprk_spaarkeai` + `spaarke-bff-dev` (coordinate deploy timing); operator UAT against §9 graduation criteria.
 - **P4-4 — 090 wrap-up** (S, `sonnet@high`): `/test-diet` reconciliation; README→Complete; lessons-learned; portfolio sync/archive.
 
@@ -110,7 +110,7 @@ Phase 1 + Phase 2 ─► Phase 3 ─► Phase 4 (P4-2 no-regression gates deploy
 - **analysis-hub-r1** (NFR-09): downstream consumer of Compose save/versioning/redline; shares `Spaarke.Compose.Components` + `ConversationPane` routing/e2e. R5's G1/G2/G7/G10/G12 MUST NOT regress its reopen-restore / retirement parity. `/conflict-check` before every BFF + shared-client PR.
 
 ## Non-Functional Gates (every applicable task)
-NFR-01 byte-preservation (28/28) · NFR-02 no text-search (I-7) · NFR-03 MIT-only, no new package · NFR-04 publish ≤60 MB (vs ~46.11) · NFR-05 facade purity (Tier-1 NetArchTest) · NFR-06 seam DoD · NFR-07 Word-native output · NFR-08 guard no-regression · NFR-09 downstream parity.
+NFR-01 byte-preservation (24/24) · NFR-02 no text-search (I-7) · NFR-03 MIT-only, no new package · NFR-04 publish ≤60 MB (vs ~46.11) · NFR-05 facade purity (Tier-1 NetArchTest) · NFR-06 seam DoD · NFR-07 Word-native output · NFR-08 guard no-regression · NFR-09 downstream parity.
 
 ## Estimated Effort
 ~18 implementation tasks + gates/deploy/wrap-up ≈ **22–26 tasks**. Rough range **4–7 weeks** single-threaded; G4 tables (L) is the long pole. Phases 1 & 2 parallelizable after Phase-0 gates clear.

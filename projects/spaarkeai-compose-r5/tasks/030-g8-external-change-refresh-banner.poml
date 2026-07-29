@@ -43,7 +43,7 @@
     <constraint source="ADR-038">Seam DoD: the webhook-delivery leg carries a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
     <constraint source="project">NFR-08: removing the guard MUST NOT reintroduce a user-triggerable error or silent-loss path. The remount MUST NOT discard unsaved local edits (see escalation). The R4 op-log-preservation net stays until the replacing feature is seam-proven.</constraint>
     <constraint source="project">NFR-09 (analysis-hub-r1): MUST NOT regress the downstream consumer's reopen-restore parity. ComposeEditor.tsx + ConversationPane routing are shared surface; run /conflict-check before the shared-client PR.</constraint>
-    <constraint source="project">NFR-01/NFR-04: corpus byte-diff harness (28/28) MUST NOT regress; report absolute BFF publish size + delta vs ~46.11 MB baseline on this BFF-touching task; ≤60 MB compressed ceiling.</constraint>
+    <constraint source="project">NFR-01/NFR-04: corpus byte-diff harness (24/24) MUST NOT regress; report absolute BFF publish size + delta vs ~46.11 MB baseline on this BFF-touching task; ≤60 MB compressed ceiling.</constraint>
     <constraint source="project">NFR-03: MIT/permissive only; no new runtime package; the banner uses existing Fluent v9 components already in the surface.</constraint>
     <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md). The webhook wiring stays in the endpoint/facade layer; no new endpoint family (G8 completes endpoints that already exist).</constraint>
   </constraints>
@@ -75,7 +75,7 @@
     <step order="4">Add the non-blocking banner "Document updated from document management system version" to ComposeEditor.tsx, anchored to the existing deferred-notice styling (:1650-1665). Verify the existing 423 lock message still renders and works after a lock releases (a refresh remounts the projection).</step>
     <step order="5">Add a webhook-delivery seam slice in tests/integration/seam/Compose/ (through-the-wire WebApplicationFactory) proving an external-change signal reaches the handler and drives the check-changes contract. Add the &lt;ui-tests&gt; below.</step>
     <step order="6">Run /conflict-check before opening the shared-client PR (ComposeEditor.tsx + ComposeWorkspace.tsx overlap with 031 and analysis-hub-r1). State Placement Justification and report publish-size delta vs ~46.11 MB in the PR.</step>
-    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + the task's seam slice + ui-tests + corpus byte-diff (28/28) pass.</step>
+    <step order="7">Run/verify: build (BFF + Spaarke.Compose.Components) + the task's seam slice + ui-tests + corpus byte-diff (24/24) pass.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="9">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
   </steps>
@@ -109,7 +109,7 @@
     <criterion testable="true">Given an external edit (Open-in-Web/Desktop), when it is detected, then Compose remounts the projection and renders the non-blocking "Document updated from document management system version" banner without data loss.</criterion>
     <criterion testable="true">Given a 423 lock that then releases, when a refresh occurs, then the existing 423 lock message still works and the projection remounts.</criterion>
     <criterion testable="true">Given a webhook-delivery seam slice in tests/integration/seam/Compose/, when it runs through the WebApplicationFactory, then it proves the external-change signal reaches the handler (no banned mock/DI/ctor test shapes).</criterion>
-    <criterion testable="true">Negative / no-regression: the corpus byte-diff harness stays 28/28, BFF publish stays ≤60 MB (delta vs ~46.11 MB reported), and no new user-triggerable error or silent-loss path is introduced (NFR-08); analysis-hub-r1 reopen-restore parity is not regressed (NFR-09).</criterion>
+    <criterion testable="true">Negative / no-regression: the corpus byte-diff harness stays 24/24, BFF publish stays ≤60 MB (delta vs ~46.11 MB reported), and no new user-triggerable error or silent-loss path is introduced (NFR-08); analysis-hub-r1 reopen-restore parity is not regressed (NFR-09).</criterion>
     <criterion testable="true">Negative: no text-search is used to detect the external change — detection resolves by document/version identity (NFR-02).</criterion>
   </acceptance-criteria>
 

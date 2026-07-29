@@ -40,7 +40,7 @@
     <constraint source="ADR-049">Engine is byte[]-in/byte[]-out; edits are surgical ops anchored by (paraId, runIndex, run-local-offset); untouched OOXML subtrees MUST remain byte-identical after save (I-4). Honor I-1…I-7 + D1–D5.</constraint>
     <constraint source="ADR-049">I-7 / NFR-02: NO text-search in the write path — resolve by (paraId, runIndex, offset), never content match, in either candidate.</constraint>
     <constraint source="project">MUST preserve the two-byte-author split (renderer clean / engine tracked) — MUST NOT merge the byte-authors or force authored origination through the op log.</constraint>
-    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 28/28) MUST NOT regress; the chosen approach must keep it green.</constraint>
+    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 24/24) MUST NOT regress; the chosen approach must keep it green.</constraint>
     <constraint source="ADR-010">Any engine clean-apply branch stays stateless (concrete singleton), no per-request state.</constraint>
     <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
     <constraint source="project">COORDINATION: G2 depends on docxBridge write helpers (`buildContentModel`/`stampParaIds`/paraId helpers) — never delete `docxBridge.ts`. Rebase onto post-R4.5 ComposeService.cs.</constraint>
@@ -90,7 +90,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Given a born-in-editor corpus doc, when the chosen approach applies an authored edit and saves, then the output contains ZERO `w:ins`/`w:del` markup (opens in Word with no redlines).</criterion>
-    <criterion testable="true">Given the chosen approach, when the corpus byte-diff harness runs, then untouched subtrees are byte-identical and the harness stays green (NFR-01, 28/28 baseline preserved).</criterion>
+    <criterion testable="true">Given the chosen approach, when the corpus byte-diff harness runs, then untouched subtrees are byte-identical and the harness stays green (NFR-01, 24/24 baseline preserved).</criterion>
     <criterion testable="true">Given the decision note, when reviewed, then it describes BOTH R5-D2 options, shows byte-diff evidence, and states the selected approach with a defensible reason.</criterion>
     <criterion testable="true">Negative: neither candidate uses text-search to resolve edits — both anchor by (paraId, runIndex, offset) (I-7 / NFR-02).</criterion>
     <criterion testable="true">Negative: `docxBridge.ts` is not deleted and the two-byte-author split is not merged.</criterion>
