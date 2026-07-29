@@ -11,14 +11,14 @@
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
 | **Progress** | **Pipeline complete.** spec.md + plan.md + 22 task POMLs + TASK-INDEX.md generated; registered as Project #695 + `projects/INDEX.md` row. |
-| **Status** | ⛔ **Execution HELD** — two Phase-0 HUMAN GATES must clear before implementation (see below). |
-| **Active task** | none — awaiting gate clearance, then `task-execute 001` |
-| **Next Action** | (1) Approve **task 002** Dataverse schema (`sprk_composeorigin` on `sprk_document`); (2) run **task 003** G2 clean-apply spike (R5-D2). Then execute per the TASK-INDEX DAG. |
+| **Status** | 🚀 **EXECUTING** (autonomous, parallel-where-possible per owner 2026-07-29). Task 002 ✅ (owner created the field). |
+| **Active task** | Wave 0 (Phase-0 design/spike/verify): 001, 003, 004, 005, 006 in parallel. |
+| **Next Action** | After Wave 0: build-verify + collect decisions (G2 approach, op-schema, numbering reuse) → serial impl waves (010–014, 020–022, 030–033, 040) → 041 gate → **STOP before 042 deploy** (human-coordinated). |
 
-## ⛔ Phase-0 human gates (blocking)
-- **002 — G1 Dataverse origin field**: needs operator approval of the schema change before the field is created. Blocks 020/022/030/040.
-- **003 — G2 clean-apply spike (R5-D2)**: decide engine-clean-branch vs re-author-from-model on a born-in-editor corpus doc. Blocks 021.
-- Both can run alongside the Phase-1 op-schema wave (004/005 → 010–014).
+## Gate status
+- **002 — G1 Dataverse origin field**: ✅ CLEARED (owner created `sprk_composeorigin`; Authored=100000000, Imported=100000001, default Imported, null→Imported — see notes/g1-origin-field-asbuilt.md).
+- **003 — G2 clean-apply spike (R5-D2)**: running as a normal task in Wave 0; output gates 021.
+- Deploy (042) will HOLD for human deploy-timing coordination (shared sprk_spaarkeai + spaarke-bff-dev).
 
 ## What exists
 - ✅ `design.md`, `README.md` (gap ledger), `notes/COORDINATION-with-r4.5.md` (from setup).

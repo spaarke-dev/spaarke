@@ -7,18 +7,16 @@
 > **Total**: 22 tasks (6 gate · 5 edit-path ops · 3 lifecycle · 4 concurrency/UX · 3 hardening/cutover · 1 wrap-up)
 > **Execution gate**: ⛔ **HELD** — two Phase-0 human gates must clear before implementation (see below).
 
-## ⛔ Human gates before implementation (read first)
-1. **Task 002 — G1 Dataverse schema (`sprk_composeorigin`)** requires operator approval of the schema change before the field is created. Blocks 020 → 022 / 030 / 040.
-2. **Task 003 — G2 clean-apply spike (R5-D2)** decides engine-clean-branch vs re-author-from-model. Blocks 021.
-
-Both can run alongside the Phase-1 op-schema wave (which depends only on 004/005), but the **authored-doc lifecycle chain (020/021/022) is blocked until they clear.**
+## Human gates
+1. **Task 002 — G1 Dataverse schema (`sprk_composeorigin`)** — ✅ **CLEARED 2026-07-29**: owner created the field. As-built: Authored=`100000000`, Imported=`100000001`, default Imported, null→Imported. See [`../notes/g1-origin-field-asbuilt.md`](../notes/g1-origin-field-asbuilt.md). Task 020 unblocked.
+2. **Task 003 — G2 clean-apply spike (R5-D2)** — runs as a normal task (produces the decision note); its output gates task 021 only.
 
 ## Task table
 
 | ID | Title | Phase | Status | Rigor | Tier/Effort | Deps | Parallel-safe |
 |----|-------|-------|--------|-------|-------------|------|---------------|
 | 001 | Confirm R4.5 merge + green baseline | 0 Gate | 🔲 | STANDARD | sonnet/high | none | ✅ true |
-| 002 | 🔔 G1 Dataverse origin field (`sprk_composeorigin`) — HUMAN GATE | 0 Gate | 🔲 | FULL | sonnet/high | none | ✅ true |
+| 002 | 🔔 G1 Dataverse origin field (`sprk_composeorigin`) — HUMAN GATE | 0 Gate | ✅ | FULL | sonnet/high | none | ✅ true |
 | 003 | G2 clean-apply spike (R5-D2 decision) | 0 Gate | 🔲 | FULL | opus/xhigh | none | ✅ true |
 | 004 | Op-schema extension design (table/acceptRevision/rejectRevision) | 0 Gate | 🔲 | FULL | opus/high | none | ✅ true |
 | 005 | NumberingComputationEngine reuse decision (extract vs reference) | 0 Gate | 🔲 | STANDARD | sonnet/high | none | ✅ true |
