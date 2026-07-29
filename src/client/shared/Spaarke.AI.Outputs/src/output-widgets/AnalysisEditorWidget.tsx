@@ -159,9 +159,7 @@ export default function AnalysisEditorWidget({
   // function form) runs ONCE on mount — later prop changes (e.g. a re-fetch
   // refreshing `data.sections`) do not clobber an in-progress edit.
   const [isEditing, setIsEditing] = useState<boolean>(() => data.isEditing ?? false);
-  const [draftSections, setDraftSections] = useState<AnalysisSection[]>(
-    () => data.draftSections ?? []
-  );
+  const [draftSections, setDraftSections] = useState<AnalysisSection[]>(() => data.draftSections ?? []);
 
   if (isLoading) {
     return (

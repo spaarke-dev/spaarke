@@ -29,10 +29,7 @@ describe('OpenFullFormButton (FR-15)', () => {
 
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    renderWithProvider(
-      <OpenFullFormButton communicationId="comm-1" onOpenFullForm={jest.fn()} />,
-      webDarkTheme
-    );
+    renderWithProvider(<OpenFullFormButton communicationId="comm-1" onOpenFullForm={jest.fn()} />, webDarkTheme);
 
     expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
     expect(errorSpy).not.toHaveBeenCalled();

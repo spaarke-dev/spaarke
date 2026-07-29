@@ -599,7 +599,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             }
           } catch (err) {
             const message = err instanceof Error ? err.message : 'Unknown error';
-            warnings.push(`To do could not be created (${message}). You can create it manually from the analysis record.`);
+            warnings.push(
+              `To do could not be created (${message}). You can create it manually from the analysis record.`
+            );
           }
         }
 

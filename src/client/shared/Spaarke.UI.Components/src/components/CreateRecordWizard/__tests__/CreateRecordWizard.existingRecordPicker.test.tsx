@@ -40,7 +40,9 @@ function buildNavigationService(lookupResult: LookupResult[]): INavigationServic
   };
 }
 
-function buildConfig(existingRecordPicker?: ICreateRecordWizardConfig['existingRecordPicker']): ICreateRecordWizardConfig {
+function buildConfig(
+  existingRecordPicker?: ICreateRecordWizardConfig['existingRecordPicker']
+): ICreateRecordWizardConfig {
   return {
     title: 'Create New Analysis',
     entityLabel: 'analysis',
@@ -93,7 +95,9 @@ describe('CreateRecordWizard — existingRecordPicker', () => {
   });
 
   it('clears the selection via the Clear button, restoring the picker button', async () => {
-    const navigationService = buildNavigationService([{ id: 'abc-123', name: 'NDA Draft', entityType: 'sprk_document' }]);
+    const navigationService = buildNavigationService([
+      { id: 'abc-123', name: 'NDA Draft', entityType: 'sprk_document' },
+    ]);
     const config = buildConfig({ navigationService, entityType: 'sprk_document', entityLabel: 'Document' });
 
     renderWithProviders(<CreateRecordWizard open onClose={jest.fn()} webApi={noopWebApi} config={config} />);

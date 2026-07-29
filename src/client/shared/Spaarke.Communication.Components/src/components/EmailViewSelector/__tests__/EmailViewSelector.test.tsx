@@ -23,9 +23,7 @@ const VIEWS: SavedView[] = [
 
 describe('EmailViewSelector', () => {
   it('renders the reused ViewSelector with the active view label', () => {
-    renderWithProvider(
-      <EmailViewSelector views={VIEWS} activeViewId="view-inbox" onViewChange={jest.fn()} />
-    );
+    renderWithProvider(<EmailViewSelector views={VIEWS} activeViewId="view-inbox" onViewChange={jest.fn()} />);
 
     expect(screen.getByText('Email — Inbox')).toBeInTheDocument();
   });

@@ -710,7 +710,12 @@ export const CreateRecordWizard: React.FC<ICreateRecordWizardProps> = ({ open, o
                   <Text size={300} weight="semibold">
                     {selectedExistingRecord.recordName}
                   </Text>
-                  <Button appearance="subtle" size="small" onClick={handleClearExistingRecord} aria-label="Clear selection">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    onClick={handleClearExistingRecord}
+                    aria-label="Clear selection"
+                  >
                     Clear
                   </Button>
                 </div>

@@ -25,7 +25,11 @@ import type { EmailTrackingPanelProps } from './EmailAssociationsAndTracking.typ
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  header: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  header: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
   disabled: { opacity: 0.6, pointerEvents: 'none' },
 });
 

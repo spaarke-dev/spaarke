@@ -82,9 +82,13 @@ function buildData(overrides: Partial<CreateAnalysisWizardData> = {}): CreateAna
   return {
     wizardId: 'create-analysis-test',
     bffBaseUrl: 'https://bff.example.com',
-    authenticatedFetch: jest.fn().mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) }),
+    authenticatedFetch: jest
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) }),
     dataService: buildDataService(),
-    navigationService: buildNavigationService([{ id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' }]),
+    navigationService: buildNavigationService([
+      { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
+    ]),
     searchUsers: jest.fn().mockResolvedValue([]),
     ...overrides,
   };
@@ -158,7 +162,12 @@ describe('CreateAnalysisWizardWidget', () => {
     const navigationService = buildNavigationService([
       { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
     ]);
-    const data = buildData({ dataService, navigationService, workTypeValue: 100000000, workTypeLabel: 'Agreement Review' });
+    const data = buildData({
+      dataService,
+      navigationService,
+      workTypeValue: 100000000,
+      workTypeLabel: 'Agreement Review',
+    });
 
     renderWidget(data);
 
@@ -249,14 +258,16 @@ describe('CreateAnalysisWizardWidget', () => {
   it('is Field-Mapping-driven for the Send Email next-step: applyFieldMappings runs sprk_analysis -> sprk_communication and mapped subject/body win over user input', async () => {
     // Field Mapping profile supplies a subject/body — the mapped values MUST
     // override the user-typed ones per the widget's onFinish contract.
-    mockApplyFieldMappings.mockImplementation(async (args: { targetEntity: string; payload: Record<string, unknown> }) => {
-      if (args.targetEntity === 'sprk_communication') {
-        args.payload['subject'] = 'Mapped subject from profile';
-        args.payload['description'] = 'Mapped body from profile';
-        return { profileFound: true, fieldsMapped: ['subject', 'description'], warnings: [] };
+    mockApplyFieldMappings.mockImplementation(
+      async (args: { targetEntity: string; payload: Record<string, unknown> }) => {
+        if (args.targetEntity === 'sprk_communication') {
+          args.payload['subject'] = 'Mapped subject from profile';
+          args.payload['description'] = 'Mapped body from profile';
+          return { profileFound: true, fieldsMapped: ['subject', 'description'], warnings: [] };
+        }
+        return { profileFound: false, fieldsMapped: [], warnings: [] };
       }
-      return { profileFound: false, fieldsMapped: [], warnings: [] };
-    });
+    );
 
     const dataService = buildDataService();
     const authenticatedFetch = jest

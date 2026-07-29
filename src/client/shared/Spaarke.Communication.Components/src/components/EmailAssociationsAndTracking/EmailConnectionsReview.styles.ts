@@ -15,9 +15,17 @@ export const useConnectionsReviewStyles = makeStyles({
   dotDecide: { backgroundColor: tokens.colorPaletteMarigoldForeground1 },
   dotFiled: { backgroundColor: tokens.colorPaletteGreenForeground1 },
   dotSuggest: { backgroundColor: tokens.colorBrandForeground1 },
-  secTitle: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  secTitle: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
   secCount: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
-  secHint: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200, lineHeight: tokens.lineHeightBase200 },
+  secHint: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+  },
 
   options: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
   opt: {
@@ -38,7 +46,11 @@ export const useConnectionsReviewStyles = makeStyles({
     boxShadow: `inset 0 0 0 1px ${tokens.colorBrandStroke1}`,
   },
   optRec: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  optName: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
+  optName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
   confLbl: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' },
 
   row: {
@@ -62,8 +74,16 @@ export const useConnectionsReviewStyles = makeStyles({
     gap: tokens.spacingHorizontalM,
     flexWrap: 'wrap',
   },
-  recNum: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightRegular },
-  typeTag: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightRegular },
+  recNum: {
+    color: tokens.colorNeutralForeground2,
+    fontVariantNumeric: 'tabular-nums',
+    fontWeight: tokens.fontWeightRegular,
+  },
+  typeTag: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightRegular,
+  },
   rowActs: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end', alignItems: 'center' },
   recWhy: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
   linkRow: { paddingTop: tokens.spacingVerticalXS },

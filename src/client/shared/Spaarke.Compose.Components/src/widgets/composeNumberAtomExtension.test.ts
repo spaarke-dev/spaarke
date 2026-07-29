@@ -36,7 +36,7 @@ describe('ComposeNumberAtomExtension — schema attributes (FR-13)', () => {
     editor.destroy();
   });
 
-  it('parses data-computed-number/data-numbering-level from the projected HTML and re-emits them on getHTML() (mirrors composeIndentExtension\'s round-trip)', () => {
+  it("parses data-computed-number/data-numbering-level from the projected HTML and re-emits them on getHTML() (mirrors composeIndentExtension's round-trip)", () => {
     const editor = makeEditor('<p data-computed-number="4.2." data-numbering-level="1">Clause text</p>');
     let found: string | null = null;
     let level: string | null = null;
