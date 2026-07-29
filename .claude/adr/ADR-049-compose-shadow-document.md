@@ -63,6 +63,20 @@ Fidelity lives on the server (`DocumentFormat.OpenXml` + retained original bytes
 
 ---
 
+## R4.5 Read/Reference Fidelity (companion — `spaarkeai-compose-fidelity-r4.5`, merged to master 2026-07-28)
+
+R4 (above) made the **write/save** side principled; **R4.5** completed the **read/reference** side on the *same* projection + `paraId` machinery — no new paradigm, the two-author split stands. Read-side invariants **F-1…F-5** (companion to R4's I-1…I-7), all extending `ComposeDocxProjectionBuilder`/`ComposeDocxProjection` (pure OOXML, zero new runtime package, ADR-007/013 purity intact):
+
+- **F-1 Text exactness** — run text emitted verbatim, character-for-character; any unrepresentable construct is **warned, never silently dropped**. Fixed the silent `w:sym`/`w:cr` drops (+ `w:pict`/`w:ptab`/footnote/endnote/`w:ruby`/page-break) and emits `w:ind` indentation. 8/8 corpus docs char-exact.
+- **F-2 One reader** — exactly **one** docx→editor reader (the server projection); every entry path (stored-doc, **upload**, **browse**, open-in-compose) renders through it. The client **`mammoth` fallback + `docxToTipTapHtml` are deleted** from Compose (mammoth remains only for SprkChat/Notepad). New **stateless `POST /api/compose/project`** serves the browse door — read-only, no persist, no authoring (ADR-040 / R4 I-2 preserved; Tension T-2 Path A). A null/unreachable projection shows an explicit error state, never a blank editor or a second reader.
+- **F-3 Deterministic numbering** — clause/section/heading/list numbers computed server-side from the OOXML numbering model (`NumberingComputationEngine`), **identical to Word** (24/24 golden), incl. interrupted / multi-level / style-linked / letter / roman / legal (`w:isLgl`). Rendered as an explicit **non-editable number-atom** (ProseMirror widget decoration), never the browser `<ol>` auto-count. Counter is **`numId`-instance-scoped** per ECMA-376 (restart-vs-continue). Read-time only; live renumber-on-edit is R5 G3.
+- **F-4 Stable reference** — every paragraph carries `paraId` **and** its computed legal number + level (`ComputedNumber`/`NumberingLevel`/`ListPath`/`HeadingLevel`), persisted in the projection payload **and** the session ledger (reuses the `ChatSession`/`StoredSession` stack — no new store). `CitationResolver` (pure static) resolves "Section 4.2" / "4.2(b)(iii)" / "Sections 4–7" ↔ `paraId`. Survives edits.
+- **F-5 Honest layout numbering** — page/line numbers are rendering artifacts; delivered only via an explicit pagination engine where in scope, never fabricated from OOXML. WS-5 = **spike + deferred** (fast-follow; LibreOffice-sidecar vs Graph-PDF, permissive-only per NFR-03 — the reachable ceiling is "Word-Online-identical", not "Word-desktop-100%").
+
+**Narrative architecture**: [`docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`](../../docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md) — entry paths, the numbering engine, the reference/citation layer, code inventory, and extension recipes. **Full reasoning**: `projects/spaarkeai-compose-fidelity-r4.5/{design,spec}.md` + `notes/` (WS-1..WS-5, incl. the numbering-engine + citation-resolver notes and the WS-5 pagination decision). Consumer wiring of `CitationResolver` (review-note citations) continues in `ai-advanced-capabilities-agreements-r1` (see its inbound handoff note).
+
+---
+
 ## Integration
 ADR-013 (facade boundary — no AI internals in `Services/Compose/`) · ADR-007 (`SpeFileStore` — no Graph types above it) · ADR-009 (version/re-anchor state via `IDistributedCache`) · ADR-010 (Patch Engine = stateless concrete singleton) · ADR-028 (client fetches via `@spaarke/auth`) · ADR-038 (seam DoD; banned mock/DI/ctor tests) · ADR-039/040 (AI engine frozen; redline path envelope-only; no new dispatch).
 
