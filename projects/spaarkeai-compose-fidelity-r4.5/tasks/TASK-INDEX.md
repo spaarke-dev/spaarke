@@ -26,7 +26,7 @@
 | 034 | Deploy + UAT — numbering identical to Word | 3 Numbering | WS-3 | sonnet | med | STANDARD | 033 | ✘ | 🔲 |
 | 040 | Extend projection with reference fields | 4 Reference | WS-4 | sonnet | high | FULL | 033 | ✘ | ✅ (numberingLevel/listPath/headingLevel; 705 pass) |
 | 041 | Persist `paraId → number` (payload + session ledger) | 4 Reference | WS-4 | sonnet | high | FULL | 040 | ✘ | ✅ (reused ChatSession/StoredSession per AnchoredAnnotations precedent; /conflict-check clean; coordinate merge w/ ai-redesign-r2) |
-| 042 | **Citation resolver (single / sub-item / range)** | 4 Reference | WS-4 | **opus** | xhigh | FULL | 041 | ✘ | 🔲 |
+| 042 | **Citation resolver (single / sub-item / range)** | 4 Reference | WS-4 | **opus** | xhigh | FULL | 041 | ✘ | ✅ (pure CitationResolver; 739 pass; contract+corpus-gap → confirm) |
 | 050 | WS-5 spike — LibreOffice-headless pagination + divergence | 5 Page/Line | WS-5 | sonnet | high | STANDARD | 001 | ✔ | ✅ |
 | 051 | WS-5 spike — Word-service eval + NFR-03 licensing | 5 Page/Line | WS-5 | opus | high | STANDARD | — | ✔ | ✅ (2 license items → human sign-off @ 052) |
 | 052 | WS-5 decision record — ship vs fast-follow | 5 Page/Line | WS-5 | opus | high | STANDARD | 050,051 | ✘ | ✅ **DEFER** (2 licensing sign-offs → human @ fast-follow) |
