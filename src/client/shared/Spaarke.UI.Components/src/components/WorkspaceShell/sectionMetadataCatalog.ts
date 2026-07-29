@@ -228,7 +228,8 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   // rows via Layout 1 per the Phase-1 framework unification (FR-03/FR-20).
   {
     id: 'communications',
-    label: 'Communications',
+    // Human-facing label (§B UAT 2026-07-28 item 1). Section `id` stays "communications".
+    label: 'Messages',
     description: 'Email, Teams, SMS, and notifications related to your work',
     category: 'data',
     icon: MailRegular,
