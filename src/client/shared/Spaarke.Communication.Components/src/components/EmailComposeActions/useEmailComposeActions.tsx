@@ -32,7 +32,15 @@
  */
 import * as React from 'react';
 import { SendEmailDialog } from '@spaarke/ui-components';
-import { deriveComposerFields, type ComposerMode, type RecordPrefill } from '../../logic/actions';
+import type { IAttachmentItem } from '@spaarke/ui-components';
+import {
+  deriveComposerFields,
+  fetchSourceAttachments,
+  type ComposerMode,
+  type RecordPrefill,
+  type IActionsWebApi,
+  type ISourceAttachmentRecord,
+} from '../../logic/actions';
 import { fetchCommunicationPrefill } from './fetchCommunicationPrefill';
 import type { EmailComposeActionsDeps, UseEmailComposeActionsResult } from './EmailComposeActions.types';
 
@@ -42,6 +50,8 @@ interface DialogState {
   communicationId?: string;
   /** `null` while the record read is in flight (or failed) — deriveComposerFields treats `null` as "no data yet". */
   prefill: RecordPrefill | null;
+  /** Source-communication attachments carried onto reply/replyAll/forward (empty for compose). */
+  initialAttachments?: IAttachmentItem[];
 }
 
 /**
@@ -56,6 +66,11 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     dataService,
     navigationService,
     onSearchRecipients,
+    onLookupRecipients,
+    recordLookupCatalog,
+    onLookupRecord,
+    onAddRelationship,
+    dataverseUrl,
     associations,
     onSent,
     onError,
@@ -81,19 +96,39 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       // "open blank, then fix in place") is what makes Reply/Reply All/Forward open
       // with the correct fields already populated.
       void (async () => {
-        let prefill: RecordPrefill | null = null;
-        try {
-          prefill = await fetchCommunicationPrefill(dataService, communicationId);
-        } catch (err) {
-          // Best-effort (mirrors CommunicationActionsApp): open with empty pre-fill
-          // rather than blocking Reply/Reply All/Forward entirely.
-          console.warn('[EmailComposeActions] source record prefill read failed:', err);
-        }
+        // Read prefill (Re:/Fwd: fields) and the parent's carry-forward
+        // attachments in parallel — mirrors CommunicationActionsApp, which
+        // enumerates both from the source record. Both are best-effort:
+        // fetchCommunicationPrefill may throw (caught → empty pre-fill);
+        // fetchSourceAttachments never throws (returns []). The
+        // `IDataService.retrieveMultipleRecords` shape satisfies the narrower
+        // `IActionsWebApi` the enumerator needs.
+        const [prefill, initialAttachments] = await Promise.all([
+          fetchCommunicationPrefill(dataService, communicationId).catch((err: unknown) => {
+            console.warn('[EmailComposeActions] source record prefill read failed:', err);
+            return null;
+          }),
+          fetchSourceAttachments(
+            {
+              retrieveMultipleRecords: (entity, options) =>
+                dataService.retrieveMultipleRecords(entity, options) as Promise<{
+                  entities: ISourceAttachmentRecord[];
+                }>,
+            } as IActionsWebApi,
+            communicationId,
+            dataverseUrl ?? ''
+          ),
+        ]);
         if (requestIdRef.current !== requestId) return; // superseded by a newer action
-        setDialogState({ mode, communicationId, prefill });
+        setDialogState({
+          mode,
+          communicationId,
+          prefill,
+          initialAttachments: initialAttachments.length > 0 ? initialAttachments : undefined,
+        });
       })();
     },
-    [dataService]
+    [dataService, dataverseUrl]
   );
 
   const handleClose = React.useCallback(() => setDialogState(null), []);
@@ -130,6 +165,25 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
   const isRecordScoped = dialogState !== null && dialogState.mode !== 'compose';
   const composerFields = dialogState ? deriveComposerFields(dialogState.mode, dialogState.prefill) : {};
 
+  // Header title override — "Reply: <subject>" / "Reply All: <subject>" /
+  // "Forward: <subject>" for the record-scoped modes (New keeps the engine's
+  // default 'New Email'). Falls back to the engine default when there's no
+  // subject yet.
+  const titleOverride = React.useMemo<string | undefined>(() => {
+    if (!dialogState) return undefined;
+    const subject = dialogState.prefill?.subject?.trim();
+    if (!subject) return undefined;
+    const label =
+      dialogState.mode === 'reply'
+        ? 'Reply'
+        : dialogState.mode === 'replyAll'
+          ? 'Reply All'
+          : dialogState.mode === 'forward'
+            ? 'Forward'
+            : undefined;
+    return label ? `${label}: ${subject}` : undefined;
+  }, [dialogState]);
+
   const composerDialog = (
     <SendEmailDialog
       open={isOpen}
@@ -139,7 +193,13 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       authenticatedFetch={authenticatedFetch}
       bffBaseUrl={bffBaseUrl}
       onSearchRecipients={onSearchRecipients}
+      onLookupRecipients={onLookupRecipients}
+      recordLookupCatalog={recordLookupCatalog}
+      onLookupRecord={onLookupRecord}
+      onAddRelationship={onAddRelationship}
       associations={isRecordScoped ? associations : undefined}
+      initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
+      titleOverride={titleOverride}
       onSent={onSent}
       onError={onError}
       {...composerFields}

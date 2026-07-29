@@ -21,6 +21,9 @@ import type {
   ICommunicationAssociation,
   SendCommunicationError,
   ISendEmailDialogProps,
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
 } from '@spaarke/ui-components';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
 import type { ComposerFields } from '../../logic/actions';
@@ -62,10 +65,36 @@ export interface EmailComposeActionsDeps {
   /** Recipient directory typeahead — forwarded to the composer's `RecipientField`. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   /**
+   * Advanced OOB recipient lookup (To/Cc/Bcc label click → people picker).
+   * Forwarded to the composer for ALL modes. Optional — the host mount supplies
+   * the Xrm-backed handler (`createXrmEmailComposeHandlers`); omitted → the
+   * recipient fields stay free-text/typeahead only.
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  /**
+   * Record-lookup catalog + host lookup for the body-toolbar "link a document" /
+   * "insert a link to a record" tools. Forwarded for ALL modes. Optional
+   * (host-supplied Xrm handlers); omitted → those toolbar tools are hidden.
+   */
+  recordLookupCatalog?: IRecordLookupTarget[];
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add-a-relationship (connector toolbar icon). Forwarded for ALL modes.
+   * Optional (host-supplied Xrm handler); omitted → the connector tool is hidden.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
+  /**
+   * Dataverse client URL (no trailing slash) used to build attachment
+   * deep-links when carrying a parent email's attachments onto reply/forward.
+   * Optional — absent → a relative document link is omitted (attachments still
+   * carry as files).
+   */
+  dataverseUrl?: string;
+  /**
    * Associations to carry onto Reply/Reply All/Forward (e.g. the parent's
    * inherited regarding records). Ignored for New (blank compose). Optional —
-   * association inheritance itself is out of this task's scope; the host may
-   * supply an already-computed list.
+   * the host may supply an already-computed list (e.g. the reading-pane's
+   * `filedAssociations` mapped to `ICommunicationAssociation`).
    */
   associations?: ICommunicationAssociation[];
   /**

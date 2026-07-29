@@ -777,15 +777,16 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
       {isChromed && (
         <div className={styles.header}>
           <Text as="h2" size={600} weight="semibold">
-            {state.mode === 'view'
-              ? 'Email'
-              : state.mode === 'reply'
-                ? 'Reply'
-                : state.mode === 'forward'
-                  ? 'Forward'
-                  : state.mode === 'draft'
-                    ? 'Edit Draft'
-                    : 'New Email'}
+            {props.titleOverride ??
+              (state.mode === 'view'
+                ? 'Email'
+                : state.mode === 'reply'
+                  ? 'Reply'
+                  : state.mode === 'forward'
+                    ? 'Forward'
+                    : state.mode === 'draft'
+                      ? 'Edit Draft'
+                      : 'New Email')}
           </Text>
           {props.onCancel && (
             <div className={styles.headerActions}>

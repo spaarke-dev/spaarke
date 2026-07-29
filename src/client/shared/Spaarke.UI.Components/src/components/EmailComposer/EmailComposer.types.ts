@@ -439,6 +439,16 @@ export interface IEmailComposerProps {
 
   /** Optional className applied to the root layout container. */
   className?: string;
+
+  /**
+   * Optional override for the chromed (page/dialog mount) header title. When
+   * supplied, it REPLACES the mode-derived word ('Reply'/'Forward'/'New
+   * Email'/…) — e.g. a caller can show `Reply: <subject>`. Additive/optional:
+   * omitted (the default for every existing caller) → the mode-derived title is
+   * used, unchanged. Ignored for the `inline` (wizard) mount, which renders no
+   * header.
+   */
+  titleOverride?: string;
 }
 
 // ---------------------------------------------------------------------------

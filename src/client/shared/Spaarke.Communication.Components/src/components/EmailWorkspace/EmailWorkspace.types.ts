@@ -25,6 +25,9 @@ import type {
   RecordTypeCatalogEntry,
   IPolymorphicPickerWebApi,
   ILookupItem,
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
 
@@ -78,6 +81,29 @@ export interface EmailWorkspaceProps {
   accessPermissionOptions?: IAccessPermissionOption[];
   /** Recipient directory typeahead for the composer (optional; forwarded to `RecipientField`). */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced OOB recipient lookup for the composer (To/Cc/Bcc label click →
+   * people picker). Optional — the assembling mount supplies the Xrm-backed
+   * handler (`createXrmEmailComposeHandlers`); omitted → typeahead only.
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  /**
+   * Body-toolbar record-lookup catalog + host lookup ("link a document" /
+   * "insert a link to a record"). Optional — mount-supplied Xrm handlers;
+   * omitted → those toolbar tools are hidden.
+   */
+  recordLookupCatalog?: IRecordLookupTarget[];
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add-a-relationship (connector toolbar icon). Optional — mount-supplied Xrm
+   * handler; omitted → the connector tool is hidden.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
+  /**
+   * Dataverse client URL (no trailing slash) — used to build deep-links for the
+   * parent email's carried-forward attachments. Optional.
+   */
+  dataverseUrl?: string;
   /** "Link another record…" catalog override for the associations review (optional — defaults to the `TODO_REGARDING_CATALOG`-derived catalog already built into `EmailConnectionsReview`). */
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
   /** Optional id to select on first mount (forwarded to `EmailReadingPaneShell`). */

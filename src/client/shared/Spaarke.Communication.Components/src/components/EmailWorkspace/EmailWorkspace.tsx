@@ -55,6 +55,7 @@
  */
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import type { ICommunicationAssociation } from '@spaarke/ui-components';
 import { EmailViewSelector, useEmailViews } from '../EmailViewSelector';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailBodyView } from '../EmailBody';
@@ -124,6 +125,11 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   bffBaseUrl,
   accessPermissionOptions = DEFAULT_ACCESS_PERMISSION_OPTIONS,
   onSearchRecipients,
+  onLookupRecipients,
+  recordLookupCatalog,
+  onLookupRecord,
+  onAddRelationship,
+  dataverseUrl,
   linkAnotherCatalog,
   initialSelectedId,
 }) => {
@@ -142,6 +148,22 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
   const record = useEmailWorkspaceRecord(dataService, selectedId);
 
+  // Parent-email "Related to" inheritance (FR — compose-wiring fix #4): the ONE
+  // per-selection read already resolves the selected record's typed regarding
+  // lookups as `filedAssociations`. Since Reply/Reply All/Forward are always
+  // invoked on the SELECTED record, those are exactly the parent's associations
+  // — map them to the composer's `ICommunicationAssociation` shape (entityUrl is
+  // optional and only used for chip deep-links, so it's left unset here).
+  const parentAssociations = React.useMemo<ICommunicationAssociation[]>(
+    () =>
+      (record.recordState?.filedAssociations ?? []).map(a => ({
+        entityType: a.entityType,
+        entityId: a.recordId,
+        entityName: a.recordName,
+      })),
+    [record.recordState]
+  );
+
   // Compose/reply/forward/new + "Open full form" (036, FR-09/FR-10/FR-15) —
   // mounts the ONE canonical `SendEmailDialog`/`EmailComposer`, never forked.
   const { actions, composerDialog, openFullForm } = useEmailComposeActions({
@@ -150,6 +172,12 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
     dataService,
     navigationService,
     onSearchRecipients,
+    onLookupRecipients,
+    recordLookupCatalog,
+    onLookupRecord,
+    onAddRelationship,
+    dataverseUrl,
+    associations: parentAssociations,
     onSent: record.reload,
   });
 

@@ -44,6 +44,8 @@ import {
   AppInsightsService,
   createXrmDataService,
   createXrmNavigationService,
+  createXrmEmailComposeHandlers,
+  searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
 } from "@spaarke/ui-components";
@@ -190,6 +192,22 @@ function Root() {
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
   const webApi = React.useMemo(() => buildXrmWebApi(), []);
 
+  // Composer parity wiring (compose-wiring fixes #1/#2/#3/#5): recipient
+  // typeahead + the Xrm-backed advanced-lookup handlers (people picker, record
+  // lookup, add-relationship) + the Dataverse URL used for attachment
+  // deep-links. Same handlers the CommunicationActions PCF builds — lifted into
+  // the shared `createXrmEmailComposeHandlers` factory so both mounts stay in
+  // parity (NFR-06).
+  const handleSearchRecipients = React.useCallback(
+    (query: string) => searchUsersAndContacts(dataService, query),
+    [dataService]
+  );
+  const composeHandlers = React.useMemo(() => createXrmEmailComposeHandlers(), []);
+  const dataverseUrl = React.useMemo(
+    () => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "",
+    []
+  );
+
   const handleRetry = React.useCallback(() => setAttempt((n) => n + 1), []);
 
   let body: React.ReactNode;
@@ -206,6 +224,12 @@ function Root() {
         webApi={webApi}
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={bffBaseUrl}
+        onSearchRecipients={handleSearchRecipients}
+        onLookupRecipients={composeHandlers.onLookupRecipients}
+        recordLookupCatalog={composeHandlers.recordLookupCatalog}
+        onLookupRecord={composeHandlers.onLookupRecord}
+        onAddRelationship={composeHandlers.onAddRelationship}
+        dataverseUrl={dataverseUrl}
       />
     );
   }

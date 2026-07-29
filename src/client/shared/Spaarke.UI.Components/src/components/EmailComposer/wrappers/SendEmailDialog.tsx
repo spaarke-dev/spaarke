@@ -24,6 +24,10 @@ import type {
   IComposerAttachmentSource,
   IComposerRecordLink,
   ISourceCommunicationRecord,
+  IAttachmentItem,
+  IRecordLookupTarget,
+  IPickedRecord,
+  IRecipient,
 } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 import type { ICommunicationAssociation, SendCommunicationError } from '../../../services/communicationApi';
@@ -81,8 +85,42 @@ export interface ISendEmailDialogProps {
   initialBodyFormat?: EmailComposerBodyFormat;
   associations?: ICommunicationAssociation[];
   attachmentSources?: IComposerAttachmentSource[];
+  /**
+   * Source-communication attachments offered for inclusion on reply/replyAll/
+   * forward. Forwarded verbatim to the engine (which applies the per-mode
+   * attach-file default). Additive/optional — behaviorally identical to the
+   * rich `SendEmailPage` wrapper's prop of the same name; omitted → no carried
+   * attachments (today's dialog behavior).
+   */
+  initialAttachments?: IAttachmentItem[];
   /** Recipient directory lookup, forwarded to the engine's `RecipientField`. */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
+  /**
+   * Advanced OOB recipient lookup — clicking a To/Cc/Bcc label box opens the
+   * host people picker and appends resolved recipients. Additive/optional
+   * (mirrors `ISendEmailPageProps.onLookupRecipients`); omitted → the fields
+   * stay free-text/typeahead only.
+   */
+  onLookupRecipients?: (field: 'to' | 'cc' | 'bcc') => Promise<IRecipient[] | null>;
+  /**
+   * Record-lookup targets + host lookup for the body-toolbar "link a document" /
+   * "insert a link to a record" tools. Additive/optional (mirror
+   * `ISendEmailPageProps`); omitted → those toolbar tools are not shown.
+   */
+  recordLookupCatalog?: IRecordLookupTarget[];
+  onLookupRecord?: (entityType: string) => Promise<IPickedRecord | null>;
+  /**
+   * Add-a-relationship (connector toolbar icon). Additive/optional (mirrors
+   * `ISendEmailPageProps.onAddRelationship`); omitted → the connector tool is
+   * not shown.
+   */
+  onAddRelationship?: () => Promise<IPickedRecord | null>;
+  /**
+   * Optional header-title override forwarded to the engine (e.g.
+   * `Reply: <subject>`). Additive/optional; omitted → the engine's mode-derived
+   * title ('Reply'/'Forward'/'New Email'/…) is used, unchanged.
+   */
+  titleOverride?: string;
   authenticatedFetch: AuthenticatedFetchFn;
   bffBaseUrl: string;
   onSent?: (communicationId: string) => void;
