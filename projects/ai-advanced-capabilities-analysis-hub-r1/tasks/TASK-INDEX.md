@@ -36,8 +36,8 @@
 | **062** | Retire legacy session path (`/continue`,`/resume`,`sprk_chathistory`,`sprk_analysischatmessage`) | 6 Retirement | FULL | sonnet / xhigh | 020,061 | false (ordered) | bff, retirement, session | ✅ |
 | **063** | Delete web resources + `AnalysisWorkspace/` tree + deploy script + reconcile casing | 6 Retirement | FULL | sonnet / high | 060,061,062 | false (ordered) | retirement, deploy, code-page | ✅ |
 | **064** | Migrate `/save`+`GET /{id}` (drop chathistory) + generalize NDA hooks → work-type + fold 3-pane | 6 Retirement | FULL | sonnet / high | 062 | false | bff, frontend, migration | ✅ |
-| **070** | Deploy BFF (publish-size report + CVE check) | 7 Deploy | STANDARD | sonnet / medium | 064 | false (ordered) | deploy, bff | 🔲 |
-| **071** | Deploy client / code-page + ribbon + form customizations | 7 Deploy | STANDARD | sonnet / medium | 063,070 | false (ordered) | deploy, code-page, ribbon | 🔲 |
+| **070** | Deploy BFF (publish-size report + CVE check) | 7 Deploy | STANDARD | sonnet / medium | 064 | false (ordered) | deploy, bff | ✅ |
+| **071** | Deploy client / code-page + ribbon + form customizations | 7 Deploy | STANDARD | sonnet / medium | 063,070 | false (ordered) | deploy, code-page, ribbon | 🔄 (code page ✅ + ribbon scripts ✅; ribbon buttons + env WR delete → user gate) |
 | **072** | End-to-end UI tests (entry matrix, hub, wizard, fork, reopen, retirement grep-clean) | 7 Deploy | FULL | sonnet / high | 071 | false | e2e-test, frontend, ui-test | 🔲 |
 | **090** | Wrap-up + `/test-diet` reconciliation + lessons-learned | 7 Deploy | MINIMAL | sonnet / low | 072 | false | wrap-up | 🔲 |
 
