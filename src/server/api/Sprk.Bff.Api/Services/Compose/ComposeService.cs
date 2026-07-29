@@ -60,6 +60,11 @@ public class ComposeService : IComposeService
     private const string FileSizeAttribute = "sprk_filesize";
     private const string MimeTypeAttribute = "sprk_mimetype";
     private const string FilePathAttribute = "sprk_filepath";
+    // G1 (FR-01, task 020): the durable cross-session authored-vs-imported origin marker (owner-created
+    // choice field; notes/g1-origin-field-asbuilt.md). Written ONLY at create-on-save
+    // (PromoteIfEphemeralAsync) and read on Path A loads (LoadAsync) — see ComposeOrigin remarks for the
+    // AS-BUILT integer values + BINDING null-handling contract.
+    private const string ComposeOriginAttribute = "sprk_composeorigin";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -447,6 +452,41 @@ public class ComposeService : IComposeService
         // session naturally has an empty ledger.
         var actionHistory = GetActionHistory(session);
 
+        // G1 (FR-01, task 020): read the persisted sprk_composeorigin marker for Path A loads (an
+        // existing sprk_document record) so the client can route a reopened Authored doc onto the
+        // clean payload instead of the op-log/tracked path (NFR-02 — never inferred from SPE-id or
+        // content). Path B continuation (no DocumentRecordId — the doc is not yet promoted) has no
+        // row to read; Origin stays null. Best-effort: a read failure OR a legacy row with no stored
+        // value degrades to Origin=null — NEVER fails Load. The BINDING null-handling contract (see
+        // ComposeOrigin remarks) is the CALLER's obligation: null MUST be treated as Imported, never
+        // strict-equal to Authored.
+        ComposeOrigin? origin = null;
+        if (request.DocumentRecordId.HasValue)
+        {
+            try
+            {
+                var documentEntity = await _dataverse.RetrieveAsync(
+                        DocumentLogicalName,
+                        request.DocumentRecordId.Value,
+                        new[] { ComposeOriginAttribute },
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (documentEntity is not null
+                    && documentEntity.Contains(ComposeOriginAttribute)
+                    && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet)
+                {
+                    origin = (ComposeOrigin)originOptionSet.Value;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose load: sprk_composeorigin lookup failed for record={DocumentRecordId} — Origin will be null (callers must treat null as Imported per the BINDING null-handling contract)",
+                    request.DocumentRecordId);
+            }
+        }
+
         return new LoadComposeDocumentResult
         {
             DocumentSpeId = request.DocumentSpeId,
@@ -465,6 +505,7 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            Origin = origin,
         };
     }
 
@@ -620,6 +661,19 @@ public class ComposeService : IComposeService
         // its own bytes; there is no baseline to patch and the client sends no op-log there).
         var hasOperations = request.OperationLog is { Operations.Count: > 0 };
         var hasComments = request.Comments is { Count: > 0 };
+
+        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME ContentModel-presence
+        // signal the born-in-editor render branch above already keys off (ResolveSaveBaselineAsync's "(a0)
+        // BORN-IN-EDITOR" check). ContentModel present → the renderer authors the whole document from the
+        // client's content model (Authored, no retained baseline to delta onto); ContentModel absent → the
+        // save carries retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
+        // Resolved ONLY from this server-side discriminant — NEVER from SPE-id presence or a content/text
+        // match (NFR-02, I-7). Computed on every save (not only create-on-save) so it can ride the returned
+        // SaveComposeDocumentResult for immediate client/consumer use (e.g. task 021's clean-apply engine
+        // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
+        // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
+        // document never mutates the stored value.
+        var origin = request.ContentModel is not null ? ComposeOrigin.Authored : ComposeOrigin.Imported;
 
         // ────────────────────────────────────────────────────────────────────────────
         // FR-08 (task 050, design §5 "Save + concurrency"): version-stamp + assert-before-apply +
@@ -862,6 +916,9 @@ public class ComposeService : IComposeService
             FileSize = saved.Size ?? contentToPersist.Length,
             MimeType = DocxContentType,
             FilePath = saved.WebUrl,
+            // G1 (FR-01, task 020): persisted onto sprk_composeorigin ONLY when this call actually
+            // creates the row (PromoteIfEphemeralAsync's idempotent existing-row branch ignores it).
+            Origin = origin,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -955,6 +1012,7 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = promotion.WasCreated,
             CompletionState = completion,
             ReanchorSummary = reanchorSummary,
+            Origin = origin,
         };
     }
 
@@ -1542,6 +1600,13 @@ public class ComposeService : IComposeService
         // A promoted Compose document always has an SPE file behind it (the drive-item id is a
         // hard precondition of this method). Mark it so downstream readers stop rejecting it.
         entity[HasFileAttribute] = true;
+
+        // G1 (FR-01, task 020): persist the durable origin marker ONLY at create-on-save (this branch —
+        // the idempotent existing-row branch above never reaches here, so a subsequent replace-path save
+        // never mutates an already-persisted origin). Defaults to Imported (the Dataverse field's own
+        // default) when the caller supplies none (e.g. a standalone /promote call that predates G1) —
+        // never left unset, so a fresh row is never silently null-origin.
+        entity[ComposeOriginAttribute] = new OptionSetValue((int)(request.Origin ?? ComposeOrigin.Imported));
 
         if (request.FileSize.HasValue)
         {

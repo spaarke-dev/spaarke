@@ -239,6 +239,41 @@ public abstract record ComposeDocumentResult
     public Guid? DocumentRecordId { get; init; }
 }
 
+/// <summary>
+/// G1 (FR-01, task 020): durable cross-session authored-vs-imported origin marker for a Compose
+/// <c>sprk_document</c>, persisted on the Dataverse <c>sprk_composeorigin</c> choice field at
+/// create-on-save (<see cref="ComposeService.PromoteIfEphemeralAsync"/>) and returned by
+/// <see cref="IComposeService.LoadAsync"/> / <see cref="IComposeService.SaveAsync"/> so the client can
+/// route a reopened document onto the clean (Authored) or tracked (Imported) save path WITHOUT
+/// inferring origin from SPE-id presence or document content (NFR-02 — no text-search/inference in the
+/// write path; that fragile discriminator is exactly what G1 replaces).
+/// </summary>
+/// <remarks>
+/// AS-BUILT integer values (owner-created Dataverse choice field — see
+/// <c>projects/spaarkeai-compose-r5/notes/g1-origin-field-asbuilt.md</c>). Do NOT renumber:
+/// <list type="bullet">
+/// <item><see cref="Authored"/> = 100000000 — born in the editor (AI-drafted / blank / edited
+/// browse-local): <see cref="ComposeDocumentRenderer"/> authors the whole document from the client's
+/// content model; there is no retained baseline to delta onto (the SAME <c>request.ContentModel is not
+/// null</c> discriminant <see cref="ComposeService.SaveAsync"/> already uses to select the born-in-editor
+/// render branch).</item>
+/// <item><see cref="Imported"/> = 100000001 — the save carries retained SPE bytes (upload / browse /
+/// open-from-existing <c>.docx</c>). Also the DEFAULT for the Dataverse field itself.</item>
+/// </list>
+/// <para>
+/// <b>NULL-HANDLING (BINDING)</b>: pre-existing <c>sprk_document</c> rows that predate this field return
+/// <c>null</c> (no backfill). Every consumer of a nullable <see cref="ComposeOrigin"/> here MUST treat
+/// <c>null</c> as <see cref="Imported"/> — NEVER strict-equal a null/missing value to
+/// <see cref="Authored"/>.
+/// </para>
+/// </remarks>
+[JsonConverter(typeof(CamelCaseStringEnumConverter))]
+public enum ComposeOrigin
+{
+    Authored = 100000000,
+    Imported = 100000001,
+}
+
 /// <summary>Upload request payload (R2-reserved; see <see cref="IComposeService.UploadAsync"/>).</summary>
 public sealed record UploadComposeDocumentRequest
 {
@@ -414,6 +449,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// (best-effort; a malformed source degrades to no imported comments, never fails Load).
     /// </summary>
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the persisted <see cref="ComposeOrigin"/> marker for Path A loads (an
+    /// existing <c>sprk_document</c> record — <see cref="ComposeDocumentResult.DocumentRecordId"/> is
+    /// non-null). Read from the <c>sprk_composeorigin</c> Dataverse field; <c>null</c> for Path B
+    /// continuation (no record yet — nothing to read) OR a legacy pre-existing record with no value
+    /// (no backfill — see <see cref="ComposeOrigin"/> remarks). Callers MUST treat a <c>null</c> value
+    /// as <see cref="ComposeOrigin.Imported"/> — NEVER strict-equal it to
+    /// <see cref="ComposeOrigin.Authored"/>. Drives the client's clean-vs-tracked save routing on reopen
+    /// (NFR-02 — no SPE-id/content inference).
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
 }
 
 /// <summary>
@@ -641,6 +688,18 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// applied and never silently dropped. Null on every non-stale save (the common case).
     /// </summary>
     public ReanchorSummary? ReanchorSummary { get; init; }
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the <see cref="ComposeOrigin"/> this save resolved (server-side, from
+    /// <c>request.ContentModel is not null</c> — never SPE-id/content inference). Populated on EVERY
+    /// save (not only create-on-save) so a caller does not need a subsequent Load to learn the origin
+    /// of the document it just saved — e.g. task 021's clean-apply engine mode selection consumes this
+    /// directly. On a create-on-save this is also the value persisted onto the new <c>sprk_document</c>
+    /// row (see <see cref="ComposeService.PromoteIfEphemeralAsync"/>); on a replace-path save of an
+    /// already-promoted document the persisted field is UNCHANGED (origin is set once, at create) even
+    /// though this property still reports the save's own resolved discriminant.
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
 }
 
 /// <summary>Promote request payload.</summary>
@@ -684,6 +743,17 @@ public sealed record PromoteComposeDocumentRequest
 
     /// <summary>SPE web URL → <c>sprk_filepath</c> (enables "Open in SharePoint" links).</summary>
     public string? FilePath { get; init; }
+
+    /// <summary>
+    /// G1 (FR-01, task 020): the <see cref="ComposeOrigin"/> to persist onto <c>sprk_composeorigin</c>
+    /// WHEN a new <c>sprk_document</c> row is created by this call (threaded from
+    /// <see cref="ComposeService.SaveAsync"/>'s <c>request.ContentModel is not null</c> discriminant —
+    /// never SPE-id/content inference). Ignored on the idempotent existing-row path (origin is set
+    /// ONLY at create-on-save; a later replace-path save never mutates it). Defaults to
+    /// <see cref="ComposeOrigin.Imported"/> — the Dataverse field's own default — when a caller (e.g. a
+    /// standalone <c>/promote</c> call that predates G1) supplies none.
+    /// </summary>
+    public ComposeOrigin? Origin { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing

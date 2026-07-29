@@ -379,6 +379,24 @@ export interface ImportedComment {
 }
 
 // ---------------------------------------------------------------------------
+// G1 (FR-01, task 020) — the durable cross-session authored-vs-imported origin marker
+// ---------------------------------------------------------------------------
+//
+// Client mirror of the server `ComposeOrigin` enum (`Sprk.Bff.Api.Services.Compose`), wire-serialized
+// via `CamelCaseStringEnumConverter` as `"authored"` | `"imported"`. Persisted on `sprk_document.
+// sprk_composeorigin` at create-on-save; returned by both Load (`LoadComposeDocumentResponse.origin`,
+// Path A only) and Save (`SaveComposeDocumentResponse.origin`, every save). Routes a REOPENED authored
+// document onto the clean renderer/contentModel save path instead of the op-log/tracked path — the
+// discriminator this replaces (SPE-id presence) was the exact defect G1 exists to fix; NEVER re-derive
+// origin from SPE-id or document content client-side either.
+//
+// BINDING null-handling contract (mirrors the server `ComposeOrigin` remarks): `origin` is `null`/
+// `undefined` for a Path B continuation (no `sprk_document` record yet) OR a legacy pre-existing record
+// that predates this field (no backfill). Every consumer MUST treat a missing value as `'imported'` —
+// NEVER `state.origin === 'authored'` as the ONLY branch; always compare the positive case.
+export type ComposeDocumentOrigin = 'authored' | 'imported';
+
+// ---------------------------------------------------------------------------
 // R3 FR-01a — the client content-model save contract (task 027)
 // ---------------------------------------------------------------------------
 //

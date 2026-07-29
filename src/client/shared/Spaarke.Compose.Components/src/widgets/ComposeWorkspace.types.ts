@@ -21,6 +21,7 @@ import type {
   ImportedRevision,
   ImportedComment,
   ComposeServerProjection,
+  ComposeDocumentOrigin,
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
@@ -151,6 +152,16 @@ export interface ComposeWorkspaceState {
    * 0 = no save has succeeded yet this mount.
    */
   saveSuccessToken: number;
+  /**
+   * G1 (FR-01, task 020): the persisted cross-session origin marker for THIS document —
+   * `'authored'` | `'imported'` | `null`. `null` covers a transient/not-yet-promoted mount (no
+   * `sprk_document` record) OR a legacy pre-existing record (no backfill) — treated the SAME as
+   * `'imported'` by every consumer (BINDING null-handling contract; see `ComposeDocumentOrigin`).
+   * Set on `loadSucceeded` (Path A reopen) and refreshed on `saveSucceeded` (so a same-session
+   * create-on-save's resolved origin is known without a follow-up Load). Drives `triggerSave`'s
+   * clean-vs-tracked routing on a REOPENED document — see the `bornInEditor` discriminant.
+   */
+  origin: ComposeDocumentOrigin | null;
 }
 
 export type ComposeWorkspaceAction =
@@ -171,6 +182,10 @@ export type ComposeWorkspaceAction =
       // The server DOCX→editor projection. Undefined (older BFF) → null in the reducer → (task 013,
       // F-2) the editor renders an explicit error/unavailable state — no client fallback reader remains.
       projection?: ComposeServerProjection | null;
+      // G1 (FR-01, task 020): the persisted origin marker (Path A only — Path B continuation and an
+      // older BFF both omit it). Normalized to `null` in the reducer (BINDING null-handling contract —
+      // treated the same as 'imported').
+      origin?: ComposeDocumentOrigin | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -226,6 +241,11 @@ export type ComposeWorkspaceAction =
       // "no baseline could be resolved — supply the retained original bytes (Content)".
       driveId?: string;
       versionId?: string | null;
+      // G1 (FR-01, task 020): the ComposeOrigin THIS save resolved (server-side, from ContentModel
+      // presence). Populated on every save so a same-session create-on-save's resolved origin is
+      // known without a follow-up Load — refreshed into state.origin below (never regressed to null
+      // by an older BFF response that omits the field; see the reducer).
+      origin?: ComposeDocumentOrigin | null;
     }
   | { kind: 'saveFailed'; errorMessage: string }
   | { kind: 'reset' }
@@ -264,6 +284,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   sameUserConflictInfo: null,
   checkoutFailureMessage: null,
   saveSuccessToken: 0,
+  origin: null,
 };
 
 export function composeWorkspaceReducer(
@@ -294,6 +315,9 @@ export function composeWorkspaceReducer(
         importedComments: action.importedComments ?? [],
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
+        // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
+        // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
+        origin: action.origin ?? null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -357,6 +381,11 @@ export function composeWorkspaceReducer(
         // caller's projection round-trip failed/was unreachable — task 013 (F-2): the editor now
         // renders an explicit error/unavailable state for that case (no client fallback reader).
         projection: action.projection ?? null,
+        // G1 (FR-01, task 020): a fresh transient mount has no persisted origin yet (this doc has
+        // never been saved) — explicitly clear rather than inheriting a PRIOR document's origin from
+        // an earlier mount in the same tab (same "clear rather than inherit" rationale as
+        // paraIdMap/importedRevisions/importedComments above).
+        origin: null,
         errorMessage: null,
       };
     // ── DEF-08: AI-drafted full-document seed. Like mountTransient (create-on-save, no SPE
@@ -383,6 +412,9 @@ export function composeWorkspaceReducer(
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
         projection: null,
+        // G1 (FR-01, task 020): same rationale as mountTransient — a fresh AI-drafted seed has no
+        // persisted origin yet.
+        origin: null,
         errorMessage: null,
       };
     case 'requestSave':
@@ -404,6 +436,10 @@ export function composeWorkspaceReducer(
         //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
         //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
         versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
+        // G1 (FR-01, task 020): refresh from this save's resolved origin when the response carries
+        // one; otherwise keep whatever state already had (never regress a known origin to null just
+        // because an older BFF response omitted the field).
+        origin: action.origin ?? state.origin,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,

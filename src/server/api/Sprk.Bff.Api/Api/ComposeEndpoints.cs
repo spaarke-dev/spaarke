@@ -1181,7 +1181,9 @@ public static class ComposeEndpoints
                 // Upload endpoint (below) reuses the IDENTICAL wire-shape mapping instead of forking it
                 // (root CLAUDE.md §11 — extend, don't duplicate).
                 Projection: MapProjectionResponse(result.Projection),
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A only).
+                Origin: result.Origin));
         }
         catch (ArgumentException ex)
         {
@@ -1382,7 +1384,10 @@ public static class ComposeEndpoints
                 Size: result.Size,
                 WasPromotedThisSave: result.WasPromotedThisSave,
                 CorrelationId: httpContext.TraceIdentifier,
-                ReanchorSummary: result.ReanchorSummary));
+                ReanchorSummary: result.ReanchorSummary,
+                // G1 (FR-01, task 020): the ComposeOrigin this save resolved (available for 021's
+                // clean-apply engine mode selection without a follow-up Load).
+                Origin: result.Origin));
         }
         catch (ArgumentException ex)
         {
@@ -2073,7 +2078,14 @@ public sealed record LoadComposeDocumentResponse(
     // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
     // mammoth. The client keys off Projection.status/canEdit, NOT html length.
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A loads only —
+    // an existing sprk_document record). Wire values "authored" | "imported" | null (CamelCaseStringEnumConverter).
+    // Null on Path B continuation (no record yet) OR a legacy pre-existing record — the client MUST treat
+    // null the SAME as "imported" (never strict-equal null to "authored"), per the BINDING null-handling
+    // contract (ComposeOrigin remarks). Optional/trailing so existing callers deserializing this response
+    // are unaffected.
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
@@ -2122,7 +2134,15 @@ public sealed record SaveComposeDocumentResponse(
     // log — AUTO applied; REVIEW/ORPHAN surfaced here so the client can present them. Null on every
     // non-stale save (the common case). Optional/trailing so existing callers deserializing this response
     // are unaffected.
-    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null);
+    [property: JsonPropertyName("reanchorSummary")] ReanchorSummary? ReanchorSummary = null,
+    // G1 (FR-01, task 020): the ComposeOrigin this save resolved (server-side, from ContentModel
+    // presence — never SPE-id/content inference). Populated on EVERY save so the client/a downstream
+    // consumer (e.g. task 021's clean-apply engine mode selection) learns the origin without a
+    // follow-up Load. On a create-on-save this is also the value persisted onto the new sprk_document
+    // row; a replace-path save of an already-promoted document reports the save's resolved
+    // discriminant WITHOUT mutating the already-persisted field. Wire values "authored" | "imported".
+    // Optional/trailing so existing callers deserializing this response are unaffected.
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(
