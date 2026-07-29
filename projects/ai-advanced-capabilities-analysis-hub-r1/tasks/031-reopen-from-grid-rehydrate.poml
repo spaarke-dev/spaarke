@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Reopen from grid → rehydrate session + review state + files</title>
+    <phase>3 Hub</phase>
+    <gate>deps 030,020,025 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend (.tsx) session-rehydration flow crossing the session-binding + persistence spine; user-facing three-pane reopen; FULL per §8 (frontend + session-state judgment).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring reopen against already-built binding (020) + persistence (025) seams; specified integration, not architectural design — sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on the hub widget (030) plus the binding (020) + persistence (025) seams; touches shared three-pane reopen path — serialize after 030 within W4.</parallel-reason>
+    <deps>030,020,025</deps>
+    <tags>frontend, spaarkeai, session</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the hub grid's row-open action: selecting a sprk_analysis row opens the three-pane SpaarkeAi surface with that
+    analysis fully rehydrated — its session transcript (from Cosmos via the session↔Analysis binding), its findings /
+    review state, and its files (resolved via the sprk_documentid → sprk_document SPE hop). Reopening restores prior
+    state; it MUST NOT silently create an empty session.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SpaarkeAi three-pane surface, the session↔Analysis binding + Cosmos
+    persistence tiers, and the sprk_document SPE file-resolution hop. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Selecting a grid row opens the three-pane surface for that Analysis with (a) its session history restored from the
+    durable transcript via the binding, (b) findings/review state restored, and (c) its files loaded via the
+    sprk_documentid hop; a TTL-expired or stale session resolves against Cosmos rather than creating an empty one.
+  </goal>
+
+  <context>
+    <background>
+      FR-11: reopen from the grid rehydrates session + review state + files. The binding (task 020) associates a
+      session to a sprk_analysis; Cosmos is the transcript store-of-record (ADR-040 Path A — Dataverse holds the anchor
+      + outputs). Persistence hardening (task 025) makes stale/expired server sessions resolve against Cosmos instead
+      of minting an empty session, anchors tab persistence on the Analysis record, and restores editor edit-state.
+      Files are NOT duplicated on sprk_analysis — they resolve through sprk_documentid → sprk_document (SPE hop,
+      ADR-007). This task consumes those seams; it does not rebuild them.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AnalysisHubWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file role="dependency">the session↔Analysis binding + reopen seam delivered by task 020</file>
+      <file role="dependency">the Cosmos-resolve + tab-anchor + edit-restore behavior delivered by task 025</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Hub widget + grid — the row whose selection triggers reopen.</dependency>
+      <dependency task="020" status="pending">Session↔Analysis FK binding — how the Analysis maps to its durable session/transcript.</dependency>
+      <dependency task="025" status="pending">Persistence hardening — stale→Cosmos resolve, tab anchor on Analysis, edit restore.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">SCOPE: transcript rehydration. Restore session history from the Cosmos transcript store-of-record via the binding; Dataverse holds the anchor + outputs only (Path A). Do NOT read the retired sprk_chathistory legacy path for rehydration.</constraint>
+    <constraint source="ADR-007">SCOPE: file restore. Resolve the Analysis's files via sprk_documentid → sprk_document SPE hop; MUST NOT read duplicated SPE pointers off sprk_analysis.</constraint>
+    <constraint source="project">SCOPE: reopen behavior. A TTL-expired/stale session MUST resolve against Cosmos (task 025), never silently create an empty session (no history loss). Tab open is anchored on the Analysis record, not gated on chatSessionId.</constraint>
+    <constraint source="ADR-030">SCOPE: mount signalling. Open the three-pane surface via the PaneEventBus widget_load event (per PaneEventTypes.ts), consistent with the surface-launch mechanism — do NOT invent a bespoke open path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+    <patterns>
+      <pattern name="widget_load mount event" location="src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts">
+        Emit the PaneEventBus widget_load event to mount/open the three-pane surface for the selected Analysis.
+      </pattern>
+      <pattern name="Session↔Analysis binding" location="task 020 binding seam">
+        Map the selected sprk_analysis to its durable session via the FK binding; resolve the transcript from Cosmos.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL: FULL. Confirm the shape of the 020 binding seam and the 025 Cosmos-resolve/edit-restore behavior before wiring.</step>
+    <step order="1">Add the grid row-open handler in AnalysisHubWidget: on row selection, resolve the Analysis id + its bound session.</step>
+    <step order="2">Open the three-pane surface (PaneEventBus widget_load) for the Analysis, anchoring the tab on the Analysis record (not chatSessionId).</step>
+    <step order="3">Rehydrate the session transcript from Cosmos via the binding; if the server session is stale/expired, resolve against Cosmos rather than minting an empty session.</step>
+    <step order="4">Restore findings/review state for the Analysis.</step>
+    <step order="5">Resolve and load the Analysis's files via sprk_documentid → sprk_document SPE hop.</step>
+    <step order="6">Add ui-tests (reopen restores history + review + files; stale session does not lose history; ADR-021 dark-mode) and run them.</step>
+    <step order="7">Update TASK-INDEX.md: set 031 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If rehydration would cross the RETIRED legacy session path (AnalysisEndpoints /continue|/resume, sprk_chathistory read) — because the binding/Cosmos seam does not yet cover a case — STOP, note it, and escalate per CLAUDE.md §6 rather than reviving the legacy path (retirement is tasks 062/064).</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Reopen restores full state">
+      <steps><step>Select a grid row for an Analysis with prior history, findings, and files.</step></steps>
+      <expected>The three-pane surface opens showing the restored session transcript, findings/review state, and the Analysis's files.</expected>
+    </test>
+    <test name="Stale session does not lose history">
+      <steps><step>Reopen an Analysis whose server session has passed TTL.</step></steps>
+      <expected>Prior history is restored from Cosmos; NO empty session is silently created.</expected>
+    </test>
+    <test name="Tab anchored on Analysis">
+      <steps><step>Reopen an Analysis, then refresh.</step></steps>
+      <expected>The tab persists anchored on the Analysis record, not gated on chatSessionId.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Reopen an Analysis under the dark Fluent theme.</step></steps>
+      <expected>The reopened three-pane surface renders with correct contrast using Fluent v9 tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the shared lib + widget (build:prod for production output).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/AnalysisHubWidget.tsx (row-open + rehydrate wiring)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/AnalysisHubWidget.reopen.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a grid row for an existing Analysis, when it is selected, then the three-pane surface opens with that analysis's session history, findings/review state, and files restored (FR-11 acceptance).</criterion>
+    <criterion testable="true">Given a TTL-expired server session, when the Analysis is reopened, then prior history is restored from Cosmos and no empty session is created.</criterion>
+    <criterion testable="true">Given a reopened Analysis, when the page refreshes, then the tab persists anchored on the Analysis record.</criterion>
+    <criterion testable="true">Files restore via sprk_documentid → sprk_document SPE hop; no SPE pointers are read off sprk_analysis.</criterion>
+    <criterion testable="true">Negative: rehydration never reads the retired sprk_chathistory / AnalysisEndpoints legacy path.</criterion>
+    <criterion testable="true">ADR-021: reopened surface renders correctly in both light and dark themes.</criterion>
+    <criterion testable="true">All unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-11 (§126-128). Consumes the 020 binding + 025 persistence seams — do not rebuild them. Reuse the
+    PaneEventBus widget_load mount path (ASSISTANT-SURFACE-LAUNCH-MECHANISM.md). Findings/review widgets
+    (FindingsWidget / NdaReviewSummaryPanel) survive retirement and are reused for review-state restore.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

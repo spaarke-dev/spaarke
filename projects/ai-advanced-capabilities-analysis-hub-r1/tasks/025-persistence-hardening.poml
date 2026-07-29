@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Persistence hardening — stale→Cosmos, tab anchor, edit restore</title>
+    <phase>2 Session</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Three data-loss-prevention changes spanning BFF session recovery + SpaarkeAi tab/editor persistence; brownfield root-cause (silent empty-session bug); tags bff/frontend/session.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified fixes with clear acceptance, but brownfield stale-session recovery + tab-anchor + editor-restore require careful root-cause tracing — xhigh effort on Sonnet.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared `ChatSessionManager.GetSessionAsync` (BFF) + SpaarkeAi tab-persistence/editor state alongside 020–023; serial within Phase 2; `/conflict-check` before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff, frontend, session</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Harden persistence against data loss on three fronts (spec §7 / FR-09): (a) a stale/expired server session
+    resolves against the durable Cosmos transcript instead of silently creating an empty session; (b) tab persistence
+    is anchored on the Analysis record, not gated on `chatSessionId`; (c) live editor edits restore on reopen (from
+    edit state or the saved SPE version). Cosmos is the transcript store-of-record (ADR-040 Path A).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in BFF session recovery (`ChatSessionManager.GetSessionAsync`, Cosmos
+    write-through) and the SpaarkeAi tab-persistence + editor state. Follow ADRs strictly (ADR-040 Path A, ADR-021).
+  </role>
+
+  <goal>
+    After TTL expiry, reopening a session restores prior history from Cosmos (no empty-session data loss); a
+    pre-session/ribbon compose tab survives refresh (anchored on the Analysis record, not `chatSessionId`); reopening
+    an Analysis restores editor edit state; build + tests green; publish-size ≤60 MB + no new HIGH CVE reported.
+  </goal>
+
+  <context>
+    <background>
+      Verified: sessions live Redis 24h (`SessionCacheTtl`) → Cosmos (`ISessionPersistenceService` write-through) →
+      Dataverse anchor. Today a stale/expired server session can silently produce an empty session (data-loss bug);
+      Cosmos already holds the durable transcript (Path A store-of-record), so `GetSessionAsync` must fall back to
+      Cosmos before minting empty. Tab persistence is currently gated on `chatSessionId`, so a pre-session/ribbon
+      compose tab is lost on refresh — anchor it on the Analysis record instead. Live editor edits are lost on reopen —
+      restore from edit state or the saved SPE version. Task 020 supplies the Analysis anchor the tab persistence keys on.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (GetSessionAsync — Cosmos fallback)</file>
+      <file role="canonical-reference">ISessionPersistenceService (Cosmos write-through / read — the store-of-record)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/ (tab-persistence anchored on the Analysis record)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/ (editor state restore on reopen)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (stale-session recovery tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Session→Analysis FK + Analysis anchor that tab persistence keys on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">SCOPE: stale-session recovery. `GetSessionAsync` MUST resolve an expired/stale session against the durable Cosmos transcript (store-of-record, Path A) before minting a new one; MUST NOT silently create an empty session or add a second transcript store.</constraint>
+    <constraint source="project">SCOPE: tab persistence. Anchor on the Analysis record, NOT gated on `chatSessionId`, so a pre-session/ribbon compose tab survives refresh.</constraint>
+    <constraint source="project">SCOPE: editor restore. Reopening an Analysis MUST restore live editor edits (edit state or the saved SPE version); no silent edit loss.</constraint>
+    <constraint source="ADR-013">SCOPE: any AI capability the recovery path needs. Reach via `PublicContracts/`; MUST NOT fork `Services/Ai/` or inject AI-internal types.</constraint>
+    <constraint source="ADR-021">SCOPE: any SpaarkeAi UI touched. Fluent v9 + theme tokens; correct dark-mode rendering.</constraint>
+    <constraint source="ADR-029">SCOPE: this BFF-touching task. State Placement Justification, report `dotnet publish` size + diff vs ~49.63 MB baseline (≤60 MB), confirm no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Session recovery + tab/editor persistence</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Cosmos store-of-record" location="ISessionPersistenceService">
+        Resolve a stale session by reading the durable Cosmos transcript before minting; Cosmos is the Path A store-of-record.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason; load knowledge; reproduce the silent empty-session case in `GetSessionAsync`.</step>
+    <step order="1">(a) Add the Cosmos fallback in `GetSessionAsync`: on stale/expired Redis session, read the durable Cosmos transcript and rehydrate rather than minting empty.</step>
+    <step order="2">(b) Re-anchor SpaarkeAi tab persistence on the Analysis record (not `chatSessionId`) so a pre-session/ribbon compose tab survives refresh.</step>
+    <step order="3">(c) Restore live editor edits on reopen (from edit state or the saved SPE version).</step>
+    <step order="4">Add BFF tests for stale-session recovery (TTL-expiry reopen restores history, no empty session); client checks for tab-survives-refresh + editor-restore.</step>
+    <step order="5">`/conflict-check` vs redesign-r1/r2; `dotnet build` + `dotnet test`; `dotnet publish` size + CVE report.</step>
+    <step order="6">Update TASK-INDEX.md: set 025 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a stale session cannot be resolved against Cosmos (e.g. the transcript is genuinely absent, not just Redis-expired), STOP before minting a silent empty session and escalate for the correct no-data-loss behavior (CLAUDE.md §6) rather than discarding history.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="TTL-expiry reopen restores history">
+      <steps><step>Create a session with messages; expire it past `SessionCacheTtl`.</step><step>Reopen the Analysis.</step></steps>
+      <expected>Prior history is restored from Cosmos; no empty-session data loss.</expected>
+    </test>
+    <test name="Compose tab survives refresh">
+      <steps><step>Open a pre-session/ribbon compose tab; refresh the page.</step></steps>
+      <expected>The tab survives (anchored on the Analysis record, not gated on `chatSessionId`); renders correctly in dark mode (ADR-021).</expected>
+    </test>
+    <test name="Editor edits restore on reopen">
+      <steps><step>Make live edits in the editor; close + reopen the Analysis.</step></steps>
+      <expected>Edit state (or the saved SPE version) is restored; no silent edit loss.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+    <tool name="npm">Build the SpaarkeAi client.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</output>
+    <output type="code">src/solutions/SpaarkeAi/src/ (tab-persistence + editor restore)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (stale-session recovery tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a session past TTL expiry, when reopened, then prior history is restored from the Cosmos transcript with no empty-session data loss.</criterion>
+    <criterion testable="true">Given a pre-session/ribbon compose tab, when the page is refreshed, then the tab survives (anchored on the Analysis record, not `chatSessionId`).</criterion>
+    <criterion testable="true">Given live editor edits, when the Analysis is closed and reopened, then edit state (or the saved SPE version) is restored.</criterion>
+    <criterion testable="true">Negative: `GetSessionAsync` does NOT silently create an empty session when a durable Cosmos transcript exists.</criterion>
+    <criterion testable="true">SpaarkeAi UI touched renders correctly in light + dark mode (ADR-021).</criterion>
+    <criterion testable="true">BFF publish-size ≤60 MB compressed (diff reported); no new HIGH CVE; all unit tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-09 / §7 / PLAN §2.6 / NFR-04 (no session/transcript data loss). Cosmos is the durable store-of-record
+    (ADR-040 Path A). `/conflict-check` before the BFF PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

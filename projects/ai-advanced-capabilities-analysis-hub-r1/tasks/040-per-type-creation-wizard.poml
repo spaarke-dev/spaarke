@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Per-type creation wizard (3 steps; Create*Wizard + Field Mapping)</title>
+    <phase>4 Wizard</phase>
+    <gate>deps 011,012 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new frontend/fluent-ui wizard (.tsx) that creates a Dataverse record + runs analysis + loads a tab, wiring the Field Mapping engine; user-facing, multi-step; FULL per §8 (frontend/fluent-ui + NEW-surface).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-heavy: extends the shipped Create*Wizard + AssociateToStep + FieldMappingService pattern; net-new is card registry + coming-soon cards — specified, not architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct file surface (new wizard widget) — runs parallel with 030 (hub) + 051 (forms) per W4; no .claude/ writes.</parallel-reason>
+    <deps>011,012</deps>
+    <tags>frontend, spaarkeai, wizard, fluent-ui, field-mapping</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the per-type analysis creation wizard: Step 1 upload OR select an existing Document; Step 2 access +
+    associate-to (regarding lookup) + name + description; Step 3 next-steps (Send Email / Create To Do). On finish,
+    create the sprk_analysis record (populate name, description, work-type, regarding, access, next-steps), run the
+    analysis, and load the file to a workspace tab. Reuse the CreateRecordWizard shell + AssociateToStep + the Field
+    Mapping engine — associate-to and next-steps are Field-Mapping-driven.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the CreateRecordWizard family, AssociateToStep (regarding lookup), the Field
+    Mapping Framework (FieldMappingService), and Fluent UI v9. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A 3-step per-type creation wizard widget exists that, on finish, creates a valid sprk_analysis (name, description,
+    work-type, regarding, access, next-steps), runs the analysis, and loads the source file to a workspace tab —
+    reusing CreateRecordWizard + AssociateToStep + FieldMappingService; ui-tests pass in light and dark mode.
+  </goal>
+
+  <context>
+    <background>
+      FR-12: the wizard is the guided create path. It reuses the Create*Wizard shell (used by all 7 Create*Wizard
+      services), AssociateToStep for the regarding lookup, and the context-agnostic Field Mapping engine
+      (FieldMappingService.ts) — "associate-to" (regarding inheritance) and "next-steps" (Send Email / Create To Do)
+      are Field-Mapping-driven, not bespoke. Exactly one regarding field is populated per Analysis (ADR-024). Files
+      are NOT duplicated on sprk_analysis — the selected/uploaded Document resolves via sprk_documentid → sprk_document
+      (ADR-007). Work-type drives which wizard/cards render (Agreement Review live; Research/Patent coming-soon).
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentUploadWizardWidget.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Client sprk_analysis type — the record shape the wizard populates.</dependency>
+      <dependency task="012" status="pending">sprk_worktype + RegardingResolver field-set — the work-type + single regarding the wizard sets.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">SCOPE: the associate-to step. Exactly ONE regarding field is populated per Analysis via the RegardingResolver field-set; the wizard MUST NOT populate multiple regarding fields.</constraint>
+    <constraint source="ADR-007">SCOPE: Step 1 file. The uploaded/selected Document resolves via sprk_documentid → sprk_document SPE hop; MUST NOT duplicate SPE pointers onto sprk_analysis.</constraint>
+    <constraint source="project">SCOPE: associate-to + next-steps. Both are Field-Mapping-driven via FieldMappingService (Copy/Default/Concat/Template) — do NOT hand-roll bespoke inheritance/next-step logic outside the Field Mapping engine.</constraint>
+    <constraint source="ADR-021">SCOPE: the wizard's Fluent v9 UI. Use Fluent UI v9 tokens (no hard-coded colors); all three steps render correctly in light and dark themes (verify via ui-tests dark-mode check).</constraint>
+    <constraint source="ADR-012">SCOPE: the wizard shell + steps. Reuse the shared-lib CreateRecordWizard + AssociateToStep; do NOT fork a parallel wizard implementation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-regarding-resolver.md</file>
+      <file>.claude/adr/ADR-007-spe-file-store.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+    <patterns>
+      <pattern name="CreateRecordWizard shell" location="src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx">
+        Reuse the multi-step wizard shell; wire the 3 analysis steps (file, access/associate-to/name/desc, next-steps).
+      </pattern>
+      <pattern name="AssociateToStep" location="src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx">
+        Reuse for the regarding lookup in Step 2 (single populated regarding per ADR-024).
+      </pattern>
+      <pattern name="Field Mapping engine" location="src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts">
+        Drive associate-to inheritance + next-steps via FieldMappingService (Copy/Default/Concat/Template) — wired the same way the 7 Create*Wizard services use it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL: FULL. Study CreateRecordWizard + AssociateToStep + a sibling wizard widget (CreateMatterWizardWidget / DocumentUploadWizardWidget) + FieldMappingService.</step>
+    <step order="1">Author CreateAnalysisWizardWidget.tsx reusing the CreateRecordWizard shell, work-type-driven (Agreement Review live; Research/Patent coming-soon cards where the card registry surfaces them).</step>
+    <step order="2">Step 1: upload OR select an existing Document (resolve via sprk_documentid).</step>
+    <step order="3">Step 2: access + AssociateToStep (regarding lookup, single populated regarding) + name + description; wire associate-to inheritance through FieldMappingService.</step>
+    <step order="4">Step 3: next-steps (Send Email / Create To Do), also Field-Mapping-driven.</step>
+    <step order="5">On finish: create the sprk_analysis record (name, description, work-type, regarding, access, next-steps), run the analysis, and load the file to a workspace tab; register the widget in register-workspace-widgets.ts.</step>
+    <step order="6">Add ui-tests (3 steps navigate; finish creates valid record + launches; associate-to + next-steps are Field-Mapping-driven; ADR-021 dark-mode) and run them.</step>
+    <step order="7">Update TASK-INDEX.md: set 040 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Field Mapping engine cannot express "next-steps" (Send Email / Create To Do) without net-new mapping-type or expression work, STOP and escalate per CLAUDE.md §6/§11 rather than hand-rolling bespoke next-step logic outside the framework.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbors: the Create*Wizard family (CreateRecordWizard.tsx, AssociateToStep.tsx) and the wizard widgets in Spaarke.AI.Widgets (CreateMatterWizardWidget.tsx, DocumentUploadWizardWidget.tsx); Field Mapping via FieldMappingService.ts:110.</existing>
+    <extension>Yes for the mechanics — this reuses (does not fork) the CreateRecordWizard shell + AssociateToStep + FieldMappingService. The net-new surface is the analysis-specific 3-step config + the work-type card registry + coming-soon cards, which no existing wizard provides.</extension>
+    <cost-of-doing-nothing>Without the wizard there is no guided create path: no capture of name / regarding / access / next-steps before an analysis runs, so FR-12 (create a valid sprk_analysis + run + load tab) has no entry point and analyses can only be created ad hoc without required context.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Three steps navigate">
+      <steps><step>Open the Agreement Review wizard; advance through Step 1 → 2 → 3.</step></steps>
+      <expected>Step 1 offers upload OR select-existing Document; Step 2 shows access + associate-to (regarding) + name + description; Step 3 shows next-steps (Send Email / Create To Do).</expected>
+    </test>
+    <test name="Finish creates valid record + launches">
+      <steps><step>Complete all three steps and click Finish.</step></steps>
+      <expected>A sprk_analysis is created with name, description, work-type, regarding, access, next-steps; the analysis runs and the file loads to a workspace tab.</expected>
+    </test>
+    <test name="Field-Mapping-driven wiring">
+      <steps><step>Set a regarding parent and a next-step, then finish.</step></steps>
+      <expected>Associate-to inheritance and next-steps are produced by FieldMappingService (not bespoke logic); exactly one regarding field is populated.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps><step>Render all three wizard steps under the dark Fluent theme.</step></steps>
+      <expected>Every step renders with correct contrast using Fluent v9 tokens; no hard-coded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the shared lib + widget (build:prod for production output).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (registration entry)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/__tests__/CreateAnalysisWizardWidget.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the wizard, when navigated, then Step 1 offers upload OR select-existing Document, Step 2 offers access + associate-to (regarding) + name + description, Step 3 offers next-steps (Send Email / Create To Do).</criterion>
+    <criterion testable="true">Given the three steps completed, when Finish is clicked, then a valid sprk_analysis is created (name, description, work-type, regarding, access, next-steps), the analysis runs, and the file loads to a workspace tab (FR-12 acceptance).</criterion>
+    <criterion testable="true">Associate-to and next-steps are produced by FieldMappingService (Field-Mapping-driven), not bespoke logic.</criterion>
+    <criterion testable="true">Exactly one regarding field is populated per Analysis (ADR-024); the file resolves via sprk_documentid, no SPE pointers duplicated on sprk_analysis.</criterion>
+    <criterion testable="true">Negative: finishing with a required field missing (e.g. no name or no Document) blocks creation with a validation message, not an unhandled error.</criterion>
+    <criterion testable="true">ADR-021: all three steps render correctly in both light and dark themes.</criterion>
+    <criterion testable="true">All unit/ui tests pass; shared-lib build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-12 (§131-136). Reuse-first per CLAUDE.md §11 — CreateRecordWizard + AssociateToStep + FieldMappingService,
+    wired the way the 7 existing Create*Wizard services use them. Work-type card registry + coming-soon cards are the
+    net-new surface shared with the hub (task 030). Tool-palette scoping on launch is task 041.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

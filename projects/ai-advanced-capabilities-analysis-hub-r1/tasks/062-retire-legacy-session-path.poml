@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Retire legacy session path (/continue, /resume, sprk_chathistory, sprk_analysischatmessage)</title>
+    <phase>6 Retirement</phase>
+    <gate>blocked — 020 (ChatEndpoints standardization), 061 (client repoint done)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Irreversible deletion of BFF endpoints + orchestration + a Dataverse column read; sprk_chathistory has legit non-legacy writers — deleting the wrong caller breaks live chat. bff/session tags; high blast radius.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The inventory is fully specified (exact files + lines) but brownfield root-cause tracing is required to prove UpdateChatHistoryAsync/column plumbing is orphaned before deletion — hence xhigh effort, sonnet tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Ordered retirement (§13.5) touching shared session code + Services/Ai seams; must run after client repoint (061) and the ChatEndpoints standardization (020); serial within Phase 6.</parallel-reason>
+    <deps>020,061</deps>
+    <tags>bff, retirement, session</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Retire the legacy in-memory analysis session path: remove POST /{id}/continue and POST /{id}/resume (and their handlers
+    ContinueAnalysis/ResumeAnalysis plus the orchestration methods ContinueAnalysisAsync/ResumeAnalysisAsync), remove the
+    sprk_analysis.sprk_chathistory JSON blob read, and drop the dead sprk_analysischatmessage shell. sprk_chathistory has
+    legit non-legacy writers (ChatEndpoints new sessions, Insights ObservationMirrorMapper) — those MUST stay untouched.
+    Column plumbing + UpdateChatHistoryAsync are deleted only after confirming they are orphaned.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the BFF chat/analysis session tiers (Redis→Cosmos→Dataverse), the legacy
+    AnalysisOrchestrationService in-memory model, and the sprk_chathistory write paths. Follow ADRs strictly; do NOT fork
+    Services/Ai (redesign-r2 sole owner) — this is deletion within it, coordinated via /conflict-check.
+  </role>
+
+  <goal>
+    The legacy endpoints /continue + /resume are removed (route not registered, handlers gone); ContinueAnalysisAsync +
+    ResumeAnalysisAsync are removed; no code reads sprk_analysis.sprk_chathistory; sprk_analysischatmessage is unreferenced
+    in src; the ChatEndpoints and Insights sprk_chathistory writers are provably intact; sprk_chathistory column plumbing +
+    AnalysisResultPersistence/WorkingDocumentService UpdateChatHistoryAsync are deleted ONLY if confirmed orphaned; BFF
+    build green.
+  </goal>
+
+  <context>
+    <background>
+      Per spec §13.5 / FR-20, the legacy analysis session path is retired in favor of the ChatEndpoints Redis→Cosmos model
+      (standardized in task 020). Legacy surface: AnalysisEndpoints.cs route regs for /continue + /resume (~64-79,122-132),
+      the ContinueAnalysis handler (~551-611) and ResumeAnalysis handler (~730-755);
+      AnalysisOrchestrationService.ContinueAnalysisAsync (~90-165, reads ChatHistory) and ResumeAnalysisAsync (~384-469,
+      in-memory); AnalysisDocumentLoader.DeserializeChatHistory (~251,300,327-340); AnalysisResumeRequest.cs (~33-39); and
+      sprk_chathistory column plumbing in DataverseServiceClientImpl.cs (~161,174), DataverseWebApiService.cs (~258,284),
+      Models.cs (~399). The entity sprk_analysischatmessage is a dead shell (not referenced in src). CAUTION:
+      sprk_chathistory is ALSO written by legit non-legacy paths — ChatEndpoints.cs (~956-965, new sessions) and Insights
+      ObservationMirrorMapper.cs (a different entity) — DO NOT touch those.
+      AnalysisResultPersistence.UpdateChatHistoryAsync and WorkingDocumentService.UpdateChatHistoryAsync become orphaned
+      once /continue is deleted — delete-if-unreferenced only after confirming no new-hub caller remains.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisDocumentLoader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisResumeRequest.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/Models.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisResultPersistence.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/WorkingDocumentService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">ChatEndpoints (Redis→Cosmos) is the standardized session model that replaces the legacy path being retired here.</dependency>
+      <dependency task="061" status="pending">Client launch points repointed off the legacy surface so removing the legacy endpoints breaks no live client.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: retire ONLY the legacy path — /continue, /resume, their handlers, ContinueAnalysisAsync/ResumeAnalysisAsync, the sprk_analysis.sprk_chathistory READ, and the dead sprk_analysischatmessage. Do NOT touch ChatEndpoints.cs:956-965 (new-session sprk_chathistory write) or Insights ObservationMirrorMapper.cs — those are legit non-legacy writers.</constraint>
+    <constraint source="project">SCOPE: sprk_chathistory column plumbing (DataverseServiceClientImpl/DataverseWebApiService/Models) + AnalysisResultPersistence.UpdateChatHistoryAsync + WorkingDocumentService.UpdateChatHistoryAsync are deleted ONLY after a Grep + hand-trace proves no surviving caller (incl. no new hub caller). If any live caller exists, keep the plumbing and note it.</constraint>
+    <constraint source="ADR-040">SCOPE: Cosmos is the transcript store-of-record (Project Tension → Path A); removing the Dataverse sprk_chathistory read must not remove transcript access — transcript continues to come from Cosmos.</constraint>
+    <constraint source="ADR-032">SCOPE: if an endpoint that maps unconditionally loses its backing service, keep registration symmetric (Null-Object) rather than leaving an asymmetric conditional registration.</constraint>
+    <constraint source="ADR-029">SCOPE: BFF-touching — report publish-size absolute + diff vs ~49.63 MB baseline; deletion should reduce or hold size.</constraint>
+    <constraint source="project">SCOPE: ordered §13.5 — runs after 061; do NOT delete the AnalysisWorkspace tree/web resources here (that is 063).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Empirical-Reproduction-FIRST orphan proof" location=".claude/constraints/bff-extensions.md">
+        Before deleting UpdateChatHistoryAsync / column plumbing, run the static-scan + hand-trace recipe (§ F.3) to prove no live caller; file a note if root cause differs from the inventory.
+      </pattern>
+      <pattern name="Non-legacy sprk_chathistory writer (keep intact)" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs">
+        Lines ~956-965 write sprk_chathistory for new sessions — this is the SURVIVING path; use it as the negative-check anchor.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor + reason; confirm 020 + 061 merged; run /conflict-check vs redesign-r2 before any Services/Ai edit.</step>
+    <step order="1">Grep sprk_chathistory across the whole repo; classify every hit as LEGACY (delete) vs NON-LEGACY (keep): ChatEndpoints new-session write + Insights ObservationMirrorMapper are KEEP anchors.</step>
+    <step order="2">Remove the /continue + /resume route registrations in AnalysisEndpoints.cs (~64-79,122-132) and the ContinueAnalysis (~551-611) + ResumeAnalysis (~730-755) handlers.</step>
+    <step order="3">Remove ContinueAnalysisAsync (~90-165) + ResumeAnalysisAsync (~384-469) from AnalysisOrchestrationService.cs and the DeserializeChatHistory usage in AnalysisDocumentLoader.cs (~251,300,327-340); delete AnalysisResumeRequest.cs if now unreferenced.</step>
+    <step order="4">Confirm no code reads sprk_analysis.sprk_chathistory; remove the READ path only (leave ChatEndpoints/Insights WRITE paths untouched).</step>
+    <step order="5">Hand-trace AnalysisResultPersistence.UpdateChatHistoryAsync + WorkingDocumentService.UpdateChatHistoryAsync callers; if orphaned (no new-hub caller), delete them + the sprk_chathistory column plumbing in DataverseServiceClientImpl (~161,174), DataverseWebApiService (~258,284), Models.cs (~399). If ANY live caller exists → STOP + escalate.</step>
+    <step order="6">Remove the dead sprk_analysischatmessage references (confirm unreferenced in src; entity shell needs no code changes beyond removing any lingering constant/type).</step>
+    <step order="7">Update/remove affected tests; build BFF (dotnet build) + run tests; run publish-size + CVE checks; record in notes.</step>
+    <step order="8">Negative-verify: Grep confirms ChatEndpoints (~956-965) + Insights ObservationMirrorMapper sprk_chathistory writers still present and compile.</step>
+    <step order="9">Update TASK-INDEX.md: set task 062 status to ✅; document any orphan-status decisions/deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>BEFORE deleting the sprk_chathistory column plumbing or either UpdateChatHistoryAsync, CONFIRM no new-hub / non-legacy caller remains (ChatEndpoints + Insights writers must stay untouched). If ANY live caller is found — or if distinguishing a legacy from a non-legacy sprk_chathistory reference is ambiguous — STOP and escalate per CLAUDE.md §6/§6.5 rather than deleting.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the affected tests.</tool>
+    <tool name="terminal">Grep provenance classification, publish-size, CVE check, /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs (legacy routes/handlers removed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs (legacy methods removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (affected legacy-session tests removed/updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the BFF is running, when POST /{id}/continue or POST /{id}/resume is called, then the route no longer exists (404/route-not-registered); the handlers ContinueAnalysis/ResumeAnalysis and orchestration methods ContinueAnalysisAsync/ResumeAnalysisAsync are gone.</criterion>
+    <criterion testable="true">No code reads sprk_analysis.sprk_chathistory; DeserializeChatHistory legacy usage is removed.</criterion>
+    <criterion testable="true">sprk_analysischatmessage is unreferenced across src (Grep zero).</criterion>
+    <criterion testable="true">Negative check: ChatEndpoints (~956-965) new-session sprk_chathistory write AND Insights ObservationMirrorMapper writer are present, unchanged, and compile — the retirement did NOT remove non-legacy writers.</criterion>
+    <criterion testable="true">UpdateChatHistoryAsync (both) + sprk_chathistory column plumbing are deleted ONLY if the hand-trace proved them orphaned; otherwise retained with a documented note — no live caller left dangling.</criterion>
+    <criterion testable="true">BFF build green; publish-size reported (absolute + diff); no new HIGH-severity CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec §13.5 / FR-20; TASK-INDEX high-risk item. The sprk_chathistory provenance split is the crux: ChatEndpoints +
+    Insights writers survive; only the legacy analysis read/continue/resume path is retired. Cosmos remains the transcript
+    store-of-record (ADR-040 Path A). Do NOT touch the AnalysisWorkspace tree here (063).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check). /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

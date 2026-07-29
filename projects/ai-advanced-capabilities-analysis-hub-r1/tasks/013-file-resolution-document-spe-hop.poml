@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>File resolution via `sprk_documentid` → `sprk_document` SPE hop</title>
+    <phase>1 Data spine</phase>
+    <gate>blocked-until-011</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Wires file open/preview through the existing document lookup + SpeFileStore facade; reuses established SPE plumbing with a hard MUST-NOT (no pointer duplication) — modification of existing surface, STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Applies the known ADR-007 document-hop pattern to the Analysis record; well-specified reuse, no architectural authoring — Sonnet-5 @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>frontend, spe</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Resolve an Analysis's files by hopping through its `sprk_documentid` → `sprk_document` lookup to the document's SPE
+    pointers (per ADR-007), reusing the existing `SpeFileStore` server facade path. Do NOT duplicate
+    `speDriveItemId` / `GraphDriveId` / `GraphItemId` onto `sprk_analysis`; the document record remains the single
+    source of SPE addressing.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the SharePoint Embedded document hop (`sprk_documentid` → `sprk_document` →
+    SPE pointers) and the `SpeFileStore` facade. Follow ADR-007 strictly.
+  </role>
+
+  <goal>
+    File open/preview for a `sprk_analysis` resolves SPE pointers via the `sprk_documentid` → `sprk_document` lookup and
+    the existing `SpeFileStore` path; no SPE pointer columns are added to `sprk_analysis`; the resolution is covered by
+    a test asserting the document-hop is used (not a duplicated pointer on the Analysis record).
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-04 / PLAN 1.3, analysis files are reached THROUGH the existing document lookup — the same SPE hop used
+      across Spaarke — rather than by copying SPE pointers onto the Analysis. Owner confirms `sprk_documentid` is KEPT as
+      the SPE subject-pointer (a separate role from `sprk_regardingdocument`). This consumes the client `sprk_analysis`
+      type (011) and reuses the server `SpeFileStore` facade (ADR-007). No new SPE pointer columns are created (spec §11.4 / NFR-05).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/ (Analysis file open/preview → document-hop resolution)</file>
+      <file role="canonical-reference">.claude/adr/ADR-007-spe-file-storage.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Client `sprk_analysis` type (with `sprk_documentid` lookup) exists.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">SCOPE = Analysis file resolution. Files MUST be reached via `sprk_documentid` → `sprk_document` → the document's SPE pointers through the existing `SpeFileStore` facade; MUST NOT duplicate `speDriveItemId`/`GraphDriveId`/`GraphItemId` onto `sprk_analysis`.</constraint>
+    <constraint source="project">SCOPE = reuse the existing document-hop + `SpeFileStore` path; do NOT author a new SPE addressing service or a new BFF endpoint for this (extend/consume the existing path). `sprk_documentid` is the subject-pointer, distinct from `sprk_regardingdocument`.</constraint>
+    <constraint source="ADR-013">SCOPE = if any BFF-side call is needed, go through the existing facade/`PublicContracts` seams; MUST NOT fork `Services/Ai/` or inject AI-internal types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SharePoint Embedded document hop</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spe-file-storage.md</file>
+      <file>.claude/patterns/ai/text-extraction.md</file>
+      <file>docs/data-model/</file>
+    </files>
+    <patterns>
+      <pattern name="SpeFileStore facade" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs">
+        The existing SPE addressing facade; resolve the document's pointers through it after the `sprk_documentid` → `sprk_document` lookup — do not re-address SPE from the Analysis record.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor + reason. Study the existing document-hop usage + `SpeFileStore` facade.</step>
+    <step order="1">Implement Analysis file open/preview to read `sprk_analysis.sprk_documentid`, load the `sprk_document`, and resolve its SPE pointers via the existing facade path.</step>
+    <step order="2">Confirm no SPE pointer field is read from or written to `sprk_analysis` (the type has none per 011; assert nothing reintroduces them).</step>
+    <step order="3">Add a test asserting resolution goes through the document hop (given an Analysis with a `sprk_documentid`, the SPE pointer comes from the linked document, not the Analysis).</step>
+    <step order="4">Build + run tests; confirm green. If a BFF-touching change was made, run the publish-size + CVE checks (spec NFR-01/NFR-06) and record them.</step>
+    <step order="5">Update TASK-INDEX.md: set task 013 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reaching files through the document hop proves impossible without adding an SPE pointer to `sprk_analysis` (e.g. an Analysis with no `sprk_documentid`), STOP and escalate per CLAUDE.md §6.5 — do NOT silently duplicate SPE pointers onto the Analysis to work around it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Analysis file opens/previews via document hop (theme smoke)">
+      <steps>
+        <step>Open/preview a file for an Analysis whose `sprk_documentid` points to a document with SPE pointers.</step>
+        <step>Toggle light → dark theme.</step>
+      </steps>
+      <expected>The file opens/previews correctly with the pointer resolved from the linked `sprk_document` (not from the Analysis). The preview surface renders correctly in dark mode (ADR-021: Fluent v9 tokens, no hard-coded colors).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + run the SpaarkeAi client tests.</tool>
+    <tool name="dotnet">Only if a BFF-side change is made: build + publish-size + CVE checks.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ (Analysis file open/preview via document-hop resolution)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/ (test asserting SPE pointer resolves via the document lookup)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `sprk_analysis` with a `sprk_documentid`, when a file is opened/previewed, then the SPE pointer is resolved via the `sprk_documentid` → `sprk_document` hop through the existing `SpeFileStore` path.</criterion>
+    <criterion testable="true">Negative: no SPE pointer column (`speDriveItemId`/`GraphDriveId`/`GraphItemId`) is read from or added to `sprk_analysis` (verify by grep/diff on the type + resolution code).</criterion>
+    <criterion testable="true">Negative: given an Analysis with no `sprk_documentid`, file open surfaces a clear no-document state (not a fabricated pointer / unhandled error).</criterion>
+    <criterion testable="true">The resolution test passes; build is green (and, if BFF was touched, publish-size ≤60 MB + no new HIGH CVE recorded).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec FR-04 / §11.4 / NFR-05 / ADR-007. `sprk_documentid` (SPE subject-pointer) is KEPT and is distinct from
+    `sprk_regardingdocument` (regarding/context lookup handled in 012).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (STANDARD rigor; Step 9.5 gates skipped unless BFF touched).</protocol>
+  </execution>
+</task>

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Record→analysis 1:N + Analysis subgrid/tab on Matter/Project forms</title>
+    <phase>5 Entry model + record integration</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new Dataverse relationship model (record→analysis 1:N) + form customization; regarding-integrity is a correctness invariant (single-valued, NFR-05); realizes the §12.2 record-integration model.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified Dataverse forms/relationship work over the owner-created regarding field-set (task 012); no novel design — subgrid config + relationship wiring against a known contract.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P5a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse form/relationship surface — distinct file set from the frontend routing (050) and launch-resolver work; no shared code.</parallel-reason>
+    <deps>012</deps>
+    <tags>dataverse, forms, ribbon</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Realize the record→analysis 1:N model (spec §12.2 / FR-15): a Matter and a Project form each show a subgrid (or tab)
+    of the analyses whose matching regarding field equals that record. A record has many analyses; each Analysis belongs
+    to exactly one record via exactly one populated regarding field (single-valued, ADR-024 / NFR-05). This is 100%
+    net-new — no `sprk_analysis` subgrid and no record→analysis 1:N exist today (§13.4). Consume the owner-created
+    regarding field-set from task 012; do not author new columns.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Dataverse model-driven form customization (subgrids/tabs), 1:N relationships,
+    and the RegardingResolver single-valued regarding field-set (ADR-024). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    The `sprk_matter` and `sprk_project` main forms each show a subgrid/tab listing the `sprk_analysis` records whose
+    matching regarding lookup (`sprk_regardingmatter` / `sprk_regardingproject`) equals the open record; the record→analysis
+    relationship is 1:N (a record has many analyses, an analysis belongs to exactly one record via one populated regarding
+    field); the subgrid launches/opens analyses per the entry matrix (2b/2d wired in task 052).
+  </goal>
+
+  <context>
+    <background>
+      §13.4: no form has a `sprk_analysis` subgrid/tab today and no record→analysis 1:N wiring exists — `sprk_analysis`'s
+      only lookups are `_sprk_documentid_value` + `sprk_Playbook`. The §12.2 model (record shows a subgrid of its analyses;
+      an analysis belongs to one record) requires the owner-created regarding field-set (`sprk_regardingmatter`,
+      `sprk_regardingproject`, `sprk_regardingdocument`) consumed via RegardingResolver in task 012, plus subgrids added to
+      the parent forms here. NFR-05 / ADR-024: exactly one populated regarding field per Analysis (single-valued regarding),
+      giving a clean 1:N.
+    </background>
+    <relevant-files>
+      <file role="modify">sprk_matter main form (subgrid/tab of analyses)</file>
+      <file role="modify">sprk_project main form (subgrid/tab of analyses)</file>
+      <file role="canonical-reference">the RegardingResolver single-valued regarding field-set consumed in task 012 (sprk_regardingmatter / sprk_regardingproject / sprk_regardingdocument)</file>
+      <file role="canonical-reference">docs/data-model/ (sprk_analysis regarding contract)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Consumes `sprk_worktype` + the single-valued regarding field-set (RegardingResolver) — the lookups the subgrid filters on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">SCOPE: the record→analysis relationship — exactly ONE regarding field is populated per Analysis (single-valued); the subgrid filters on the matching regarding lookup. MUST NOT model multi-record ownership of a single Analysis.</constraint>
+    <constraint source="project">SCOPE: this task consumes owner-created columns only — MUST NOT author new `sprk_analysis` columns or option sets; the regarding field-set + `sprk_worktype` exist per the schema contract (spec Prerequisites).</constraint>
+    <constraint source="NFR-05">SCOPE: regarding integrity — the 1:N is clean (record has many analyses; analysis belongs to exactly one record via one populated regarding field). Multi-populated regarding on a single Analysis is rejected/invalid.</constraint>
+    <constraint source="project">SCOPE: subgrid launch/open behavior defers to the entry matrix (2b/2d) wired in task 052 via `openSpaarkeAi` — this task lays the subgrid + relationship; it MUST NOT hand-roll a `surfaceLaunchRegistry` open (ADR-039).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="RegardingResolver single-valued regarding" location="src/client/pcf/RegardingResolver">
+        The regarding field-set is single-valued (exactly one populated); the parent record supplies the source parent. The subgrid on the parent form filters `sprk_analysis` by the matching regarding lookup.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor; load ADR-024, ADR-039; confirm the owner-created regarding field-set + `sprk_worktype` are present (task 012 output / schema preflight).</step>
+    <step order="1">Establish the record→analysis 1:N: the `sprk_analysis.sprk_regardingmatter` → `sprk_matter` and `sprk_analysis.sprk_regardingproject` → `sprk_project` lookups are the 1:N relationships that back the subgrids.</step>
+    <step order="2">Add an Analyses subgrid/tab to the `sprk_matter` main form filtered to analyses where `sprk_regardingmatter` = the open record.</step>
+    <step order="3">Add an Analyses subgrid/tab to the `sprk_project` main form filtered to analyses where `sprk_regardingproject` = the open record.</step>
+    <step order="4">Verify single-valued regarding: each Analysis shows under exactly one parent record (one populated regarding); confirm no Analysis appears under two records.</step>
+    <step order="5">Confirm the subgrid open/launch path defers to `openSpaarkeAi` (task 052), not `surfaceLaunchRegistry`.</step>
+    <step order="6">Update TASK-INDEX.md: set task 051 status to ✅.</step>
+    <step order="7">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a legitimate need for an Analysis to belong to more than one record surfaces (multi-populated regarding), STOP and escalate per CLAUDE.md §6.5 (ADR-024 single-valued regarding) — do not silently model multi-record ownership or add a second populated regarding.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None — §13.4 (design-discussion.md:361) confirms no form has a `sprk_analysis` subgrid/tab today and no record→analysis 1:N wiring exists; `sprk_analysis`'s only lookups are `_sprk_documentid_value` + `sprk_Playbook`.</existing>
+    <extension>No — there is no existing record→analysis relationship or subgrid to extend; the regarding field-set (owner-created, consumed in 012) is the enabling contract, but the 1:N + subgrids on the parent forms do not exist and must be added.</extension>
+    <cost-of-doing-nothing>A Matter/Project record cannot show or launch its own analyses; the §12.2 record-integration model (and entry cases 2b/2d) is unrealizable — records and analyses stay unlinked in the UI.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pac">Dataverse solution / form customization (export/import).</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">sprk_matter main form — Analyses subgrid/tab</output>
+    <output type="config">sprk_project main form — Analyses subgrid/tab</output>
+    <output type="config">record→analysis 1:N relationships (sprk_regardingmatter, sprk_regardingproject)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `sprk_matter` record with N analyses regarding it, when the form opens, then the Analyses subgrid lists exactly those N analyses (filtered by `sprk_regardingmatter`).</criterion>
+    <criterion testable="true">Given a `sprk_project` record, when the form opens, then its Analyses subgrid lists the analyses whose `sprk_regardingproject` = the record.</criterion>
+    <criterion testable="true">A record can have many analyses (1:N); each Analysis appears under exactly one parent record (single-valued regarding).</criterion>
+    <criterion testable="true">Negative: an Analysis with a second populated regarding field is invalid/rejected — a single Analysis does NOT appear under two records (multi-record ownership rejected per ADR-024 / NFR-05).</criterion>
+    <criterion testable="true">Negative: the subgrid open path uses the entry-matrix `openSpaarkeAi` route (task 052), not `surfaceLaunchRegistry`.</criterion>
+    <criterion testable="true">No new `sprk_analysis` columns/option sets were authored by this task (owner-created contract consumed only).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec §12.2 / FR-15 / §13.4. Depends on the owner-created regarding field-set consumed in task 012. Subgrid
+    open/launch wiring lands in task 052 (`openSpaarkeAi` ribbon launcher). Completion summary appended here when done.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

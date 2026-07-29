@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Session↔Analysis binding FK + standardize on ChatEndpoints</title>
+    <phase>2 Session</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF session persistence (`Sprk.Bff.Api`) + Dataverse write path; tags bff/dataverse/session; core data-spine seam every Phase 2/3 task depends on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded modification of a known repository/manager path against a verified schema contract; no architectural authoring — Sonnet @ high suffices.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial within Phase 2 — shares session code (`ChatSessionManager`/`ChatDataverseRepository`) with 021/022/023/025 and collides with `Services/Ai/` (redesign-r2 sole owner); `/conflict-check` before the BFF PR.</parallel-reason>
+    <deps>010,011</deps>
+    <tags>bff, dataverse, session</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Bind chat sessions to the owner-created `sprk_aichatsummary → sprk_analysis` lookup FK: write the analysis FK
+    inside `ChatDataverseRepository.CreateSessionAsync` alongside the existing `sprk_sessionid` grouping key, so an
+    Analysis-owned session carries its Analysis reference and "one Analysis → many sessions" is queryable by
+    `sprk_sessionid` + the analysis FK. Standardize on the `ChatEndpoints` (Redis→Cosmos→Dataverse-anchor) path.
+    MUST NOT write the dead `sprk_analysischatmessage` entity.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the BFF chat/session persistence tiers (Redis→Cosmos→Dataverse anchor),
+    `ChatDataverseRepository` sessionId grouping, and the ADR-013 `Services/Ai/PublicContracts/` facade. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    `ChatDataverseRepository.CreateSessionAsync` writes the `sprk_analysis` FK on the `sprk_aichatsummary` record
+    for Analysis-owned sessions; sessions for a given Analysis are retrievable by the analysis FK (grouped by
+    `sprk_sessionid`); the dead `sprk_analysischatmessage` entity is never written; build + tests green; publish-size
+    reported ≤60 MB with no new HIGH CVE.
+  </goal>
+
+  <context>
+    <background>
+      Verified session facts: GUIDs are minted 100% server-side at `ChatSessionManager.cs:108` (`Guid.NewGuid`);
+      the create endpoint is `ChatEndpoints.cs:345`; per-turn history writes to `sprk_chathistory` at
+      `ChatEndpoints.cs:956` keyed on `session.HostContext.EntityType="sprk_analysisoutput"`+`EntityId`;
+      `sprk_sessionid` is the grouping key (`ChatDataverseRepository.cs:37-45,128-137`). The owner has pre-created the
+      `sprk_aichatsummary → sprk_analysis` lookup (verified present by task 010). Storage model is ADR-040 Path A:
+      Cosmos = durable transcript store-of-record, Dataverse `sprk_analysis`/`sprk_aichatsummary` = business anchor.
+      This task adds the last-mile FK write; it does NOT introduce a new entity or a second session store.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs (lines 37-45, 128-137 — sessionId grouping)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (line 108 — server-minted GUID)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Endpoints/ChatEndpoints.cs (lines 345 create, 956 per-turn history)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (session repository tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Owner schema preflight — `sprk_aichatsummary.sprk_analysis` FK confirmed present.</dependency>
+      <dependency task="011" status="pending">Client `sprk_analysis` TypeScript type (analysisId shape consumed downstream).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">SCOPE: session persistence writes. Cosmos remains the transcript store-of-record; the Dataverse `sprk_aichatsummary`/`sprk_analysis` write is the business anchor only — do NOT create a second transcript store or move per-message durability into Dataverse (Path A project exception).</constraint>
+    <constraint source="ADR-013">SCOPE: this BFF write path. Reach any AI capability through `Services/Ai/PublicContracts/`; MUST NOT inject AI-internal types into the session repository or fork `Services/Ai/` (sole-owned by redesign-r2).</constraint>
+    <constraint source="project">SCOPE: the Dataverse write in `CreateSessionAsync`. MUST NOT revive or write the dead `sprk_analysischatmessage` entity (empty shell — §11 reuse violation); bind ONLY to `sprk_aichatsummary` + the new `sprk_analysis` FK.</constraint>
+    <constraint source="project">SCOPE: session path selection. Standardize on `ChatEndpoints` (Redis→Cosmos); MUST NOT extend the deprecated `AnalysisEndpoints` in-memory session model.</constraint>
+    <constraint source="ADR-029">SCOPE: this BFF-touching task. State the Placement Justification (modification of existing repository path), run `dotnet publish -c Release`, report compressed size + diff vs ~49.63 MB baseline (≤60 MB), and confirm no new HIGH CVE from `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="ADR-028">SCOPE: any endpoint touched. Session create/read stays behind Spaarke Auth v2; an unauthenticated caller MUST get 401, not an anonymous session.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF chat/session persistence + Dataverse write path</topic>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/ai/public-contracts-facade.md</file>
+      <file>.claude/patterns/dataverse/entity-operations.md</file>
+    </files>
+    <patterns>
+      <pattern name="sessionId grouping write" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs:37-45,128-137">
+        Follow the existing `sprk_sessionid` grouping-key write; add the `sprk_analysis` lookup on the same `sprk_aichatsummary` upsert — do not add a new repository or a parallel write.
+      </pattern>
+      <pattern name="PublicContracts facade" location=".claude/patterns/ai/public-contracts-facade.md">
+        Any AI capability the repository needs is reached through `Services/Ai/PublicContracts/`; no AI-internal type injection.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason; load knowledge files; confirm task 010 verified the `sprk_aichatsummary.sprk_analysis` FK present.</step>
+    <step order="1">Read `ChatDataverseRepository.cs` (37-45, 128-137) + `ChatSessionManager.cs:108` + `ChatEndpoints.cs:345,956` to map the current create + sessionId-grouped write.</step>
+    <step order="2">Extend `CreateSessionAsync` to set the `sprk_analysis` lookup on the `sprk_aichatsummary` record when the session is Analysis-owned (analysisId supplied via HostContext), alongside the existing `sprk_sessionid`.</step>
+    <step order="3">Add/confirm a read path that returns sessions for a given Analysis (filter by the analysis FK, grouped by `sprk_sessionid`) — "one Analysis → many sessions".</step>
+    <step order="4">Verify no code path writes `sprk_analysischatmessage`; confirm the write stays on the `ChatEndpoints` (Redis→Cosmos→anchor) path and does not touch `AnalysisEndpoints`.</step>
+    <step order="5">Add/update unit tests: FK is written for an Analysis-owned session; query-by-analysis-FK returns the grouped sessions; loose (no analysisId) session writes no FK; dead entity never written.</step>
+    <step order="6">`/conflict-check` vs `spaarke-ai-architecture-redesign-r2`; then `dotnet build` + `dotnet test`; run `dotnet publish -c Release` and record compressed size + diff + CVE scan in task notes.</step>
+    <step order="7">Update TASK-INDEX.md: set 020 status to ✅.</step>
+    <step order="8">Document any deviation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If binding the FK appears to require modifying `Services/Ai/` internals (not just composing `PublicContracts/` seams + the Dataverse write), STOP and escalate per CLAUDE.md §6.5 — `Services/Ai/` is sole-owned by redesign-r2 (no fork).</trigger>
+    <trigger>If task 010 finds the `sprk_aichatsummary.sprk_analysis` FK NOT present, STOP — this task is gated on the owner schema and cannot proceed.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test BFF; `dotnet publish -c Release` for the size report; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (session binding tests)</output>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/ (publish-size + CVE report)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an Analysis-owned session (analysisId in HostContext), when `CreateSessionAsync` runs, then the `sprk_aichatsummary` record carries the `sprk_analysis` FK plus its `sprk_sessionid`.</criterion>
+    <criterion testable="true">Given an Analysis with multiple sessions, when queried by the analysis FK, then all its sessions are returned grouped by `sprk_sessionid` ("one Analysis → many sessions").</criterion>
+    <criterion testable="true">Negative: no code path writes the dead `sprk_analysischatmessage` entity (grep-clean + test asserts it is never written).</criterion>
+    <criterion testable="true">Negative: a loose session (no analysisId) writes NO analysis FK; the record persists with only `sprk_sessionid`.</criterion>
+    <criterion testable="true">Negative: an unauthenticated call to the session create/read endpoint returns 401, not an anonymous session.</criterion>
+    <criterion testable="true">Session writes stay on the `ChatEndpoints` path; `AnalysisEndpoints` in-memory session model is not extended.</criterion>
+    <criterion testable="true">BFF publish-size ≤60 MB compressed (diff vs ~49.63 MB reported); no new HIGH CVE; all unit tests pass; build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-05. This is the data-spine seam; keep the FK write minimal and on the live `sprk_aichatsummary` path.
+    Tasks 021 (fork) and 031 (reopen) consume "query sessions by analysis FK". `/conflict-check` before the BFF PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL: code-review + adr-check).</protocol>
+  </execution>
+</task>

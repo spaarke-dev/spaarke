@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Enforce record-driven opens via openSpaarkeAi, not surfaceLaunchRegistry</title>
+    <phase>5 Entry model + record integration</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>ADR-039 compliance verification over the entry surface authored in 050/052 — grep + code-review confirmation, no new implementation surface; not a build/architecture change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded verification/enforcement task (grep + review against a single ADR rule); no design judgment required beyond the documented UQ-4 = NO decision.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verifies the combined output of 050 + 052 (the entry routing + ribbon launcher); must run after both land.</parallel-reason>
+    <deps>052</deps>
+    <tags>frontend, spaarkeai, adr-039</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Enforce ADR-039 / §13.3 (FR-17): every record-driven open (ribbon + subgrid, cases 2b/2d) routes through the
+    `openSpaarkeAi` deep-link, NOT `surfaceLaunchRegistry` — the registry is the reactive in-chat path (agent offers a
+    surface), explicitly distinct from record-driven opens. Confirm by code review + grep that no record-driven path
+    touches `surfaceLaunchRegistry`. Per UQ-4 = NO (owner 2026-07-28), the in-chat Assistant *offer* to open Agreement
+    Analysis is OUT OF SCOPE — do NOT add a `workspace-tab` registry entry.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the Assistant surface-launch mechanism (ADR-039), the distinction between the
+    record-driven `openSpaarkeAi` deep-link path and the reactive in-chat `surfaceLaunchRegistry` path. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Verified evidence (code review + grep) that all record-driven opens (Matter/Project ribbon, record subgrid, entry cases
+    2b/2d) route via `openSpaarkeAi`, and NO record-driven path routes through `surfaceLaunchRegistry`; no new `workspace-tab`
+    registry entry is added (UQ-4 = NO); findings recorded in project notes.
+  </goal>
+
+  <context>
+    <background>
+      §13.3 / ADR-039: record-driven opens stay in CODE via `openSpaarkeAi`; `surfaceLaunchRegistry` is the reactive in-chat
+      path (the Assistant offering a surface) and is explicitly distinct. UQ-4 (RESOLVED 2026-07-28) = NO for this project:
+      the in-chat *offer* to open Agreement Analysis is a deferred later enhancement (deferring avoids chip mis-fire risk
+      while the deterministic entry model is established). This task is the enforcement/verification gate over the entry
+      surface authored in tasks 050 (host routing) and 052 (ribbon launcher + `openSpaarkeAi` param extension).
+    </background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts (record-driven opens — verify path)</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/ribbon/AnalysisRecordLaunch.ts (ribbon — verify path)</file>
+      <file role="canonical-reference">docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md (record-driven vs surfaceLaunchRegistry boundary)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="pending">The extended `openSpaarkeAi` + Matter/Project ribbon launcher — the record-driven paths this task verifies are registry-free.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">SCOPE: record-driven opens only — MUST route via `openSpaarkeAi` deep-link; MUST NOT route through `surfaceLaunchRegistry` (the reactive in-chat path).</constraint>
+    <constraint source="project">SCOPE: UQ-4 = NO — MUST NOT add a `workspace-tab` `surfaceLaunchRegistry` entry for Agreement Analysis; the in-chat Assistant offer is deferred/out-of-scope for this project.</constraint>
+    <constraint source="project">SCOPE: this is a verification/enforcement task — it MUST NOT add new open surfaces; if it finds a record-driven path on `surfaceLaunchRegistry`, it repoints that path to `openSpaarkeAi` (a fix), not a registry addition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+    <patterns>
+      <pattern name="record-driven vs in-chat launch boundary" location="docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md">
+        Record-driven opens = code deep-link via `openSpaarkeAi`; `surfaceLaunchRegistry` = reactive in-chat offer. Keep the two paths separate; a record ribbon/subgrid never calls the registry.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare STANDARD rigor; load ADR-039 + the surface-launch mechanism doc.</step>
+    <step order="1">Grep the SpaarkeAi record-driven surfaces (ribbon script, subgrid open, entry-matrix 2b/2d routing) for `surfaceLaunchRegistry` references.</step>
+    <step order="2">Confirm each record-driven open resolves via `openSpaarkeAi`; if any record-driven path touches `surfaceLaunchRegistry`, repoint it to `openSpaarkeAi`.</step>
+    <step order="3">Confirm NO new `workspace-tab` registry entry was added for Agreement Analysis (UQ-4 = NO).</step>
+    <step order="4">Record the grep evidence + code-review confirmation in projects/ai-advanced-capabilities-analysis-hub-r1/notes/.</step>
+    <step order="5">Update TASK-INDEX.md: set task 053 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the design surfaces a genuine need for the in-chat Assistant to *offer* "open Agreement Analysis" (i.e. a `workspace-tab` registry entry), STOP and escalate per CLAUDE.md §6.5 — UQ-4 resolved this as NO/deferred; do not add a registry entry silently.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the SpaarkeAi code page if a repoint fix is applied (`npm run build:prod`).</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/ai-advanced-capabilities-analysis-hub-r1/notes/adr-039-record-open-enforcement.md (grep evidence + review confirmation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep + code review confirm no record-driven path (ribbon, subgrid, entry cases 2b/2d) routes through `surfaceLaunchRegistry`.</criterion>
+    <criterion testable="true">Every record-driven open resolves via the `openSpaarkeAi` deep-link.</criterion>
+    <criterion testable="true">Negative: no new `workspace-tab` `surfaceLaunchRegistry` entry for Agreement Analysis was added (UQ-4 = NO).</criterion>
+    <criterion testable="true">The grep evidence + review confirmation are recorded in project notes; build is green if any repoint fix was applied.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec FR-17 / §13.3 / UQ-4. This is the ADR-039 enforcement gate over 050 + 052. A `workspace-tab` registry entry is
+    added ONLY if the Assistant should also *offer* "open Agreement Analysis" in chat — explicitly out of scope (UQ-4 = NO).
+    Completion summary appended here when done.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute (STANDARD rigor — Step 9.5 gates skipped by default).</protocol>
+  </execution>
+</task>

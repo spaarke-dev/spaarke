@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="ai-advanced-capabilities-analysis-hub-r1">
+  <metadata>
+    <title>Consume `sprk_worktype` + regarding field-set via RegardingResolver (single-valued)</title>
+    <phase>1 Data spine</phase>
+    <gate>blocked-until-010-011</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.ts`/`.tsx` and enforces a data-integrity invariant (single populated regarding) consumed by hub grid, wizard, subgrid, and record integration; wrong resolution corrupts the regarding contract across the platform.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Applying an existing RegardingResolver field-set pattern to a new record with a closed validation rule; well-specified, no architectural authoring — Sonnet-5 @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010,011</deps>
+    <tags>frontend, dataverse, regarding</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the Analysis record to resolve its parent (Matter / Project / Document) from the owner-created regarding
+    field-set (`sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardingdocument`) using the existing
+    RegardingResolver field-set pattern (per-type typed lookups, ADR-024), and read `sprk_worktype` to drive surface/tool
+    scoping. Enforce the single-valued invariant: exactly one populated regarding field per Analysis — zero or multiple
+    populated fields is rejected/flagged.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the RegardingResolver field-set pattern (per-type typed lookups) and ADR-024
+    regarding/association modeling. Follow ADR-024 strictly.
+  </role>
+
+  <goal>
+    Given a `sprk_analysis` record, code resolves the single populated regarding lookup to its parent
+    (Matter/Project/Document) via the RegardingResolver field-set, reads `sprk_worktype`, and rejects/flags any record
+    with zero or multiple populated regarding fields; unit tests cover the one-populated, zero-populated, and
+    multiple-populated cases.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-03 / PLAN 1.2, the Analysis platform reuses the RegardingResolver field-set (the same per-type typed
+      lookup pattern used elsewhere) rather than a polymorphic customer/regarding column. ADR-024 + NFR-05 require
+      exactly one populated regarding field per Analysis (single-valued, clean 1:N record→analysis). This consumes the
+      client `sprk_analysis` type (011) and the owner schema verified in 010. `sprk_documentid` (SPE subject-pointer) is
+      a SEPARATE role from `sprk_regardingdocument` — do not treat them as the same field.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/ (Analysis regarding consumption — resolver call + single-valued validation)</file>
+      <file role="canonical-reference">.claude/adr/ADR-024-regarding-association-modeling.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Regarding field-set + `sprk_worktype` verified present in Dataverse.</dependency>
+      <dependency task="011" status="pending">Client `sprk_analysis` type (regarding lookups + work-type union) exists.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">SCOPE = the Analysis regarding field-set (`sprk_regardingmatter`/`project`/`document`). Resolution MUST use per-type typed lookups (the RegardingResolver field-set pattern); MUST NOT populate or resolve multiple entity lookups for one Analysis.</constraint>
+    <constraint source="project">SCOPE = single-valued invariant. Exactly ONE regarding field populated → resolve to that parent. ZERO populated → rejected/flagged (unresolvable). MORE THAN ONE populated → rejected/flagged (invalid). Do not silently pick the first.</constraint>
+    <constraint source="project">SCOPE = `sprk_documentid` (SPE subject-pointer) is NOT a regarding field and is excluded from the single-valued count; only the three `sprk_regarding*` lookups participate in the invariant.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>regarding field-set resolution</topic>
+    <files>
+      <file>.claude/adr/ADR-024-regarding-association-modeling.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/data-model/</file>
+    </files>
+    <patterns>
+      <pattern name="RegardingResolver field-set" location="src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts">
+        Per-type typed lookups resolved to a single parent; mirror the field-set enumeration + single-populated selection here for `sprk_analysis`.
+      </pattern>
+      <pattern name="polymorphic resolver service" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">
+        Shared resolution helper; reuse rather than re-implement lookup-target resolution.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare FULL rigor + reason. Study ResolverWriteHandler + PolymorphicResolverService + ADR-024.</step>
+    <step order="1">Implement resolution: enumerate the three `sprk_regarding*` lookups on a `sprk_analysis`, count populated, and resolve the single one to its parent (Matter/Project/Document).</step>
+    <step order="2">Implement the single-valued validation: 0 populated → flagged unresolvable; &gt;1 populated → flagged invalid; exactly 1 → resolved. Surface the flag to callers (return type / error).</step>
+    <step order="3">Read `sprk_worktype` alongside resolution so downstream (041 tool scoping) can consume it.</step>
+    <step order="4">Add unit tests: one-populated (resolves), zero-populated (rejected), multiple-populated (rejected). Exclude `sprk_documentid` from the count.</step>
+    <step order="5">Build + run tests; confirm green.</step>
+    <step order="6">Update TASK-INDEX.md: set task 012 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/ai-advanced-capabilities-analysis-hub-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the owner-created regarding field-set cannot express single-valued resolution cleanly (e.g. a fourth regarding target or a polymorphic column appears that ADR-024's field-set pattern does not cover), STOP and escalate per CLAUDE.md §6.5 rather than inventing a resolution rule.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Regarding parent displays for a single-populated Analysis (theme smoke)">
+      <steps>
+        <step>Render a consumer surface for an Analysis with exactly one populated regarding lookup (e.g. Matter).</step>
+        <step>Toggle light → dark theme.</step>
+      </steps>
+      <expected>The resolved parent (Matter/Project/Document) displays correctly; an Analysis with 0 or &gt;1 populated regarding fields shows the rejected/flagged affordance (not a silent parent). Both states render correctly in dark mode (ADR-021: Fluent v9 tokens, no hard-coded colors).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + run unit tests for the resolver consumption.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ (Analysis regarding resolution + single-valued validation)</output>
+    <output type="test">src/solutions/SpaarkeAi/src/ (unit tests: one/zero/multiple populated regarding)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `sprk_analysis` with exactly one populated regarding lookup, when resolution runs, then RegardingResolver resolves the correct parent (Matter/Project/Document) and `sprk_worktype` is read.</criterion>
+    <criterion testable="true">Negative: given a `sprk_analysis` with ZERO populated regarding fields, resolution rejects/flags it as unresolvable (no fabricated parent).</criterion>
+    <criterion testable="true">Negative: given a `sprk_analysis` with MORE THAN ONE populated regarding field, resolution rejects/flags it as invalid (does not silently pick one).</criterion>
+    <criterion testable="true">`sprk_documentid` being populated does NOT count toward the single-valued regarding invariant.</criterion>
+    <criterion testable="true">Unit tests for the one/zero/multiple cases pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec FR-03 / NFR-05 / ADR-024. Feeds 041 (`activeWorkType` → `getToolsForSurface`) and 051 (subgrid where regarding = record).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Follow task-execute incl. Step 9.5 gates (FULL rigor).</protocol>
+  </execution>
+</task>
