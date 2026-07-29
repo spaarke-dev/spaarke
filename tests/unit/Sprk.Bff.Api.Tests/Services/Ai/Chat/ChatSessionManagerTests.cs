@@ -587,6 +587,120 @@ public class ChatSessionManagerTests
     // Private helpers
     // =========================================================================
 
+    // =========================================================================
+    // PromoteSessionToAnalysisAsync — explicit promotion (task 023, spec FR-07)
+    // Binds an EXISTING loose session to a NEW sprk_analysis in place — a bind, not a mint.
+    // =========================================================================
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_BindsExistingRow_AndUpdatesHostContextInPlace()
+    {
+        // Arrange — a loose session (no HostContext) is currently cached (Redis hit path).
+        var looseSession = CreateTestSession("session-promote");
+        var analysisId = Guid.NewGuid();
+
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-promote", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(looseSession);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-promote", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        SetupCacheSetSuccess();
+
+        _repoMock
+            .Setup(r => r.BindSessionToAnalysisAsync(TenantId, "session-promote", analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-promote", analysisId, "My Analysis");
+
+        // Assert — the SAME session id, now Analysis-owned via the task-020 HostContext convention.
+        result.Should().NotBeNull();
+        result!.SessionId.Should().Be("session-promote");
+        result.HostContext.Should().NotBeNull();
+        result.HostContext!.EntityType.Should().Be("sprk_analysisoutput");
+        result.HostContext.EntityId.Should().Be(analysisId.ToString());
+        result.HostContext.EntityName.Should().Be("My Analysis");
+
+        // The FK bind targeted the EXISTING row — no CreateSessionAsync (no new session/row minted).
+        _repoMock.Verify(
+            r => r.BindSessionToAnalysisAsync(TenantId, "session-promote", analysisId, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _repoMock.Verify(
+            r => r.CreateSessionAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "promotion must bind the existing session, never mint a new one");
+
+        // The updated session was written through to the cache (Redis re-warm).
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            TenantId, CacheResource, "session-promote", CacheVersion,
+            It.IsAny<ChatSession>(), It.IsAny<TimeSpan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_WhenSessionNotFound_ReturnsNullAndDoesNotBind()
+    {
+        // Arrange — Redis miss + no Dataverse cold-tier row (session genuinely gone).
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+        _repoMock
+            .Setup(r => r.GetSessionAsync(TenantId, "session-gone", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        // Act
+        var result = await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-gone", Guid.NewGuid(), "Orphan Attempt");
+
+        // Assert
+        result.Should().BeNull();
+        _repoMock.Verify(
+            r => r.BindSessionToAnalysisAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_WhenFkBindThrows_PropagatesAndDoesNotUpdateCache()
+    {
+        // Arrange — the Dataverse FK write fails. UNLIKE CreateSessionAsync's tolerant posture, the
+        // durable FK is promotion's entire deliverable — the failure MUST propagate so the caller
+        // (AnalysisEndpoints.PromoteSession) can compensate by deleting the orphaned Analysis, rather
+        // than silently leaving a "promoted" session with no durable, queryable bind.
+        var looseSession = CreateTestSession("session-bind-fails");
+        var analysisId = Guid.NewGuid();
+
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-bind-fails", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(looseSession);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-bind-fails", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        _repoMock
+            .Setup(r => r.BindSessionToAnalysisAsync(TenantId, "session-bind-fails", analysisId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse outage"));
+
+        // Act
+        var act = async () => await _sut.PromoteSessionToAnalysisAsync(TenantId, "session-bind-fails", analysisId, "Failed Promote");
+
+        // Assert — the exception propagates; no cache write (no partial-promotion state left behind).
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        _cacheMock.Verify(c => c.SetSlidingAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+            It.IsAny<ChatSession>(), It.IsAny<TimeSpan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     private static ChatSession CreateTestSession(string sessionId)
         => new ChatSession(
             SessionId: sessionId,

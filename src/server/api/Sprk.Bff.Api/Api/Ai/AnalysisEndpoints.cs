@@ -68,6 +68,25 @@ public static class AnalysisEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
+        // POST /api/ai/analysis/promote - Explicit promotion (ai-advanced-capabilities-analysis-hub-r1
+        // task 023 / spec FR-07 / two-tier session model). Lighter sibling of /fork: binds an
+        // EXISTING loose session to a NEW sprk_analysis via the task-020 FK — NO new session mint, NO
+        // archive. A casual/ad-hoc chat is NEVER auto-promoted; this is the only path that associates
+        // a session with an sprk_analysis after the fact.
+        group.MapPost("/promote", PromoteSession)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-batch")
+            .WithName("PromoteSession")
+            .WithSummary("Promote a loose chat session into a new, named Analysis")
+            .WithDescription("Binds an EXISTING loose (non-Analysis) chat session to a NEW sprk_analysis record via the task-020 sprk_aichatsummary.sprk_analysis FK. This is a BIND on the session's existing Dataverse row — no new session is minted and no prior session is archived (contrast with /fork, task 021). Returns { analysisId, sessionId }.")
+            .Produces<AnalysisPromoteResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
         // POST /api/ai/analysis/execute - Execute new analysis with SSE streaming
         group.MapPost("/execute", ExecuteAnalysis)
             .AddAnalysisExecuteAuthorizationFilter()
@@ -1319,6 +1338,168 @@ public static class AnalysisEndpoints
         return Results.Created(
             $"/api/ai/analysis/{analysisId}",
             new AnalysisForkResponse(analysisId, newSession.SessionId, request.PriorSessionId));
+    }
+
+    // =========================================================================
+    // Explicit promotion (task 023 / spec FR-07 / two-tier session model)
+    // =========================================================================
+
+    /// <summary>
+    /// Explicit promotion. <c>POST /api/ai/analysis/promote</c>.
+    ///
+    /// <para>
+    /// Lighter sibling of <see cref="ForkAnalysis"/>: BIND-only, no mint, no archive. Composes the
+    /// SAME two seams the fork endpoint uses (<see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>
+    /// + the task-020 FK write, here via <see cref="ChatSessionManager.PromoteSessionToAnalysisAsync"/>),
+    /// but never creates a second session and never archives the original — the loose session simply
+    /// BECOMES Analysis-owned in place, keeping its session id.
+    /// </para>
+    /// <list type="number">
+    ///   <item><b>Fetch + verify</b> — <see cref="ChatSessionManager.GetSessionAsync"/> confirms the
+    ///     loose session exists and is not already Analysis-owned, before any write.</item>
+    ///   <item><b>Create Analysis</b> — <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>,
+    ///     document-anchored (the request's <c>documentId</c> or the session's own).</item>
+    ///   <item><b>Bind in place</b> — <see cref="ChatSessionManager.PromoteSessionToAnalysisAsync"/>
+    ///     writes the <c>sprk_analysis</c> FK onto the EXISTING <c>sprk_aichatsummary</c> row and
+    ///     updates the session's <see cref="ChatHostContext"/>. If the bind throws or the session
+    ///     vanished, the Analysis is compensated (deleted) — no orphan, same discipline as the fork.</item>
+    /// </list>
+    /// </summary>
+    private static async Task<IResult> PromoteSession(
+        AnalysisPromoteRequest request,
+        IAnalysisDataverseService analysisService,
+        ChatSessionManager sessionManager,
+        IGenericEntityService entityService,
+        HttpContext httpContext,
+        ILogger<AnalysisOrchestrationService> logger,
+        CancellationToken cancellationToken)
+    {
+        // ---- Validate ----
+        if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A sessionId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "A name is required to promote a session to an Analysis.");
+        }
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var correlationId = httpContext.TraceIdentifier;
+
+        // ---- Step 1: fetch + verify the loose session (read-only — NO mutation yet) ----
+        var session = await sessionManager.GetSessionAsync(tenantId, request.SessionId, cancellationToken);
+        if (session is null)
+        {
+            // Nothing has been written yet — a missing/expired session cannot orphan anything.
+            return Results.NotFound(new { error = "Session not found", correlationId });
+        }
+
+        // Guard: a session already bound to an Analysis MUST NOT be promoted again — promotion is a
+        // ONE-TIME bind (re-promoting would silently re-parent the session away from its first
+        // Analysis, orphaning that FK history). Re-run against the SAME convention CreateSessionAsync
+        // checks at create time (task 020).
+        if (session.HostContext?.EntityType == AnalysisHostContextEntityType)
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "This session is already bound to an Analysis and cannot be promoted again.");
+        }
+
+        // Promotion is document-anchored (mirrors CreateAnalysis/ForkAnalysis — sprk_analysis
+        // requires a document). Prefer the request's explicit documentId; fall back to the session's
+        // own DocumentId (set at session-create time from the chat's attached document, if any).
+        Guid documentId;
+        if (request.DocumentId is { } requestDocId && requestDocId != Guid.Empty)
+        {
+            documentId = requestDocId;
+        }
+        else if (!string.IsNullOrEmpty(session.DocumentId) &&
+                 Guid.TryParse(session.DocumentId, out var sessionDocId) &&
+                 sessionDocId != Guid.Empty)
+        {
+            documentId = sessionDocId;
+        }
+        else
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "This session has no associated document; promoting to an Analysis requires a documentId.");
+        }
+
+        // ---- Step 2: create the new Analysis anchor ----
+        Guid analysisId;
+        try
+        {
+            analysisId = await analysisService.CreateAnalysisAsync(
+                documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Promote: failed to create Analysis for session {SessionId} document {DocumentId} (corr={CorrelationId})",
+                request.SessionId, documentId, correlationId);
+            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "Failed to create the analysis record.");
+        }
+
+        // ---- Step 3: bind the EXISTING session to the new Analysis (no new session minted) ----
+        ChatSession? promoted;
+        try
+        {
+            promoted = await sessionManager.PromoteSessionToAnalysisAsync(
+                tenantId, request.SessionId, analysisId, request.Name, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Promote: bind failed after Analysis {AnalysisId} create for session {SessionId} — compensating by deleting the Analysis (corr={CorrelationId})",
+                analysisId, request.SessionId, correlationId);
+            await CompensatePromoteAnalysisDeleteAsync(entityService, analysisId, correlationId, logger);
+            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "Failed to bind the session to the new analysis.");
+        }
+
+        if (promoted is null)
+        {
+            // The session disappeared between the read (Step 1) and the bind (Step 3) — e.g. a Redis
+            // eviction racing the request. Compensate the Analysis so no dangling anchor remains
+            // (same no-orphan discipline as ForkAnalysis's mint-failure compensation).
+            logger.LogWarning(
+                "Promote: session {SessionId} disappeared before bind — compensating by deleting Analysis {AnalysisId} (corr={CorrelationId})",
+                request.SessionId, analysisId, correlationId);
+            await CompensatePromoteAnalysisDeleteAsync(entityService, analysisId, correlationId, logger);
+            return Results.NotFound(new { error = "Session not found", correlationId });
+        }
+
+        logger.LogInformation(
+            "Promote complete: analysis={AnalysisId} session={SessionId} (corr={CorrelationId})",
+            analysisId, request.SessionId, correlationId);
+
+        return Results.Created(
+            $"/api/ai/analysis/{analysisId}",
+            new AnalysisPromoteResponse(analysisId, request.SessionId));
+    }
+
+    /// <summary>Compensating delete for the promote endpoint — mirrors the fork endpoint's rollback.</summary>
+    private static async Task CompensatePromoteAnalysisDeleteAsync(
+        IGenericEntityService entityService, Guid analysisId, string correlationId, ILogger logger)
+    {
+        try
+        {
+            await entityService.DeleteAsync(AnalysisEntityLogicalName, analysisId, CancellationToken.None);
+        }
+        catch (Exception compensationEx)
+        {
+            logger.LogError(compensationEx,
+                "Promote: COMPENSATION FAILED — Analysis {AnalysisId} may be orphaned; manual cleanup required (corr={CorrelationId})",
+                analysisId, correlationId);
+        }
     }
 
     /// <summary>Builds a canonical ProblemDetails result for the fork endpoint.</summary>

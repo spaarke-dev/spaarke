@@ -344,6 +344,87 @@ public class ChatDataverseRepositoryTests
             Times.Once);
     }
 
+    // =========================================================================
+    // BindSessionToAnalysisAsync — explicit promotion (task 023, spec FR-07)
+    // Binds an EXISTING sprk_aichatsummary row to a NEW sprk_analysis — a bind on the CURRENT
+    // row, never a new row. Mirrors ArchiveSessionAsync's tenant-scoped query-then-update shape.
+    // =========================================================================
+
+    [Fact]
+    public async Task BindSessionToAnalysisAsync_WhenSummaryRecordExists_SetsAnalysisFkTenantScoped()
+    {
+        // Arrange — a persisted, previously loose session summary row for this tenant.
+        var sessionId = Guid.NewGuid().ToString("N");
+        var analysisId = Guid.NewGuid();
+        var recordId = Guid.NewGuid();
+        var summaryRow = new Entity("sprk_aichatsummary", recordId);
+
+        QueryExpression? capturedQuery = null;
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => capturedQuery = q)
+            .ReturnsAsync(new EntityCollection(new List<Entity> { summaryRow }));
+
+        string? updatedEntity = null;
+        Guid updatedId = Guid.Empty;
+        Dictionary<string, object>? updatedFields = null;
+        _entityServiceMock
+            .Setup(s => s.UpdateAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((name, id, fields, _) =>
+            {
+                updatedEntity = name;
+                updatedId = id;
+                updatedFields = fields;
+            })
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var bound = await _sut.BindSessionToAnalysisAsync(TenantId, sessionId, analysisId);
+
+        // Assert — tenant-scoped resolve query (ADR-014/ADR-028), same convention as ArchiveSessionAsync.
+        bound.Should().BeTrue();
+        capturedQuery.Should().NotBeNull();
+        capturedQuery!.EntityName.Should().Be("sprk_aichatsummary");
+        var sessionCondition = capturedQuery.Criteria.Conditions.Single(c => c.AttributeName == "sprk_sessionid");
+        sessionCondition.Values.Should().ContainSingle().Which.Should().Be(sessionId);
+        var tenantCondition = capturedQuery.Criteria.Conditions.Single(c => c.AttributeName == "sprk_tenantid");
+        tenantCondition.Values.Should().ContainSingle().Which.Should().Be(TenantId);
+
+        // Assert — the sprk_analysis FK is set on the resolved EXISTING row (no new row created).
+        updatedEntity.Should().Be("sprk_aichatsummary");
+        updatedId.Should().Be(recordId);
+        updatedFields.Should().NotBeNull();
+        updatedFields!.Should().ContainKey("sprk_analysis");
+        var fk = (EntityReference)updatedFields!["sprk_analysis"];
+        fk.LogicalName.Should().Be("sprk_analysis");
+        fk.Id.Should().Be(analysisId);
+
+        _entityServiceMock.Verify(
+            s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "binding an existing session to an analysis must never create a NEW sprk_aichatsummary row");
+    }
+
+    [Fact]
+    public async Task BindSessionToAnalysisAsync_WhenNoSummaryRow_ReturnsFalseAndDoesNotThrow()
+    {
+        // Arrange — no cold-tier anchor row (mirrors ArchiveSessionAsync's tolerant behavior).
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>()));
+
+        // Act
+        var bound = await _sut.BindSessionToAnalysisAsync(TenantId, Guid.NewGuid().ToString("N"), Guid.NewGuid());
+
+        // Assert
+        bound.Should().BeFalse();
+        _entityServiceMock.Verify(
+            s => s.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(),
+                It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task ArchiveSessionAsync_WhenNoSummaryRow_DoesNotThrowAndDoesNotUpdate()
     {

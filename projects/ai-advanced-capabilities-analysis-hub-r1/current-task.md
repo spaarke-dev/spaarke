@@ -3,8 +3,10 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 023 (two-tier session model — loose vs Analysis-owned + promotion), serial
-**Next action**: 023 → 024 → 025 close session phase, then W4 (030 ∥ 040 ∥ 051 fan-out). Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅ 022 ✅. Publish 47.51 MB. AIPL-054 archive gap closed (Option B durable flip).
+**Active task**: W3 — 024 (add-file-to-running-chat prompt), serial (then 025)
+**Next action**: 024 → 025 close session phase, then W4 (030 ∥ 040 ∥ 051 fan-out). Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅ 022 ✅ 023 ✅. Publish 47.52 MB. Promote path live (POST /api/ai/analysis/promote).
+
+> W3 tail (024, 025) stays SERIAL — both touch the SpaarkeAi conversation/session client surface (ConversationPane hotspot); real fan-out resumes at W4.
 
 ## Pipeline progress (2026-07-28)
 

@@ -3,8 +3,8 @@
   <metadata>
     <title>Two-tier session model — loose vs Analysis-owned + explicit promotion</title>
     <phase>2 Session</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Spans BFF session model + SpaarkeAi `ConversationPane`; changes session-lifecycle semantics (auto-create vs explicit promotion); tags bff/frontend/session.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -131,6 +131,38 @@
 
   <notes>
     spec.md FR-07 / PLAN §2.4. Promotion is the loose→owned bridge; reuse tasks 020/021 seams — no new store. `/conflict-check` before the BFF PR.
+
+    COMPLETED 2026-07-29. Full details: projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-023-two-tier-session-model.md
+
+    Summary: added `IChatDataverseRepository.BindSessionToAnalysisAsync` (FK bind on an EXISTING
+    sprk_aichatsummary row) + `ChatSessionManager.PromoteSessionToAnalysisAsync` (re-fetch → bind →
+    update HostContext in place, no new session minted) + `POST /api/ai/analysis/promote`
+    (AnalysisEndpoints.cs — lighter sibling of /fork: bind-only, no mint, no archive; compensates by
+    deleting the Analysis if the bind fails or the session vanished). Client: HistoryOverlay.tsx
+    (HistoryMenu) gained a self-contained "Promote to Analysis…" affordance (icon button + Fluent v9
+    Dialog) — zero ConversationPane.tsx changes, per the merge-order note.
+
+    Course-correction during implementation: the first draft swallowed a BindSessionToAnalysisAsync
+    failure (mirroring CreateSessionAsync's tolerant posture); the compensation contract test caught
+    this (expected 500, got 201) and the fix now propagates the bind failure so the endpoint
+    compensates — see notes file "Design note" section.
+
+    Tests: 12 new/updated (2 ChatDataverseRepositoryTests, 3 ChatSessionManagerTests, 7
+    AnalysisPromoteEndpointContractTests incl. the negative acceptance criterion), all green.
+    dotnet build: 0 errors. Full unit suite: 9027 passed / 8 pre-existing-and-unrelated failures
+    (verified via git stash -u against the pre-task baseline). npm run typecheck: 0 new surface
+    errors. Publish size 47.52 MB (+0.01 MB vs baseline). No new CVE (zero package changes).
+    /conflict-check: no open PR overlap on any touched file.
+
+    Scope decision: History-list visual tier distinction (loose vs Analysis-owned row styling) was
+    deferred — it depends on a pre-existing, unrelated gap (StoredSession.EntityRefs is never
+    written by any code path today) and was not named in this task's acceptance criteria. The
+    "Promote" affordance is offered on every row; the server's one-time-bind guard (400 on an
+    already-Analysis-owned session) is the actual enforcement point.
+
+    Open follow-up (not blocking): dark-mode rendering of the new Dialog was not visually verified
+    via ui-test/browser in this pass (structurally theme-token-driven, so expected to be correct;
+    flagged as a Warning in the Step 9.5 ADR check, not a violation).
   </notes>
 
   <execution>

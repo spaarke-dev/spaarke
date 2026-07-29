@@ -399,4 +399,17 @@ public sealed class CapturingChatDataverseRepository : IChatDataverseRepository
 
     public Task<IReadOnlyList<AnalysisSessionSummary>> GetSessionsByAnalysisAsync(string tenantId, Guid analysisId, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<AnalysisSessionSummary>>(Array.Empty<AnalysisSessionSummary>());
+
+    public List<(string TenantId, string SessionId, Guid AnalysisId)> Bound { get; } = new();
+    public bool FailOnBind { get; set; }
+
+    public Task<bool> BindSessionToAnalysisAsync(string tenantId, string sessionId, Guid analysisId, CancellationToken ct = default)
+    {
+        if (FailOnBind)
+        {
+            throw new InvalidTimeZoneException("simulated bind failure (promote compensation test)");
+        }
+        Bound.Add((tenantId, sessionId, analysisId));
+        return Task.FromResult(true);
+    }
 }

@@ -227,6 +227,62 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     }
 
     /// <inheritdoc />
+    public async Task<bool> BindSessionToAnalysisAsync(
+        string tenantId,
+        string sessionId,
+        Guid analysisId,
+        CancellationToken ct = default)
+    {
+        // Explicit promotion (task 023, spec FR-07): binds an EXISTING sprk_aichatsummary row to a
+        // NEW sprk_analysis — a bind on the CURRENT row, never a new row. Distinct from
+        // CreateSessionAsync's create-time FK write (which fires only for a session minted with an
+        // Analysis-owned HostContext) — this is the after-the-fact path for a loose session that was
+        // NOT Analysis-owned at create time. Same tenant-scoped query-then-update shape as
+        // ArchiveSessionAsync (ADR-014/ADR-028: a cross-tenant sessionId guess must not bind another
+        // tenant's row).
+        _logger.LogInformation(
+            "Binding session {SessionId} to analysis {AnalysisId} (tenant={TenantId}) — explicit promotion (task 023)",
+            sessionId, analysisId, tenantId);
+
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet(AnalysisFkAttribute),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition("sprk_sessionid", ConditionOperator.Equal, sessionId);
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+        var record = results.Entities.FirstOrDefault();
+
+        if (record is null)
+        {
+            // No sprk_aichatsummary anchor row (e.g. a session whose cold-tier create was skipped or
+            // failed — CreateSessionAsync tolerates a Dataverse write failure and continues on Redis
+            // only). There is no row to bind; the caller's Redis/Cosmos HostContext update still
+            // proceeds (best-effort durable FK — same tolerant posture as ArchiveSessionAsync).
+            _logger.LogWarning(
+                "BindSessionToAnalysisAsync: no sprk_aichatsummary row for session {SessionId} (tenant={TenantId}) — " +
+                "sprk_analysis FK not bound. Redis/Cosmos HostContext update still proceeds (best-effort).",
+                sessionId, tenantId);
+            return false;
+        }
+
+        await _genericEntityService.UpdateAsync(
+            SummaryEntityName,
+            record.Id,
+            new Dictionary<string, object> { [AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, analysisId) },
+            ct);
+
+        _logger.LogInformation(
+            "Bound session {SessionId} to analysis {AnalysisId}: sprk_analysis FK set on sprk_aichatsummary {RecordId} (tenant={TenantId})",
+            sessionId, analysisId, record.Id, tenantId);
+
+        return true;
+    }
+
+    /// <inheritdoc />
     public async Task AddMessageAsync(ChatMessage message, CancellationToken ct = default)
     {
         // Map ChatMessageRole enum (matches Dataverse option set values)
