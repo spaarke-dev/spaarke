@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-09/FR-10/FR-15: wire toolbar to canonical EmailComposer (reply/reply-all/forward/new) + "Open full form" 85% modal</title>
+    <phase>3 Layer-2 React 19 views + reading-pane shell</phase>
+    <gate>after:022,032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires the compose/send path — MUST reuse the canonical `EmailComposer`/`SendEmailDialog` for EVERY compose/reply/forward/new (MUST NOT fork a composer) and send via the existing BFF path. A forked composer or wrong recipient-prefill per mode is a silent correctness/duplication failure. Tags include frontend/fluent-ui; the per-mode prefill + no-fork cases are DoD. FULL gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-and-wire against a clear canonical reference (EmailComposer + SendEmailDialog + xrmNavigationServiceAdapter.openRecordModal); the discipline is "reuse, do not fork" rather than novel design. Sonnet @ high with a FULL gate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct reading-pane concern (toolbar action wiring); shares only the shell/toolbar mount contract with 033/034/035. Separate wiring file.</parallel-reason>
+    <deps>022,032</deps>
+    <tags>frontend, fluent-ui, react</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the reading-pane toolbar actions (via the task-022 action-bar Layer-1 logic) to the CANONICAL composer: Reply / Reply All / Forward / New each open `EmailComposer` via `SendEmailDialog` with recipients pre-filled — `initialTo`/`initialCc`; reply-all includes ALL recipients; new = empty compose. Send uses the EXISTING BFF send path; the reading pane refreshes on success. MUST NOT fork a new composer. "Open full form" escalates to the OOB Email main form as an 85% `navigateTo` modal via `xrmNavigationServiceAdapter.openRecordModal` (per MODAL-DECISION-CRITERIA). Compose into the reading-pane shell (task 032).</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent UI v9 and the canonical Spaarke email-compose/send stack. Follow ADRs strictly (ADR-021 Fluent v9/dark, ADR-028 auth).</role>
+  <goal>Toolbar action wiring in `@spaarke/communication-components` that: (1) for Reply / Reply All / Forward, opens the canonical `EmailComposer` via `SendEmailDialog` in the correct mode with recipients pre-filled (`initialTo`/`initialCc`; reply-all = all recipients; forward = empty recipients + quoted body); (2) for New, opens the canonical `EmailComposer` in empty compose mode; (3) sends via the EXISTING BFF send path and refreshes the reading pane on success; (4) "Open full form" opens the OOB Email main form for the selected record as an 85% `navigateTo` modal via `xrmNavigationServiceAdapter.openRecordModal`. NO forked/second composer introduced (spec MUST). No `as React.ComponentType` cast (NFR-05); dark-mode correct (ADR-021).</goal>
+
+  <context>
+    <background>Spec FR-09 + FR-10 + FR-15. The full-width toolbar (built in task 032, logic from task 022) must dispatch compose actions to the ONE canonical composer used across all new-email surfaces (`EmailComposer` + `SendEmailDialog` wrapper — r4-consolidated; `NewThreadModal` was dropped). Recipient prefill differs per mode: reply = sender; reply-all = all recipients (To+Cc); forward = empty recipients with quoted body; new = empty. Send reuses the existing BFF path (no new send endpoint — spec MUST NOT add BFF surface beyond `eml-render`). "Open full form" is the escalation to the OOB main form as an 85% modal (`navigateTo`), per MODAL-DECISION-CRITERIA, using the existing `xrmNavigationServiceAdapter.openRecordModal`.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailToolbarActions.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/EmailComposer.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="022" status="pending">Extracted `CommunicationActions` Layer-1 logic (action-bar / prefill / suggested-create) — the toolbar action dispatch this wiring consumes.</dependency>
+      <dependency task="032" status="pending">Reading-pane shell + full-width toolbar — the mount point; supplies the selected record + toolbar surface.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Canonical composer ONLY (FR-09/FR-10, spec MUST): every reply / reply-all / forward / new MUST open the canonical `EmailComposer` via `SendEmailDialog`. MUST NOT fork, wrap-as-new, or reimplement a composer.</constraint>
+    <constraint source="project">Per-mode prefill (FR-09): reply → sender in `initialTo`; reply-all → all recipients (To+Cc) in `initialTo`/`initialCc`; forward → empty recipients + quoted body; new → empty compose.</constraint>
+    <constraint source="project">Existing send path (spec MUST NOT): send goes through the EXISTING BFF send path — do NOT add a new send/compose BFF endpoint (the only new BFF surface in r5 is `eml-render`). On send success, refresh the reading pane.</constraint>
+    <constraint source="project">Full-form escalation (FR-15): "Open full form" opens the OOB `sprk_communication` Email main form for the selected record as an 85% `navigateTo` modal via `xrmNavigationServiceAdapter.openRecordModal` — per `docs/standards/MODAL-DECISION-CRITERIA.md`. Do NOT iframe-embed the form.</constraint>
+    <constraint source="ADR-028">Send + any record fetch use `@spaarke/auth` `authenticatedFetch` / host webApi; no new auth surface.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; the composer dialog + toolbar render correctly in dark mode via the host `FluentProvider`.</constraint>
+    <constraint source="NFR-05">React 19 Layer-2 wiring consuming React-agnostic action-bar logic only; no `as React.ComponentType` cast introduced.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 · canonical email compose/send reuse · OOB navigateTo modal</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-components.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical composer" location="src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx">The one compose dialog for all new-email triggers (reply/forward/new); pass `initialTo`/`initialCc` + mode. Send uses the existing BFF path inside the composer.</pattern>
+      <pattern name="85% modal escalation" location="src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts">`openRecordModal(entityName, entityId)` opens the OOB record/form as an 85% `navigateTo` modal — use for "Open full form" per MODAL-DECISION-CRITERIA.</pattern>
+      <pattern name="Action-bar logic" location="src/client/pcf/CommunicationActions/CommunicationActions">The task-022 extracted action-bar/prefill logic drives which mode + recipients to pass to the composer.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load CLAUDE.md, spec FR-09/FR-10/FR-15, MODAL-DECISION-CRITERIA, ADR-021/ADR-028. Declare RIGOR LEVEL: FULL (compose/send wiring). Confirm tasks 022 + 032 landed.</step>
+    <step order="1">Wire Reply / Reply All / Forward toolbar actions (via task-022 action-bar logic) to open `SendEmailDialog`/`EmailComposer` in the correct mode with recipients pre-filled per mode (reply → sender; reply-all → To+Cc; forward → empty + quoted body).</step>
+    <step order="2">Wire New → open the canonical `EmailComposer` in empty compose mode via `SendEmailDialog`.</step>
+    <step order="3">Confirm send flows through the EXISTING BFF send path inside the composer; on success, refresh the reading pane (re-load the selected record / body).</step>
+    <step order="4">Wire "Open full form" → `xrmNavigationServiceAdapter.openRecordModal('sprk_communication', recordId)` as an 85% `navigateTo` modal.</step>
+    <step order="5">Compose the wiring into `ReadingPaneShell.tsx`/the toolbar; verify no second composer component is introduced anywhere in the path.</step>
+    <step order="6">Add `&lt;ui-tests&gt;` incl. dark-mode + per-mode prefill + no-fork + full-form-modal. Build + typecheck (no `as React.ComponentType`).</step>
+    <step order="N-1">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 036 to ✅.</step>
+    <step order="N">Document any deviation in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the canonical `EmailComposer`/`SendEmailDialog` cannot express a required mode/prefill (reply-all recipient set, forward quoted body) without modifying the composer, STOP and escalate per root CLAUDE.md §6 — do NOT fork a second composer (spec MUST NOT). A small additive prop on the canonical composer is preferable to a fork and needs owner sign-off.</trigger>
+    <trigger>If sending appears to require a new BFF send/compose endpoint, STOP and escalate — the only new BFF surface in r5 is `eml-render`; send reuses the existing path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Canonical `EmailComposer` + `SendEmailDialog` wrapper and `xrmNavigationServiceAdapter.openRecordModal` all exist. Grep: `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailDialog.tsx`, `.../utils/adapters/xrmNavigationServiceAdapter.ts`.</existing>
+    <extension>Yes — this task is thin WIRING that reuses the canonical composer + the OOB modal adapter, driven by the task-022 action-bar logic, composed into the reading-pane shell (task 032, the §11-justified surface). No new composer/compose surface is introduced.</extension>
+    <cost-of-doing-nothing>Without it the reading-pane toolbar buttons are inert — a user cannot reply/reply-all/forward/compose or escalate to the full form; FR-09/FR-10/FR-15 fail and the read+act loop is broken.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Per-mode recipient prefill">
+      <steps><step>On a multi-recipient email, click Reply, then Reply All, then Forward, then New — inspecting the composer each time.</step></steps>
+      <expected>Reply prefills the sender in To; Reply All prefills all recipients (To+Cc); Forward opens empty recipients with the quoted body; New opens fully empty.</expected>
+    </test>
+    <test name="Send uses existing path + refreshes pane">
+      <steps><step>Compose a reply and send.</step></steps>
+      <expected>Send completes via the existing BFF send path; the reading pane refreshes to reflect the sent state (no new send endpoint invoked).</expected>
+    </test>
+    <test name="No forked composer">
+      <steps><step>Trace the component tree opened by each toolbar action.</step></steps>
+      <expected>Every action mounts the canonical `EmailComposer` via `SendEmailDialog`; no second/forked composer component exists in the path.</expected>
+    </test>
+    <test name="Open full form as 85% modal">
+      <steps><step>Click "Open full form".</step></steps>
+      <expected>The OOB `sprk_communication` Email main form opens for the selected record as an 85% `navigateTo` modal (not iframe-embedded).</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Toggle the host `FluentProvider` to dark theme.</step><step>Open the composer dialog + toolbar.</step></steps>
+      <expected>Composer dialog + toolbar render correctly in dark mode with no hardcoded colors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/typecheck the shared TS package</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailToolbarActions.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/reading-pane/__tests__/EmailToolbarActions.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a multi-recipient email, when Reply is clicked, then the canonical composer opens with the sender in To; when Reply All, then all recipients (To+Cc) prefill; when Forward, then recipients are empty with the quoted body; when New, then compose opens empty.</criterion>
+    <criterion testable="true">Given a composed reply, when sent, then it goes through the existing BFF send path and the reading pane refreshes on success.</criterion>
+    <criterion testable="true">Negative (no fork): every compose/reply/forward/new action mounts the canonical `EmailComposer` via `SendEmailDialog`; no second/forked composer is introduced (verified by component trace + import path).</criterion>
+    <criterion testable="true">Negative (no new BFF surface): send invokes the existing send path only — no new send/compose BFF endpoint is added.</criterion>
+    <criterion testable="true">Given "Open full form", when clicked, then the OOB `sprk_communication` Email main form opens for the selected record as an 85% `navigateTo` modal (per MODAL-DECISION-CRITERIA; not iframe-embedded).</criterion>
+    <criterion testable="true">Composer dialog + toolbar render correctly in dark mode (ADR-021); no `as React.ComponentType` cast introduced (NFR-05); package build + typecheck green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-09, FR-10, FR-15; design.md Lens 2 (toolbar → composer flow) + Resolved Decisions (canonical composer; `NewThreadModal` dropped). `docs/standards/MODAL-DECISION-CRITERIA.md` for the 85% modal. Run `/conflict-check` before PR (touches `@spaarke/communication-components`; `EmailComposer/**` is shared with email-r4/messaging). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

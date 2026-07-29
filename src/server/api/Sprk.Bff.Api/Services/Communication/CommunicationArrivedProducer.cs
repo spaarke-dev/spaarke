@@ -1,5 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Notifications;
 using Sprk.Bff.Api.Services.Notifications.Envelopes;
@@ -65,17 +67,34 @@ public sealed class CommunicationArrivedProducer
     private const string RegardingTypeField = "sprk_regardingrecordtype";
     private const string ThreadPrivacyStateField = "sprk_privacystate";
 
+    // Q2 app-notification mirror. Category is load-bearing for idempotency (recipient + category + regarding=thread).
+    private const string CommunicationNotificationCategory = "communication";
+    // appnotification.toasttype: Timed (200000000) — emits the clickable "Open" data.actions[]; Hidden suppresses it.
+    private const int ToastTypeTimed = 200_000_000;
+
     /// <summary>
     /// Columns re-read off the persisted <c>sprk_communication</c> row — exactly what the task-013 envelope +
     /// the task-023 fan-out CONTRACT need (fan-out reads <c>sprk_isinternalonly</c> + <c>createdon</c> off the
     /// message entity; a missing projection fail-closes to under-fan, never over-fan).
     /// </summary>
-    private static readonly string[] CommunicationColumns =
+    private static readonly string[] CommunicationColumns = BuildCommunicationColumns();
+
+    private static string[] BuildCommunicationColumns()
     {
-        ThreadLookupField, CommunicationTypeField, DirectionField,
-        IsInternalOnlyField, CreatedOnField,
-        RegardingIdField, RegardingTypeField,
-    };
+        // Base envelope/fan-out columns + the TYPED ADR-024 regarding lookups (RegardingFieldMap) so the Q2
+        // app-notification deep-link can resolve the regarding entity's REAL logical name. NOTE: the message's
+        // sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref, NOT a usable entity-type string (this is
+        // the same field ThreadResolver stopped reading as text), so the deep-link must come from the typed
+        // lookup, not RegardingTypeField.
+        var cols = new List<string>
+        {
+            ThreadLookupField, CommunicationTypeField, DirectionField,
+            IsInternalOnlyField, CreatedOnField,
+            RegardingIdField, RegardingTypeField,
+        };
+        cols.AddRange(RegardingFieldMap.AllRegardingFields);
+        return cols.ToArray();
+    }
 
     private static readonly string[] ThreadColumns = { ThreadPrivacyStateField };
 
@@ -83,6 +102,7 @@ public sealed class CommunicationArrivedProducer
     private readonly CommunicationFanOutTargetingService _targeting;
     private readonly OutboxService _outbox;
     private readonly SignalRDeliveryService _delivery;
+    private readonly IActionSeam _actionSeam;
     private readonly ILogger<CommunicationArrivedProducer> _logger;
 
     public CommunicationArrivedProducer(
@@ -90,12 +110,14 @@ public sealed class CommunicationArrivedProducer
         CommunicationFanOutTargetingService targeting,
         OutboxService outbox,
         SignalRDeliveryService delivery,
+        IActionSeam actionSeam,
         ILogger<CommunicationArrivedProducer> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _targeting = targeting ?? throw new ArgumentNullException(nameof(targeting));
         _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
         _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
+        _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -180,8 +202,15 @@ public sealed class CommunicationArrivedProducer
             var regardingId = message.GetAttributeValue<string>(RegardingIdField);
             var regardingType = message.GetAttributeValue<string>(RegardingTypeField);
 
+            // Q2 (2026-07-28): deep-link target for the MDA bell notification = the REGARDING record (it hosts the
+            // Communications conversation panel), resolved from the TYPED ADR-024 lookup for a reliable entity
+            // logical name; a record-less thread falls back to the thread record so the notification stays clickable.
+            var (linkEntityType, linkId) = ResolveTypedRegarding(message) ?? (ThreadEntity, threadRef.Id);
+            var actionUrl = BuildRecordDeepLink(linkEntityType, linkId);
+
             // 5) Per recipient: durable outbox row FIRST, then best-effort ping. Ordering is structural
-            //    (PingUserAsync requires the outboxRowId that only exists after the write).
+            //    (PingUserAsync requires the outboxRowId that only exists after the write). Then mirror a
+            //    persistent, clickable Dataverse app-notification (Q2) via the Layer-A IActionSeam facade.
             foreach (var recipientSystemUserId in recipients)
             {
                 var outboxRowId = await _outbox.WriteAsync(
@@ -194,6 +223,36 @@ public sealed class CommunicationArrivedProducer
                     cancellationToken: ct);
 
                 await _delivery.PingUserAsync(outboxRowId, recipientSystemUserId, NotificationKind.CommunicationArrived, ct);
+
+                // App-notification MIRROR (Q2, mirrors the sanctioned CommunicationRiActionService pattern). A
+                // persistent, clickable bell notification in the MDA notification center, deep-linked to the
+                // regarding record. Reuses the ONE Layer-A dispatch path (IActionSeam, ADR-013); dedups per
+                // (recipient + "communication" + thread) so a busy thread yields ONE unread bell, not one per
+                // message. Signal-only (NFR-02/03): title is a channel label, body is a generic prompt — no
+                // address/content. Non-fatal: IActionSeam.CreateNotificationAsync never throws (returns a result),
+                // and the outer try/catch swallows anything else so the persist path is never affected (NFR-05).
+                var notify = await _actionSeam.CreateNotificationAsync(
+                    new CreateNotificationRequest
+                    {
+                        Title = envelope.SenderDisplay, // "New email" / "New message" — privacy-safe label
+                        Body = "Open to view the conversation.",
+                        RecipientId = recipientSystemUserId,
+                        Category = CommunicationNotificationCategory,
+                        RegardingId = threadRef.Id,      // idempotency key = thread → one unread bell per thread
+                        RegardingType = ThreadEntity,
+                        ToastType = ToastTypeTimed,      // Timed → emits the clickable "Open" action (NOT Hidden)
+                        ActionUrl = actionUrl,
+                        Source = CommunicationNotificationCategory,
+                        CorrelationId = communicationId.ToString(),
+                    },
+                    ct);
+
+                if (notify is { Success: false, Skipped: false })
+                {
+                    _logger.LogDebug(
+                        "[communication-arrived] app-notification not created for recipient {Recipient} on thread {ThreadId}: {Error}",
+                        recipientSystemUserId, threadRef.Id, notify.Error);
+                }
             }
 
             _logger.LogInformation(
@@ -257,4 +316,31 @@ public sealed class CommunicationArrivedProducer
     /// display-name column is added later, populate it here.
     /// </summary>
     private static string SenderDisplayFor(string channel) => channel == "email" ? "New email" : "New message";
+
+    /// <summary>
+    /// Resolves the message's regarding record as a (entity-logical-name, id) pair from the TYPED ADR-024
+    /// lookups (<see cref="RegardingFieldMap"/>), in family priority order — the reliable source of the regarding
+    /// entity type for the Q2 deep-link. Returns null for a record-less message (no typed lookup populated), so
+    /// the caller falls back to linking the thread record.
+    /// </summary>
+    private static (string EntityType, Guid Id)? ResolveTypedRegarding(Entity message)
+    {
+        foreach (var (entityLogicalName, field) in RegardingFieldMap.All)
+        {
+            if (message.GetAttributeValue<EntityReference>(field) is { } er && er.Id != Guid.Empty)
+            {
+                return (string.IsNullOrWhiteSpace(er.LogicalName) ? entityLogicalName : er.LogicalName, er.Id);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Builds a model-driven-app record deep-link (the canonical <c>appnotification.data.actions[].data.url</c>
+    /// form) for the notification's clickable "Open" action. The URL is a plain navigation target — NOT a
+    /// pre-authorized token (NFR-02/03); the click re-enters an access-checked record surface.
+    /// </summary>
+    private static string BuildRecordDeepLink(string entityType, Guid id) =>
+        $"/main.aspx?pagetype=entityrecord&etn={entityType}&id={id:D}";
 }

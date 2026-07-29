@@ -53,9 +53,17 @@ import {
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
-import { deriveComposerFields, type ComposerMode } from './composerPrefill';
-import { fetchSourceAttachments } from './attachmentsSource';
-import { launchCreate, type CreateKind } from './launchCreate';
+// Task 022: the Layer-1 action-bar / composer-prefill / suggested-create logic now
+// lives in `@spaarke/communication-components` — the local `./composerPrefill`,
+// `./attachmentsSource`, and `./launchCreate` copies are deleted
+// (email-communication-solution-r5 FR-08/FR-18 two-layer split).
+import {
+  deriveComposerFields,
+  type ComposerMode,
+  fetchSourceAttachments,
+  launchCreate,
+  type CreateKind,
+} from '@spaarke/communication-components/logic/actions';
 import { getMsalClientId, getBffApiAppId, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 
 // React 16 type seam: the shared lib's .d.ts is emitted against React 19 types,

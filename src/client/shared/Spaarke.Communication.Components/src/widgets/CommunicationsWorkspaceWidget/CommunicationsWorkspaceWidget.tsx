@@ -156,8 +156,14 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
   const { dispatchToast } = useToastController(toasterId);
 
   const handleArrival = React.useCallback(
-    (_event: ArrivalEvent) => {
-      // Signal-only: we raise an awareness toast; we do NOT read `_event.envelope` for content (NFR-03).
+    (event: ArrivalEvent) => {
+      // Toast ONLY for genuine real-time (live SignalR) arrivals — one at a time. The poll-fallback
+      // path re-delivers the whole backlog of undismissed outbox rows on load / widget remount (each a
+      // distinct outboxRowId), which flooded the user with non-actionable "New communication" toasts
+      // (RB R3 UAT 2026-07-28). The unread BADGE (threadsHeaderAccessory "N new communications") still
+      // counts every arrival via useCommunicationArrivals, so poll-fallback awareness is preserved
+      // without the popup spam. Signal-only: we never read `event.envelope` for content (NFR-03).
+      if (event.source !== 'live') return;
       dispatchToast(
         <Toast>
           <ToastTitle>New communication</ToastTitle>

@@ -22,3 +22,4 @@ export {
   composeEditorRegistration,
   ComposeWorkspacePlaceholder,
 } from "./composeEditor.registration";
+export { emailRegistration } from "./email.registration";

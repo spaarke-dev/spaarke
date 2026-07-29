@@ -7,7 +7,7 @@
  * the button call sites.
  */
 
-import { launchCreate, CREATE_LAUNCH_TARGETS, type CreateKind } from '../CommunicationActions/launchCreate';
+import { launchCreate, CREATE_LAUNCH_TARGETS, type CreateKind } from '@spaarke/communication-components/logic/actions';
 
 describe('launchCreate seam', () => {
   it('maps each kind to the correct target entity + title', () => {

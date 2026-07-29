@@ -4,8 +4,9 @@
 
 ## Active Task
 
-**Status**: CODE-COMPLETE — all 20 code/research tasks ✅. Remaining: wrap-up 090 + human deploys 014/034.
-**Mode**: autonomous, parallel-where-possible; `/conflict-check` before every BFF PR.
+**Status**: ✅ **PROJECT COMPLETE + ARCHIVED (2026-07-29).** All tasks done; wrap-up 090 done. Merged to master (`81f64dad0`) + deployed to dev; docs complete; issues #696-699 filed; `.archived` marker written; worktree PRESERVED per operator request.
+**Next action**: none — project closed. Deferred work tracked in GitHub issues #696-699 + the agreements-r1 handoff. Worktree kept in case follow-up is needed.
+**Mode**: (was) autonomous, parallel-where-possible; `/conflict-check` before every BFF PR.
 
 ### Success criteria (spec §Success Criteria)
 1. One reader ✅ · 2. Text-exact ✅ (8/8) · 3. Numbering-exact ✅ (24/24 = Word; round-trip caught+fixed DEF-03) · 4. Referenceable ✅ (map + resolver; survives edits) · 5. Page/line honest ✅ (WS-5 DEFER) · 6. Hygiene ✅ (739 Compose pass, ~47 MB, no new pkg, ADR-013 purity green) — caveats: DEF-01 + ADR-007 GraphIsolation both PRE-EXISTING/unrelated.

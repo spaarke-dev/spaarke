@@ -7,8 +7,8 @@
 import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, tokens } from '@fluentui/react-components';
-import { AttachmentList, uploadStatusColorToken } from '../CommunicationAttachments/AttachmentList';
-import { IAttachmentItem } from '../CommunicationAttachments/types';
+import { AttachmentList, uploadStatusColorToken } from '@spaarke/communication-components/components/AttachmentList';
+import { IAttachmentItem } from '@spaarke/communication-components/logic/attachments';
 
 const renderWithProvider = (ui: React.ReactElement) =>
   render(<FluentProvider theme={webLightTheme}>{ui}</FluentProvider>);

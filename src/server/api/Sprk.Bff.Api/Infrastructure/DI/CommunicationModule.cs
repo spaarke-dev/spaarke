@@ -59,6 +59,11 @@ public static class CommunicationModule
         services.AddSingleton<CommunicationService>();
         services.AddSingleton<EmlGenerationService>();
         services.AddSingleton<GraphMessageToEmlConverter>();
+        // HTML-preserving REVERSE of GraphMessageToEmlConverter (email-communication-solution-r5 task 010 /
+        // FR-07 / NFR-03). Pure transformation (no I/O) → singleton, mirroring the converter above; its
+        // HtmlSanitizer is configured once in the ctor and only Sanitize() is called after (thread-safe).
+        // Consumed by the GET /api/documents/{id}/eml-render endpoint (FileAccessEndpoints).
+        services.AddSingleton<EmlToHtmlRenderer>();
         services.AddSingleton<MailboxVerificationService>();
 
         // Channel seams (ADR-045 rule 4 / NFR-04). Email is the ONLY R4 implementation of each seam.

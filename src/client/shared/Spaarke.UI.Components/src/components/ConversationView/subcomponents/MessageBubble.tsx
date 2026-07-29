@@ -26,12 +26,16 @@
  * their LAYOUT moved (pill+markers+name+time to the header row).
  *
  * HTML bodies come from persisted email content (external senders included)
- * and are UNTRUSTED — sanitized via DOMPurify before `dangerouslySetInnerHTML`,
- * same as `CommunicationTimeline/subcomponents/MessageRow.tsx`.
+ * and are UNTRUSTED — sanitized via the shared hardened `sanitizeEmailHtml`
+ * util (allow-list DOMPurify: no script/iframe/object, no `on*` handlers,
+ * schemes restricted to http/https/mailto, anchors forced to
+ * `rel="noopener noreferrer" target="_blank"`; task 001 / FR-16 / NFR-03)
+ * before `dangerouslySetInnerHTML`, same as
+ * `CommunicationTimeline/subcomponents/MessageRow.tsx`.
  */
 import * as React from 'react';
 import { Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import DOMPurify from 'dompurify';
+import { sanitizeEmailHtml } from '../../../utils/sanitizeEmailHtml';
 import { CheckmarkCircleRegular, ErrorCircleRegular } from '@fluentui/react-icons';
 import { ChannelBadge } from '../../CommunicationTimeline/subcomponents/ChannelBadge';
 import { PrivacyMarkers } from '../../CommunicationTimeline/subcomponents/PrivacyMarkers';
@@ -172,7 +176,7 @@ export const MessageBubble: React.FC<IMessageBubbleProps> = ({ message, isOwn, s
 
   const sanitizedHtml = React.useMemo(() => {
     if (message.bodyFormat !== 'html' || !message.body) return '';
-    return DOMPurify.sanitize(message.body, { USE_PROFILES: { html: true } });
+    return sanitizeEmailHtml(message.body);
   }, [message.bodyFormat, message.body]);
 
   const displayName = message.senderName ?? message.sender ?? 'Unknown sender';

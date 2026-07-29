@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="email-communication-solution-r5">
+  <metadata>
+    <title>NFR-03/04/06 · SC 7/8: Verification sweep — dual-mount parity + OOB-form/4-PCF regression + XSS security cases</title>
+    <phase>5 Integration &amp; verification</phase>
+    <gate>after:041,042</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying + security verification (XSS) + cross-surface regression. Per CLAUDE.md §8 TEST-MODIFYING override (tags include `testing`/`e2e-test`/`security`), the FULL gate (code-review + adr-check at Step 9.5) is UNCONDITIONAL. This task is the load-bearing "no XSS / no regression" proof.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adversarial XSS verification across two untrusted-HTML paths + cross-surface regression judgment; the failure mode (a payload that slips the sanitizer/sandbox, or a silent PCF regression) is exactly what strongest-tier reasoning must not miss.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Integration gate — runs after 041 + 042 and exercises the whole surface + all four PCFs + the OOB form; not parallelizable with any task.</parallel-reason>
+    <deps>041,042</deps>
+    <tags>frontend, e2e-test, testing, security</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Run the verification sweep proving the r5 surface is safe and non-regressive: (a) DUAL-MOUNT PARITY — the widget (041) and the code page (042) render the Email surface identically; (b) OOB REGRESSION — the OOB `sprk_communication` main form + its 4 PCFs (`CommunicationActions`, `CommunicationAttachments`, `CommunicationConnections`, `TrackingFieldTrio`) function unchanged after the Layer-1 extraction (020–023); (c) XSS SECURITY — malicious HTML (`&lt;script&gt;`, `onerror=`, `javascript:` link, tracking pixel) in BOTH the `.eml` (server-sanitized) and a `sprk_body` field render (client-sanitized via `sanitizeEmailHtml`) executes no script, and the `.eml` renders inside a sandboxed iframe (no `allow-scripts`/`allow-same-origin`). Use the closed test set from design Lens 6. Drive UI cases via the `ui-test` skill (task-execute Step 9.7).</prompt>
+  <role>SPAARKE platform QA/security engineer. Expert in Fluent v9 UI verification, PCF/MDA regression, and web XSS/sanitization + sandboxed-iframe containment. Follow ADRs strictly.</role>
+  <goal>A completed verification pass with evidence that: dual-mount parity holds (widget ≡ code page); the OOB form + all 4 PCFs are regression-free after Layer-1 extraction (NFR-04); and every malicious-HTML case (design Lens 6 negative set) executes zero script on both the `.eml` (server-sanitized) and `sprk_body` (client-sanitized) paths, with the `.eml` contained in a sandboxed iframe (NFR-03). Spec Success Criteria 1–8 are verified. Any test added/modified here is classified against ADR-038 (maintain vs scaffolding) at wrap-up.</goal>
+
+  <context>
+    <background>Spec NFR-03 (XSS), NFR-04 (zero regression), NFR-06 (dual-mount parity) + Success Criteria 7 (malicious HTML → no script; `.eml` sandboxed) and 8 (OOB form + 4 PCFs regression-free). Design Lens 6 defines the closed test set + the negative/authorization cases (non-Email excluded; no-access fails closed; malicious `&lt;script&gt;`/`onerror=`/`javascript:` link/tracking pixel on both paths). The Layer-1 extraction (020–023) shared React-agnostic logic out of the 4 PCFs while the PCFs kept their views — this task proves that extraction did not change PCF/OOB-form behavior.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/*/DocumentsEndpoints.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/*/EmlRenderEndpointTests.cs</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/**</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationAttachments/**</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationConnections/**</file>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/**</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">The widget mount (parity target A).</dependency>
+      <dependency task="042" status="pending">The code-page mount (parity target B).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Any test added/modified here follows the KEEP-path categories; use the real seam/render harness — NO `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests. Endpoint XSS cases extend the `eml-render` endpoint tests (010). These are reconciled by `/test-diet` at wrap-up (090).</constraint>
+    <constraint source="project">XSS verification is a CLOSED SET (design Lens 6 negative cases): for EACH of `&lt;script&gt;`, `onerror=` handler, `javascript:` link, and a remote tracking pixel, run the payload through BOTH (1) the `.eml` path (server-sanitized in `eml-render`, rendered in a sandboxed iframe) and (2) a `sprk_body` field render (client-sanitized via `sanitizeEmailHtml`). PASS = no script executes on any of the 8 combinations and the `.eml` iframe carries `sandbox` with NO `allow-scripts`/`allow-same-origin`.</constraint>
+    <constraint source="project">Regression is a CLOSED SET: open the OOB `sprk_communication` main form and exercise EACH of the 4 PCFs (`CommunicationActions`, `CommunicationAttachments`, `CommunicationConnections`, `TrackingFieldTrio`) — read + write path — confirming behavior is unchanged after Layer-1 extraction (NFR-04). MUST NOT modify PCF view code to "fix" a regression here; a real regression is escalated back to the owning extraction task.</constraint>
+    <constraint source="ADR-021">Run dual-mount parity + the render cases in BOTH light and dark themes; no theme-only rendering defect.</constraint>
+    <constraint source="ui-test">Drive the UI cases via the `ui-test` skill (task-execute Step 9.7) — browser-based verification of the malicious-HTML cases, parity, and PCF regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>XSS/sanitization verification + sandboxed iframe + PCF/MDA regression</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-adoption.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed XSS test set" location="projects/email-communication-solution-r5/design.md (Lens 6 negative cases)">The exact malicious-HTML payloads + both-path expectation to encode as cases.</pattern>
+      <pattern name="Endpoint XSS tests" location="tests/unit/Sprk.Bff.Api.Tests/">Extend the `eml-render` endpoint tests (010) with the server-side sanitize assertions (malicious markup neutralized; unauthorized doc fails closed).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec NFR-03/04/06 + Success Criteria 1–8 + design Lens 6. Declare RIGOR LEVEL: FULL (TEST-MODIFYING override — unconditional Step 9.5 gate). Confirm 041 + 042 are ✅.</step>
+    <step order="1">Dual-mount parity (SC 1/NFR-06): open the Email surface as the widget (041) and as the code page (042); verify identical card list, reading pane, `.eml` body, toolbar, associations, tracking — in light AND dark.</step>
+    <step order="2">Left-list + view cases (SC 2): confirm only Email-type records appear; a non-Email (`Teams`/`SMS`) record is excluded from every Email view; view switch re-populates.</step>
+    <step order="3">Reading-pane fidelity + degradation (SC 3/4): an email with quoted history renders the full chain as sent (inline images resolved) from the `.eml`; an archive-less email degrades to `sprk_body` + "full history unavailable" note (no error).</step>
+    <step order="4">Compose + association cases (SC 5/6): Reply/ReplyAll/Forward/New prefill recipients correctly and send via the existing path; association review writes additively (siblings preserved); a reply shows inherited parent regarding.</step>
+    <step order="5">XSS closed set (SC 7/NFR-03): for EACH payload (`&lt;script&gt;`, `onerror=`, `javascript:` link, tracking pixel) verify NO script executes on BOTH the `.eml` path (server-sanitized + sandboxed iframe) AND the `sprk_body` field render (client-sanitized via `sanitizeEmailHtml`); assert the `.eml` iframe `sandbox` attribute excludes `allow-scripts`/`allow-same-origin`. Add/extend endpoint tests for the server-side sanitize + unauthorized-doc-fails-closed cases.</step>
+    <step order="6">OOB regression closed set (SC 8/NFR-04): open the OOB `sprk_communication` main form; exercise each of the 4 PCFs (read + write); confirm unchanged behavior after Layer-1 extraction. If a real regression surfaces, escalate to the owning extraction task (020–023) — do NOT patch PCF views here.</step>
+    <step order="7">Run the full test suite (BFF endpoint tests + shared-lib/PCF tests); capture the `ui-test` evidence + a results summary in `projects/email-communication-solution-r5/notes/verification-report.md`.</step>
+    <step order="8">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 050 to ✅. Document any deviation in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY malicious-HTML case executes a script on either path, OR the `.eml` iframe is missing the hardened `sandbox`, OR any of the 4 PCFs / the OOB form regresses after Layer-1 extraction — STOP and escalate per root CLAUDE.md §6 (do NOT mark the project verifiable). A security or regression failure is a blocker, not a documented deviation.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Malicious HTML — .eml path (server-sanitized + sandboxed iframe)">
+      <steps><step>Load an email whose `.eml` contains `&lt;script&gt;`, an `onerror=` handler, a `javascript:` link, and a tracking pixel.</step><step>Open it in the reading pane.</step></steps>
+      <expected>No script executes; the body is server-sanitized; the `.eml` renders in a sandboxed iframe with NO `allow-scripts`/`allow-same-origin`.</expected>
+    </test>
+    <test name="Malicious HTML — sprk_body field render (client-sanitized)">
+      <steps><step>Render a `sprk_body` field containing the same four payloads (degradation path).</step></steps>
+      <expected>No script executes; `sanitizeEmailHtml` neutralizes scripts/handlers/`javascript:` schemes; safe content still renders.</expected>
+    </test>
+    <test name="OOB form + 4 PCFs regression (NFR-04)">
+      <steps><step>Open the OOB `sprk_communication` main form.</step><step>Exercise CommunicationActions, CommunicationAttachments, CommunicationConnections, TrackingFieldTrio (read + write).</step></steps>
+      <expected>All four PCFs behave exactly as before Layer-1 extraction; no error, no changed behavior.</expected>
+    </test>
+    <test name="Dual-mount parity in dark mode (ADR-021)">
+      <steps><step>Open the widget and the code page in dark theme.</step></steps>
+      <expected>Both mounts render identically and legibly in dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="dotnet">Run BFF endpoint tests</tool><tool name="npm">Run shared-lib/PCF tests + builds</tool><tool name="ui-test">Browser-based UI verification (Step 9.7)</tool></tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/*/EmlRenderEndpointTests.cs (XSS + unauthorized cases extended)</output>
+    <output type="doc">projects/email-communication-solution-r5/notes/verification-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SC 1/NFR-06: the widget (041) and code page (042) render the Email surface identically (dual-mount parity) in light AND dark — verified.</criterion>
+    <criterion testable="true">SC 2: only Email-type records appear in Email views; a non-Email (`Teams`/`SMS`) record is excluded from every view; view switch re-populates.</criterion>
+    <criterion testable="true">SC 3/4: a quoted-history email renders the full chain as sent (inline images resolved) from the `.eml`; an archive-less email degrades to `sprk_body` + note with no error.</criterion>
+    <criterion testable="true">SC 5/6: Reply/ReplyAll/Forward/New prefill recipients correctly and send via the existing path; association review writes additively (siblings preserved); a reply shows inherited parent regarding.</criterion>
+    <criterion testable="true">SC 7/NFR-03 (closed set): for ALL four payloads on BOTH the `.eml` (server-sanitized) and `sprk_body` (client-sanitized) paths — 8 combinations — no script executes; the `.eml` iframe `sandbox` excludes `allow-scripts`/`allow-same-origin`.</criterion>
+    <criterion testable="true">Negative/authorization: an email with no user access is not returned; a direct-id load fails closed with an error state (no content).</criterion>
+    <criterion testable="true">SC 8/NFR-04: the OOB `sprk_communication` main form + all 4 PCFs are regression-free after Layer-1 extraction — each PCF exercised read + write.</criterion>
+    <criterion testable="true">All tests pass (BFF endpoint tests incl. server-side sanitize + unauthorized-fails-closed; shared-lib/PCF tests); the verification report is written.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec Success Criteria 1–8 + NFR-03/04/06 + design Lens 6 closed test set. TEST-MODIFYING → FULL gate is unconditional (CLAUDE.md §8). A security/regression failure is a hard blocker, not a deviation. Tests added here are reconciled by `/test-diet` at 090. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute (incl. Step 9.5 gate + Step 9.7 ui-test).</protocol></execution>
+</task>

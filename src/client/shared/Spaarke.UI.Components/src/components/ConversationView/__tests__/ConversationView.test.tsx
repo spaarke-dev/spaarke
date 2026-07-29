@@ -299,4 +299,49 @@ describe('ConversationView', () => {
       expect((bubble as HTMLElement).tabIndex).toBe(0);
     }
   });
+
+  // RB R3 UAT 2026-07-28: switching threads showed the UNION of both threads' messages
+  // (a fresh thread displayed every message on the record). Root cause: the initial,
+  // cursor-less load on a threadId change was MERGED into the previous thread's state
+  // instead of REPLACING it. Guards the fix (useThreadPoll passes isInitialLoad →
+  // ConversationView dispatches SET_THREAD on initial load, MERGE_POLL on delta ticks).
+  it('replaces messages on threadId change — a fresh thread shows ONLY its own messages, not the union', async () => {
+    const fetch = jest.fn(async (url: string) => {
+      if (url.includes('/unread-count')) return jsonResponse({ threadId: 't', since: null, unreadCount: 0 });
+      if (url.includes('thread-b')) {
+        return jsonResponse({
+          threadId: 'thread-b',
+          name: null,
+          messages: [dto('b1', { body: 'only in thread B', bodyFormat: 100000000 })],
+          count: 1,
+        });
+      }
+      return jsonResponse({
+        threadId: 'thread-a',
+        name: null,
+        messages: [dto('a1', { body: 'only in thread A', bodyFormat: 100000000 })],
+        count: 1,
+      });
+    });
+    const props = {
+      currentUserSystemUserId: USER_1,
+      authenticatedFetch: fetch as unknown as ConversationViewProps['authenticatedFetch'],
+    };
+    const { rerender } = render(
+      <FluentProvider theme={webLightTheme}>
+        <ConversationView threadId="thread-a" {...props} />
+      </FluentProvider>
+    );
+    expect(await screen.findByText('only in thread A')).toBeInTheDocument();
+
+    // Switch to thread B (the exact operator action that surfaced the bug).
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ConversationView threadId="thread-b" {...props} />
+      </FluentProvider>
+    );
+    expect(await screen.findByText('only in thread B')).toBeInTheDocument();
+    // Thread A's message must be GONE — not unioned into thread B.
+    await waitFor(() => expect(screen.queryByText('only in thread A')).not.toBeInTheDocument());
+  });
 });

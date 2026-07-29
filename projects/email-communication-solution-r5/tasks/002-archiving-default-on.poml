@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-17: Archiving default-on for monitored email accounts (`ArchiveIncomingOptIn`), forward-only — so a `.eml` archive exists to render</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield edit of a shared, ingestion-path backend file (`Services/Communication/IncomingCommunicationProcessor.cs`); changing an incoming-mail default has blast radius across every monitored mailbox; BFF-touching (publish-size + CVE gates). FULL gate.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared `Services/Communication/` ingestion-path edit contested with four sibling projects; the change must guarantee default-on WITHOUT altering any other ingestion semantics (attachments, threading, send). Getting the "config/default only" boundary exactly right is the reasoning risk Opus is tiered for (project CLAUDE.md — `Services/Communication/` shared-file edit).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared `Services/Communication/IncomingCommunicationProcessor.cs` ingestion path — contested with spaarke-notification-spine-r1, messaging-communication-app-r1/r2/r3, and email-communication-solution-r4. Serialize; run `/conflict-check` before PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, backend, config</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Guarantee that incoming mail to MONITORED email accounts is archived as a full-body `.eml` to SPE by DEFAULT (forward-only — no retroactive backfill), so the r5 reading pane has an `.eml` to render "as sent". This is a CONFIG/default change, NOT a new service: work with the existing `ArchiveIncomingOptIn` opt-out flag on `sprk_communicationaccount` and the existing `ArchiveEmlAsync` writer in `IncomingCommunicationProcessor.cs`. First verify the current effective default empirically (the code path at line 380 already archives when the flag is `null` or `true`); make the smallest change that guarantees default-on for monitored accounts and document it. Do NOT touch send/attachment/threading paths.</prompt>
+  <role>SPAARKE platform developer. Expert in the Email/Communication ingestion path (Graph inbound → `sprk_communication` → SPE `.eml` archive). Follow ADRs strictly.</role>
+  <goal>Monitored email accounts archive incoming mail as `.eml` by default. Concretely: the `IncomingCommunicationProcessor` archive gate resolves to archive-on for a monitored account whose `sprk_archiveincomingoptin` is unset (the intended default), forward-only. The change is confined to the archive default/opt-out semantics — the attachment step (Step 5), threading, and send paths are untouched. The current behavior is characterized in task notes (empirical trace), the change is the minimal edit that guarantees the default, and no historical mail is backfilled. Existing unit tests in `tests/unit/Sprk.Bff.Api.Tests/` for the processor pass (add/adjust a test asserting default-on for a monitored account with an unset flag, and opt-out honored when explicitly `false`).</goal>
+
+  <context>
+    <background>Spec FR-17 + design Lens 4 ("Archiving reliability — COMPLETE/CONFIG") + Owner Clarification "Archiving rollout → default-on for all monitored email accounts, forward-only; no backfill". The reading pane renders the archived `.eml` (which preserves the full `body.content`); the queryable `sprk_body` stores only Graph's stripped `uniqueBody`. If no `.eml` exists, the pane degrades to `sprk_body` + a "full history unavailable" note. For the "email as sent" spine to work on new mail, archiving must be on by default. Empirical current state (grounded 2026-07-27): `IncomingCommunicationProcessor.cs:380` already archives when `account?.ArchiveIncomingOptIn != false` (i.e. `null` → archive), and `CommunicationAccount.cs` documents "Defaults to true if not set." So the code-level default may already be on — the task's substance may be confirming that default is the guaranteed contract for monitored accounts (and covering it with a test), not a behavioral flip. Resolve this empirically before editing.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/Models/CommunicationAccount.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/**</file>
+    </relevant-files>
+    <dependencies>none — but this is the prerequisite for task 010 (`eml-render`) and the reading pane (task 033): archiving must guarantee `.eml` exists before the render spine is meaningful.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE = archiving default/opt-out semantics ONLY. The change MUST be confined to the `ArchiveIncomingOptIn` archive gate (`IncomingCommunicationProcessor.cs` Step 6, line ~380) and/or the account-model default. It MUST NOT alter the attachment-processing step (Step 5), thread continuity, association, send, or mark-as-read paths. Forward-only: NO retroactive backfill of historical mail is performed or scheduled.</constraint>
+    <constraint source="project">SCOPE = monitored accounts. "Monitored" = a `sprk_communicationaccount` with receive/monitoring enabled (`ReceiveEnabled` / `MonitorFolder`). Default-on MUST apply to those accounts when the opt-in flag is unset; an EXPLICIT opt-out (`sprk_archiveincomingoptin = false`) MUST still be honored (do not force-archive over an explicit opt-out). A NON-monitored account is unaffected.</constraint>
+    <constraint source="bff-extensions">SCOPE = this BFF-touching task (§10). State the Placement Justification in the PR citing `.claude/constraints/bff-extensions.md` (change lives in the existing `Services/Communication/` ingestion path behind the ADR-045 boundary — no new endpoint/service/DI/package). Verify publish ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) and report absolute size + delta. Verify 0 new HIGH CVE (`dotnet list package --vulnerable --include-transitive`). No new package.</constraint>
+    <constraint source="project">Contention control: `Services/Communication/**` is shared with notification-spine-r1, messaging-r1/r2/r3, email-r4. Run `/conflict-check` before opening the PR; sequence the merge after email-r4 per plan.md §7.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Email/Communication inbound ingestion + `.eml` SPE archival (BFF)</topic>
+    <files>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Archive opt-out gate" location="src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs">Step 6 (line ~378–402): `if (account?.ArchiveIncomingOptIn != false) { await ArchiveEmlAsync(...); }` — the default-on gate. `ArchiveEmlAsync` (line ~864) writes the full-body `.eml` to SPE. Reason about this gate; do not duplicate the writer.</pattern>
+      <pattern name="Account flag mapping" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationAccountService.cs">Line ~155: `ArchiveIncomingOptIn = entity.Contains("sprk_archiveincomingoptin") ? ... : null` — unset maps to `null` (→ default-on). `MonitorFolder`/`ReceiveEnabled` (lines ~152–153) define "monitored".</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + spec FR-17 + the ADR-045 / bff-extensions / config knowledge files. Declare RIGOR LEVEL FULL, model-tier opus, effort high.</step>
+    <step order="1">Empirically characterize the CURRENT default: hand-trace the Step-6 archive gate and the `CommunicationAccountService` flag mapping. Determine whether monitored accounts with an unset flag already archive by default (the grounded reading says yes). Record the trace in task notes.</step>
+    <step order="2">Decide the minimal change that GUARANTEES default-on for monitored accounts forward-only: if the default is already on for `null`, the change may be a test that pins the contract + a clarifying comment; if any monitored path can skip archiving unintentionally, make the smallest gate/default correction. Do NOT broaden beyond archiving.</step>
+    <step order="3">Ensure an EXPLICIT opt-out (`sprk_archiveincomingoptin = false`) is still honored (archiving skipped + the existing informational log emitted). Ensure NON-monitored accounts are unaffected.</step>
+    <step order="4">Add/adjust unit tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) monitored account, flag unset → `ArchiveEmlAsync` invoked; (b) monitored account, flag explicitly `false` → archiving skipped; (c) non-monitored account → unaffected. Do NOT assert anything about send/attachment/threading.</step>
+    <step order="5">Build `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test`; run `dotnet publish -c Release ... -o deploy/api-publish/`, measure compressed size, report absolute + delta; run the CVE scan.</step>
+    <step order="6">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 002 status to ✅.</step>
+    <step order="7">Document the empirical current-state finding, the exact change made (or "no behavioral change needed — contract pinned by test"), the forward-only/no-backfill decision, and the publish delta in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If guaranteeing archiving default-on would change ingestion semantics BEYOND archiving — e.g. it would affect send, attachment processing, thread continuity/association, or mark-as-read — STOP and escalate per root CLAUDE.md §6. The task is a config/default change only; a broader ingestion-behavior change is an owner decision, not an in-task adaptation.</trigger>
+  </escalation>
+
+  <tools><tool name="dotnet">Build, test, publish (size measurement)</tool><tool name="terminal">shell (CVE scan, conflict-check)</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/**</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a monitored email account whose `sprk_archiveincomingoptin` is unset, when new inbound mail is processed, then `ArchiveEmlAsync` runs and a full-body `.eml` archive is written to SPE (default-on).</criterion>
+    <criterion testable="true">Negative (explicit opt-out honored): Given a monitored account with `sprk_archiveincomingoptin = false`, when inbound mail is processed, then archiving is skipped (the existing "archival skipped" log is emitted) — default-on does NOT override an explicit opt-out.</criterion>
+    <criterion testable="true">Negative (non-monitored unaffected): a NON-monitored account's processing behavior is unchanged by this task.</criterion>
+    <criterion testable="true">No retroactive backfill occurs: no historical-mail archival is triggered or scheduled (forward-only).</criterion>
+    <criterion testable="true">Scope containment: send, attachment-processing (Step 5), thread continuity/association, and mark-as-read paths are unchanged (no diff outside the archive gate/default + its test).</criterion>
+    <criterion testable="true">BFF publish measured ≤60 MB compressed; absolute size + delta reported in task notes/PR (baseline ~49.63 MB incl. PDBs).</criterion>
+    <criterion testable="true">All tests pass; build green; 0 new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-17; design Lens 4 (COMPLETE/CONFIG) + Resolved Owner Clarifications ("default-on for all monitored accounts, forward-only; no backfill"). Grounded finding (2026-07-27): the code at `IncomingCommunicationProcessor.cs:380` already archives when the flag is `null`/`true`, and `CommunicationAccount.cs` documents "Defaults to true if not set" — so this task may be primarily contract-pinning + test coverage rather than a behavioral flip; confirm empirically in Step 1 before editing. This is NOT a new service (no §11 justification — modify-only). Placement Justification MUST be stated in the PR (cite `.claude/constraints/bff-extensions.md`). Run `/conflict-check` before PR (shared `Services/Communication/**`).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute (FULL rigor — code-review + adr-check at Step 9.5).</protocol></execution>
+</task>
