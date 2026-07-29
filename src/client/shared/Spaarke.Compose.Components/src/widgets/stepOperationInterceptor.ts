@@ -431,6 +431,133 @@ function classifyStructuralStep(step: Step, docBefore: PMNode, reason: string): 
 }
 
 // ---------------------------------------------------------------------------
+// Block-attribute step → setBlockAttr synthesis (R5 task 011 — G3 heading/list)
+// ---------------------------------------------------------------------------
+//
+// A heading toggle (setBlockType → ReplaceAroundStep) or a list wrap/unwrap/re-nest
+// (wrapInList / liftListItem / sinkListItem → ReplaceStep/ReplaceAroundStep) preserves the paraId-bearing
+// block COUNT + every block's TEXT, but changes a block's STYLE (heading level) or LIST context
+// (ordered/bullet + nesting depth). Before task 011 these fell through to `classifyStructuralStep` and were
+// DEFERRED (`defer-structural`) — the R4 SDL-1/2 guard. Task 011 EMITS the corresponding closed-set
+// `setBlockAttr` op (Style / ListOrdered / ListLevel), mirroring the server op schema exactly. paraId is
+// read from the PRE-STEP block (durable, server-known) so a type-change that re-mints the post-step id
+// never mis-addresses the op.
+
+/** A paraId block's style + list context in a doc snapshot (the diff basis for a block-attr change). */
+interface BlockAttrSignature {
+  paraId: string | null;
+  text: string;
+  /** 'Normal' | 'Heading1'..'Heading6' | 'ListParagraph' — mirrors the server `ComposeBlockAttr Style` set. */
+  style: string;
+  /** true = ordered list, false = bullet list, null = not in a list. */
+  listOrdered: boolean | null;
+  /** 0-based list nesting depth, or null when not in a list. */
+  listLevel: number | null;
+}
+
+/** Ordered signatures of every paraId-bearing textblock, tracking list-ancestor context (ordered-ness + depth). */
+function blockAttrSignatures(doc: PMNode): BlockAttrSignature[] {
+  const out: BlockAttrSignature[] = [];
+  const walk = (node: PMNode, listStack: boolean[]): void => {
+    node.forEach(child => {
+      const name = child.type.name;
+      if (name === 'orderedList' || name === 'bulletList') {
+        walk(child, [...listStack, name === 'orderedList']);
+      } else if ((PARAID_NODE_TYPES as readonly string[]).includes(name) && child.isTextblock) {
+        const pid = (child.attrs as { paraId?: unknown }).paraId;
+        const level = (child.attrs as { level?: unknown }).level;
+        out.push({
+          paraId: typeof pid === 'string' && pid.length > 0 ? pid : null,
+          text: child.textContent,
+          style:
+            name === 'heading'
+              ? `Heading${typeof level === 'number' ? level : 1}`
+              : listStack.length > 0
+                ? 'ListParagraph'
+                : 'Normal',
+          listOrdered: listStack.length > 0 ? listStack[listStack.length - 1] : null,
+          listLevel: listStack.length > 0 ? listStack.length - 1 : null,
+        });
+      } else {
+        // listItem / tableCell / blockquote wrapper — recurse, preserving the list stack.
+        walk(child, listStack);
+      }
+    });
+  };
+  walk(doc, []);
+  return out;
+}
+
+/** True when two signatures differ in any block-attribute (style / list ordered-ness / list depth). */
+function signatureChanged(a: BlockAttrSignature, b: BlockAttrSignature): boolean {
+  return a.style !== b.style || a.listOrdered !== b.listOrdered || a.listLevel !== b.listLevel;
+}
+
+/**
+ * Synthesize the single closed-set `setBlockAttr` op a block-attribute change performs, given the block's
+ * BEFORE + AFTER signature. Returns null for a transition the closed op set cannot carry cleanly (deferred).
+ *
+ *   - enter a list (wrap)                  → ListOrdered ('true'/'false')  [server sets ListParagraph + numPr]
+ *   - leave a list (unwrap)                → Style (the new Normal/HeadingN) [server clears the direct numPr]
+ *   - ordered-ness flipped within a list   → ListOrdered
+ *   - nesting depth changed within a list  → ListLevel
+ *   - heading level / paragraph↔heading    → Style
+ */
+function blockAttrOpForChange(paraId: string, before: BlockAttrSignature, after: BlockAttrSignature): ComposeOperation | null {
+  const wasList = before.listOrdered !== null;
+  const isList = after.listOrdered !== null;
+
+  if (!wasList && isList) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListOrdered' as ComposeBlockAttr, value: String(after.listOrdered) };
+  }
+  if (wasList && !isList) {
+    return { type: 'setBlockAttr', paraId, attr: 'Style' as ComposeBlockAttr, value: after.style };
+  }
+  if (wasList && isList && before.listOrdered !== after.listOrdered) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListOrdered' as ComposeBlockAttr, value: String(after.listOrdered) };
+  }
+  if (wasList && isList && before.listLevel !== after.listLevel) {
+    return { type: 'setBlockAttr', paraId, attr: 'ListLevel' as ComposeBlockAttr, value: String(after.listLevel) };
+  }
+  if (before.style !== after.style) {
+    return { type: 'setBlockAttr', paraId, attr: 'Style' as ComposeBlockAttr, value: after.style };
+  }
+  return null;
+}
+
+/**
+ * Classify a block-boundary step as a heading/list block-attribute change (R5 task 011). Returns an `ops`
+ * classification when the step preserves the paraId-block COUNT + every block's TEXT and changes ONLY block
+ * attributes (style / list membership / list depth); returns null otherwise (a genuine structural add/remove
+ * or an unrepresentable transition — the caller falls through to `classifyStructuralStep`). paraId is taken
+ * from the PRE-STEP block so a re-minted post-step id never mis-addresses the op (I-7 durable anchor).
+ */
+function classifyBlockAttrStep(step: Step, docBefore: PMNode): StepClassification | null {
+  const applied = step.apply(docBefore);
+  if (applied.failed || !applied.doc) return null;
+
+  const before = blockAttrSignatures(docBefore);
+  const after = blockAttrSignatures(applied.doc);
+  if (before.length !== after.length) return null; // block add/remove → structural, not a block-attr change
+
+  for (let i = 0; i < before.length; i++) {
+    if (before[i].text !== after[i].text) return null; // text changed → not a pure block-attr change
+  }
+
+  const ops: ComposeOperation[] = [];
+  for (let i = 0; i < before.length; i++) {
+    if (!signatureChanged(before[i], after[i])) continue;
+    const paraId = before[i].paraId;
+    if (!paraId) return null; // no durable id to anchor → defer rather than mis-address
+    const op = blockAttrOpForChange(paraId, before[i], after[i]);
+    if (!op) return null; // transition the closed op set cannot carry → defer to structural
+    ops.push(op);
+  }
+
+  return ops.length > 0 ? { kind: 'ops', ops } : null;
+}
+
+// ---------------------------------------------------------------------------
 // Step → operation classification
 // ---------------------------------------------------------------------------
 
@@ -510,6 +637,12 @@ export function classifyStep(
       return { kind: 'ops', ops: [] };
     }
 
+    // A block-attribute change (heading level / list wrap-unwrap-renest) preserves the block count + text
+    // and only changes style/list context → emit setBlockAttr (R5 task 011). Tried BEFORE the structural
+    // classifier, which would otherwise defer these as `defer-structural` (the R4 SDL-1/2 guard).
+    const blockAttr = classifyBlockAttrStep(step, docBefore);
+    if (blockAttr) return blockAttr;
+
     // Cross-paragraph or block-boundary ReplaceStep (split/merge/para insert/delete) → synthesize the
     // structural op (task 031). Whole-paragraph delete/merge is captured here (closes task 023's gap).
     return classifyStructuralStep(step, docBefore, 'replace-step-structural');
@@ -544,8 +677,11 @@ export function classifyStep(
     return { kind: 'defer-structural', step, reason: `attr-step:${step.attr}` };
   }
 
-  // --- ReplaceAroundStep (list wrap/unwrap, blockquote, para split/merge) → structural (task 031) ----
+  // --- ReplaceAroundStep (list wrap/unwrap, blockquote, para split/merge) → block-attr or structural ----
   if (step instanceof ReplaceAroundStep) {
+    // Heading toggle (setBlockType) + list wrap/unwrap/re-nest arrive here → setBlockAttr (R5 task 011).
+    const blockAttr = classifyBlockAttrStep(step, docBefore);
+    if (blockAttr) return blockAttr;
     return classifyStructuralStep(step, docBefore, 'replace-around-step');
   }
 
@@ -818,6 +954,16 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     assoc,
   });
 
+  // setBlockAttr is paragraph-scoped (no run offset). Alignment arrives as an AttrStep (task 020); heading/
+  // list (task 011) arrive as a ReplaceStep/ReplaceAroundStep block-boundary edit. Anchor at the block
+  // position so the rebasing pass still flags the op if a later edit deletes it (never-silently-drop). Its
+  // durable payload paraId is captured from the pre-step doc at classify time.
+  if (op.type === 'setBlockAttr') {
+    if (step instanceof AttrStep) return { kind: 'block', point: toFinal(step.pos, -1) };
+    if (step instanceof ReplaceStep || step instanceof ReplaceAroundStep) return { kind: 'block', point: toFinal(step.from, -1) };
+    return null;
+  }
+
   if (
     op.type === 'splitParagraph' ||
     op.type === 'mergeParagraph' ||
@@ -850,11 +996,6 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
   ) {
     return { kind: 'range', start: toFinal(step.from, -1), end: toFinal(step.to, 1) };
   }
-  if (step instanceof AttrStep && op.type === 'setBlockAttr') {
-    // A NODE position (the paragraph itself), not a text offset — assoc -1 keeps it anchored to
-    // the node's own start rather than drifting past it.
-    return { kind: 'block', point: toFinal(step.pos, -1) };
-  }
   return null;
 }
 
@@ -884,12 +1025,12 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       if (!s || !e || s.paraId !== e.paraId) return null;
       return { ...op, paraId: s.paraId, range: { start: pointOf(s), end: pointOf(e) } } as ComposeOperation;
     }
-    case 'setBlockAttr': {
-      if (anchor.kind !== 'block') return null;
-      const node = doc.nodeAt(anchor.point.pos);
-      if (!isParaIdBlock(node)) return null;
-      return { ...op, paraId: (node.attrs as { paraId: string }).paraId };
-    }
+    case 'setBlockAttr':
+      // setBlockAttr's paraId is DURABLE — captured from the pre-step block at classify time (for a heading/
+      // list type-change the LIVE block may carry a re-minted id, so re-deriving from the current position
+      // could mis-address the op). Return it as-captured; the rebasing `deletedContentFlag` still guards it
+      // (never-silently-drop), same as the structural ops below.
+      return op;
     case 'splitParagraph':
     case 'mergeParagraph':
     case 'insertParagraph':

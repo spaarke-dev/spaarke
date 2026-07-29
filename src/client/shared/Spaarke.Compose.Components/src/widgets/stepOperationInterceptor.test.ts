@@ -30,8 +30,10 @@
  */
 import { Schema, Slice, Fragment } from '@tiptap/pm/model';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { EditorState } from '@tiptap/pm/state';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
+import type { Command } from '@tiptap/pm/state';
 import { ReplaceStep, AddMarkStep, AttrStep } from '@tiptap/pm/transform';
+import { wrapInList, sinkListItem } from '@tiptap/pm/schema-list';
 
 import {
   classifyStep,
@@ -61,6 +63,18 @@ const schema = new Schema({
       parseDOM: [{ tag: 'p' }],
       toDOM: () => ['p', 0],
     },
+    // R5 task 011 — heading + list nodes mirror the StarterKit schema ComposeEditor mounts, so a heading
+    // toggle / list wrap produces the same ReplaceAroundStep/ReplaceStep shape the classifier sees in prod.
+    heading: {
+      group: 'block',
+      content: 'inline*',
+      attrs: { paraId: { default: null }, level: { default: 1 }, textAlign: { default: null } },
+      parseDOM: [{ tag: 'h1', attrs: { level: 1 } }],
+      toDOM: node => [`h${node.attrs.level as number}`, 0],
+    },
+    orderedList: { group: 'block', content: 'listItem+', parseDOM: [{ tag: 'ol' }], toDOM: () => ['ol', 0] },
+    bulletList: { group: 'block', content: 'listItem+', parseDOM: [{ tag: 'ul' }], toDOM: () => ['ul', 0] },
+    listItem: { content: 'paragraph block*', parseDOM: [{ tag: 'li' }], toDOM: () => ['li', 0] },
     // Mirrors task 021's non-editable leaf (atom: true). Name intentionally DIFFERENT
     // from task 021's (`composeBlockAtom`) to prove the guard is schema-driven, not name-coupled.
     opaqueAtom: {
@@ -711,5 +725,122 @@ describe('RebasedOperationLog — op-log survives a rejected save, cleared only 
     expect(remaining.orderedOps).toHaveLength(1);
     expect((remaining.orderedOps[0].operation as InsertTextOperation).text).toBe('B');
     expect(log.size).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Heading / list block-attribute changes → setBlockAttr (R5 task 011, G3)
+// ---------------------------------------------------------------------------
+//
+// The R4 SDL-1/2 guard deferred heading + list edits as `defer-structural`. Task 011's classifier EMITS the
+// closed-set setBlockAttr op (Style / ListOrdered / ListLevel) for these block-boundary steps, mirroring the
+// server op schema. paraId is read from the PRE-STEP block (durable). These exercise the concrete acceptance
+// behavior "a heading/list edit EMITS setBlockAttr, no longer defer-structural".
+
+/** A single heading node, paraId `id`, level `level`, text `text`. */
+function oneHeading(id: string, text: string, level: number): PMNode {
+  const h = schema.nodes.heading.create({ paraId: id, level }, text ? [schema.text(text)] : []);
+  return schema.nodes.doc.create(null, [h]);
+}
+
+/** Run a ProseMirror command against `state`, returning the transaction it dispatched (or null). */
+function runCommand(state: EditorState, cmd: Command): { tr: EditorState['tr']; state: EditorState } | null {
+  let captured: EditorState['tr'] | null = null;
+  cmd(state, tr => {
+    captured = tr;
+  });
+  return captured ? { tr: captured, state } : null;
+}
+
+/** Place the selection inside the first paragraph/heading at absolute char offset `k`, then return the state. */
+function withCaretAt(state: EditorState, pos: number): EditorState {
+  return state.apply(state.tr.setSelection(TextSelection.create(state.doc, pos)));
+}
+
+describe('classifyStep — heading style changes → setBlockAttr(Style) (R5 task 011)', () => {
+  it('toggling a paragraph to Heading 2 emits setBlockAttr{attr:Style, value:Heading2} anchored to the pre-step paraId', () => {
+    const doc = onePara('AAAA0001', 'Section title');
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 2 });
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'Style', value: 'Heading2' }]);
+  });
+
+  it('changing an existing Heading1 to Heading3 emits setBlockAttr{Style:Heading3}', () => {
+    const doc = oneHeading('BBBB0002', 'Recitals', 1);
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 3 });
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'BBBB0002', attr: 'Style', value: 'Heading3' }]);
+  });
+
+  it('toggling a Heading back to a paragraph emits setBlockAttr{Style:Normal}', () => {
+    const doc = oneHeading('CCCC0003', 'Body now', 1);
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.paragraph, {});
+
+    const ops = expectOps(classifyStep(tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'CCCC0003', attr: 'Style', value: 'Normal' }]);
+  });
+});
+
+describe('classifyStep — list wrap / unwrap / re-nest → setBlockAttr(ListOrdered/ListLevel) (R5 task 011)', () => {
+  it('wrapping a paragraph in a numbered list emits setBlockAttr{ListOrdered:true}', () => {
+    const doc = onePara('AAAA0001', 'first item');
+    const state = withCaretAt(EditorState.create({ doc }), 3);
+    const run = runCommand(state, wrapInList(schema.nodes.orderedList));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'ListOrdered', value: 'true' }]);
+  });
+
+  it('wrapping a paragraph in a bullet list emits setBlockAttr{ListOrdered:false}', () => {
+    const doc = onePara('AAAA0001', 'first item');
+    const state = withCaretAt(EditorState.create({ doc }), 3);
+    const run = runCommand(state, wrapInList(schema.nodes.bulletList));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'ListOrdered', value: 'false' }]);
+  });
+
+  it('sinking (indenting) a list item emits setBlockAttr{ListLevel} at the deeper depth', () => {
+    const p = (id: string, t: string): PMNode => schema.nodes.paragraph.create({ paraId: id }, [schema.text(t)]);
+    const li = (id: string, t: string): PMNode => schema.nodes.listItem.create(null, p(id, t));
+    const ol = schema.nodes.orderedList.create(null, [li('AAAA0001', 'a'), li('BBBB0002', 'b')]);
+    const doc = schema.nodes.doc.create(null, [ol]);
+
+    // Caret inside the SECOND item's paragraph. li(a)=[1,6): p(a) content at 3. li(b)=[6,11): p(b) content at 8.
+    const state = withCaretAt(EditorState.create({ doc }), 8);
+    const run = runCommand(state, sinkListItem(schema.nodes.listItem));
+    expect(run).not.toBeNull();
+
+    const ops = expectOps(classifyStep(run!.tr.steps[0], run!.state.doc, {}));
+    expect(ops).toEqual([{ type: 'setBlockAttr', paraId: 'BBBB0002', attr: 'ListLevel', value: '1' }]);
+  });
+});
+
+describe('RebasedOperationLog — heading/list setBlockAttr is CAPTURED (no silent loss, R5 task 011)', () => {
+  it('a heading-toggle transaction lands a setBlockAttr(Style) op in the serialized log', () => {
+    const doc = onePara('AAAA0001', 'title');
+    const log = new RebasedOperationLog();
+    const state = EditorState.create({ doc });
+    const tr = state.tr.setBlockType(1, 1, schema.nodes.heading, { level: 2 });
+
+    const appended = log.recordTransaction(tr);
+
+    expect(appended).toEqual([{ type: 'setBlockAttr', paraId: 'AAAA0001', attr: 'Style', value: 'Heading2' }]);
+    const snapshot = log.serialize(tr.doc);
+    // The op survives serialize with its durable pre-step paraId (never dropped, never mis-addressed).
+    expect(snapshot.orderedOps).toHaveLength(1);
+    expect(snapshot.orderedOps[0].operation).toEqual({
+      type: 'setBlockAttr',
+      paraId: 'AAAA0001',
+      attr: 'Style',
+      value: 'Heading2',
+    });
   });
 });

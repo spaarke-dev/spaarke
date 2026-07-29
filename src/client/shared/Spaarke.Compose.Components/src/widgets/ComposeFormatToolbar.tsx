@@ -449,30 +449,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
-  // ---- task 038 (spaarkeai-compose-r4 zero-error guardrail pass) --------------------------------
-  // The tracked-edit path (loaded/imported docs) originally had NO representation for alignment (the
-  // engine threw StructuralOpNotYetImplemented → 422) nor for heading/list/table structural edits
-  // (silently deferred). On a LOADED doc (`hasLoadedBaseline === true`) those controls were DISABLED; a
-  // BORN-IN-EDITOR draft (blank / AI-draft, `hasLoadedBaseline` falsy) kept them (the
-  // ComposeDocumentRenderer authors them cleanly). This SUPERSEDES + INVERTS task 037's table gating:
-  // the renderer authors born-in-editor tables cleanly, but the engine has no table op and would
-  // silently drop a loaded-doc table — so table-insert is ENABLED born-in-editor and DISABLED loaded
-  // (the exact opposite of what 037 shipped). Hyperlinks are unrepresentable in BOTH modes in R4 (no
-  // mark op, no content-model href). Heading/list/table remain deferred (R5 tasks 011/014).
-  //
-  // R5 task 010 (G3 alignment applier) RE-ENABLES alignment on loaded docs: ComposeShadowPatchEngine now
-  // applies a setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment buttons are gated by
-  // `alignmentEditDisabled` (controlDisabled only) — independent of `structuralEditDisabled`, which still
-  // gates heading/list/table until 011/014 land. See projects/spaarkeai-compose-r5 (G3/G4/G5 gap ledger).
+  // ---- task 038 guardrails, progressively lifted by R5 (spaarkeai-compose-r5 G3/G4) ----------------
+  // The tracked-edit path (loaded/imported docs) originally had NO representation for alignment/heading/
+  // list/table, so those controls were DISABLED on a LOADED doc and kept only for a BORN-IN-EDITOR draft
+  // (the ComposeDocumentRenderer authors them cleanly). R5 lifts the guards one construct at a time as the
+  // ComposeShadowPatchEngine gains each applier:
+  //   - R5 task 010 (G3 alignment): alignment RE-ENABLED on loaded docs (tracked w:pPrChange).
+  //   - R5 task 011 (G3 heading/list): heading + bullet/ordered list RE-ENABLED on loaded docs (tracked
+  //     w:pPrChange for Style/ListOrdered/ListLevel; list numbering reuses R4.5's numbering engine).
+  //   - Table-insert remains loaded-gated until R5 task 014 (G4 table op) — the engine has no table op yet
+  //     and would silently drop a loaded-doc table. (Born-in-editor tables stay enabled — renderer authors them.)
+  //   - Hyperlinks remain unrepresentable in BOTH modes until R5 G5 (no mark op, no content-model href).
   const isLoadedBaseline = hasLoadedBaseline === true;
   /** Hover tooltip on a control disabled because its feature is deferred to a future release. */
   const FUTURE_RELEASE_TOOLTIP = 'Available in a future release';
   const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
-  // Heading + bullet/ordered list — still deferred on loaded docs (R5 task 011).
-  const structuralEditDisabled = controlDisabled || isLoadedBaseline;
+  // Heading + bullet/ordered list — RE-ENABLED on loaded docs (R5 task 011); read-only gate still applies.
+  const headingListEditDisabled = controlDisabled;
   // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
   const alignmentEditDisabled = controlDisabled;
-  // INVERTED from task 037: enabled born-in-editor, disabled loaded.
+  // Table-insert — still loaded-gated (R5 task 014). Enabled born-in-editor, disabled loaded.
   const tableInsertDisabled = controlDisabled || isLoadedBaseline;
   // Hyperlinks are not representable in EITHER mode in R4 (R5 G5).
   const hyperlinkDisabled = true;
@@ -485,49 +481,31 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       data-testid="compose-format-toolbar"
     >
       {/* ---- Body (block/heading style) ---- */}
-      {/* task 038: heading changes are deferred on a LOADED doc (the engine has no setBlockAttr applier
-          — R5 G3), so render a disabled, tooltip'd button instead of an openable menu. A born-in-editor
-          draft keeps the full heading menu. testId is stable across both branches. */}
-      {isLoadedBaseline ? (
-        <Tooltip content={FUTURE_RELEASE_TOOLTIP} relationship="description" withArrow>
+      {/* R5 task 011 (G3 heading/list): the heading menu is RE-ENABLED on loaded docs — the engine now applies
+          a setBlockAttr Style op as a tracked w:pPrChange. Gated only by the read-only `controlDisabled`. */}
+      <Menu positioning="below-start">
+        <MenuTrigger disableButtonEnhancement>
           <Button
             appearance="subtle"
             size="small"
-            disabled
+            disabled={headingListEditDisabled}
             className={styles.menuButton}
             icon={<ChevronDown16Regular />}
             iconPosition="after"
-            aria-label={`${currentBlockLabel(editor)} — block style`}
             data-testid="compose-format-heading-menu"
           >
             {currentBlockLabel(editor)}
           </Button>
-        </Tooltip>
-      ) : (
-        <Menu positioning="below-start">
-          <MenuTrigger disableButtonEnhancement>
-            <Button
-              appearance="subtle"
-              size="small"
-              disabled={controlDisabled}
-              className={styles.menuButton}
-              icon={<ChevronDown16Regular />}
-              iconPosition="after"
-              data-testid="compose-format-heading-menu"
-            >
-              {currentBlockLabel(editor)}
-            </Button>
-          </MenuTrigger>
-          <MenuPopover>
-            <MenuList>
-              <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
-              <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
-              <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
-              <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
-            </MenuList>
-          </MenuPopover>
-        </Menu>
-      )}
+        </MenuTrigger>
+        <MenuPopover>
+          <MenuList>
+            <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
+            <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
+            <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
+            <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
+          </MenuList>
+        </MenuPopover>
+      </Menu>
 
       {/* ---- Paragraph (lists / blockquote / alignment) ---- */}
       <Menu positioning="below-start">
@@ -540,8 +518,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -549,8 +526,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={structuralEditDisabled}
-              deferredReason={deferredIfLoaded}
+              disabled={headingListEditDisabled}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />

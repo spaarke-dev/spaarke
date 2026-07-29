@@ -346,20 +346,19 @@ describe('ComposeFormatToolbar — Table insert INVERTED to born-in-editor-only 
 //     w:pPrChange) — see the alignment-specific describe block below.
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED doc (task 038)', () => {
-  it('on a LOADED doc, the heading dropdown is DISABLED (SDL-1)', () => {
+describe('ComposeFormatToolbar — edit-path controls on a LOADED doc (task 038; heading/list re-enabled by R5 task 011)', () => {
+  it('on a LOADED doc, the heading dropdown is ENABLED (R5 task 011 — SDL-1 guard removed)', () => {
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
-    // Rendered as a disabled, tooltip-bearing button (no openable menu) on a loaded doc.
-    expect(screen.getByTestId('compose-format-heading-menu')).toBeDisabled();
+    // The engine now applies a setBlockAttr Style op as a tracked w:pPrChange — the menu is openable.
+    expect(screen.getByTestId('compose-format-heading-menu')).not.toBeDisabled();
   });
 
-  it('on a LOADED doc, the bullet + numbered list buttons are DISABLED (SDL-2)', async () => {
+  it('on a LOADED doc, the bullet + numbered list buttons are ENABLED (R5 task 011 — SDL-2 guard removed)', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { hasLoadedBaseline: true } });
-    // The Paragraph trigger stays enabled (blockquote is still reachable) — open it, then assert.
     await user.click(screen.getByTestId('compose-format-paragraph-menu'));
-    expect(screen.getByTestId('compose-format-bullet-list')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
   });
 
   it('on a BORN-IN-EDITOR doc, heading / list are ENABLED', async () => {
@@ -402,7 +401,8 @@ describe('ComposeFormatToolbar — deferred edit-path controls gated on a LOADED
 //     removes the R4 ET-1 guard). ComposeShadowPatchEngine now applies a
 //     setBlockAttr Alignment op as a tracked w:pPrChange, so the alignment
 //     buttons are gated ONLY by the read-only `disabled` prop, independent of
-//     `hasLoadedBaseline` — unlike heading/list/table (still deferred to 011/014).
+//     `hasLoadedBaseline`. Heading/list joined this set in R5 task 011; only
+//     table-insert stays deferred (to R5 task 014).
 // ---------------------------------------------------------------------------
 
 describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard removed)', () => {
@@ -413,9 +413,9 @@ describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard r
     expect(screen.getByTestId('compose-format-align-left')).not.toBeDisabled();
     expect(screen.getByTestId('compose-format-align-center')).not.toBeDisabled();
     expect(screen.getByTestId('compose-format-align-right')).not.toBeDisabled();
-    // Heading/list stay deferred on the SAME loaded doc — alignment's re-enable is independent.
-    expect(screen.getByTestId('compose-format-bullet-list')).toBeDisabled();
-    expect(screen.getByTestId('compose-format-ordered-list')).toBeDisabled();
+    // Heading/list are ALSO re-enabled on the SAME loaded doc (R5 task 011); only table stays deferred (task 014).
+    expect(screen.getByTestId('compose-format-bullet-list')).not.toBeDisabled();
+    expect(screen.getByTestId('compose-format-ordered-list')).not.toBeDisabled();
   });
 
   it('on a BORN-IN-EDITOR doc, the alignment buttons are ENABLED (unchanged)', async () => {

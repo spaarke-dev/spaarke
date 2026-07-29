@@ -10,10 +10,11 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
-| **Progress** | **Pipeline complete.** spec.md + plan.md + 22 task POMLs + TASK-INDEX.md generated; registered as Project #695 + `projects/INDEX.md` row. |
-| **Status** | 🚀 **EXECUTING** — ✅ **Phase 0 COMPLETE (001–006 all done)**. Starting Phase 1 serial impl. |
-| **Active task** | 010 (G3 alignment applier) — first production-code task. |
-| **Next Action** | Serial impl (build-verify + commit between each): 010→011→012→013→014 (Phase 1); 020→022 + 021 (Phase 2); 030/031/032/033 (Phase 3); 040→041 (Phase 4) → **STOP before 042 deploy** (human-coordinated). |
+| **Progress** | Phase 0 done; task 010 (alignment applier) shipped. **NOW: task 011 (G3 heading/list applier).** |
+| **Status** | 🚀 **EXECUTING task 011** — FULL rigor, opus. Tracked w:pPrChange for Style/ListOrdered/ListLevel; client classifyStep emits heading/list; re-enable heading/list toolbar controls; reuse NumberingComputationEngine (reference-in-place, no fork). |
+| **Active task** | 011 (G3 heading/list applier). |
+| **Next Action** | Impl: (1) engine Style applier (pStyle in pPrChange), (2) engine List applier (numPr in pPrChange, reuse NumberingModel/engine), (3) client classifyStep emit Style/ListOrdered/ListLevel, (4) re-enable heading/list toolbar (keep table gated for 014), (5) seam slices, (6) build+test+byte-diff+publish, (7) code-review+adr-check, (8) /conflict-check, commit. |
+| **011 design notes** | Mirror task 010's ApplySetBlockAttrAlignment for Style (snapshot prior pStyle → pPrChange). List: reference existing suitable numId from NumberingModel; author minimal ordered/bullet abstractNum+instance ONLY if none (NFR-08 no-error). w:pPrChange nested prev-props = `ParagraphPropertiesExtended` (010 finding). Tracked path only; structure for 021 clean branch (like 010). |
 
 ## Phase-0 decisions locked (implementers MUST follow)
 - **002 — origin field** ✅: `sprk_composeorigin` Authored=100000000, Imported=100000001, default Imported, null→Imported (notes/g1-origin-field-asbuilt.md).

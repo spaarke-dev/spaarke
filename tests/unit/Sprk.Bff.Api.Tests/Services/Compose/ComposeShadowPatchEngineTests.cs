@@ -269,21 +269,23 @@ public sealed class ComposeShadowPatchEngineTests
         result.Should().BeSameAs(docx); // true no-op passthrough — never re-serialized
     }
 
-    // ── seam: setBlockAttr Style/ListOrdered/ListLevel are outside the four structural ops (R5 task 011 scope) ──
-    // NOTE: setBlockAttr Alignment moved OFF this seam in R5 task 010 (G3 alignment applier) — it now applies
-    // as a tracked w:pPrChange; see ComposeAlignmentApplierSeamTests (tests/integration/seam/Compose/) for its
-    // coverage. This test narrows to the attrs still deferred to task 011.
+    // ── setBlockAttr Style/ListOrdered/ListLevel now APPLY (R5 task 010 Alignment; R5 task 011 Style/List) ──
+    // Full corpus coverage lives in ComposeAlignmentApplierSeamTests + ComposeHeadingListApplierSeamTests
+    // (tests/integration/seam/Compose/). This unit case confirms Style is no longer refused at a seam — it
+    // sets w:pStyle inside a tracked w:pPrChange.
 
-    [Fact(DisplayName = "Apply: a setBlockAttr Style op is refused at its own (non-task-031, non-task-010) seam")]
-    public void Apply_SetBlockAttrOp_RefusedAtSeam()
+    [Fact(DisplayName = "Apply: a setBlockAttr Style op applies w:pStyle inside a tracked w:pPrChange (R5 task 011)")]
+    public void Apply_SetBlockAttrStyleOp_AppliesTrackedPStyleChange()
     {
         var docx = Pack(Para("AAAA0001", TextRun("para")));
         var log = Log(new SetBlockAttrOperation { ParaId = "AAAA0001", Attr = ComposeBlockAttr.Style, Value = "Heading1" });
 
-        var act = () => _engine.Apply(docx, log, timestamp: When);
+        var result = _engine.Apply(docx, log, timestamp: When);
 
-        act.Should().Throw<ComposePatchException>()
-            .Which.Kind.Should().Be(ComposePatchErrorKind.StructuralOpNotYetImplemented);
+        var pPr = ParagraphById(result, "AAAA0001").ParagraphProperties!;
+        pPr.GetFirstChild<ParagraphStyleId>()!.Val!.Value.Should().Be("Heading1");
+        pPr.GetFirstChild<ParagraphPropertiesChange>().Should().NotBeNull(
+            "the style change is recorded as a tracked w:pPrChange, not refused");
     }
 
     // ── structural: splitParagraph (inserted para-mark) ─────────────────────────────────────────────

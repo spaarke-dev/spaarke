@@ -4,7 +4,7 @@
     <title>G3 heading/list applier — setBlockAttr Style/ListOrdered/ListLevel → w:pPrChange; client emits heading/list; reuse NumberingComputationEngine</title>
     <phase>1 Edit-path ops</phase>
     <gate>dep:005,010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared OOXML write engine plus the client step classifier; reuses R4.5's numbering engine across a visibility boundary; save/apply change requires ADR-038 seam DoD + byte-diff no-regression.</rigor-reason>
     <model-tier>opus</model-tier>

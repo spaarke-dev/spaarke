@@ -195,9 +195,13 @@ public sealed class ComposeAlignmentApplierSeamTests
     [InlineData(ComposeBlockAttr.Style)]
     [InlineData(ComposeBlockAttr.ListOrdered)]
     [InlineData(ComposeBlockAttr.ListLevel)]
-    public void SetBlockAttr_NonAlignmentAttrs_StillThrowStructuralOpNotYetImplemented_ScopeBoundaryHeldForTask011(
+    public void SetBlockAttr_NonAlignmentAttrs_NoLongerThrowNotYetImplemented_Task011ImplementedTheAppliers(
         ComposeBlockAttr attr)
     {
+        // Task 010's scope boundary (Style/ListOrdered/ListLevel → StructuralOpNotYetImplemented) is REMOVED by
+        // task 011, which implemented all three appliers. An unrecognized value 'x' now reaches the applier and
+        // is rejected as InvalidBlockAttrValue (proving the applier RAN + validated) — never the old
+        // blanket StructuralOpNotYetImplemented. Full positive behavior lives in ComposeHeadingListApplierSeamTests.
         var (original, paraId) = LoadFirstFixtureParagraph();
 
         var log = new ComposeOperationLog
@@ -211,7 +215,7 @@ public sealed class ComposeAlignmentApplierSeamTests
         var act = () => _engine.Apply(original, log, author: "Seam", timestamp: When);
 
         act.Should().Throw<ComposePatchException>()
-            .Which.Kind.Should().Be(ComposePatchErrorKind.StructuralOpNotYetImplemented);
+            .Which.Kind.Should().Be(ComposePatchErrorKind.InvalidBlockAttrValue);
     }
 
     // -- helpers --------------------------------------------------------------------------------

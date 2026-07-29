@@ -166,7 +166,7 @@ public sealed class ComposeShadowPatchEngine
             var body = mainPart.Document?.Body
                 ?? throw new ComposePatchException(ComposePatchErrorKind.MalformedDocument, "The .docx main document part has no body.");
 
-            var session = new PatchSession(mainPart, body, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime);
+            var session = new PatchSession(mainPart, body, retainedBytes, author ?? DefaultAuthor, (timestamp ?? DateTimeOffset.UtcNow).UtcDateTime);
             session.Execute(ops, anchoredComments);
 
             mainPart.Document!.Save();
@@ -183,16 +183,29 @@ public sealed class ComposeShadowPatchEngine
     {
         private readonly MainDocumentPart _mainPart;
         private readonly Body _body;
+        private readonly byte[] _retainedBytes;
         private readonly string _author;
         private readonly DateTime _date;
         private readonly Dictionary<string, Paragraph> _byParaId;
         private int _idCounter;
         private WordprocessingCommentsPart? _commentsPart;
 
-        public PatchSession(MainDocumentPart mainPart, Body body, string author, DateTime date)
+        // Lazy per-apply-session cache of R4.5's read-side numbering MODEL
+        // (ComposeDocxProjectionBuilder.BuildNumberingModel — referenced in place per task 005, R5-D4:
+        // reuse, never fork). See GetNumberingModel: the model is built from a throwaway read-only probe over
+        // the retained bytes so a list op that only REFERENCES existing numbering never materializes (and thus
+        // never re-serializes) the EDITABLE numbering/styles parts — they stay byte-identical (NFR-01 / I-4).
+        private ComposeDocxProjectionBuilder.NumberingModel? _numberingModel;
+
+        // Set once this session AUTHORS a new numbering definition into the editable numbering part; after that
+        // the model must be read from the (now-modified) editable part rather than the pristine retained bytes.
+        private bool _numberingAuthored;
+
+        public PatchSession(MainDocumentPart mainPart, Body body, byte[] retainedBytes, string author, DateTime date)
         {
             _mainPart = mainPart;
             _body = body;
+            _retainedBytes = retainedBytes;
             _author = author;
             _date = date;
             _byParaId = BuildParaIdIndex(body);
@@ -246,18 +259,28 @@ public sealed class ComposeShadowPatchEngine
                         break;
 
                     // setBlockAttr (alignment/style/list block application) is outside task 031's four-op scope.
-                    // R5 task 010 (G3) fills the Alignment case; Style/ListOrdered/ListLevel remain deferred to
-                    // task 011 (G3 heading/list — reuses NumberingComputationEngine).
+                    // R5 task 010 (G3) filled the Alignment case; R5 task 011 (G3 heading/list) fills Style +
+                    // ListOrdered/ListLevel — each a tracked w:pPrChange, reusing R4.5's numbering MODEL for the
+                    // list case (referenced in place per task 005; never a fork of the numbering algorithm).
                     case SetBlockAttrOperation setAttr when setAttr.Attr == ComposeBlockAttr.Alignment:
                         ApplySetBlockAttrAlignment(setAttr);
                         break;
 
+                    case SetBlockAttrOperation setAttr when setAttr.Attr == ComposeBlockAttr.Style:
+                        ApplySetBlockAttrStyle(setAttr);
+                        break;
+
+                    case SetBlockAttrOperation setAttr when setAttr.Attr is ComposeBlockAttr.ListOrdered or ComposeBlockAttr.ListLevel:
+                        ApplySetBlockAttrList(setAttr);
+                        break;
+
                     case SetBlockAttrOperation setAttr:
+                        // Defensive: ComposeBlockAttr is a closed set (Alignment/Style/ListOrdered/ListLevel), all
+                        // handled above. A value here means the enum grew without an applier — refuse, never guess.
                         throw new ComposePatchException(
                             ComposePatchErrorKind.StructuralOpNotYetImplemented,
-                            $"Operation 'setBlockAttr' (paraId {op.ParaId}, attr {setAttr.Attr}) — paragraph " +
-                            "block-attribute application (style/list) is not yet implemented (R5 task 011); only " +
-                            "Alignment is implemented (R5 task 010).");
+                            $"Operation 'setBlockAttr' (paraId {op.ParaId}, attr {setAttr.Attr}) — no applier is " +
+                            "registered for this block attribute.");
 
                     default:
                         throw new ComposePatchException(
@@ -679,6 +702,396 @@ public sealed class ComposeShadowPatchEngine
             {
                 pPr.AppendChild(justification);
             }
+        }
+
+        // -- setBlockAttr: Style (heading level / list-paragraph style) (R5 G3, task 011) --------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.Style"/> op: resolves the target
+        /// paragraph by paraId ONLY (I-7 — no run offset, no text-search) and records the paragraph-style
+        /// change as a tracked <c>w:pPrChange</c> (the paragraph-property analogue of
+        /// <see cref="ApplySetBlockAttrAlignment"/>). <c>Normal</c>/<c>null</c> reverts to the default
+        /// paragraph style (drops <c>w:pStyle</c>); <c>Heading1..6</c> sets the heading style;
+        /// <c>ListParagraph</c> sets the list style. A move to a NON-list style (Normal/HeadingN) also drops
+        /// any DIRECT <c>w:numPr</c> — a heading numbers through its STYLE (never a direct numId, FR-27), and
+        /// Normal is plain body — so the paragraph cleanly leaves a list it was in.
+        /// </summary>
+        /// <remarks>Tracked path only (the engine's sole caller is the imported/tracked path). G2's
+        /// clean-apply branch (task 021, R5-D2) adds a sibling that sets <c>w:pStyle</c>/<c>w:numPr</c>
+        /// directly with NO <see cref="ParagraphPropertiesChange"/>; this method is self-contained (own
+        /// resolve + own mutation) precisely so that branch is easy to add later.</remarks>
+        private void ApplySetBlockAttrStyle(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+
+            if (!TryParseStyleValue(op.Value, out var styleId, out var isListParagraph))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.InvalidBlockAttrValue,
+                    $"setBlockAttr Style on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                    "expected one of Normal/Heading1..Heading6/ListParagraph (null/'Normal' reverts to the default style).");
+            }
+
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+            var previousProps = SnapshotPriorPPr(pPr);
+
+            pPr.RemoveAllChildren<ParagraphStyleId>();
+            if (styleId is not null)
+            {
+                pPr.PrependChild(new ParagraphStyleId { Val = styleId }); // w:pStyle is the FIRST child of CT_PPr.
+            }
+
+            if (!isListParagraph)
+            {
+                // Leaving a list: a non-list paragraph carries no direct numbering.
+                pPr.RemoveAllChildren<NumberingProperties>();
+            }
+
+            RecordPPrChange(pPr, previousProps);
+        }
+
+        // -- setBlockAttr: ListOrdered / ListLevel (R5 G3, task 011) ------------------------------------
+
+        /// <summary>
+        /// Applies a <c>setBlockAttr</c> <see cref="ComposeBlockAttr.ListOrdered"/> or
+        /// <see cref="ComposeBlockAttr.ListLevel"/> op: resolves the paragraph by paraId ONLY (I-7) and sets
+        /// a DIRECT <c>w:numPr</c> (numId + ilvl) recorded as a tracked <c>w:pPrChange</c>. The numId is
+        /// resolved through R4.5's read-side numbering MODEL (<see cref="EnsureListNumbering"/>) so the
+        /// resulting numbering renders identically to what the read-side
+        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> computes — the numbering
+        /// algorithm is NEVER re-implemented here (R5-D4 / task 005). <c>ListOrdered</c> switches
+        /// numbered/bullet at the current depth; <c>ListLevel</c> re-nests to the requested depth keeping the
+        /// paragraph's existing list identity when it has one.
+        /// </summary>
+        private void ApplySetBlockAttrList(SetBlockAttrOperation op)
+        {
+            var para = Resolve(op.ParaId);
+            var pPr = para.ParagraphProperties ??= new ParagraphProperties();
+            var existingNumPr = pPr.GetFirstChild<NumberingProperties>();
+
+            int numId;
+            int ilvl;
+
+            if (op.Attr == ComposeBlockAttr.ListOrdered)
+            {
+                if (!TryParseBool(op.Value, out var ordered))
+                {
+                    throw new ComposePatchException(
+                        ComposePatchErrorKind.InvalidBlockAttrValue,
+                        $"setBlockAttr ListOrdered on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                        "expected 'true' (numbered) or 'false' (bullet).");
+                }
+
+                ilvl = existingNumPr?.NumberingLevelReference?.Val?.Value ?? 0;
+                numId = EnsureListNumbering(ordered);
+            }
+            else // ListLevel
+            {
+                if (!TryParseLevel(op.Value, out ilvl))
+                {
+                    throw new ComposePatchException(
+                        ComposePatchErrorKind.InvalidBlockAttrValue,
+                        $"setBlockAttr ListLevel on paraId '{op.ParaId}' carries an unrecognized value '{op.Value}' — " +
+                        "expected a 0-based integer string '0'..'8'.");
+                }
+
+                // Keep the paragraph's existing list identity when it already is a list item; otherwise start
+                // an ordered list at the requested depth (a bare level with no list is not representable —
+                // default to ordered rather than error, so removing the SDL-2 guard never traps the user).
+                numId = existingNumPr?.NumberingId?.Val?.Value ?? EnsureListNumbering(ordered: true);
+            }
+
+            var previousProps = SnapshotPriorPPr(pPr);
+
+            // A list item carries a DIRECT w:numPr (mirrors ComposeDocumentRenderer.BuildListItem). The typed
+            // setter replaces any prior numPr at the schema-correct CT_PPr position.
+            pPr.NumberingProperties = new NumberingProperties(
+                new NumberingLevelReference { Val = ilvl },
+                new NumberingId { Val = numId });
+
+            // Ensure the paragraph reads as a list paragraph — UNLESS it is a heading (a heading keeps its
+            // heading style; ListParagraph carries no style numbering, so the direct numPr is not double-numbering).
+            if (!IsHeadingStyle(pPr.GetFirstChild<ParagraphStyleId>()?.Val?.Value))
+            {
+                pPr.RemoveAllChildren<ParagraphStyleId>();
+                pPr.PrependChild(new ParagraphStyleId { Val = "ListParagraph" });
+            }
+
+            RecordPPrChange(pPr, previousProps);
+        }
+
+        /// <summary>Maps a <see cref="SetBlockAttrOperation.Value"/> to the OOXML <c>w:pStyle</c> id to write
+        /// (or <c>null</c> to revert to the default paragraph style). Closed set:
+        /// <c>null</c>/<c>Normal</c> → default; <c>Heading1..Heading6</c>; <c>ListParagraph</c>. Mirrors the
+        /// client <c>ComposeBlockAttr Style</c> vocabulary + <see cref="ComposeDocumentRenderer"/>'s style ids.
+        /// Returns <c>false</c> for a value outside the closed set.</summary>
+        private static bool TryParseStyleValue(string? value, out string? styleId, out bool isListParagraph)
+        {
+            styleId = null;
+            isListParagraph = false;
+            switch (value)
+            {
+                case null:
+                case "Normal":
+                    return true; // styleId null ⇒ drop w:pStyle ⇒ default paragraph style
+                case "ListParagraph":
+                    styleId = "ListParagraph";
+                    isListParagraph = true;
+                    return true;
+                case "Heading1":
+                case "Heading2":
+                case "Heading3":
+                case "Heading4":
+                case "Heading5":
+                case "Heading6":
+                    styleId = value;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool TryParseBool(string? value, out bool result)
+        {
+            if (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)) { result = true; return true; }
+            if (string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)) { result = false; return true; }
+            result = false;
+            return false;
+        }
+
+        private static bool TryParseLevel(string? value, out int level)
+        {
+            if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out level) && level is >= 0 and <= 8)
+            {
+                return true;
+            }
+
+            level = 0;
+            return false;
+        }
+
+        // Detects a heading paragraph-style id ("Heading1".."HeadingN", any case) WITHOUT a text-search API
+        // (Substring/AsSpan equality, not StartsWith — the write path bans content-locating string APIs, I-7).
+        private static bool IsHeadingStyle(string? styleId) =>
+            styleId is { Length: >= 7 } && string.Equals(styleId.AsSpan(0, 7).ToString(), "Heading", StringComparison.OrdinalIgnoreCase);
+
+        // -- list numbering resolution (reuse R4.5's read-side model; never fork the algorithm) --------
+
+        /// <summary>R4.5's read-side numbering MODEL for this document, built lazily + cached per apply session
+        /// (referenced in place per task 005 — zero change to ComposeDocxProjectionBuilder). BEFORE this session
+        /// authors any numbering it is built from a THROWAWAY read-only probe over the retained bytes, so a
+        /// reference-only list op never materializes the EDITABLE numbering/styles DOM (which the SDK would then
+        /// re-serialize on save, changing those parts' bytes) — they stay copied-verbatim byte-identical
+        /// (NFR-01 / I-4). AFTER this session authors a definition into the editable numbering part, the model
+        /// is read from that (now-modified) part so a subsequent list op sees the just-authored numId.</summary>
+        private ComposeDocxProjectionBuilder.NumberingModel GetNumberingModel()
+        {
+            if (_numberingModel is not null)
+            {
+                return _numberingModel;
+            }
+
+            if (_numberingAuthored)
+            {
+                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(_mainPart);
+            }
+            else
+            {
+                using var probe = WordprocessingDocument.Open(new MemoryStream(_retainedBytes, writable: false), isEditable: false);
+                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(probe.MainDocumentPart!);
+            }
+
+            return _numberingModel;
+        }
+
+        /// <summary>
+        /// Returns a numId whose numbering the read-side engine renders as the requested list kind (ordered =
+        /// a numeric <c>w:numFmt</c>; bullet = <c>w:numFmt="bullet"</c>). PREFERS an existing DIRECT-list numId
+        /// already in the document's numbering model (pure reference — <c>numbering.xml</c> stays byte-identical,
+        /// task 005), excluding style-linked (heading) numbering; only AUTHORS a fresh definition when the
+        /// document carries no suitable list numbering — so removing the SDL-2 guard never yields a
+        /// user-triggerable error or a silent no-op (NFR-08). The label a paragraph then shows is computed by
+        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> at read time — this method picks
+        /// / declares the numbering DATA that engine reads, it does NOT compute labels (R5-D4 no-fork).
+        /// </summary>
+        private int EnsureListNumbering(bool ordered)
+        {
+            var model = GetNumberingModel();
+
+            // Exclude style-linked numIds (e.g. the Heading1..6 numbering) — attaching a heading's numbering
+            // to a list paragraph would mis-number it. A list wants its own direct-list numbering.
+            var styleLinkedNumIds = model.StyleLinkedNumbering.Values.Select(r => r.NumId);
+
+            foreach (var numId in model.AbstractNumIdByNumId.Keys.Except(styleLinkedNumIds))
+            {
+                var fmt = model.ResolveLevel(numId, 0)?.NumFmt;
+                if (fmt is null)
+                {
+                    continue;
+                }
+
+                var isBullet = fmt == NumberFormatValues.Bullet;
+                if (ordered ? !isBullet : isBullet)
+                {
+                    return numId; // reference in place — no numbering.xml change
+                }
+            }
+
+            return AuthorListNumbering(ordered);
+        }
+
+        /// <summary>Appends a minimal ordered/bullet numbering definition (abstractNum + instance) to the
+        /// document's numbering part (creating the part if absent), using non-colliding ids, and returns the
+        /// new numId. Mirrors <see cref="ComposeDocumentRenderer"/>'s abstractNum vocabulary (decimal
+        /// <c>%N.</c> / Symbol bullet) so the read-side engine computes clean labels; it declares numbering
+        /// DATA only (no label computation — R5-D4). Invalidates the cached model.</summary>
+        private int AuthorListNumbering(bool ordered)
+        {
+            var numberingPart = _mainPart.NumberingDefinitionsPart;
+            if (numberingPart is null)
+            {
+                numberingPart = _mainPart.AddNewPart<NumberingDefinitionsPart>();
+                numberingPart.Numbering = new Numbering();
+            }
+
+            var numbering = numberingPart.Numbering ??= new Numbering();
+
+            var abstractNumId = NextAbstractNumId(numbering);
+            var numId = NextNumId(numbering);
+            var abstractNum = ordered ? BuildOrderedAbstractNum(abstractNumId) : BuildBulletAbstractNum(abstractNumId);
+
+            // Schema: every <w:abstractNum> precedes every <w:num>. Insert after the last existing abstractNum,
+            // else before the first num, else append into the (fresh) numbering root.
+            var lastAbstract = numbering.Elements<AbstractNum>().LastOrDefault();
+            if (lastAbstract is not null)
+            {
+                lastAbstract.InsertAfterSelf(abstractNum);
+            }
+            else if (numbering.Elements<NumberingInstance>().FirstOrDefault() is { } firstNum)
+            {
+                firstNum.InsertBeforeSelf(abstractNum);
+            }
+            else
+            {
+                numbering.AppendChild(abstractNum);
+            }
+
+            numbering.AppendChild(new NumberingInstance(new AbstractNumId { Val = abstractNumId }) { NumberID = numId });
+            numbering.Save();
+
+            // A later list op must see the definition just authored — invalidate the cache and read the model
+            // from the (now-modified) editable numbering part from here on.
+            _numberingAuthored = true;
+            _numberingModel = null;
+            return numId;
+        }
+
+        private static int NextAbstractNumId(Numbering numbering)
+        {
+            var max = -1;
+            foreach (var a in numbering.Elements<AbstractNum>())
+            {
+                if (a.AbstractNumberId?.Value is { } v && v > max) max = v;
+            }
+
+            return max + 1;
+        }
+
+        private static int NextNumId(Numbering numbering)
+        {
+            var max = 0;
+            foreach (var n in numbering.Elements<NumberingInstance>())
+            {
+                if (n.NumberID?.Value is { } v && v > max) max = v;
+            }
+
+            return max + 1;
+        }
+
+        private static AbstractNum BuildOrderedAbstractNum(int abstractNumId)
+        {
+            var abstractNum = new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
+            {
+                AbstractNumberId = abstractNumId,
+            };
+
+            for (var ilvl = 0; ilvl <= 8; ilvl++)
+            {
+                abstractNum.AppendChild(new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Decimal },
+                    new LevelText { Val = $"%{ilvl + 1}." },
+                    new LevelJustification { Val = LevelJustificationValues.Left })
+                {
+                    LevelIndex = ilvl,
+                });
+            }
+
+            return abstractNum;
+        }
+
+        private static AbstractNum BuildBulletAbstractNum(int abstractNumId)
+        {
+            var abstractNum = new AbstractNum(new MultiLevelType { Val = MultiLevelValues.HybridMultilevel })
+            {
+                AbstractNumberId = abstractNumId,
+            };
+
+            for (var ilvl = 0; ilvl <= 8; ilvl++)
+            {
+                abstractNum.AppendChild(new Level(
+                    new StartNumberingValue { Val = 1 },
+                    new NumberingFormat { Val = NumberFormatValues.Bullet },
+                    new LevelText { Val = "•" },
+                    new LevelJustification { Val = LevelJustificationValues.Left },
+                    new NumberingSymbolRunProperties(
+                        new RunFonts { Ascii = "Symbol", HighAnsi = "Symbol", Hint = FontTypeHintValues.Default }))
+                {
+                    LevelIndex = ilvl,
+                });
+            }
+
+            return abstractNum;
+        }
+
+        // -- tracked paragraph-property change (shared by Style + List appliers) -----------------------
+
+        /// <summary>Clones the paragraph's CURRENT direct properties (every child EXCEPT an existing
+        /// <c>w:pPrChange</c>) into a <see cref="ParagraphPropertiesExtended"/> — the "changed from" state a
+        /// tracked <c>w:pPrChange</c> records so Word's "Reject Formatting Change" restores exactly what was
+        /// there. <see cref="ParagraphPropertiesExtended"/> (NOT <c>PreviousParagraphProperties</c>) is the SDK's
+        /// schema-contextual type for a <c>w:pPrChange</c> child — confirmed by round-trip in task 010
+        /// (notes/task-010-deviations.md §1).</summary>
+        private static ParagraphPropertiesExtended SnapshotPriorPPr(ParagraphProperties pPr)
+        {
+            // The w:pPrChange nested <w:pPr> is CT_PPrBase — it holds the paragraph-property children
+            // (w:pStyle, w:numPr, w:jc, w:ind, …) but NOT w:rPr (the paragraph-mark run properties),
+            // w:sectPr, or a nested w:pPrChange. Cloning any of those in would be schema-invalid (Word rejects
+            // it even though the lenient SDK reader tolerates it). Snapshot only the CT_PPrBase-valid children.
+            var previous = new ParagraphPropertiesExtended();
+            foreach (var child in pPr.ChildElements)
+            {
+                if (child is ParagraphPropertiesChange or ParagraphMarkRunProperties or SectionProperties)
+                {
+                    continue;
+                }
+
+                previous.AppendChild(child.CloneNode(true));
+            }
+
+            return previous;
+        }
+
+        /// <summary>Records <paramref name="previousProps"/> as a tracked <c>w:pPrChange</c> on
+        /// <paramref name="pPr"/> — never stacking (an earlier change to THIS paragraph within the SAME
+        /// Apply() is superseded), always the LAST child of CT_PPr. Mirrors
+        /// <see cref="ApplySetBlockAttrAlignment"/>'s pPrChange discipline.</summary>
+        private void RecordPPrChange(ParagraphProperties pPr, ParagraphPropertiesExtended previousProps)
+        {
+            pPr.RemoveAllChildren<ParagraphPropertiesChange>();
+            var pPrChange = new ParagraphPropertiesChange { Id = NextId(), Author = _author, Date = _date };
+            pPrChange.AppendChild(previousProps);
+            pPr.AppendChild(pPrChange);
         }
 
         // -- structural helpers -----------------------------------------------------------------------
