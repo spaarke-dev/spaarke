@@ -472,6 +472,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "email-communication-intelligence-r1 task 040 (FR-14) — Binding for email-create-task, a Linear AI Consumer (routed via IConsumerRoutingService.ResolveActionAsync/IActionResolver, mirroring email-triage/email-propose above) — NOT a chat/loop-projectable capability: toolDescription/surfaces/disposition/risk/captureMode/chipTransitions/onEventBindings are all null because CommunicationEnrichmentService.RunEmailCreateTaskAsync invokes the CREATE-TASK-FROM-EMAIL Action DIRECTLY off the enrichment path (via the ICommunicationCreateTaskAi PublicContracts facade, ADR-013) — never agent-selectable, never Click-dispatched (no infra/dataverse/inputschemas/ mirror either, same reason as email-triage/email-propose). actionCode resolves to the JPS Action authored by task 040 (infra/dataverse/actions/create-task-from-email.action.json, sprk_actioncode='create-task-from-email') which extracts candidate follow-up tasks/events (subject/description/optional due date), each with a verbatim citation + confidence, grounded in the already-produced triage output. A non-deadline-bearing candidate is created immediately via the SHIPPED create-task path (IActionSeam.CreateTaskAsync -> TaskActionCore, the same session-agnostic write core the chat-loop CREATE-TASK@v1 capability's dataverse.create_record tool ultimately backs); a deadline-bearing candidate is stored PENDING (sprk_emailreviewlog Proposed row, Decision-1 pattern reused from task 030) for human confirm (NFR-06/ADR-015) — never auto-finalized.",
+      "consumerType": "email-create-task",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Email Create Task (Job C)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "create-task-from-email",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "insights-ask",
       "consumerCode": "default",
       "environment": "*",

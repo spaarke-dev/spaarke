@@ -1,0 +1,105 @@
+{
+  "$comment": "email-communication-intelligence-r1 task 040 (NFR-07 blocking merge gate) — the email-create-task (Job C) eval family, joined to the SAME Category=GoldenUtteranceEval merge gate via CreateTaskFromEmailEvalTests.cs (identical net-new-family pattern as the triage-email / email-propose / NDA-review families in this directory — no shared golden-utterances.json edit for the family, no CI-YAML change; the trait IS the registration). Like TRIAGE-EMAIL/PROPOSE-FIELD-UPDATES, CREATE-TASK-FROM-EMAIL is NOT chat/loop-projectable — it is invoked directly off the Communication enrichment path (CommunicationEnrichmentService.RunEmailCreateTaskAsync via the ICommunicationCreateTaskAi PublicContracts facade), so 'channel' is uniformly 'event' and 'utterance' is the event/affordance descriptor, not NL phrasing. Five families: structured-output (the Action's own worked example -> the tasks[] output shape {subject, description, dueDate, citation{source, locator, quotedText}, reason, confidence}, cross-checked against BOTH the action file and this seed so either drifting fails a test), verify-cited-text (NFR-06 -- the CitationVerifier drops a fabricated quote, keeps a verbatim span), deadline-confirm (NFR-06/ADR-015 -- a candidate WITH a dueDate is deadline-bearing and MUST route to human-confirm, never auto-finalize; a candidate with none may create immediately), reuse-not-fork (FR-14/ADR-039 -- the create leg is the SAME IActionSeam.CreateTaskAsync/TaskActionCore write core the shipped chat-loop CREATE-TASK@v1 capability's dataverse.create_record tool ultimately backs -- no second create mechanism, grep-verifiable), no-second-pass (FR-05/FR-14 -- the facade has NO classification dependency; the triage output is grounding only).",
+  "schemaVersion": "create-task-from-email-eval@v1",
+  "cases": [
+    {
+      "caseId": "CREATETASK-001",
+      "family": "structured-output",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] inbound message enrichment extracts an implied follow-up task after the record is associated (task 020) and triaged (task 023)",
+      "notes": "The representative candidate from infra/dataverse/actions/create-task-from-email.action.json's own worked example (examples[0]) — asserts the Action's declared output shape (tasks[] of {subject, description, dueDate, citation{source, locator, quotedText}, reason, confidence}) and that the worked example populates every field with the expected values, including a concrete dueDate (the deadline-bearing case).",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 040 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "create-task-from-email",
+        "exampleTask": {
+          "subject": "Respond to settlement offer - Smith v. Acme",
+          "dueDate": "2026-08-21",
+          "citation": {
+            "source": "body",
+            "locator": "body: sentence 1",
+            "quotedText": "please respond to our settlement offer no later than Friday, August 21, 2026"
+          },
+          "reason": "The email sets a concrete response deadline of August 21, 2026.",
+          "confidence": 0.9
+        }
+      }
+    },
+    {
+      "caseId": "CREATETASK-002",
+      "family": "verify-cited-text",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] NFR-06 — a candidate whose quotedText IS a verbatim span of the source is kept; a fabricated quotedText is dropped",
+      "notes": "Demonstrates the verify-cited-text trust gate structurally (mechanical, no live model): CitationVerifier.IsCitedTextPresent returns true when the quotedText is a whitespace/case-normalized substring of the source communication/attachment, and false when it is not — the exact gate CommunicationEnrichmentService applies before creating or storing a candidate. A fabricated (hallucinated) citation is never created or stored.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "verifiedVsFabricatedDiffers": true
+      }
+    },
+    {
+      "caseId": "CREATETASK-003",
+      "family": "deadline-confirm",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] NFR-06/ADR-015 — a candidate WITH a concrete dueDate is deadline-bearing and MUST route to human-confirm (stored PENDING, never auto-finalized); a candidate with NO dueDate may be created immediately",
+      "notes": "Structural proof of the deadline-bearing -> confirm design: CommunicationEnrichmentService.RunEmailCreateTaskAsync branches on TaskCandidate.DueDate.HasValue — a non-null DueDate skips the IActionSeam.CreateTaskAsync call entirely and leaves the sprk_emailreviewlog Proposed row OPEN (no terminal row), while a null DueDate proceeds to create immediately and writes a terminal Applied row. Proven at the unit level (EmailCreateTaskSeamTests) against the REAL enrichment orchestration.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "deadlineBearingNeverAutoFinalizes": true
+      }
+    },
+    {
+      "caseId": "CREATETASK-004",
+      "family": "reuse-not-fork",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] the non-deadline-bearing create leg reuses the SHIPPED create-task write core (IActionSeam.CreateTaskAsync -> TaskActionCore) — the SAME session-agnostic core the chat-loop CREATE-TASK@v1 capability's dataverse.create_record tool ultimately backs. No second task-creation mechanism is introduced.",
+      "notes": "Grep-verifiable structural proof: CommunicationEnrichmentService references Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam and calls CreateTaskAsync — it does not construct a task Entity directly, does not call IGenericEntityService.CreateAsync('task', ...), and does not reference CreateTaskNodeExecutor. The Communication layer's ONLY task-creation call is through the ADR-013 facade.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "reusesShippedCreatePath": true
+      }
+    },
+    {
+      "caseId": "CREATETASK-005",
+      "family": "binding-resolution",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] CommunicationEnrichmentService resolves the CREATE-TASK-FROM-EMAIL Action via IActionResolver -> IConsumerRoutingService.ResolveActionAsync('email-create-task')",
+      "notes": "The exact read the Linear AI Consumer primitives perform (ActionResolver.ResolveAsync -> ConsumerRoutingService.ResolveActionAsync), read from the REAL mirror file — a drift in the mirror row (consumerType/actionCode typo) fails here, same mechanical posture as the triage-email/email-propose families' routing facts.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "catalogStatus": "mirrored",
+        "mirroredBy": "task 040 (infra/dataverse/sprk_playbookconsumer-rows.json)",
+        "actionCode": "create-task-from-email"
+      }
+    },
+    {
+      "caseId": "CREATETASK-006",
+      "family": "no-second-pass",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "[email-create-task] the create-task-from-email Action is Job C's OWN targeted 'implied follow-up work' extraction — never a second classification pass",
+      "notes": "Structural proof (FR-05/FR-14): CommunicationCreateTaskAi's constructor has NO dependency on ICommunicationClassificationAi/IOpenAiClient (it cannot invoke a classification even by mistake); the already-produced triage output is passed IN as optional grounding (CommunicationCreateTaskRequest.Triage), never re-derived. A single, legitimate targeted-extraction Action call.",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "noSecondClassificationPass": true
+      }
+    }
+  ]
+}

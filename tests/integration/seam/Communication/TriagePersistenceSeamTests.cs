@@ -90,6 +90,8 @@ public sealed class TriagePersistenceSeamTests
             assessedProducer,
             triageAi,
             new NullCommunicationProposeAi(),
+            new NullCommunicationCreateTaskAi(),
+            new Mock<IActionSeam>(MockBehavior.Loose).Object,
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

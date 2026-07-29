@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -37,6 +39,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly ICommunicationAssessedProducer _assessedProducer;
     private readonly ICommunicationTriageAi _triageAi;
     private readonly ICommunicationProposeAi _proposeAi;
+    private readonly ICommunicationCreateTaskAi _createTaskAi;
+    private readonly IActionSeam _actionSeam;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
 
     // ── Job B propose (task 030, FR-09) — sprk_emailreviewlog / sprk_emailupdatefield constants ──
@@ -50,6 +54,18 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
     /// <summary>As-built <c>sprk_emailreviewlog.sprk_actortype</c> = Machine (task 012 verification).</summary>
     private const int ReviewActorTypeMachine = 100000000;
+
+    /// <summary>
+    /// Job C (task 040, FR-14) — the <c>sprk_emailreviewlog.sprk_targetfield</c> sentinel PREFIX used to mark
+    /// a "create task" proposal row, distinguishing it from a Job B field-update proposal (which carries a
+    /// real target field logical name). Suffixed per-candidate with a short content hash of the candidate's
+    /// subject (<see cref="BuildCreateTaskSentinelField"/>) so two DIFFERENT implied tasks on the same email
+    /// each get their own open/closed lifecycle — reusing task 030's exact "open Proposed row with no later
+    /// terminal row" idempotency shape (<see cref="LoadOpenProposalFieldsAsync"/>) rather than forking a
+    /// second pending-store mechanism. This sentinel can never collide with a real allow-listed field name
+    /// (Job B's allow-list only ever contains real Dataverse field logical names).
+    /// </summary>
+    private const string CreateTaskSentinelFieldPrefix = "__create_task__:";
 
     /// <summary>
     /// The 7 core record types whose <c>sprk_communication</c> regarding lookup Job B may propose updates to
@@ -114,6 +130,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         ICommunicationAssessedProducer assessedProducer,
         ICommunicationTriageAi triageAi,
         ICommunicationProposeAi proposeAi,
+        ICommunicationCreateTaskAi createTaskAi,
+        IActionSeam actionSeam,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
@@ -122,6 +140,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
         _triageAi = triageAi ?? throw new ArgumentNullException(nameof(triageAi));
         _proposeAi = proposeAi ?? throw new ArgumentNullException(nameof(proposeAi));
+        _createTaskAi = createTaskAi ?? throw new ArgumentNullException(nameof(createTaskAi));
+        _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
         _logger = logger;
     }
 
@@ -165,6 +185,13 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         // classification). Reuses the hoisted triageResult; no re-derivation.
         await RunStepAsync("email-propose", communicationId,
             () => RunEmailProposeAsync(communicationId, message, triageResult, ct));
+
+        // Job C create-task (task 040, FR-14): best-effort, non-fatal (NFR-04). Runs alongside email-propose
+        // (also grounded in the hoisted triageResult, no second classification) — a distinct capability
+        // (implied follow-up work vs a field-update proposal), so it is its own step/method, independent of
+        // email-propose's allow-list gating.
+        await RunStepAsync("email-create-task", communicationId,
+            () => RunEmailCreateTaskAsync(communicationId, message, triageResult, ct));
 
         await RunStepAsync("assessment-event", communicationId,
             () => RunAssessmentEmissionAsync(communicationId, direction, message, triageResult, ct));
@@ -982,6 +1009,322 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
     private static string Truncate(string value, int maxLength) =>
         string.IsNullOrEmpty(value) || value.Length <= maxLength ? value : value[..maxLength];
+
+    // ── Step 4.7: Job C create-task (task 040, FR-14) ────────────────────────────
+    /// <summary>
+    /// email-communication-intelligence-r1 task 040 (FR-14). For a communication associated to one of the 7
+    /// core records (task 020), extracts candidate follow-up tasks/events implied by the email content —
+    /// grounded in the already-produced triage output (hoisted, no second classification) — and, for each
+    /// surviving candidate, either creates it immediately via the SHIPPED create-task write core
+    /// (<see cref="IActionSeam.CreateTaskAsync"/> → <c>TaskActionCore</c>) when it carries NO concrete
+    /// deadline, or stores it PENDING (an <c>sprk_emailreviewlog</c> <c>Proposed</c> row — reusing task 030's
+    /// Decision-1 pending-store pattern, no new table) for HUMAN CONFIRM when it DOES carry a deadline
+    /// (NFR-06 / ADR-015 — nothing deadline-bearing auto-finalizes). Every created/proposed item carries a
+    /// citation to the source communication (email + locator).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Which associated record.</b> Reuses the SAME core-record association read as Job B
+    /// (<see cref="CoreProposeTargets"/> / <see cref="ResolveAssociatedCoreRecords"/>) and targets the
+    /// FIRST resolved association (deterministic order) — "the record the email is associated to" (task
+    /// 020) — rather than invoking the extraction Action once per associated record, which would multiply
+    /// LLM cost for the same email without a corresponding benefit.
+    /// </para>
+    /// <para>
+    /// <b>Reuse, no fork (FR-14 / ADR-039).</b> The create is the SAME session-agnostic write core Job B's
+    /// apply step (task 031) and the chat-loop CREATE-TASK@v1 capability's <c>dataverse.create_record</c>
+    /// tool both ultimately reach (<c>TaskActionCore</c>) — reached here via the ADR-013
+    /// <see cref="IActionSeam"/> facade (already registered unconditionally, not AI-model-gated). No second
+    /// create mechanism is introduced.
+    /// </para>
+    /// <para>
+    /// <b>Uniform audit trail.</b> EVERY surviving candidate is stored as a <c>Proposed</c> row FIRST
+    /// (<see cref="StoreCreateTaskProposedRowAsync"/>) — this is the citation-bearing audit record task 041
+    /// and any future review surface can read. A non-deadline-bearing candidate immediately gets a SECOND
+    /// <c>Applied</c> row once the create succeeds (<see cref="WriteCreateTaskAppliedRowAsync"/>); a
+    /// deadline-bearing candidate's <c>Proposed</c> row is left OPEN (no later terminal row) — the exact
+    /// "open/pending" shape task 030/031/032 already established, reusing <see cref="LoadOpenProposalFieldsAsync"/>
+    /// unmodified (it is generic over any <c>sprk_targetfield</c> string, sentinel or real) rather than
+    /// forking a second idempotency query.
+    /// </para>
+    /// <para>
+    /// <b>Best-effort (NFR-04).</b> The ENTIRE method is wrapped in try/catch — any failure (association
+    /// read, facade completion, a Dataverse write) degrades to a logged warning and returns without
+    /// throwing, independent of <see cref="RunStepAsync"/>'s outer guard on the "email-create-task" step. A
+    /// Job C failure never fails capture or send.
+    /// </para>
+    /// </remarks>
+    private async Task RunEmailCreateTaskAsync(
+        Guid communicationId, NormalizedMessage message, CommunicationTriageResult? triageResult, CancellationToken ct)
+    {
+        try
+        {
+            var columns = CoreProposeTargets.Select(t => t.RegardingField).ToArray();
+            var record = await _genericEntityService.RetrieveAsync("sprk_communication", communicationId, columns, ct)
+                .ConfigureAwait(false);
+            if (record is null)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-create-task] skipped: communication record could not be retrieved | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            var associations = ResolveAssociatedCoreRecords(record);
+            if (associations.Count == 0)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-create-task] skipped: no association to a core record (nothing to attach a task to) | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            // "The record the email is associated to" (singular, task 020) — the first resolved association
+            // in CoreProposeTargets' deterministic order. Multiple simultaneous associations do not multiply
+            // the extraction call.
+            var (entityLogicalName, recordId) = associations[0];
+
+            var sourceText = CitationVerifier.BuildSourceText(message.Subject, message.BodyText, message.AttachmentText);
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            var request = new CommunicationCreateTaskRequest
+            {
+                EntityLogicalName = entityLogicalName,
+                Triage = triageResult,
+                Subject = message.Subject ?? string.Empty,
+                BodyText = message.BodyText ?? string.Empty,
+                AttachmentText = message.AttachmentText,
+                TenantId = tenantId,
+            };
+
+            var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+            if (candidates is not { Count: > 0 })
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-create-task] produced no candidate follow-up tasks for {Entity} | CommunicationId: {CommunicationId}.",
+                    entityLogicalName, communicationId);
+                return;
+            }
+
+            var openSentinels = await LoadOpenProposalFieldsAsync(communicationId, entityLogicalName, ct).ConfigureAwait(false);
+            var createdCount = 0;
+            var pendingCount = 0;
+
+            foreach (var candidate in candidates)
+            {
+                // Verify-cited-text (NFR-06) — drop any candidate whose quotedText is not in the source.
+                if (!CitationVerifier.IsCitedTextPresent(sourceText, candidate.Citation?.QuotedText))
+                {
+                    _logger.LogDebug(
+                        "Enrichment[email-create-task] dropped candidate '{Subject}': cited text not located in source (NFR-06) | CommunicationId: {CommunicationId}.",
+                        candidate.Subject, communicationId);
+                    continue;
+                }
+
+                var sentinelField = BuildCreateTaskSentinelField(candidate.Subject);
+
+                // Idempotency — skip if an OPEN proposal already exists for this exact candidate (same
+                // subject, same associated entity) on a prior enrichment run.
+                if (openSentinels.Contains(sentinelField))
+                {
+                    _logger.LogDebug(
+                        "Enrichment[email-create-task] skipped '{Subject}': an open Proposed row already exists (append-only, idempotent) | CommunicationId: {CommunicationId}.",
+                        candidate.Subject, communicationId);
+                    continue;
+                }
+
+                var proposedRowId = await StoreCreateTaskProposedRowAsync(
+                    communicationId, entityLogicalName, recordId, sentinelField, candidate, ct).ConfigureAwait(false);
+
+                if (candidate.DueDate.HasValue)
+                {
+                    // NFR-06 / ADR-015: deadline-bearing candidates NEVER auto-finalize. The Proposed row is
+                    // left OPEN for human confirm; nothing is created here.
+                    pendingCount++;
+                    _logger.LogInformation(
+                        "Enrichment[email-create-task] deadline-bearing candidate '{Subject}' stored PENDING for human confirm (DueDate: {DueDate:yyyy-MM-dd}) | CommunicationId: {CommunicationId}.",
+                        candidate.Subject, candidate.DueDate, communicationId);
+                    continue;
+                }
+
+                // Non-deadline-bearing: create immediately via the SHIPPED create-task write core.
+                var description = BuildCreatedTaskDescription(candidate, communicationId);
+                var createResult = await _actionSeam.CreateTaskAsync(
+                    new CreateTaskRequest
+                    {
+                        Subject = Truncate(candidate.Subject, 200),
+                        Description = description,
+                        DueDate = null,
+                        RegardingObjectId = recordId,
+                        RegardingObjectType = entityLogicalName,
+                    },
+                    ct).ConfigureAwait(false);
+
+                if (createResult.Success && createResult.TaskId != Guid.Empty)
+                {
+                    await WriteCreateTaskAppliedRowAsync(
+                        communicationId, entityLogicalName, recordId, sentinelField, candidate, createResult.TaskId, ct)
+                        .ConfigureAwait(false);
+                    createdCount++;
+                }
+                else
+                {
+                    // Degraded/failed create — the Proposed row stays open (no Applied row), so a future
+                    // re-enrichment can retry rather than silently losing the candidate.
+                    _logger.LogWarning(
+                        "Enrichment[email-create-task] create-task did not succeed for '{Subject}' ({Error}); Proposed row left open for retry | CommunicationId: {CommunicationId}.",
+                        candidate.Subject, createResult.Error, communicationId);
+                }
+            }
+
+            _logger.LogInformation(
+                "Enrichment[email-create-task] processed {CandidateCount} candidate(s) for {Entity}: {CreatedCount} created, {PendingCount} pending human confirm | CommunicationId: {CommunicationId}.",
+                candidates.Count, entityLogicalName, createdCount, pendingCount, communicationId);
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: a Job C failure MUST NOT fail capture/enrichment — degrade + log, never throw.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-create-task] failed (non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>Builds the sentinel <c>sprk_targetfield</c> value for a Job C candidate — the
+    /// <see cref="CreateTaskSentinelFieldPrefix"/> plus a short, STABLE (process-independent) hash of the
+    /// candidate's subject, so distinct implied tasks on the same email each get their own open/closed
+    /// lifecycle under <see cref="LoadOpenProposalFieldsAsync"/>'s existing per-field walk.</summary>
+    private static string BuildCreateTaskSentinelField(string subject)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(subject.Trim().ToLowerInvariant()));
+        return CreateTaskSentinelFieldPrefix + Convert.ToHexString(hash)[..8];
+    }
+
+    /// <summary>Appends the source-communication citation as a provenance line to a created task's
+    /// description (FR-14 — every created/proposed item carries a citation to the source communication).</summary>
+    private static string BuildCreatedTaskDescription(TaskCandidate candidate, Guid communicationId)
+    {
+        var locator = candidate.Citation?.Locator ?? candidate.Citation?.Source ?? "email";
+        var quoted = candidate.Citation?.QuotedText ?? string.Empty;
+        var provenance = $"Provenance: source communication {communicationId:D}; {locator}. \"{quoted}\"";
+        return string.IsNullOrWhiteSpace(candidate.Description)
+            ? provenance
+            : $"{candidate.Description}\n\n{provenance}";
+    }
+
+    /// <summary>
+    /// Stores ONE candidate as a PENDING <c>sprk_emailreviewlog</c> <c>Proposed</c> row — the SAME
+    /// Decision-1 pending-store reuse as Job B (task 030), keyed by <paramref name="sentinelField"/> instead
+    /// of a real field logical name. Returns the created row id (not currently consumed by the caller, kept
+    /// for parity with a future apply/feed reader).
+    /// </summary>
+    private async Task<Guid> StoreCreateTaskProposedRowAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        string sentinelField,
+        TaskCandidate candidate,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            kind = "create-task",
+            subject = candidate.Subject,
+            description = candidate.Description,
+            dueDate = candidate.DueDate?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            regardingObjectType = entityLogicalName,
+            regardingObjectId = recordId,
+            citation = new
+            {
+                source = candidate.Citation?.Source,
+                locator = candidate.Citation?.Locator,
+                quotedText = candidate.Citation?.QuotedText,
+            },
+            reason = candidate.Reason,
+            confidence = candidate.Confidence,
+            requireConfirm = candidate.DueDate.HasValue, // NFR-06/ADR-015: deadline-bearing requires confirm
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var name = $"Create task: {candidate.Subject}";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionProposed),
+            ["sprk_actor"] = ConsumerTypes.EmailCreateTask,
+            ["sprk_targetentity"] = Truncate(entityLogicalName, 100),
+            ["sprk_targetrecordid"] = Truncate(recordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(sentinelField, 100),
+            ["sprk_confidence"] = (decimal)candidate.Confidence,
+            ["sprk_sourceref"] = Truncate(candidate.Citation?.Locator ?? candidate.Citation?.Source ?? string.Empty, 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        var rowId = await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-create-task] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, Subject: {Subject}, DeadlineBearing: {DeadlineBearing}.",
+            communicationId, entityLogicalName, candidate.Subject, candidate.DueDate.HasValue);
+
+        return rowId;
+    }
+
+    /// <summary>
+    /// Writes the resolution <c>Applied</c> row for a non-deadline-bearing candidate that was created
+    /// immediately — mirroring Job B's append-only Proposed→terminal-row convention (task 030/031), except
+    /// there is no separate human-confirm turn for a non-deadline candidate (it is system auto-finalized, so
+    /// both rows carry <c>Machine</c> actor type). The <c>Proposed</c> row itself is NEVER mutated
+    /// (append-only).
+    /// </summary>
+    private async Task WriteCreateTaskAppliedRowAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        string sentinelField,
+        TaskCandidate candidate,
+        Guid createdTaskId,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            kind = "create-task",
+            subject = candidate.Subject,
+            createdTaskId,
+            citation = new
+            {
+                source = candidate.Citation?.Source,
+                locator = candidate.Citation?.Locator,
+                quotedText = candidate.Citation?.QuotedText,
+            },
+            confidence = candidate.Confidence,
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var name = $"Created task: {candidate.Subject}";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionApplied),
+            ["sprk_actor"] = ConsumerTypes.EmailCreateTask,
+            ["sprk_targetentity"] = Truncate(entityLogicalName, 100),
+            ["sprk_targetrecordid"] = Truncate(recordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(sentinelField, 100),
+            ["sprk_confidence"] = (decimal)candidate.Confidence,
+            ["sprk_sourceref"] = Truncate(candidate.Citation?.Locator ?? candidate.Citation?.Source ?? string.Empty, 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-create-task] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}.",
+            createdTaskId, communicationId, entityLogicalName, candidate.Subject);
+    }
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────
     /// <summary>

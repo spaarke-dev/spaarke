@@ -129,6 +129,8 @@ public sealed class EmailProposeSeamTests
             producer.Object,
             triageAi.Object,
             proposeAi,
+            new NullCommunicationCreateTaskAi(),
+            new Mock<IActionSeam>(MockBehavior.Loose).Object,
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

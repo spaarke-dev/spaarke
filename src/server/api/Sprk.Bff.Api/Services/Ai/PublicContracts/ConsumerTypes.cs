@@ -109,6 +109,22 @@ public static class ConsumerTypes
     public const string EmailPropose = "email-propose";
 
     /// <summary>
+    /// <c>CommunicationEnrichmentService</c> (email-communication-intelligence-r1 task 040, FR-14) —
+    /// the Job C "email implies work" capability. A Linear AI Consumer (routed like <see cref="EmailPropose"/>/
+    /// <see cref="EmailTriage"/>: no <c>toolDescription</c>/<c>surfaces</c> — invoked directly off the
+    /// Communication enrichment path via <see cref="ICommunicationCreateTaskAi"/>, never chat/loop-projected).
+    /// Resolves to the catalog-authored <c>CREATE-TASK-FROM-EMAIL</c> Action
+    /// (<c>sprk_actioncode = "create-task-from-email"</c>, task 040), which extracts candidate follow-up
+    /// tasks/events (subject/description/optional due date) — each with a verbatim citation + confidence —
+    /// grounded in the already-produced triage output. A non-deadline-bearing candidate is created
+    /// immediately via the shipped <c>IActionSeam.CreateTaskAsync</c> write core; a deadline-bearing
+    /// candidate is stored PENDING (<c>sprk_emailreviewlog</c> Proposed row) for human confirm (NFR-06 /
+    /// ADR-015) — never auto-finalized. Job C's OWN targeted extraction (a single Action call), NOT a
+    /// second classification pass (the triage output is reused as grounding only).
+    /// </summary>
+    public const string EmailCreateTask = "email-create-task";
+
+    /// <summary>
     /// <c>DailyBriefingCompositeService</c> — the Daily Briefing coded composite
     /// (FR-P3-04, spaarke-ai-architecture-redesign-r1 task 043; the platform's FIRST
     /// full <c>coded</c> Action). Two Binding rows: <c>default</c> (informational —
@@ -346,6 +362,7 @@ public static class ConsumerTypes
         EmailAnalysis,
         EmailTriage,
         EmailPropose,
+        EmailCreateTask,
         DailyBriefingNarrate,
         DocumentProfile,
         ComposeSummarize,

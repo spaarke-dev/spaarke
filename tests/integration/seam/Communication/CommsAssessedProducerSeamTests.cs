@@ -109,6 +109,8 @@ public sealed class CommsAssessedProducerSeamTests
             producer,
             triageAi,
             new NullCommunicationProposeAi(),
+            new NullCommunicationCreateTaskAi(),
+            new Mock<IActionSeam>(MockBehavior.Loose).Object,
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

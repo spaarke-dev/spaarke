@@ -4,7 +4,7 @@
     <title>Job C — email-triggered tasks/events via the shipped create-task pattern (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`), cited</title>
     <phase>P4 — Job C + intent</phase>
     <gate>after:020,022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>bff-api, catalog</tags>
     <rigor>FULL</rigor>
     <rigor-reason>Creates records (tasks/events) from email content on the AI-directed create path; deadline-bearing entries require human confirm (NFR-06 / ADR-015); citation to the source communication is load-bearing. Reuses the shipped `CREATE-TASK@v1` pattern — MUST NOT fork a second create mechanism. BFF-touching (catalog data + Ai via PublicContracts): publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>

@@ -318,6 +318,23 @@
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)" }
     },
     {
+      "caseId": "GU-140",
+      "family": "email-create-task",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "inbound email enrichment extracts an implied follow-up task/event (subject/description/optional due date, cited) on the associated record — created immediately when no deadline is stated, or stored PENDING for human confirm when one is (email-communication-intelligence-r1 task 040, FR-14)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.EmailCreateTask constant (added task 040) — a Linear AI Consumer (Job C create-task), same shape as GU-138/GU-139's email-triage/email-propose event cases (no chat/loop channel; UC-F data enrichment). The dedicated per-family coverage (tasks[] output shape, NFR-06 verify-cited-text, deadline-bearing -> confirm gate, Binding resolution, no-second-pass structural guarantee, reuse-not-fork of the shipped create-task path) lives in the net-new tests/integration/contract/Eval/create-task-from-email-eval-cases.json + CreateTaskFromEmailEvalTests.cs (same net-new-family pattern as the triage-email/email-propose families) — this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "email-processing-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-create-task",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 040 (FR-14)" }
+    },
+    {
       "caseId": "GU-018",
       "family": "briefing",
       "ucId": "UC-B-3",
