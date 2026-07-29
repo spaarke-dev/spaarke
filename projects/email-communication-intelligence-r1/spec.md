@@ -55,13 +55,13 @@ r1 is the intelligence and record-currency layer over Spaarke's shipped communic
 8. **FR-08 (Review audit)**: New append-only `sprk_emailreviewlog`: item, actor (user OR rule/model id), action, prior AI suggestion + confidence, timestamp — **machine-review and human-review both as rows**. — Acceptance: every AI proposal and every human decision is queryable per matter.
 9. **FR-09 (Job B — propose)**: The triage Action proposes **allow-listed** field updates on the associated record, each with **old→new value, cited source text (email or attachment + locator), and confidence**; stored as pending proposals. — Acceptance: "closing moved to Aug 15" yields a proposed `sprk_closingdate` update, cited, on the matched matter; a non-allow-listed field is never proposed.
 10. **FR-10 (Job B — apply)**: An apply endpoint applies a confirmed proposal via `IActionSeam.UpdateRecordAsync` under the confirming user's OBO, and writes the audit row; rendered on r5's shipped surface. — Acceptance: on confirm, the record updates under OBO and an `sprk_emailreviewlog` row records "AI proposed / human approved / from email X / confidence".
-11. **FR-11 (Job B allow-list config)**: Per-entity allow-list of updatable fields (config-driven). — Acceptance: the allow-list governs what FR-09 may propose; tenant-configurable.
+11. **FR-11 (Job B allow-list config — `sprk_emailupdatefield`)**: Per-`(entity, field)` allow-list in the new `sprk_emailupdatefield` table (`sprk_targetentity` → `sprk_recordtype_ref`, `sprk_targetfield`, `sprk_enabled`, `sprk_fieldtype` coercion hint, `sprk_requireconfirm`=true in P1, `sprk_extractionguidance`). Job B may propose an update ONLY to an enabled row here. — Acceptance: the allow-list governs what FR-09 may propose; a non-listed/disabled field is never proposed; tenant-configurable + per-field kill-switch. *(Table created by operator; r1 reads it.)*
 12. **FR-12 (Regarding-vs-related intent)**: Classify intent `file-to-existing | update-existing | new-record-related-to`; phrasing like "new filing based on X" **demotes** the identifier from *regarding* to *related* and suppresses auto-file; on `new-record-related-to`, propose creating a record (gated `dataverse.create_record`) linking the referenced record as related. — Acceptance: "new filing based on PAT-908068" does NOT auto-file onto PAT-908068; it offers create-new / file-onto / link-related.
 13. **FR-13 (Attachment-grounded action extraction)**: The triage/action Action grounds on extracted attachment text (existing text-extraction → SPE → child-`sprk_document`), deterministically gated to likely action-triggers. — Acceptance: an action stated only in an attachment PDF is extracted and cited to the attachment + locator.
 14. **FR-14 (Job C — email-triggered work)**: Email content triggers tasks/events via the shipped create-task pattern (`CREATE-TASK@v1` → gated `dataverse.create_record` → `sprk_event`), cited to the source communication. — Acceptance: an email implying a task creates one on the right record, cited; deadline-bearing entries require confirm.
-15. **FR-15 (Shared/group mailbox coverage)**: Extend capture (Graph subscriptions + app-only permissions) to cover shared mailboxes and M365 group mailboxes. — Acceptance: an email to a shared/group mailbox is captured, associated, and triaged like a user mailbox. *(Depends on communication-service capture layer — coordination item.)*
+15. **FR-15 (Shared/group mailbox coverage)**: Extend capture (Graph subscriptions + Exchange `ApplicationAccessPolicy`) to cover shared mailboxes and M365 group mailboxes. **r1 owns this** (r4 capture is archived, no active owner). **Spike-first**: task 1 confirms the subscription/permission model for shared vs group mailboxes + the `GraphSubscriptionManager` / permission-grant delta; implementation is gated on that finding. Runs **parallel to the intelligence spine** (independent). — Acceptance: an email to a shared/group mailbox is captured, associated, and triaged like a user mailbox.
 16. **FR-16 (Category taxonomy + priority weights)**: Category taxonomy and priority weights are Dataverse-configurable with a seeded starter set (D-03). — Acceptance: an admin can add/reweight categories without code.
-17. **FR-17 (Dual-use surface feed)**: r1's outputs (triage data, association suggestions, proposals) are consumable by both r5 surfaces (Code Page + SpaarkeAi widget) — r1 exposes surface-agnostic contracts; the build mounts in both via r5 (D-10). — Acceptance: the same r1 contract renders in the Code Page and the widget without a fork.
+17. **FR-17 (Surface-agnostic feed — NOT the UI)**: r1 exposes surface-agnostic contracts (triage data, ranked association suggestions, proposals, and a **queue-feed** endpoint returning the ranked exceptions) that **r5 renders** in both surfaces (Code Page + SpaarkeAi widget). **C-3 resolved: r5 builds the Exceptions Queue *surface*; r1 supplies the *feed* only.** — Acceptance: the r1 feed contract is consumable by both r5 surfaces without a fork; r1 builds no UI.
 
 ### Non-Functional Requirements
 - **NFR-01 (Publish size)**: BFF publish ≤ 60 MB compressed; report delta per BFF-touching task. Triage adds no new heavy dependency (reuses the AI stack).
@@ -126,7 +126,7 @@ Placement: all server work lands in `Sprk.Bff.Api` inside the existing Communica
 | RI-confidence scorer | `CommunicationAssessedSignal.Confidence` (hardcoded 0) | Replaces the hardcoded value with a computed one | Without it the notification path denies under any threshold and creates nothing (Pillar 1 stays dark) |
 | Triage fields on `sprk_communication` | `sprk_associationstatus` | **Yes — extend the entity** | N/A (extension) |
 | `TRIAGE-EMAIL` Action + Binding | none (catalog data) | No existing triage capability | Without it there is no category/summary/obligations/priority — Pillar 1 fails |
-| Job B allow-list config | Field Mapping Framework (creation-time value copy) | Evaluated; poor fit (different intent) → **new config** | Without it Job B can propose arbitrary column writes — unsafe |
+| `sprk_emailupdatefield` (Job B allow-list) | Field Mapping Framework (creation-time value copy) | Evaluated; poor fit (different intent) → **new config table** | Without it Job B can propose arbitrary column writes — unsafe |
 | Apply + queue-feed endpoints | `suggest-associations` (read-only) | Extends the endpoint family; thin minimal-APIs | Without them r5 has no way to apply a confirmed proposal or read the exceptions queue |
 
 ## ADR Tensions (CLAUDE.md §6.5)
@@ -158,9 +158,9 @@ Placement: all server work lands in `Sprk.Bff.Api` inside the existing Communica
 - `sprk_recordtype_ref` data-hygiene fix (typos in some `sprk_regardingfield` values; `contact`-row anomaly) — read defensively or clean first.
 
 ### External / Coordination
-- **r5** — renders association suggestions (ranked + reasons), proposed-update/action cards; hosts the Exceptions Queue; thread grouping key aligned with engine inheritance (coordination doc §2/§3).
-- **communication-service capture layer** — shared/group mailbox subscription coverage (FR-15).
+- **r5** — **builds** the review surfaces (association-suggestion cards, proposed-update/action cards, the **Exceptions Queue surface**) consuming r1's feed; thread grouping key aligned with engine inheritance (coordination doc §2/§3). r1 supplies feed + apply endpoints, not UI (C-3).
 - **`Services/Ai` seams** — consume `PublicContracts`; ADR-041/043/047 in-flight; `/conflict-check` before BFF PRs.
+- **Operator** — creates the `sprk_emailupdatefield` table (FR-11 schema) + seeds a starter allow-list.
 
 ## Owner Clarifications (2026-07-28)
 
@@ -178,18 +178,20 @@ Placement: all server work lands in `Sprk.Bff.Api` inside the existing Communica
 | IP docketing (D-12/13) | Removed | Out of scope |
 | Auto-file (C-1) | rung 0 + rung 1 only | FR-03 |
 | Job B depth | FULL (not propose-only) | FR-09/10 |
+| **Allow-list home (C-4)** | **New `sprk_emailupdatefield` table** (operator creates; schema in FR-11) | FR-11 |
+| **Exceptions Queue (C-3)** | **r5 builds surface; r1 supplies feed** | FR-17 |
+| **Shared/group mailbox (FR-15)** | **r1 owns; spike-first, parallel to spine** | FR-15 |
 
 ## Assumptions
 
-- **Job B allow-list home (C-4)**: new dedicated per-entity config table (r1's call; Field Mapping Framework evaluated and judged a poor fit) — flag for confirmation.
 - **RI-confidence formula (C-5)**: urgency × deterministic-rung-agreement blend; exact weights tuned during implementation with an eval set.
 - **Review-outcome value set**: File / Update / Route / Dismiss (+ Suggested/Ambiguous statuses from the engine) — confirm the closed set at task time.
 
 ## Unresolved Questions
 
-- [ ] **C-4 allow-list home** — confirm new config table vs. any better reuse — Blocks: FR-11 schema.
-- [ ] **Exceptions Queue ownership (C-3)** — r5 builds the surface, r1 supplies the feed — confirm split — Blocks: FR-17 surface delivery.
-- [ ] **FR-15 capture-layer sizing** — shared/group-mailbox subscription/permission changes need the communication-service owner's estimate — Blocks: FR-15.
+*All prior blocking items (C-3, C-4, FR-15) resolved 2026-07-28 — see Owner Clarifications. Remaining items are tuning-during-implementation, not blockers:*
+- [ ] RI-confidence exact weights (C-5) — tuned with an eval set at implementation, not a blocker.
+- [ ] Review-outcome closed value set — confirmed at task time.
 
 ---
 *AI-optimized specification. Original design: `design.md` (rev-3).*
