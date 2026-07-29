@@ -5,6 +5,10 @@
  */
 export { EmailWorkspace } from './EmailWorkspace';
 export type { EmailWorkspaceProps, EmailWorkspaceWebApi } from './EmailWorkspace.types';
+export { CollapsibleSection } from './CollapsibleSection';
+export type { CollapsibleSectionProps, SectionStatusTone } from './CollapsibleSection';
+export { EmailRelatedToPills } from './EmailRelatedToPills';
+export type { EmailRelatedToPillsProps } from './EmailRelatedToPills';
 export {
   COMMUNICATION_ENTITY,
   EMAIL_TRACKING_FIELDS,

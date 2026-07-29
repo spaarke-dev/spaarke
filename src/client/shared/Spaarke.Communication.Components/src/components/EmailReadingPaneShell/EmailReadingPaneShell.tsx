@@ -11,18 +11,17 @@
  * via `localStorage` (the hook's own persistence, keyed by `storageKey`).
  *
  * This is the COMPOSITION ROOT for the reading pane — it does NOT implement
- * the header band/body/attachments/connections/tracking sub-views. Those are
+ * the title-bar/body/attachments/related-to/association sub-views. Those are
  * supplied by the host as two `render*` slot props — `renderHeader` (the
- * subject + compact tracking trio + "Open full form" band, rendered ABOVE the
- * toolbar) and `renderBody` (the composed recipients/body/attachments/
- * related-to region, rendered BELOW the toolbar) — see
- * `EmailReadingPaneShell.types.ts` for the full slot contract (reworked for
- * the Outlook-style one-column layout redesign). The full-width
- * `<EmailToolbar/>` spans the reading-pane width and dispatches Reply/Reply
- * All/Forward/New/Archive/Create through the host-supplied `actions`
- * handlers — the shell never re-implements action-bar/compose logic itself
- * (task 022's extracted `logic/actions` is the canonical source; task 036
- * owns the real dispatch).
+ * TITLE BAR: the email subject on its own light-gray row, rendered ABOVE the
+ * toolbar) and `renderBody` (the composed recipients + collapsible
+ * Attachments/Related-to/Association sections + body region, rendered BELOW
+ * the toolbar) — see `EmailReadingPaneShell.types.ts` for the full slot
+ * contract. The full-width `<EmailToolbar/>` spans the reading-pane width and
+ * dispatches Reply/Reply All/Forward/New plus the icon-only Save-to-SharePoint/
+ * Create-Event/Create-To-Do/Link-Invoice/Open-full-form actions through the
+ * host-supplied `actions` handlers — the shell never re-implements action-bar/
+ * compose logic itself (the host wires the real dispatch).
  *
  * When nothing is selected, the right pane shows the "Select an email"
  * placeholder (FR-19 empty state).

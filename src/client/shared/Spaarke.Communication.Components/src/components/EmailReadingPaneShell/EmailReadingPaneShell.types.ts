@@ -10,16 +10,16 @@
  *   - the full-width toolbar dispatch seam (Reply / Reply All / Forward / New /
  *     Archive / Create).
  *
- * It does NOT implement the header band/body/attachments/connections/tracking
+ * It does NOT implement the title-bar/body/attachments/related-to/association
  * sub-views — those are supplied by the host as TWO render-slot props:
- *   - `renderHeader` — the HEADER BAND (subject + compact tracking trio +
- *     "Open full form"), rendered ABOVE the full-width `EmailToolbar`.
- *   - `renderBody` — the entire scrollable composed region BELOW the
- *     toolbar: recipients block, email body, attachments section, "Related
- *     to" (associations) section, in that order. The host (`EmailWorkspace`)
- *     composes all four pieces into one node it hands back from this single
- *     slot call — the shell does not know about (or render) each piece
- *     individually.
+ *   - `renderHeader` — the TITLE BAR (the email subject on its own row with a
+ *     light-gray background), rendered ABOVE the full-width `EmailToolbar`.
+ *   - `renderBody` — the entire scrollable composed region BELOW the toolbar:
+ *     recipients block, then the collapsible Attachments / Related-to /
+ *     Association sections, then the email body, in that order. The host
+ *     (`EmailWorkspace`) composes all pieces into one node it hands back from
+ *     this single slot call — the shell does not know about (or render) each
+ *     piece individually.
  *
  * (Reading-pane layout redesign, email-communication-solution-r5: previously
  * five slots — `renderHeader`/`renderBody`/`renderAttachments`/
@@ -43,27 +43,40 @@ export type EmailPaneSlotRenderer = (selectedId: string) => React.ReactNode;
 
 /**
  * Toolbar dispatch seam (FR-08). The shell/`<EmailToolbar/>` NEVER implements
- * compose/prefill/archive logic itself — it only calls the handler the host
- * supplies, keyed by selected id (New is not record-scoped: it's a blank
+ * compose/prefill/archive/create logic itself — it only calls the handler the
+ * host supplies, keyed by selected id (New is not record-scoped: it's a blank
  * compose, mirroring `deriveComposerFields('compose', …)` in the extracted
- * task-022 `logic/actions` — see `@spaarke/communication-components/logic/actions`).
- * Reply/Reply All/Forward/Archive/Create the button is disabled until a card is
- * selected. Any handler left unwired falls back to a console-warned no-op
- * (task 036 supplies the real compose/archive/create-from-email dispatch).
+ * task-022 `logic/actions`). The record-scoped buttons disable until a card is
+ * selected. Any handler left unwired falls back to a console-warned no-op.
+ *
+ * (Reading-pane MAIN-AREA redesign, email-communication-solution-r5: the toolbar
+ * is now Reply / Reply All / Forward / New as icon+text on the LEFT, and a
+ * right-aligned group of ICON-ONLY buttons with tooltips — Save to SharePoint,
+ * Create Event, Create To Do, Link Invoice, and the demoted Open full form. The
+ * four create/save actions act on the email's RESOLVED association; the host
+ * builds those handlers from the same `launchCreate` / archive seams the
+ * `CommunicationActions` PCF uses. The old generic `onArchive`/`onCreate` pair is
+ * superseded by these explicit handlers.)
  */
 export interface EmailToolbarActionHandlers {
-  /** Opens the reply composer for `selectedId` (task 036). */
+  /** Opens the reply composer for `selectedId`. */
   onReply?: (selectedId: string) => void;
-  /** Opens the reply-all composer for `selectedId` (task 036). */
+  /** Opens the reply-all composer for `selectedId`. */
   onReplyAll?: (selectedId: string) => void;
-  /** Opens the forward composer for `selectedId` (task 036). */
+  /** Opens the forward composer for `selectedId`. */
   onForward?: (selectedId: string) => void;
   /** Opens a blank "+ New" compose — NOT tied to the current selection. */
   onNew?: () => void;
-  /** Archives (saves to SharePoint) `selectedId`. */
-  onArchive?: (selectedId: string) => void;
-  /** Launches the "create from this email" flow for `selectedId`. */
-  onCreate?: (selectedId: string) => void;
+  /** Saves the selected email to SharePoint (archive). */
+  onSaveToSharePoint?: (selectedId: string) => void;
+  /** Launches the "Create Event" flow against the email's resolved association. */
+  onCreateEvent?: (selectedId: string) => void;
+  /** Launches the "Create To Do" flow against the email's resolved association. */
+  onCreateTodo?: (selectedId: string) => void;
+  /** Launches the "Link Invoice" flow against the email's resolved association. */
+  onLinkInvoice?: (selectedId: string) => void;
+  /** Opens the OOB Email main form for `selectedId` as an 85% `navigateTo` modal (demoted "Open full form"). */
+  onOpenFullForm?: (selectedId: string) => void;
 }
 
 export interface EmailReadingPaneShellProps {
@@ -77,9 +90,9 @@ export interface EmailReadingPaneShellProps {
   onSelectedIdChange?: (id: string | undefined) => void;
   /** Toolbar dispatch handlers (FR-08). Omitted handlers no-op with a console warning. */
   actions?: EmailToolbarActionHandlers;
-  /** Header BAND slot — subject + compact tracking trio + "Open full form"; rendered ABOVE the toolbar. Invoked with the selected id whenever a card is selected. */
+  /** TITLE-BAR slot — the email subject on its own light-gray row; rendered ABOVE the toolbar. Invoked with the selected id whenever a card is selected. */
   renderHeader?: EmailPaneSlotRenderer;
-  /** Composed BODY-REGION slot — recipients block + email body + attachments section + "Related to" section, in that order (the host composes all four; the shell just renders the one returned node inside the scrollable region below the toolbar). Invoked with the selected id whenever a card is selected. */
+  /** Composed BODY-REGION slot — recipients block + collapsible Attachments / Related-to / Association sections + email body, in that order (the host composes them; the shell just renders the one returned node inside the scrollable region below the toolbar). Invoked with the selected id whenever a card is selected. */
   renderBody?: EmailPaneSlotRenderer;
   /** localStorage key the splitter width persists under (default: a stable shell-scoped key). */
   storageKey?: string;

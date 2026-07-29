@@ -40,10 +40,17 @@ export interface EmailConnectionsReviewProps {
   linkAnotherCatalog?: readonly RecordTypeCatalogEntry[];
   /** Resolve a friendly display name for a target (entity + GUID). Falls back to the slot's own `targetName` when omitted/undefined. */
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
-  /** Hide every write affordance (Confirm/Change/Dismiss/Link another) — review-only display. */
+  /** Hide every write affordance (Confirm/Change/Remove/Link another) — review-only display. */
   readOnly?: boolean;
-  /** Called after ANY successful write (confirm/change/dismiss/link-another) so the host can refetch the record's provenance/filed-associations. */
+  /** Called after ANY successful write (confirm/change/remove/link-another) so the host can refetch the record's provenance/filed-associations. */
   onAssociationsChanged?: () => void;
+  /**
+   * Optional "Create new" affordance for the UNMATCHED state ("Not filed yet." →
+   * Find a record · Create new · Dismiss). When omitted, the "Create new" button
+   * is not rendered (the host has no create-a-record-to-associate flow wired) —
+   * "Find a record" (the shared picker) + "Dismiss" still appear.
+   */
+  onCreateNewRecord?: () => void;
 }
 
 export interface EmailTrackingPanelProps {

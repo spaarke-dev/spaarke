@@ -1,24 +1,45 @@
 /**
- * Fluent v9 styles for the ASSOCIATIONS review view (task 035). Split out of
- * `EmailConnectionsReview.tsx` at code-review time (Step 9.5) purely to keep
- * the main component file under this repo's review-metric line thresholds —
- * no behavior change. Semantic tokens only (ADR-021) — no hardcoded colors,
- * so both light and dark themes resolve correctly.
+ * Fluent v9 styles for the reading-pane ASSOCIATION RESOLVER (email-
+ * communication-solution-r5, reading-pane MAIN-AREA redesign, section #6).
+ * Semantic tokens only (ADR-021) — no hardcoded colors, so both light and dark
+ * themes resolve correctly. The resolver answers ONE plain question with an
+ * obvious action per state (clear-match / ambiguous / filed / suggested /
+ * unmatched); these styles back that presentation.
  */
 import { makeStyles, tokens } from '@fluentui/react-components';
 
 export const useConnectionsReviewStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
-  section: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  secHead: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
-  dot: { width: '8px', height: '8px', borderRadius: '50%', flexShrink: 0 },
-  dotDecide: { backgroundColor: tokens.colorPaletteMarigoldForeground1 },
-  dotFiled: { backgroundColor: tokens.colorPaletteGreenForeground1 },
-  dotSuggest: { backgroundColor: tokens.colorBrandForeground1 },
-  secTitle: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
-  secCount: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase200 },
-  secHint: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200, lineHeight: tokens.lineHeightBase200 },
+  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalL },
 
+  // ── Shared lead-in question / labels ──
+  question: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  groupLabel: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
+    letterSpacing: '0.03em',
+  },
+  block: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+
+  // ── "This email looks like it's about …" lead sentence (clear/possible match) ──
+  leadText: {
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+    lineHeight: tokens.lineHeightBase300,
+  },
+  strongName: { fontWeight: tokens.fontWeightSemibold },
+  why: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
+  pct: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightSemibold },
+
+  actionsRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  linkBtn: { paddingInline: 0 },
+
+  // ── Ambiguous — ranked, selectable options (best pre-selected) ──
   options: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
   opt: {
     display: 'grid',
@@ -27,47 +48,52 @@ export const useConnectionsReviewStyles = makeStyles({
     alignItems: 'center',
     paddingBlock: tokens.spacingVerticalS,
     paddingInline: tokens.spacingHorizontalM,
-    border: `1px solid ${tokens.colorPaletteMarigoldBorder2}`,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
     borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorPaletteMarigoldBackground1,
+    backgroundColor: tokens.colorNeutralBackground1,
     cursor: 'pointer',
   },
   optSel: {
-    border: `1px solid ${tokens.colorBrandStroke1}`,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke1}`,
     backgroundColor: tokens.colorBrandBackground2,
     boxShadow: `inset 0 0 0 1px ${tokens.colorBrandStroke1}`,
   },
-  optRec: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  optName: { fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, color: tokens.colorNeutralForeground1 },
-  confLbl: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3, whiteSpace: 'nowrap' },
+  optRec: { display: 'flex', flexDirection: 'column', minWidth: 0, gap: tokens.spacingVerticalXXS },
+  optName: {
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  recNum: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightRegular },
 
-  row: {
+  // ── Filed — silent confirmed rows (Change / Remove) ──
+  filedRow: {
     display: 'grid',
-    gridTemplateColumns: '20px 1fr auto auto',
+    gridTemplateColumns: '20px 1fr auto',
     gap: tokens.spacingHorizontalM,
     alignItems: 'center',
-    paddingBlock: tokens.spacingVerticalS,
-    paddingInline: tokens.spacingHorizontalXS,
-    borderRadius: tokens.borderRadiusMedium,
+    paddingBlock: tokens.spacingVerticalXS,
   },
-  rowBorder: { borderTop: `1px solid ${tokens.colorNeutralStroke3}` },
-  ico: { color: tokens.colorNeutralForeground3, display: 'flex', flexShrink: 0 },
-  rec: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  recName: {
+  filedCheck: { color: tokens.colorPaletteGreenForeground1, display: 'flex', flexShrink: 0 },
+  filedRec: { display: 'flex', flexDirection: 'column', minWidth: 0 },
+  filedName: {
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalM,
+    gap: tokens.spacingHorizontalS,
     flexWrap: 'wrap',
   },
-  recNum: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightRegular },
   typeTag: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightRegular },
   rowActs: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end', alignItems: 'center' },
-  recWhy: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase200 },
-  linkRow: { paddingTop: tokens.spacingVerticalXS },
+
+  // ── Unmatched empty state ──
+  unmatched: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  unmatchedText: { color: tokens.colorNeutralForeground2, fontSize: tokens.fontSizeBase300 },
+
   empty: { color: tokens.colorNeutralForeground3 },
+  linkRow: { paddingTop: tokens.spacingVerticalXS },
 });
 
 export type ConnectionsReviewStyles = ReturnType<typeof useConnectionsReviewStyles>;

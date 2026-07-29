@@ -173,12 +173,14 @@ describe('EmailWorkspace', () => {
 
     fireEvent.click(await screen.findByText('Quarterly filing update'));
 
-    // Header band paints from the record (EmailReadingHeader) — subject appears
-    // prominently in the reading pane (no from/to/cc/bcc in the header band anymore).
+    // Title bar paints from the record (EmailReadingHeader) — the subject appears
+    // on its own light-gray row (no tracking trio, no from/to/cc/bcc here).
     await waitFor(() => expect(screen.getByTestId('email-reading-header')).toBeInTheDocument());
+    // The tracking trio was REMOVED from the reading pane entirely (redesign).
+    expect(screen.queryByTestId('email-tracking-panel')).not.toBeInTheDocument();
     // Recipients block reflects the record's From/To — Cc/Bcc rows are absent
-    // since FULL_RECORD carries neither (the bug-fix mapping reads them
-    // defensively from the same no-`$select` read, never throwing).
+    // since FULL_RECORD carries neither (the mapping reads them defensively from
+    // the same no-`$select` read, never throwing).
     const recipients = await screen.findByTestId('email-recipients');
     expect(within(recipients).getByText('jane.doe@example.com')).toBeInTheDocument();
     expect(within(recipients).getByText('legal-team@example.com')).toBeInTheDocument();
@@ -189,15 +191,17 @@ describe('EmailWorkspace', () => {
     // contains a snippet of the same sentence.
     const readingPane = screen.getByTestId('email-reading-pane');
     await waitFor(() => expect(within(readingPane).getByText(/latest draft/i)).toBeInTheDocument());
-    // FR-15 "Open full form" trigger is rendered near the toolbar (now inside the header band).
+    // "Open full form" trigger is now in the toolbar (demoted icon).
     expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
-    // Tracking panel (compact) reflects the record's tracking values, in the header band.
-    expect(await screen.findByTestId('email-tracking-panel')).toBeInTheDocument();
-    // Attachments + "Related to" sections render with bold section headers.
+    // The three collapsible sections render (COLLAPSED by default) with their headers.
     expect(screen.getByText('Attachments')).toBeInTheDocument();
     expect(screen.getByText('Related to')).toBeInTheDocument();
-    // Associations review renders (no engine provenance in this fixture → review-only empty state, no crash).
-    expect(screen.getByTestId('email-connections-review')).toBeInTheDocument();
+    expect(screen.getByText('Association')).toBeInTheDocument();
+    // The Association resolver is collapsed by default; expanding it mounts the
+    // redesigned review (no engine provenance in this fixture → "Not filed yet.").
+    fireEvent.click(screen.getByTestId('section-toggle-association'));
+    expect(await screen.findByTestId('email-connections-review')).toBeInTheDocument();
+    expect(screen.getByText('Not filed yet.')).toBeInTheDocument();
   });
 
   it('given a selected card WITH a `.eml` archive, resolves the archive document id and renders the server-rendered body (loading→loaded transition)', async () => {

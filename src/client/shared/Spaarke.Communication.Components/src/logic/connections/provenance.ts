@@ -514,6 +514,104 @@ export function isConnectionConfirmed(conn: Connection, confirmedFields: Readonl
   return conn.status === 'confirmed' || confirmedFields.has(conn.field);
 }
 
+// ── Reading-pane resolver: single-source connection build + status summary ───────
+//
+// `sprk_associationstatus` = Resolved (task 002 verified integer). Kept local (a
+// plain Dataverse OptionSet value, not write logic) so both the reading-pane
+// resolver AND the collapsible-section status dot derive connections identically.
+export const ASSOCIATION_STATUS_RESOLVED_VALUE = 100000000;
+
+/** An empty provenance doc so `deriveConnections` still has a shape to walk when every association was filed manually (no engine trail). */
+function emptyProvenanceDoc(): ProvenanceDoc {
+  return {
+    version: 1,
+    direction: '',
+    decision: {
+      status: '',
+      autoFiled: false,
+      killSwitchEnabled: false,
+      autoFileThreshold: 0.85,
+      topDeterministicConfidence: 0,
+      topConfidence: 0,
+      aiInvolved: false,
+      reason: '',
+    },
+    rungsFired: [],
+    candidates: [],
+    signals: [],
+  };
+}
+
+/**
+ * THE single connection-build path for the reading-pane surface: parse the raw
+ * provenance JSON, derive engine slots, then fold in what's ACTUALLY filed on the
+ * record (authoritative — includes manual "Link another" associations). Used by BOTH
+ * `EmailConnectionsReview` (the resolver body) and `summarizeEmailConnections` (the
+ * section status dot) so they never disagree.
+ */
+export function buildEmailConnections(
+  provenanceJson: string | null | undefined,
+  associationStatus: number | null | undefined,
+  filed: FiledAssociation[] | undefined
+): Connection[] {
+  const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
+  const isResolved = associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE;
+  return mergeFiledConnections(deriveConnections(doc, isResolved), filed ?? []);
+}
+
+/** Traffic-light tone for the Association section header (🔴 needs decision · 🟡 review · 🟢 all set). */
+export type AssociationTone = 'red' | 'yellow' | 'green';
+
+export interface AssociationSummary {
+  tone: AssociationTone;
+  /** One-line status shown next to the dot. */
+  label: string;
+  filedCount: number;
+  suggestedCount: number;
+  needsDecisionCount: number;
+}
+
+/**
+ * Reduce grouped connections to the single traffic-light status the collapsed
+ * Association section shows:
+ *   🔴 red    — no confirmed primary yet (a decision is still needed / unmatched).
+ *   🟡 yellow — filed, but suggestions/conflicts remain to review.
+ *   🟢 green  — filed and nothing left to review.
+ */
+export function summarizeConnections(grouped: {
+  needsDecision: Connection[];
+  filed: Connection[];
+  suggested: Connection[];
+}): AssociationSummary {
+  const filedCount = grouped.filed.length;
+  const suggestedCount = grouped.suggested.length;
+  const needsDecisionCount = grouped.needsDecision.length;
+  let tone: AssociationTone;
+  let label: string;
+  if (filedCount === 0) {
+    tone = 'red';
+    label = needsDecisionCount > 0 ? 'Needs your decision' : 'Not filed yet';
+  } else if (needsDecisionCount > 0 || suggestedCount > 0) {
+    tone = 'yellow';
+    label = 'Filed — suggestions to review';
+  } else {
+    tone = 'green';
+    label = 'All set';
+  }
+  return { tone, label, filedCount, suggestedCount, needsDecisionCount };
+}
+
+/** Convenience: build → group → summarize in one call for the section status dot. */
+export function summarizeEmailConnections(
+  provenanceJson: string | null | undefined,
+  associationStatus: number | null | undefined,
+  filed: FiledAssociation[] | undefined
+): AssociationSummary {
+  const connections = buildEmailConnections(provenanceJson, associationStatus, filed);
+  const grouped = groupConnectionsByAction(connections, [], new Set<string>(), new Set<string>());
+  return summarizeConnections(grouped);
+}
+
 /**
  * Partition connections + AI suggestions into the three action groups the rebuilt
  * modal renders. Pure (no React, no webApi) so the grouping is unit-testable.

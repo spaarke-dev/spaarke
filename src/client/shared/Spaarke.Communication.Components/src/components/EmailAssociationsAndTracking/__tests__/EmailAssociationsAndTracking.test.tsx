@@ -174,33 +174,46 @@ describe('EmailConnectionsReview', () => {
     global.fetch = originalFetch;
   });
 
-  it('groups an already-filed reply-inherited association into "Filed automatically" — display only', () => {
+  it('shows an already-filed reply-inherited association as a silent FILED row (display only)', () => {
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
 
-    expect(screen.getByText('Filed automatically')).toBeInTheDocument();
-    expect(screen.getByText('Acme v Beta')).toBeInTheDocument();
+    // Filed group header + the filed matter, with Change/Remove (no Confirm).
+    expect(screen.getByText('Filed')).toBeInTheDocument();
+    const filed = screen.getByTestId('association-filed');
+    expect(within(filed).getByText('Acme v Beta')).toBeInTheDocument();
+    expect(within(filed).getByRole('button', { name: 'Change' })).toBeInTheDocument();
+    expect(within(filed).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
   });
 
-  it('groups low-confidence/ambiguous matches into "Needs your decision", distinct from "Suggested" (FR-19)', () => {
+  it('renders an AMBIGUOUS conflict as "Which is this about?" ranked options — distinct from a low-confidence SUGGESTED match (FR-19)', () => {
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />);
 
-    expect(screen.getByText('Needs your decision')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Acme Corp' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Acme Corp International' })).toBeInTheDocument();
+    // Ambiguous org conflict → a "Which is this about?" decision block with the
+    // two competing candidates, best pre-selected.
+    expect(screen.getByText('Which is this about?')).toBeInTheDocument();
+    const decision = screen.getByTestId('association-decision');
+    expect(within(decision).getByRole('radio', { name: 'Acme Corp' })).toBeInTheDocument();
+    expect(within(decision).getByRole('radio', { name: 'Acme Corp International' })).toBeInTheDocument();
+    // Best (highest-confidence) candidate is pre-selected.
+    expect(within(decision).getByRole('radio', { name: 'Acme Corp' })).toBeChecked();
+    // The % is paired with a "why" rationale (never a bare percentage).
+    expect(within(decision).getByText('60%')).toBeInTheDocument();
 
-    expect(screen.getByText('Suggested')).toBeInTheDocument();
-    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
+    // Low-confidence contact → a "Possible match" suggested row (NOT a decision).
+    const suggested = screen.getByTestId('association-suggested');
+    expect(within(suggested).getByText(/Possible match/i)).toBeInTheDocument();
+    expect(within(suggested).getByText(/Jane Doe/)).toBeInTheDocument();
+    expect(within(suggested).getByText(/40%/)).toBeInTheDocument();
   });
 
   it('confirming a suggested match persists ADDITIVELY via applyRegardingSelection — the existing sibling regarding is preserved', async () => {
     const props = baseProps();
     renderWithProvider(<EmailConnectionsReview {...props} />);
 
-    // Scope to the "Suggested" section — "Needs your decision" ALSO has a
-    // "Confirm" button (the ambiguous-conflict confirm), so an unscoped query
-    // is ambiguous.
-    const suggestedSection = screen.getByText('Suggested').closest('section') as HTMLElement;
-    fireEvent.click(within(suggestedSection).getByRole('button', { name: 'Confirm' }));
+    // Scope to the suggested row — the ambiguous decision block ALSO has a
+    // "Confirm" button, so an unscoped query is ambiguous.
+    const suggested = screen.getByTestId('association-suggested');
+    fireEvent.click(within(suggested).getByRole('button', { name: 'Confirm' }));
 
     await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
 
@@ -213,19 +226,17 @@ describe('EmailConnectionsReview', () => {
     expect(nulledBinds).toHaveLength(0);
 
     // The pre-existing sibling (the filed Matter) is still rendered — untouched.
-    expect(screen.getByText('Filed automatically')).toBeInTheDocument();
     expect(screen.getByText('Acme v Beta')).toBeInTheDocument();
   });
 
-  it('dismissing a FILED association removes ONLY that one via unlinkRegarding — siblings (and other pending suggestions) are left intact', async () => {
+  it('removing a FILED association removes ONLY that one via unlinkRegarding — siblings (and other pending suggestions) are left intact', async () => {
     const props = baseProps();
     renderWithProvider(<EmailConnectionsReview {...props} />);
 
-    // "Dismiss" on the Filed-automatically row (Acme v Beta / Matter). The
-    // Suggested section ALSO has a "Dismiss" button (Jane Doe), so scope to
-    // the "Filed automatically" section.
-    const filedSection = screen.getByText('Filed automatically').closest('section') as HTMLElement;
-    fireEvent.click(within(filedSection).getByRole('button', { name: 'Dismiss' }));
+    // "Remove" on the FILED row (Acme v Beta / Matter). The suggested row uses
+    // "Not related" for its dismiss, so scope to the filed row for "Remove".
+    const filed = screen.getByTestId('association-filed');
+    fireEvent.click(within(filed).getByRole('button', { name: 'Remove' }));
 
     await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
 
@@ -235,15 +246,14 @@ describe('EmailConnectionsReview', () => {
     expect(nulledBinds).toHaveLength(1);
 
     // The untouched suggested contact sibling is still present.
-    expect(screen.getByText('Jane Doe')).toBeInTheDocument();
-    expect(screen.getByText('Suggested')).toBeInTheDocument();
+    expect(screen.getByText(/Jane Doe/)).toBeInTheDocument();
   });
 
   it('renders correctly under a dark FluentProvider theme (ADR-021) with no console errors', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     renderWithProvider(<EmailConnectionsReview {...baseProps()} />, webDarkTheme);
 
-    expect(screen.getByText('Filed automatically')).toBeInTheDocument();
+    expect(screen.getByText('Filed')).toBeInTheDocument();
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });

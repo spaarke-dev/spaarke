@@ -105,17 +105,22 @@ describe('EmailReadingPaneShell', () => {
   });
 
   describe('full-width toolbar (FR-08)', () => {
-    it('renders all six action buttons once a card is selected', () => {
+    it('renders the four email verbs (icon+text) + the right-aligned icon-only action group once a card is selected', () => {
       renderShell();
       fireEvent.click(screen.getByText('Email one'));
 
       expect(screen.getByRole('toolbar', { name: 'Email actions' })).toBeInTheDocument();
+      // Left group — icon+text verbs.
       expect(screen.getByRole('button', { name: 'Reply' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Reply All' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Forward' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'New' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Archive' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
+      // Right group — icon-only (aria-label / tooltip).
+      expect(screen.getByRole('button', { name: 'Save to SharePoint' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create Event' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Create To Do' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Link Invoice' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open full form' })).toBeInTheDocument();
     });
 
     it('dispatches each record-scoped action through the host-supplied actions core with the selected id', () => {
@@ -124,8 +129,11 @@ describe('EmailReadingPaneShell', () => {
         onReplyAll: jest.fn(),
         onForward: jest.fn(),
         onNew: jest.fn(),
-        onArchive: jest.fn(),
-        onCreate: jest.fn(),
+        onSaveToSharePoint: jest.fn(),
+        onCreateEvent: jest.fn(),
+        onCreateTodo: jest.fn(),
+        onLinkInvoice: jest.fn(),
+        onOpenFullForm: jest.fn(),
       };
       renderShell({ actions });
       fireEvent.click(screen.getByText('Email one'));
@@ -134,15 +142,21 @@ describe('EmailReadingPaneShell', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Reply All' }));
       fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
       fireEvent.click(screen.getByRole('button', { name: 'New' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save to SharePoint' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create Event' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Create To Do' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Link Invoice' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Open full form' }));
 
       expect(actions.onReply).toHaveBeenCalledWith('e1');
       expect(actions.onReplyAll).toHaveBeenCalledWith('e1');
       expect(actions.onForward).toHaveBeenCalledWith('e1');
       expect(actions.onNew).toHaveBeenCalledWith();
-      expect(actions.onArchive).toHaveBeenCalledWith('e1');
-      expect(actions.onCreate).toHaveBeenCalledWith('e1');
+      expect(actions.onSaveToSharePoint).toHaveBeenCalledWith('e1');
+      expect(actions.onCreateEvent).toHaveBeenCalledWith('e1');
+      expect(actions.onCreateTodo).toHaveBeenCalledWith('e1');
+      expect(actions.onLinkInvoice).toHaveBeenCalledWith('e1');
+      expect(actions.onOpenFullForm).toHaveBeenCalledWith('e1');
     });
 
     it('New is always enabled (not record-scoped); record-scoped buttons enable only once a card is selected', () => {
