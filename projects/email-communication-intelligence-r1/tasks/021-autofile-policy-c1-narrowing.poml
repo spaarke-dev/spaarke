@@ -3,7 +3,7 @@
     <title>Auto-file policy narrowing C-1 in `AssociationStatusMapper`/`AutoFileGate` — rung 0+1 auto-file, 2/3 → `Suggested`</title>
     <phase>P2 — Lean intelligence spine</phase>
     <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>6</estimated-hours>
     <dependencies>020</dependencies>
     <deps>020</deps>
