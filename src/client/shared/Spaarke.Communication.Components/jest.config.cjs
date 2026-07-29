@@ -25,6 +25,23 @@
  *   - React/ReactDOM are pinned to THIS package's own `node_modules` copy so
  *     a component mounted from `@spaarke/ui-components` source shares the
  *     SAME React instance (hooks fail with "Invalid hook call" otherwise).
+ *   - `@fluentui/react-components` / `@fluentui/react-tabster` / `tabster` are
+ *     ALSO pinned to this package's own copy (task 040 discovery): this
+ *     package's own devDependency (`@fluentui/react-components` ^9.46.2) and
+ *     `@spaarke/ui-components`'s (^9.73.2) resolve to two DIFFERENT installed
+ *     versions with different transitive `tabster` versions (8.8.0 vs 8.7.0).
+ *     Rendering a component built against one copy (e.g. this package's own
+ *     `<Toolbar>`) alongside one built against the source-mapped other copy
+ *     (e.g. `DataGridViewSelector` from `@spaarke/ui-components` source) in
+ *     the SAME test creates two independent tabster "core" instances that do
+ *     not share internal state, crashing deep in `@fluentui/react-tabster`'s
+ *     `useTabster` hook (`getMover`: "Cannot read properties of undefined
+ *     (reading 'set')") the first time both mount within one commit — first
+ *     hit by `EmailWorkspace.test.tsx` (task 040), which is the first test in
+ *     this package to combine a real `<Toolbar>`-family component together
+ *     with the real `DataGridViewSelector` in one tree. Same "one instance"
+ *     fix as the existing React/ReactDOM dedup above, just extended to the
+ *     Fluent/tabster trio.
  *   - `@spaarke/auth` is intentionally NOT mapped here — this package never
  *     initializes `@spaarke/auth` itself, so every test file that needs it
  *     supplies its own `jest.mock('@spaarke/auth', () => ({ ... }))`
@@ -61,6 +78,15 @@ module.exports = {
     '^react/(.*)$': '<rootDir>/node_modules/react/$1',
     '^react-dom$': '<rootDir>/node_modules/react-dom',
     '^react-dom/(.*)$': '<rootDir>/node_modules/react-dom/$1',
+    // Dedupe Fluent v9 + tabster so a component mounted from @spaarke/ui-components
+    // SOURCE shares this package's SAME tabster core (see note above — avoids a
+    // "Cannot read properties of undefined (reading 'set')" crash deep in
+    // @fluentui/react-tabster's useTabster hook when two independent copies mount
+    // together, e.g. a real `<Toolbar>` alongside `DataGridViewSelector`).
+    '^@fluentui/react-components$': '<rootDir>/node_modules/@fluentui/react-components',
+    '^@fluentui/react-tabster$': '<rootDir>/node_modules/@fluentui/react-tabster',
+    '^@fluentui/react-tabster/(.*)$': '<rootDir>/node_modules/@fluentui/react-tabster/$1',
+    '^tabster$': '<rootDir>/node_modules/tabster',
   },
   testPathIgnorePatterns: ['/node_modules/', '/dist/'],
 };

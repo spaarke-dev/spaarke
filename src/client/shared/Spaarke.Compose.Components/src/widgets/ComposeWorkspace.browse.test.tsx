@@ -70,7 +70,7 @@ jest.mock('./ComposeToolbar', () => ({
   },
 }));
 
-// ── ComposeEditor — capture the docxBytes + sessionId it is handed ──────────
+// ── ComposeEditor — capture the docxBytes + sessionId + projection it is handed ─
 // `sessionId` is the DOCUMENT session id threaded onward to ComposeAiToolbar as
 // `documentSessionId` — the non-empty value is what classifies a compose EDIT
 // (redline) vs a misrouted INFORMATIONAL prose card (Wave 2 / UAT-R3 Test #3).
@@ -81,14 +81,25 @@ const editorSessionId: { current: string | undefined } = { current: undefined };
 // (`canSave`) to ComposeEditor. Capture it here to assert the transient-draft
 // "first Save is reachable" signal that previously rode `ComposeToolbar.isDirty`.
 const editorCanSave: { current: boolean | undefined } = { current: undefined };
+// FR-02 regression guard (task 012 audit finding): task 011 already wires the Browse door to
+// hydrate `projection` from POST /api/compose/project's response instead of hardcoding `null`.
+// Capture it so a future regression that silently drops a present server projection back to
+// `null` fails a test — see the "hydrates a non-null projection" test below.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const editorProjection: { current: any } = { current: undefined };
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
     ComposeEditor: ReactLib.forwardRef(
-      (props: { docxBytes: ArrayBuffer | null; sessionId?: string; canSave?: boolean }, ref: React.Ref<unknown>) => {
+      (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        props: { docxBytes: ArrayBuffer | null; sessionId?: string; canSave?: boolean; projection?: any },
+        ref: React.Ref<unknown>
+      ) => {
         editorDocxBytes.current = props.docxBytes;
         editorSessionId.current = props.sessionId;
         editorCanSave.current = props.canSave;
+        editorProjection.current = props.projection;
         ReactLib.useImperativeHandle(ref, () => ({
           serialize: async () => new ArrayBuffer(0),
           getCounts: () => ({ characters: 0, words: 0 }),
@@ -140,6 +151,7 @@ beforeEach(() => {
   editorDocxBytes.current = undefined;
   editorSessionId.current = undefined;
   editorCanSave.current = undefined;
+  editorProjection.current = undefined;
   toolbarProps.current = {};
 });
 
@@ -227,6 +239,85 @@ describe('ComposeWorkspace — FR-01 Browse transient mount', () => {
     // Still transient: the id was minted CLIENT-side (Browse bytes are local) — no persistence
     // round-trip. (A read-only compose-outputs durability probe against the session is allowed.)
     expectNoPersistenceCalls();
+  });
+
+  // FR-02 regression guard (task 012 audit finding): task 011 already wires this door to hydrate
+  // `projection` from POST /api/compose/project's response instead of hardcoding `null`. This
+  // test proves that end-to-end at the CLIENT level (not just the server seam) — if a future
+  // change to `mountTransient`'s dispatch, the reducer, or `normalizeProjection` silently drops a
+  // present server projection back to `null`, this test fails instead of the regression shipping
+  // unnoticed. Mirrors task 011's server-side seam proof (`ComposeProjectSeamTests.cs`) at the
+  // client boundary those tests cannot reach.
+  it('hydrates a non-null projection from POST /api/compose/project (FR-02 one-reader regression guard)', async () => {
+    authenticatedFetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/api/compose/project')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            projection: {
+              status: 'success',
+              canEdit: true,
+              html: '<p>Hello</p>',
+              warnings: [],
+              schemaVersion: 'compose-html-v1',
+            },
+          }),
+        };
+      }
+      // Any other call (e.g. the FR-04 compose-outputs durability probe) — benign 404 default.
+      return { ok: false, status: 404, json: async () => [], text: async () => '' };
+    });
+
+    renderWorkspace();
+
+    fireEvent.click(screen.getByTestId('compose-empty-state-browse'));
+    const fileInput = screen.getByTestId('compose-workspace-browse-file-input') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [makeDocxFile()] } });
+
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    // The projection round-trip resolves asynchronously inside the same IIFE as the mount
+    // dispatch — wait for it to settle before asserting.
+    await waitFor(() => expect(editorProjection.current).not.toBeNull());
+
+    // The editor must take the projection branch (never `projection: null`, which would force
+    // the deleted-per-F-2 `mammoth` fallback).
+    expect(editorProjection.current).not.toBeUndefined();
+    expect(editorProjection.current?.status).toBe('success');
+    expect(editorProjection.current?.canEdit).toBe(true);
+    expect(editorProjection.current?.html).toBe('<p>Hello</p>');
+  });
+
+  // Task 013 (spaarkeai-compose-fidelity-r4.5, FR-04 / F-2 "one reader") reconciliation: the client
+  // mammoth fallback is DELETED, so a docx mount with no projection now renders an explicit error
+  // state INSIDE ComposeEditor (proven at the ComposeEditor unit level in
+  // ComposeEditor.projection.test.tsx). At THIS boundary the contract under test is narrower but
+  // load-bearing: an unreachable BFF must NOT block the Browse mount itself — the tab still
+  // navigates, the file is still registered with the active chat session for Assistant reference,
+  // and `mountTransient` still dispatches with `projection: null` (never blocking on the network
+  // call) — it is ComposeEditor's render, not this dispatch, that changed in task 013.
+  it('BFF unreachable (fetch throws): the Browse mount still proceeds with projection: null (never blocked)', async () => {
+    authenticatedFetchMock.mockImplementation(async (url: unknown) => {
+      if (String(url).includes('/api/compose/project')) {
+        throw new Error('network unreachable');
+      }
+      return { ok: false, status: 404, json: async () => [], text: async () => '' };
+    });
+
+    renderWorkspace();
+
+    fireEvent.click(screen.getByTestId('compose-empty-state-browse'));
+    const fileInput = screen.getByTestId('compose-workspace-browse-file-input') as HTMLInputElement;
+    fireEvent.change(fileInput, { target: { files: [makeDocxFile()] } });
+
+    // The mount still proceeds — never blocked by the failed round-trip.
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+    expect(screen.queryByTestId('compose-empty-state')).not.toBeInTheDocument();
+    expect(editorDocxBytes.current).toBeInstanceOf(ArrayBuffer);
+
+    // `projection` normalizes to null — ComposeEditor (unit-tested separately) is responsible for
+    // rendering the error/unavailable state from here, not this dispatch.
+    await waitFor(() => expect(editorProjection.current).toBeNull());
   });
 
   it('(negative) cancelling the picker leaves the empty state unchanged and mounts nothing', async () => {

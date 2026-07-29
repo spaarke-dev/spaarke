@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="email-communication-solution-r5">
+  <metadata>
+    <title>NFR-01: Deploy — BFF (`eml-render`) + Email code page + widget layout seed; publish-size report (≤60 MB)</title>
+    <phase>5 Integration &amp; verification</phase>
+    <gate>after:050</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Irreversible multi-surface release (BFF + code page + layout seed) with the binding §10/NFR-01 publish-size verification + CVE gate. Deploy ordering is load-bearing. FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes established deploy skills (bff-deploy, code-page-deploy, `Deploy-SystemWorkspaceLayouts.ps1`) in a fixed order + measures/reports size; procedural, low ambiguity. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Irreversible release; must run after 050 and in a fixed order (BFF → code page → widget seed). Never parallelized.</parallel-reason>
+    <deps>050</deps>
+    <tags>deploy, bff-api</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy all r5 surfaces in order: (1) the BFF (`GET /api/documents/{id}/eml-render` endpoint) via the `bff-deploy` skill; (2) the standalone Email code page (`src/solutions/EmailPage`) via the `code-page-deploy` skill; (3) the `email` widget layout seed via `scripts/Deploy-SystemWorkspaceLayouts.ps1`. MEASURE + REPORT the BFF publish size per §10/NFR-01 — `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, compressed output, absolute size + delta vs the ~49.63 MB (incl. PDBs) baseline, ≤60 MB ceiling — and confirm 0 new HIGH CVE. Run `/conflict-check` BEFORE opening the BFF PR (Communication-cluster contention). This is a prescriptive, irreversible sequence.</prompt>
+  <role>SPAARKE release engineer. Expert in BFF App Service deploy, Code Page web-resource deploy, Dataverse layout seeding, and §10 publish-size governance. Follow ADRs strictly.</role>
+  <goal>All three r5 surfaces deployed and reachable: the `eml-render` BFF endpoint live; the Email code page deployed as a navigation-reachable web resource; the `email` widget seeded into system workspace layouts. The BFF publish size is measured, ≤60 MB compressed, with the absolute size + delta vs the ~49.63 MB baseline reported in task notes/PR; `dotnet list package --vulnerable --include-transitive` shows 0 new HIGH CVE.</goal>
+
+  <context>
+    <background>Spec NFR-01 + §10 BFF Hygiene: every BFF-touching task measures + reports publish size (≤60 MB compressed ceiling; baseline ~49.63 MB incl. PDBs) and verifies no new HIGH CVE. MimeKit is already referenced (no new package), so the `eml-render` endpoint should add ~0 MB. The r5 release spans three surfaces (BFF endpoint, code page, widget layout seed) that must go out in a safe order — BFF first (so the endpoint the surface calls exists), then the code page + widget seed. `Deploy-SystemWorkspaceLayouts.ps1` seeds the `email` widget/section into system layouts (from 041).</background>
+    <relevant-files>
+      <file role="modify">deploy/api-publish/ (publish output — measured)</file>
+      <file role="canonical-reference">scripts/Deploy-SystemWorkspaceLayouts.ps1</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Verification sweep passed (parity + regression + XSS) before release.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="bff-extensions">Publish-size verification (NFR-01, binding): run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure COMPRESSED output, report absolute size + delta vs the ~49.63 MB (incl. PDBs) baseline (state the PDB convention). HARD STOP if ≥60 MB; ≥+5 MB single-task delta requires explicit justification. MimeKit already present → expected ~0 MB delta.</constraint>
+    <constraint source="bff-extensions">CVE gate: `dotnet list package --vulnerable --include-transitive` — 0 new HIGH-severity CVE. State the Placement Justification for the `eml-render` endpoint in the BFF PR (cite `.claude/constraints/bff-extensions.md`).</constraint>
+    <constraint source="project">Run `/conflict-check` BEFORE opening the BFF PR (Communication-cluster contention — `Services/Communication/**` shared with notification-spine-r1, messaging-r1/r2/r3, email-r4; sequence merge after email-r4).</constraint>
+    <constraint source="project">Deploy ORDER is fixed (prescriptive): (1) BFF `eml-render` → (2) Email code page → (3) `email` widget layout seed. The code page + widget must not go out before the endpoint they call is live.</constraint>
+    <constraint source="ADR-028">The deployed code page authenticates via `@spaarke/auth` against the deployed BFF — verify the deployed endpoint is reachable under auth post-deploy (smoke check).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF + code-page + layout-seed deployment + §10 publish-size governance</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deploy + size report" location=".claude/skills/bff-deploy/SKILL.md">Publish, measure compressed size, report delta vs baseline; the §10 per-task verification recipe.</pattern>
+      <pattern name="Code page deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build + deploy the React code-page web resource to Dataverse.</pattern>
+      <pattern name="Layout seed" location="scripts/Deploy-SystemWorkspaceLayouts.ps1">Seeds the `email` widget/section into system workspace layouts.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec NFR-01 + §10 + the deploy skills. Declare RIGOR LEVEL: FULL with reason. Confirm 050 is ✅ (verification passed) — do NOT deploy on a failed verification.</step>
+    <step order="1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure the COMPRESSED output; record absolute size + delta vs ~49.63 MB (incl. PDBs) baseline. HARD STOP if ≥60 MB.</step>
+    <step order="2">Run `dotnet list package --vulnerable --include-transitive`; confirm 0 new HIGH CVE.</step>
+    <step order="3">Run `/conflict-check` (Communication-cluster); resolve/sequence per its output BEFORE the BFF PR. State the `eml-render` Placement Justification in the PR.</step>
+    <step order="4">Deploy the BFF via the `bff-deploy` skill; smoke-check `GET /api/documents/{id}/eml-render` is live and requires auth (401 unauthenticated, sanitized HTML authenticated).</step>
+    <step order="5">Deploy the Email code page (`src/solutions/EmailPage`) via the `code-page-deploy` skill; verify it is navigation-reachable and authenticates against the deployed BFF.</step>
+    <step order="6">Run `scripts/Deploy-SystemWorkspaceLayouts.ps1` to seed the `email` widget/section; verify the widget appears in the target system workspace layout.</step>
+    <step order="7">Record the publish size + delta + CVE result + deployed URLs in `projects/email-communication-solution-r5/notes/deploy-report.md`; cite it in the PR.</step>
+    <step order="8">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 051 to ✅. Document any deviation in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the BFF publish size is ≥60 MB (HARD STOP), OR a new HIGH CVE appears, OR the post-deploy smoke check of `eml-render` fails, STOP and escalate per root CLAUDE.md §6/§10 rather than continuing the (irreversible) code-page + widget-seed steps.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + size measure + CVE scan</tool>
+    <tool name="bff-deploy">Deploy the BFF API</tool>
+    <tool name="code-page-deploy">Deploy the Email code page</tool>
+    <tool name="conflict-check">Pre-PR conflict detection</tool>
+    <tool name="terminal">Run `Deploy-SystemWorkspaceLayouts.ps1`</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/email-communication-solution-r5/notes/deploy-report.md (size + delta + CVE + URLs)</output>
+    <output type="artifact">deploy/api-publish/ (measured BFF publish)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The `GET /api/documents/{id}/eml-render` endpoint is deployed and live; smoke check returns sanitized HTML authenticated and 401 unauthenticated (fails closed).</criterion>
+    <criterion testable="true">The Email code page is deployed, navigation-reachable, and authenticates against the deployed BFF via `@spaarke/auth`.</criterion>
+    <criterion testable="true">The `email` widget/section is seeded into the system workspace layout via `Deploy-SystemWorkspaceLayouts.ps1` and renders in the workspace.</criterion>
+    <criterion testable="true">BFF publish size measured, ≤60 MB compressed, with absolute size + delta vs the ~49.63 MB baseline reported in `notes/deploy-report.md` + PR (PDB convention stated).</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows 0 new HIGH CVE; the `eml-render` Placement Justification is stated in the PR.</criterion>
+    <criterion testable="true">`/conflict-check` ran before the BFF PR and its findings were resolved/sequenced.</criterion>
+    <criterion testable="true">Negative: if size ≥60 MB or a new HIGH CVE appears, the deploy STOPS before the code-page/widget steps (irreversible steps not taken on a failed gate).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec NFR-01 + root CLAUDE.md §10. Prescriptive/irreversible ordering: BFF → code page → widget seed. MimeKit already referenced → expected ~0 MB publish delta. Run `/conflict-check` before the BFF PR (Communication-cluster; sequence merge after email-r4). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

@@ -31,6 +31,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 import { ComposeEditor, type ComposeEditorHandle } from './ComposeEditor';
+import type { ComposeServerProjection } from '../types/compose-contracts';
 
 // ComposeAiToolbar (rendered inside the BubbleMenu) calls useAuth(); stub it — this test
 // never dispatches an action. Mirrors ComposeEditor.dirtyOnMount.test.tsx.
@@ -44,7 +45,8 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-// Resolve the mammoth import synchronously (jsdom has no mammoth WASM path).
+// Regression guard only (task 013): production no longer imports `docxToTipTapHtml` or
+// `stampParaIds`. The editor mounts via the `projection` prop below, not this bridge.
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: jest.fn(async () => ({
     html: '<p>Loaded document body for the pane-toggle crash guard.</p>',
@@ -61,6 +63,16 @@ function docxBytesFixture(totalLen = 8): ArrayBuffer {
   buf.set([0x50, 0x4b, 0x03, 0x04], 0);
   return buf.buffer;
 }
+
+// Task 013 (F-2 "one reader"): the client-side mammoth reader is DELETED — the editor now
+// requires a server `projection` to mount the editable surface at all.
+const PANE_TOGGLE_PROJECTION: ComposeServerProjection = {
+  status: 'success',
+  canEdit: true,
+  html: '<p data-paraid="AB12CD34">Loaded document body for the pane-toggle crash guard.</p>',
+  warnings: [],
+  schemaVersion: 'compose-html-v1',
+};
 
 const FINDING = {
   sectionRef: 'Paragraph 1 (p. 1)',
@@ -84,6 +96,7 @@ function renderEditor(summaryOpen: boolean) {
         <ComposeEditor
           ref={ref}
           docxBytes={docxBytesFixture(8)}
+          projection={PANE_TOGGLE_PROJECTION}
           // Transient draft, no imports — the crash is import-independent.
           documentRef={{ speDriveItemId: '', fileName: 'Pane-toggle guard.docx' }}
           sessionId="session-pane-toggle"
@@ -99,6 +112,7 @@ function renderEditor(summaryOpen: boolean) {
           <ComposeEditor
             ref={ref}
             docxBytes={docxBytesFixture(8)}
+            projection={PANE_TOGGLE_PROJECTION}
             documentRef={{ speDriveItemId: '', fileName: 'Pane-toggle guard.docx' }}
             sessionId="session-pane-toggle"
             reviewSummary={{ ...reviewSummary, open }}

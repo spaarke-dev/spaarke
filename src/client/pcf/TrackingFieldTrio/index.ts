@@ -9,6 +9,17 @@
  * v1.0.1 — added showTitle / showVersion PCF properties, alignment fix
  * (explicit 2-row grid), pale color scheme, option-set color binding.
  *
+ * v1.0.6 (task 023, FR-14/FR-18) — the rendered component now lives in
+ * `@spaarke/ui-components` (entity-agnostic `TrackingFieldTrio`; options
+ * injected via props). This `index.ts` is the ONLY place in the tree that
+ * knows about `sprk_communication`'s Access Permission choice values —
+ * `getAccessPermissionOptions()` supplies the real Dataverse OptionSet
+ * metadata (value + label + color) when available, falling back to the
+ * hardcoded Standard/Limited/Restricted triple (no color — the shared
+ * core's position-based default palette applies) when metadata is
+ * unavailable (e.g., harness/test environments), preserving the PRE-LIFT
+ * behavior (NFR-04 — zero regression).
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -18,7 +29,32 @@ import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { TrackingFieldTrioApp, ITrackingFieldTrioAppProps, IAccessPermissionOption } from './TrackingFieldTrioApp';
+// Aliased on import — the PCF control class below MUST be named
+// `TrackingFieldTrio` to match `constructor="TrackingFieldTrio"` in
+// ControlManifest.Input.xml, so the shared component is imported under a
+// distinct local name.
+import {
+  TrackingFieldTrio as SharedTrackingFieldTrio,
+  type ITrackingFieldTrioProps,
+  type IAccessPermissionOption,
+} from '@spaarke/ui-components/dist/components/TrackingFieldTrio';
+
+// sprk_communication Access Permission choice values — MUST match the
+// Dataverse OptionSet values. Entity-specific: lives ONLY here (the PCF
+// caller), never in the shared `TrackingFieldTrio` core (FR-14).
+const ACCESS_PERMISSION_STANDARD = 100000000;
+const ACCESS_PERMISSION_LIMITED = 100000001;
+const ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+// Fallback segments (no per-option color) used when the bound OptionSet's
+// field metadata isn't available (e.g., harness/test environments). The
+// shared core's position-based default palette (green/yellow/red, by index)
+// then supplies the same colors the pre-lift hardcoded fallback did.
+const FALLBACK_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
+  { value: ACCESS_PERMISSION_STANDARD, label: 'Standard' },
+  { value: ACCESS_PERMISSION_LIMITED, label: 'Limited' },
+  { value: ACCESS_PERMISSION_RESTRICTED, label: 'Restricted' },
+];
 
 export class TrackingFieldTrio implements ComponentFramework.StandardControl<IInputs, IOutputs> {
   private container: HTMLDivElement;
@@ -62,16 +98,17 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   }
 
   /**
-   * v1.0.1 — Extract per-option colors from the bound OptionSet's field
-   * metadata so the segmented picker can honor colors configured on the
-   * choice column in Dataverse. Falls back to fluent pale tokens in the
-   * React component if no color is defined.
+   * Extract per-option value/label/color from the bound OptionSet's field
+   * metadata so the segmented picker can honor the choice column's real
+   * Dataverse values, labels, and colors. Falls back to the hardcoded
+   * Standard/Limited/Restricted triple (no color) when metadata isn't
+   * available, so the control always renders 3 segments (NFR-04).
    */
   private getAccessPermissionOptions(): IAccessPermissionOption[] {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const attrs = (this.context.parameters.accessPermission as any)?.attributes;
     const options = attrs?.Options as { Value: number; Label: string; Color?: string }[] | undefined;
-    if (!options) return [];
+    if (!options || options.length === 0) return FALLBACK_ACCESS_PERMISSION_OPTIONS;
     return options.map(o => ({
       value: o.Value,
       label: o.Label,
@@ -80,9 +117,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   }
 
   /**
-   * v1.0.4 — Resolve a bound field's Dataverse display name from the
-   * PCF context. Falls back to the provided default when metadata isn't
-   * available (e.g., harness/test environments).
+   * Resolve a bound field's Dataverse display name from the PCF context.
+   * Falls back to the provided default when metadata isn't available (e.g.,
+   * harness/test environments).
    */
   private getFieldLabel(param: ComponentFramework.PropertyTypes.Property | undefined, fallback: string): string {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,22 +128,23 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   }
 
   private renderControl(): void {
-    // v1.0.3 — `!== false` treats unset / null / undefined as "not explicitly
-    // false" so the manifest default (showTitle=true) wins. Same pattern as
+    // `!== false` treats unset / null / undefined as "not explicitly false"
+    // so the manifest default (showTitle=true) wins. Same pattern as
     // VisualHost's showToolbar/showVersion reads.
     const showTitle = this.context.parameters.showTitle?.raw !== false;
     const showVersion = this.context.parameters.showVersion?.raw === true;
 
-    const props: ITrackingFieldTrioAppProps = {
+    const props: ITrackingFieldTrioProps = {
       monitor: this.monitorValue,
       highPriority: this.highPriorityValue,
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
+      versionText: 'v1.0.7 • Built 2026-07-28',
       accessPermissionOptions: this.getAccessPermissionOptions(),
-      // v1.0.4 — labels pulled from each bound field's Dataverse metadata
-      // so they reflect the actual field display name (localizable, and
-      // stays in sync if the field is renamed).
+      // Labels pulled from each bound field's Dataverse metadata so they
+      // reflect the actual field display name (localizable, and stays in
+      // sync if the field is renamed).
       monitorLabel: this.getFieldLabel(this.context.parameters.monitor, 'Monitor'),
       highPriorityLabel: this.getFieldLabel(this.context.parameters.highPriority, 'High Priority'),
       accessPermissionLabel: this.getFieldLabel(this.context.parameters.accessPermission, 'Access Permission'),
@@ -129,7 +167,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       React.createElement(
         FluentProvider,
         { theme: webLightTheme, style: { width: '100%' } },
-        React.createElement(TrackingFieldTrioApp, props)
+        React.createElement(SharedTrackingFieldTrio, props)
       ),
       this.container
     );

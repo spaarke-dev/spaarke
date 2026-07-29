@@ -19,7 +19,7 @@ import {
   type Connection,
   type AiSuggestedType,
   type ProvenanceDoc,
-} from '../CommunicationConnections/provenance';
+} from '@spaarke/communication-components/logic/connections/provenance';
 
 function mkConn(partial: Partial<Connection> & Pick<Connection, 'field' | 'status'>): Connection {
   return {

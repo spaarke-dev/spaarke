@@ -1,0 +1,150 @@
+<task id="020" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-2: stop silent glyph drops (w:cr, w:sym) + intra-run warning mechanism</title>
+    <phase>2 WS-2 Harden read</phase>
+    <gate>blocked until 013</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (`ComposeDocxProjectionBuilder.cs` — the run switch) with `bff-api`/`compose` tags; brownfield root-cause on glyph handling that feeds the F-1 text-exactness release blocker. Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield root-cause on run-switch glyph handling — must audit every run child (`w:t`/`w:delText`/`w:br`/`w:tab`/`w:noBreakHyphen`/`w:cr`/`w:sym`/…) and reason about which are represented vs silently dropped. Fully-specified target (represent-or-warn) but requires exhaustive construct coverage, so xhigh effort; no architectural blast radius → sonnet not opus.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Compose/ComposeDocxProjectionBuilder.cs` (the run switch) — the same file 021, 022, 030, 031 modify. All WS-2/WS-3 builder tasks run sequentially per plan.md group W2/W3.</parallel-reason>
+    <deps>013</deps>
+    <tags>bff-api,compose,docx,testing</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the two silent glyph-drop defects on the projection read path (design §1, §4 WS-2; spec FR-05/FR-06/FR-10).
+    Add `CarriageReturn` (`w:cr`) handling to the run switch — emit a `&lt;br&gt;` (or a preserved separator consistent
+    with the existing `w:br` handling) so a carriage return is never silently dropped. Add `w:sym` (`SymbolChar`)
+    handling — map the symbol-font code point to its Unicode equivalent where known (Symbol / Wingdings → Unicode,
+    e.g. the section mark §), and where no known mapping exists emit a VISIBLE placeholder AND raise a warning. NEVER
+    drop a glyph without a warning. Today the F-03 alignment guard counts PARAGRAPHS, not intra-run glyphs, so a
+    dropped `w:cr`/`w:sym` is invisible — add a mechanism that observes intra-run glyph loss and surfaces it. Add
+    projection tests (the suite has no `w:sym` test today).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer working the BFF Compose projection. Expert in OOXML run-level markup
+    (`DocumentFormat.OpenXml.Wordprocessing` run children: `Text`/`DeletedText`/`Break`/`TabChar`/`NoBreakHyphen`/
+    `CarriageReturn`/`SymbolChar`) and symbol-font → Unicode code-point mapping (Symbol / Wingdings PUA ranges).
+    Understands the R4.5 F-1 text-exactness invariant: no glyph vanishes without a surfaced warning. Follow ADRs
+    strictly — `Services/Compose/` stays pure (`byte[]`-in/projection-out; no `Microsoft.Graph`, no AI internals).
+  </role>
+
+  <goal>
+    `ComposeDocxProjectionBuilder.cs`'s run switch handles `w:cr` (emits a break) and `w:sym` (maps to Unicode where
+    known, else a visible placeholder + warning), so neither glyph is ever silently dropped; an intra-run glyph-loss
+    warning mechanism observes and surfaces any placeholdered/dropped glyph (not just paragraph-level guards); and
+    projection tests assert `w:cr` emission and `w:sym` §-mapping/placeholder+warning behaviour. F-1 holds: every
+    corpus doc's run text is represented or warned, never silently lost.
+  </goal>
+
+  <context>
+    <background>
+      On the projection path `w:sym` (symbol glyphs — the § section mark, custom Wingdings bullets) and `w:cr` are
+      absent from the run switch and are dropped with NO warning (design §1: "A few silent text drops"). `w:t` /
+      `DeletedText` are emitted verbatim via `AppendEscaped` (`:689-693`, `:944-957`); `w:noBreakHyphen` is already
+      U+2011 (`:702-703`); `w:tab` is already `compose-tab` (`:695-698`); `w:softHyphen` is dropped (correct). The
+      only warning mechanism today is the F-03 alignment guard, which counts PARAGRAPHS — it cannot see an
+      intra-run glyph vanish. This task adds `w:cr` + `w:sym` to the switch and an intra-run glyph-loss observer so
+      F-1 (text exactness — represent-or-warn, never silent drop) holds. `w:sym` mapping coverage (which fonts get
+      first-class Unicode vs warned placeholder) is an open spec question — enumerate the mapping you implement.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the run switch (~`:685-705`, around `AppendEscaped` at `:689-693`, `w:noBreakHyphen` at `:702-703`, `w:tab` at `:695-698`). RE-GREP these lines before editing — line numbers drift. Add `CarriageReturn` + `SymbolChar` cases; add the intra-run glyph-loss warning hook.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — existing `w:br` handling is the pattern to mirror for `w:cr` → break; the existing paragraph-count warning (F-03 alignment guard, `AppendAlignment` `:816-830`) is the mechanism to EXTEND (not duplicate) for intra-run glyph loss.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/symbol-section-mark.docx — the `w:sym` § exemplar authored by task 001; the projection test asserts against this doc.</file>
+      <file role="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (or the established projection-test path — RE-GREP) — add the `w:sym` and `w:cr` construct tests (absent today).</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-05 (`w:cr` represented), FR-06 (`w:sym` → Unicode/placeholder+warning), FR-10 (intra-run warning, not paragraph counts), NFR-01 (text exactness release blocker).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §1 (silent text drops), §4 WS-2 (stop the silent drops).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">WS-1 complete — every entry path (upload/browse/open-in-compose) already routes through the server projection, so hardening the projection now benefits ALL paths (not just stored-doc Load).</dependency>
+      <dependency task="001" status="pending">Provides `tests/fixtures/compose-corpus/symbol-section-mark.docx` — the `w:sym` § exemplar this task's test asserts against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-05">`w:cr` (`CarriageReturn`) MUST be represented (a `&lt;br&gt;` or a preserved separator), never silently dropped. Scope: add a `CarriageReturn` case to the run switch mirroring the existing `w:br` handling; a construct test asserts the emission.</constraint>
+    <constraint source="spec / FR-06">`w:sym` (`SymbolChar`) MUST map the symbol-font code point to its Unicode equivalent where known (Symbol / Wingdings → Unicode, e.g. §), else emit a VISIBLE placeholder AND a warning — never a silent drop. Scope: implement + document the mapping table you cover; a code point with no known mapping falls through to placeholder+warning, not to nothing.</constraint>
+    <constraint source="spec / FR-10">No glyph is dropped without a warning; the warning mechanism MUST observe INTRA-RUN glyphs, not just paragraph counts. Scope: extend/augment the existing warning surface (today the F-03 alignment guard counts paragraphs) so a placeholdered/dropped `w:sym`/`w:cr` raises a surfaced warning.</constraint>
+    <constraint source="ADR-007">The projection stays `byte[]`-in / projection-out; no `Microsoft.Graph` usage above `SpeFileStore`. Scope: this task edits only OOXML-reading code inside `Services/Compose/`; adds no Graph/storage call.</constraint>
+    <constraint source="ADR-013">No AI-internal type injected into `Services/Compose/`. Scope: `ComposeDocxProjectionBuilder` remains pure OOXML→projection; no `IOpenAiClient`/`IPlaybookService`/executor reference.</constraint>
+    <constraint source="ADR-038">Add tests at the KEEP path (integration/seam or the established projection-test suite). Scope: no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration test, no ctor-null test; the `w:sym`/`w:cr` tests exercise the real builder over a real corpus doc.</constraint>
+    <constraint source="project / BFF Hygiene §10">Pure-OOXML change on the existing `DocumentFormat.OpenXml` dependency — expected ~0 MB publish delta. Scope: run `dotnet publish -c Release` and report compressed size + diff vs the ~49.63 MB baseline (incl. PDBs) in task notes / PR; run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML run-level markup + the represent-or-warn invariant; symbol-font → Unicode code-point mapping (Symbol/Wingdings); intra-run warning surfacing; F-1 text exactness</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Run-switch represent-or-warn" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (~:685-705)">
+        Each run child is handled explicitly in the switch: `w:t`/`w:delText` → `AppendEscaped` (verbatim), `w:tab` → `compose-tab`, `w:noBreakHyphen` → U+2011, `w:br` → break. Add `w:cr` (mirror `w:br`) and `w:sym` (Unicode-map-or-placeholder+warning). A run child that hits no case and is not deliberately dropped (`w:softHyphen`) is the defect this task closes.
+      </pattern>
+      <pattern name="Warning surface must be intra-run" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (AppendAlignment :816-830 = today's paragraph-count guard)">
+        The existing warning counts paragraphs, so a lost glyph inside a run is invisible. Route glyph-level placeholder/drop events into the warning surface so FR-10 (intra-run observation) holds — extend the existing mechanism rather than adding a second parallel one (§11 default-to-reuse).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: modifies `.cs` with `bff-api`/`compose` tags, F-1 release-blocker path / 📖 PROTOCOL STEPS incl. Step 9.5 code-review + adr-check). Load spec FR-05/06/10 + NFR-01 + design §1/§4 WS-2.</step>
+    <step order="1" name="RE-GREP the run switch">Grep the current run switch in `ComposeDocxProjectionBuilder.cs` to confirm exact line numbers and the existing `w:br`/`w:tab`/`w:noBreakHyphen`/`AppendEscaped` handling before editing (line refs drift from the design's `:685-705`).</step>
+    <step order="2" name="Add w:cr handling">Add a `CarriageReturn` case emitting a `&lt;br&gt;` / preserved separator, mirroring the existing `w:br` handling.</step>
+    <step order="3" name="Add w:sym handling + mapping table">Add a `SymbolChar` case: read `w:sym` `@w:font` + `@w:char` (hex code point), map Symbol/Wingdings code points to their Unicode equivalents (at minimum § and the constructs the corpus exercises), and for any unmapped code point emit a VISIBLE placeholder. Document the mapping coverage in task notes (spec open question: which fonts get first-class mapping).</step>
+    <step order="4" name="Wire the intra-run glyph-loss warning">Route any placeholdered/unmapped `w:sym` (and any deliberately-separated `w:cr` edge case) into the warning surface, extending the existing guard so it observes intra-run glyphs (FR-10) — NOT a second parallel mechanism.</step>
+    <step order="5" name="Add projection tests">Add construct tests over the corpus: `w:cr` renders the break; `w:sym` § renders the section mark (mapped) OR a warned placeholder; assert a warning is raised for any placeholdered glyph. No `Mock&lt;HttpMessageHandler&gt;`/DI/ctor-null tests (ADR-038).</step>
+    <step order="6" name="Build + publish-size check">`dotnet build` + `dotnet test` the Compose suite green; run `dotnet publish -c Release` and record compressed size + diff vs ~49.63 MB baseline (expect ~0). Run `/conflict-check` before the PR.</step>
+    <step order="7" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 020 to ✅. Record any deviation (e.g. an unmapped legal glyph) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A symbol-font code point has NO known Unicode mapping AND no safe placeholder — warn + placeholder as the general rule; BUT if this affects the legal section mark § specifically (or another legally-load-bearing glyph), STOP and surface it: text-exactness (F-1 / NFR-01) is a release blocker and a lost § is a wrong legal document, not a cosmetic gap.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The run switch in `ComposeDocxProjectionBuilder.cs` handles `w:t`/`w:delText`/`w:br`/`w:tab`/`w:noBreakHyphen`; `w:cr` and `w:sym` are ABSENT and silently dropped (verified by grep of the switch — no `CarriageReturn`/`SymbolChar` case). The only warning surface is the paragraph-counting F-03 alignment guard.</existing>
+    <extension>Yes — add two cases to the existing switch and extend the existing warning surface to observe intra-run glyphs. No new service/abstraction; a capability added inside the existing builder.</extension>
+    <cost-of-doing-nothing>A `w:sym` § (the section mark that appears in "§ 4.2" legal citations) and a `w:cr` vanish from the rendered legal document with no warning — F-1 text exactness (a release blocker) fails silently; a reader trusts a document that is missing characters.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF Compose suite; `dotnet publish -c Release` for the publish-size check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (w:cr + w:sym run-switch cases; intra-run glyph-loss warning)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (w:cr emission + w:sym §-map/placeholder+warning tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a corpus doc containing `w:cr`, when projected, then a break is emitted at the carriage return (never dropped); a construct test asserts the emission.</criterion>
+    <criterion testable="true">Given `symbol-section-mark.docx` (`w:sym` §), when projected, then the § renders via its Unicode mapping OR a visible placeholder — no glyph vanishes.</criterion>
+    <criterion testable="true">Given an unmapped `w:sym` code point, when projected, then a visible placeholder is emitted AND an intra-run glyph-loss warning is surfaced (FR-10) — the warning mechanism observes the run-level loss, not just paragraph counts.</criterion>
+    <criterion testable="true">Negative: no `w:sym`/`w:cr` is dropped without a corresponding warning; a test asserts that a placeholdered glyph always co-occurs with a raised warning.</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure — no `Microsoft.Graph` / AI-internal reference added (ADR-007/013); Tier-1 NetArch green.</criterion>
+    <criterion testable="true">BFF build + Compose suite green; `dotnet publish` compressed size reported with ~0 MB delta vs the ~49.63 MB baseline; `/conflict-check` clean before PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 020 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    First WS-2 hardening task; it is the F-1 (text-exactness) gate for `w:sym`/`w:cr`. The `w:sym` mapping-coverage
+    breadth (which fonts get first-class Unicode vs warned placeholder) is a spec Unresolved Question — record the
+    coverage you implement so the construct audit (022) can enumerate it. Deliberately-dropped `w:softHyphen` stays
+    dropped (correct). TASK-INDEX.md + current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

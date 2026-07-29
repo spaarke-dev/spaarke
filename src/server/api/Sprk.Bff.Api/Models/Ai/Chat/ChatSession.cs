@@ -211,6 +211,39 @@ public record ChatSession(
     /// See the class-level remarks above for the mutability + governance notes.
     /// </summary>
     public ActiveDocumentIdentity? ActiveDocument { get; init; }
+
+    // =========================================================================
+    // R4.5 WS-4 paraId -> legal-number reference map (spaarkeai-compose-fidelity-r4.5
+    // task 041, spec FR-17). Owner clarification (project CLAUDE.md "WS-4 store"): the
+    // map persists in BOTH the projection payload (ComposeDocxProjection.ParaIdMap, task
+    // 040) AND here, the session ledger. REUSES the existing three-tier ChatSession stack
+    // (Redis hot / Cosmos warm) — no new store (ADR-040 / root CLAUDE.md §11).
+    //
+    // Like AnchoredAnnotations / DefinedTermsTracking / ActiveDocument above, this is
+    // MUTABLE — ComposeService.LoadAsync REPLACES the stored collection wholesale on every
+    // load with the freshest ComposeDocxProjectionBuilder output (see
+    // ComposeService.BuildReferenceMap). It is NOT an ADR-040 append-only ledger entry.
+    // Bound to the session's DocumentId, so a reload or a consumer reading the session
+    // directly (not re-running the projection) resolves paraId -> number without a
+    // recompute divergence. Values are copied verbatim from ParaIdMapEntry (Services/
+    // Compose/ParaIdPreParser.cs) — never recomputed here (ADR-013 purity: this is a data
+    // model, not AI-internal logic). Stability across edits rides R4's paraId stability
+    // (AnnotationReanchorService): unchanged paragraphs keep their physical w14:paraId, so
+    // their map entry does not change; new/split paragraphs simply appear as new entries
+    // (R4 re-anchor — not recomputed or reconciled here).
+    //
+    // Null (like the sibling collections above) means "none yet" — pre-task-041 Redis/
+    // Cosmos payloads deserialize cleanly. Governance: ADR-015 Tier 3 (user-owned,
+    // GDPR-erasable with the session); tenant-scoped via TenantId; document-scoped via
+    // DocumentId — same as AnchoredAnnotations/DefinedTermsTracking.
+    // =========================================================================
+
+    /// <summary>
+    /// R4.5 WS-4 (task 041, spec FR-17) — the <c>paraId -&gt; legal-number</c> reference map,
+    /// persisted alongside the session so a reload resolves it without recomputing the
+    /// projection. See the class-level remarks above for mutability + governance notes.
+    /// </summary>
+    public IReadOnlyList<ParaReferenceMapEntry>? ReferenceMap { get; init; }
 }
 
 /// <summary>
@@ -406,6 +439,28 @@ public sealed record DefinedTerm
     /// <summary>AI-sourced entries carry the producing Binding + the ADR-040 ledger ref. References the ledger entry — never duplicates the <c>SessionOutput</c> payload.</summary>
     public AnchoredAnnotationProvenance? Provenance { get; init; }
 }
+
+/// <summary>
+/// R4.5 WS-4 (task 041, spec FR-17) — one entry in the session-ledger-persisted
+/// <c>paraId -&gt; legal-number</c> reference map on <see cref="ChatSession.ReferenceMap"/>.
+/// Mirrors the WS-3/WS-4 reference fields on <c>ParaIdMapEntry</c>
+/// (<c>Services/Compose/ParaIdPreParser.cs</c>) exactly — this sibling type exists in
+/// <c>Models/Ai/Chat</c> (which <c>Services/Compose</c> already depends on) rather than
+/// <c>Services/Compose</c> depending back on a session type. Values are COPIED verbatim from
+/// the projection's <c>ParaIdMapEntry</c> at Load time (<c>ComposeService.BuildReferenceMap</c>)
+/// — never recomputed here.
+/// </summary>
+/// <param name="ParaId">The paragraph's <c>w14:paraId</c> (8-hex uppercase) — the stable key R4's <c>AnnotationReanchorService</c> keeps unchanged across edits.</param>
+/// <param name="ComputedNumber">The deterministic computed legal-number label (task 031), or null for a non-numbered paragraph.</param>
+/// <param name="NumberingLevel">The paragraph's raw <c>w:ilvl</c> (task 040), or null together with <see cref="ComputedNumber"/> for a non-numbered paragraph.</param>
+/// <param name="ListPath">The raw per-level ordinal chain (task 040), or null together with <see cref="ComputedNumber"/> for a non-numbered paragraph.</param>
+/// <param name="HeadingLevel">The style-derived outline level (Heading1..Heading6 -&gt; 1..6, task 040), independent of numbering — null for a non-heading paragraph.</param>
+public sealed record ParaReferenceMapEntry(
+    string ParaId,
+    string? ComputedNumber = null,
+    int? NumberingLevel = null,
+    IReadOnlyList<int>? ListPath = null,
+    int? HeadingLevel = null);
 
 /// <summary>
 /// Per-file manifest entry on <see cref="ChatSession.UploadedFiles"/>.

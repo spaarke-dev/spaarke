@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-1: stateless POST /api/compose/project endpoint for browse-local docx</title>
+    <phase>1 WS-1 One reader</phase>
+    <gate>blocked until 010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a NEW BFF endpoint on the `bff-api` hot path and modifies the client browse effect (`.cs` + `.tsx`); carries an ADR-040 tension (T-2). FULL per root CLAUDE.md §8. Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New endpoint but fully specified — a stateless, no-persist read-only wrapper reusing `ComposeDocxProjectionBuilder`; the ADR tension is already resolved as path A in design §9. No architectural judgment left open.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Api/ComposeEndpoints.cs`, `Services/Compose/ComposeService.cs`/`IComposeService.cs`, and client `ComposeWorkspace.tsx` — the same files 010/012/013 touch. Sequential within group W1.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a NEW read-only, stateless `POST /api/compose/project` endpoint that takes docx bytes and returns a
+    `ComposeServerProjection` — NO persistence, NO authoring — so browse-local `.docx` renders via the SERVER
+    reader instead of the lossy client `mammoth` fallback. Update the client browse effect (`ComposeWorkspace.tsx`)
+    to send the browsed bytes to this endpoint and hydrate `projection`. This is FR-03 and resolves ADR Tension
+    T-2: it does NOT violate ADR-040 / R4 I-2 — the client authors nothing; the server only READS. Document that
+    explicitly in the PR. The alternative (a client-side projection path) is rejected because it re-introduces a
+    second reader and breaks F-2 (single auditable reader).
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose client). Expert in the R4 server projection, the ADR-040 browse-client-only boundary, and the `byte[]`-in/projection-out contract. Follow ADRs strictly and surface tensions per §6.5.</role>
+
+  <goal>
+    A new stateless `POST /api/compose/project` endpoint (bytes → `ComposeServerProjection`, no persistence, no
+    authoring) exists; the client browse effect sends browsed bytes and hydrates `projection`; browse-local `.docx`
+    renders via the server projection branch (no `mammoth`). The PR documents T-2 as a resolved path-A exception.
+  </goal>
+
+  <context>
+    <background>
+      Browse-local docs are client-only by design (ADR-040 — no BFF round-trip for authoring). Today that means
+      browsed `.docx` falls back to the lossy client `mammoth` reader, breaking F-2 (single reader) and legal
+      read-fidelity. WS-1 routes browse through the SAME server reader via a read-only, stateless projection
+      round-trip. Because the server only reads (returns a projection, persists nothing, authors nothing), the
+      "client never authors bytes" invariant (I-2) is preserved — this is the design-time resolution of Tension
+      T-2 (design §9, spec T-2). `POST /api/compose/upload` exists but PERSISTS, so it cannot be reused for browse.
+      Line numbers are indicative — RE-GREP before editing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add the new `POST /api/compose/project` route (stateless, no-persist)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs / IComposeService.cs — add a stateless project-from-bytes method reusing `ComposeDocxProjectionBuilder`</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the single reader to reuse; returns the Load-path projection shape</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs:356-362 — the projection shape `project` must also return</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — browse client effect sends bytes to `project` and hydrates `projection`</file>
+      <file role="modify">tests/integration/seam/ — seam slice for the browse→project (no-persist) path (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Upload path returns a projection — establishes the projection-hydration client pattern and the reusable server projection call this task mirrors (no-persist variant).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-03">The `project` endpoint MUST be read-only and stateless — bytes → projection, NO persistence, NO authoring. Scope: it MUST NOT write to the session ledger, SPE, or any store; a call leaves zero server-side state.</constraint>
+    <constraint source="ADR-040 / R4 I-2">The client MUST author no bytes; browse stays client-only for authoring. Scope: sending browsed bytes to a read-only server reader is a projection round-trip, NOT authoring — document this as the T-2 path-A resolution in the PR.</constraint>
+    <constraint source="ADR-007">`byte[]`-in / projection-out; no `Microsoft.Graph` above `SpeFileStore`. Scope: `project` reads bytes via `ComposeDocxProjectionBuilder` entirely inside `Services/Compose/`.</constraint>
+    <constraint source="ADR-013">No AI-internal type injected into the `project` path; `Services/Compose/` stays pure (Tier-1 NetArchTest). Scope: consume `Services/Ai/PublicContracts/` seams only if ever needed — not needed here.</constraint>
+    <constraint source="ADR-038">Add a seam slice for the browse→project vertical slice at its KEEP path, asserting the projection matches the Load-path shape AND that nothing is persisted. Scope: no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null tests.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size, report absolute + delta vs ~49.63 MB (expected ~0 MB). Scope: run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Stateless read-only projection endpoint; ADR-040 browse boundary; T-2 path-A resolution; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Upload projection wiring (persisting)" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Task 010's upload→projection wiring is the template; `project` is the no-persist sibling (drop the persistence, keep the projection build).
+      </pattern>
+      <pattern name="Single docx→projection reader" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        The one reader `project` reuses so browse renders through the same auditable code path (F-2).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Load spec FR-03 + Tension T-2, design §4/§9, ADR-040/007/013/038, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Re-grep the anchors">RE-GREP the upload endpoint (010's wiring), the Load-path projection shape (`IComposeService.cs:356-362`), and the browse client effect in `ComposeWorkspace.tsx`. Confirm where browse currently falls back to `mammoth`.</step>
+    <step order="2" name="Add the stateless project method (server)">Add a stateless `project(bytes) → ComposeServerProjection` method to `ComposeService.cs`/`IComposeService.cs` reusing `ComposeDocxProjectionBuilder`; persist NOTHING (no ledger, no SPE). Add `POST /api/compose/project` in `ComposeEndpoints.cs` returning the Load-path projection shape.</step>
+    <step order="3" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="4" name="Wire the browse effect (client)">Update the browse effect in `ComposeWorkspace.tsx` to POST browsed bytes to `project` and hydrate `projection`, so browse takes the projection branch — no `mammoth`.</step>
+    <step order="5" name="Seam slice">Add a seam slice asserting browse→project returns the Load-path projection shape AND persists nothing (ADR-038).</step>
+    <step order="6" name="Build + hygiene + PR justification">Build BFF + client; run suite + seam. Publish-size report (delta vs ~49.63 MB, ~0 expected). Run `/conflict-check`. Write the PR Placement Justification AND the T-2 path-A note (server reads only; client authors nothing).</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 011 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If code-review reads the browse round-trip as byte-authoring (an ADR-040 / I-2 concern) rather than a read-only projection — do NOT proceed silently. Surface it as the T-2 documented exception per root CLAUDE.md §6.5 (ADR Conflict — Resolution Required), citing the design-time path-A resolution.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`POST /api/compose/upload` exists (`ComposeEndpoints.cs:913-920`) but PERSISTS the uploaded doc; no stateless read-only projection route exists. Verified by grepping `ComposeEndpoints.cs` for `MapPost`/`compose/` routes.</existing>
+    <extension>No — browse is client-only per ADR-040 and must not persist; the upload endpoint's persistence makes it the wrong tool. A distinct stateless, no-persist read-only projection endpoint is required. It reuses the existing `ComposeDocxProjectionBuilder` reader (no new reader), so only the route/persistence boundary is new.</extension>
+    <cost-of-doing-nothing>Without it, browse-local `.docx` keeps falling back to the lossy `mammoth` reader — breaking F-2 (single auditable reader) and legal read-fidelity (wrong numbering, dropped glyphs, lost alignment) on the browse entry path.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (new `POST /api/compose/project`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs / IComposeService.cs (stateless project-from-bytes)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (browse effect uses `project`)</output>
+    <output type="test">tests/integration/seam/ (browse→project no-persist seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given docx bytes POSTed to `/api/compose/project`, when the request completes, then the response is a `ComposeServerProjection` of the Load-path shape (`IComposeService.cs:356-362`) and NOTHING is persisted (no ledger/SPE write).</criterion>
+    <criterion testable="true">Given a browse-local `.docx`, when the browse effect runs, then it POSTs the bytes to `project`, hydrates `projection`, and the editor takes the projection branch — NOT `mammoth`.</criterion>
+    <criterion testable="true">Negative: a second `project` call for the same bytes leaves zero cumulative server-side state (idempotent, stateless) — the endpoint never authors or stores bytes (ADR-040 / I-2 preserved).</criterion>
+    <criterion testable="true">Negative: the `project` path injects no AI-internal type and reaches no `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest green (ADR-007/013).</criterion>
+    <criterion testable="true">A seam slice asserts the browse→project shape AND no-persistence; no banned mock/DI/ctor test added (ADR-038).</criterion>
+    <criterion testable="true">The PR documents T-2 as a resolved path-A exception (server reads only; client authors nothing) and states the Placement Justification; publish delta ~0 MB (≤60 MB); `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 011 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-03 + Tension T-2; design §4 WS-1 + §9. The endpoint is read-only by contract — reviewers should verify
+    the no-persist invariant, not just the shape. Numbering is still not fixed here (WS-3); browse gains the same
+    R4 projection wins as upload (alignment/tabs/comments).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

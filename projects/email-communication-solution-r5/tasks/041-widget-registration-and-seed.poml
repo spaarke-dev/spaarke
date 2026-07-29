@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-01: SpaarkeAi `email` widget registration + LegalWorkspace section shim + `system-layouts.json` seed</title>
+    <phase>4 Dual-use surface</phase>
+    <gate>after:040</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Thin surface-wiring: one widget registration + one section shim + one layout-seed entry, all mirroring the existing `communications-list` reference. New-surface files but no business logic; STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical registration/seed work following an in-repo reference (`communications-list` + `communications.registration.ts`); low ambiguity. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct files from the code-page mount (042); both depend only on 040. Coordinate the `@spaarke/communication-components` barrel import but no shared-file write with 042.</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Register a new SpaarkeAi workspace widget type `email` that renders the shared `EmailWorkspace` component (040), so the Email surface mounts as a SpaarkeAi widget (FR-01, mount #1 of Pattern D). Add the registration in `register-workspace-widgets.ts` (`registerWorkspaceWidget('email', {metadata}, () => import('@spaarke/communication-components'))`), a LegalWorkspace section shim `email.registration.ts` + its `sectionRegistry.ts` / `sections/index.ts` barrel entry (mirroring `communications.registration.ts`), and seed the widget into `scripts/system-layouts.json` + `Deploy-SystemWorkspaceLayouts.ps1`. Per ADR-039 / BFF §10 (Path C): surface identity stays in CODE — no server-side surface identity is added.</prompt>
+  <role>SPAARKE platform developer. Expert in the SpaarkeAi WorkspaceWidgetRegistry + LegalWorkspace section registry + Pattern D dual-use wiring. Follow ADRs strictly.</role>
+  <goal>The Email surface is selectable/renderable as a SpaarkeAi workspace widget: (1) a `registerWorkspaceWidget('email', …)` entry lazily importing `EmailWorkspace` from `@spaarke/communication-components`; (2) a `email.registration.ts` LegalWorkspace `SectionRegistration` shim wired into `sectionRegistry.ts` + `sections/index.ts`; (3) an `email` widget/section seeded into `scripts/system-layouts.json` + `Deploy-SystemWorkspaceLayouts.ps1`. The widget renders identically to the code page (dual-mount parity via the shared component).</goal>
+
+  <context>
+    <background>Spec FR-01 + design Lens 2/Lens 5: mount #1 of the dual-use surface is a SpaarkeAi workspace widget type `email` (sibling of `communications-list`), registered in `Spaarke.AI.Widgets` + a LegalWorkspace section shim + a `system-layouts.json` seed. The `communications` section (`communications.registration.ts`) and the `communications-list` direct-widget registration are the exact reference: both mount a rich Pattern D widget from `@spaarke/communication-components`. This task copies that shape for `email`, pointing at the `EmailWorkspace` component from 040.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file role="new">src/solutions/LegalWorkspace/src/sections/email.registration.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/index.ts</file>
+      <file role="modify">scripts/system-layouts.json</file>
+      <file role="modify">scripts/Deploy-SystemWorkspaceLayouts.ps1</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/communications.registration.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The shared `EmailWorkspace` component this widget/section renders.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Surface identity stays in CODE (Path C — no server-side surface identity). The `email` widget-type string + section id are code-level constants; the BFF adds no surface-identity endpoint or record. Choose an `email` type string that will match any future `widget_load` dispatch and MUST NOT collide with the existing `communications-list`, `email-compose`, or `communications` ids.</constraint>
+    <constraint source="project">Mirror `communications.registration.ts` exactly for the section shim (`SectionRegistration` shape: id `email`, MailRegular-style icon, `category: "data"`, `renderContent` mounting `EmailWorkspace` from `@spaarke/communication-components`). Register through `safeRegister`/`safeRegisterWidget` like its siblings so one bad registration cannot blank the pane.</constraint>
+    <constraint source="ADR-012">The widget/section render the SHARED `EmailWorkspace` (040) — MUST NOT re-implement or fork the surface here; the mount is a thin lazy-import wrapper.</constraint>
+    <constraint source="ADR-022">React 19 registration path (`Spaarke.AI.Widgets` is React 19, NOT PCF-safe). No PCF context introduced.</constraint>
+    <constraint source="project">`system-layouts.json` + `Deploy-SystemWorkspaceLayouts.ps1` seed: add the `email` widget/section to the seed following the existing `communications` entry; do NOT invent a new config record type.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SpaarkeAi widget registration + LegalWorkspace section registry + layout seed</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-039-config-boundary.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </files>
+    <patterns>
+      <pattern name="Direct widget registration" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts">The `communications-list` registration (`registerWorkspaceWidget('communications-list', {metadata}, () => import('@spaarke/communication-components').then(...))`) is the exact template for the `email` entry.</pattern>
+      <pattern name="Section shim" location="src/solutions/LegalWorkspace/src/sections/communications.registration.ts">The `communicationsRegistration` `SectionRegistration` — copy its shape for `emailRegistration`, mounting `EmailWorkspace` in `renderContent`.</pattern>
+      <pattern name="Section barrel + registry" location="src/solutions/LegalWorkspace/src/sections/index.ts">Add `export { emailRegistration } from './email.registration'`; add the entry to `SECTION_REGISTRY` in `../sectionRegistry`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-01 + design Lens 5 + the `communications` reference. Declare RIGOR LEVEL: STANDARD with reason. Confirm 040 is ✅ (the `EmailWorkspace` export exists).</step>
+    <step order="1">Add `registerWorkspaceWidget('email', { displayName: 'Email', category: 'data', icon: 'MailRegular', allowMultiple: true, defaultOrder: (after communications-list) }, () =&gt; import('@spaarke/communication-components').then(m =&gt; ({ default: m.EmailWorkspace })))` in `register-workspace-widgets.ts` (via `safeRegisterWidget`); verify the type string does not collide.</step>
+    <step order="2">Author `src/solutions/LegalWorkspace/src/sections/email.registration.ts` — an `emailRegistration: SectionRegistration` (id `email`, icon, `category: "data"`, `renderContent` → `React.createElement(EmailWorkspace, {...})`), mirroring `communications.registration.ts`.</step>
+    <step order="3">Wire it in: add `emailRegistration` to `SECTION_REGISTRY` in `src/solutions/LegalWorkspace/src/sectionRegistry.ts` and re-export it from `src/solutions/LegalWorkspace/src/sections/index.ts`.</step>
+    <step order="4">Seed the `email` widget/section into `scripts/system-layouts.json` and `scripts/Deploy-SystemWorkspaceLayouts.ps1`, following the existing `communications` seed entry.</step>
+    <step order="5">Build the affected packages (`Spaarke.AI.Widgets`, `LegalWorkspace`) and run their tests; verify the registration resolves the lazy import without error.</step>
+    <step order="6">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 041 to ✅.</step>
+    <step order="7">Document the chosen `email` widget-type string + `defaultOrder` + seed entry in `projects/email-communication-solution-r5/notes/` (so 042 and the deploy task 051 stay consistent).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `email` widget-type string or section id would collide with an existing registration (`communications-list`, `email-compose`, `communications`) or the seed schema cannot express the new widget without a new config-record type, STOP and escalate per root CLAUDE.md §6 rather than renaming an existing surface or inventing a config entity.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`communications-list` direct-widget registration + `communications` section (`communications.registration.ts`) — the sibling multi-channel surface in the same registry.</existing>
+    <extension>No — `communications-list` is the chat/thread multi-channel widget; the Email mail-metaphor surface is a distinct widget type by design (Lens 1/2). It reuses the exact registration + section-shim mechanism (not forked), pointing at the new shared `EmailWorkspace`.</extension>
+    <cost-of-doing-nothing>Without the `email` registration + section shim + seed, the shared `EmailWorkspace` component has no SpaarkeAi mount — the widget half of the dual-use Pattern D (FR-01) never appears in the workspace, so Success Criterion 1 (opens as a widget) fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Email widget renders in SpaarkeAi workspace">
+      <steps><step>Add the `email` widget/section to a workspace layout (via the seed).</step><step>Open the SpaarkeAi workspace and select the Email section/widget.</step></steps>
+      <expected>The shared `EmailWorkspace` two-pane surface renders inside the workspace tab; the section shim resolves the lazy import with no blank/empty tab.</expected>
+    </test>
+    <test name="Dark-mode render in workspace host (ADR-021)">
+      <steps><step>Toggle the SpaarkeAi host to dark theme.</step><step>Open the Email widget.</step></steps>
+      <expected>The Email surface inherits the host `FluentProvider` dark theme and renders legibly.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test `Spaarke.AI.Widgets` + `LegalWorkspace`</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/email.registration.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sectionRegistry.ts</output>
+    <output type="code">scripts/system-layouts.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the built `Spaarke.AI.Widgets`, when the widget registry is inspected, then a `registerWorkspaceWidget('email', …)` entry exists whose factory lazily imports `EmailWorkspace` from `@spaarke/communication-components`.</criterion>
+    <criterion testable="true">Given the LegalWorkspace section registry, when resolved, then `emailRegistration` (id `email`) is present in `SECTION_REGISTRY` and exported from `sections/index.ts`, and its `renderContent` mounts `EmailWorkspace`.</criterion>
+    <criterion testable="true">Given `scripts/system-layouts.json` + `Deploy-SystemWorkspaceLayouts.ps1`, when inspected, then an `email` widget/section seed entry is present following the `communications` entry.</criterion>
+    <criterion testable="true">Given the workspace, when the Email widget is opened, then the shared surface renders (no blank tab) and matches the code-page mount (dual-mount parity via the shared component).</criterion>
+    <criterion testable="true">Negative (ADR-039 Path C): no server-side surface-identity endpoint/record is added — surface identity is code-only (grep + review).</criterion>
+    <criterion testable="true">Negative: the `email` type string / section id does not collide with `communications-list`, `email-compose`, or `communications` (app starts, registrations resolve unambiguously).</criterion>
+    <criterion testable="true">Email widget renders legibly in dark mode (ADR-021 dark-mode ui-test passes); affected builds are green and tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-01 + design Lens 5 (widget registration + shared-lib layering). Mirror `communications.registration.ts` / the `communications-list` registration. No BFF change here. Run `/conflict-check` before the PR (shared `@spaarke/communication-components` barrel import + `Spaarke.AI.Widgets`). Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>

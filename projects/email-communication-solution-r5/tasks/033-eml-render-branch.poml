@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-06/FR-19: reading-pane .eml render branch — sandboxed iframe (as sent) with sprk_body degradation</title>
+    <phase>3 Layer-2 React 19 views + reading-pane shell</phase>
+    <gate>after:010,032</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical: renders untrusted email HTML. Modifies a frontend surface with a non-negotiable XSS boundary (sandboxed iframe, no allow-scripts/allow-same-origin) + a client-sanitize degradation path. Tags include security + fluent-ui; the negative/malicious-HTML cases are DoD. FULL gate (code-review + adr-check at Step 9.5).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The defense-in-depth XSS boundary (server sanitize is trusted, the iframe sandbox + client sanitize are the second and third lines) must be reasoned exactly — a sloppy sandbox attr or a fallback that skips client sanitize re-opens the exact hole this task exists to close.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P3b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Distinct reading-pane sub-view (the body branch); shares only the shell mount contract with 034/035/036. Each P3b task owns separate view files.</parallel-reason>
+    <deps>010,032</deps>
+    <tags>frontend, fluent-ui, react, security</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the reading-pane BODY branch (a React 19 Layer-2 view) that renders the selected email **as sent**: call `GET /api/documents/{emlDocId}/eml-render` via `@spaarke/auth` `authenticatedFetch` and render the returned server-sanitized HTML inside a **sandboxed iframe** (`sandbox` attr with NO `allow-scripts` and NO `allow-same-origin`) — showing the full quoted reply/forward history and inline `cid:` images. If the record has no `.eml` archive, degrade to rendering `sprk_body` (client-sanitized via the shared `sanitizeEmailHtml` from task 001) with a "full history unavailable" note. This sub-view composes into the reading-pane shell (task 032). Explicit, literal: the iframe sandbox is mandatory even though the server already sanitizes (NFR-03 defense-in-depth).</prompt>
+  <role>SPAARKE platform developer. Expert in React 19, Fluent UI v9, and browser XSS/iframe-sandbox security. Follow ADRs strictly (ADR-021 Fluent v9/dark, ADR-028 auth).</role>
+  <goal>A React 19 body-branch component in `@spaarke/communication-components` that, given a selected `sprk_communication` record: (1) resolves the `.eml` archive document id (the related document flagged `sprk_isemailarchive`); (2) if present, fetches `GET /api/documents/{emlDocId}/eml-render` via `authenticatedFetch` and renders the returned sanitized HTML in a sandboxed iframe (`sandbox=""` — i.e. no `allow-scripts`, no `allow-same-origin`; inline images already resolved to `data:` server-side); (3) if absent OR the fetch fails, degrades to `sprk_body` client-sanitized via `sanitizeEmailHtml` + a "full history unavailable" note; (4) renders loading (header paints from the record first via the shell, body swaps in when render returns — NFR-02 &lt;1.5s) and error (retry on record-load failure) states. No `as React.ComponentType` cast introduced (NFR-05).</goal>
+
+  <context>
+    <background>Spec FR-06 + FR-19 + NFR-02/03. The reading pane must show the single selected email exactly as the sender sent it — the embedded quoted history + inline images — which only the archived `.eml` preserves (the queryable `sprk_body` field holds Graph's stripped `uniqueBody` only). The `.eml`→sanitized-HTML render is done server-side by the task-010 endpoint (MimeKit HTML-preserving parse + `cid:`→`data:` + server sanitize + immutable cache). This task is the CLIENT branch: fetch + sandboxed-iframe render, with graceful degradation to `sprk_body` when no archive exists (owner decision 2026-07-27: degradation acceptable, no historical backfill). The sandboxed iframe is defense-in-depth (NFR-03) — mandatory even though the server sanitizes.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailBodyView.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/sanitizeEmailHtml.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">`GET /api/documents/{id}/eml-render` — returns server-sanitized HTML with inline `cid:` images resolved to `data:` URIs; immutable/long-cache response.</dependency>
+      <dependency task="032" status="pending">Reading-pane shell (2-pane + full-width toolbar) — the mount point this body branch composes into; provides the selected record + the header-first paint contract.</dependency>
+      <dependency task="001" status="pending">Shared hardened `sanitizeEmailHtml` in `@spaarke/ui-components` — used for the `sprk_body` degradation path.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Defense-in-depth (NFR-03): the `.eml` HTML MUST render inside a sandboxed iframe with the `sandbox` attribute set and NO `allow-scripts` and NO `allow-same-origin` tokens — even though the task-010 endpoint already sanitizes server-side. Do NOT use `dangerouslySetInnerHTML` for the `.eml` path.</constraint>
+    <constraint source="project">Degradation path (FR-06/FR-19): when no `.eml` archive exists OR the render fetch fails, render `sprk_body` sanitized CLIENT-SIDE via the shared `sanitizeEmailHtml` (task 001) + a visible "full history unavailable" note. The `sprk_body` fallback MUST NOT be rendered unsanitized. An archive-less email is a normal state, NOT an error.</constraint>
+    <constraint source="ADR-028">All BFF calls (the `eml-render` fetch) go through `@spaarke/auth` `authenticatedFetch`; no new auth surface, no client-supplied caller identity.</constraint>
+    <constraint source="ADR-021">Fluent v9 only; the note + loading + error states must render correctly in dark mode via the host `FluentProvider` (no hardcoded colors).</constraint>
+    <constraint source="NFR-05">React-version boundary: no `as React.ComponentType` cast introduced; this is a React 19 code-page/widget Layer-2 view — it consumes React-agnostic logic only, never PCF React.</constraint>
+    <constraint source="project">Document identity: the doc id passed to `eml-render` is the `.eml` archive document (`sprk_isemailarchive` = true) related to the selected `sprk_communication` record — NOT an arbitrary attachment.</constraint>
+    <constraint source="NFR-02">Header-first paint: the shell paints the header/metadata from the loaded record immediately; this branch renders a body skeleton and swaps in the `.eml` render when it returns (&lt;1.5s target). Do not block the header on the body fetch.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 view · untrusted-HTML rendering · iframe sandbox · Spaarke auth</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-components.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    </files>
+    <patterns>
+      <pattern name="Client sanitize + render" location="src/client/shared/Spaarke.UI.Components/src/components/CommunicationTimeline/subcomponents/MessageRow.tsx">The existing DOMPurify + render pattern for field bodies; use the hardened `sanitizeEmailHtml` (task 001) for the `sprk_body` degradation path here — NOT the permissive `USE_PROFILES:{html:true}` this file historically used.</pattern>
+      <pattern name="authenticatedFetch" location="src/client/shared/Spaarke.UI.Components">Reuse `@spaarke/auth` `authenticatedFetch` for the `eml-render` GET; handle non-2xx by falling through to the `sprk_body` degradation branch (fail-soft to fallback, not to a crash).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this project's CLAUDE.md, spec.md FR-06/FR-19/NFR-02/NFR-03, and the ADRs above. Declare RIGOR LEVEL: FULL (security-critical frontend). Confirm tasks 010, 032, 001 have landed the endpoint, shell, and sanitizer.</step>
+    <step order="1">In the shell/record model, resolve the `.eml` archive document id for the selected `sprk_communication` — the related document with `sprk_isemailarchive = true`. Determine presence/absence (drives the branch).</step>
+    <step order="2">Implement the `.eml` branch: `authenticatedFetch('GET /api/documents/{emlDocId}/eml-render')`; on 2xx, render the returned HTML into a sandboxed iframe via `srcdoc` with `sandbox=""` (no `allow-scripts`, no `allow-same-origin`). Size the iframe to the pane; inline images arrive pre-resolved as `data:` URIs.</step>
+    <step order="3">Implement the degradation branch: if there is no archive doc id, OR the fetch is non-2xx, render `sanitizeEmailHtml(sprk_body)` (client-sanitized) with a visible "full history unavailable" note. This is a normal state — no error banner.</step>
+    <step order="4">Implement states: loading (body skeleton while the render is in flight; the shell already painted the header from the record — do not block it); error ONLY for record-load failure (retry affordance). An archive-less email is degradation, not error.</step>
+    <step order="5">Compose the branch into `ReadingPaneShell.tsx` at the body slot; keep header-first paint intact (NFR-02).</step>
+    <step order="6">Add `&lt;ui-tests&gt;` coverage incl. the dark-mode + malicious-HTML cases below. Build the package (`npm run build`, non-PCF), typecheck (no `as React.ComponentType`).</step>
+    <step order="N-1">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set 033 to ✅.</step>
+    <step order="N">Document any deviation (e.g. iframe sizing approach, archive-doc resolution) in `projects/email-communication-solution-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `.eml` archive document identity cannot be resolved from the `sprk_communication` record via the available `sprk_isemailarchive` flag (i.e. correct resolution appears to need a new BFF surface or a new Graph call), STOP and escalate per root CLAUDE.md §6 — do NOT introduce a second BFF endpoint (spec MUST NOT: no new BFF surface beyond `eml-render`).</trigger>
+    <trigger>If server-sanitized `.eml` HTML cannot render acceptably inside a `sandbox=""` iframe without adding `allow-same-origin` or `allow-scripts`, STOP and escalate — do NOT relax the sandbox (NFR-03 is non-negotiable).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task-010 `GET /api/documents/{id}/eml-render` is the justified server surface (§11 row in spec); the generic SPE `/preview-url` iframe cannot render `.eml` as email (design Lens 4). This task adds only the CLIENT render branch that consumes the already-justified endpoint.</existing>
+    <extension>Yes for the endpoint (reused, not forked); the client body branch is a new Layer-2 view composing into the reading-pane shell (task 032, the §11-justified shell surface) — not a new standalone surface.</extension>
+    <cost-of-doing-nothing>Without this branch the reading pane cannot show the email "as sent" (the core FR-06 requirement fails) and archive-less emails would error instead of degrading — the surface is unusable for its primary job.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Quoted-history email renders as sent in sandboxed iframe">
+      <steps><step>Select an email whose `.eml` archive exists and contains a quoted reply/forward chain + inline `cid:` images.</step><step>Inspect the reading-pane body.</step></steps>
+      <expected>The full quoted chain + inline images render inside an iframe carrying `sandbox=""` (no `allow-scripts`, no `allow-same-origin`); images display (resolved to `data:` server-side).</expected>
+    </test>
+    <test name="Archive-less email degrades without error">
+      <steps><step>Select an email with no `.eml` archive document.</step></steps>
+      <expected>The latest message renders from `sprk_body` (client-sanitized) with a visible "full history unavailable" note; NO error banner is shown.</expected>
+    </test>
+    <test name="Malicious HTML in sprk_body executes no script">
+      <steps><step>Select an archive-less email whose `sprk_body` contains `&lt;script&gt;`, an `onerror=` handler, and a `javascript:` link.</step></steps>
+      <expected>No script executes; the payload is neutralized by `sanitizeEmailHtml`; the visible text renders safely.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps><step>Toggle the host `FluentProvider` to dark theme.</step><step>View the note, loading skeleton, and error/retry states.</step></steps>
+      <expected>All chrome renders correctly in dark mode with no hardcoded colors; only the sandboxed `.eml` body reflects the sender's own styling.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/typecheck the shared TS package (`npm run build`, not PCF build:prod)</tool><tool name="terminal">shell</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/EmailBodyView.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/reading-pane/ReadingPaneShell.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/reading-pane/__tests__/EmailBodyView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an email with a `.eml` archive containing quoted history + inline images, when selected, then the body renders the full chain + inline images inside an iframe with `sandbox=""` (no `allow-scripts`, no `allow-same-origin`).</criterion>
+    <criterion testable="true">Given an archive-less email, when selected, then `sprk_body` (client-sanitized) renders with a "full history unavailable" note and NO error state.</criterion>
+    <criterion testable="true">Negative (XSS): given `sprk_body` containing `&lt;script&gt;` / `onerror=` / `javascript:` link, when rendered on the degradation path, then no script executes (client-sanitized).</criterion>
+    <criterion testable="true">Negative (XSS): the `.eml` iframe never carries `allow-scripts` or `allow-same-origin`, so even a sanitizer-bypass payload cannot execute script or reach the parent origin.</criterion>
+    <criterion testable="true">Negative (fetch failure): given the `eml-render` GET returns non-2xx, when the branch resolves, then it degrades to the `sprk_body` path (no crash, no unhandled error).</criterion>
+    <criterion testable="true">Given a selected record, when loading, then the header paints first from the record and the body swaps in when the render returns (NFR-02; header not blocked on the body fetch).</criterion>
+    <criterion testable="true">All chrome (note/loading/error) renders correctly in dark mode (ADR-021); no `as React.ComponentType` cast introduced (NFR-05); package build + typecheck green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-06, FR-19, NFR-02, NFR-03; design.md Lens 2 (reading-pane definition + degradation) and Lens 6 (malicious-HTML negative case). Run `/conflict-check` before PR (touches `@spaarke/communication-components`, shared with messaging-r1/r2/r3, notification-spine-r1, email-r4). The `.eml` archive is immutable → the endpoint response is long-cache; repeat opens should be cheap. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

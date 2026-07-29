@@ -1,9 +1,12 @@
-# R4 Fidelity Corpus Manifest
+# R4 / R4.5 Fidelity Corpus Manifest
 
 > **Created**: 2026-07-22 by task 002 (`spaarkeai-compose-r4`)
+> **Extended**: 2026-07-28 by task 001 (`spaarkeai-compose-fidelity-r4.5`) — §1.5 legal-numbering exemplars
 > **Purpose**: Catalog of the OOXML fixtures in `tests/fixtures/compose-corpus/` — feature coverage per document
-> and the known R3 UAT defect(s) each one exercises. Consumed by task 004 (byte-diff harness) and task 006
-> (Phase 0 hard-replace gate) as their acceptance evidence base (spec NFR-01, NFR-08).
+> and the known R3 UAT defect(s) / R4.5 numbering defect(s) each one exercises. Consumed by task 004 (R4 byte-diff
+> harness), task 006 (R4 Phase 0 hard-replace gate), and task 002 (`spaarkeai-compose-fidelity-r4.5` — the
+> text-exactness + numbering-exactness harness) as their acceptance evidence base (R4 spec NFR-01/NFR-08; R4.5
+> spec NFR-01/NFR-02).
 > **Storage**: All `.docx` files are Git-LFS pointers (`*.docx filter=lfs` in `.gitattributes`). Verify with
 > `git lfs ls-files` — do NOT commit a raw binary under this path.
 
@@ -64,11 +67,51 @@ This section exists so downstream harness/gate authors (tasks 004, 006) get grou
 
 ---
 
+## 1.5. Legal-numbering exemplars (R4.5 additions — task 001)
+
+**All five docs below are SYNTHETIC** — authored for this task by writing raw OOXML parts (`word/document.xml`,
+`word/numbering.xml`, `word/styles.xml`) directly into a zip container (no owner-supplied document exists for
+these constructs; per the task constraint, no owner document is fabricated — these are clearly labelled
+synthetic exemplars, not sourced from a real filing). Each reproduces one specific OOXML numbering construct
+named in spec §Dependencies / design §5, and each row records the **golden numbering label(s)** — i.e. the
+exact label Word's numbering algorithm computes for that paragraph, per NFR-02 — because the author of the
+fixture controls the OOXML numbering model and can compute the label directly from the standard algorithm
+(single document-order walk, one counter per `(abstractNumId, level)`, reset-lower-levels-on-higher-increment).
+These are the golden values the R4.5 task 002 harness asserts against.
+
+| # | Filename | Feature Coverage | Known Defect Exercised | Golden Numbering Label(s) Word Displays | Status |
+|---|---|---|---|---|---|
+| 9 | `nda-interrupted-clauses.docx` | Direct `w:numPr` (single `numId`, `ilvl=0`, `w:numFmt="decimal"`, `w:lvlText="%1."`) on 6 clause paragraphs, **interrupted** by a `Heading1`-styled heading, a plain body paragraph, and a `w:tbl` table (all non-list, no `w:numPr`) | "Every clause restarts at 1 on interruption" — the projection defect where a naive `<ol>`-per-contiguous-run reconstruction starts a new `<ol>` after each interruption and restarts the count at 1, instead of replaying Word's single per-`numId` counter across the whole document | Clauses 1–3 (pre-interruption): **"1."** Confidentiality Obligations, **"2."** Term, **"3."** Definitions. [interruption: heading / body / table — none numbered]. Clauses 4–6 (post-interruption, SAME `numId`): **"4."** Remedies, **"5."** Indemnification, **"6."** Miscellaneous. The correct (Word) behavior is the **continuous** sequence 1→6; a defective reader emits 1,2,3 then 1,2,3 again. | Synthetic |
+| 10 | `heading-style-numbering.docx` | **Style-linked** `w:numPr` — the `w:numPr` (`ilvl`/`numId`) is defined on the `Heading1`/`Heading2` **paragraph styles** in `word/styles.xml`, not directly on any paragraph; paragraphs reference the style only (`w:pStyle`). Multi-level `abstractNum`: level 0 `w:lvlText="%1"`, level 1 `w:lvlText="%1.%2"` | Dropped heading numbers — a reader that only scans paragraph-level `w:numPr` sees **zero** `w:numPr` elements in `document.xml` (confirmed: `w:numPr` count = 0 in this doc's body) and drops the numbering entirely unless it resolves numbering through the style chain (FR-12) | `Heading1` "Recitals" → **"1"**; `Heading1` "Definitions" → **"2"**; `Heading1` "Term" → **"3"**; `Heading1` "Confidentiality" → **"4"**; `Heading2` "Purpose" (under heading 4) → **"4.1"**; `Heading2` "Confidentiality" (under heading 4) → **"4.2"** — i.e. the doc renders **"4.2 Confidentiality"**, the literal FR-12 acceptance example. | Synthetic |
+| 11 | `multilevel-1-1-1.docx` | Single `numId` / `abstractNum` with 3 levels (`ilvl` 0/1/2), `w:lvlText` `"%1."` / `"%1.%2."` / `"%1.%2.%3."`, direct `w:numPr` per paragraph at varying `ilvl` | Multi-level numbering "discarded to a warning count" — exercises `w:lvlText` template composition across levels AND the standard reset-lower-levels-on-higher-increment behavior (level-1/2 counters reset when a new level-0 paragraph appears) | `ilvl0` "Introduction" → **"1."**; `ilvl1` "Background" → **"1.1."**; `ilvl2` "History" → **"1.1.1."**; `ilvl2` "Current State" → **"1.1.2."**; `ilvl1` "Scope" → **"1.2."**; `ilvl0` "Definitions" → **"2."** (level-1/2 counters reset here); `ilvl1` "Key Terms" → **"2.1."** | Synthetic |
+| 12 | `symbol-section-mark.docx` | (a) Two paragraphs each with a `w:sym` run (`w:font="Symbol" w:char="F0A7"`) followed by a text run — the Symbol-font PUA code point `F0A7` has a **known** Unicode mapping (§, U+00A7); (b) two bulleted-list paragraphs (`w:numFmt="bullet"`) whose level bullet glyph is defined via `w:rFonts w:ascii="Wingdings"` + a PUA `w:lvlText` char — Wingdings PUA glyphs have **no** canonical Unicode equivalent | Silent `w:sym` drop (FR-06) — a reader that ignores `w:sym` runs entirely loses the section-mark glyph from the visible text; the Wingdings-bullet case is the harder "no mapping exists" branch that MUST warn + placeholder rather than silently drop or mis-render as a random PUA codepoint | Symbol-run paragraphs: **"§  2.01  Confidentiality Obligations. …"** and **"§  2.02  Term. …"** (§ = U+00A7, the correct Unicode target for Symbol-font `F0A7`). Wingdings-bullet paragraphs: bullet glyph has **NO golden Unicode value** — expected disposition is FR-06's "visible placeholder + warning", not a specific character; this is deliberately the negative/unmapped case, not an oversight. | Synthetic |
+| 13 | `line-numbered-pleading.docx` | `w:sectPr/w:lnNumType` (`w:countBy="1" w:start="1" w:distance="360" w:restart="newPage"`) enabling Word's rendered line numbering; ALSO carries direct `w:numPr` paragraph numbering (`numId`, decimal, `"%1."`) across 4 headed sections (Parties / Jurisdiction and Venue / Factual Allegations / First Cause of Action) so the doc exercises the SAME interrupted-numbering construct as row 9, in pleading form; 12 numbered paragraphs total | WS-5 (task 050) divergence-measurement input — page/line numbers are a **rendering-time layout artifact**, not derivable from OOXML alone (design §5.5); this fixture supplies `w:lnNumType` + enough prose (12 substantive numbered paragraphs + 4 headings + caption block) to be a meaningful pagination/line-count input once run through a layout engine (LibreOffice-headless / Word-rendering service per WS-5) | Paragraph-number sequence (same "continuous across headings" rule as row 9): PARTIES → **"1."**, **"2."**; JURISDICTION AND VENUE → **"3."**, **"4."**; FACTUAL ALLEGATIONS → **"5."**–**"8."**; FIRST CAUSE OF ACTION → **"9."**–**"12."**. **Line numbers: NO golden value recorded here** — per design §5.5 they are a layout artifact only measurable by rendering; WS-5/task 050 measures actual Word-divergence, this task does not fabricate a page/line "100%" claim (spec MUST NOT rule). | Synthetic |
+
+### Verification method (§1.5)
+
+Golden labels above were derived by hand-simulating Word's numbering algorithm (per design §5, FR-11: single
+document-order walk, one counter per `(abstractNumId, level)`, honoring `w:start`/`w:lvlText`/`w:numFmt`,
+resetting lower-level counters when a higher level increments) directly against the `numbering.xml` +
+`document.xml` this task authored — i.e. computed from the OOXML source of truth, not assumed from narrative,
+consistent with the NFR-02 constraint ("capture labels by opening each doc in Word, or by OOXML-derived
+computation you verify"). Each `.docx` was round-tripped through `zipfile`/`xml.etree.ElementTree` to confirm
+well-formed XML and the presence of the required parts (`[Content_Types].xml`, `_rels/.rels`, `word/document.xml`,
+`word/_rels/document.xml.rels`, `word/numbering.xml`, `word/styles.xml`, `word/settings.xml`) before being
+zipped as the final `.docx`.
+
+---
+
 ## 2. Owner-supplied worst-offenders (Phase 0 intake — PLACEHOLDER rows)
 
 Per spec Unresolved Question ("Corpus documents — owner to supply the worst-offender set"), the following rows
 are **intake slots only**. No owner documents are fabricated here; each row is added to this table (and its
 `.docx` copied into this directory as an LFS fixture) once supplied.
+
+> **Note on row 7 (added 2026-07-28 by task 001)**: row 7's placeholder is for a real owner-supplied multi-level
+> document and remains open — it is NOT closed by §1.5. Row 11 (`multilevel-1-1-1.docx`) is a **synthetic**
+> multi-level exemplar (1 / 1.1 / 1.1.1) that gives the R4.5 numbering-exactness harness something to run
+> against today; it does not substitute for real owner-authored multi-level content (e.g. an outline-numbered
+> policy or nested defined-terms list) if/when the owner supplies one.
 
 | # | Filename | Track Changes | Fields | SDT / Content Controls | Tables | Tabs | Multi-level Numbering | Headers/Footers | Empty Paragraphs | Multi-Section | Known Defect(s) Exercised | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -86,8 +129,10 @@ Owner intake process: land the redacted `.docx` under this directory (auto-regis
 
 ## 3. Consumers
 
-| Task | Uses this corpus for |
-|---|---|
-| 004 — byte-diff harness | Round-trip (load → no-op save) byte-identity verification per NFR-01, across all fixtures in this directory. |
-| 005 — applier spike | Operation-schema applier spike against the CIPO doc specifically (row 1). |
-| 006 — Phase 0 hard-replace gate | Gate evidence: schema + applier spike (CIPO) + corpus byte-diff harness (all fixtures) green, per NFR-08. |
+| Project | Task | Uses this corpus for |
+|---|---|---|
+| `spaarkeai-compose-r4` | 004 — byte-diff harness | Round-trip (load → no-op save) byte-identity verification per NFR-01, across all fixtures in this directory. |
+| `spaarkeai-compose-r4` | 005 — applier spike | Operation-schema applier spike against the CIPO doc specifically (row 1). |
+| `spaarkeai-compose-r4` | 006 — Phase 0 hard-replace gate | Gate evidence: schema + applier spike (CIPO) + corpus byte-diff harness (all fixtures) green, per NFR-08. |
+| `spaarkeai-compose-fidelity-r4.5` | 002 — text-exactness + numbering-exactness harness | Text-exact (character-for-character run text) + numbering-exact (computed label == golden label in §1.5) assertions across the full corpus, per R4.5 NFR-01/NFR-02; any ❌ is a release blocker (spec Success Criteria 2+3). |
+| `spaarkeai-compose-fidelity-r4.5` | 050 — WS-5 page/line spike | `line-numbered-pleading.docx` (row 13) is the ONLY corpus input carrying `w:lnNumType` — used to measure rendered-line divergence against a layout engine (LibreOffice-headless / Word-rendering service), per FR-19. |

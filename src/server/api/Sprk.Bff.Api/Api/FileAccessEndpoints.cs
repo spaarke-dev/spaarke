@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -90,6 +91,25 @@ public static class FileAccessEndpoints
                 "Proxies SPE file downloads for files uploaded by background processing.")
             .Produces(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // GET /api/documents/{documentId}/eml-render (email-communication-solution-r5 task 010 / FR-07 / NFR-03).
+        // Renders an archived .eml as sanitized, safe-to-display HTML for the reading pane. Unlike the sibling
+        // routes above (which rely on the group's RequireAuthorization() + downstream Graph/Dataverse access),
+        // this route ADDS a per-document DocumentAuthorizationFilter("read") because it is on the untrusted-
+        // email-HTML path and MUST fail closed — an unauthorized/inaccessible document returns 403/404 with NO
+        // HTML body (the filter/resolution rejects BEFORE any HTML is produced). ADR-008 (endpoint-filter authz).
+        docs.MapGet("/{documentId}/eml-render", GetEmlRender)
+            .AddDocumentAuthorizationFilter("read")
+            .WithName("GetDocumentEmlRender")
+            .WithTags("File Access")
+            .WithDescription("Render an archived .eml as sanitized, safe HTML for the reading pane. " +
+                "Server-side sanitization is the authoritative XSS boundary (NFR-03); fails closed on no-access.")
+            .Produces(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -785,6 +805,121 @@ public static class FileAccessEndpoints
                 contentType: contentType,
                 fileDownloadName: fileName,
                 enableRangeProcessing: true);
+        }
+
+        /// <summary>
+        /// GET /api/documents/{documentId}/eml-render
+        /// Renders an archived .eml as sanitized, safe-to-display HTML for the reading pane (FR-07 / NFR-03).
+        /// Reuses the GetDownload resolution shape (resolve document -> validate SPE pointers ->
+        /// SpeFileStore.DownloadFileAsync), then parses with MimeKit (HTML-preserving), rewrites inline cid:
+        /// images to data: URIs, and SANITIZES server-side (authoritative XSS boundary). Fails closed:
+        /// unauthorized documents are rejected by DocumentAuthorizationFilter (403) and missing documents/files
+        /// resolve to 404 — in neither case is any HTML body returned.
+        /// </summary>
+        static async Task<IResult> GetEmlRender(
+            string documentId,
+            IDocumentDataverseService dataverseService,
+            SpeFileStore speFileStore,
+            EmlToHtmlRenderer emlRenderer,
+            ILogger<Program> logger,
+            HttpContext context,
+            CancellationToken ct)
+        {
+            logger.LogInformation("GetEmlRender called | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            // 1. Validate document ID format
+            if (!Guid.TryParse(documentId, out _))
+            {
+                throw new SdapProblemException(
+                    "invalid_id",
+                    "Invalid Document ID",
+                    $"Document ID '{documentId}' is not a valid GUID format",
+                    400
+                );
+            }
+
+            // 2. Get document entity from Dataverse (includes SPE pointers)
+            var document = await dataverseService.GetDocumentAsync(documentId, ct);
+
+            if (document == null)
+            {
+                throw new SdapProblemException(
+                    "document_not_found",
+                    "Document Not Found",
+                    $"Document with ID '{documentId}' does not exist",
+                    404
+                );
+            }
+
+            // 3. Validate SPE pointers (driveId, itemId)
+            ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+            // 4. Download the .eml stream from SPE via the EXISTING facade (app-only, per ADR-007) — no new
+            //    download method, no GraphServiceClient injection.
+            var fileStream = await speFileStore.DownloadFileAsync(
+                document.GraphDriveId!,
+                document.GraphItemId!,
+                ct);
+
+            // 5. Parse + cid:->data: rewrite + sanitize + shape the immutable-cacheable HTML response.
+            return await BuildEmlRenderResponseAsync(fileStream, emlRenderer, documentId, ct);
+        }
+    }
+
+    /// <summary>
+    /// Parses the downloaded .eml stream into sanitized HTML and wraps it in a long-lived, immutable-cacheable
+    /// response. A null stream (no .eml in SPE) throws a 404 SdapProblemException (the client degrades to
+    /// sprk_body) — so NO HTML body is ever returned for a missing archive. Extracted (and internal) so the
+    /// HTTP-shaping behavior (404-on-missing, 200 + immutable cache header + sanitized body) is unit-testable
+    /// without mocking SpeFileStore/Graph (ADR-038).
+    /// </summary>
+    internal static async Task<IResult> BuildEmlRenderResponseAsync(
+        Stream? emlStream,
+        EmlToHtmlRenderer renderer,
+        string documentId,
+        CancellationToken ct)
+    {
+        if (emlStream == null)
+        {
+            throw new SdapProblemException(
+                "file_not_found",
+                "File Not Found",
+                $"File content not found in storage for document {documentId}",
+                404
+            );
+        }
+
+        string sanitizedHtml;
+        await using (emlStream)
+        {
+            sanitizedHtml = await renderer.RenderSanitizedHtmlAsync(emlStream, ct);
+        }
+
+        return new SanitizedEmlHtmlResult(sanitizedHtml);
+    }
+
+    /// <summary>
+    /// IResult that writes sanitized email HTML with a long-lived immutable cache header. The archived .eml is
+    /// content-immutable, so repeat opens hit the HTTP cache (spec NFR-01) — no bespoke server-side render cache.
+    /// </summary>
+    internal sealed class SanitizedEmlHtmlResult : IResult
+    {
+        // public: browser + shared caches may store the immutable per-document render (task 010 spec header).
+        // Long-lived + immutable because the archived .eml never changes (spec NFR-01).
+        internal static readonly string CacheControlValue =
+            $"public, max-age={EmlToHtmlRenderer.ImmutableMaxAgeSeconds}, immutable";
+
+        private readonly string _html;
+
+        public SanitizedEmlHtmlResult(string html) => _html = html;
+
+        public async Task ExecuteAsync(HttpContext httpContext)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status200OK;
+            httpContext.Response.ContentType = "text/html; charset=utf-8";
+            httpContext.Response.Headers.CacheControl = CacheControlValue;
+            await httpContext.Response.WriteAsync(_html, System.Text.Encoding.UTF8, httpContext.RequestAborted);
         }
     }
 

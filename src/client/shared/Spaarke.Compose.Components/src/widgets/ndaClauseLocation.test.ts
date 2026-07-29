@@ -8,9 +8,19 @@
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { findGoverningHeading, deriveClauseLocationLabel } from './ndaClauseLocation';
+import { ComposeNumberAtomExtension } from './composeNumberAtomExtension';
 
 function makeEditor(content: string): Editor {
   return new Editor({ extensions: [StarterKit], content });
+}
+
+/**
+ * Editor that ALSO registers `ComposeNumberAtomExtension` — so `data-computed-number` on a `<p>`/`<h#>`
+ * parses into the `computedNumber` node attribute, exactly as the real ComposeEditor mounts it. Used to
+ * exercise the WS-3/WS-4 numbered-paragraph citation path.
+ */
+function makeNumberedEditor(content: string): Editor {
+  return new Editor({ extensions: [StarterKit, ComposeNumberAtomExtension], content });
 }
 
 /** Find the document position of the first text matching `needle`. */
@@ -84,6 +94,42 @@ describe('deriveClauseLocationLabel', () => {
   it('falls back to the model-only formatter when the position is null (unresolved anchor)', () => {
     const editor = makeEditor(DOC);
     expect(deriveClauseLocationLabel(editor.state.doc, null, 'Paragraph 5 (p. 1)')).toBe('Pg 1 · Para 5');
+    editor.destroy();
+  });
+
+  // WS-3/WS-4 (spaarkeai-compose-fidelity-r4.5) — the NDA's sections are NUMBERED PARAGRAPHS, not
+  // headings, so `findGoverningHeading` sees nothing. Before this, the label dropped to "Para 3"; now it
+  // cites the clause's own computed legal number ("Sec 2"). Reproduces the 2026-07-28 dev-UAT gap.
+  it('cites a numbered-paragraph clause by its computed legal number (no heading present)', () => {
+    const editor = makeNumberedEditor(
+      '<p>This Agreement governs the disclosure of information by and between the parties.</p>' +
+        '<p data-computed-number="1">&ldquo;Confidential Information&rdquo; means any technical information.</p>' +
+        '<p data-computed-number="2">If the Confidential Information is contained in a written communication, it will be marked Confidential.</p>'
+    );
+    const pos = posOf(editor, 'written communication'); // inside the clause the model calls "Paragraph 3"
+    expect(deriveClauseLocationLabel(editor.state.doc, pos, 'Paragraph 3 (p. 1)')).toBe('Pg 1 · Sec 2 · Para 3');
+    editor.destroy();
+  });
+
+  it("prefers the clause's own computed number over a governing heading's positional ordinal", () => {
+    const editor = makeNumberedEditor(
+      '<h2>Confidentiality</h2>' +
+        '<p data-computed-number="4.2">Each party shall protect the other party&rsquo;s Confidential Information.</p>'
+    );
+    const pos = posOf(editor, 'shall protect');
+    expect(deriveClauseLocationLabel(editor.state.doc, pos, 'para 1 (p. 3)')).toBe(
+      'Pg 3 · Sec 4.2 · Para 1 · Confidentiality'
+    );
+    editor.destroy();
+  });
+
+  it('uses a style-linked heading computed number when the clause body has none', () => {
+    const editor = makeNumberedEditor(
+      '<h2 data-computed-number="4.2">Confidentiality</h2>' +
+        '<p>Each party shall protect the other party&rsquo;s Confidential Information.</p>'
+    );
+    const pos = posOf(editor, 'shall protect');
+    expect(deriveClauseLocationLabel(editor.state.doc, pos, undefined)).toBe('Sec 4.2 · Confidentiality');
     editor.destroy();
   });
 });

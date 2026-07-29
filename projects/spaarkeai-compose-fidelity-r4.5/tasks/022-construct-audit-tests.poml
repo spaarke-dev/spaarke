@@ -1,0 +1,145 @@
+<task id="022" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-2: full OOXML run/block construct audit + missing projection tests</title>
+    <phase>2 WS-2 Harden read</phase>
+    <gate>blocked until 021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (any construct found silently dropped is fixed here) + adds tests; `bff-api`/`compose`/`testing` tags. The `testing` tag alone triggers the TEST-MODIFYING override; Step 9.5 code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Systematic enumeration of a known, bounded construct set (represent-or-warn per construct) against the existing switch + a disposition note; fully specified, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Services/Compose/ComposeDocxProjectionBuilder.cs` (if a construct is found dropped) + the shared projection-test suite — the same files 020/021/030/031 touch. Sequential per plan.md group W2.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff-api,compose,docx,testing</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Complete the WS-2 hardening with a full OOXML run/block construct audit and the projection tests the suite is
+    missing (design §4 WS-2; spec FR-09). Enumerate the full OOXML run/block construct set and confirm each is
+    either REPRESENTED or WARNED — `w:noBreakHyphen` (already U+2011), `w:tab` (already `compose-tab`), fields
+    (already RESULT-not-CODE), `w:br type="page"` (currently a line break), `w:softHyphen` (correctly dropped),
+    plus `w:cr`/`w:sym` (fixed in 020) and `w:ind` (fixed in 021), and any remaining construct. Write an audit note
+    `projects/spaarkeai-compose-fidelity-r4.5/notes/ws2-construct-audit.md` with the disposition per construct. Add
+    the MISSING projection tests — alignment, ordered-list, and symbol — which the suite has none of today.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer auditing the BFF Compose projection for read completeness. Expert in the full OOXML
+    run/block construct vocabulary (`w:t`/`w:delText`/`w:br`(line/page/column)/`w:tab`/`w:noBreakHyphen`/
+    `w:softHyphen`/`w:cr`/`w:sym`/`w:fldSimple`/`w:instrText`/`w:ind`/`w:jc`/`w:numPr`/`w:sectPr`/…) and the R4.5
+    represent-or-warn invariant (F-1). Understands the KEEP-path test model (ADR-038). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A construct-audit note (`notes/ws2-construct-audit.md`) that enumerates the full OOXML run/block construct set
+    with a disposition per construct (represented / warned / deliberately-dropped-with-reason), confirming F-1
+    holds (no construct is silently dropped); plus the three missing projection tests — alignment, ordered-list,
+    symbol — added to the suite. Any construct the audit finds silently dropped is either represented or warned in
+    `ComposeDocxProjectionBuilder.cs` (or escalated if neither is safe).
+  </goal>
+
+  <context>
+    <background>
+      Design §4 WS-2 requires a full OOXML run/block construct audit: enumerate the set and either represent or warn
+      on each. Several are already handled (`w:noBreakHyphen` → U+2011 `:702-703`; `w:tab` → `compose-tab`
+      `:695-698`; fields → RESULT-not-CODE; `w:br type=page` → currently a line break; `w:softHyphen` → dropped,
+      correct), and 020/021 added `w:cr`/`w:sym`/`w:ind`. This task closes the audit: prove every construct is
+      represented-or-warned, document the disposition, and add the projection tests the suite lacks — the R4.5
+      suite has NO alignment, ordered-list, or symbol test today (`ComposeDocxProjectionBuilderTests.cs`). This is
+      the last WS-2 task before the WS-3 numbering flagship (030) builds on the hardened reader.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the run/block switches; if the audit finds a construct silently dropped, add a represent-or-warn case here. RE-GREP before editing.</file>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/ws2-construct-audit.md — the enumerated construct set with disposition per construct (represented / warned / deliberately-dropped-with-reason).</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs — add the alignment, ordered-list, and symbol projection tests (absent today). RE-GREP the suite path.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — `AppendAlignment` (`:816-830`), `ListInfo`/`ResolveOrdered` (`:779-814`), the run switch — the surfaces the new tests assert against and the audit enumerates.</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-09 (construct audit + alignment/ordered-list/symbol tests), NFR-01 (text exactness), NFR-05 (single auditable reader).</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-2 (construct audit — `w:noBreakHyphen`, `w:tab`, fields, `w:br type=page`, `w:softHyphen`).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Added `w:cr`/`w:sym` handling — the audit records their disposition.</dependency>
+      <dependency task="021" status="pending">Added `w:ind` emit + `white-space:pre-wrap` — the audit records their disposition.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-09">The audit MUST enumerate the full OOXML run/block construct set and confirm each is represented or warned; a construct silently dropped is a defect. Scope: document the disposition per construct in `notes/ws2-construct-audit.md`; where a construct is deliberately dropped (e.g. `w:softHyphen`), record WHY.</constraint>
+    <constraint source="spec / FR-09">The projection test suite MUST add the alignment, ordered-list, and symbol tests (absent today). Scope: each test exercises the real builder over a corpus doc and asserts the projected output (alignment style, ordered-list emission, `w:sym` mapping/placeholder).</constraint>
+    <constraint source="project / F-1 invariant">No construct may be silently dropped. Scope: if the audit finds one that is dropped AND cannot be safely represented or warned, STOP and escalate — do not paper over it in the note.</constraint>
+    <constraint source="ADR-038">Tests are KEEP-path integration/seam-style over the real builder + corpus. Scope: no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null tests.</constraint>
+    <constraint source="ADR-007 / ADR-013">`Services/Compose/` stays pure `byte[]`-in/projection-out; no `Microsoft.Graph`, no AI-internal type. Scope: any fix stays inside the builder's OOXML-reading code.</constraint>
+    <constraint source="project / BFF Hygiene §10">Pure-OOXML change — expected ~0 MB publish delta. Scope: `dotnet publish -c Release`, report compressed size + diff vs ~49.63 MB baseline; `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Full OOXML run/block construct vocabulary; represent-or-warn audit; KEEP-path projection tests; F-1 / single-auditable-reader invariants</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Construct disposition table" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §4 WS-2">
+        Design already lists dispositions to record: `w:noBreakHyphen` = U+2011; `w:tab` = `compose-tab`; fields = RESULT-not-CODE; `w:br type=page` = line break (today); `w:softHyphen` = dropped (correct); + `w:cr`/`w:sym` (020) + `w:ind` (021). Extend to the full set and mark each represented/warned/dropped-with-reason.
+      </pattern>
+      <pattern name="Existing surfaces the tests assert" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        Alignment = `AppendAlignment` (`:816-830`); ordered list = `ListInfo`/`ResolveOrdered` (`:779-814`) + list emit (`:268-280`); symbol = the `w:sym` case added in 020. The three missing tests target exactly these.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON: modifies `.cs` + `testing` TEST-MODIFYING override → Step 9.5 unconditional / 📖 PROTOCOL STEPS). Load spec FR-09 + NFR-01/05 + design §4 WS-2.</step>
+    <step order="1" name="Enumerate the construct set">List the full OOXML run/block construct set (run children + block-level: alignment, indentation, lists/numbering, sectPr, breaks, fields, symbols, hyphens). RE-GREP the run/block switches to see what is handled today.</step>
+    <step order="2" name="Determine disposition per construct">For each construct, classify: represented / warned / deliberately-dropped-with-reason. Flag any that is silently dropped (neither represented nor warned).</step>
+    <step order="3" name="Fix any silent drop">For any construct found silently dropped, add a represent-or-warn case in the builder (or escalate if neither is safe per the escalation trigger).</step>
+    <step order="4" name="Write the audit note">Author `notes/ws2-construct-audit.md` with the enumerated set + disposition per construct (the FR-09 deliverable).</step>
+    <step order="5" name="Add the three missing tests">Add alignment, ordered-list, and symbol projection tests over corpus docs, asserting the projected output. No `Mock&lt;HttpMessageHandler&gt;`/DI/ctor-null tests.</step>
+    <step order="6" name="Build + publish-size check">`dotnet build` + `dotnet test` green; `dotnet publish -c Release` size + diff (~0). `/conflict-check` before PR.</step>
+    <step order="7" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 022 to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the audit finds a construct that is silently dropped AND cannot be safely represented OR warned — STOP and surface per §6. F-1 (no silent drop) is a hard invariant; do not record such a construct as "acceptable" in the audit note without human sign-off.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The projection test suite (`ComposeDocxProjectionBuilderTests.cs`) has NO alignment, ordered-list, or symbol test (design §4 WS-2, verified by inspecting the suite). No construct-audit note exists.</existing>
+    <extension>Yes — adds tests to the existing suite and a note under the project's `notes/`; any fix extends the existing builder switch. No new abstraction.</extension>
+    <cost-of-doing-nothing>Without the audit, an unhandled OOXML construct can silently drop from a legal document with no test catching it (F-1 breach); without the alignment/ordered-list/symbol tests, the WS-2 hardening and WS-3 numbering work have no regression net at exactly the surfaces most likely to break.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build + test the BFF Compose suite; `dotnet publish -c Release` for the size check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws2-construct-audit.md (enumerated construct set + disposition per construct)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocxProjectionBuilderTests.cs (alignment + ordered-list + symbol tests)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (only if the audit finds a construct to represent/warn)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/ws2-construct-audit.md` enumerates the full OOXML run/block construct set with a disposition per construct (represented / warned / deliberately-dropped-with-reason).</criterion>
+    <criterion testable="true">The projection suite adds an alignment test, an ordered-list test, and a symbol test — each exercising the real builder over a corpus doc; all pass.</criterion>
+    <criterion testable="true">Every construct in the audit is represented or warned; none is recorded as silently dropped (or the escalation fired for one that could not be safely handled).</criterion>
+    <criterion testable="true">Negative: a deliberately-dropped construct (e.g. `w:softHyphen`) is recorded WITH its reason, not left implicit.</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure (ADR-007/013); BFF build + Compose suite green; publish ~0 MB delta vs ~49.63 MB baseline; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 022 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Final WS-2 task — the hardened, audited reader is the foundation WS-3 (030+) builds numbering on. The three
+    missing tests (alignment/ordered-list/symbol) are named explicitly in FR-09 and design §4. TASK-INDEX.md +
+    current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

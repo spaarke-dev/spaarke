@@ -37,14 +37,18 @@ import {
 // React 16's resolution (PCF target per ADR-022). Matches SemanticSearchControl.
 import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
 import { IInputs } from './generated/ManifestTypes';
-import { IAttachmentItem } from './types';
+// Task 021: the Layer-1 attachments logic + the promoted AttachmentList
+// presentational core now live in `@spaarke/communication-components` — the
+// local `./types`, `./services/*`, and `./AttachmentList` copies are deleted
+// (email-communication-solution-r5 FR-12/FR-18 two-layer split).
 import {
+  IAttachmentItem,
   CommunicationAttachmentsService,
   IAttachmentsWebApi,
   fileTypeLabel,
-} from './services/CommunicationAttachmentsService';
-import { AttachmentApiService } from './services/AttachmentApiService';
-import { AttachmentList } from './AttachmentList';
+  AttachmentApiService,
+} from '@spaarke/communication-components/logic/attachments';
+import { AttachmentList } from '@spaarke/communication-components/components/AttachmentList';
 import { initializeAuth } from './authInit';
 import { getEnvironmentVariable, getApiBaseUrl } from '../../shared/utils/environmentVariables';
 

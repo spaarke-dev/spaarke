@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-1: deploy + UAT — one reader on every entry path</title>
+    <phase>1 WS-1 One reader</phase>
+    <gate>blocked until 013</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + manual UAT verification of already-implemented WS-1 work; no new implementation code. STANDARD. (Executed with the `ui-test`/`deploy` scope — verification only; no `.cs`/`.ts` change authored here.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Ordered deploy + manual UAT against a fixed checklist; no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W1-deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared `sprk_spaarkeai` dev web resource + BFF; must serialize against in-flight sibling deploys on the same resource. Gates on 013.</parallel-reason>
+    <deps>013</deps>
+    <tags>deploy,compose,ui-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the WS-1 Compose changes (BFF API + the SpaarkeAi code page) and run UAT confirming the server
+    projection is now the ONE reader on every entry path: an uploaded `.docx` renders via the projection with the
+    centered title / alignment / tabs correct; a browse-local `.docx` renders via the projection; an
+    open-in-Compose transient draft renders via the projection. Coordinate the shared `sprk_spaarkeai` dev web
+    resource and run `/conflict-check` before deploying. Numbering is NOT expected correct yet — that is WS-3;
+    do not fail UAT on clause numbers.
+  </prompt>
+
+  <role>SPAARKE deployment engineer. Expert in `bff-deploy` + `code-page-deploy`, the shared `sprk_spaarkeai` web resource deploy contention, and Compose UAT. Follow the deploy skills' ordered procedure exactly.</role>
+
+  <goal>
+    WS-1 is deployed (BFF + SpaarkeAi code page) and UAT confirms all three entry paths (upload/browse/open-in-Compose)
+    render via the server projection with the R4 projection wins (centered title/alignment/tabs) correct; the
+    `mammoth` fallback is gone. A UAT note records the results.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 010-013 routed upload/browse/open-in-Compose through the server projection and deleted the `mammoth`
+      fallback. This task deploys that work and verifies it end-to-end on the real surface. Compose is hosted in the
+      shared `sprk_spaarkeai` dev web resource — the R4 deploy-contention applies: coordinate deploys, run
+      `/conflict-check`, and do not force-deploy over an in-flight sibling. Design §8 (coordination); spec Success
+      Criterion 1 (one reader). Numbering correctness is WS-3 (034), not this task.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/bff-deploy/SKILL.md — BFF API deploy procedure</file>
+      <file role="canonical-reference">.claude/skills/code-page-deploy/SKILL.md — SpaarkeAi code-page (sprk_spaarkeai) deploy procedure</file>
+      <file role="canonical-reference">.claude/skills/conflict-check/SKILL.md — run before deploying (shared web resource + sibling worktrees)</file>
+      <file role="new">projects/spaarkeai-compose-fidelity-r4.5/notes/ws1-deploy-uat.md — the UAT results note</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">The mammoth-fallback deletion — WS-1 is only complete (and deployable as "one reader") after 013.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / deploy coordination">MUST run `/conflict-check` and coordinate the shared `sprk_spaarkeai` dev web resource before deploying; MUST NOT force-deploy over an in-flight sibling deploy (design §8). Scope: verify no sibling compose worktree is mid-deploy first.</constraint>
+    <constraint source="project / deploy skills">MUST deploy via `bff-deploy` (BFF) and `code-page-deploy` (SpaarkeAi) — do not hand-roll a deploy. Scope: follow each skill's ordered steps.</constraint>
+    <constraint source="spec / Success Criterion 1">UAT MUST verify all three entry paths (upload, browse, open-in-Compose) render via the server projection — the acceptance is "one reader on every path". Scope: do NOT assert numbering correctness (WS-3 territory).</constraint>
+    <constraint source="ADR-021">UAT MUST include a dark-mode check on the deployed surface. Scope: editor renders theme-correct in dark + light.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF + code-page deploy; shared web-resource contention; WS-1 UAT acceptance</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared web-resource deploy coordination" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §8">
+        `sprk_spaarkeai` is a shared dev web resource — `/conflict-check` + coordinate; never force-deploy over an in-flight sibling.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON / 📖 PROTOCOL STEPS). Load design §8 + spec Success Criterion 1.</step>
+    <step order="1" name="Conflict-check + coordinate">Run `/conflict-check`. Confirm no sibling compose worktree is mid-deploy on `sprk_spaarkeai`. If contention exists, coordinate/wait — do NOT force-deploy.</step>
+    <step order="2" name="Deploy BFF">Deploy the BFF API via `bff-deploy`. Confirm the deploy succeeds and the Compose endpoints (upload + `project`) are live.</step>
+    <step order="3" name="Deploy the code page">Deploy the SpaarkeAi code page via `code-page-deploy` to `sprk_spaarkeai`. Confirm publish.</step>
+    <step order="4" name="Run UAT">Execute the ui-tests below on the deployed surface: upload / browse / open-in-Compose all render via the projection; centered title / alignment / tabs correct; dark-mode correct. Record results in `notes/ws1-deploy-uat.md`.</step>
+    <step order="5" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 014 status to ✅. Record any deviation / UAT finding in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Deploy contention on the shared `sprk_spaarkeai` web resource (a sibling worktree is mid-deploy or has uncommitted web-resource changes) — coordinate per design §8 and wait; do NOT force-deploy over an in-flight sibling. Surface per root CLAUDE.md §6 if coordination cannot be resolved.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Upload renders via projection">
+      <steps>
+        <step>Upload a `.docx` with a centered title, mixed alignment, and tabs into Compose.</step>
+        <step>Observe the rendered editor.</step>
+      </steps>
+      <expected>Renders via the server projection; centered title stays centered, alignment + tabs correct. (Clause numbering may still be wrong — WS-3 — that does NOT fail this test.)</expected>
+    </test>
+    <test name="Browse-local docx renders via projection">
+      <steps>
+        <step>Browse and select a local `.docx` in Compose.</step>
+        <step>Observe the rendered editor.</step>
+      </steps>
+      <expected>Renders via the server projection (through `POST /api/compose/project`); no `mammoth` fallback.</expected>
+    </test>
+    <test name="Open-in-Compose renders via projection">
+      <steps>
+        <step>Open a transient draft via open-in-Compose.</step>
+        <step>Observe the rendered editor.</step>
+      </steps>
+      <expected>Renders via the server projection (no `projection: null`, no `mammoth`).</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps>
+        <step>With a docx open in Compose, toggle dark theme, then light theme.</step>
+      </steps>
+      <expected>Editor surface renders theme-correct in both dark and light (ADR-021).</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws1-deploy-uat.md (UAT results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed surface, when a `.docx` is uploaded, then it renders via the server projection with centered title / alignment / tabs correct.</criterion>
+    <criterion testable="true">Given the deployed surface, when a local `.docx` is browsed, then it renders via the server projection (via `POST /api/compose/project`).</criterion>
+    <criterion testable="true">Given the deployed surface, when an open-in-Compose transient draft is opened, then it renders via the server projection.</criterion>
+    <criterion testable="true">The editor renders theme-correct in dark and light on the deployed surface (ADR-021).</criterion>
+    <criterion testable="true">Negative: no `mammoth` fallback is reached on any entry path (no console reference; behavior confirms the projection branch).</criterion>
+    <criterion testable="true">Expected-not-yet: clause/section numbering is NOT asserted correct (WS-3 scope) — its incorrectness does not fail this UAT.</criterion>
+    <criterion testable="true">`/conflict-check` was run and the shared `sprk_spaarkeai` deploy was coordinated (no force-deploy over an in-flight sibling); UAT results recorded in notes/ws1-deploy-uat.md.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 014 as ✅ and any deviation/UAT finding is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec Success Criterion 1 (one reader); design §8 (deploy coordination). WS-1 delivers the immediate projection
+    wins on upload/browse (alignment/tabs/comments/tracked-change recovery). Numbering correctness lands in WS-3
+    (task 034 deploy/UAT). This is the WS-1 deploy gate — the phase is complete when this UAT passes.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

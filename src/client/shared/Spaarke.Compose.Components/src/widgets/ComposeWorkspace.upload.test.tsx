@@ -62,22 +62,32 @@ jest.mock('./ComposeToolbar', () => ({
   ComposeToolbar: () => <div data-testid="compose-toolbar-stub" />,
 }));
 
-// ── ComposeEditor — capture the docxBytes it is handed ──────────────────────
+// ── ComposeEditor — capture the docxBytes + projection it is handed ────────
 const editorDocxBytes: { current: ArrayBuffer | null | undefined } = { current: undefined };
+// FR-02 regression guard (task 012): captures the `projection` prop so a future change that
+// silently drops the server projection on the transient upload-mount door (reintroducing
+// `projection: null` even when the BFF response carries one) fails a test instead of shipping
+// unnoticed. See the "hydrates a non-null projection" test below.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const editorProjection: { current: any } = { current: undefined };
 jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
-    ComposeEditor: ReactLib.forwardRef((props: { docxBytes: ArrayBuffer | null }, ref: React.Ref<unknown>) => {
-      editorDocxBytes.current = props.docxBytes;
-      ReactLib.useImperativeHandle(ref, () => ({
-        serialize: async () => new ArrayBuffer(0),
-        getCounts: () => ({ characters: 0, words: 0 }),
-        isDirty: () => true,
-        materializeComposeDraft: () => undefined,
-        materializePendingRedline: () => 'applied',
-      }));
-      return <div data-testid="compose-editor-stub" />;
-    }),
+    ComposeEditor: ReactLib.forwardRef(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (props: { docxBytes: ArrayBuffer | null; projection?: any }, ref: React.Ref<unknown>) => {
+        editorDocxBytes.current = props.docxBytes;
+        editorProjection.current = props.projection;
+        ReactLib.useImperativeHandle(ref, () => ({
+          serialize: async () => new ArrayBuffer(0),
+          getCounts: () => ({ characters: 0, words: 0 }),
+          isDirty: () => true,
+          materializeComposeDraft: () => undefined,
+          materializePendingRedline: () => 'applied',
+        }));
+        return <div data-testid="compose-editor-stub" />;
+      }
+    ),
   };
 });
 
@@ -105,6 +115,7 @@ beforeEach(() => {
   // when the editor reaches 'loaded' — no AI drafts for a fresh upload).
   authenticatedFetchMock.mockResolvedValue({ ok: false, status: 404, json: async () => [] });
   editorDocxBytes.current = undefined;
+  editorProjection.current = undefined;
 });
 
 describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
@@ -124,6 +135,44 @@ describe('ComposeWorkspace — FR-03 transient upload-mount', () => {
 
     expect(editorDocxBytes.current).toBeInstanceOf(ArrayBuffer);
     expect((editorDocxBytes.current as ArrayBuffer).byteLength).toBe(3);
+  });
+
+  // FR-02 regression guard (task 012 audit finding): task 010 already wires this door to hydrate
+  // `projection` from POST /api/compose/upload's response instead of hardcoding `null`. This test
+  // proves that end-to-end at the CLIENT level (not just the server seam) — if a future change to
+  // `mountTransient`'s dispatch, the reducer, or this effect's `normalizeProjection` call silently
+  // drops a present server projection back to `null`, this test fails instead of the regression
+  // shipping unnoticed. Mirrors task 010/011's server-side seam proof
+  // (`ComposeUploadProjectionSeamTests.cs`) at the client boundary those tests cannot reach.
+  it('hydrates a non-null projection from the upload response (FR-02 one-reader regression guard)', async () => {
+    authenticatedFetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        content: 'YWJj',
+        fileName: 'draft.docx',
+        size: 3,
+        projection: {
+          status: 'success',
+          canEdit: true,
+          html: '<p>Hello</p>',
+          warnings: [],
+          schemaVersion: 'compose-html-v1',
+        },
+      }),
+    });
+
+    renderWorkspace();
+
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+    // The editor must take the projection branch (never `projection: null`, which would force
+    // the deleted-per-F-2 `mammoth` fallback).
+    expect(editorProjection.current).not.toBeNull();
+    expect(editorProjection.current).not.toBeUndefined();
+    expect(editorProjection.current?.status).toBe('success');
+    expect(editorProjection.current?.canEdit).toBe(true);
+    expect(editorProjection.current?.html).toBe('<p>Hello</p>');
   });
 
   it('POSTs to /api/compose/upload with the session + file ids, and issues no create/save on mount', async () => {

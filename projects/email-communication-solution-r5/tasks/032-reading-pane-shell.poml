@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="email-communication-solution-r5">
+  <metadata>
+    <title>FR-05 / FR-08: Reading-pane shell — resizable two-pane layout (PanelSplitter reuse) with the card list left + reading pane right, selection drives the right pane, splitter width persists, full-width reading-pane toolbar with wired slots (Reply / Reply All / Forward / New / Archive / Create)</title>
+    <phase>3 Layer-2 views</phase>
+    <gate>after:030</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new React 19 composition surface (new file) and the composition root that tasks 033/034/035/036 all wire into; modifies .tsx; establishes the toolbar slot contract + selection state that downstream sub-views depend on. NFR-05 cast prohibition applies. FULL gate per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified composition over reused primitives (`PanelSplitter`) + the extracted `CommunicationActions` (task 022) logic with an exact slot/selection contract; no security or access-model reasoning. Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>This shell is the composition root that 033/034/035/036 (P3b) all compose into; it defines the toolbar-slot + selected-record contract those tasks consume. It MUST land before P3b — serialize it ahead of that wave rather than editing it concurrently.</parallel-reason>
+    <deps>030</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the net-new React 19 reading-pane shell — the composition root of the Email surface. REUSE `PanelSplitter` for a resizable two-pane layout: the `EmailCardList` (task 030) on the left, the reading pane on the right. Selecting a card sets the selected `sprk_communication` id and loads that email into the right pane. The splitter width persists across sessions. Render a full-width toolbar region spanning the reading-pane width with Reply / Reply All / Forward / New / Archive / Create actions — wire the toolbar SLOTS here, dispatching through the Phase-2 extracted `CommunicationActions` (task 022) action-bar logic. The reading-pane BODY, header/attachments, association/tracking views, and the compose wiring itself are separate tasks (033/034/035/036) that mount into the slots this shell exposes — provide the slots + selection context; do NOT implement those sub-views here.</prompt>
+  <role>SPAARKE platform developer. Expert in React 19 + Fluent v9 master/detail composition in the shared component libraries. Follow ADRs strictly (ADR-012 reuse, ADR-021 Fluent v9 + dark mode, ADR-022 slim-first, ADR-045 additive association — display/dispatch only here).</role>
+  <goal>A new `EmailReadingPaneShell` component at `src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.tsx` (+ types) that: (1) renders the reused `PanelSplitter` with the left slot = `EmailCardList` and the right slot = the reading pane; (2) owns `selectedId` state — `onSelect(id)` from the list loads that email into the right pane (the shell exposes the selected id + a load hook; body render is task 033); (3) persists the splitter width (e.g. via `localStorage`/session key) and restores it on next open; (4) renders a full-width toolbar spanning the reading-pane width with Reply / Reply All / Forward / New / Archive / Create buttons, each dispatching via the extracted `CommunicationActions` action-bar logic (task 022) — the compose/prefill wiring lands in task 036; (5) exposes named slots/props for the body (033), header+attachments (034), and connections+tracking (035) sub-views so they compose in without editing the shell; (6) shows the "Select an email" placeholder in the right pane when nothing is selected (FR-19).</goal>
+
+  <context>
+    <background>Spec FR-05 (two-pane reading layout: reuse `PanelSplitter`; selection drives the right pane; resizable + persists width) + FR-08 (full-width toolbar: Reply / Reply All / Forward / New / Archive / Create spanning the reading pane width; reuse the extracted `CommunicationActionBar` logic). Design Lens 2 walk-through: clicking a card loads that `sprk_communication` into the right reading pane, which renders the toolbar + header + body + attachments + associations + tracking + "Open full form". Per design Lens 4 this is BUILD (net-new): `ConversationView` is chat bubbles and `CommunicationLayout` is a full-page single-record view with no split/toolbar-across-width. This shell is the composition root: tasks 033 (.eml body), 034 (header/attachments), 035 (connections/tracking), 036 (compose wiring + Open-full-form) all mount into the slots defined here — which is exactly why this task is `parallel-safe:false` and must land before the P3b wave.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.types.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</file>
+      <file role="canonical-reference">src/client/pcf/CommunicationActions/control/CommunicationActionsApp.tsx</file>
+      <file role="reference">src/client/code-pages/CommunicationPage/src/components/CommunicationLayout.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/ConversationView/ConversationView.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">`EmailCardList` — mounted in the left splitter slot; its `onSelect(id)` drives the shell's `selectedId`.</dependency>
+      <dependency task="022" status="pending">Extracted `CommunicationActions` Layer-1 action-bar logic — the toolbar buttons dispatch through it (Reply / Reply All / Forward / New / Archive / Create). If 022 has not landed, wire the slots against its intended interface and mark the dispatch as pending-integration in notes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">REUSE `PanelSplitter` from `@spaarke/ui-components` for the resizable two-pane layout — do NOT build a new splitter. The shell composes it; it does not fork it.</constraint>
+    <constraint source="project">Selection contract: the shell owns `selectedId`; `EmailCardList.onSelect(id)` sets it; a selection loads that `sprk_communication` into the right pane. The shell provides the selected id + a load hook to the body slot (task 033) — it MUST NOT implement the `.eml` render/body fetch itself (that is 033).</constraint>
+    <constraint source="project">Splitter width MUST persist across sessions (restore on next open) via a stable key (e.g. `localStorage`), and MUST be resizable at runtime.</constraint>
+    <constraint source="project">Toolbar (FR-08): a SINGLE full-width toolbar region spanning the reading-pane width with Reply / Reply All / Forward / New / Archive / Create. Wire each button to dispatch through the extracted `CommunicationActions` action-bar logic (task 022). The actual compose/prefill + "Open full form" behavior is task 036 — this task provides the slots + dispatch wiring, not the compose implementation.</constraint>
+    <constraint source="project">Slot contract: expose named slots/props for the body (033), header+attachments (034), and connections+tracking (035) sub-views so they compose without editing the shell. Downstream tasks fill slots; they do not restructure the shell.</constraint>
+    <constraint source="project">When no card is selected, the right pane shows the "Select an email" placeholder (FR-19 empty state).</constraint>
+    <constraint source="ADR-045">Any association action surfaced through the toolbar/shell dispatches via the existing additive path (`applyRegardingSelection`, reused in 035) — the shell adds NO new client-side association logic (display/dispatch only).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only for the shell + toolbar; MUST render correctly in dark mode via the host `FluentProvider`.</constraint>
+    <constraint source="ADR-022,NFR-05">React 19 code-page-tier composition; introduce NO `as React.ComponentType` cast on this new work.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>React 19 master/detail composition + reused splitter + extracted action-bar dispatch</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Resizable two-pane" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">Reuse for the list-left / reading-pane-right layout; wire its width to a persisted key.</pattern>
+      <pattern name="Action-bar logic (extract target)" location="src/client/pcf/CommunicationActions/control/CommunicationActionsApp.tsx">The source of the Reply/ReplyAll/Forward/New/Archive/Create/suggested-create logic; task 022 extracts it to a React-agnostic core the toolbar dispatches through.</pattern>
+      <pattern name="Single-record composition reference" location="src/client/code-pages/CommunicationPage/src/components/CommunicationLayout.tsx">Reference for the sub-view arrangement (header/body/attachments/associations) — but full-page, no split/toolbar-across-width; the shell adds the split + full-width toolbar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load this POML + spec FR-05/FR-08/FR-19 + design Lens 2. Declare RIGOR LEVEL: FULL with reason. Confirm `PanelSplitter` prop shape + the `CommunicationActions` (022) intended interface.</step>
+    <step order="1">Define `EmailReadingPaneShellProps` + the slot props in `EmailReadingPaneShell.types.ts`: `items`/`isLoading` (forwarded to `EmailCardList`), `renderBody(selectedId)`, `renderHeader(selectedId)`, `renderAttachments(selectedId)`, `renderConnections(selectedId)`, `renderTracking(selectedId)`, and an `actions` handle (the extracted CommunicationActions core) for toolbar dispatch.</step>
+    <step order="2">Implement the layout: reused `PanelSplitter` with left = `&lt;EmailCardList … onSelect={setSelectedId} selectedId={selectedId} /&gt;`, right = the reading pane. Persist + restore the splitter width via a stable key; keep it resizable.</step>
+    <step order="3">Reading pane: when `selectedId` is set, render (top→bottom) the full-width `EmailToolbar` spanning the pane width, then the header slot, body slot, attachments slot, connections slot, tracking slot. When `selectedId` is unset, render the "Select an email" placeholder.</step>
+    <step order="4">Implement `EmailToolbar.tsx`: a Fluent v9 `Toolbar` spanning the reading-pane width with Reply / Reply All / Forward / New / Archive / Create buttons; each `onClick` dispatches through the injected `CommunicationActions` (022) core. Do NOT implement compose/prefill here (task 036) — dispatch to the provided handler.</step>
+    <step order="5">Export `EmailReadingPaneShell` + `EmailToolbar` + types from `src/index.ts`.</step>
+    <step order="6">Add tests: selection drives the right pane (selecting a card calls the body slot with the id); the "Select an email" placeholder shows when nothing is selected; the toolbar renders all six slots and each dispatches through the actions core; the splitter width persists (write then re-mount reads the persisted value).</step>
+    <step order="7">Run `npm run build` + tests for `@spaarke/communication-components`.</step>
+    <step order="8">Update `projects/email-communication-solution-r5/tasks/TASK-INDEX.md`: set task 032 status to ✅.</step>
+    <step order="9">Document the slot contract + toolbar dispatch interface in `projects/email-communication-solution-r5/notes/` (this is the contract 033/034/035/036 consume).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the toolbar cannot dispatch through the extracted `CommunicationActions` (022) core without duplicating action-bar logic in the shell (e.g. 022's interface is missing or incompatible), STOP and escalate per root CLAUDE.md §6/§6.5 — do NOT fork a second action-bar implementation in the shell (that would violate FR-08's "reuse extracted CommunicationActionBar logic" + §11).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ConversationView.tsx` (chat-bubble conversation) and `CommunicationPage/.../CommunicationLayout.tsx` (single-record full-page layout). Grep: no split (list+detail) reading-pane shell with a full-width toolbar exists in the shared libs.</existing>
+    <extension>No — `ConversationView` renders chat bubbles (a fundamentally different metaphor), and `CommunicationLayout` is a full-page single-record view with no master/detail split and no toolbar spanning the reading-pane width; adding a resizable list-left/detail-right split + full-width action toolbar to either is a new composition, not a prop.</extension>
+    <cost-of-doing-nothing>Without the reading-pane shell there is no side-by-side read-while-browsing — the surface loses the Outlook reading pane (FR-05) and its full-width action toolbar (FR-08), and tasks 033/034/035/036 have no composition root to mount into.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Selection drives the right pane">
+      <steps>
+        <step>Render the shell with an Email `items` array and stub slot renderers; click a card in the left list.</step>
+      </steps>
+      <expected>The right pane's body/header slots are invoked with the selected id; the reading pane switches from the placeholder to the record.</expected>
+    </test>
+    <test name="Empty placeholder + toolbar slots">
+      <steps>
+        <step>Render the shell with nothing selected, then select a card.</step>
+      </steps>
+      <expected>With no selection the right pane shows "Select an email"; once selected, the full-width toolbar renders Reply / Reply All / Forward / New / Archive / Create, each dispatching through the actions core.</expected>
+    </test>
+    <test name="Splitter width persists">
+      <steps>
+        <step>Resize the splitter, unmount, and re-mount the shell.</step>
+      </steps>
+      <expected>The re-mounted shell restores the previously set splitter width from the persisted key.</expected>
+    </test>
+    <test name="Dark-mode theming (ADR-021)">
+      <steps>
+        <step>Render the shell (list + toolbar + reading pane) inside a `FluentProvider` using `webDarkTheme`.</step>
+      </steps>
+      <expected>Splitter, toolbar, and pane chrome use theme tokens and are legible in dark mode; no hardcoded colors leak.</expected>
+    </test>
+  </ui-tests>
+
+  <tools><tool name="npm">Build/test shared-lib (npm run build)</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/EmailReadingPaneShell.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/EmailReadingPaneShell/__tests__/EmailReadingPaneShell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the shell mounts with Email items, when it renders, then the reused `PanelSplitter` shows the `EmailCardList` on the left and the reading pane on the right (resizable).</criterion>
+    <criterion testable="true">Given a card is clicked, when `onSelect(id)` fires, then the shell's `selectedId` updates and the right-pane body/header slots are invoked with that id (selection drives the right pane).</criterion>
+    <criterion testable="true">Given nothing is selected, when the shell renders, then the right pane shows the "Select an email" placeholder (FR-19).</criterion>
+    <criterion testable="true">Given the splitter is resized, when the shell is re-mounted, then the previously set width is restored from the persisted key.</criterion>
+    <criterion testable="true">Given a selected email, when the reading pane renders, then a single full-width toolbar spans the reading-pane width with Reply / Reply All / Forward / New / Archive / Create, each wired to dispatch through the extracted `CommunicationActions` (022) core (compose behavior itself lands in 036).</criterion>
+    <criterion testable="true">Given the downstream sub-views (033/034/035/036), when they compose in, then they fill the shell's named slots without editing the shell (slot contract holds).</criterion>
+    <criterion testable="true">Given a host `FluentProvider` in dark theme, when the shell renders, then all chrome uses tokens (ADR-021 dark mode) and no `as React.ComponentType` cast is introduced (NFR-05).</criterion>
+    <criterion testable="true">`npm run build` for `@spaarke/communication-components` is green and all new tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference spec FR-05 + FR-08 + FR-19 and design Lens 2 (two-pane, selection→right pane, full-width toolbar) + Lens 4 (BUILD verdict). This shell is the composition root for the P3b wave (033 body / 034 header+attachments / 035 connections+tracking / 036 compose+Open-full-form) — hence `parallel-safe:false`: it must land before P3b so those tasks fill its slots. Toolbar dispatch reuses task 022's extracted `CommunicationActions` logic (FR-08), NOT a forked action bar. "Open full form" (85% `navigateTo` modal) is task 036. Completion summary appended here when done.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill><protocol>Load all knowledge files first; follow task-execute.</protocol></execution>
+</task>
