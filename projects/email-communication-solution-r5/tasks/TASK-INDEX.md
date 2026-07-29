@@ -27,7 +27,7 @@
 | 040 | Assemble shared `EmailWorkspace` component (Pattern D source of truth) | 4 | ✅ | FULL | sonnet/high | — | ❌ | 033, 034, 035, 036 |
 | 041 | `email` widget registration + section shim + `system-layouts.json` seed | 4 | ✅ | STANDARD | sonnet/high | P4 | ✅ | 040 |
 | 042 | Standalone Email code page `src/solutions/EmailPage/**` + auth bootstrap | 4 | ✅ | FULL | sonnet/high | P4 | ✅ | 040 |
-| 050 | Verification sweep — parity + OOB regression + XSS cases | 5 | 🔲 | FULL | opus/high | — | ❌ | 041, 042 |
+| 050 | Verification sweep — parity + OOB regression + XSS cases | 5 | ✅ | FULL | opus/high | — | ❌ | 041, 042 |
 | 051 | Deploy — BFF + code page + widget seed; publish-size report | 5 | 🔲 | FULL | sonnet/high | — | ❌ | 050 |
 | 090 | Project wrap-up — README, lessons-learned, `/test-diet`, archive | 5 | 🔲 | MINIMAL | sonnet/medium | — | ❌ | 051 |
 
