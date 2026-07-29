@@ -3,9 +3,10 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W6 — 063 (delete web resources + AnalysisWorkspace tree + reconcile casing), ORDERED retirement (prescriptive)
+**Active task**: W6 — 064 (migrate /save+GET + generalize hooks + fold 3-pane + 062 write-cleanup), ORDERED retirement (final W6 task)
 
-> **064 owes (062 hand-off, notes/task-062-handoff-to-064.md)**: the `sprk_chathistory` WRITE cleanup (`IWorkingDocumentService.UpdateChatHistoryAsync` impl, `AnalysisResultPersistence` if provably dead after GET/save read-drop, and the 3-file Dataverse column plumbing) — deferred because the reader is live until 064 drops the GET/save `sprk_chathistory` read.
+> **064 scope**: drop `sprk_chathistory` READ from GET/save (FR-22); assess /export reader (062 note: DeserializeChatHistory feeds save/export/GET) — repoint to Cosmos or drop; then complete 062 hand-off (write cleanup: UpdateChatHistoryAsync impl, AnalysisResultPersistence if dead, 3-file column plumbing) — escalation-guarded if it balloons. Generalize NDA hooks→work-type; shared widgets survive.
+> **071 (deploy) owes 3 items**: (1) hub `sprk_gridconfiguration` seed (notes/hub-grid-config-deployment.md); (2) ribbon XML for AnalysisRecordLaunch (Matter/Project buttons); (3) Dataverse env web-resource/canvasapp deletion w/ exact GUIDs (notes/task-063-env-deletion-deferred-to-071.md).
 **Next action**: W6 060 → 061 → 062 → 063; 064 after 062 (repoint BEFORE delete, §13.5) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 050 ✅ 051–053 ✅ (19/28). Phases 1–5 COMPLETE. Publish 46.16 MB.
 
 > **W6 is the ordered/prescriptive retirement (§13.5)** — MUST run serially: repoint server deep-links (060) → repoint client launch points (061) → retire legacy session path (062, escalation-guarded on sprk_chathistory provenance) → delete web resources + tree (063); 064 (migrate save/get + generalize hooks + fold 3-pane) after 062. Nothing dangles.

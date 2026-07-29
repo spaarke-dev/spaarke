@@ -4,7 +4,7 @@
     <title>Delete web resources + AnalysisWorkspace/ tree + deploy script + reconcile casing</title>
     <phase>6 Retirement</phase>
     <gate>blocked — 060, 061, 062 (all repoints/retirement done first)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Irreversible deletion of a source tree + a deploy script + environment web resources; a dangling reference or a wrongly-deleted shared-lib file breaks build/deploy. deploy/code-page tags.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -125,6 +125,27 @@
   <notes>
     Spec §13.5 / FR-21. Ordered tail — runs after 060/061/062. No solution XML references these names (code/scripts +
     environment only). The shared-lib keep-list is the one judgment call: extracted-from-AnalysisWorkspace ≠ delete.
+
+    COMPLETED 2026-07-29. Deleted src/client/code-pages/AnalysisWorkspace/ (51 files) + scripts/Deploy-AnalysisWorkspace.ps1
+    via `git rm -r`. All 5 keep-list shared-lib files verified to have surviving consumers outside the deleted tree — none
+    deleted (no escalation fired). Grep for the exact 4-name casing set (sprk_analysisworkspace, sprk_AnalysisWorkspace,
+    sprk_AnalysisWorkspaceLauncher, sprk_analysisworkspace_8bc0b) returns zero matches across src/, scripts/, infra/.
+    Found + fixed one real dangling reference during review: scripts/Build-AllClientComponents.ps1 still listed
+    "AnalysisWorkspace" in $WebpackCodePages (would have broken the script) — removed + updated doc-comment examples in
+    that file, scripts/README.md, and scripts/Deploy-SpaarkeAi.ps1. Shared lib (Spaarke.UI.Components) builds clean;
+    SpaarkeAi typecheck surface gate: 0 surface-owned errors.
+
+    Dataverse ENVIRONMENT deletion (sprk_analysisworkspace HTML webresourceid ba85d6be-6413-f111-8343-7c1e520aa4df,
+    cc_Spaarke.Controls.AnalysisWorkspace/bundle.js webresourceid c8c1a3cc-8d64-48ca-b3ed-ff7d645f8358,
+    cc_Spaarke.Controls.AnalysisWorkspace/css/AnalysisWorkspace.css webresourceid 24dc8d05-45d9-4dde-bc98-2cb61a588a87,
+    dead custom page sprk_analysisworkspace_8bc0b canvasappid ff384002-a0ea-4253-a2a0-88ae3c49108b — note: no distinct
+    sprk_AnalysisWorkspaceLauncher web resource exists in spaarkedev1) is DEFERRED to task 071 per this task's own
+    authorized fallback clause: mcp__dataverse__delete_record requires live per-call human approval, unavailable in this
+    autonomous run. Precise IDs + deletion order documented in
+    projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-063-env-deletion-deferred-to-071.md.
+
+    Quality gates: code-review clean (1 real issue found+fixed); adr-check compliant (ADR-006 — deferral is the
+    authorized fallback, not a silent gap; no live code path points at the dead env resources after 061's repoint).
   </notes>
 
   <execution>

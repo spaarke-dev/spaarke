@@ -575,7 +575,7 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Parameters:**
 - `-SkipSharedLibs` — Skip shared library builds (step 1). Use when shared libs are already built.
-- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `AnalysisWorkspace`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`.
+- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`.
 
 **Build Order:**
 1. Shared libraries (`Spaarke.Auth`, `Spaarke.SdapClient`, `Spaarke.UI.Components`)
