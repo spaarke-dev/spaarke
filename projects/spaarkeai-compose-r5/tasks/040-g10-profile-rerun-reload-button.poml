@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G10 — Document Profile re-run: add reload/onload re-trigger + manual "Refresh Profile" button</title>
+    <phase>4 Profiling + hardening</phase>
+    <gate>dep:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches BFF (ComposeService.cs save/load orchestration) + client (Refresh Profile button); modifies .cs and .tsx; tags include bff-api. Risk of a profiling storm (re-trigger loop) requires the FULL code-review + adr-check gate at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified additive wiring on an existing fire-and-forget hook; reuses R4.5 CitationResolver; no novel architecture. The existing save-hook is the reference implementation to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the shared, contended ComposeService.cs (R4.5-owned-FIRST). Must rebase onto post-R4.5 LoadAsync/SaveAsync; cannot run concurrently with other ComposeService.cs edits.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose, frontend</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>The save-hook Document-Profile re-trigger already exists fire-and-forget in ComposeService.cs (~:895-942). Add the two MISSING legs: (a) a reload/onload re-trigger and (b) a manual "Refresh Profile" button in the Compose client. Reuse R4.5's CitationResolver (paraId to legal-number, CitationResolver.cs) for precise citations. Do NOT re-implement the profile trigger — extend the existing one.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 BFF (Services/Compose) expertise and Fluent UI v9 React (Spaarke.Compose.Components) experience, familiar with the Compose OOXML save/load lifecycle (ADR-049) and the R4.5 CitationResolver.</role>
+
+  <goal>G10 (spec FR-09 / gap G10 / R5-D5) delivered: (1) a reload/onload re-trigger of the Document-Profile fires when an authored/edited Compose doc is reopened, reusing the existing fire-and-forget mechanism; (2) a manual "Refresh Profile" button exists in the Compose toolbar/UI that triggers the same profile re-run on demand; (3) both legs reuse R4.5 CitationResolver for paraId→legal-number citations; (4) UI tests cover the Refresh Profile button (renders, triggers, dark-mode). ESCAPE HATCH (R5-D5): if end-to-end profile complexity proves high, a §6.5 deferral note is written to notes/ instead of shipping a half-wired trigger. A seam/UI slice proves the reload leg or the deferral is documented.</goal>
+
+  <context>
+    <background>Per spec FR-09 (G10) and plan P4-1: the Compose→sprk_document/SPE save path already fires the Dataverse Document-Profile re-trigger fire-and-forget on a detached DI scope (ComposeService.cs:~895-942). The remaining gap is ONLY reload/onload + a manual button — downstream analysis/search must reflect edits even when the doc is reopened without a save, and the operator needs an on-demand refresh. R5-D5 keeps G10 in R5 with a documented complexity-defer escape hatch per CLAUDE.md §6.5.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>020 (Phase-2/3 client + service work must be in place so the reload/button wiring rebases onto the current ComposeService.cs / ComposeWorkspace.tsx).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Engine is byte[]-in/byte[]-out; the profile re-trigger is a domain event on the save/load path, not a change to the surgical-op engine. Honor I-1…I-7 + D1–D5.</constraint>
+    <constraint source="ADR-007">No Microsoft.Graph above SpeFileStore; the profile re-trigger is a domain event, NOT a Graph call in the engine. SPE hop stays in the endpoint/facade layer.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest). No IOpenAiClient/executor/routing types in the profile-trigger code path.</constraint>
+    <constraint source="ADR-038">Seam DoD — the reload leg carries a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project">R5-D5 / COORDINATION: REUSE R4.5 CitationResolver (paraId→legal-number) — do NOT fork it. Rebase onto post-R4.5 ComposeService.cs (R4.5-owned-FIRST). Run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">NFR-01/03/04: corpus byte-diff harness (28/28) MUST NOT regress; no new runtime package; BFF publish ≤60 MB compressed — report absolute + delta vs ~46.11 MB baseline in the PR.</constraint>
+    <constraint source="project">NFR-08: adding the reload trigger MUST NOT reintroduce a user-triggerable error or profiling-storm/silent-loss path; keep the existing fire-and-forget safety semantics.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); the profile re-trigger stays in Services/Compose/ save/load orchestration; no new service/endpoint family.</constraint>
+    <constraint source="ADR-021">Client Refresh Profile button MUST render correctly in dark mode; UI tests cover both themes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing profile fire-and-forget hook" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (~:895-942)">The reference implementation to copy for the reload/onload and manual-button legs — detached DI scope, fire-and-forget.</pattern>
+      <pattern name="Citation reuse" location="src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs (Resolve:53/:60, ResolveCitation:72/:76)">R4.5 static paraId→legal-number resolver — reuse for precise citations; do not fork.</pattern>
+      <pattern name="R4 guard sites / toolbar" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">Toolbar surface where the Refresh Profile button is added, anchored to existing toolbar button visual direction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the existing fire-and-forget save-hook (ComposeService.cs:~895-942) and the CitationResolver to understand the current trigger mechanism, its DI-scope detachment, and how citations are produced. Confirm the profiling target contract.</step>
+    <step order="2">TRIAGE complexity FIRST (R5-D5 escape hatch): assess whether wiring the reload/onload + button legs end-to-end is tractable within this task. If complexity is high (e.g., profile pipeline requires cross-service orchestration not reachable from Compose save/load), STOP, write the §6.5 deferral note to notes/, and escalate rather than half-wiring a trigger.</step>
+    <step order="3">Add the reload/onload re-trigger leg: on reopen/onload of an authored/edited Compose doc, invoke the same fire-and-forget profile re-trigger (reusing the existing mechanism, not a new one). Guard against a re-trigger loop / profiling storm (idempotency / change-detection so reopen without edits does not re-trigger unnecessarily).</step>
+    <step order="4">Add the manual "Refresh Profile" button in the Compose client (ComposeFormatToolbar.tsx or the appropriate toolbar/UI surface), wired to trigger the same profile re-run on demand. Anchor its visual direction to an existing toolbar button.</step>
+    <step order="5">Wire both legs to reuse R4.5 CitationResolver for paraId→legal-number citations; do not fork the resolver.</step>
+    <step order="6">Add a through-the-wire seam slice in tests/integration/seam/Compose/ proving the reload leg re-triggers the profile (or, if deferred, ensure the deferral note fully documents the §6.5 path and no half-wired code ships).</step>
+    <step order="7">Add UI tests for the Refresh Profile button: renders, triggers the profile re-run, and renders correctly in dark mode (ADR-021).</step>
+    <step order="8">Verify NFR gates: run the corpus byte-diff harness (28/28 no-regression), run dotnet publish and report absolute compressed size + delta vs ~46.11 MB, confirm zero new runtime package. Run /conflict-check before the BFF PR.</step>
+    <step order="9">Run/verify: build + the task's seam/unit tests + UI tests pass.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Refresh Profile button renders">The Refresh Profile button appears in the Compose toolbar with an accessible label.</test>
+    <test name="Refresh Profile button triggers profile re-run">Clicking the button invokes the profile re-trigger (assert the request/handler fires).</test>
+    <test name="Dark-mode render (ADR-021)">The button renders correctly in dark mode; icon/label contrast is correct in both light and dark themes.</test>
+  </ui-tests>
+
+  <escalation>
+    <trigger>If the reload/onload re-trigger risks a profiling storm (a re-trigger loop where reopen re-fires profiling without a real change), STOP and escalate before shipping. Separately, if end-to-end profile complexity forces deferral, write the §6.5 deferral note to notes/ and escalate rather than half-wiring the trigger — do NOT ship a partially-wired profile re-run.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, run seam/unit tests, and dotnet publish for the size check.</tool>
+    <tool name="npm">Build the Compose client bundle and run UI tests.</tool>
+    <tool name="terminal">Grep/inspect ComposeService.cs and CitationResolver; run /conflict-check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a reopened authored/edited Compose doc, when it loads, then the Document-Profile re-trigger fires via the existing fire-and-forget mechanism (reload leg present) — asserted by a seam slice.</criterion>
+    <criterion testable="true">Given the Compose toolbar, when the user clicks "Refresh Profile", then the same profile re-run is triggered on demand.</criterion>
+    <criterion testable="true">Given citation production, when the profile re-run runs, then it reuses R4.5 CitationResolver (paraId→legal-number) — no forked resolver introduced.</criterion>
+    <criterion testable="true">Given the Refresh Profile button, when rendered in dark mode, then it displays correctly (ADR-021) per the UI test.</criterion>
+    <criterion testable="true">Negative/no-regression: the corpus byte-diff harness stays 28/28, no new runtime package is added, BFF publish stays ≤60 MB, and reopen without an edit does NOT cause a profiling-storm re-trigger loop (NFR-08).</criterion>
+    <criterion testable="true">Escape hatch: if complexity forces deferral, then a §6.5 deferral note exists in notes/ and NO half-wired profile-trigger code is merged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09 / gap G10 / R5-D5; plan P4-1. The save-hook trigger already exists (ComposeService.cs:~895-942) — this task adds ONLY reload/onload + the manual button. Reuse CitationResolver; do not fork. The R5-D5 escape hatch is a legitimate stop, not a failure.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

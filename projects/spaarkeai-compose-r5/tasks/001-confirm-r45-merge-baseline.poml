@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>Confirm R4.5 outputs on branch + establish GREEN baseline</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification/confirm-only task: no production code change. Runs existing harness + seam tests and records a baseline; no new appliers, ops, or schema.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic verification against a known-good baseline; no architectural judgment or high-blast-radius change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification; touches no source files, only runs tests and reads the tree.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, testing, verification, compose</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Confirm that R4.5's outputs are present on the R5 branch and that the Compose corpus byte-diff harness and existing seam tests are GREEN before any R5 implementation begins. Record the baseline publish size (~46.11 MB). Do not modify any source file — this is a confirm-only gate.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 BFF test-harness expertise and familiarity with the Compose OOXML round-trip (ADR-049) seam-test suite.</role>
+
+  <goal>A written baseline confirmation exists proving: (1) `NumberingComputationEngine` is present nested in `ComposeDocxProjectionBuilder.cs` and `CitationResolver.cs` is present in `Services/Compose/`; (2) the R4 corpus byte-diff harness passes (28/28) and the existing Compose seam tests pass; (3) the current BFF publish size is recorded (~46.11 MB compressed, PDB convention stated). A baseline note is written to `projects/spaarkeai-compose-r5/notes/`.</goal>
+
+  <context>
+    <background>Per spec §Phasing (Phase 0) and plan P0-1, R4.5 merged to master 2026-07-28 so this is a confirm-only gate. All downstream R5 implementation depends on a GREEN baseline; starting on a red baseline would attribute pre-existing failures to R5 work. Establishes the byte-diff/publish-size reference points used by every later BFF task (NFR-01, NFR-04).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</file>
+      <file>tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs</file>
+      <file>tests/integration/seam/Compose/ComposePatchEngineSaveSeamTests.cs</file>
+      <file>tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </relevant-files>
+    <dependencies>None. This is the first Phase-0 task.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">NFR-01: the corpus byte-diff harness (R4's 28/28) MUST be recorded as the baseline; it MUST NOT be modified.</constraint>
+    <constraint source="project">NFR-04: record the BFF publish size (absolute + PDB convention) as the ~46.11 MB baseline every later BFF task reports its delta against. BFF ≤60 MB compressed ceiling.</constraint>
+    <constraint source="ADR-038">Do not add or modify tests; only run the existing seam/unit suites. No `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</constraint>
+    <constraint source="project">COORDINATION: verify the branch is rebased onto post-R4.5 `ComposeService.cs`/`ComposeWorkspace.tsx`; confirm `docxBridge.ts` write helpers present and `docxToTipTapHtml` gone. Do NOT delete `docxBridge.ts`.</constraint>
+    <constraint source="CLAUDE.md §10">Read-only verification; no BFF surface added, so no Placement Justification required — but report the publish-size baseline for downstream tasks.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seam-test suite" location="tests/integration/seam/Compose/">Canonical corpus byte-diff + save seam tests to run for the baseline.</pattern>
+      <pattern name="Publish-size verification" location=".claude/constraints/azure-deployment.md">BFF Publish-Size Per-Task Verification Rule (NFR-01) — measure compressed output.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Grep/read to confirm `NumberingComputationEngine` exists as the nested `internal sealed class` in `ComposeDocxProjectionBuilder.cs` (~:1357) and `CitationResolver.cs` exists in `Services/Compose/` with `Resolve`/`ResolveCitation`. Record file:line evidence.</step>
+    <step order="2">Confirm the docxBridge hazard state: `utils/docxBridge.ts` retains `buildContentModel`/`stampParaIds`/paraId helpers and `docxToTipTapHtml` is gone (R4.5 read fn removed). Record evidence.</step>
+    <step order="3">Run the Compose corpus byte-diff harness + existing seam tests (`tests/integration/seam/Compose/`) and the Compose unit tests. Record pass counts (target: byte-diff 28/28 green).</step>
+    <step order="4">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure the compressed output, and record the absolute size + PDB convention as the ~46.11 MB baseline.</step>
+    <step order="5">Write the baseline confirmation note to `projects/spaarkeai-compose-r5/notes/baseline-confirmation.md` (R4.5 outputs present, seam/byte-diff pass counts, publish-size baseline, docxBridge state).</step>
+    <step order="6">Run/verify: build + the task's seam/unit tests pass (already run in step 3-4; confirm green and capture final numbers).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the corpus byte-diff harness is NOT green on the untouched branch (i.e., the baseline is already red), STOP and escalate to the operator — do not start any R5 implementation on a red baseline. A red baseline means the merge/rebase is broken and must be fixed before R5 work proceeds.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run seam/unit tests and `dotnet publish` for the size baseline.</tool>
+    <tool name="terminal">Grep/inspect the tree for R4.5 output presence.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/baseline-confirmation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the R5 branch, when I grep the Compose services, then `NumberingComputationEngine` (nested in `ComposeDocxProjectionBuilder.cs`) and `CitationResolver.cs` are both confirmed present with recorded file:line evidence.</criterion>
+    <criterion testable="true">Given the untouched branch, when the corpus byte-diff harness + existing Compose seam tests run, then all pass (byte-diff 28/28) and the counts are recorded in the baseline note.</criterion>
+    <criterion testable="true">Given a Release publish, when the compressed output is measured, then the absolute size (~46.11 MB) + PDB convention is recorded as the baseline and is ≤60 MB.</criterion>
+    <criterion testable="true">Given the coordination hazard, when I inspect `utils/docxBridge.ts`, then its write helpers are present, `docxToTipTapHtml` is absent, and the file is NOT modified or deleted.</criterion>
+    <criterion testable="true">Negative: no source file under `src/` is modified by this task (confirm-only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec §Phasing Phase 0, plan P0-1. Confirm-only because R4.5 merged 2026-07-28. This baseline is the reference for NFR-01 (byte-diff) and NFR-04 (publish size) used by every later BFF task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

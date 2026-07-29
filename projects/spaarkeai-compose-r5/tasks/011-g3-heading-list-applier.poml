@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G3 heading/list applier — setBlockAttr Style/ListOrdered/ListLevel → w:pPrChange; client emits heading/list; reuse NumberingComputationEngine</title>
+    <phase>1 Edit-path ops</phase>
+    <gate>dep:005,010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared OOXML write engine plus the client step classifier; reuses R4.5's numbering engine across a visibility boundary; save/apply change requires ADR-038 seam DoD + byte-diff no-regression.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Heading/list renumber is high-blast-radius: it must reuse R4.5's NumberingComputationEngine without forking the algorithm and match the read-time model exactly, spanning engine + client-classifier surfaces with a real correctness bar.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine.cs (the same setBlockAttr surface 010 fills), which every Phase-1 task edits. Must run after 010 (shared applier surface) and 005 (numbering-reuse decision). Serialize against 012/013/014.</parallel-reason>
+    <deps>005,010</deps>
+    <tags>bff-api, compose, engine</tags>
+    <estimated-effort>2-4 days (M)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement the setBlockAttr applier for Style (heading level), ListOrdered, and ListLevel in
+    ComposeShadowPatchEngine.cs as tracked w:pPrChange (imported) or clean paragraph properties (authored). Make the
+    client stepOperationInterceptor.ts classifyStep EMIT heading/list steps (today defer-structural around :442).
+    REUSE R4.5's NumberingComputationEngine per task 005's extract-vs-reference decision — do NOT fork the numbering
+    algorithm. Re-enable the heading/list controls in ComposeFormatToolbar.tsx (guards :537/:546/:563). Add seam
+    slices; the edit-side renumber must match R4.5's read-time model.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in OOXML paragraph styling (w:pStyle), numbering (w:numPr), tracked
+    paragraph-property revisions (w:pPrChange), the ComposeShadowPatchEngine surgical-op model, and the client
+    step classifier. Honor ADR-049 + CLAUDE.md §10 and the R4.5 numbering-reuse contract.
+  </role>
+
+  <goal>
+    ComposeShadowPatchEngine applies setBlockAttr Style/ListOrdered/ListLevel ops: tracked w:pPrChange (w:pStyle +
+    w:numPr) for imported docs, clean paragraph properties for authored docs — resolved by paraId. The client
+    classifyStep emits heading/list steps instead of defer-structural. Renumbering is computed by R4.5's
+    NumberingComputationEngine (reused, not forked) and matches its read-time model. The R4 SDL-1/2 guards are
+    removed (heading/list controls re-enabled). Per-construct tests/integration/seam/Compose/ slices prove
+    round-trip; corpus byte-diff (28/28) does not regress.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-03 (G3) heading/list + R4 guards SDL-1/2 + R5-D4. The engine setBlockAttr surface is opened by 010
+      (alignment). Style/ListOrdered/ListLevel are already enumerated ComposeBlockAttr values but the client currently
+      classifies them as defer-structural at classifyStep (~:442). R4.5's NumberingComputationEngine lives as an
+      internal sealed class nested in ComposeDocxProjectionBuilder.cs (~:1357); task 005 decides whether to extract
+      it to a standalone reusable type or reference it in place. This task consumes that decision and MUST NOT
+      re-implement numbering (R5-D4 / R4.5 FR-14). This is NEW behavior applied to existing (loaded) files — not a
+      new op type and not a new file.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>010 (opens the setBlockAttr applier surface — this task extends it); 005 (NumberingComputationEngine extract-vs-reference decision — determines the reuse mechanism).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. Surgical ops anchored by (paraId, runIndex, offset); untouched subtrees byte-identical; two-byte-author split (imported → w:pPrChange via engine; authored → clean w:pPr). ADR-049 F-3 names live renumber-on-edit as the sanctioned R5 G3 follow-on.</constraint>
+    <constraint source="ADR-049">NO text-search in the write path (I-7 / NFR-02) — resolve target paragraphs by paraId only.</constraint>
+    <constraint source="project">R5-D4 — edit-side numbering MUST reuse R4.5's NumberingComputationEngine (per 005's decision); MUST NOT fork or re-implement the numbering algorithm. Renumber output MUST match R4.5's read-time model. If 005 chose extract-to-standalone, do NOT alter the projection-builder path's byte output.</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the heading/list branch carries no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-038">Add per-construct through-the-wire WebApplicationFactory seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-08 — removing SDL-1/2 guards MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
+    <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="setBlockAttr applier surface" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Extend the Alignment branch added by 010 (setBlockAttr throw :249 → real appliers) for Style/ListOrdered/ListLevel; emit w:pStyle + w:numPr inside a w:pPrChange (tracked) or as clean w:pPr (authored).
+      </pattern>
+      <pattern name="Numbering reuse (do NOT fork)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        NumberingComputationEngine.Compute (nested internal sealed ~:1357) is the single source of numbering truth; reuse it per 005's extract-vs-reference decision so edit-side renumber matches read-time output.
+      </pattern>
+      <pattern name="Client step classification" location="src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts">
+        classifyStep (~:442) currently defers heading/list as structural; change it to emit the setBlockAttr Style/ListOrdered/ListLevel steps mirroring the server op schema.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 005's NumberingComputationEngine reuse decision (extract-to-standalone vs reference-nested) is made and recorded; if not, invoke the escalation trigger.</step>
+    <step order="2">Read the setBlockAttr surface (post-010) and ComposeBlockAttr enum; read NumberingComputationEngine.Compute and how the projection builder invokes it (:159/:1357).</step>
+    <step order="3">Implement the Style (heading level) applier: resolve paragraph by paraId; emit w:pStyle inside w:pPrChange (tracked) or clean w:pPr (authored).</step>
+    <step order="4">Implement ListOrdered/ListLevel appliers: emit w:numPr (ilvl/numId) driven by NumberingComputationEngine output — reused per 005, never forked — inside w:pPrChange (tracked) or clean w:pPr (authored); ensure renumber matches R4.5's read-time model.</step>
+    <step order="5">Update client stepOperationInterceptor.ts classifyStep to EMIT heading/list steps (remove defer-structural for these) mirroring the server op schema exactly.</step>
+    <step order="6">Re-enable the heading/list controls in ComposeFormatToolbar.tsx (guards :537/:546/:563); leave alignment (010) and table (014) handling as-is.</step>
+    <step order="7">Add per-construct seam slices in tests/integration/seam/Compose/: heading, ordered/unordered list, list level — each round-trips through the wire, carries the expected markup, renumber matches read-time, and untouched subtrees are byte-identical.</step>
+    <step order="8">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="9">Run/verify: build + this task's seam/unit tests pass.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 005's numbering-reuse decision is not yet made/recorded, OR reusing the engine per that decision would in practice require forking or re-implementing the numbering algorithm (e.g. the internal visibility can't be reused without duplicating logic), STOP and escalate per §6.5 — do NOT fork numbering (R5-D4).</trigger>
+    <trigger>If applying w:pPrChange or locating a paragraph would require text-search instead of paraId resolution, STOP (I-7 / NFR-02 violation).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF; run the byte-diff harness.</tool>
+    <tool name="npm">Build the Spaarke.Compose.Components client for classifier + toolbar changes.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (Style/ListOrdered/ListLevel appliers)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts (emit heading/list)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx (heading/list guards removed)</output>
+    <output type="test">tests/integration/seam/Compose/ (per-construct heading/list seam slices)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an imported/tracked doc, when a setBlockAttr Style (heading level) op is applied and saved, then the paragraph carries w:pStyle inside a w:pPrChange and opens in Word as a tracked style change.</criterion>
+    <criterion testable="true">Given an imported/tracked doc, when ListOrdered/ListLevel ops are applied and saved, then the paragraph carries w:numPr inside a w:pPrChange and the resulting numbering matches R4.5's read-time NumberingComputationEngine output.</criterion>
+    <criterion testable="true">Given an authored doc, when heading/list ops are applied and saved, then the paragraph carries clean w:pStyle/w:numPr with zero w:ins/w:del/w:pPrChange markup.</criterion>
+    <criterion testable="true">Given a heading/list edit in the client, when classifyStep runs, then it EMITS the corresponding setBlockAttr step (no longer defer-structural) mirroring the server op schema.</criterion>
+    <criterion testable="true">Given any heading/list edit, then the target paragraph is resolved by paraId — no text-search in the write path.</criterion>
+    <criterion testable="true">Given the numbering reuse, then NumberingComputationEngine is reused (per 005) and the numbering algorithm is NOT re-implemented or forked; if 005 chose extract, the projection-builder byte output is unchanged.</criterion>
+    <criterion testable="true">Given the seam slices run, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, SDL-1/2 guards are removed with no user-triggerable error or silent-loss path (NFR-08), and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    NEW behavior on existing files, not a new op type or new file — Style/ListOrdered/ListLevel are already enumerated
+    ComposeBlockAttr values; no &lt;justification&gt; required. Depends on 010 (applier surface) and 005 (numbering reuse).
+    Spec §FR-03; guard sites ComposeFormatToolbar.tsx :537/:546/:563; classifyStep stepOperationInterceptor.ts ~:442.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check. Confirm 005's numbering-reuse decision before implementing.</protocol>
+  </execution>
+</task>

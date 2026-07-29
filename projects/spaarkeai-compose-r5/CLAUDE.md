@@ -77,7 +77,11 @@ MIT/permissive only. No commercial/per-seat/AGPL. **No TipTap Pro** (`@tiptap-pr
 ADR-013 (AI facade — no AI internals in Compose) · ADR-007 (no Graph above SpeFileStore) · ADR-039/040 (closed op catalog, engine frozen, no new AI dispatch) · ADR-038 (seam DoD; banned mock/DI/ctor tests) · ADR-009 (version/re-anchor state via `IDistributedCache`) · ADR-028 (client fetches via `@spaarke/auth`).
 
 ## Setup status / next steps
-- ✅ `design.md` written + committed to master (`7989462e8`); README + coordination note synced.
-- ✅ Worktree created (`work/spaarkeai-compose-r5` off updated master); R4.5 confirmed merged.
-- ⏭️ **NEXT: `/design-to-spec spaarkeai-compose-r5`** → `spec.md` (mirror §10 coordination into binding FRs/NFRs), then `/project-pipeline` → plan + tasks. Execution gate is already cleared.
-- ⏭️ **Portfolio**: no Project Issue yet — run `/devops-project-register` (Epic #421, like R4's #679) or defer.
+- ✅ `design.md` → `spec.md` (`/design-to-spec`, 11 FRs + 9 NFRs) → `plan.md` + **22 task POMLs + `tasks/TASK-INDEX.md`** (`/project-pipeline` → `/task-create`). All XML-valid, canonical metadata, seam-DoD constraints.
+- ✅ Portfolio **Project #695** registered under Epic #421 (`/devops-project-register`); `projects/INDEX.md` row added (BFF=Y/SpaarkeAi=Y).
+- ✅ Branch synced with master-with-R4.5 (picked up **ADR-049** governing Shadow Document ADR). BFF build green.
+- ⛔ **Execution HELD on two Phase-0 HUMAN GATES**: (1) task **002** Dataverse `sprk_composeorigin` schema approval; (2) task **003** G2 clean-apply spike (R5-D2). See `tasks/TASK-INDEX.md` + `current-task.md`.
+- ⏭️ **NEXT**: clear gates 002/003, then run tasks via **`task-execute`** per the TASK-INDEX DAG (`task-execute 001` first). Optional: set a Target Date on Project #695.
+
+## Task set (22) — see `tasks/TASK-INDEX.md`
+Phase 0 (gate): 001 baseline · 002🔔 Dataverse field · 003🔔 G2 spike · 004 op-schema design · 005 numbering reuse · 006 reciprocal note. Phase 1 (edit-path ops): 010 G3 align · 011 G3 heading/list · 012 G12 single · 013 G12 batch · 014 G4 tables(L). Phase 2 (lifecycle): 020 G1 · 021 G2 · 022 G7. Phase 3 (UX): 030 G8 · 031 G9 · 032 G11 · 033 G5. Phase 4: 040 G10 · 041 hardening · 042 deploy+UAT · 090 wrap-up. **Serialization-heavy** (shared Compose files → `parallel-safe:false` dominates); `/goal`-ineligible (human gates + judgment-heavy).

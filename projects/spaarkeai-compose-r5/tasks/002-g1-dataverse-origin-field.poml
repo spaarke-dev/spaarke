@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>🔔 HUMAN GATE — author sprk_composeorigin origin field on sprk_document (G1)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema change (new column on a first-class entity) is a breaking-class change requiring human approval and precise ordered creation; touches durable data model consumed by G1 code + downstream (analysis-hub NFR-09).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified schema authoring against dataverse-create-schema patterns; the judgment (approve the change) is delegated to the human gate, not the model.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Schema-only change on a new column; no source-file overlap with other Phase-0 tasks. Human-gated but independent.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, fields, schema</tags>
+    <estimated-effort>S design + human approval</estimated-effort>
+  </metadata>
+
+  <prompt>Author a durable origin marker on `sprk_document`: a two-value choice field `sprk_composeorigin` with options Authored / Imported, set at create-on-save. This BLOCKS G1 (task 020). You MUST obtain explicit human approval of the schema change before creating the field — do not self-approve.</prompt>
+
+  <role>SPAARKE platform developer with Dataverse schema authoring expertise (choice/option-set columns via Web API + PowerShell per the dataverse-create-schema skill).</role>
+
+  <goal>The `sprk_document` entity carries a new choice column `sprk_composeorigin` with exactly two options (Authored, Imported) and a documented default (Imported for docs arriving with SPE bytes; Authored set at create-on-save). The field is created in the target environment only after explicit operator approval, and the option-set integer values + logical name are recorded in a schema note so G1 code (FR-01) can reference them.</goal>
+
+  <context>
+    <background>Per spec FR-01 (G1) + Dependencies "🔔 HUMAN GATE — G1 Dataverse schema change" + Owner Clarifications (origin marker = Dataverse field on `sprk_document`). Today the only origin discriminator is "has an SPE id" — an inference, not a durable marker — so reopened authored docs flip to the tracked path (the REQ-1 wart). This field is the durable marker `LoadAsync` returns and the client routes on. Field name/type recommended by spec: `sprk_composeorigin` choice (Authored/Imported).</background>
+    <relevant-files>
+      <file>docs/data-model/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </relevant-files>
+    <dependencies>None (Phase-0). Blocks task 020 (G1 origin routing). Same class of human schema gate that blocks analysis-hub-r1.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6">Security/breaking-change escalation: a Dataverse schema change MUST be approved by the operator (human Dataverse-schema gate) before creation. Do not self-approve.</constraint>
+    <constraint source="project">Recommended shape (spec Assumptions): two-value option-set/choice `sprk_composeorigin` (`Authored`/`Imported`) on `sprk_document`, default `Imported` for docs arriving with SPE bytes, Authored set at create-on-save. Confirm exact name/type/default with operator.</constraint>
+    <constraint source="project">NFR-09: this field underpins the save/versioning contract analysis-hub-r1 consumes downstream — additive column only; MUST NOT alter existing `sprk_document` fields.</constraint>
+    <constraint source="CLAUDE.md §11">NEW Dataverse column — justification required (see &lt;justification&gt;). Additive column, not a new table.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`sprk_document` fields (docs/data-model/). Grep of the entity shows the only origin discriminator today is SPE-id presence — an inferred boolean, not a persisted origin marker; no existing column carries authored-vs-imported origin.</existing>
+    <extension>Yes — extend the existing `sprk_document` record with ONE durable choice column. No new table, no new entity. Cannot reuse an existing column because none encodes durable origin (SPE-id presence is inference-only and flips on reopen).</extension>
+    <cost-of-doing-nothing>Reopened authored docs flip to the tracked/op-log path because origin is inferred from SPE-id presence rather than persisted — the concrete REQ-1 wart: an authored doc's own cross-session edits render as tracked changes instead of clean.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/data-model/</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Choice/option-set creation" location=".claude/skills/dataverse-create-schema/SKILL.md">Create a local option-set choice column via Web API + PowerShell (covers what PAC CLI cannot).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Load the `dataverse-create-schema` skill and read `docs/data-model/` for the `sprk_document` schema + Spaarke naming/option-set conventions.</step>
+    <step order="2">Draft the exact field spec: logical name `sprk_composeorigin`, type Choice (local option-set), options Authored + Imported with proposed integer values, default Imported. Record it in a proposal note.</step>
+    <step order="3">🔔 STOP and request explicit operator approval of the schema change (situation, the field spec, options/defaults, recommendation). Do NOT create the field until approval is granted (root CLAUDE.md §6). If the operator amends name/type/default, update the spec accordingly.</step>
+    <step order="4">After approval, create the choice column on `sprk_document` per the dataverse-create-schema patterns (Web API + PowerShell). Verify the column and option-set exist in the environment.</step>
+    <step order="5">Record the final logical name + option-set integer values + default in `projects/spaarkeai-compose-r5/notes/g1-origin-field-schema.md` so G1 code (task 020) can reference the exact contract.</step>
+    <step order="6">Run/verify: confirm via a metadata read that `sprk_composeorigin` exists with exactly two options; no other `sprk_document` field was altered.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation (e.g., operator-amended name/type/default) in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>This task REQUIRES human approval of the schema change before creation. STOP at step 3 and request the operator's Dataverse-schema gate approval (root CLAUDE.md §6). Do not self-approve or create the field on assumption. Also escalate if the operator's chosen shape (name/type/default) diverges materially from the FR-01 LoadAsync contract, since G1 code depends on it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Web API + PowerShell schema creation per dataverse-create-schema.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/g1-origin-field-schema.md</output>
+    <output type="schema">sprk_document.sprk_composeorigin (Choice: Authored/Imported)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given operator approval was requested and granted, when the field is created, then `sprk_document` has a `sprk_composeorigin` choice column with exactly two options (Authored, Imported) and a documented default.</criterion>
+    <criterion testable="true">Given the created field, when its metadata is read back, then the logical name + option-set integer values match those recorded in the schema note.</criterion>
+    <criterion testable="true">Negative: the field is NOT created before explicit operator approval (the human gate at step 3 fired).</criterion>
+    <criterion testable="true">Negative: no existing `sprk_document` column is modified or removed — the change is additive only (NFR-09 downstream contract preserved).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01, Dependencies (Human Gate), Owner Clarifications, Assumptions (field shape), Unresolved Questions (exact name/type/default resolved at Phase 0). Blocks task 020. Same gate class as analysis-hub-r1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist. Use dataverse-create-schema patterns.</protocol>
+  </execution>
+</task>

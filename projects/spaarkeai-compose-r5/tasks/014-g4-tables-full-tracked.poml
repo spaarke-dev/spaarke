@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G4 tables (full tracked structure) — table op + client capture + engine applier emitting w:tblPrChange + row/cell w:ins/w:del</title>
+    <phase>1 Edit-path ops</phase>
+    <gate>dep:004</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New op on the closed catalog + client capture + the most complex engine applier (full tracked table structure). Highest-risk L-item; Word-valid tracked-table markup correctness bar. Save/apply change requires ADR-038 seam DoD + byte-diff no-regression.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Full tracked table structure (w:tblPrChange + row/cell w:ins/w:del for add/remove row/column and cell-content edits) is the L long pole — deep, brownfield OOXML reasoning where invalid markup breaks Word; xhigh effort on an architectural surface.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeShadowPatchEngine.cs AND the closed op catalog (ComposeOperation.cs ↔ compose-operations.ts) — both shared across every Phase-1 op-schema task. Scheduled LAST in Phase 1; serialize against 010/011/012/013.</parallel-reason>
+    <deps>004</deps>
+    <tags>bff-api, compose, engine, op-schema</tags>
+    <estimated-effort>1-2 weeks (L)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add one table op to the closed catalog (per task 004's design) + client capture of table steps (today
+    defer-structural) + an engine applier emitting FULL tracked table structure: w:tblPrChange plus row/cell
+    w:ins/w:del tracking for add/remove row, add/remove column, and cell-content edits. Re-enable the table control
+    in ComposeFormatToolbar.tsx (:654). Prove with a seam slice on a table corpus doc that a table structural edit
+    round-trips as Word-valid tracked table changes and untouched subtrees stay byte-identical. This is the L long
+    pole — scheduled LAST in Phase 1.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in OOXML table markup (w:tbl/w:tr/w:tc), tracked table structure
+    (w:tblPrChange, w:trPr/w:tcPr insertion/deletion, w:ins/w:del on rows/cells), the ComposeShadowPatchEngine
+    surgical-op model, and the closed ComposeOperation catalog. Honor ADR-049 + ADR-039 + CLAUDE.md §10.
+  </role>
+
+  <goal>
+    The closed catalog gains one table op (mirrored server↔client). The client captures table structural steps
+    (no longer defer-structural). ComposeShadowPatchEngine applies the table op emitting FULL tracked table
+    structure — w:tblPrChange, row/cell w:ins/w:del for add/remove row, add/remove column, and cell-content edits —
+    resolved by paraId/anchor, never by text-search. The R4 SDL-3 table guard is removed (control re-enabled on
+    loaded docs). A tests/integration/seam/Compose/ slice on a table corpus doc proves a table structural edit
+    round-trips as Word-valid tracked table changes with untouched subtrees byte-identical; corpus byte-diff (28/28)
+    does not regress.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-04 (G4) — owner-selected FULL scope (full tracked table structure, not a reduced cell-content-only
+      first slice) + R4 guard SDL-3. Table steps are captured as defer-structural today; task 004 designs the table
+      op shape for the closed catalog. This is the highest-value / highest-risk gap and is scheduled LAST in Phase 1
+      as the L long pole. The specific Word-valid tracked-table OOXML ordering (w:tblPrChange / row-cell w:ins/w:del
+      structure) is a design-time discovery in this task (spec Unresolved Question).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts</file>
+      <file>src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>004 (op-schema extension design for the table op — supplies the op shape for the closed catalog).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">The table op EXTENDS the closed ComposeOperation catalog under version control — never fork, no side channel, no new AI dispatch endpoint. Server ComposeOperation.cs ([JsonDerivedType] :148-157) and client compose-operations.ts (:54-64) stay in exact sync.</constraint>
+    <constraint source="ADR-049">Surgical ops anchored by (paraId, runIndex, offset); untouched OOXML subtrees byte-identical after save. Resolve targets by anchor/paraId — NO text-search in the write path (I-7 / NFR-02). Preserve the two-byte-author split (imported → tracked via engine).</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the table applier carries no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in Services/Compose/ (Tier-1 NetArchTest).</constraint>
+    <constraint source="ADR-038">Add a through-the-wire WebApplicationFactory seam slice in tests/integration/seam/Compose/ on a table corpus fixture. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01 corpus byte-diff (28/28) MUST NOT regress. NFR-07 output must be Word-valid tracked-table revision state — MUST NOT emit invalid revision markup. NFR-08 — removing SDL-3 MUST NOT reintroduce a user-triggerable error or silent-loss path.</constraint>
+    <constraint source="CLAUDE.md-10">BFF task — Placement Justification in the PR; engine stays in Services/Compose/. Publish ≤60 MB; report absolute + delta vs ~46.11 MB. Run /conflict-check. Zero new runtime package (NFR-03). Never delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tracked applier reference" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">
+        Follow the surgical-op shape of ApplyInsertText:314 / WrapRunAsDeleted:942, scaled to table structure: w:tblPrChange for table-property changes and w:ins/w:del on w:tr (rows) and w:tc (cells) for add/remove and cell-content edits. Resolve by anchor, touch nothing else.
+      </pattern>
+      <pattern name="Closed-catalog op addition (mirror)" location="src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs">
+        Add the table op to [JsonDerivedType] :148-157 and mirror in client compose-operations.ts :54-64, per 004's design. Extend, never fork.
+      </pattern>
+      <pattern name="Client step capture" location="src/client/shared/Spaarke.Compose.Components/src/widgets/stepOperationInterceptor.ts">
+        classifyStep currently defers table steps as structural; capture them and emit the table op mirroring the server op schema.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>Closest neighbors: the 10 ops in ComposeOperation.cs [JsonDerivedType] :148-157 and the tracked appliers ApplyInsertText:314 / WrapRunAsDeleted:942. No table op exists in the catalog (verified against COMPOSE_OPERATION_TYPES :54-64); table steps are defer-structural in classifyStep.</existing>
+    <extension>Yes — EXTEND the closed catalog with one table op + a table applier alongside the existing run-level appliers (ADR-039: extend, never fork). Not a new class hierarchy, not a new endpoint.</extension>
+    <cost-of-doing-nothing>Table structural edits (add/remove row/column, cell-content edits) are silently dropped and the table control stays disabled on loaded docs — REQ-3 (edit) is unmet and the SDL-3 guard cannot be removed.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 004's table op shape; discover the Word-valid tracked-table OOXML structure (w:tblPrChange placement, w:ins/w:del on rows/cells, cell-content edit markup) against reference docx samples and record it in notes/.</step>
+    <step order="2">Add the table op to ComposeOperation.cs [JsonDerivedType] :148-157 and mirror in compose-operations.ts :54-64 — exact sync.</step>
+    <step order="3">Update client stepOperationInterceptor.ts to capture and emit table steps (add/remove row, add/remove column, cell-content edit) mirroring the server op schema.</step>
+    <step order="4">Implement the engine applier: resolve the table/row/cell by anchor; emit w:tblPrChange for table-property changes and row/cell w:ins/w:del for add/remove row/column and cell-content edits — Word-valid tracked structure, no text-search, untouched subtrees untouched.</step>
+    <step order="5">Re-enable the table control in ComposeFormatToolbar.tsx (:654).</step>
+    <step order="6">Add a seam slice on a table corpus doc: apply each table structural edit through the wire, assert Word-valid tracked-table markup and byte-identical untouched subtrees.</step>
+    <step order="7">Run the corpus byte-diff harness (confirm 28/28) and dotnet publish -c Release; report absolute size + delta vs ~46.11 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="8">Run/verify: build + this task's seam/unit tests pass.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a Word-valid tracked table structure cannot be produced for a given structural edit (e.g. add/remove column has no clean tracked representation), STOP and escalate per §6.5 — do NOT emit invalid revision markup. The reduced-scope fallback (e.g. cell-content-only first slice) may be adopted ONLY with explicit operator approval, since the owner selected FULL scope.</trigger>
+    <trigger>If resolving a table/row/cell target would require text-search instead of anchor/paraId resolution, STOP (I-7 / NFR-02 violation).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish the BFF; run the byte-diff harness.</tool>
+    <tool name="npm">Build the Spaarke.Compose.Components client for op-mirror + interceptor + toolbar changes.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/Operations/ComposeOperation.cs (table op)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (full tracked table applier)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-operations.ts + widgets/stepOperationInterceptor.ts + widgets/ComposeFormatToolbar.tsx (:654 guard removed)</output>
+    <output type="test">tests/integration/seam/Compose/ (table structural-edit seam slice on a table corpus doc)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a loaded table corpus doc, when an add-row / remove-row / add-column / remove-column edit is applied and saved, then the output carries Word-valid tracked table structure (row/cell w:ins/w:del) and opens in Word with real accept/reject table redlines.</criterion>
+    <criterion testable="true">Given a cell-content edit, when applied and saved, then it round-trips as tracked change inside the cell with Word-valid markup.</criterion>
+    <criterion testable="true">Given a table-property change, then a w:tblPrChange is emitted recording the prior properties.</criterion>
+    <criterion testable="true">Given any table edit, then the table/row/cell target is resolved by anchor/paraId — no text-search in the write path.</criterion>
+    <criterion testable="true">Given the closed catalog, then the table op exists in both ComposeOperation.cs and compose-operations.ts in exact sync; no side channel or new AI dispatch endpoint (ADR-039); the client no longer defers table steps as structural.</criterion>
+    <criterion testable="true">Given the SDL-3 guard is removed, then the table control is enabled on loaded docs with no user-triggerable error and no silent-loss path (NFR-08).</criterion>
+    <criterion testable="true">Given the seam slice runs, then untouched subtrees are byte-identical, corpus byte-diff stays 28/28, and dotnet publish -c Release is ≤60 MB with delta reported vs ~46.11 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    NEW table op → &lt;justification&gt; emitted above. Owner-selected FULL scope (FR-04) — full tracked table structure,
+    not a reduced first slice; reduced-scope fallback only with operator approval via the escalation trigger. The L
+    long pole — scheduled LAST in Phase 1. Guard site ComposeFormatToolbar.tsx :654. Run /conflict-check (shared
+    Spaarke.Compose surface).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>NumberingComputationEngine reuse decision — extract-to-standalone vs reference-in-place (G3)</title>
+    <phase>0 Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Decision/analysis task producing a note; if extraction is chosen it must be a pure refactor, but the deliverable here is the decision + evidence, not the refactor itself (that lands in G3 task 011).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded reuse/visibility decision against a well-understood nested type; the byte-identity guard is verified mechanically via the numbering round-trip seam test.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Produces a decision note; any extraction is deferred to G3 (task 011). No source-file contention with other Phase-0 tasks.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, refactoring, compose</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Decide how G3 (task 011) reuses the numbering engine. It is currently `internal sealed class NumberingComputationEngine` nested in `ComposeDocxProjectionBuilder.cs:1357` (Compute), so it is NOT reachable from `ComposeShadowPatchEngine`. Choose extract-to-standalone-type vs reference-in-place-with-visibility-change. If extract, it MUST be a pure refactor that keeps the `ComposeDocxProjectionBuilder` projection path byte-identical (verify via the numbering round-trip seam test). Output a decision note. This is a dependency for task 011.</prompt>
+
+  <role>SPAARKE platform developer with .NET refactoring judgment and knowledge of the Compose projection builder + shadow patch engine boundaries.</role>
+
+  <goal>A decision note `projects/spaarkeai-compose-r5/notes/numbering-engine-reuse-decision.md` exists that: (1) states whether G3 extracts `NumberingComputationEngine` to a standalone reusable type or references it in place with a visibility change, (2) justifies the choice against reachability from `ComposeShadowPatchEngine` and the MUST-NOT-fork-numbering rule (R5-D4), and (3) if extraction is chosen, specifies that it is a pure refactor verified byte-identical via the numbering round-trip seam test, and identifies that seam test.</goal>
+
+  <context>
+    <background>Per spec FR-03 (G3) + Affected Areas note (b) + design R5-D4 + plan P0-5. G3 edit-side numbering MUST reuse R4.5's `NumberingComputationEngine` and MUST NOT re-implement the numbering algorithm. But the engine is `internal sealed` nested at `ComposeDocxProjectionBuilder.cs:~1357`, so `ComposeShadowPatchEngine` cannot call it. This task decides the reuse mechanism so G3 (task 011) can consume it without forking.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>tests/integration/seam/Compose/</file>
+    </relevant-files>
+    <dependencies>None (Phase-0). Dependency for task 011 (G3 heading/list applier).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">R5-D4: G3 MUST reuse `NumberingComputationEngine` — MUST NOT re-implement/fork the numbering algorithm (R4.5 FR-14).</constraint>
+    <constraint source="ADR-049">If extraction is chosen it MUST be a pure refactor that keeps the `ComposeDocxProjectionBuilder` projection path byte-identical (I-4); untouched OOXML subtrees byte-identical after save. Verify via the numbering round-trip seam/golden test.</constraint>
+    <constraint source="project">NFR-01: the corpus byte-diff harness MUST NOT regress; the projection path stays green.</constraint>
+    <constraint source="ADR-010">Any extracted type stays stateless / no per-request state (consistent with the patch engine singleton model).</constraint>
+    <constraint source="ADR-013">Numbering engine is pure OOXML — no AI internals; stays in Services/Compose/.</constraint>
+    <constraint source="CLAUDE.md §10">BFF decision — state Placement Justification in the note; any extracted type stays in Services/Compose/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+    </files>
+    <patterns>
+      <pattern name="Nested numbering engine" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">NumberingComputationEngine nested internal sealed :1357 (Compute), instantiated :159 — the reuse target.</pattern>
+      <pattern name="Numbering round-trip seam" location="tests/integration/seam/Compose/">The golden/seam test proving projection byte-identity — the guard for a pure-refactor extraction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `ComposeDocxProjectionBuilder.cs` around :1357/:159 to understand `NumberingComputationEngine.Compute`'s inputs/outputs and its coupling to the projection builder's private state.</step>
+    <step order="2">Assess reachability: can `ComposeShadowPatchEngine` consume it via a visibility change (internal→internal-with-InternalsVisibleTo or a public/internal standalone) without pulling projection-builder private state? Note the coupling.</step>
+    <step order="3">Weigh the two options: (A) extract to a standalone reusable type; (B) reference in place with a visibility change. Judge which lets G3 reuse the algorithm without forking and with the least byte-risk.</step>
+    <step order="4">Identify the numbering round-trip seam/golden test that guards projection byte-identity; specify it as the acceptance guard if extraction is chosen.</step>
+    <step order="5">Write `projects/spaarkeai-compose-r5/notes/numbering-engine-reuse-decision.md` (chosen option + rationale, coupling notes, byte-identity guard test, Placement Justification, hand-off to task 011).</step>
+    <step order="6">Run/verify: no production code committed here; confirm the current numbering round-trip seam test passes as the pre-refactor baseline for task 011.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a prototype extraction changes ANY projection byte or breaks the numbering round-trip golden, STOP and revert to reference-in-place (visibility change) — do not ship an extraction that alters the projection-builder output. If neither option cleanly enables reuse without byte drift, escalate per root §6.5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the numbering round-trip seam/golden test.</tool>
+    <tool name="terminal">Inspect the nested type and its callers.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r5/notes/numbering-engine-reuse-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the decision note, when reviewed, then it selects extract-to-standalone OR reference-in-place with a justification tied to reachability from `ComposeShadowPatchEngine` and R5-D4 (no fork).</criterion>
+    <criterion testable="true">Given an extraction choice, when documented, then it is specified as a PURE refactor guarded by the named numbering round-trip seam test proving projection byte-identity.</criterion>
+    <criterion testable="true">Given the current branch, when the numbering round-trip seam test runs, then it passes and is recorded as task 011's pre-refactor baseline.</criterion>
+    <criterion testable="true">Negative: the decision does NOT propose re-implementing or forking the numbering algorithm (R5-D4).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03 + Affected Areas note (b), design R5-D4, plan P0-5. Dependency for task 011. Decision-only; the actual extraction/visibility change (if any) lands in G3.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

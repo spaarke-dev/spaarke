@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-compose-r5">
+  <metadata>
+    <title>G2 — Clean (non-tracked) apply mode: implement the R5-D2 approach selected by the Phase-0 spike</title>
+    <phase>2 Authored-doc lifecycle</phase>
+    <gate>dep:003</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>High-blast-radius engine/save change on the byte-authoring path; a wrong branch silently produces tracked markup on authored docs or breaks byte preservation. Tags include bff-api/engine, modifies `.cs`, changes the apply contract. FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Engine-heavy byte-authoring work implementing the selected clean-apply approach; must hold the two-byte-author split and byte-diff invariants exactly. Architectural care beyond a well-specified mechanical change.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the shared engine/service byte-authoring surface (`ComposeShadowPatchEngine.cs` / `ComposeService.cs`) also touched by 020 and 022 across the R5 Phase-2 wave. Must be serialized to avoid rebase collisions on the contended files.</parallel-reason>
+    <deps>003</deps>
+    <tags>bff-api, compose, engine</tags>
+    <estimated-effort>M–L (2–4d, up to ~1wk if re-author path)</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the clean-apply approach SELECTED by task 003's R5-D2 decision note — either an engine clean-apply branch (emits plain runs, no `w:ins`/`w:del`) OR re-author-from-content-model — so a born-in-editor document's cross-session edits produce CLEAN OOXML with zero tracked-change markup. Do NOT merge the two byte-authors; the renderer-clean / engine-tracked split stands.</prompt>
+
+  <role>SPAARKE platform developer with deep DocumentFormat.OpenXml expertise and ADR-049 byte-authoring knowledge (surgical ops, byte preservation, the two-byte-author split).</role>
+
+  <goal>The R5-D2 approach recorded in task 003's decision note is implemented so that a born-in-editor document's cross-session edits save as CLEAN OOXML (zero `w:ins`/`w:del`) that opens in Word with no redlines; the corpus byte-diff shows untouched subtrees byte-identical. A seam slice on the born-in-editor corpus doc proves the clean round-trip through the wire. The renderer-clean / engine-tracked split is preserved (no merged public byte-author).</goal>
+
+  <context>
+    <background>Per spec FR-02 (gap G2 / REQ-1): today the engine appliers (`ApplyInsertText:314`, `WrapRunAsDeleted:942`) are always-tracked, so a reopened authored doc's own edits render as tracked changes. R5-D2 offers two approaches — an engine clean-apply branch vs re-author-from-content-model — and task 003's Phase-0 spike selects ONE on a born-in-editor corpus doc and documents the reason. This task implements the selected approach. FR-02 acceptance is invariant to which was chosen.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file>tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs</file>
+      <file>tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+    </relevant-files>
+    <dependencies>Task 003 (R5-D2 Phase-0 clean-apply spike + decision note). BLOCKED until the decision is recorded — see escalation.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Honor I-1…I-7 + D1–D5. Engine is byte[]-in/byte[]-out; edits are surgical ops anchored by (paraId, runIndex, run-local-offset); untouched OOXML subtrees byte-identical after save (I-4).</constraint>
+    <constraint source="ADR-049">I-7 / NFR-02: NO text-search anywhere in the write path — the clean-apply branch resolves by (paraId, runIndex, offset), never content match.</constraint>
+    <constraint source="ADR-049" reference="D5/I-5, R4 036/037 C-revised, path-A exception">Do NOT merge the two byte-authors. The renderer-clean / engine-tracked split stands as the shipped R4 decision (a documented path-A project-scoped exception). Clean-apply is an engine mode/branch OR re-author-from-content-model per the renderer — NOT a second synthesizer and NOT a collapse to one public byte-author.</constraint>
+    <constraint source="ADR-010">Patch engine = stateless concrete singleton; the clean-apply branch carries no per-request state.</constraint>
+    <constraint source="ADR-013">No AI internals in `Services/Compose/` (Tier-1 NetArchTest) — no `IOpenAiClient`/executor/routing types.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` above `SpeFileStore`.</constraint>
+    <constraint source="ADR-038">Seam DoD: the apply change carries a through-the-wire WebApplicationFactory seam slice on the born-in-editor corpus doc in `tests/integration/seam/Compose/`. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">NFR-01: corpus byte-diff harness (R4's 28/28) MUST NOT regress; untouched subtrees byte-identical. NFR-04: report BFF publish size absolute + delta vs ~46.11 MB; ≤60 MB ceiling. NFR-03: no new runtime package.</constraint>
+    <constraint source="project">NFR-08: the clean path MUST NOT reintroduce a user-triggerable error or silent-loss path; R4's op-log-preservation safety net stays until this feature is seam-proven.</constraint>
+    <constraint source="project">NFR-09: the apply/save contract change MUST NOT regress `ai-advanced-capabilities-analysis-hub-r1`'s reopen-restore / clean-retirement parity.</constraint>
+    <constraint source="project">COORDINATION: REBASE onto post-R4.5 `ComposeService.cs` before touching the save path. NEVER delete `docxBridge.ts` / "remove the mammoth module" — its write helpers are load-bearing. Run `/conflict-check` before the BFF PR (overlaps compose-r1/r2/r3 + ai-architecture-redesign-r2).</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`). Clean-apply engine/save orchestration stays in `Services/Compose/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r5/spec.md</file>
+      <file>projects/spaarkeai-compose-r5/notes/COORDINATION-with-r4.5.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tracked appliers (extend alongside)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">ApplyInsertText:314, WrapRunAsDeleted:942 — the always-tracked path; add the clean branch alongside (if the engine-branch approach is chosen).</pattern>
+      <pattern name="Clean byte-author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">BuildRun:366, AssembleParagraph:346 — the clean-authoring path (I-5 exception) referenced by re-author-from-content-model.</pattern>
+      <pattern name="Byte-diff seam slice" location="tests/integration/seam/Compose/ComposeShadowPatchEngineByteDiffSeamTests.cs">Canonical byte-diff seam to extend for the born-in-editor corpus doc.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read task 003's R5-D2 decision note and confirm which approach was SELECTED (engine clean-apply branch vs re-author-from-content-model) and the recorded reason. If no decision is recorded, STOP (see escalation).</step>
+    <step order="2">REBASE onto master-with-R4.5: confirm `ComposeService.cs` / `ComposeShadowPatchEngine.cs` / `ComposeDocumentRenderer.cs` are the post-R4.5 versions before editing.</step>
+    <step order="3">Implement the selected approach so a born-in-editor doc's cross-session edits emit plain runs with zero `w:ins`/`w:del`. Resolve edit locations by (paraId, runIndex, offset) only — no text-search. Keep the two byte-authors separate (renderer clean / engine tracked); do NOT add a merged public byte-author.</step>
+    <step order="4">Add a seam slice on the born-in-editor corpus doc in `tests/integration/seam/Compose/` proving: (a) the saved OOXML has zero tracked-change markup, and (b) untouched subtrees are byte-identical. Use `ComposeCorpusFixtureLocator`; NO banned test shapes.</step>
+    <step order="5">Run the corpus byte-diff harness; confirm 28/28 green (no regression). Run `/conflict-check` before the BFF PR; run `dotnet publish -c Release` and report size absolute + delta vs ~46.11 MB.</step>
+    <step order="6">Run/verify: build + the task's seam/unit tests pass and the byte-diff harness is still 28/28.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 003's R5-D2 decision is NOT recorded (no decision note selecting engine-branch vs re-author-from-model), STOP and escalate — do not pick an approach unilaterally; the spike owns that choice.</trigger>
+    <trigger>If the chosen approach regresses the corpus byte-diff (untouched subtrees no longer byte-identical, or byte-diff drops below 28/28), STOP and escalate per CLAUDE.md §6/§6.5 rather than shipping a byte-diff regression.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run seam/unit tests, the corpus byte-diff harness, and `dotnet publish` for the size delta.</tool>
+    <tool name="terminal">Run `/conflict-check`; grep/inspect the engine + renderer paths and the decision note.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs (or ComposeDocumentRenderer.cs / ComposeService.cs per the selected approach)</output>
+    <output type="test">tests/integration/seam/Compose/ (born-in-editor clean-apply seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a born-in-editor doc with cross-session edits, when it is saved via the selected clean-apply approach, then the resulting OOXML contains zero `w:ins`/`w:del` and opens in Word with no redlines.</criterion>
+    <criterion testable="true">Given that same save, when the corpus byte-diff runs, then untouched OOXML subtrees are byte-identical and the harness is still 28/28 green.</criterion>
+    <criterion testable="true">Given the born-in-editor corpus doc, when the seam slice runs through the wire, then the clean round-trip passes with no banned test shapes.</criterion>
+    <criterion testable="true">Negative (NFR-02): the clean-apply branch resolves by (paraId, runIndex, offset) — no text-search / content match in the write path.</criterion>
+    <criterion testable="true">Negative (D5/I-5): the two byte-authors remain separate — no merged public byte-author is introduced and authored origination is NOT forced through the op log.</criterion>
+    <criterion testable="true">No-regression (NFR-04/NFR-03): publish size reported absolute + delta vs ~46.11 MB and ≤60 MB; no new runtime package added. (NFR-08/NFR-09): no new user-triggerable error / silent-loss path; analysis-hub reopen-restore parity intact.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-02 (G2 / REQ-1); plan P2-2. Implements the task-003 spike decision — acceptance is invariant to which R5-D2 option was chosen. The renderer-clean / engine-tracked split is a documented path-A exception (ADR-049 D5/I-5) and MUST stand. Pairs with task 020 (G1 origin routing) to deliver REQ-1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>
