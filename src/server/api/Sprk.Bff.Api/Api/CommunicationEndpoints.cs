@@ -213,6 +213,23 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
+        // Surface-agnostic: r1 supplies the feed ONLY, r5 builds the Exceptions Queue surface on top of it (C-3).
+        // Composes unresolved/Suggested/Ambiguous association exceptions + OPEN pending Job B proposals (task 030)
+        // into ONE dual-use QueueFeedItem shape both r5 surfaces (Code Page + SpaarkeAi widget) render without a
+        // fork (D-10), ranked by the EXISTING sprk_triagepriority + sprk_riconfidence (tasks 022-025) — no second
+        // scoring scheme (D-08). Optional ?regarding={entityType}:{guid} narrows to one record's communications
+        // (any ADR-024 regarding family); omitted, the scope is every communication the caller may see. Same
+        // access posture as every other communication read (impersonated + the shared CommunicationAccessFilter) —
+        // a communication (or proposal on it) the caller may not see is absent, never redacted. READ-ONLY.
+        group.MapGet("/queue-feed", GetQueueFeedAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetCommunicationQueueFeed")
+            .WithDescription("FR-17 ranked-exceptions queue-feed: unresolved/Suggested/Ambiguous associations + open pending Job B proposals, ranked by the existing triage priority + RI-confidence. Optional ?regarding={entityType}:{guid} scope; ?top= page size. Surface-agnostic (r5 builds the Exceptions Queue surface); read-only.")
+            .Produces<QueueFeedResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -751,6 +768,23 @@ public static class CommunicationEndpoints
         var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
         var decision = await associationResolver.EvaluateAsync(message, context, ct);
         return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
+    }
+
+    /// <summary>
+    /// FR-17 ranked-exceptions queue-feed (task 032) — delegates entirely to
+    /// <see cref="CommunicationQueueFeedService.GetQueueFeedAsync"/> (caller resolved server-side inside the
+    /// service, same access posture as every other communication read). READ-ONLY; r1 supplies the feed only,
+    /// r5 renders it (C-3) — this handler builds no UI.
+    /// </summary>
+    private static async Task<IResult> GetQueueFeedAsync(
+        CommunicationQueueFeedService feedService,
+        HttpContext context,
+        [FromQuery] string? regarding,
+        [FromQuery] int? top,
+        CancellationToken ct)
+    {
+        var result = await feedService.GetQueueFeedAsync(regarding, top, context.User, ct);
+        return TypedResults.Ok(result);
     }
 
     private static async Task<IResult> VerifyCommunicationAccountAsync(

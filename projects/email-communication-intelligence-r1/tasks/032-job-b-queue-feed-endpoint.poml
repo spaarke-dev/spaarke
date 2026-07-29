@@ -4,7 +4,7 @@
     <title>Job B queue-feed endpoint — ranked exceptions feed for r5 (feed only; r1 builds NO UI, C-3)</title>
     <phase>P3 — Job B record currency</phase>
     <gate>after:030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <tags>bff-api, communication</tags>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a NEW read endpoint on the shared `Api/CommunicationEndpoints.cs` family that is the sole feed for r5's Exceptions Queue surface. It composes ranked exceptions (unresolved associations + pending Job B proposals + Suggested/Ambiguous items) and MUST apply the same access posture as the rest of the communication read surface — no over-disclosure. BFF-touching: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5.</rigor-reason>

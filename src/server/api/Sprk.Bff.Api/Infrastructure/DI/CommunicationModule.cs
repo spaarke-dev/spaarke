@@ -325,6 +325,14 @@ public static class CommunicationModule
                               Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver>();
         services.AddScoped<CommunicationThreadReadService>();
 
+        // FR-17 ranked-exceptions queue-feed (email-communication-intelligence-r1 task 032). SAME impersonated
+        // read + shared ICommunicationAccessFilter as CommunicationThreadReadService above (no new access
+        // mechanism) — composed with task 030's sprk_emailreviewlog Proposed-row store via the existing
+        // IGenericEntityService seam. SCOPED for the same reason as CommunicationThreadReadService (consumes the
+        // Scoped ICallerSystemUserResolver). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the endpoint maps
+        // unconditionally); read-only, r1 supplies the feed only (C-3), r5 builds no surface here.
+        services.AddScoped<CommunicationQueueFeedService>();
+
         // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
         // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
         // producer loops them into SignalRDeliveryService.PingUserAsync). Placement Justification (root §10 / §11):
