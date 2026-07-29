@@ -140,7 +140,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.6 • Built 2026-07-28',
+      versionText: 'v1.0.7 • Built 2026-07-28',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
