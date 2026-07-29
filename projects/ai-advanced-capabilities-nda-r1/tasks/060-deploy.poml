@@ -3,8 +3,8 @@
   <metadata>
     <title>Deploy — BFF, SpaarkeAi code page, Dataverse Actions/Bindings, AI Search index</title>
     <phase>6 Deploy &amp; Wrap-up</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Multi-surface deployment; irreversible/ordered; publish-size gate; tags include deploy.</rigor-reason>
     <model-tier>sonnet</model-tier>
