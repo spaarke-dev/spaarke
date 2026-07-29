@@ -4,7 +4,7 @@
     <title>Repoint 4 server-side C# deep-links → openSpaarkeAi shape</title>
     <phase>6 Retirement</phase>
     <gate>blocked — 052 (openSpaarkeAi param extension must exist)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies compiled C# in Sprk.Bff.Api (bff tag); the current deep-links would 404 post-retirement, so correctness is load-bearing; test update required (HandoffUrlBuilderTests).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -120,6 +120,64 @@
   <notes>
     Spec §13.5 / FR-18. Ordered head of the retirement chain: repoint before delete. Do NOT delete the web resource here
     (that is task 063). The sprk_spaarkeai target shape is defined by task 052's openSpaarkeAi extension.
+
+    COMPLETED 2026-07-29.
+
+    Dependency 052 confirmed completed before starting (verified via 052's own POML status).
+
+    **HandoffUrlBuilder.BuildAnalysisWorkspaceUrl** (name + 3-arg signature kept stable, per POML's "your call,
+    document it"): now targets `sprk_spaarkeai` instead of `sprk_AnalysisWorkspaceLauncher`. `analysisId` is always
+    emitted (never dropped). `sourceFileId`, when non-`Guid.Empty`, threads as `entityLogicalName=sprk_document` +
+    `entityId` — reusing the openSpaarkeAi "entity form" context channel already defined in
+    `SpaarkeAiLaunchParams` rather than inventing a bespoke `sourceFileId` param the client has no reader for.
+    `playbookId` is accepted for source compatibility (3 existing callers pass it) but is DELIBERATELY DROPPED from
+    the emitted URL — `SpaarkeAiLaunchParams` has no playbookId field and `main.tsx` has no reader for it; the
+    playbook that produced an analysis is already resolvable server-side from the analysis record itself once
+    `analysisId` resolves the bound session. This did not rise to the POML's escalation trigger (no caller lost
+    the ability to open the correct surface) — documented as a design decision in the method's XML doc, not
+    escalated.
+
+    **3 callers** (`PlaybookStatusEndpoints.cs`, `PlaybookInvocationService.BuildAnalysisDeepLink`,
+    `AgentErrorHandler.HandlePlaybookTimeout`) required NO call-site changes — the shared method signature absorbed
+    the repoint. Doc-comments + one user-facing Adaptive Card message ("Analysis Workspace" → "Spaarke AI" / "the
+    SpaarkeAi Analysis surface") were updated for accuracy.
+
+    **AnalysisEndpoints.cs notification actionUrl** (~line 823, `SendAnalysisCompleteNotificationAsync`): new
+    private `BuildSpaarkeAiActionUrl` helper (mirrors `HandoffUrlBuilder.BuildWebResourceUrl`'s encoding but stays
+    relative — no Dataverse base URL — matching this file's + `WorkAssignmentEndpoints.cs`'s existing relative
+    actionUrl convention). Prefers `request.AnalysisId` (guarded against both `null` and `Guid.Empty`, mirroring
+    the established `BuildDocumentUploadWizardUrl(Guid?)` degrade-to-unscoped convention in the same builder class)
+    when the execute request is bound to an existing `sprk_analysis` record; falls back to
+    `entityLogicalName=sprk_document` + `entityId=documentId` when no analysis record is bound yet (the legacy
+    in-memory `/execute` path), so the notification stays actionable either way.
+
+    **Grep-clean**: `sprk_analysisworkspace` / `sprk_AnalysisWorkspace` / `sprk_AnalysisWorkspaceLauncher` — zero
+    matches across the full `.cs` tree (src + tests), including doc-comments (explanatory prose rewritten to avoid
+    the literal legacy identifiers rather than excepted).
+
+    **Tests**: `HandoffUrlBuilderTests.cs` — updated the 3 `BuildAnalysisWorkspaceUrl` tests for the new shape
+    (webresourceName, entityLogicalName/entityId instead of sourceFileId, playbookId dropped) and added 2 new
+    tests (`WithEmptySourceFileId_OmitsEntityContext`, `AlwaysCarriesAnalysisId` — the POML's negative acceptance
+    criterion). Full `HandoffUrlBuilderTests` suite: 31/31 green (was 29 pre-change).
+
+    **Gates**: code-review found one real Warning — `request.AnalysisId` in `AnalysisEndpoints.cs` was not guarded
+    against `Guid.Empty` before this fix, which could have fabricated an invalid `analysisId` link; fixed to match
+    the sibling `BuildDocumentUploadWizardUrl(Guid?)` convention. adr-check — ADR-013 (no AI-internal types
+    injected, grep-verified clean) and ADR-039 (no `surfaceLaunchRegistry` reference, deep-links remain deterministic
+    CODE-path URL construction, no new intent-detection/routing-config surface) both PASS, 0 violations.
+    `/conflict-check` — only open PR touching this branch is #694 (this same branch); no other active PR or
+    worktree touches any of the 6 changed files; none of the changes touch `Services/Ai/**`
+    (redesign-r2 sole-ownership boundary respected — all edits are `Api/Agent/**` + `Api/Ai/AnalysisEndpoints.cs`).
+
+    **Publish-size** (ADR-029 / CLAUDE.md §10 bullet 4): 46.16 MB compressed (48,402,081 bytes) — matches the
+    ~46.16 MB baseline exactly, size-neutral as expected for a string-only repoint (no new packages, no new files).
+    **CVE**: `dotnet list package --vulnerable --include-transitive` shows one pre-existing HIGH
+    (`System.Security.Cryptography.Xml` transitive, GHSA-g8r8-53c2-pm3f et al.) — NOT introduced by this task (zero
+    `.csproj` changes).
+
+    **Build**: `dotnet build src/server/api/Sprk.Bff.Api/` green (0 errors; pre-existing warning count unchanged).
+
+    No deviation from the POML's prescriptive step sequence. Escalation trigger did not fire.
   </notes>
 
   <execution>

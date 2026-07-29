@@ -3,7 +3,7 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W6 — 060 (repoint 4 server C# deep-links), ORDERED retirement (prescriptive)
+**Active task**: W6 — 061 (repoint client launch points + remove dead custom-page path), ORDERED retirement (prescriptive)
 **Next action**: W6 060 → 061 → 062 → 063; 064 after 062 (repoint BEFORE delete, §13.5) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 050 ✅ 051–053 ✅ (19/28). Phases 1–5 COMPLETE. Publish 46.16 MB.
 
 > **W6 is the ordered/prescriptive retirement (§13.5)** — MUST run serially: repoint server deep-links (060) → repoint client launch points (061) → retire legacy session path (062, escalation-guarded on sprk_chathistory provenance) → delete web resources + tree (063); 064 (migrate save/get + generalize hooks + fold 3-pane) after 062. Nothing dangles.

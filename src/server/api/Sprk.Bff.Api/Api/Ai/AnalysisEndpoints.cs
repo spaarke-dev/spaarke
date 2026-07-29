@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Text.Json;
+using System.Web;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -819,10 +820,29 @@ public static class AnalysisEndpoints
                 return;
             }
 
+            // Retirement task 060 (spec §13.5 / FR-18): repoints this notification's
+            // actionUrl from the now-retired legacy Analysis Workspace code page to the
+            // SpaarkeAi three-pane surface (sprk_spaarkeai), mirroring the openSpaarkeAi
+            // deep-link shape (launch-resolver.ts SpaarkeAiLaunchParams). Prefer analysisId
+            // when the request is bound to an existing sprk_analysis record (task 052 entry
+            // case 2d/2c semantics — existing analysis, no Create-new cards); fall back to
+            // document entity context (entityLogicalName=sprk_document + entityId) when no
+            // analysis record is bound yet, so the notification is still actionable. Guids
+            // Empty is treated the same as null (mirrors BuildDocumentUploadWizardUrl(Guid?)'s
+            // established degrade-to-unscoped convention elsewhere in this codebase).
             var documentId = request.DocumentIds.FirstOrDefault();
-            var actionUrl = documentId != Guid.Empty
-                ? $"/main.aspx?pagetype=webresource&webresourceName=sprk_analysisworkspace&data=documentId={documentId}"
-                : null;
+            string? actionUrl = request.AnalysisId is { } boundAnalysisId && boundAnalysisId != Guid.Empty
+                ? BuildSpaarkeAiActionUrl(new Dictionary<string, string>
+                {
+                    ["analysisId"] = boundAnalysisId.ToString()
+                })
+                : documentId != Guid.Empty
+                    ? BuildSpaarkeAiActionUrl(new Dictionary<string, string>
+                    {
+                        ["entityLogicalName"] = "sprk_document",
+                        ["entityId"] = documentId.ToString()
+                    })
+                    : null;
 
             var aiMetadata = new Dictionary<string, object?>
             {
@@ -853,6 +873,24 @@ public static class AnalysisEndpoints
                 "Failed to send analysis-complete notification, TraceId={TraceId} — {ErrorMessage}",
                 traceIdentifier, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Builds a relative deep-link to the SpaarkeAi three-pane surface (<c>sprk_spaarkeai</c>),
+    /// mirroring the <c>openSpaarkeAi</c> query-param shape (<c>launch-resolver.ts</c>
+    /// <c>buildLaunchUrl</c>) so an in-app notification action opens the same surface the
+    /// client-side launcher would produce. Retirement task 060 (spec §13.5 / FR-18) repoints
+    /// this from the now-retired legacy Analysis Workspace code page. Relative (no Dataverse
+    /// base URL) to match the existing notification actionUrl convention used elsewhere in
+    /// this file and in <c>WorkAssignmentEndpoints</c>.
+    /// </summary>
+    private static string BuildSpaarkeAiActionUrl(Dictionary<string, string> parameters)
+    {
+        var dataString = string.Join("&",
+            parameters.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
+        var encodedData = HttpUtility.UrlEncode(dataString);
+
+        return $"/main.aspx?pagetype=webresource&webresourceName=sprk_spaarkeai&data={encodedData}";
     }
 
     /// <summary>
