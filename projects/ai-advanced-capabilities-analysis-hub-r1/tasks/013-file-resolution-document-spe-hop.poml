@@ -4,7 +4,7 @@
     <title>File resolution via `sprk_documentid` → `sprk_document` SPE hop</title>
     <phase>1 Data spine</phase>
     <gate>blocked-until-011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Wires file open/preview through the existing document lookup + SpeFileStore facade; reuses established SPE plumbing with a hard MUST-NOT (no pointer duplication) — modification of existing surface, STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,6 +116,34 @@
   <notes>
     spec FR-04 / §11.4 / NFR-05 / ADR-007. `sprk_documentid` (SPE subject-pointer) is KEPT and is distinct from
     `sprk_regardingdocument` (regarding/context lookup handled in 012).
+
+    COMPLETED 2026-07-28. Implemented as a standalone resolution module (no hub/reopen consumer exists yet at
+    Phase 1 — those land in tasks 030/031) so later phases spread its output straight into
+    `RichFilePreviewDialog`/`RichFilePreview` props:
+      - `src/solutions/SpaarkeAi/src/services/analysisFileResolution.ts` — `resolveAnalysisDocumentId()` reads
+        ONLY `_sprk_documentid_value` off `sprk_analysis` (the entire "hop" read); `resolveAnalysisFilePreview()`
+        wires that id into the EXISTING BFF `GET /api/documents/{id}/preview-url` surface (SpeFileStore resolves
+        the SPE pointer server-side) — the exact same call shape already shipped in this solution's
+        `ConversationPane.tsx` FIX #7a (`fetchSavedPreviewUrl`), reused verbatim per CLAUDE.md §11 (no new BFF
+        endpoint, no new SPE-addressing service, no `Services/Ai/` touch — ADR-013 N/A here since no AI call is
+        made). Returns a discriminated union: `{status:'resolved', documentId, documentName, fetchPreviewUrl}` or
+        `{status:'no-document'}` — the negative case (no `sprk_documentid`) is a first-class return value, not an
+        escalation; the `<escalation>` trigger (duplicating a pointer onto the Analysis to work around a missing
+        document) never fired because the existing document-preview BFF surface handles "no document" and
+        "preview unavailable" gracefully already.
+      - `src/solutions/SpaarkeAi/src/services/__tests__/analysisFileResolution.test.ts` — 9 tests (Jest): the
+        document-hop id-read, the BFF call target being the LINKED `sprk_document` id, the no-document negative
+        case, and 3 `fetchPreviewUrl` failure-mode cases (network error / non-ok response / no `bffBaseUrl`) all
+        resolving to `null` rather than throwing.
+      - No SPE pointer field (`speDriveItemId`/`GraphDriveId`/`GraphItemId`) is read from or added to
+        `sprk_analysis` — verified by grep (only doc-comment prose references those names, explaining what is
+        NOT duplicated) and by `sprkAnalysis.ts` (task 011, untouched — read-only import).
+    Gates run: `npx tsc --noEmit` (SpaarkeAi solution) — zero errors attributable to the new files (pre-existing
+    unrelated `@tiptap/*` module-resolution errors in `Spaarke.Compose.Components` predate this task and are
+    out of scope); `npx jest src/services/__tests__/analysisFileResolution.test.ts` — 9/9 passed. BFF was NOT
+    touched (no new endpoint/service), so publish-size/CVE checks are N/A. Step 9.5 quality gates skipped per
+    STANDARD rigor (no override condition — not a test-modifying task per the CLAUDE.md §8 override row; the new
+    test file is a task DELIVERABLE, not a modification to an existing `tests/**` KEEP-path file).
   </notes>
 
   <execution>

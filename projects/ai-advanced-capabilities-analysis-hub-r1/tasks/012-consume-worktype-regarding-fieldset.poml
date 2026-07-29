@@ -4,7 +4,7 @@
     <title>Consume `sprk_worktype` + regarding field-set via RegardingResolver (single-valued)</title>
     <phase>1 Data spine</phase>
     <gate>blocked-until-010-011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.ts`/`.tsx` and enforces a data-integrity invariant (single populated regarding) consumed by hub grid, wizard, subgrid, and record integration; wrong resolution corrupts the regarding contract across the platform.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -124,6 +124,38 @@
 
   <notes>
     spec FR-03 / NFR-05 / ADR-024. Feeds 041 (`activeWorkType` → `getToolsForSurface`) and 051 (subgrid where regarding = record).
+
+    COMPLETED 2026-07-28. New file `src/solutions/SpaarkeAi/src/services/analysisRegardingResolver.ts`
+    (176 lines) — a pure, synchronous read-side consumer of the ADR-024 dual-field resolver pattern
+    already written on `sprk_analysis`. Enumerates the three Analysis-scoped entity-specific lookups
+    (`_sprk_regardingmatter_value` / `_sprk_regardingproject_value` / `_sprk_regardingdocument_value`,
+    deliberately excluding the pre-existing `sprk_regardingbudget`/`communication`/`invoice` lookups
+    which are out of scope for Analysis, and `sprk_documentid` which is the ADR-007 SPE
+    subject-pointer, a separate role). Returns a discriminated union
+    `AnalysisRegardingResolution` = `resolved` (exactly one populated → parent entityType + GUID +
+    denormalized `sprk_regardingrecordname`/`sprk_regardingrecordnumber`) | `unresolved` (zero
+    populated) | `invalid` (&gt;1 populated) — `sprk_worktype` (+ semantic `AnalysisWorkTypeId`) is
+    always read regardless of resolution status per step 3. Reuses `cleanGuid` from
+    `@spaarke/ui-components` (PolymorphicResolverService) for GUID normalization — does NOT
+    reimplement any write-side logic (ADR-024 "MUST use the shared PolymorphicResolverService").
+
+    No deviation from the POML's directional steps or escalation trigger — the owner-verified
+    field-set (schema-prerequisites.md) covers exactly the three Analysis regarding targets the
+    task anticipated; no fourth target / polymorphic column appeared.
+
+    Unit tests: `src/solutions/SpaarkeAi/src/services/__tests__/analysisRegardingResolver.test.ts`
+    (10 tests) — one-populated (Matter/Project/Document each independently), zero-populated,
+    multiple-populated (2-way and 3-way), `sprk_documentid` exclusion (both alone and alongside a
+    true regarding field), unset `sprk_worktype`, and whitespace-only lookup value. All 10 pass.
+
+    Gates: `npm run typecheck` (tsc-surface-gate) → 0 surface-owned errors (291 pre-existing
+    shared-lib errors deferred to Phase B, unrelated). `npx jest
+    src/services/__tests__/analysisRegardingResolver.test.ts` → 10/10 pass. Step 9.5 code-review:
+    0 Critical/Warning (176/155 lines, no AI code smells). Step 9.5 adr-check: ADR-024 compliant
+    (no write-path reimplementation, correct single-valued enforcement, no hard-coded
+    type-discriminator regression). `npm run lint` could not run in this environment — pre-existing
+    ESLint v10/`.eslintrc` config mismatch in the SpaarkeAi package unrelated to this change (ESLint
+    9+ requires `eslint.config.js`; the repo still ships a legacy config); not introduced by this task.
   </notes>
 
   <execution>

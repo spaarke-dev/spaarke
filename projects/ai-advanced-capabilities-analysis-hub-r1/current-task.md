@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W2b — 012 (regarding field-set) ∥ 013 (file SPE hop), parallel
-**Next action**: 012 + 013 running in parallel; on completion → W3 (session phase, serial). Done: 001 ✅ 010 ✅ 011 ✅.
+**Active task**: W3 — 020 (session↔Analysis binding FK), serial
+**Next action**: W3 session phase runs SERIAL (shared ChatSessionManager/ChatEndpoints/ConversationPane + Services/Ai no-fork). Order: 020 → 021 → 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ (data spine complete).
 
 ## Pipeline progress (2026-07-28)
 
