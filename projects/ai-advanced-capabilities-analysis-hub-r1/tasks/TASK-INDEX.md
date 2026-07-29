@@ -17,7 +17,7 @@
 | **011** | Client `sprk_analysis` TypeScript type (net-new) | 1 Data spine | STANDARD | sonnet / high | 010 | true (P1) | frontend, typescript, dataverse | ✅ |
 | **012** | Consume `sprk_worktype` + regarding field-set (RegardingResolver, single-valued) | 1 Data spine | FULL | sonnet / high | 010,011 | true (P1) | frontend, dataverse, regarding | ✅ |
 | **013** | File resolution via `sprk_documentid` → `sprk_document` SPE hop | 1 Data spine | STANDARD | sonnet / high | 011 | true (P1) | frontend, spe | ✅ |
-| **020** | Session↔Analysis binding FK + standardize on `ChatEndpoints` | 2 Session | FULL | sonnet / high | 010,011 | false | bff, dataverse, session | 🔲 |
+| **020** | Session↔Analysis binding FK + standardize on `ChatEndpoints` | 2 Session | FULL | sonnet / high | 010,011 | false | bff, dataverse, session | ✅ |
 | **021** | Fork-on-analysis BFF endpoint `POST /api/ai/analysis/fork` (UQ-1 Option B) | 2 Session | FULL | opus / xhigh | 020 | false | bff, ai, session | 🔲 |
 | **022** | Archive-durability decision + impl (AIPL-054 stub) | 2 Session | FULL | opus / high | 021 | false | bff, session, dataverse | 🔲 |
 | **023** | Two-tier session model — loose vs Analysis-owned + explicit promotion | 2 Session | FULL | sonnet / high | 020 | false | bff, frontend, session | 🔲 |

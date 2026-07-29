@@ -1,4 +1,5 @@
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
@@ -19,6 +20,17 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     // Dataverse entity names (from dataverse-chat-schema.md)
     private const string SummaryEntityName = "sprk_aichatsummary";
     private const string MessageEntityName = "sprk_aichatmessage";
+
+    // sprk_aichatsummary.sprk_analysis lookup FK target entity (owner-created; verified
+    // present by ai-advanced-capabilities-analysis-hub-r1 task 010 — Dataverse MCP `describe`
+    // confirms: sprk_analysis LOOKUP (GUID) (Related table: sprk_analysis)). Bound at
+    // CreateSessionAsync for Analysis-owned sessions (task 020, spec FR-05).
+    private const string AnalysisFkAttribute = "sprk_analysis";
+    private const string AnalysisEntityName = "sprk_analysis";
+
+    // HostContext.EntityType value that identifies an Analysis-owned chat session (existing
+    // convention — see ChatEndpoints.cs SendMessageAsync sprk_chathistory write seam).
+    private const string AnalysisHostContextEntityType = "sprk_analysisoutput";
 
     private readonly IGenericEntityService _genericEntityService;
     private readonly ILogger<ChatDataverseRepository> _logger;
@@ -44,11 +56,62 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
             ["sprk_isarchived"] = false
         };
 
+        // Analysis-owned session binding (task 020, spec FR-05): when the session's
+        // HostContext identifies an analysis-scoped session (the existing
+        // "sprk_analysisoutput" + analysis GUID convention — see ChatEndpoints.cs
+        // SendMessageAsync sprk_chathistory write seam), set the sprk_analysis lookup FK
+        // alongside sprk_sessionid so "one Analysis → many sessions" is queryable
+        // (GetSessionsByAnalysisAsync below). Loose (non-Analysis) sessions write no FK —
+        // the record persists with only sprk_sessionid, matching pre-existing behavior.
+        Guid? analysisId = null;
+        if (session.HostContext?.EntityType == AnalysisHostContextEntityType &&
+            Guid.TryParse(session.HostContext.EntityId, out var parsedAnalysisId))
+        {
+            analysisId = parsedAnalysisId;
+            entity[AnalysisFkAttribute] = new EntityReference(AnalysisEntityName, parsedAnalysisId);
+        }
+
         var id = await _genericEntityService.CreateAsync(entity, ct);
 
         _logger.LogInformation(
-            "Created sprk_aichatsummary {RecordId} for session {SessionId} (tenant={TenantId})",
-            id, session.SessionId, session.TenantId);
+            "Created sprk_aichatsummary {RecordId} for session {SessionId} (tenant={TenantId}, analysis={AnalysisId})",
+            id, session.SessionId, session.TenantId, analysisId);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<AnalysisSessionSummary>> GetSessionsByAnalysisAsync(
+        string tenantId,
+        Guid analysisId,
+        CancellationToken ct = default)
+    {
+        var query = new QueryExpression(SummaryEntityName)
+        {
+            ColumnSet = new ColumnSet("sprk_sessionid", "sprk_messagecount", "sprk_isarchived", "createdon"),
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(AnalysisFkAttribute, ConditionOperator.Equal, analysisId);
+        // Tenant-scoped (ADR-014/ADR-028): mirrors every sibling read on this interface — a
+        // cross-tenant analysisId guess must not leak another tenant's sessions.
+        query.Criteria.AddCondition("sprk_tenantid", ConditionOperator.Equal, tenantId);
+
+        var results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
+
+        var summaries = results.Entities
+            .Select(e => new AnalysisSessionSummary(
+                SessionId: e.GetAttributeValue<string>("sprk_sessionid") ?? string.Empty,
+                MessageCount: e.GetAttributeValue<int?>("sprk_messagecount") ?? 0,
+                IsArchived: e.GetAttributeValue<bool?>("sprk_isarchived") ?? false,
+                CreatedOn: e.Contains("createdon")
+                    ? new DateTimeOffset(e.GetAttributeValue<DateTime>("createdon"), TimeSpan.Zero)
+                    : null))
+            .Where(s => !string.IsNullOrEmpty(s.SessionId))
+            .ToList();
+
+        _logger.LogInformation(
+            "Retrieved {Count} session(s) bound to analysis {AnalysisId} for tenant {TenantId} (sprk_analysis FK, grouped by sprk_sessionid)",
+            summaries.Count, analysisId, tenantId);
+
+        return summaries;
     }
 
     /// <inheritdoc />

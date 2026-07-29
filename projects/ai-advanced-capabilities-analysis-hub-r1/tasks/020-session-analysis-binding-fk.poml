@@ -4,7 +4,7 @@
     <title>Session↔Analysis binding FK + standardize on ChatEndpoints</title>
     <phase>2 Session</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF session persistence (`Sprk.Bff.Api`) + Dataverse write path; tags bff/dataverse/session; core data-spine seam every Phase 2/3 task depends on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -133,6 +133,97 @@
   <notes>
     spec.md FR-05. This is the data-spine seam; keep the FK write minimal and on the live `sprk_aichatsummary` path.
     Tasks 021 (fork) and 031 (reopen) consume "query sessions by analysis FK". `/conflict-check` before the BFF PR.
+
+    ## Completion note (2026-07-28)
+
+    STATUS: completed. Ground truth re-verified live via Dataverse MCP `describe('tables/sprk_aichatsummary')`
+    immediately before implementation: `sprk_analysis LOOKUP (GUID) (Related table: sprk_analysis)` — confirms
+    task 010's finding and the exact attribute/target-entity names used below.
+
+    ### Implementation
+    - `ChatDataverseRepository.CreateSessionAsync` (Services/Ai/Chat/): when
+      `session.HostContext?.EntityType == "sprk_analysisoutput"` and `HostContext.EntityId` parses as a GUID
+      (the existing convention `ChatEndpoints.cs` SendMessageAsync already uses for the `sprk_chathistory` write),
+      sets `entity["sprk_analysis"] = new EntityReference("sprk_analysis", analysisId)` alongside the existing
+      `sprk_sessionid` write. Loose (non-Analysis) sessions write no FK — unchanged behavior otherwise.
+    - New read method `IChatDataverseRepository.GetSessionsByAnalysisAsync(string tenantId, Guid analysisId, ct)`
+      — `QueryExpression` on `sprk_aichatsummary` filtered by `sprk_analysis` AND `sprk_tenantid` (tenant-scoped
+      per ADR-014/ADR-028, added during code-review — every sibling read method on the interface takes tenantId;
+      the first draft omitted it), projecting into a new `AnalysisSessionSummary` record
+      (`SessionId, MessageCount, IsArchived, CreatedOn`). Each returned row already represents exactly one
+      session (`CreateSessionAsync` writes one row per session) — "one Analysis → many sessions" is satisfied
+      by the query returning N rows, no further server-side grouping needed.
+    - New file: `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/AnalysisSessionSummary.cs` (24-line DTO).
+    - `sprk_analysischatmessage` — confirmed grep-clean across `src/` (only appears in docs/notes/other-project
+      POMLs referencing its retirement); never written by this or any other code path; test asserts it too.
+    - `AnalysisEndpoints` (legacy in-memory path) — not touched.
+
+    ### Placement Justification (root CLAUDE.md §10 / `.claude/constraints/bff-extensions.md`)
+    Modification of an EXISTING repository (`ChatDataverseRepository`) and its EXISTING interface
+    (`IChatDataverseRepository`) — not a new service, endpoint, DI registration, or package. Belongs in BFF
+    per ADR-013 (session persistence is already BFF-hosted; this is the last-mile FK write on that existing
+    write path). No new CRUD→AI dependency introduced (this repository does not call any AI service — ADR-002,
+    unchanged). `.claude/constraints/bff-extensions.md` §11 Component Justification for the ONE new file
+    (`AnalysisSessionSummary.cs`): existing = grep-verified no equivalent DTO exists; extension = the read path
+    requires a typed projection, none of the existing `ChatSession`/`ChatMessage` shapes fit a lightweight
+    multi-row summary; cost-of-doing-nothing = without a read method, acceptance criterion #2 ("one Analysis →
+    many sessions" queryable) is unmet and tasks 021/031 have no query surface to consume.
+
+    ### Quality gates (Step 9.5)
+    - `code-review`: reviewed diff directly (metrics, AI-smell checklist, ADR/§11 justification, 17-ban test
+      check). Found and FIXED one Warning during review: `GetSessionsByAnalysisAsync` initially omitted
+      `tenantId` — inconsistent with every sibling method on `IChatDataverseRepository` and a tenant-isolation
+      gap (ADR-014/ADR-028). Fixed by adding the parameter + `sprk_tenantid` filter condition before finalizing;
+      tests updated to assert both conditions. No other Critical/Warning findings. Test-shape check against the
+      17-ban list (tests/CLAUDE.md): the new `ChatDataverseRepositoryTests.cs` mocks `IGenericEntityService` only
+      (the Dataverse SDK boundary — matches `NotificationServiceTests.cs`/`DataverseObservationMirrorTests.cs`
+      precedent and the allowed-seam guidance in `src/server/shared/CLAUDE.md`), asserts real field/shape values
+      (not interaction-only `Verify(Times.Once)`), and is not a mirror/pass-through/coverage-filler test — no
+      ban triggered. Location note (non-blocking): the file sits at
+      `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/` rather than one of the 7 canonical KEEP paths in
+      tests/CLAUDE.md; this matches the ~67 existing sibling files at the same location using the identical
+      Mock-boundary pattern (the KEEP-path migration sweep is explicitly acknowledged as incomplete/phased in
+      tests/CLAUDE.md) — flagged for the eventual sweep, not new debt introduced by this task.
+    - `adr-check`: 0 Violations, 0 Warnings after the tenantId fix. Compliant: ADR-002 (no AI processing —
+      unchanged), ADR-010 (no new DI registrations), ADR-013 (Dataverse-persistence-only change, no orchestration
+      fork, no new CRUD→AI dependency), ADR-040 (Cosmos remains transcript store-of-record; this write is the
+      business anchor only — Path A per project CLAUDE.md), ADR-014/ADR-028 (tenant-scoped read, fixed above).
+    - `/conflict-check`: ran `git diff --name-only origin/master...HEAD` + `gh pr list --state open --json
+      number,title,headRefName,files` (23 open PRs). Zero overlap on `ChatDataverseRepository.cs`,
+      `IChatDataverseRepository.cs`, `AnalysisSessionSummary.cs`, or any `Services/Ai/Chat/**` file. Confirmed
+      `spaarke-ai-architecture-redesign-r2` (sole owner of `Services/Ai/` internals per `projects/INDEX.md`) has
+      no open PR touching these files; this project's own `projects/INDEX.md` row already documents this exact
+      FK-binding scope as pre-cleared (BFF=Y note). Safe to proceed — no coordination action needed.
+
+    ### Build / test / publish evidence
+    - `dotnet build src/server/api/Sprk.Bff.Api/` — green (0 errors; only pre-existing warnings).
+    - New tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatDataverseRepositoryTests.cs` — 7/7 pass
+      (FK-write, no-FK loose/non-Analysis/unparsable-GUID branches, dead-entity-never-written, analysis-FK query
+      + tenant-scoping, empty-result path).
+    - Full `Services.Ai.Chat` suite: 653 passed / 3 pre-existing skipped / 0 failed (no regressions).
+    - Full BFF unit suite: 9011 passed / 101 skipped / 5 failed. The 5 failures are ALL in
+      `Services/Communication/**` (`SentByName`/`sprk_sentbyname` enrichment — `CommunicationThreadReadServiceTests`,
+      `CommunicationFilteredQueryTests`, `CommunicationByRegardingReadTests`) — completely unrelated to this
+      task's `Services/Ai/Chat/` scope. Verified pre-existing via `git stash -u` (removes both tracked edits AND
+      the new untracked files) + re-running the same 3 test classes: identical 5/51 failures on the unmodified
+      baseline. Not caused by task 020.
+    - CVE scan: `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api.csproj` — one pre-existing
+      HIGH-severity transitive advisory on `System.Security.Cryptography.Xml` 8.0.3 (5 GHSA IDs). Zero package
+      references were touched by this task (no `.csproj` diff) — this advisory pre-dates and is unrelated to
+      task 020; **no NEW HIGH CVE introduced**.
+    - Publish-size: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` succeeded;
+      `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` → **47.51 MB compressed incl. PDBs**
+      (248 file entries) vs the ~49.63 MB baseline (2026-07-08) — a **-2.12 MB decrease**, well under the
+      ≤60 MB hard ceiling and the 55 MB architecture-review flag. (Baseline drift downward is expected repo
+      churn — this task added ~150 net lines of code across 2 modified + 1 new file and zero new package
+      references, a negligible compiled-size contribution either way.) `deploy/api-publish/` and the zip were
+      deleted after measurement (both gitignored; no artifacts committed).
+
+    ### Files changed
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatDataverseRepository.cs` (modified)
+    - `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IChatDataverseRepository.cs` (modified)
+    - `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/AnalysisSessionSummary.cs` (new)
+    - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ChatDataverseRepositoryTests.cs` (new)
   </notes>
 
   <execution>

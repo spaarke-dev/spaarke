@@ -95,4 +95,26 @@ public interface IChatDataverseRepository
         string sessionId,
         string summary,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns every chat session bound to a given <c>sprk_analysis</c> record via the
+    /// <c>sprk_aichatsummary.sprk_analysis</c> lookup FK — "one Analysis → many sessions"
+    /// (ai-advanced-capabilities-analysis-hub-r1 task 020, spec FR-05).
+    ///
+    /// Each returned <see cref="AnalysisSessionSummary"/> already represents exactly one
+    /// session (grouped by <c>sprk_sessionid</c>) — <see cref="CreateSessionAsync"/> writes
+    /// one <c>sprk_aichatsummary</c> row per session, so no further server-side grouping is
+    /// required.
+    /// </summary>
+    /// <param name="tenantId">
+    /// Tenant ID for isolation (ADR-014/ADR-028) — matches the tenant-scoping convention every
+    /// sibling read method on this interface follows. Filtered alongside the analysis FK so a
+    /// cross-tenant analysisId guess cannot leak another tenant's sessions.
+    /// </param>
+    /// <param name="analysisId">The <c>sprk_analysis</c> record ID to filter by.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<AnalysisSessionSummary>> GetSessionsByAnalysisAsync(
+        string tenantId,
+        Guid analysisId,
+        CancellationToken ct = default);
 }

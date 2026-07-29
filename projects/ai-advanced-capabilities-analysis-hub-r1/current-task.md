@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 020 (session↔Analysis binding FK), serial
-**Next action**: W3 session phase runs SERIAL (shared ChatSessionManager/ChatEndpoints/ConversationPane + Services/Ai no-fork). Order: 020 → 021 → 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ (data spine complete).
+**Active task**: W3 — 021 (fork-on-analysis BFF endpoint, opus/xhigh, §6.5 Path A), serial
+**Next action**: 021 → 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅. BFF baseline publish 47.51 MB.
 
 ## Pipeline progress (2026-07-28)
 
