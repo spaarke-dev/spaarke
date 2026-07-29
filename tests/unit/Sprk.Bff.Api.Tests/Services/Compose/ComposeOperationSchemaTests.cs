@@ -207,6 +207,31 @@ public sealed class ComposeOperationSchemaTests
         ComposeOperationSchema.Version.Should().Be("compose-ops-v2");
     }
 
+    [Fact(DisplayName = "G12 batch: an All-scope accept-all/reject-all op round-trips with a null revisionId")]
+    public void OperationLog_WithAllScopeBatchRevisionOps_RoundTripsWithNullRevisionId()
+    {
+        // The batch (accept-all/reject-all) op shape: scope=All with revisionId=null. The concrete behavior this
+        // locks: a client-emitted All-scope op survives serialize→deserialize with its null revisionId intact, so
+        // the server engine reconciles every revision by document order (never mis-reads a null id as a target).
+        var log = new ComposeOperationLog
+        {
+            Operations = new ComposeOperation[]
+            {
+                new AcceptRevisionOperation { ParaId = "0A1B2C3D", Scope = ComposeRevisionScope.All, RevisionId = null },
+                new RejectRevisionOperation { ParaId = "0A1B2C3D", Scope = ComposeRevisionScope.All, RevisionId = null },
+            },
+        };
+
+        var json = JsonSerializer.Serialize(log, WireOptions);
+        var roundTripped = JsonSerializer.Deserialize<ComposeOperationLog>(json, WireOptions)!;
+
+        json.Should().Contain("\"scope\":\"All\"");
+        roundTripped.Operations[0].Should().BeOfType<AcceptRevisionOperation>()
+            .Which.Should().BeEquivalentTo(new { Scope = ComposeRevisionScope.All, RevisionId = (string?)null });
+        roundTripped.Operations[1].Should().BeOfType<RejectRevisionOperation>()
+            .Which.RevisionId.Should().BeNull();
+    }
+
     [Fact(DisplayName = "FR-11: an op log authored as raw client JSON deserializes on the server (client→server direction)")]
     public void OperationLog_FromRawClientJson_DeserializesToTypedOps()
     {

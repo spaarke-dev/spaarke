@@ -41,6 +41,7 @@ import {
   createStepInterceptorPlugin,
   STEP_INTERCEPTOR_IGNORE_META,
   RebasedOperationLog,
+  buildBatchRevisionOp,
   type StepClassification,
 } from './stepOperationInterceptor';
 import {
@@ -964,5 +965,21 @@ describe('RebasedOperationLog — imported-revision ops are captured + deduped (
     const revOps = log.serialize(tr.doc).orderedOps.map(o => o.operation).filter(o => o.type === 'acceptRevision');
     expect(revOps).toHaveLength(1);
     expect(revOps[0]).toMatchObject({ type: 'acceptRevision', revisionId: '5' });
+  });
+});
+
+describe('buildBatchRevisionOp — accept-all / reject-all (G12 batch / task 013)', () => {
+  it('builds an All-scope acceptRevision op with a null revisionId + presence-anchor paraId', () => {
+    const op = buildBatchRevisionOp('acceptRevision', PARA_ID);
+    // All-scope batch: revisionId is null (server reconciles every revision in document order), scope is All,
+    // paraId is the real presence-anchor id (keeps the isComposeOperation guard + base contract meaningful).
+    expect(op).toEqual({ type: 'acceptRevision', paraId: PARA_ID, scope: 'All', revisionId: null });
+    expect(isComposeOperation(op)).toBe(true);
+  });
+
+  it('builds an All-scope rejectRevision op (inverse discriminator, same batch shape)', () => {
+    const op = buildBatchRevisionOp('rejectRevision', PARA_ID);
+    expect(op).toEqual({ type: 'rejectRevision', paraId: PARA_ID, scope: 'All', revisionId: null });
+    expect(isComposeOperation(op)).toBe(true);
   });
 });

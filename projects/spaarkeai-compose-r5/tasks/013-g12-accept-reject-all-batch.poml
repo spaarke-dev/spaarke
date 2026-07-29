@@ -4,7 +4,7 @@
     <title>G12 accept-all/reject-all batch — batch ops with deterministic reconciliation ordering</title>
     <phase>1 Edit-path ops</phase>
     <gate>dep:012</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New batch ops on the closed catalog + batch reconciliation logic in the shared engine; determinism + Word-validity correctness bar. Save/apply change requires ADR-038 seam DoD; downstream-consumer coupling (NFR-09).</rigor-reason>
     <model-tier>opus</model-tier>

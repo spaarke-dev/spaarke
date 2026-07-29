@@ -10,10 +10,10 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarkeai-compose-r5 (Editing Completeness — additive on R4's Shadow Document Architecture) |
-| **Progress** | Phase 0 ✅; **Phase 1: 010 ✅ (alignment), 011 ✅ (heading/list). NOW: 012 (G12 accept/reject single-by-id).** |
-| **Status** | 🚀 **EXECUTING task 012** — FULL rigor, opus/xhigh. Add acceptRevision/rejectRevision ops (revisionId-addressed, Single scope, compose-ops-v2 bump); engine resolves by revision id (accept-ins strips w:ins, accept-del removes run, reject inverse); fix importedRevisions end-of-para re-anchor; ET-2 seam on CIPO (accept-then-save no 422). |
-| **Active task** | 012 (G12 accept/reject single-by-id). Then 013 (batch) → 014 (tables). |
-| **Next Action** | After 012: build-verify + commit + mark ✅ → dispatch 013 (accept-all/reject-all batch, dep 012) → 014 (G4 tables, dep 004). Then Phase 2 (020→022, 021), Phase 3 (030/031/032/033), Phase 4 (040→041) → STOP before 042 deploy. |
+| **Progress** | Phase 0 ✅; **Phase 1: 010 ✅, 011 ✅, 012 ✅ (G12 single). NOW: 013 (G12 accept-all/reject-all batch).** |
+| **Status** | 🚀 **EXECUTING task 013** — FULL rigor, opus/high. Implement `All` scope (accept-all/reject-all) on acceptRevision/rejectRevision in ComposeShadowPatchEngine: compose 012's per-wrapper primitives (extracted to ReconcileInsertion/ReconcileDeletion), iterate every w:ins/w:del in DETERMINISTIC document preorder (`_body.Descendants()`), live-tree guard for nested revisions. Batch seam cases (accept-all/reject-all then save no 422; repeated runs byte-identical). |
+| **Active task** | 013 (G12 batch). Then 014 (tables, dep 004). |
+| **Next Action** | After 013: build-verify + commit + mark ✅ → 014 (G4 tables). Then Phase 2 (020→022, 021), Phase 3, Phase 4 → STOP before 042 deploy. |
 | **Applier findings (carry forward)** | (010) w:pPrChange nested prev-props = `ParagraphPropertiesExtended`, and w:*Change types are schema-context-dependent. (011) reading the SDK numbering/styles DOM on the EDITABLE package re-serializes those parts → use a throwaway read-only probe for model reads (byte-surgical). (011) extended 022's buildAnchor/deriveOperation so new setBlockAttr ops aren't dropped by the save log. |
 
 ## Phase-0 decisions locked (implementers MUST follow)

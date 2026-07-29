@@ -180,6 +180,22 @@ function revisionOp(
   return { type, paraId, scope: 'Single' as ComposeRevisionScope, revisionId };
 }
 
+/**
+ * R5 task 013 (G12 batch) — build an `All`-scope acceptRevision/rejectRevision op (accept-all / reject-all).
+ * Unlike the `Single` gesture ops the step interceptor emits, accept-all/reject-all is a document-level toolbar
+ * command, so this is an exported builder a toolbar handler calls once. `revisionId` is `null` (the server
+ * reconciles EVERY tracked revision in deterministic document order, not one by id — task-004 §3.4); `paraId`
+ * is the presence-anchor: the `w14:paraId` of the first paragraph (document order) that holds an imported
+ * revision. That id keeps the base-contract invariant "`paraId` is always a real 8-hex id" intact and doubles
+ * as a client-side precondition (there is ≥1 revision to reconcile). Never a text-search / offset (I-7 / NFR-02).
+ */
+export function buildBatchRevisionOp(
+  type: 'acceptRevision' | 'rejectRevision',
+  presenceAnchorParaId: string
+): ComposeOperation {
+  return { type, paraId: presenceAnchorParaId, scope: 'All' as ComposeRevisionScope, revisionId: null };
+}
+
 /** The imported insertion/deletion revision a text node carries (first such mark), or null. */
 function importedRevisionOfNode(node: PMNode): { markName: string; revisionId: string } | null {
   for (const m of node.marks) {
