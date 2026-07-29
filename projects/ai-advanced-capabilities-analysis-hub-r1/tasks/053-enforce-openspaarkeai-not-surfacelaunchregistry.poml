@@ -3,8 +3,9 @@
   <metadata>
     <title>Enforce record-driven opens via openSpaarkeAi, not surfaceLaunchRegistry</title>
     <phase>5 Entry model + record integration</phase>
-    <gate>startable</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
+    <completion>Verified inline by the orchestrator (2026-07-29) via grep + code-review. FR-17 PASS: every `surfaceLaunchRegistry` reference in record-driven paths (`ribbon/AnalysisRecordLaunch.ts`, `workspace/WorkspacePane.tsx` analysis-entry) is an explanatory COMMENT asserting record-driven opens go via `openSpaarkeAi`, NOT the registry. The only actual `surfaceLaunchRegistry` USAGE is in `conversation/ConversationPane.tsx` — the reactive in-chat/TEXT-path (deliberately OUT of scope; UQ-4=NO, no `workspace-tab` registry entry added). No record-driven ribbon/subgrid/deep-link path routes through the surface-launch registry. ADR-039 / §13.3 satisfied. Confirmed by task 052's own adr-check (0 violations) + the 041/050/052 launch chain being deep-link only.</completion>
     <rigor>STANDARD</rigor>
     <rigor-reason>ADR-039 compliance verification over the entry surface authored in 050/052 — grep + code-review confirmation, no new implementation surface; not a build/architecture change.</rigor-reason>
     <model-tier>sonnet</model-tier>

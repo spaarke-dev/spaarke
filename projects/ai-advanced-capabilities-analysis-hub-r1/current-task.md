@@ -3,10 +3,11 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W5 — 052 (extend openSpaarkeAi params + Matter/Project ribbon launcher), serial (then 053)
-**Next action**: 052 → 053 → W6 (060–064 retirement, ordered) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 050 ✅ 051 ✅ (17/28). Publish 46.16 MB.
+**Active task**: W6 — 060 (repoint 4 server C# deep-links), ORDERED retirement (prescriptive)
+**Next action**: W6 060 → 061 → 062 → 063; 064 after 062 (repoint BEFORE delete, §13.5) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 050 ✅ 051–053 ✅ (19/28). Phases 1–5 COMPLETE. Publish 46.16 MB.
 
-> 050 keystone done: host CONSUMES analysisId/worktype/regarding URL params; entry matrix 2a–2d wired; 3 integration threads resolved (wizard services, execution launch, activeWorkType). 052 now adds the record-side EMITTERS (launch-resolver param extension + sprk_matter/sprk_project ribbon mirroring DocumentComposeLaunch).
+> **W6 is the ordered/prescriptive retirement (§13.5)** — MUST run serially: repoint server deep-links (060) → repoint client launch points (061) → retire legacy session path (062, escalation-guarded on sprk_chathistory provenance) → delete web resources + tree (063); 064 (migrate save/get + generalize hooks + fold 3-pane) after 062. Nothing dangles.
+> **071 (deploy) owes**: hub sprk_gridconfiguration seed (notes/hub-grid-config-deployment.md) + ribbon XML wiring for AnalysisRecordLaunch (Matter/Project buttons).
 
 > **050 (entry matrix) is the integration keystone — 3 threads converge there:**
 >  1. Wizard deep-service wiring (`dataService`/`authenticatedFetch`/`navigationService`) — deferred from 030 (interim "Connecting to workspace services…").
