@@ -4,7 +4,7 @@
     <title>Add-file-to-running-chat prompt (new session vs add-to-current)</title>
     <phase>2 Session</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Client-only UX change (a two-choice prompt + branch on the file-attach path); no BFF surface, no architecture change — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,6 +116,68 @@
 
   <notes>
     spec.md FR-08 / PLAN §2.5. Reuse the fork/archive seam from tasks 021/022 for the "new session" branch — no new client fork logic.
+
+    === COMPLETION (2026-07-29, STANDARD rigor, sonnet/high) ===
+    Two-choice `ChoiceDialog` (`FileAttachSessionPrompt.tsx`, new self-contained file — mirrors the
+    task-023 "keep it out of `ConversationPane.tsx`" merge-order precedent set by `HistoryOverlay.tsx`'s
+    "Promote to Analysis…" affordance) shown when a file attaches to a chat that already has messages
+    (`chatMessageCount > 0`, tracked via `onMessagesChange`). Options: "Start a new session" / "Add to
+    current session"; Cancel present (ChoiceDialog pattern) and applies NO default — dismissing just
+    leaves the file attached-but-unpromoted (negative acceptance criterion).
+
+    Files: `useAttachments.ts` (new `hasPriorMessages` dep; a not-yet-decided ready chip is excluded
+    from the existing auto-promote effect via `excludedFromAutoPromoteChipIdsRef` and queued into
+    `pendingFileSessionChoice`; new `chooseAddToCurrentSession` / `prepareFilesForNewSession` /
+    `dismissFileSessionChoice` controller methods); `FileAttachSessionPrompt.tsx` (new); `ConversationPane.tsx`
+    (moved the pre-existing `chatMessageCount` state up ~1400 lines so `hasPriorMessages` is available at
+    the `useAttachments` call site; +1 import; +1 dialog render wiring `prepareFilesForNewSession` together
+    with the EXISTING `handleNewSession` seam on the "new session" choice — no new session-switch logic).
+
+    DESIGN DEVIATION (surfaced, not silent — directional steps mode): the task suggested reusing the
+    task-021 `/fork` endpoint for "new session". Investigated and did NOT use it — `/fork`'s
+    `AnalysisForkRequest.DocumentId` MUST be a non-empty GUID of an EXISTING `sprk_document` (validated,
+    400 otherwise), but a file just-attached mid-chat is only a session-scoped upload-cache entry
+    (`POST /documents` mints a random `Guid.NewGuid().ToString("N")`, not a Dataverse `sprk_document`) —
+    there is no existing seam that synchronously turns a raw chat attachment into a real `sprk_document`
+    GUID. Forcing `/fork` here would require NEW document-creation plumbing, which is out of scope
+    ("MUST NOT introduce new client-side session store or fork logic") and a bigger risk than the
+    2-4 hour STANDARD budget. Grep confirmed `/fork` has ZERO existing client callers (task 024 would
+    have been the first) — task 021's own docs already flagged its DocumentId precondition as
+    document-first-flow-shaped, not raw-upload-shaped.
+
+    Instead: "new session" reuses the EXISTING `handleNewSession` seam (`clearChatSession()` +
+    `startNewSession()` — the same header "New session" button / task-021-era R4-5 mechanism) —
+    genuinely no new session/fork logic. "Archived (switchable back)" is satisfied AS-IS: verified
+    `ChatEndpoints.ListRecentSessionsAsync` → `SessionPersistenceService.ListRecentSessionsAsync` reads
+    Cosmos and is NOT filtered by the Dataverse `sprk_isarchived` marker (task 022 already documented
+    that marker as archival/advisory, not retrieval-gating) — so the prior session is fully retrievable
+    from History regardless of whether the marker is durably flipped. The file itself is carried over:
+    `prepareFilesForNewSession` queues the still-held `File` object (captured pre-remount); a new effect
+    detects the moment `chatSessionId` actually switches to the freshly-minted session and POSTs the SAME
+    `/documents` upload against the NEW session id, then settles the Event-path gesture via the EXISTING
+    `fireForPromotedFile` synthetic-batch seam (`useEventBatch.ts`) that `spaarkeai-compose-r2`'s manual
+    Browse-ingest ceremony already uses for a file promoted outside the attachment strip — no new
+    Event-path mechanism either.
+
+    If a durable Dataverse-flag flip + Analysis anchor for a raw mid-chat attachment IS wanted later,
+    that requires either (a) a "persist the raw attach to a real sprk_document" seam feeding `/fork`'s
+    DocumentId, or (b) a `/fork`-shaped-but-DocumentId-optional variant — both are net-new BFF surface,
+    out of this task's "no BFF change expected" scope; flagging for owner triage, not blocking this task.
+
+    GATES (STANDARD — Step 9.5 skipped per rigor level): `npm run typecheck` (tsc-surface-gate) — 0
+    surface-owned errors (291 pre-existing shared-lib errors deferred to Phase B, unrelated). New jest
+    suite `ConversationPane.file-attach-session-prompt.test.tsx` — 7/7 pass, covering: prompt appears on
+    live-chat attach; prompt does NOT appear on an empty/new chat (existing auto-promote unaffected);
+    negative — no `/documents` POST fires before a choice is made; "add to current" promotes into the
+    SAME session (no remount); "new session" archives-by-leaving-retrievable + remounts + carries the
+    file into the NEW session only (never the old); dismiss applies no default; dark mode (`webDarkTheme`)
+    smoke render. Full `src/components/conversation` suite (47 files / 426 tests) re-run green — no
+    regressions. `npm run lint` could not run in this environment (ESLint v10 config mismatch,
+    pre-existing/unrelated to this task — flagged, not fixed, out of scope).
+
+    Merge-order: zero edits to `ConversationPane.tsx`'s JSX body beyond +1 import, +1 dialog block,
+    +1 relocated `useState` — per the project CLAUDE.md merge-order note against
+    `spaarke-ai-architecture-redesign-r1`'s `ConversationPane` decomposition.
   </notes>
 
   <execution>

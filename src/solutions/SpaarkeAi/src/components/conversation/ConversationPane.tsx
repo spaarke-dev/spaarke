@@ -54,6 +54,7 @@ import { CommandHelpPanel } from "./CommandHelpPanel";
 import { useInjectionQueue } from "./useInjectionQueue";
 import { useEventBatch } from "./useEventBatch";
 import { useAttachments } from "./useAttachments";
+import { FileAttachSessionPrompt } from "./FileAttachSessionPrompt";
 import { useConsumerChips } from "./useConsumerChips";
 // spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
@@ -449,10 +450,20 @@ export function ConversationPane(): React.JSX.Element {
     onClassified: handleNdaClassified,
   });
 
+  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
+  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
+  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
+  //
+  // task 024 (spec FR-08): declared here (moved up from its original spot further below) so
+  // `hasPriorMessages` is available for the `useAttachments` call immediately below — a file
+  // attach mid-chat needs to know, AT ATTACH TIME, whether the chat already has messages.
+  const [chatMessageCount, setChatMessageCount] = React.useState(0);
+
   const attachments = useAttachments({
     bffBaseUrl,
     chatSessionId,
     hasActiveWorkspaceDocument: entityContext !== null,
+    hasPriorMessages: chatMessageCount > 0,
     authenticatedFetch,
     dispatch,
     inject: injection.inject,
@@ -1877,11 +1888,6 @@ export function ConversationPane(): React.JSX.Element {
   const showProfileNudge =
     myAssistant.available && myAssistant.needsProfile && !profileNudgeDismissed;
 
-  // CHAT-4 (UAT 2026-07-19): track the live transcript length so the get-started cards render
-  // whenever the transcript is EMPTY — including a restored-but-empty session (where the old
-  // `chatSessionId === null` gate was false). Kept in sync via SprkChat's onMessagesChange.
-  const [chatMessageCount, setChatMessageCount] = React.useState(0);
-
   // ── Auth loading guard (gate on isAuthenticated — never a token snapshot) ──
   // NOTE (Rules of Hooks): every React.use* call MUST appear ABOVE this early return — see the
   // React #300 note on `transcriptFooter` above. Do not add hooks below this line.
@@ -2226,6 +2232,23 @@ export function ConversationPane(): React.JSX.Element {
             );
           }
         }}
+      />
+
+      {/* task 024 (spec FR-08): attaching a file to a LIVE chat (prior messages already exist)
+          prompts new-session vs add-to-current — never a silent default. "New session" pairs the
+          hook's file-carryover bookkeeping (prepareFilesForNewSession) with the EXISTING
+          "New session" seam (handleNewSession — clear + remount, task 021/022/023's archive
+          semantics: the prior session stays fully retrievable from History regardless, since
+          ListRecentSessionsAsync is not filtered by the Dataverse archived marker) so no new
+          client-side session/fork logic is introduced here. */}
+      <FileAttachSessionPrompt
+        pending={attachments.pendingFileSessionChoice}
+        onChooseNewSession={() => {
+          attachments.prepareFilesForNewSession();
+          handleNewSession();
+        }}
+        onChooseAddToCurrent={attachments.chooseAddToCurrentSession}
+        onDismiss={attachments.dismissFileSessionChoice}
       />
 
       {/* #8 (UAT 2026-07-21): "What the Assistant remembers about you" — review + forget over the

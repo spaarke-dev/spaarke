@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 024 (add-file-to-running-chat prompt), serial (then 025)
-**Next action**: 024 → 025 close session phase, then W4 (030 ∥ 040 ∥ 051 fan-out). Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅ 022 ✅ 023 ✅. Publish 47.52 MB. Promote path live (POST /api/ai/analysis/promote).
+**Active task**: W3 — 025 (persistence hardening — stale→Cosmos, tab anchor, edit restore), serial (FINALE)
+**Next action**: 025 closes session phase → then W4 fan-out (030 hub ∥ 040 wizard ∥ 051 subgrid). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–024 ✅. Publish 47.52 MB.
 
 > W3 tail (024, 025) stays SERIAL — both touch the SpaarkeAi conversation/session client surface (ConversationPane hotspot); real fan-out resumes at W4.
 
