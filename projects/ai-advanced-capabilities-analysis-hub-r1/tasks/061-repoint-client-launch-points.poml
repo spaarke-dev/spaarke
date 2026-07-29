@@ -4,7 +4,7 @@
     <title>Repoint client launch points + remove dead custom-page path</title>
     <phase>6 Retirement</phase>
     <gate>blocked — 052, 060 (server repoint first)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Frontend edits to web-resource JS + a code-page navigateTo; repoints known launch strings to openSpaarkeAi and removes a dead branch — bounded, no new surface.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,6 +116,33 @@
     Spec §13.5 / FR-19. Ordered: repoint client after server (060), before delete (063). The launcher shim
     sprk_AnalysisWorkspaceLauncher.js is deleted with the tree in 063 unless a surviving caller needs it — do not resurrect
     the custom page.
+
+    COMPLETION (2026-07-29): Repointed both surviving launch callers.
+    - sprk_analysis_commands.js: Spaarke_OpenAnalysisWorkspace (~L145) now navigates to webresource
+      "sprk_spaarkeai" (openSpaarkeAi param shape hand-duplicated inline — the file is a plain
+      non-module web resource and cannot import launch-resolver.ts) with analysisId (existing-analysis
+      channel) plus entityLogicalName="sprk_document"/entityId/regarding when a documentId is present.
+      The dead custom-page branch (pageType: "custom", the retiring sprk_analysisworkspace_8bc0b name)
+      was removed entirely, not just repointed. Version bumped 1.0.0 -> 1.1.0; stale deployment-notes
+      comment updated.
+    - PlaybookLibrary/src/main.tsx: handleComplete's cross-frame navigateTo repointed from the retiring
+      webresourceName to "sprk_spaarkeai", param payload rebuilt via URLSearchParams to match the
+      analysisId/entityId/entityLogicalName/regarding shape (was analysisId/documentId ad hoc).
+    - Deliberately left untouched (task 063 scope): src/client/code-pages/AnalysisWorkspace/** including
+      sprk_AnalysisWorkspaceLauncher.js — still references the retiring names; that whole tree is deleted,
+      not repointed.
+    - Grep verification: `sprk_analysisworkspace|sprk_AnalysisWorkspace` (case-insensitive) returns zero
+      matches in both modified files and in src/solutions/** overall; the only remaining src/client hits
+      are the three files under code-pages/AnalysisWorkspace/ (index.tsx, launcher script,
+      build-webresource.ps1) — in scope for 063, not this task.
+    - Build/test: PlaybookLibrary `vite build` succeeds (3721 modules, dist/index.html emitted, cleaned up
+      after verification). `tsc --noEmit` reports 4 pre-existing TS2307 module-resolution errors on
+      unrelated import lines (45-48, @spaarke/ui-components subpath exports) — confirmed identical via
+      `git stash` against unmodified HEAD, not introduced by this task. sprk_analysis_commands.js passed
+      `node --check` syntax validation. package-lock.json churn from the local `npm install` (adding a
+      pre-existing @spaarke/auth file: dependency entry) was reverted to keep the diff scoped to the two
+      intended source files.
+    - Quality gates: STANDARD rigor per POML — code-review/adr-check (Step 9.5) skipped by default, not run.
   </notes>
 
   <execution>
