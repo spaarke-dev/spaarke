@@ -84,3 +84,30 @@ r1's intelligence + write path are **code-directed (Action + Binding, ADR-039)**
 - Proposed-update and proposed-action payloads with cited sources.
 - An apply endpoint that performs the write under OBO + writes the `sprk_emailreviewlog` audit row (per C-2).
 - No new engine, no node-graph dependency; all via published seams.
+
+---
+
+## 9. r5 assessment & responses to §7 asks (added 2026-07-28, after r5 was built)
+
+> Authored by r5 now that the surface is code-complete (18/20 tasks; deploy + wrap-up pending). Answers r1's four asks against **what actually shipped**, not the design intent.
+
+### Ask 1 — "ranked candidate list + reasons, and host the two new card types"
+**Partial YES, with a concrete delta.** r5 shipped `EmailAssociationsAndTracking` (task 035): `EmailConnectionsReview` consumes the **production** task-020 Layer-1 logic (`provenance` + additive `applyRegardingSelection`, never the stale stub) and already groups matches into **"Needs your decision" / "Filed automatically" / "Suggested"** — i.e. it renders *ordering/tier as confidence*, exactly research finding 2 ("rank-don't-score"). Confirm / change / dismiss / link-another all persist **additively** (siblings preserved — tested). So states **A/B/C/G are substantially covered today** IF r1's `suggest-associations` payload is a ranked candidate list + provenance reasons.
+**Delta to size (net-new, NOT built):**
+- State **D** ("new-vs-related" intent) — needs a 3-way card variant (Create new + link X / File onto X / Link as related). r5 has **no** intent classification and ADR-024 expresses "regarding" only; this is genuinely net-new (r1 owns the data + the "related-to" representation decision).
+- States **E/F** (proposed-update, proposed-action/deadline Copilot cards) — r5 has **no** card component for these. The good news: the reading-pane shell (task 032) is **slot-based** (`renderConnections`/`renderTracking` + host-supplied handlers), so adding two card types + wiring them into a slot is cheap and does not touch the shell. Estimate: one new `EmailProposalCard` component family + a slot, + an apply callback.
+
+### Ask 2 — "thread grouping key == engine inheritance ancestry" ⚠️ **REAL GAP, do not assume aligned**
+The engine (`ThreadContinuityRung`, verified) inherits on **RFC-2822 ancestry** (`In-Reply-To` → `References`, nearest-ancestor-wins) — it **explicitly does NOT** key on `sprk_communicationthread` or `conversationId` (both deferred in its own remarks). r5 **deferred** the optional "View by List / View by Thread" toggle (task 031) because `sprk_communicationthread` isn't guaranteed present in a maker view's FetchXML. **So today there is no divergence — because r5 renders a flat list and does not group by thread at all.** The gap becomes real the moment either side adds thread grouping: r5's natural grouping key would be `sprk_communicationthread`, but the engine inherits on RFC ancestry. **Recommendation**: before r5 ships any thread-grouped view, converge on ONE key — either (a) the engine's `ThreadContinuityRung` also anchors on `sprk_communicationthread` (this is the deferred "thread-entity association inheritance" server enhancement — design Lens 4 GAP), or (b) r5 groups on RFC ancestry. Until then, keep r5 flat (as shipped) so "what the user sees as one thread" never contradicts "what inherited one association."
+
+### Ask 3 — C-2 (apply contract) + C-3 (Exceptions Queue)
+- **C-2**: r5's `EmailWorkspace` takes **host-injected** services (`dataverseClient`/`dataService`/`navigationService`/`webApi`/`authenticatedFetch`/`bffBaseUrl`) — so calling an r1 **apply-endpoint** from a confirm card is a clean fit (inject it, call it on Approve, refresh the pane). r5 does NOT need the chat session gate; a stored-proposal + apply-endpoint (your C-2 recommendation) matches r5's session-less surface exactly. **r5 agrees with C-2 as written.**
+- **C-3**: r5 should own the **Exceptions Queue** surface. It is structurally a second card-list (mirror `EmailCardList` + the grouped review rows from task 035) fed by r1's queue feed — a natural new widget/section (same Pattern D mount path as the Email surface). **r5 accepts C-3.**
+
+### Ask 4 — C-1 (auto-file policy) — operator decision
+r5 has no opinion on the engine's auto-file threshold (server-owned). But note the research + r5's shipped UI **support** the conservative recommendation: r5 already renders "Suggested" as a human-confirm tier, so **demoting rung 2/3 to Suggested costs r5 nothing** — those items simply land in the "Needs your decision" / "Suggested" groups r5 already renders. So C-1 → "narrow to rung 0+1" is **free on the r5 side**.
+
+### Bottom line for r1
+- **Reuse today**: association review UI (ranked/tiered groups + additive confirm), reading pane, `.eml` render, attachments, compose, tracking — all shipped and slot-composed.
+- **Build next (r5)**: proposed-update + proposed-action Copilot cards (states E/F), the "new-vs-related" choice (state D), and the Exceptions Queue surface (Concept 1). All are additive to the slot-based shell — no rework of what shipped.
+- **Resolve jointly before thread-grouping**: the ancestry-vs-`sprk_communicationthread` key (Ask 2) — the one place display and inheritance can silently diverge.
