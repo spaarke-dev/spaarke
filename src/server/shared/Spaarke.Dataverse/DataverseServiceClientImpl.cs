@@ -2408,6 +2408,56 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return results.Entities.Count > 0 ? results.Entities[0] : null;
     }
 
+    public async Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying full sprk_recordtype_ref catalog (identifier-rung roster)");
+
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_recordtype_refid",
+                "sprk_recordlogicalname",
+                "sprk_regardingfield",
+                "sprk_regardingrecordnumberfield"),
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities;
+    }
+
+    public async Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default)
+    {
+        // Defensive: a dirty/typo'd catalog row (null/blank field) or an empty value degrades to no-match,
+        // never a wrong-field query (NFR-04). The identifier rung already guards, but guard here too.
+        if (string.IsNullOrWhiteSpace(entityLogicalName)
+            || string.IsNullOrWhiteSpace(numberFieldLogicalName)
+            || string.IsNullOrWhiteSpace(value))
+        {
+            return Array.Empty<Entity>();
+        }
+
+        _logger.LogDebug(
+            "Reverse-lookup {Entity}.{Field} == {Value}", entityLogicalName, numberFieldLogicalName, value);
+
+        var query = new QueryExpression(entityLogicalName)
+        {
+            // Return the number field (the id is always populated on the returned Entity). A small TopCount
+            // still detects same-field duplicates (2+ rows → the caller surfaces Ambiguous) while capping cost.
+            ColumnSet = new ColumnSet(numberFieldLogicalName),
+            TopCount = 5,
+        };
+        query.Criteria.Conditions.Add(
+            new ConditionExpression(numberFieldLogicalName, ConditionOperator.Equal, value));
+        query.Criteria.Conditions.Add(
+            new ConditionExpression("statecode", ConditionOperator.Equal, 0)); // Active only
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+        return results.Entities;
+    }
+
     public async Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)
     {
         _logger.LogDebug("Querying systemuser by Azure AD OID: {AzureAdOid}", azureAdObjectId);

@@ -9,10 +9,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Project setup COMPLETE → **execution starting** |
-| **Task** | **001** — Verify operator schema inputs (first task, read-only) |
-| **Status** | ready-to-start (not yet begun) |
-| **Next Action** | Invoke `task-execute` on `tasks/001-verify-operator-schema-inputs.poml`; then continue through the waves per `tasks/TASK-INDEX.md`. |
+| **Phase** | **Execution — Wave 1 DONE; 020 in flight** |
+| **Task** | Wave 1 ✅: 001 010 011 012 013 022 050. **020 (identifier rung) dispatched as background opus agent** (brief in scratchpad/task-020-brief.md). |
+| **Status** | in-progress — waiting on 020 |
+| **Next Action** | On 020 completion: verify build+tests, run Step 9.5 (`/code-review` + `/adr-check`) + `/conflict-check`, mark 020 ✅ → then 021 (C-1) → triage track 023→024→025 (serial, shared enrichment) → Job B 030→031→032 → Job C/intent 040→041→042 → 051a. All serial (BFF `Services/Communication/` writers never concurrent). |
+| **🔔 OWNER DECISION PENDING** | **050 escalation FIRED** (group mailbox). 051a (shared mailbox) = shippable no-code. 051b (M365 group mailbox) = BLOCKED: needs forked pipeline + tenant-wide `Group.Read.All` + security sign-off. Owner picks: A-descope (recommended) / B-build / C-defer. See `notes/050-mailbox-capture-spike.md`. |
+| **001 findings** | `notes/001-operator-schema-verification.md` — ALL 4 inputs PRESENT. Deltas: `sprk_targetfieldlogicalname` (Job B), `sprk_triageobligation` singular (011/025), contact-row anomaly (filter null number-field), typos already clean. |
+| **010 finding (LOAD-BEARING for 020/021)** | **TWO regarding maps exist**: `Engine/RegardingFieldMap.cs` (used by association rungs — 020/021 path) AND `CommunicationService.RegardingLookupMap` (send-time caller-supplied path, carries `EntitySetName`). ADR-024 "one mechanism" tension is PRE-EXISTING. 010 added report-card to BOTH. 020 reads the Engine map + `sprk_recordtype_ref` roster. |
+| **Wave-1 build status** | BFF build clean (0 err); AssociationMappingTests 35/35 pass (incl. 2 new report-card). Publish-size: 010 adds 0 packages → delta ≈0 (authoritative measure deferred to task 060). |
 | **Execution mode** | **AUTONOMOUS + PARALLEL where possible** (operator's explicit instruction). Wave-by-wave via TASK-INDEX parallel groups; `dotnet build` between waves; `/conflict-check` before each BFF PR. |
 | **Branch** | `work/email-communication-intelligence-r1` (all setup committed + pushed, latest `5acd5c00c`) |
 

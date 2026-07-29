@@ -10,14 +10,14 @@
 
 | # | Title | Phase | Tags | FR | Deps | Parallel-group | Parallel-safe | Rigor | Model/Effort | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 001 | Verify operator schema inputs in `spaarkedev1` (`sprk_regardingreportcard`; `sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`; `sprk_emailupdatefield`) + data-hygiene check of `sprk_recordtype_ref` `sprk_regardingfield` typos | P0 | dataverse, verify, read-only | FR-11 (verify) | — | P0 | true | MINIMAL | sonnet/low | 🔲 |
-| 010 | Add `sprk_reportcard`→`sprk_regardingreportcard` to `RegardingFieldMap.cs` | P1 | bff-api, communication | FR-02 | 001 | P1 | true | FULL | sonnet/high | 🔲 |
-| 011 | Triage fields on `sprk_communication`: category, priority, summary, obligations (lean JSON), riconfidence, reviewoutcome | P1 | dataverse, schema | FR-07 | 001 | P1 | true | STANDARD | sonnet/medium | 🔲 |
-| 012 | `sprk_emailreviewlog` append-only audit entity | P1 | dataverse, schema | FR-08 | 001 | P1 | true | STANDARD | sonnet/medium | 🔲 |
+| 001 | Verify operator schema inputs in `spaarkedev1` (`sprk_regardingreportcard`; `sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`; `sprk_emailupdatefield`) + data-hygiene check of `sprk_recordtype_ref` `sprk_regardingfield` typos | P0 | dataverse, verify, read-only | FR-11 (verify) | — | P0 | true | MINIMAL | sonnet/low | ✅ |
+| 010 | Add `sprk_reportcard`→`sprk_regardingreportcard` to `RegardingFieldMap.cs` (+ send-time `RegardingLookupMap`) | P1 | bff-api, communication | FR-02 | 001 | P1 | true | FULL | sonnet/high | ✅ |
+| 011 | Triage fields on `sprk_communication`: category, priority, summary, obligations (lean JSON), riconfidence, reviewoutcome | P1 | dataverse, schema | FR-07 | 001 | P1 | true | STANDARD | sonnet/medium | ✅ |
+| 012 | `sprk_emailreviewlog` append-only audit entity | P1 | dataverse, schema | FR-08 | 001 | P1 | true | STANDARD | sonnet/medium | ✅ |
 | 013 | Category taxonomy + priority-weight config seed | P1 | dataverse, config | FR-16 | 001 | P1 | true | STANDARD | sonnet/medium | 🔲 |
-| 020 | 7-entity identifier rung — catalog-driven (`sprk_recordtype_ref`), value-based reverse lookup, reinforcement-gated, auto-file per C-1 | P2 | bff-api, communication | FR-01 | 001 | P2-assoc | **false** (shared `Engine/`) | FULL | opus/xhigh | 🔲 |
+| 020 | 7-entity identifier rung — catalog-driven (`sprk_recordtype_ref`), value-based reverse lookup, reinforcement-gated, auto-file per C-1 | P2 | bff-api, communication | FR-01 | 001 | P2-assoc | **false** (shared `Engine/`) | FULL | opus/xhigh | ✅ |
 | 021 | Auto-file policy narrowing C-1 in `AssociationStatusMapper`/`AutoFileGate` — rung 0+1 auto-file, 2/3 → `Suggested` | P2 | bff-api, communication | FR-03 | 020 | P2-assoc | **false** (shared `Engine/`) | FULL | sonnet/high | 🔲 |
-| 022 | `TRIAGE-EMAIL` Action authoring via `jps-action-create` — `{category, summary, obligations[], priority, reviewOutcome}` reusing `AiClassificationRung` signal, no 2nd full LLM pass | P2 | catalog, jps | FR-05 | 001 | P2-triage | true | STANDARD | sonnet/high | 🔲 |
+| 022 | `TRIAGE-EMAIL` Action authoring via `jps-action-create` — `{category, summary, obligations[], priority, reviewOutcome}` reusing `AiClassificationRung` signal, no 2nd full LLM pass | P2 | catalog, jps | FR-05 | 001 | P2-triage | true | STANDARD | sonnet/high | ✅ |
 | 023 | `TRIAGE-EMAIL` Binding + input/output schema (mirror-first) + golden-utterance eval case + RAG grounding + enrichment/event trigger via `PublicContracts` facade | P2 | catalog, bff-api, jps | FR-05, FR-06, NFR-07 | 022 | P2-triage | **false** (shared enrichment) | FULL | sonnet/high | 🔲 |
 | 024 | RI-confidence scorer — compute (urgency × deterministic-rung agreement) + wire into `CommunicationAssessedSignal` (`RunAssessmentEmissionAsync`); lights up `CommunicationRiActionService` | P2 | bff-api, communication | FR-04 | 022 (reads 020) | P2-triage | **false** (shared enrichment) | FULL | sonnet/high | 🔲 |
 | 025 | Persist triage output to `sprk_communication` triage fields on enrichment path | P2 | bff-api, communication | FR-07 | 011, 022 | P2-triage | **false** (shared enrichment) | FULL | sonnet/high | 🔲 |
@@ -27,8 +27,9 @@
 | 040 | Job C email-triggered tasks/events via create-task pattern (`CREATE-TASK@v1`), cited | P4 | bff-api, catalog | FR-14 | 020, 022 | P4 | **false** (shared) | FULL | sonnet/high | 🔲 |
 | 041 | Attachment-grounded action extraction — ground Action on extracted attachment text, gated to action-triggers | P4 | bff-api, catalog | FR-13 | 040 | P4 | **false** (shared) | FULL | opus/high | 🔲 |
 | 042 | Regarding-vs-related intent — classify file/update/new-related; demote identifier on "new filing based on X"; propose create-record linked as related | P4 | bff-api, catalog, communication | FR-12 | 020, 022 | P4 | **false** (shared) | FULL | opus/xhigh | 🔲 |
-| 050 | SPIKE: shared vs M365-group mailbox Graph subscription + Exchange `ApplicationAccessPolicy` model; `GraphSubscriptionManager` delta (FR-15 sizing) | P5 | investigation, spike | FR-15 | — | P5 | true | STANDARD | opus/high | 🔲 |
-| 051 | Implement shared/group mailbox capture coverage (gated on 050 finding) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | 🔲 |
+| 050 | SPIKE: shared vs M365-group mailbox Graph subscription + Exchange `ApplicationAccessPolicy` model; `GraphSubscriptionManager` delta (FR-15 sizing) | P5 | investigation, spike | FR-15 | — | P5 | true | STANDARD | opus/high | ✅ (escalation FIRED) |
+| 051a | Shared-mailbox capture coverage — verify `SharedAccount` subscription + exactly-once + operator runbook line (XS, no code) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | 🔲 |
+| 051b | M365-group-mailbox capture — forked pipeline (**BLOCKED: owner decision A-descope / B-build / C-defer; needs `Group.Read.All` + security sign-off**) | P5 | bff-api, communication | FR-15 | 050 | P5 | **false** (capture path) | FULL | sonnet/high | ⛔ |
 | 060 | Deploy BFF + Dataverse to `spaarkedev1` | P6 | deploy | — | 010–051 (all impl) | P6 | **false** | STANDARD | sonnet/medium | 🔲 |
 | 061 | Operator browser UAT — success criteria 1–9 | P6 | ui-test | (all) | 060 | P6 | true | MINIMAL | sonnet/low | 🔲 |
 | 090 | Project wrap-up — status Complete, `/test-diet`, lessons-learned | Wrap | wrapup | — | 061 | P6 | **false** (main-session) | MINIMAL | sonnet/low | 🔲 |

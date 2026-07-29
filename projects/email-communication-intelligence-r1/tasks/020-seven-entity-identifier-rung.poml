@@ -3,7 +3,7 @@
     <title>7-entity identifier rung — catalog-driven (`sprk_recordtype_ref`), value-based reverse lookup, reinforcement-gated, auto-file per C-1</title>
     <phase>P2 — Lean intelligence spine</phase>
     <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>12</estimated-hours>
     <dependencies>001</dependencies>
     <deps>001</deps>

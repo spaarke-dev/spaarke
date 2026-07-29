@@ -3,7 +3,7 @@
     <title>Verify operator schema inputs in `spaarkedev1` (`sprk_regardingreportcard`; `sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`; `sprk_emailupdatefield`) + data-hygiene check of `sprk_recordtype_ref` `sprk_regardingfield` typos + contact-row anomaly</title>
     <phase>P0 — Prerequisites &amp; verification</phase>
     <gate>none (MINIMAL — Step 9.5 skipped; read-only verification, no code/schema change)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>none</dependencies>
     <deps>none</deps>

@@ -1814,6 +1814,7 @@ public sealed class CommunicationService
         ["sprk_project"] = ("sprk_regardingproject", "sprk_projects"),
         ["sprk_analysis"] = ("sprk_regardinganalysis", "sprk_analysises"),
         ["sprk_budget"] = ("sprk_regardingbudget", "sprk_budgets"),
+        ["sprk_reportcard"] = ("sprk_regardingreportcard", "sprk_reportcards"),
         ["sprk_invoice"] = ("sprk_regardinginvoice", "sprk_invoices"),
         ["sprk_workassignment"] = ("sprk_regardingworkassignment", "sprk_workassignments"),
         ["sprk_servicerequest"] = ("sprk_regardingservicerequest", "sprk_servicerequests"),

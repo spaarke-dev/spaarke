@@ -152,6 +152,13 @@ public static class CommunicationModule
         // and the engine evaluates them by ascending Order — so registration order is cosmetic.
         services.AddSingleton<GraphMessageNormalizer>();
         services.AddSingleton<IAssociationRung, ExplicitReferenceRung>();      // rung 0 — explicit reference
+        // rung 0 — identifier reverse-lookup (FR-01). SAME Kind/Order as ExplicitReferenceRung: a well-formed
+        // explicit identifier IS a rung-0 explicit reference. Extends matter-only identifier matching to all 7
+        // core types by VALUE-based reverse lookup against Dataverse, catalog-driven off sprk_recordtype_ref
+        // (no numbering scheme in code; onboarding a tenant needs only catalog config). Bare-numeric tokens
+        // emit sub-threshold (never auto-file alone); multi-entity tokens are capped (never a guessed auto-file).
+        // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, IdentifierReverseLookupRung>(); // rung 0 — identifier reverse-lookup
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector

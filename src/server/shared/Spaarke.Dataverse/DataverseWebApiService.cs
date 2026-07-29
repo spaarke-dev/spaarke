@@ -2651,6 +2651,19 @@ public class DataverseWebApiService : IDataverseService
             "QueryRecordTypeRefAsync is implemented in DataverseServiceClientImpl.");
     }
 
+    public Task<IReadOnlyList<Entity>> QueryAllRecordTypeRefsAsync(CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryAllRecordTypeRefsAsync is implemented in DataverseServiceClientImpl.");
+    }
+
+    public Task<IReadOnlyList<Entity>> QueryRecordsByNumberFieldAsync(
+        string entityLogicalName, string numberFieldLogicalName, string value, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "QueryRecordsByNumberFieldAsync is implemented in DataverseServiceClientImpl.");
+    }
+
     public Task<Guid?> QuerySystemUserByAzureAdOidAsync(string azureAdObjectId, CancellationToken ct = default)
     {
         throw new NotImplementedException(

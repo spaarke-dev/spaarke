@@ -3,7 +3,7 @@
     <title>Add `sprk_reportcard`→`sprk_regardingreportcard` to `RegardingFieldMap.cs`</title>
     <phase>P1 — Schema &amp; catalog foundation</phase>
     <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <deps>001</deps>
