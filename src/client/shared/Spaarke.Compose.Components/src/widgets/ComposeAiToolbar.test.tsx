@@ -29,6 +29,7 @@ import type { Editor } from '@tiptap/react';
 import {
   ComposeAiToolbar,
   registerComposeAiToolbarAction,
+  getToolsForSurface,
   __resetComposeAiToolbarActionsForTests,
   extractCleanDraftText,
   type ComposeAiToolbarAction,
@@ -85,6 +86,7 @@ function renderToolbar(
     actions?: ReadonlyArray<ComposeAiToolbarAction>;
     dispatchConsumerOverride?: DispatchConsumer;
     forceVisible?: boolean;
+    onRequestInstruction?: (action: ComposeAiToolbarAction) => Promise<string | null>;
   },
   theme: typeof webLightTheme = webLightTheme
 ) {
@@ -99,6 +101,7 @@ function renderToolbar(
         actions={ui.actions}
         dispatchConsumerOverride={ui.dispatchConsumerOverride}
         forceVisible={ui.forceVisible}
+        onRequestInstruction={ui.onRequestInstruction}
       />
     </FluentProvider>
   );
@@ -137,14 +140,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ComposeAiToolbar — render on selection', () => {
-  it('renders the Explain/Compare/Draft buttons and the overflow trigger on a non-collapsed selection', () => {
+  it('renders only the Draft-alternative button + overflow trigger on a non-collapsed selection (round-8 #6: Explain/Compare/Defined-terms/Email retired from the selection surface)', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
 
     expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
+    // Contextual AI Tool Library: the default selection surface now carries ONLY the
+    // reusable Draft-alternative edit primitive; the three retired tools carry `surfaces: []`.
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-explain-clause')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-compare-to-playbook')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-email')).not.toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
   });
 
@@ -160,11 +166,9 @@ describe('ComposeAiToolbar — render on selection', () => {
     expect(screen.queryByTestId('compose-ai-toolbar')).not.toBeInTheDocument();
   });
 
-  it('the default (Phase-4-stubbed) primary buttons render disabled — no Binding wired yet', () => {
+  it('the default (Phase-4-stubbed) Draft-alternative button renders disabled — no Binding wired yet', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeDisabled();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeDisabled();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
   });
 });
@@ -207,8 +211,6 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spa
     renderToolbar({ editor, forceVisible: true });
 
     expect(screen.getByTestId('compose-ai-toolbar')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
     expect(screen.getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
   });
@@ -237,24 +239,20 @@ describe('ComposeAiToolbar — task 111 layout fix (single Toolbar + tightly-spa
 // ---------------------------------------------------------------------------
 
 describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
-  it('primary action buttons + Email + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
+  it('primary action button + overflow are ICON-ONLY (no tool WORDS on the bubble)', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
     const toolbar = screen.getByTestId('compose-ai-toolbar');
 
-    // No visible label text on the primary buttons (icon-only). The names live in
+    // No visible label text on the primary button (icon-only). The name lives in
     // the hover Tooltip + aria-label, not as button text.
-    expect(within(toolbar).queryByText('Explain')).not.toBeInTheDocument();
-    expect(within(toolbar).queryByText('Compare to playbook')).not.toBeInTheDocument();
     expect(within(toolbar).queryByText('Draft alternative')).not.toBeInTheDocument();
-    expect(within(toolbar).queryByText('Email')).not.toBeInTheDocument();
 
-    // Each still renders its icon (an svg) and keeps its accessible name.
-    const explain = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
-    expect(explain.querySelector('svg')).not.toBeNull();
-    expect(explain.textContent).toBe('');
-    expect(screen.getByLabelText('Explain')).toBeInTheDocument();
-    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    // The Draft-alternative button renders its icon (an svg) and keeps its accessible name.
+    const draft = screen.getByTestId('compose-ai-toolbar-compose-draft-alternative');
+    expect(draft.querySelector('svg')).not.toBeNull();
+    expect(draft.textContent).toBe('');
+    expect(screen.getByLabelText('Draft alternative')).toBeInTheDocument();
     // Overflow trigger renders an icon (vertical three-dots) with no text.
     const more = screen.getByTestId('compose-ai-toolbar-more');
     expect(more.querySelector('svg')).not.toBeNull();
@@ -277,8 +275,8 @@ describe('ComposeAiToolbar — FIX #9 bubble restyle', () => {
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     renderToolbar({ editor });
 
-    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-explain-clause'));
-    expect(await screen.findByRole('tooltip')).toHaveTextContent('Explain');
+    await user.hover(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative'));
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Draft alternative');
   });
 });
 
@@ -340,7 +338,7 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     const dispatchConsumerOverride = jest.fn();
     renderToolbar({ editor, dispatchConsumerOverride }); // default actions — all bindingId: ''
 
-    const button = screen.getByTestId('compose-ai-toolbar-compose-explain-clause');
+    const button = screen.getByTestId('compose-ai-toolbar-compose-draft-alternative');
     expect(button).toBeDisabled();
     expect(dispatchConsumerOverride).not.toHaveBeenCalled();
   });
@@ -376,25 +374,21 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
     );
   });
 
-  it('FIX #5: the defined-terms whole-document action is in the overflow; summarize-word-changes is NOT (removed from the selection toolbar)', async () => {
+  it('round-8 #6: the defined-terms action is RETIRED from the selection surface — the default overflow is empty', async () => {
     const user = userEvent.setup();
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
 
-    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS. FIX #5 removed
-    // `compose-summarize-word-changes` (a RETURN-FROM-WORD action that has no
-    // tracked-change data on the selection toolbar and made the LLM fabricate a
-    // phantom "[Insertion]"). Only `defined-terms` remains as an overflow action.
+    // No `actions` prop → reads the REAL module DEFAULT_ACTIONS. Contextual AI Tool
+    // Library (round-8 #6): `compose-defined-terms` now carries `surfaces: []`, so it
+    // no longer appears on the selection toolbar's overflow (it belongs to a future
+    // `whole-document` surface). With Explain/Compare/Defined-terms all retired, the
+    // default selection overflow is empty.
     renderToolbar({ editor });
 
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
 
-    const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
-    expect(definedTerms).toBeInTheDocument();
-    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
-
-    // Phase-4 stub: disabled until the seeded Binding GUID is registered
-    // (button ENABLEMENT is E2E-pending on task 047).
-    expect(definedTerms).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
   });
 
   it('the overflow menu shows a placeholder when no overflow actions are registered', async () => {
@@ -404,6 +398,84 @@ describe('ComposeAiToolbar — dispatch + extensibility', () => {
 
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
     expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contextual AI Tool Library (phase 3) — free-text instruction tools
+// (compose-rewrite-instruction / "Describe a change…") collect the user's
+// instruction via onRequestInstruction BEFORE dispatch and pass it as a slot.
+// ---------------------------------------------------------------------------
+
+describe('ComposeAiToolbar — free-text instruction tools (phase 3)', () => {
+  const INSTRUCTION_ACTION: ComposeAiToolbarAction = {
+    id: 'compose-rewrite-instruction',
+    label: 'Describe a change',
+    tooltip: 'Describe a change.',
+    bindingId: 'test-binding-rewrite',
+    placement: 'primary',
+    materializesInEditor: true,
+    surfaces: ['selection', 'review-note'],
+    inputPrompt: 'Describe the change…',
+  };
+
+  it('collects the instruction via onRequestInstruction and dispatches it as a slot', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
+    const onRequestInstruction = jest.fn().mockResolvedValue('make it mutual');
+
+    renderToolbar({ editor, actions: [INSTRUCTION_ACTION], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-rewrite-instruction'));
+
+    expect(onRequestInstruction).toHaveBeenCalledWith(expect.objectContaining({ id: 'compose-rewrite-instruction' }));
+    expect(dispatchConsumerOverride).toHaveBeenCalledWith(
+      'test-binding-rewrite',
+      expect.objectContaining({
+        slots: expect.objectContaining({ selectionText: 'Hello world', instruction: 'make it mutual' }),
+      })
+    );
+  });
+
+  it('does NOT dispatch when the user cancels the instruction dialog (resolves null)', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn();
+    const onRequestInstruction = jest.fn().mockResolvedValue(null);
+
+    renderToolbar({ editor, actions: [INSTRUCTION_ACTION], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-rewrite-instruction'));
+
+    expect(onRequestInstruction).toHaveBeenCalledTimes(1);
+    expect(dispatchConsumerOverride).not.toHaveBeenCalled();
+  });
+
+  it('a non-instruction tool (no inputPrompt) dispatches WITHOUT calling onRequestInstruction or adding an instruction slot', async () => {
+    const user = userEvent.setup();
+    const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
+    const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
+    const onRequestInstruction = jest.fn().mockResolvedValue('should not be called');
+    const concise: ComposeAiToolbarAction = {
+      id: 'compose-make-concise',
+      label: 'Make more concise',
+      tooltip: 'Condense.',
+      bindingId: 'test-binding-concise',
+      placement: 'primary',
+      materializesInEditor: true,
+      surfaces: ['selection', 'review-note'],
+    };
+
+    renderToolbar({ editor, actions: [concise], dispatchConsumerOverride, onRequestInstruction });
+
+    await user.click(screen.getByTestId('compose-ai-toolbar-compose-make-concise'));
+
+    expect(onRequestInstruction).not.toHaveBeenCalled();
+    expect(dispatchConsumerOverride).toHaveBeenCalledWith(
+      'test-binding-concise',
+      expect.objectContaining({ slots: expect.not.objectContaining({ instruction: expect.anything() }) })
+    );
   });
 });
 
@@ -454,5 +526,86 @@ describe('extractCleanDraftText — clean email body (FIX #10b)', () => {
       ],
     };
     expect(extractCleanDraftText(doc)).toBe('A drafted sentence.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Contextual AI Tool Library — getToolsForSurface: the two-dimension
+// (surface × workType) selector + the surface/workType defaults.
+// ---------------------------------------------------------------------------
+
+describe('getToolsForSurface — Contextual AI Tool Library selector', () => {
+  it('default DEFAULT_ACTIONS: only Draft-alternative is on the selection surface (Explain/Compare/Defined-terms retired, #6)', () => {
+    const ids = getToolsForSurface('selection', '*').map(a => a.id);
+    // The three edit primitives (round-8 #6 retired Explain/Compare/Defined-terms; phase-3 added
+    // make-concise + rewrite-instruction). Order = DEFAULT_ACTIONS order.
+    expect(ids).toEqual(['compose-draft-alternative', 'compose-make-concise', 'compose-rewrite-instruction']);
+  });
+
+  it('the edit primitives are shown on both the selection AND review-note surfaces from one definition each', () => {
+    const EDIT_TOOLS = ['compose-draft-alternative', 'compose-make-concise', 'compose-rewrite-instruction'];
+    expect(getToolsForSurface('selection', '*').map(a => a.id)).toEqual(EDIT_TOOLS);
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toEqual(EDIT_TOOLS);
+  });
+
+  it('retired tools (surfaces: []) appear on NO surface even though they remain in the registry', () => {
+    for (const surface of ['selection', 'review-note', 'whole-document', 'assistant-chip'] as const) {
+      const ids = getToolsForSurface(surface, '*').map(a => a.id);
+      expect(ids).not.toContain('compose-explain-clause');
+      expect(ids).not.toContain('compose-compare-to-playbook');
+      expect(ids).not.toContain('compose-defined-terms');
+    }
+  });
+
+  it('workType narrowing: a workTypes:[agreement-analysis] tool shows ONLY for that work type, while a workTypes:[*] primitive shows for any', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-agreement-only',
+      label: 'Compare to firm playbook',
+      tooltip: 'Agreement-analysis-only.',
+      bindingId: 'b-agr',
+      placement: 'primary',
+      surfaces: ['review-note'],
+      workTypes: ['agreement-analysis'],
+    });
+
+    // Shared work type '*' → the agreement-only tool is hidden; the '*' edit primitives still show.
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-agreement-only');
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).toContain('compose-draft-alternative');
+    // Active work type 'agreement-analysis' → BOTH the '*' primitives and the agreement-only tool.
+    const agrIds = getToolsForSurface('review-note', 'agreement-analysis').map(a => a.id);
+    expect(agrIds).toContain('compose-draft-alternative');
+    expect(agrIds).toContain('test-agreement-only');
+    // A DIFFERENT work type ('legal-research') → the agreement-only tool is hidden; primitives remain.
+    const researchIds = getToolsForSurface('review-note', 'legal-research').map(a => a.id);
+    expect(researchIds).not.toContain('test-agreement-only');
+    expect(researchIds).toContain('compose-draft-alternative');
+  });
+
+  it('a registered action with NO surfaces defaults to the selection surface (backward-compatible)', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-legacy-shape',
+      label: 'Legacy',
+      tooltip: 'No surfaces field.',
+      bindingId: 'b-legacy',
+      placement: 'overflow',
+    });
+    expect(getToolsForSurface('selection', '*').map(a => a.id)).toContain('test-legacy-shape');
+    expect(getToolsForSurface('review-note', '*').map(a => a.id)).not.toContain('test-legacy-shape');
+  });
+
+  it('appliesTo predicate can hide a tool for a given context', () => {
+    registerComposeAiToolbarAction({
+      id: 'test-gated',
+      label: 'Gated',
+      tooltip: 'Predicate-gated.',
+      bindingId: 'b-gated',
+      placement: 'primary',
+      surfaces: ['selection'],
+      appliesTo: ctx => (ctx.selectionText?.length ?? 0) > 5,
+    });
+    expect(getToolsForSurface('selection', '*', { selectionText: 'short' }).map(a => a.id)).not.toContain('test-gated');
+    expect(getToolsForSurface('selection', '*', { selectionText: 'a longer selection' }).map(a => a.id)).toContain(
+      'test-gated'
+    );
   });
 });

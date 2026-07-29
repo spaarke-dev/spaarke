@@ -324,7 +324,10 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     let cancelled = false;
     void (async () => {
       try {
-        const regardingSelect = COMMUNICATION_REGARDING_FIELDS.map(m => m.field).join(',');
+        // Lookup columns are queryable in $select ONLY via their `_<field>_value` form — the bare
+        // navigation name (e.g. `sprk_regardingmatter`) returns 400, which would throw the whole
+        // retrieve and leave `prefill` null → Reply/Reply All/Forward stay greyed (owner UAT 2026-07-27).
+        const regardingSelect = COMMUNICATION_REGARDING_FIELDS.map(m => `_${m.field}_value`).join(',');
         const rec = await context.webAPI.retrieveRecord(
           'sprk_communication',
           communicationId,

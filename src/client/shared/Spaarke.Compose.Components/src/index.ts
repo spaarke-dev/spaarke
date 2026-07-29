@@ -13,7 +13,11 @@
 //
 // Licensing constraint (LOCKED at Spike #1, 2026-06-29): TipTap core +
 // StarterKit + 11 standard MIT extensions ONLY. No TipTap Pro packages.
-// DOCX bridge: mammoth ^1.8.0 (BSD-2-Clause) + docx ^9.0.3 (MIT). All OSS.
+// DOCX→editor read path: server-side projection (Sprk.Bff.Api `ComposeDocxProjectionBuilder`,
+// DocumentFormat.OpenXml, MIT). Task 013 (spaarkeai-compose-fidelity-r4.5, F-2 "one reader")
+// removed the client-side mammoth read path from Compose; `mammoth` ^1.8.0 (BSD-2-Clause)
+// remains a repo dependency for other consumers (SprkChat/Notepad in @spaarke/ui-components).
+// DOCX export path (TipTap → structured content model, server-rendered): docx ^9.0.3 (MIT).
 
 // -------------------------------------------------------------------------
 // Editor (Phase 4 task 045 — pre-Phase 7 origin)
@@ -369,5 +373,7 @@ export type { ApplyImportedCommentAnchorsResult } from './widgets/importedCommen
 // R4 task 023: `collectEditedParagraphs` (the paragraph-diff export) is REMOVED — dirty-save capture
 // routes only through the step interceptor's operation log (`serializeOperationLog` on the editor
 // handle); `buildContentModel` (the born-in-editor full-render path) is unchanged here (task 033).
-export { docxToTipTapHtml, stampParaIds, captureParaIdSnapshot, buildContentModel } from './utils/docxBridge';
-export type { MammothConversionResult, TipTapNode } from './utils/docxBridge';
+// Task 013 (spaarkeai-compose-fidelity-r4.5, F-2): `docxToTipTapHtml` (the client mammoth reader) and
+// its `MammothConversionResult` type are REMOVED — every entry path now hydrates a server projection.
+export { stampParaIds, captureParaIdSnapshot, buildContentModel } from './utils/docxBridge';
+export type { TipTapNode } from './utils/docxBridge';

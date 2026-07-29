@@ -1,0 +1,18 @@
+Archived: 2026-07-28
+Final status: Completed
+Closing PR: #668 (last associated PR, merged 2026-07-21) — final UAT work merged direct-to-master @ 89e53b670
+Closed Date (Board #2): 2026-07-28
+Worktree: c:/code_files/spaarke-wt-email-communication-solution-r4 (PRESERVED — not removed by archive; clean up separately if desired)
+Remote branch: work/email-communication-solution-r4 (still on origin)
+Issue: #642 (closed, reason=completed)
+Board: #2 "Spaarke Core" — item Status=Completed, Closed Date=2026-07-28
+
+Quality gates at close:
+- /code-review: 0 critical; 1 non-blocking resilience Warning (W1: prefill-gates-reply coupling) logged for follow-up
+- /adr-check: 0 violations (W1/W2 observational)
+- /test-diet: 0 scaffolding deletions; Communication suite ban-clean — notes/test-diet-report.md
+
+Final deliverable: CommunicationActions v1.3.15 (imported by owner, UAT confirmed).
+Open follow-ups (not blocking close):
+- BFF provenance-escaping change merged, awaiting its deploy window
+- Repo-wide KEEP-path taxonomy migration for tests/unit/Sprk.Bff.Api.Tests/Services/Communication/** (pre-existing, not email-r4-specific)

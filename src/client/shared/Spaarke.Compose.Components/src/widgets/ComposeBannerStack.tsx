@@ -48,6 +48,12 @@ export interface ComposeBannerStackProps {
   checkoutLockedBy: ComposeCheckoutLockedByInfo | null;
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
+  /**
+   * UAT round-7 #8 — when true, the "Some formatting was simplified" import banner is suppressed (the
+   * reviewer asked to remove the formatting warnings). The warnings still exist in the data; they just
+   * don't render. Default false (every other consumer keeps the banner).
+   */
+  hideImportWarnings?: boolean;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /**
    * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
@@ -122,6 +128,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutLockedBy,
     checkoutFailureMessage,
     importWarnings,
+    hideImportWarnings = false,
     pendingAssistantInsert,
     saveSuccessToken = 0,
   } = props;
@@ -146,7 +153,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     setImportWarningsDismissed(true);
   }, [importWarningsSig]);
 
-  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed;
+  const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed && !hideImportWarnings;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
   // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent

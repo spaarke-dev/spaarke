@@ -1,0 +1,24 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-rewrite-instruction (ai-advanced-capabilities-nda-r1, Contextual AI Tool Library phase 3). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). Consumes the compose-selection JPS scope PLUS a free-text `instruction` slot (the clause-scoped analogue of compose-revise-document's whole-document instruction). The inline AI toolbar / Review-Note tools menu dispatches { selectionText, instruction, ... } via the shipped session-dispatch seam; the client collects `instruction` from the user (inputPrompt). selectionText is the anchor the emitted target_text is copied from. Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix.",
+  "actionCode": "compose-rewrite-instruction",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "required": ["selectionText", "instruction"],
+    "properties": {
+      "selectionText": {
+        "type": "string",
+        "description": "The selected contract clause (or clause fragment) to rewrite. The clause the attorney highlighted in the Compose editor (or the clause a Review Note anchors to); the emitted target_text MUST be copied verbatim from this so the editor can locate and apply the edit. Capped upstream at the compose-selection scope's authored budget.",
+        "maxLength": 16000,
+        "elicitation_prompt": "Which clause would you like me to rewrite? Select it in the document first.",
+        "ledger_resolution": "compose.selectionText — the current editor selection dispatched by the FR-14 inline AI toolbar (compose-selection scope), or the Review Note's anchored clause span."
+      },
+      "instruction": {
+        "type": "string",
+        "description": "The user's free-text description of the change they want made to the selected clause (e.g. 'make this mutual', 'add a 30-day cure period', 'change governing law to Delaware', 'make the notice period 60 days'). Required — the rewrite is steered entirely by this instruction. Collected from the user by the client (inputPrompt) at dispatch time.",
+        "maxLength": 2000,
+        "elicitation_prompt": "Describe the change you'd like to make to this clause."
+      }
+    }
+  }
+}

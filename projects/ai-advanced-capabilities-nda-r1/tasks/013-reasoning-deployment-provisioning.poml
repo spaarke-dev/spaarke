@@ -3,8 +3,8 @@
   <metadata>
     <title>Provision + configure the Reasoning Azure OpenAI deployment</title>
     <phase>1 Platform Enablers</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Infrastructure/config; appsettings + Azure deployment; may involve an external provisioning step.</rigor-reason>
     <model-tier>sonnet</model-tier>

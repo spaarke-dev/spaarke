@@ -555,7 +555,13 @@ public class ChatSessionManager
             // R2 session-scoped active-document pointer (task 113): carry it through the warm tier
             // so a Redis eviction / cold restore does not silently drop the active document (the
             // ADR-040 document-reference-survival MUST — the same P2 class this mapper documents).
-            ActiveDocument = session.ActiveDocument
+            ActiveDocument = session.ActiveDocument,
+
+            // R4.5 WS-4 paraId -> legal-number reference map (task 041, spec FR-17): carry it
+            // through the warm tier for the same reason as ActiveDocument above — a Redis
+            // eviction / cold restore must not silently drop it. Null (no map yet) maps to an
+            // empty list, mirroring AnchoredAnnotations/DefinedTermsTracking.
+            ReferenceMap = session.ReferenceMap?.ToList() ?? []
         };
     }
 
@@ -635,7 +641,14 @@ public class ChatSessionManager
             // R2 session-scoped active-document pointer (task 113) — restore from the warm tier
             // (null when the Cosmos document pre-dates the field). Matches the sibling collections'
             // convention: absent → null ("no active document yet").
-            ActiveDocument = stored.ActiveDocument
+            ActiveDocument = stored.ActiveDocument,
+
+            // R4.5 WS-4 paraId -> legal-number reference map (task 041, spec FR-17) — restore from
+            // the warm tier. Empty stored list maps to null ("no reference map yet"), matching the
+            // sibling collections' convention.
+            ReferenceMap = stored.ReferenceMap is { Count: > 0 }
+                ? stored.ReferenceMap
+                : null
         };
     }
 }

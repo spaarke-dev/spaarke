@@ -770,7 +770,9 @@ registerWorkspaceWidget(
 registerWorkspaceWidget(
   'communications-list',
   {
-    displayName: 'Communications',
+    // Human-facing label (§B UAT 2026-07-27 item 1). The widget TYPE string
+    // 'communications-list' is the dispatch identity and MUST stay unchanged.
+    displayName: 'Messages',
     category: 'data',
     icon: 'MailRegular',
     allowMultiple: true,

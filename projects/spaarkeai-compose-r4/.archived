@@ -1,0 +1,15 @@
+Archived: 2026-07-28
+Final status: Completed
+Closing PR: none (R4 merged to master via the 2026-07-24 multi-project worktree cleanup, not a single PR)
+Worktree: c:/code_files/spaarke-wt-spaarkeai-compose-r4 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/spaarkeai-compose-r4 (still on origin)
+Issue: #679 (closed 2026-07-28)
+
+Close-out summary:
+- Shadow Document Architecture delivered; code on master; dev-deployed + UAT'd.
+- Flagship gate closed green-with-exceptions (all tracked):
+  * Criterion 7 (one byte-author) via C-revised two-author decision.
+  * Read/reference fidelity (numbering, mammoth removal) → spaarkeai-compose-fidelity-r4.5.
+  * Accept/reject tracked-change reconciliation (accept-then-save 422) → R5 G12.
+  * AI Advisory Review Word-comment export gap → ai-advanced-capabilities-nda-r1 → future ai-advanced-capabilities-agreements-r1.
+- Tests gated at dev Step 9.5 + merged; /test-diet N/A on doc-only close.

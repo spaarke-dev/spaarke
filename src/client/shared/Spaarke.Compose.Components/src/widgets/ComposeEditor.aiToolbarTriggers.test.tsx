@@ -143,17 +143,17 @@ describe('ComposeEditor — right-click AI-toolbar trigger (task 111 requirement
     const toolbar = toolbars[0];
     expect(toolbar).toHaveAttribute('data-testid', 'compose-ai-toolbar');
 
-    // AI actions present (3 primary buttons + the Email menu + overflow trigger;
-    // the whole-document defined-terms action is behind "More actions"). FIX #5
-    // removed summarize-word-changes from the selection toolbar.
-    expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-explain-clause')).toBeInTheDocument();
-    expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeInTheDocument();
+    // AI actions present: the Draft-alternative primary button + overflow trigger.
+    // Contextual AI Tool Library (round-8 #6) retired Explain / Compare / Defined-terms /
+    // Email from the selection surface (they carry `surfaces: []`), so the default
+    // selection toolbar is now just Draft-alternative + an (empty) overflow.
     expect(within(toolbar).getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeInTheDocument();
+    expect(within(toolbar).queryByTestId('compose-ai-toolbar-compose-explain-clause')).not.toBeInTheDocument();
+    expect(within(toolbar).queryByTestId('compose-ai-toolbar-compose-compare-to-playbook')).not.toBeInTheDocument();
     expect(within(toolbar).getByTestId('compose-ai-toolbar-more')).toBeInTheDocument();
 
     await fireEvent.click(within(toolbar).getByTestId('compose-ai-toolbar-more'));
-    expect(await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).toBeInTheDocument();
-    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).not.toBeInTheDocument();
 
     // ToolbarDividers were removed (compose-r2 UAT) to close the large Explain→Email icon gap —
     // grouping is now carried by the distinct glyphs/tooltips. Assert the single Toolbar renders

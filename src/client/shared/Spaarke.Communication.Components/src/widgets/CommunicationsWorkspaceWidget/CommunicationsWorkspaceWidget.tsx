@@ -204,9 +204,16 @@ export const CommunicationsWorkspaceWidget: React.FC<CommunicationsWorkspaceWidg
         bffBaseUrl={bffBaseUrl}
         currentUserSystemUserId={currentUserSystemUserId}
         onMarkThreadRead={onMarkThreadRead}
+        // An email is a sprk_communication row (TimelineMessage.id IS the
+        // sprk_communication GUID) — open it as a centred record modal via the
+        // SAME Xrm-backed navigation adapter the shell already uses (§B UAT
+        // 2026-07-27 item 3; no second mechanism, root CLAUDE.md §11).
+        onOpenEmail={msg => {
+          void navigationService.openRecordModal?.('sprk_communication', msg.id);
+        }}
       />
     ),
-    [currentUserSystemUserId]
+    [currentUserSystemUserId, navigationService]
   );
 
   // FR-22 awareness count as the ThreadList header accessory (round 3 item 3) —

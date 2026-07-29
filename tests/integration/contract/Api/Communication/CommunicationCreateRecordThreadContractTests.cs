@@ -125,8 +125,14 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
         created.GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeRecordAnchored);
         // Owner = the server-resolved caller so the new thread is visible in the caller's all-mode list.
         created.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(CallerSystemUserId);
-        // Denormalized ADR-024 regarding pointer (REUSE — not a second mechanism).
-        ((string)created["sprk_regardingrecordtype"]).Should().Be("sprk_matter");
+        // TYPED ADR-024 regarding lookup — the exact field the by-regarding read filters on (sprk_matter →
+        // sprk_regardingmatter via RegardingFieldMap). RB (R3 UAT 2026-07-24): the create previously wrote a
+        // NON-EXISTENT 'sprk_regardingrecordtype' text attribute → Dataverse InvalidOperationException (500).
+        // This asserts the typed lookup is set and the bogus text attribute is NOT written.
+        created.GetAttributeValue<EntityReference>("sprk_regardingmatter").LogicalName.Should().Be("sprk_matter");
+        created.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(recordId);
+        created.Contains("sprk_regardingrecordtype").Should().BeFalse();
+        // Denormalized display pointers (these text attributes DO exist on the thread).
         ((string)created["sprk_regardingrecordid"]).Should().Be(recordId.ToString());
         ((string)created["sprk_regardingrecordname"]).Should().Be("Acme v Widgets");
         // A user-provided name is Edited so the auto re-derive never overwrites it.

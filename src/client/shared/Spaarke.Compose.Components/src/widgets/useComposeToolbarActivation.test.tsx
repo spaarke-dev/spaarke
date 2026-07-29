@@ -20,7 +20,7 @@
  */
 
 import * as React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import type { Editor } from '@tiptap/react';
@@ -119,14 +119,17 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
-  it('registers matching compose capabilities → matching buttons ENABLE with the deployed bindingId; non-matching capability ignored', async () => {
+  it('registers matching compose capabilities → the SURFACED Draft-alternative button ENABLES with the deployed bindingId; retired + non-matching capabilities do not surface', async () => {
     const user = userEvent.setup();
     const editor = createMockEditor({ from: 0, to: 11, text: 'Hello world' });
     const dispatchConsumerOverride = jest.fn().mockResolvedValue({ streamId: 's1', status: 'complete' });
 
     const fetchOverride = stubCapabilitiesFetch([
+      { bindingId: 'guid-draft', consumerType: 'compose-draft-alternative' },
+      // RETIRED from the selection surface (round-8 #6, `surfaces: []`): the activation
+      // hook still REGISTERS these bindingIds onto the registry, but they no longer
+      // render on the BubbleMenu — proof that surface retirement survives live registration.
       { bindingId: 'guid-explain', consumerType: 'compose-explain-clause' },
-      { bindingId: 'guid-compare', consumerType: 'compose-compare-to-playbook' },
       { bindingId: 'guid-defined-terms', consumerType: 'compose-defined-terms' },
       // NON-matching: the whole-document summarize binding is NOT a toolbar action.
       { bindingId: 'guid-wholedoc-summarize', consumerType: 'compose-summarize' },
@@ -141,32 +144,29 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
     );
 
     // The async fetch + registration lands AFTER first paint — the toolbar
-    // re-renders via the module subscription and flips the button to enabled.
-    const explain = await screen.findByTestId('compose-ai-toolbar-compose-explain-clause');
-    await waitFor(() => expect(explain).toBeEnabled());
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeEnabled();
+    // re-renders via the module subscription and flips the SURFACED button to enabled.
+    const draft = await screen.findByTestId('compose-ai-toolbar-compose-draft-alternative');
+    await waitFor(() => expect(draft).toBeEnabled());
 
-    // Draft was NOT in the response → its stub stays disabled.
-    expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
+    // Retired tools do NOT render on the selection surface even though their capability
+    // was returned + registered (Contextual AI Tool Library: `surfaces: []`).
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-explain-clause')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-compose-compare-to-playbook')).not.toBeInTheDocument();
 
     // The registered bindingId flows through verbatim on click (exact-value proof).
-    await user.click(explain);
+    await user.click(draft);
     expect(dispatchConsumerOverride).toHaveBeenCalledWith(
-      'guid-explain',
+      'guid-draft',
       expect.objectContaining({ slots: expect.objectContaining({ selectionText: 'Hello world' }) })
     );
 
-    // Overflow: the matching whole-doc summarize was ignored (no such button was
-    // ever appended); the matching `compose-defined-terms` DEFAULT overflow action
-    // is now enabled. (FIX #5 removed `compose-summarize-word-changes` from the
-    // selection toolbar registry, so it is no longer an overflow action here.)
+    // Overflow: with Explain/Compare/Defined-terms all retired from the selection
+    // surface, the default overflow is empty — the registered defined-terms and the
+    // non-matching whole-doc summarize both surface nothing here.
     await user.click(screen.getByTestId('compose-ai-toolbar-more'));
-    const definedTerms = await screen.findByTestId('compose-ai-toolbar-overflow-compose-defined-terms');
-    expect(definedTerms).not.toHaveAttribute('aria-disabled', 'true');
-    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize-word-changes')).not.toBeInTheDocument();
-    // The non-matching capability was NOT turned into an action.
+    expect(await screen.findByTestId('compose-ai-toolbar-more-empty')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-defined-terms')).not.toBeInTheDocument();
     expect(screen.queryByTestId('compose-ai-toolbar-overflow-compose-summarize')).not.toBeInTheDocument();
-    expect(within(screen.getByRole('menu')).queryByText('compose-summarize')).not.toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -179,12 +179,10 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
     render(<ActivationHost editor={editor} fetchOverride={fetchOverride} />);
 
-    const explain = await screen.findByTestId('compose-ai-toolbar-compose-explain-clause');
+    const draft = await screen.findByTestId('compose-ai-toolbar-compose-draft-alternative');
     // Give the effect a chance to run and (not) register anything.
     await waitFor(() => expect(fetchOverride).toHaveBeenCalledTimes(1));
-    expect(explain).toBeDisabled();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-compare-to-playbook')).toBeDisabled();
-    expect(screen.getByTestId('compose-ai-toolbar-compose-draft-alternative')).toBeDisabled();
+    expect(draft).toBeDisabled();
     // No error banner/alert rendered anywhere.
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
@@ -203,9 +201,9 @@ describe('useComposeToolbarActivation — activation (E2E DoD row 3)', () => {
 
     render(<ActivationHost editor={editor} fetchOverride={failing} />);
 
-    const explain = await screen.findByTestId('compose-ai-toolbar-compose-explain-clause');
+    const draft = await screen.findByTestId('compose-ai-toolbar-compose-draft-alternative');
     await waitFor(() => expect(failing).toHaveBeenCalledTimes(1));
-    expect(explain).toBeDisabled();
+    expect(draft).toBeDisabled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

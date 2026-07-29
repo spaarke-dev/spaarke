@@ -99,10 +99,12 @@ public class ThreadResolverSeamTests
         var threadId = Guid.NewGuid();
         var matterId = Guid.NewGuid();
 
-        // Anchor read: the send path mapped the regarding onto the record (denormalized ADR-024 family).
+        // Anchor read: the send path mapped the regarding onto the record via the TYPED ADR-024 lookup
+        // (sprk_regardingmatter) — the authoritative anchor the resolver reads (there is no
+        // 'sprk_regardingrecordtype' text field). RB R3 UAT 2026-07-24.
         SetupRetrieve("sprk_communication", commId, Communication(commId,
+            ("sprk_regardingmatter", new EntityReference("sprk_matter", matterId)),
             ("sprk_regardingrecordid", matterId.ToString()),
-            ("sprk_regardingrecordtype", "sprk_matter"),
             ("sprk_regardingrecordname", "Acme v. Widgets")));
 
         DataverseEntity? createdThread = null;
@@ -123,9 +125,10 @@ public class ThreadResolverSeamTests
         createdThread.Should().NotBeNull();
         createdThread!.GetAttributeValue<string>("sprk_name").Should().Be("Re: Acme");
         createdThread.GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeRecordAnchored);
-        // Anchor REUSES the ADR-024 regarding family — NOT a second mechanism / no sprk_anchor* fields.
+        // Anchor REUSES the ADR-024 regarding family via the TYPED lookup — NOT a text type attr, no sprk_anchor*.
         createdThread.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
-        createdThread.GetAttributeValue<string>("sprk_regardingrecordtype").Should().Be("sprk_matter");
+        createdThread.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(matterId);
+        createdThread.Contains("sprk_regardingrecordtype").Should().BeFalse();
         createdThread.Attributes.Keys.Should().NotContain(k => k.StartsWith("sprk_anchor"));
         updates.Should().ContainSingle();
         updates[0]["sprk_communicationthread"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(threadId);

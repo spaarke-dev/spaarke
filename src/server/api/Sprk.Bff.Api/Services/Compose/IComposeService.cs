@@ -73,6 +73,25 @@ public interface IComposeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): builds the
+    /// server DOCX→editor projection from caller-supplied bytes using the SAME single-walk
+    /// <see cref="ComposeDocxProjectionBuilder"/> <see cref="LoadAsync"/> uses internally (F-2 — one
+    /// reader). Used by the <c>POST /api/compose/upload</c> transient-mount door, which reads its
+    /// bytes from <c>ITenantCache</c> rather than SPE, so it cannot call <see cref="LoadAsync"/>
+    /// itself; this thin seam lets it reuse the identical builder/shape instead of a divergent
+    /// projection path. Pure / synchronous — no I/O, no Graph (ADR-007). Fail-closed like the Load
+    /// path: an unreadable or empty source returns <see cref="ComposeProjectionStatus.Failed"/> with
+    /// <c>CanEdit=false</c>, never throws.
+    /// </summary>
+    /// <param name="content">The document's raw bytes (e.g. an Assistant-uploaded <c>.docx</c>).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The SAME <see cref="ComposeDocxProjection"/> shape
+    /// <see cref="LoadComposeDocumentResult.Projection"/> carries.</returns>
+    ComposeDocxProjection ProjectDocument(
+        ReadOnlyMemory<byte> content,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Load an existing document into the Compose workspace. Used by both Path A (open from
     /// an existing <c>sprk_document</c> record — caller passes both
     /// <see cref="LoadComposeDocumentRequest.DocumentRecordId"/> and the resolved SPE

@@ -185,6 +185,10 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
         title={threadNames[props.threadId]}
         regarding={{ entityType, id }}
         onOpenRecord={onOpenRecord}
+        // An email is a sprk_communication row (TimelineMessage.id IS the
+        // sprk_communication GUID) — open it via the SAME record-modal path as
+        // the regarding record (§B UAT 2026-07-27 item 3).
+        onOpenEmail={msg => onOpenRecord('sprk_communication', msg.id)}
       />
     ),
     [currentUserSystemUserId, threadNames, entityType, id, onOpenRecord]
@@ -202,7 +206,6 @@ export const ConversationModal: React.FC<IConversationModalProps> = ({
 
   const overlay = (
     <div className={s.overlay} onMouseDown={handleOverlayMouseDown}>
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
       <div ref={surfaceRef} className={s.surface} role="dialog" aria-modal="true" aria-label="Messages" tabIndex={-1}>
         {/* §B1 (UAT): close "x" pinned to the surface's literal upper-right corner. */}
         <Button

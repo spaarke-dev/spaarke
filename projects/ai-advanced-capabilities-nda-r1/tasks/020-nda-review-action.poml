@@ -3,8 +3,8 @@
   <metadata>
     <title>NDA-REVIEW Action — advisory whole-doc JPS on the Reasoning tier</title>
     <phase>2 NDA Review Capability</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core advisory-quality artifact (north star); JPS Action authoring + output schema + tier assignment; drives all downstream review UX.</rigor-reason>
     <model-tier>opus</model-tier>

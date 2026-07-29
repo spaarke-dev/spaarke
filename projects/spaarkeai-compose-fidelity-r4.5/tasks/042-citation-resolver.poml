@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-4: citation resolver — single label, sub-item depth, and ranges</title>
+    <phase>4 WS-4 Reference layer</phase>
+    <gate>blocked until 041</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New citation-resolution capability in `.cs` on the `bff-api` hot path — maps human citations ↔ paragraph `paraId`(s), the single most valuable analysis output of R4.5. FULL per root CLAUDE.md §8 (modifying `.cs`, tags include `bff-api`, NEW-surface). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Citation-model depth + resolution judgment — sub-item ("4.2(b)(iii)") + contiguous-range ("Sections 4–7") semantics, the single most valuable analysis output; the exact consumer contract is an UNRESOLVED spec question (escalation-gated). High-blast-radius interface decision → Opus.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Builds on the projection payload (040) + persisted map (041) in shared `Services/Compose/` — the same surface 040/041 touch. Sequential within group W4; serialized behind 041.</parallel-reason>
+    <deps>041</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build a citation resolver that maps a human citation ↔ the exact paragraph `paraId`(s), covering three reference
+    shapes: single labels ("Section 4.2"), SUB-ITEM depth ("4.2(b)(iii)"), and CONTIGUOUS RANGES ("Sections 4–7").
+    Expose it to the analysis/citation tool so retrieval + citations are legally precise and stable — today the AI
+    layer anchors only on the opaque `paraId` + raw text + doc-order index (`ComposeService.cs`,
+    `AnnotationReanchorService`) with no human-citation resolution. This is FR-18 (owner clarification: ranges too)
+    and the single most valuable output of R4.5: a citation that resolves to the exact clause and renders exactly as
+    the source. Build on the `paraId → legal-number` map from 040/041; do NOT recompute numbering. The exact consumer
+    contract is an OPEN spec question — see the escalation trigger before finalizing the interface.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose). Expert in the WS-3 numbering model + the WS-4 reference map (040/041), the `paraId` re-anchor layer, and the `Services/Ai/PublicContracts/` facade the analysis/citation tool consumes. Strong on legal-citation grammar (section / sub-item / range). Follow ADRs strictly.</role>
+
+  <goal>
+    A citation resolver in `Services/Compose/` that, given the `paraId → legal-number` map (040/041), resolves a human
+    citation to the correct paragraph `paraId`(s) — and vice versa — for single labels, sub-item depth, and contiguous
+    ranges, exposed to the analysis/citation tool via the projection/`PublicContracts` contract. A seam slice proves
+    all three reference shapes resolve correctly on the corpus (including sub-item and range goldens) and that
+    unresolvable citations return an explicit not-found result, not a fabricated `paraId`.
+  </goal>
+
+  <context>
+    <background>
+      Today the AI layer anchors only on the opaque `paraId` + raw text + doc-order index (`ComposeService.cs` paraId
+      ×47; reanchor by Levenshtein + position; `AnnotationReanchorService.cs:14-22`) — there is NO human-citation
+      resolution. A legal analysis tool must be able to say "per Section 4.2" and resolve it to the exact clause, cite
+      "4.2(b)(iii)" to the exact sub-item, and cite "Sections 4–7" to the contiguous span. WS-3 computed the numbers;
+      040/041 exposed + persisted the `paraId → legal-number` map. This task adds the resolver capability on top. Owner
+      clarification (spec Owner Clarifications: Citation depth): include RANGES too — single labels + sub-item depth
+      ("4.2(b)(iii)") + contiguous ranges ("Sections 4–7"). Design §4 WS-4; spec FR-18. NOTE: the exact API contract
+      the analysis/citation tool consumes (resolver vs flat map vs both) is a spec UNRESOLVED QUESTION — resolve it in
+      design, escalating if the tool's needs are unclear.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/ — a citation resolver capability (human citation ↔ `paraId`(s)) built on the 040/041 reference map (exact file/shape decided in design, gated by escalation)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs — the reference fields (040) + persisted map (041) the resolver consumes</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — the AI-layer anchor today (opaque `paraId` + raw text + doc-order index); the resolver adds the human-citation dimension it lacks</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ — the facade the analysis/citation tool consumes; expose the resolver via this contract (ADR-013), do NOT inject AI internals into Compose</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — `paraId` re-anchor layer (`:14-22`) the resolved `paraId`(s) stay stable against</file>
+      <file role="modify">tests/integration/seam/ — seam slice: single-label + sub-item + range resolution on the corpus, plus the not-found negative case (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">The persisted `paraId → legal-number` map (projection payload + session ledger) — the resolution source the citation resolver maps human references against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-18">The resolver MUST resolve all three reference shapes ↔ `paraId`(s): single labels ("Section 4.2"), sub-item depth ("4.2(b)(iii)"), and contiguous ranges ("Sections 4–7") — on the corpus. Scope: resolution is bidirectional (citation → `paraId`(s) and `paraId` → citation); an unresolvable citation returns an explicit not-found, never a fabricated `paraId`.</constraint>
+    <constraint source="ADR-013">Expose the resolver to the analysis/citation tool via the projection contract / `Services/Ai/PublicContracts/` facade — WS-4 exposes data TO the analysis layer; it MUST NOT inject `IOpenAiClient`/`IPlaybookService`/executor/routing into `Services/Compose/`, and MUST NOT fork `Services/Ai/`. Scope: `Services/Compose/` stays pure (Tier-1 NetArchTest green); consume PublicContracts seams only.</constraint>
+    <constraint source="ADR-007">The resolver stays `byte[]`-in / projection-out territory; no `Microsoft.Graph` above `SpeFileStore`. Scope: resolution operates on the in-memory reference map, not external stores.</constraint>
+    <constraint source="project / §11">The resolver is genuinely NEW surface (see `&lt;justification&gt;`); build it on the 040/041 map — do NOT recompute numbering and do NOT duplicate the WS-3 engine. Scope: one resolver capability, not a family of overlapping handlers.</constraint>
+    <constraint source="ADR-038">Add/extend a seam slice for the three reference shapes + the not-found negative at the KEEP path (`tests/integration/seam/`); NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: the seam resolves real corpus citations, including sub-item and range goldens.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size and report absolute + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB (pure OOXML/string resolution, no new runtime package). Scope: run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Legal-citation resolution (section / sub-item / range); WS-4 reference map; PublicContracts facade exposure; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reference map source" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjection.cs">
+        The `paraId → {computedNumber, numberingLevel, listPath, headingLevel}` fields (040) + persisted map (041) the resolver maps human citations against — the resolver reads this, it does not recompute it.
+      </pattern>
+      <pattern name="AI facade exposure" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">
+        Expose the resolver TO the analysis/citation tool via this facade (ADR-013) — Compose exposes data, never injects AI internals nor forks `Services/Ai/`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-18 + Owner Clarifications (Citation depth = ranges too) + Unresolved Questions (Citation-model API shape), design §4 WS-4, ADR-013/007/038.</step>
+    <step order="1" name="Resolve the consumer contract FIRST">Determine the exact API contract the analysis/citation tool consumes (resolver method vs flat map vs both). This is a spec UNRESOLVED QUESTION — if the tool's needs are unclear, STOP and confirm the interface with the human per the escalation trigger BEFORE writing the resolver.</step>
+    <step order="2" name="Design the citation grammar">Design the resolution grammar for the three shapes: single label ("Section 4.2"), sub-item depth ("4.2(b)(iii)"), contiguous range ("Sections 4–7"). Map each shape onto the 040/041 `paraId → legal-number` data (listPath / computedNumber). Define the not-found result explicitly.</step>
+    <step order="3" name="Implement the resolver">Implement the resolver in `Services/Compose/` on top of the reference map — bidirectional (citation → `paraId`(s), `paraId` → citation). Do NOT recompute numbering; read the 040/041 map. Expose via the projection contract / `PublicContracts` facade (ADR-013).</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Seam slice">Add/extend a seam slice (`tests/integration/seam/`) resolving corpus citations for all three shapes (single-label, sub-item, range goldens) + the not-found negative (unresolvable citation → explicit not-found, no fabricated `paraId`) (ADR-038; no banned mock/DI/ctor tests).</step>
+    <step order="6" name="Build + hygiene">Build BFF; run the Compose suite + new seam; confirm Tier-1 NetArchTest green (no AI-internal injection, no `Services/Ai/` fork). Run `dotnet publish -c Release` and report compressed size + delta vs ~49.63 MB (incl. PDBs). Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 042 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The exact API contract the analysis/citation tool consumes for ranges + sub-items ("4.2(b)(iii)", "Sections 4–7") is an UNRESOLVED QUESTION in the spec (Unresolved Questions — Citation-model API shape). If the tool's needs are unclear (resolver vs flat map vs both) — STOP and confirm the interface with the human per root CLAUDE.md §6 BEFORE finalizing the interface; do not improvise the consumer contract.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The AI layer anchors on the opaque `paraId` + raw text + doc-order index (`ComposeService.cs` paraId ×47; `AnnotationReanchorService.cs:14-22` — reanchor by Levenshtein + position). No human-citation resolution exists anywhere on the read/analysis path (verified via Grep of `Services/Compose/` + `Services/Ai/`).</existing>
+    <extension>No — the existing anchor layer resolves opaque `paraId` ↔ text/position, not human citation ↔ `paraId`. A new resolver capability is needed to map "Section 4.2" / "4.2(b)(iii)" / "Sections 4–7" onto `paraId`(s); no existing surface performs this mapping.</extension>
+    <cost-of-doing-nothing>The analysis/citation tool cannot cite a section by number or resolve "Section 4.2" to the exact clause — retrieval + citations stay anchored on opaque paraIds and raw text, so a legal citation cannot render exactly as the source nor resolve to the exact sub-item/range. This is the single most valuable output of R4.5 left undelivered.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (citation resolver capability, exposed via projection/PublicContracts contract)</output>
+    <output type="test">tests/integration/seam/ (single-label + sub-item + range resolution + not-found seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the corpus + its `paraId → legal-number` map, when "Section 4.2" is resolved, then the resolver returns the exact paragraph `paraId` for clause 4.2.</criterion>
+    <criterion testable="true">Given a sub-item citation "4.2(b)(iii)", when resolved, then the resolver returns the correct paragraph `paraId`(s) at sub-item depth (via `listPath` / `computedNumber`), not just the top-level 4.2.</criterion>
+    <criterion testable="true">Given a contiguous range "Sections 4–7", when resolved, then the resolver returns the `paraId`(s) for the full contiguous span, in document order.</criterion>
+    <criterion testable="true">Given a `paraId`, when reverse-resolved, then the resolver returns its human citation label (bidirectional).</criterion>
+    <criterion testable="true">Negative: an unresolvable citation returns an explicit not-found result — NOT a fabricated or nearest-guess `paraId`.</criterion>
+    <criterion testable="true">The resolver is exposed to the analysis/citation tool via the projection/`PublicContracts` contract; it does NOT inject any AI-internal type into `Services/Compose/` and does NOT fork `Services/Ai/` — Tier-1 NetArchTest stays green (ADR-013).</criterion>
+    <criterion testable="true">Negative: the resolver does NOT reach `Microsoft.Graph` above `SpeFileStore` and does NOT recompute numbering (reads the 040/041 map) — ADR-007 + §11 (no WS-3 duplication).</criterion>
+    <criterion testable="true">A seam slice at the `tests/integration/seam/` KEEP path covers all three reference shapes + the not-found negative; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null test is added (ADR-038).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size reported with ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 042 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-18; design §4 WS-4; owner clarification = ranges too. This is the flagship WS-4 output: "a citation that
+    resolves to the exact clause and renders exactly as the source." Built on 040 (payload fields) + 041 (persisted
+    map) — do NOT re-implement WS-3 numbering. The consumer-contract shape is a spec Unresolved Question (Citation-model
+    API shape) — resolve it in design (step 1), escalating if the analysis tool's needs are unclear. Success criterion
+    #4 (Referenceable) closes on this task passing on the corpus.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

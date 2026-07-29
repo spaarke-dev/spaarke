@@ -673,6 +673,15 @@ public record AnalysisAction
     public AiModelTier? ModelTier { get; init; }
 
     /// <summary>
+    /// Whether this Action opts into reference-knowledge grounding (<c>sprk_allowsknowledge</c>). When
+    /// true, the linear <see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.ActionRunner"/> retrieves
+    /// grounding references from <c>spaarke-rag-references</c> (e.g. the firm NDA standard KNW-011) and
+    /// injects them into the prompt before the completion — the linear-path equivalent of the playbook
+    /// node executor's L1 retrieval. ai-advanced-capabilities-nda-r1 follow-up.
+    /// </summary>
+    public bool AllowsKnowledge { get; init; }
+
+    /// <summary>
     /// Structured-Outputs JSON Schema for the action (sprk_outputschemajson, multiline text).
     /// Verbatim contents of the Dataverse field — supplied to
     /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> as the

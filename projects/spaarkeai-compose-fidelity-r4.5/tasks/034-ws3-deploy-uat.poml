@@ -1,0 +1,144 @@
+<task id="034" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-3: deploy + UAT — numbering identical to Word (golden harness)</title>
+    <phase>3 WS-3 Numbering</phase>
+    <gate>blocked until 033</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + manual UAT — no new implementation (all WS-3 code shipped in 030-033). STANDARD; the `deploy`/`ui-test` tags still require the `&lt;ui-tests&gt;` UAT evidence and a coordinated deploy, but there is no `.cs`/`.ts` change to code-review.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy execution + structured manual UAT against golden Word labels; procedural, no design judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W3-deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate on the shared `sprk_spaarkeai` web resource + BFF — must serialize with any other Compose deploy; single deploy contention point per plan.md group W3-deploy.</parallel-reason>
+    <deps>033</deps>
+    <tags>deploy,compose,ui-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the completed WS-3 numbering work (030-033) and run UAT confirming spec success criterion 3
+    (numbering-exact) on the corpus (design §5; spec NFR-02, Success Criterion 3). Deploy the BFF + the Compose
+    client web resource, coordinating the shared `sprk_spaarkeai` web resource and running `/conflict-check` first.
+    Then UAT: upload the NDA corpus doc (and the heading-style + multi-level exemplars) and confirm clause/section/
+    heading/list numbers render IDENTICAL to Word — no "1." collapse, no dropped heading numbers, multi-level
+    "4.2.1" correct — in both light and dark mode (ADR-021). Any corpus doc's numbering ❌ is a release blocker.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer running a coordinated Compose deploy + numbering UAT. Knows the `bff-deploy` +
+    `code-page-deploy` skills, the shared `sprk_spaarkeai` deploy-contention risk (coordinate deploys), and the
+    golden-label UAT model (computed number == Word's displayed number, per corpus doc). Understands that
+    numbering-exactness (NFR-02) is a release blocker — a single ❌ stops sign-off.
+  </role>
+
+  <goal>
+    WS-3 deployed to the shared dev environment and a UAT record confirming every corpus numbering exemplar renders
+    identical to Word — interrupted clauses continue (no "1." collapse), heading-style numbers present (not
+    dropped), multi-level "4.2.1" correct — in light and dark mode. Success criterion 3 (numbering-exact) is
+    verified on the corpus; any ❌ is recorded as a release blocker (not signed off).
+  </goal>
+
+  <context>
+    <background>
+      030-033 built + tested the WS-3 numbering engine, render atom, and round-trip agreement. This deploy gate
+      puts it in front of the real editor on the shared `sprk_spaarkeai` environment and confirms the
+      numbering-exact success criterion on the corpus by uploading the actual exemplars (the NDA doc is the
+      provoking evidence from R4 UAT — numbered sections rendered "1." repeated). Recall the R4 deploy-contention:
+      `sprk_spaarkeai` is a shared dev web resource — coordinate the deploy and run `/conflict-check` first.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/{nda-interrupted-clauses,heading-style-numbering,multilevel-1-1-1}.docx + corpus-manifest.md — the exemplars + golden Word labels (task 001) UAT compares against.</file>
+      <file role="deploy">src/server/api/Sprk.Bff.Api/ — BFF deploy (`bff-deploy` skill).</file>
+      <file role="deploy">src/client/shared/Spaarke.Compose.Components/ → the `sprk_spaarkeai` web resource (`code-page-deploy` skill).</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — Success Criterion 3 (numbering-exact, release blocker on ❌), NFR-02.</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5 (corpus &amp; verification — golden numbering-exact per doc).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">WS-3 numbering slice complete + round-trip green — the thing this deploys + UATs.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project / deploy coordination">The deploy MUST coordinate the shared `sprk_spaarkeai` web resource + run `/conflict-check` BEFORE deploying. Scope: serialize with any other active Compose/SpaarkeAi deploy (R4 deploy-contention); do not clobber another project's web resource.</constraint>
+    <constraint source="spec / NFR-02">UAT MUST confirm every corpus numbering exemplar renders identical to Word (golden label). Scope: upload the actual exemplars; verify no "1." collapse, no dropped heading numbers, correct multi-level "4.2.1"; a single ❌ is a release blocker.</constraint>
+    <constraint source="ADR-021">UAT MUST include a dark-mode check. Scope: numbers render correctly in both light and dark themes.</constraint>
+    <constraint source="project / no new implementation">This task deploys + UATs only — it introduces no code change. Scope: if UAT surfaces a numbering defect, file it back to the relevant WS-3 task (030/031/032), do NOT patch inline here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Coordinated Compose deploy (bff-deploy + code-page-deploy on shared sprk_spaarkeai); golden-label numbering UAT; NFR-02 release-blocker gate</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Coordinated shared-resource deploy" location="projects/spaarkeai-compose-fidelity-r4.5/CLAUDE.md (Coordination)">
+        `sprk_spaarkeai` is a shared dev web resource with known deploy contention — run `/conflict-check`, coordinate the deploy window, then `bff-deploy` + `code-page-deploy`.
+      </pattern>
+      <pattern name="Golden-label UAT" location="tests/fixtures/compose-corpus/corpus-manifest.md">
+        The manifest records the exact Word-displayed labels per exemplar (task 001). UAT compares the rendered atom against those golden values — a mismatch is a ❌ release blocker.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON: deploy + manual UAT, no new implementation / 📖 PROTOCOL STEPS). Load spec Success Criterion 3 + NFR-02 + design §5.</step>
+    <step order="1" name="Conflict-check">Run `/conflict-check` to confirm no other project is mid-deploy on `Services/Compose/` / `sprk_spaarkeai`.</step>
+    <step order="2" name="Deploy BFF">Deploy the BFF via `bff-deploy`; confirm the publish-size report (≤60 MB, ~0 delta vs ~49.63 MB) from the WS-3 tasks holds.</step>
+    <step order="3" name="Deploy the client web resource">Deploy the Compose client to the shared `sprk_spaarkeai` web resource via `code-page-deploy`, coordinating the deploy window.</step>
+    <step order="4" name="UAT the numbering exemplars">Upload the NDA interrupted-clause, heading-style, and multi-level exemplars; compare each rendered number to the manifest golden Word labels. Confirm no "1." collapse, no dropped heading numbers, multi-level "4.2.1" correct. Repeat in dark mode (ADR-021).</step>
+    <step order="5" name="Record UAT + gate">Record the UAT result (per exemplar ✅/❌) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`. Any ❌ → STOP, do not sign off, file back to the WS-3 task.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 034 to ✅ only if all corpus numbering is ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any corpus doc's numbering renders ❌ in UAT (a "1." collapse, a dropped heading number, or a wrong multi-level label) — STOP and do NOT sign off. Numbering-exactness (NFR-02 / Success Criterion 3) is a release blocker; file the defect back to the responsible WS-3 task (030/031/032) rather than patching inline or accepting the divergence.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="NDA corpus numbering identical to Word">
+      <steps><step>Upload `nda-interrupted-clauses.docx` to Compose (via the server projection).</step><step>Compare each clause/section number to Word (and the manifest golden labels).</step></steps>
+      <expected>Every number matches Word; interrupted clauses continue (no "1." collapse).</expected>
+    </test>
+    <test name="Heading-style + multi-level render">
+      <steps><step>Upload `heading-style-numbering.docx` and `multilevel-1-1-1.docx`.</step><step>Inspect heading numbers and multi-level labels.</step></steps>
+      <expected>Heading-style numbers present (not dropped); multi-level renders "1" / "1.1" / "1.1.1" correctly.</expected>
+    </test>
+    <test name="Dark-mode (ADR-021)">
+      <steps><step>Toggle dark mode and re-inspect all three exemplars.</step></steps>
+      <expected>Numbers render identical + correct contrast in both light and dark.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="bff-deploy">Deploy the BFF API.</tool>
+    <tool name="code-page-deploy">Deploy the Compose client web resource to sprk_spaarkeai.</tool>
+    <tool name="ui-test">Browser-based numbering UAT.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-fidelity-r4.5/notes/ws3-uat-numbering.md (per-exemplar ✅/❌ numbering UAT record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF + Compose client deployed to the shared `sprk_spaarkeai` environment with `/conflict-check` run first and the publish-size report confirmed (≤60 MB, ~0 delta).</criterion>
+    <criterion testable="true">Uploading the NDA / heading-style / multi-level exemplars renders numbers identical to Word (manifest golden labels) — no "1." collapse, no dropped heading numbers, multi-level "4.2.1" correct.</criterion>
+    <criterion testable="true">Numbers render correctly in both light and dark mode (ADR-021).</criterion>
+    <criterion testable="true">Negative: any corpus doc's numbering ❌ stops sign-off (task not marked ✅) and is filed back to the responsible WS-3 task — not patched inline.</criterion>
+    <criterion testable="true">The UAT result (per exemplar ✅/❌) is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 034 as ✅ only when all corpus numbering is ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    WS-3 deploy gate. The NDA doc is the original R4-UAT provoking evidence (numbers rendered "1." repeated) — this
+    UAT is the direct confirmation the flagship fixed it. If UAT ❌, the defect goes back to 030/031/032; this task
+    does not implement. TASK-INDEX.md + current-task.md are owned by the main session (sub-agent write boundary).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

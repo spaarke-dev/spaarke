@@ -66,9 +66,11 @@ const NEW_TEXT = 'The Supplier shall indemnify the Customer without any liabilit
 const SPE_ID = 'drive-item-doc-1';
 const DRIVE_ID = 'drive-1';
 
-// A minimal real .docx so mammoth import succeeds cleanly (falls back to empty bytes
-// if the fixture path can't be resolved — the no-target insertion redline renders
-// either way).
+// A minimal real .docx retained bytes fixture — kept for `content`/save-baseline fidelity
+// even though task 013 (F-2 "one reader") means the EDITOR no longer decodes these bytes
+// client-side; the mocked Load response below supplies `projection` directly instead (falls
+// back to empty bytes if the fixture path can't be resolved — the no-target insertion
+// redline renders either way, since it does not depend on the loaded document's own text).
 function loadSampleDocxBase64(): string {
   try {
     const p = path.resolve(__dirname, '../../../../../../tests/integration/Spe.Integration.Tests/fixtures/sample.docx');
@@ -119,7 +121,10 @@ function sessionFromUrl(url: string): string {
 }
 
 const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit): Promise<Response> => {
-  // Compose Load (stored document).
+  // Compose Load (stored document). Task 013 (F-2 "one reader"): the client-side mammoth reader is
+  // DELETED, so the mocked response MUST carry `projection` — a real BFF always does (tasks
+  // 010/011/012) — otherwise the editor renders the error/unavailable state, not an editable
+  // ProseMirror surface, and every assertion below that waits on `role="textbox"` times out.
   if (url.includes('/api/compose/documents/') && !url.includes('/save')) {
     return {
       ok: true,
@@ -136,6 +141,13 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
         anchoredAnnotations: [],
         definedTermsTracking: [],
         actionHistory: [],
+        projection: {
+          status: 'success',
+          canEdit: true,
+          html: '<p data-paraid="AB12CD34">Sample document body.</p>',
+          warnings: [],
+          schemaVersion: 'compose-html-v1',
+        },
       }),
     } as unknown as Response;
   }

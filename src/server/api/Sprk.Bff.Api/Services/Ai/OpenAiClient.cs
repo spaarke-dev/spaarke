@@ -67,7 +67,16 @@ public class OpenAiClient : IOpenAiClient
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         var credential = new AzureKeyCredential(_options.OpenAiKey);
-        _client = new AzureOpenAIClient(endpoint, credential);
+        // Raise the per-attempt network timeout above the SDK default (100s). The Reasoning tier
+        // (gpt-5-reasoning) routinely needs 2-4 minutes on a full document; at 100s the call is
+        // cancelled + retried 3× and surfaces to the user as "couldn't run that action" (observed
+        // 2026-07-27 on the HELIO NDA review). Fast/Standard tiers finish well within this, so one
+        // global value is safe. Configurable via DocumentIntelligence:OpenAiNetworkTimeoutSeconds.
+        var clientOptions = new AzureOpenAIClientOptions
+        {
+            NetworkTimeout = TimeSpan.FromSeconds(_options.OpenAiNetworkTimeoutSeconds),
+        };
+        _client = new AzureOpenAIClient(endpoint, credential, clientOptions);
 
         // Register with circuit breaker registry
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.AzureOpenAI);
@@ -732,6 +741,48 @@ public class OpenAiClient : IOpenAiClient
     /// <returns>The raw JSON string response conforming to the schema.</returns>
     /// <exception cref="OpenAiCircuitBrokenException">Thrown when circuit breaker is open.</exception>
     /// <exception cref="InvalidOperationException">Thrown when response is empty.</exception>
+    /// <summary>
+    /// True when <paramref name="deploymentName"/> is the configured Reasoning-tier deployment
+    /// (<see cref="DocumentIntelligenceOptions.ReasoningModel"/>). Reasoning models (o-series / gpt-5)
+    /// require a distinct request shape — see <see cref="ResolveEffectiveTemperature"/> and the
+    /// max-output-tokens handling in <see cref="GetStructuredCompletionRawAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// ai-advanced-capabilities-nda-r1 follow-up (post-UAT). A config-grounded, deployment-name signal
+    /// (ADR-039: tier→deployment mapping is config, not catalog) so it covers every caller of this client,
+    /// not just the ActionRunner path. <c>internal static</c> + pure so the decision is unit-testable
+    /// without a live Azure call (the actual on-the-wire omission is only verifiable end-to-end).
+    /// </remarks>
+    internal static bool IsReasoningDeployment(string deploymentName, string? reasoningModel) =>
+        !string.IsNullOrWhiteSpace(reasoningModel)
+        && string.Equals(deploymentName, reasoningModel, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the temperature value to send on a structured completion, or <c>null</c> to OMIT the
+    /// <c>temperature</c> parameter from the request entirely.
+    /// </summary>
+    /// <remarks>
+    /// Reasoning-tier deployments (o-series / gpt-5) REJECT any non-default temperature — the Azure OpenAI
+    /// API returns 400 <c>"Only the default (1) value is supported"</c> when <c>temperature</c> is present
+    /// at all, even at <c>0.0</c>. So for the configured reasoning model the request must omit the
+    /// parameter (this returns <c>null</c>); every other model keeps the deterministic-structured default
+    /// (<c>0.0</c> when the caller passes nothing).
+    /// </remarks>
+    internal static float? ResolveEffectiveTemperature(
+        string deploymentName,
+        string? reasoningModel,
+        float? requestedTemperature)
+    {
+        if (IsReasoningDeployment(deploymentName, reasoningModel))
+        {
+            return null; // reasoning model — omit temperature
+        }
+
+        // Wave B-G9c1 (B6): non-reasoning structured output defaults to 0.0 for determinism,
+        // matching GetStructuredCompletionAsync<T> / StreamStructuredCompletionAsync.
+        return requestedTemperature ?? 0.0f;
+    }
+
     public async Task<string> GetStructuredCompletionRawAsync(
         string prompt,
         BinaryData jsonSchema,
@@ -743,13 +794,11 @@ public class OpenAiClient : IOpenAiClient
     {
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
-        // Wave B-G9c1 (B6) fix: default to 0.0f for deterministic structured output,
-        // matching sibling structured methods (GetStructuredCompletionAsync<T>,
-        // StreamStructuredCompletionAsync) which both hardcode Temperature=0.
-        // Callers (typically the 8 tool handlers that resolve a per-action override
-        // from sprk_analysisaction.sprk_temperature) pass an explicit value when
-        // non-deterministic output is desired.
-        var effectiveTemperature = temperature ?? 0.0f;
+        var isReasoning = IsReasoningDeployment(deploymentName, _options.ReasoningModel);
+        // Callers (typically the 8 tool handlers that resolve a per-action override from
+        // sprk_analysisaction.sprk_temperature) pass an explicit value when non-deterministic output is
+        // desired. Reasoning-tier deployments (gpt-5 / o-series) omit it (ResolveEffectiveTemperature → null).
+        var effectiveTemperature = ResolveEffectiveTemperature(deploymentName, _options.ReasoningModel, temperature);
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -758,9 +807,24 @@ public class OpenAiClient : IOpenAiClient
                 schemaName,
                 jsonSchema,
                 jsonSchemaIsStrict: true),
-            MaxOutputTokenCount = effectiveMaxTokens,
-            Temperature = effectiveTemperature
         };
+
+        // Reasoning models (gpt-5 / o-series) reject BOTH knobs, so the request must OMIT each:
+        //  - temperature: any value (even 0.0) → 400 "Only the default (1) value is supported".
+        //  - max tokens: the OpenAI/Azure SDK serializes ChatCompletionOptions.MaxOutputTokenCount as
+        //    `max_tokens` (verified live at api-version 2025-04-01-preview), which these models 400 with
+        //    "Unsupported parameter: 'max_tokens' ... use 'max_completion_tokens' instead". There is no
+        //    SDK surface here that emits max_completion_tokens, so we omit the cap entirely — the model
+        //    uses its own default max_completion_tokens and the strict output schema bounds the JSON body.
+        //    (This was the actual live "Sorry — I couldn't run that action" on the NDA Review path.)
+        if (!isReasoning)
+        {
+            chatOptions.MaxOutputTokenCount = effectiveMaxTokens;
+        }
+        if (effectiveTemperature.HasValue)
+        {
+            chatOptions.Temperature = effectiveTemperature.Value;
+        }
 
         var messages = new List<ChatMessage>
         {

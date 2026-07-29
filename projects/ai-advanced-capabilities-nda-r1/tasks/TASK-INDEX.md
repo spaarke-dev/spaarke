@@ -10,10 +10,10 @@
 |----|-------|-------|--------|------|-------|------|--------|----------|
 | 001 | ADR-039 advisory-tier amendment (MERGE GATE) | 0 | ✅ | none | FULL | opus | high | — (.claude/) |
 | 010 | Model-tier last-mile | 1 | ✅ | 001 | FULL | sonnet | xhigh | — |
-| 011 | Runtime model picker | 1 | 🔄 | 010 | FULL | sonnet | high | A |
-| 012 | Seed NDA standard + grounding pin | 1 | 🔄 | 001 | STANDARD | sonnet | high | A |
-| 013 | Reasoning deployment provisioning | 1 | ⛔ | 010 | STANDARD | sonnet | high | A |
-| 020 | NDA-REVIEW Action (advisory, Reasoning) | 2 | 🔄 | 001,010,012 | FULL | opus | high | — |
+| 011 | Runtime model picker | 1 | ✅ | 010 | FULL | sonnet | high | A |
+| 012 | Seed NDA standard + grounding pin | 1 | ✅ | 001 | STANDARD | sonnet | high | A |
+| 013 | Reasoning deployment provisioning | 1 | ✅ | 010 | STANDARD | sonnet | high | A |
+| 020 | NDA-REVIEW Action (advisory, Reasoning) | 2 | ✅ | 001,010,012 | FULL | opus | high | — |
 | 021 | NDA-STANDARD-SUMMARY Action (UC3) | 2 | ✅ | 012,020 | STANDARD | sonnet | high | B |
 | 022 | Bindings + Review-NDA card + classification | 2 | ✅ | 020 | FULL | sonnet | high | — |
 | 023 | Whole-doc review orchestration (fan-out) | 2 | ✅ | 020 | FULL | opus | high | — |
@@ -27,9 +27,9 @@
 | 050 | Eval harness + closed set | 5 | ✅ | 020 | STANDARD | sonnet | high | E |
 | 051 | Golden-utterance dispatch eval | 5 | ✅ | 022 | STANDARD | sonnet | high | E |
 | 052 | Grounding tenant-pin integration test | 5 | ✅ | 012 | STANDARD | sonnet | high | E |
-| 060 | Deploy (BFF/code-page/Dataverse/index) | 6 | 🔲 | all impl+eval | FULL | sonnet | high | — |
-| 061 | UI tests end-to-end | 6 | 🔲 | 060 | STANDARD | sonnet | high | — |
-| 090 | Project wrap-up | 6 | 🔲 | 060,061 | FULL | sonnet | high | — |
+| 060 | Deploy (BFF/code-page/Dataverse/index) | 6 | ✅ | all impl+eval | FULL | sonnet | high | — |
+| 061 | UI tests end-to-end | 6 | ✅ | 060 | STANDARD | sonnet | high | — |
+| 090 | Project wrap-up | 6 | ✅ | 060,061 | FULL | sonnet | high | — |
 
 ## Critical path
 
@@ -89,6 +89,16 @@ Phase 6:
 
 **How to execute a parallel wave:** confirm all prerequisites are ✅, then invoke the Skill tool with one
 `task-execute` invocation per task in the wave, in ONE message. Wait for the wave to complete before the next.
+
+## Status reconciliation (2026-07-28)
+
+Tasks **011 / 012 / 013 / 020** were completed through the UAT follow-up commit wave (not the formal parallel-wave dispatch) and **deployed 2026-07-28 12:15 UTC**; their index statuses were stale (🔄/⛔) and are now ✅. Empirical verification this session (live `az`/`pac` access to spaarkedev1 — the 2026-07-22 session lacked it):
+- **011** — picker in `ConversationPane.tsx`/`ConversationPaneChrome.tsx`, override composition (`06317bbbc`).
+- **012** — KNW-011 seeded (8 chunks, `tenantId=system`, `documentType=legal`); NFR-06 OR-clause tenant-pin fix on master, **owner-approved** (`9176ff25b`); reproduced empirically: bare-tenant filter → 0 chunks, `(tenant or 'system')` → 8 chunks. `ReferenceRetrievalService.cs:316`.
+- **013** — `gpt-5-reasoning` deployment live on `spaarke-openai-dev` (smoke: `REASONING-OK`, finish:stop); `DocumentIntelligence__ReasoningModel=gpt-5-reasoning` set on `spaarke-bff-dev`; request-shape/timeout fixes deployed (`82c087a31`, `0786ebecd`).
+- **020** — `infra/dataverse/actions/nda-review.action.json`: `modelTier:Reasoning`, `outputDeterminism:advisory`, temp 0.3, closed schema `{overallRisk, flaggedSections[sectionRef,quotedText,riskLevel,explanation,standardRef]}`, prompt carries not-legal-advice + citation + decline-if-unverifiable. Grounding empirically non-zero. (Formal `jps-validate` run pending in wrap-up.)
+
+⚠️ **Re-UAT note for owner**: the `9176ff25b` commit **de-embedded the standard from the prompt** AND fixed the tenant pin — meaning the NDA-REVIEW deployed today is the **first version that is actually RAG-grounded on the 8-chunk KNW-011 standard** (prior UAT ran on the prompt-embedded standard / silently-zero grounding). Output character may have shifted — worth a fresh UAT pass.
 
 ## Notes
 - **001 is a human-review merge gate** (governance / high blast radius) — execute interactively, not autonomously (CLAUDE.md §6/§6.5).

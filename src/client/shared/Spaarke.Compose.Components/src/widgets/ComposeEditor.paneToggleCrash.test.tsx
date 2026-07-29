@@ -27,10 +27,11 @@
  */
 
 import * as React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 import { ComposeEditor, type ComposeEditorHandle } from './ComposeEditor';
+import type { ComposeServerProjection } from '../types/compose-contracts';
 
 // ComposeAiToolbar (rendered inside the BubbleMenu) calls useAuth(); stub it — this test
 // never dispatches an action. Mirrors ComposeEditor.dirtyOnMount.test.tsx.
@@ -44,7 +45,8 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
-// Resolve the mammoth import synchronously (jsdom has no mammoth WASM path).
+// Regression guard only (task 013): production no longer imports `docxToTipTapHtml` or
+// `stampParaIds`. The editor mounts via the `projection` prop below, not this bridge.
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: jest.fn(async () => ({
     html: '<p>Loaded document body for the pane-toggle crash guard.</p>',
@@ -62,53 +64,89 @@ function docxBytesFixture(totalLen = 8): ArrayBuffer {
   return buf.buffer;
 }
 
-function renderEditor() {
+// Task 013 (F-2 "one reader"): the client-side mammoth reader is DELETED — the editor now
+// requires a server `projection` to mount the editable surface at all.
+const PANE_TOGGLE_PROJECTION: ComposeServerProjection = {
+  status: 'success',
+  canEdit: true,
+  html: '<p data-paraid="AB12CD34">Loaded document body for the pane-toggle crash guard.</p>',
+  warnings: [],
+  schemaVersion: 'compose-html-v1',
+};
+
+const FINDING = {
+  sectionRef: 'Paragraph 1 (p. 1)',
+  quotedText: 'Loaded document body for the pane-toggle crash guard.',
+  riskLevel: 'High',
+  explanation: 'A flagged clause.',
+};
+
+function renderEditor(summaryOpen: boolean) {
   const ref = React.createRef<ComposeEditorHandle>();
-  render(
+  const reviewSummary = {
+    open: summaryOpen,
+    hasFindings: true,
+    onToggle: jest.fn(),
+    findings: [FINDING],
+    placementFailureCount: 0,
+  };
+  const view = render(
     <FluentProvider theme={webLightTheme}>
       <PaneEventBusProvider>
         <ComposeEditor
           ref={ref}
           docxBytes={docxBytesFixture(8)}
+          projection={PANE_TOGGLE_PROJECTION}
           // Transient draft, no imports — the crash is import-independent.
           documentRef={{ speDriveItemId: '', fileName: 'Pane-toggle guard.docx' }}
           sessionId="session-pane-toggle"
+          reviewSummary={reviewSummary}
         />
       </PaneEventBusProvider>
     </FluentProvider>
   );
-  return ref;
+  const rerenderWith = (open: boolean): void =>
+    view.rerender(
+      <FluentProvider theme={webLightTheme}>
+        <PaneEventBusProvider>
+          <ComposeEditor
+            ref={ref}
+            docxBytes={docxBytesFixture(8)}
+            projection={PANE_TOGGLE_PROJECTION}
+            documentRef={{ speDriveItemId: '', fileName: 'Pane-toggle guard.docx' }}
+            sessionId="session-pane-toggle"
+            reviewSummary={{ ...reviewSummary, open }}
+          />
+        </PaneEventBusProvider>
+      </FluentProvider>
+    );
+  return { ref, rerenderWith };
 }
 
-describe('ComposeEditor — P1: toggling the Comments FAB with a live BubbleMenu does not crash', () => {
-  // NOTE (UAT round-4): the Styles FAB was removed per user request; the Comments FAB alone still
-  // exercises the same null↔<div> sibling toggle that the BubbleMenu-last-child fix guards against.
-
-  it('opens the Comments pane without an insertBefore DOM error', async () => {
-    renderEditor();
+// UAT round-6 #3b: the Comments FAB (the original trigger) was REMOVED. This guard now exercises the
+// SAME null↔<div> sibling toggle via the Review Summary panel (round-5 #1 — it renders in the editor's
+// top region, conditional on `reviewSummary.open`), which is exactly the kind of conditional-sibling
+// change the BubbleMenu-last-child fix protects.
+describe('ComposeEditor — P1: toggling an editor pane with a live BubbleMenu does not crash', () => {
+  it('opens the Review Summary pane without an insertBefore DOM error', async () => {
+    renderEditor(true);
     await screen.findByRole('textbox'); // editor + BubbleMenu mounted
-
-    // Before the fix, this click threw during React commit
-    // ("NotFoundError: The child can not be found in the parent.").
-    fireEvent.click(screen.getByTestId('compose-comments-toggle'));
-
-    await waitFor(() => expect(screen.getByTestId('compose-comment-thread-panel')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId('nda-review-summary-panel')).toBeInTheDocument());
+    // The editor is still mounted and healthy (no WidgetErrorBoundary swap-out).
+    expect(screen.getByRole('textbox')).toBeInTheDocument();
   });
 
-  it('toggles the Comments pane open/closed repeatedly without crashing', async () => {
-    renderEditor();
+  it('toggles the Review Summary pane open/closed repeatedly without crashing', async () => {
+    const { rerenderWith } = renderEditor(true);
     await screen.findByRole('textbox');
-
-    const comments = screen.getByTestId('compose-comments-toggle');
+    await screen.findByTestId('nda-review-summary-panel');
 
     // Each toggle is a null↔<div> sibling change that previously could resolve its anchor to the
     // detached BubbleMenu node.
-    fireEvent.click(comments);
-    await screen.findByTestId('compose-comment-thread-panel');
-    fireEvent.click(comments);
-    await waitFor(() => expect(screen.queryByTestId('compose-comment-thread-panel')).not.toBeInTheDocument());
-    fireEvent.click(comments);
-    await screen.findByTestId('compose-comment-thread-panel');
+    rerenderWith(false);
+    await waitFor(() => expect(screen.queryByTestId('nda-review-summary-panel')).not.toBeInTheDocument());
+    rerenderWith(true);
+    await screen.findByTestId('nda-review-summary-panel');
 
     // The editor is still mounted and healthy (no WidgetErrorBoundary swap-out).
     expect(screen.getByRole('textbox')).toBeInTheDocument();

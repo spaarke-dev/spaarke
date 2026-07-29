@@ -230,8 +230,23 @@ export function composeSessionCommentThreadsToAnchoredComments(
     if (!span) continue;
 
     const start = resolveRunAnchor(doc, span.from);
-    const end = resolveRunAnchor(doc, span.to);
-    if (!start || !end || start.paraId !== end.paraId) continue;
+    // The mark starts in a non-paragraph block (e.g. a heading with no paraId) — cannot anchor a
+    // single-paragraph comment there. Do NOT guess a different paragraph (I-7). Skip.
+    if (!start) continue;
+
+    // A ComposeAnchoredComment is single-paragraph (paraId + run-local range). Advisory REVIEW comments,
+    // though, routinely span a long multi-sentence excerpt that crosses paragraph boundaries — the old
+    // `start.paraId !== end.paraId → continue` DROPPED every such comment, so NOTHING reached Word
+    // (UAT round-3, 2026-07-27: server received 0 comments on the create-on-save path). Instead, CLAMP the
+    // range to the START paragraph the comment demonstrably begins in: anchor from the mark's start to the
+    // end of that paragraph's inline content when the mark extends past it. The comment marker still sits
+    // on the flagged clause's start; we never guess across a boundary. When the mark already ends inside
+    // the start paragraph, the exact span is used unchanged.
+    const $from = doc.resolve(span.from);
+    const paraEnd = $from.end($from.depth); // end position of the start paragraph's inline content
+    const clampedTo = Math.min(span.to, paraEnd);
+    const end = resolveRunAnchor(doc, clampedTo > span.from ? clampedTo : paraEnd);
+    if (!end || start.paraId !== end.paraId) continue; // defensive: the clamp must land in the same paragraph
 
     const range = {
       start: { runIndex: start.runIndex, offset: start.offset },

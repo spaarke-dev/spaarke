@@ -169,6 +169,21 @@ function menuComposeOpen() {
   };
 }
 
+/**
+ * A SEEDLESS compose widget_load. With a `source` marker it is a known source-only re-activation
+ * (add-to-DMS / reporting-email / welcome) that legitimately targets the ACTIVE compose tab; WITHOUT
+ * one it is an ambiguous/new open that must mint a NEW tab (never clobber an open analysis) — the
+ * tab-independence UAT fix.
+ */
+function seedlessComposeOpen(source?: string) {
+  return {
+    type: 'widget_load' as const,
+    widgetType: 'compose',
+    widgetData: source ? { source } : {},
+    displayName: 'Compose',
+  };
+}
+
 const keepAliveHosts = () => screen.queryAllByTestId('workspace-compose-keepalive');
 const lastPatchComposeTabs = () => {
   const last = recordedPatches[recordedPatches.length - 1];
@@ -267,5 +282,47 @@ describe('WorkspacePane — multiple Compose tabs (spaarkeai-compose-r2)', () =>
 
     await waitFor(() => expect(keepAliveHosts()).toHaveLength(2));
     await waitFor(() => expect(lastPatchComposeTabs()).toHaveLength(2));
+  });
+
+  // ── Tab independence (UAT) ────────────────────────────────────────────────
+  it('a SEEDLESS compose open with NO source marker MINTS a new tab — does not clobber the active analysis tab', async () => {
+    const { bus } = renderPane();
+
+    // An open analysis (e.g. an NDA review) is the active compose tab.
+    await act(async () => {
+      bus.dispatch('workspace', composeDraftOpen('nda-analysis@t1'));
+    });
+    await waitFor(() => expect(keepAliveHosts()).toHaveLength(1));
+
+    // A seedless compose open with NO `source` marker arrives (the bug: this used to adopt +
+    // OVERWRITE the active NDA tab). It must now mint a NEW independent tab instead.
+    await act(async () => {
+      bus.dispatch('workspace', seedlessComposeOpen());
+    });
+
+    await waitFor(() => expect(keepAliveHosts()).toHaveLength(2));
+    await waitFor(() => expect(lastPatchComposeTabs()).toHaveLength(2));
+    // The NDA analysis tab's content SURVIVES (was not overwritten).
+    const hostFor = (ledgerRef: string) =>
+      keepAliveHosts().find((h) => within(h).queryByText(ledgerRef)) ?? null;
+    expect(hostFor('nda-analysis@t1')).not.toBeNull();
+  });
+
+  it('a SEEDLESS compose open WITH a source marker re-activates the active tab (add-to-DMS behavior preserved)', async () => {
+    const { bus } = renderPane();
+
+    await act(async () => {
+      bus.dispatch('workspace', composeDraftOpen('nda-analysis@t1'));
+    });
+    await waitFor(() => expect(keepAliveHosts()).toHaveLength(1));
+
+    // A source-marked seedless re-activation (add-to-DMS acts on the CURRENT doc) reuses the
+    // active compose tab — NO new tab, no duplicate.
+    await act(async () => {
+      bus.dispatch('workspace', seedlessComposeOpen('compose-add-to-dms'));
+    });
+
+    await waitFor(() => expect(lastPatchComposeTabs()).toHaveLength(1));
+    expect(keepAliveHosts()).toHaveLength(1);
   });
 });
