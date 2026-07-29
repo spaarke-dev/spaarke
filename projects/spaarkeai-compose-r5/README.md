@@ -1,5 +1,7 @@
 # Spaarke Compose R5 — Editing Completeness (deferred scope)
 
+> **Portfolio**: [Project #695](https://github.com/spaarke-dev/spaarke/issues/695) · Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — registered 2026-07-28 via `/devops-project-register`.
+
 > **Status**: 📋 PLANNED — deferred scope captured during R4 (`spaarkeai-compose-r4`), 2026-07-23. **Revised 2026-07-28**: read/reference fidelity (incl. G6) carved out into `spaarkeai-compose-fidelity-r4.5` — see the ⚠️ note below. **R4 is now merged to master.**
 > **Origin**: R4 (Shadow Document Architecture) delivered the engine + save-path foundation and ships
 > **error-free with documented functional limits**. R5 implements those limits. The owner decision (2026-07-23):
