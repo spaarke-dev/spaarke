@@ -274,6 +274,20 @@ public sealed class ComposeShadowPatchEngine
                         ApplySetBlockAttrList(setAttr);
                         break;
 
+                    // R5 task 012 (G12 / FR-11) — reconcile a PRE-EXISTING imported tracked change by its native
+                    // w:id: accept-ins strips the w:ins wrapper keeping the run, accept-del removes the run;
+                    // reject is the inverse. This is exactly the case the task-030 escalation guard REFUSED with
+                    // TrackedChangeReconciliationUnsupported — a deterministic id-addressed accept/reject is
+                    // Word-valid (NFR-07) and never text-searches (I-7). Runs in the first pass (it mutates runs
+                    // WITHIN a paragraph, like the inline ops), before the structural paragraph pass.
+                    case AcceptRevisionOperation accept:
+                        ApplyRevisionReconciliation(accept.ParaId, accept.Scope, accept.RevisionId, acceptNotReject: true);
+                        break;
+
+                    case RejectRevisionOperation reject:
+                        ApplyRevisionReconciliation(reject.ParaId, reject.Scope, reject.RevisionId, acceptNotReject: false);
+                        break;
+
                     case SetBlockAttrOperation setAttr:
                         // Defensive: ComposeBlockAttr is a closed set (Alignment/Style/ListOrdered/ListLevel), all
                         // handled above. A value here means the enum grew without an applier — refuse, never guess.
@@ -1471,6 +1485,111 @@ public sealed class ComposeShadowPatchEngine
             }
         }
 
+        // -- acceptRevision / rejectRevision (G12 / FR-11 — reconcile imported tracked changes by w:id) ----
+
+        /// <summary>
+        /// Reconcile a PRE-EXISTING imported tracked change (native <c>w:ins</c>/<c>w:del</c>) addressed by its
+        /// native OOXML <c>w:id</c> within paragraph <paramref name="paraId"/> — resolved O(1) by paraId then by
+        /// id, NEVER by text/content match (invariant I-7 / NFR-02). <paramref name="acceptNotReject"/> selects
+        /// accept vs its inverse. Batch (<see cref="ComposeRevisionScope.All"/>) is task 013.
+        /// </summary>
+        private void ApplyRevisionReconciliation(string paraId, ComposeRevisionScope scope, string? revisionId, bool acceptNotReject)
+        {
+            if (scope == ComposeRevisionScope.All)
+            {
+                // accept-all / reject-all (batch) is task 013 (G12 batch): the deterministic document-order
+                // interleave when reconciling one revision shifts a sibling's indices is that task's design
+                // detail (task-004 op-schema design §3.4). Single-by-id (this task) refuses All rather than
+                // guess an ordering — never a silent partial apply.
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.StructuralOpNotYetImplemented,
+                    $"Revision reconciliation scope 'All' (accept-all/reject-all) is not yet implemented " +
+                    $"(task 013, G12 batch). paraId '{paraId}'.");
+            }
+
+            if (string.IsNullOrEmpty(revisionId))
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.RevisionNotFound,
+                    "A 'Single'-scope acceptRevision/rejectRevision op requires a non-empty revisionId (the native " +
+                    $"w:ins/w:del w:id). paraId '{paraId}' carried a null/empty revisionId.");
+            }
+
+            var para = Resolve(paraId); // O(1) paraId lookup — no text-search (I-7).
+
+            // Locate the native run-level revision(s) by w:id WITHIN the resolved paragraph. Descendants covers
+            // a w:ins/w:del nested inside a w:hyperlink. Each element carries its own w:id (SeedRevisionId proves
+            // ids are unique integers), so this is normally a single match; we handle every match for safety.
+            var insertions = para.Descendants<InsertedRun>()
+                .Where(i => string.Equals(i.Id?.Value, revisionId, StringComparison.Ordinal)).ToList();
+            var deletions = para.Descendants<DeletedRun>()
+                .Where(d => string.Equals(d.Id?.Value, revisionId, StringComparison.Ordinal)).ToList();
+
+            if (insertions.Count == 0 && deletions.Count == 0)
+            {
+                throw new ComposePatchException(
+                    ComposePatchErrorKind.RevisionNotFound,
+                    $"No imported tracked revision (w:ins/w:del) with w:id '{revisionId}' exists in paragraph " +
+                    $"'{paraId}'. Revisions are resolved by native id only (I-7) — never by a text/content match.");
+            }
+
+            foreach (var ins in insertions)
+            {
+                if (acceptNotReject)
+                {
+                    // accept w:ins → strip the wrapper, keeping the inserted run(s) as normal content.
+                    UnwrapKeepingChildren(ins);
+                }
+                else
+                {
+                    // reject w:ins → remove the inserted run(s) entirely.
+                    ins.Remove();
+                }
+            }
+
+            foreach (var del in deletions)
+            {
+                if (acceptNotReject)
+                {
+                    // accept w:del → the deletion stands: remove the run(s) entirely.
+                    del.Remove();
+                }
+                else
+                {
+                    // reject w:del → restore the deleted run(s) as normal content (every w:delText → w:t at ANY
+                    // nesting depth, e.g. w:del > w:hyperlink > w:r/w:delText), then strip the w:del wrapper.
+                    foreach (var dt in del.Descendants<DeletedText>().ToList())
+                    {
+                        dt.Parent!.ReplaceChild(new Text(dt.Text) { Space = SpaceProcessingModeValues.Preserve }, dt);
+                    }
+
+                    UnwrapKeepingChildren(del);
+                }
+            }
+        }
+
+        /// <summary>Promote every child of <paramref name="wrapper"/> into its parent, in order and in the
+        /// wrapper's original position, then remove the (now-empty) wrapper. Used to strip a <c>w:ins</c>/<c>w:del</c>
+        /// tracked-change wrapper while keeping its inner runs as settled content.</summary>
+        private static void UnwrapKeepingChildren(OpenXmlElement wrapper)
+        {
+            if (wrapper.Parent is null)
+            {
+                wrapper.Remove();
+                return;
+            }
+
+            OpenXmlElement anchor = wrapper;
+            foreach (var child in wrapper.Elements().ToList())
+            {
+                child.Remove();
+                anchor.InsertAfterSelf(child);
+                anchor = child;
+            }
+
+            wrapper.Remove();
+        }
+
         private void WrapRunAsDeleted(Run run)
         {
             // A run may carry text (w:t), deleted text (already inside a tracked change — guarded upstream
@@ -1972,6 +2091,11 @@ public enum ComposePatchErrorKind
     /// <summary>A <c>setBlockAttr</c> op's <c>Value</c> is not a recognized member of the attribute's closed
     /// value set (e.g. an Alignment value outside Default/Left/Center/Right/Justify) → 422.</summary>
     InvalidBlockAttrValue,
+
+    /// <summary>An <c>acceptRevision</c>/<c>rejectRevision</c> op's <c>revisionId</c> resolves to no native
+    /// <c>w:ins</c>/<c>w:del</c> with that <c>w:id</c> in the target paragraph (no text-search fallback — G12/I-7)
+    /// → 422.</summary>
+    RevisionNotFound,
 }
 
 /// <summary>

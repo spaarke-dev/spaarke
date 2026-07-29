@@ -48,7 +48,7 @@
  * backward-incompatible change to the op set / anchor / property shape; both ends
  * validate the version they receive against the one they compile against.
  */
-export const COMPOSE_OPERATION_SCHEMA_VERSION = 'compose-ops-v1' as const;
+export const COMPOSE_OPERATION_SCHEMA_VERSION = 'compose-ops-v2' as const;
 
 /** The exact, CLOSED set of op-type discriminators (FR-11). Order is not significant. */
 export const COMPOSE_OPERATION_TYPES = [
@@ -62,6 +62,9 @@ export const COMPOSE_OPERATION_TYPES = [
   'insertParagraph',
   'deleteParagraph',
   'setBlockAttr',
+  // R5 task 012 (G12 / FR-11) — imported-revision reconciliation (accept/reject by native w:id).
+  'acceptRevision',
+  'rejectRevision',
 ] as const;
 
 /** The op-type discriminator union (the `type` field of every {@link ComposeOperation}). */
@@ -112,6 +115,14 @@ export type ComposeBlockAttr = 'Alignment' | 'Style' | 'ListOrdered' | 'ListLeve
 
 /** Where {@link InsertParagraphOperation} places the new paragraph relative to its reference. */
 export type ComposeParagraphPosition = 'Before' | 'After';
+
+/**
+ * The scope of an {@link AcceptRevisionOperation} / {@link RejectRevisionOperation} (mirrors the server
+ * `ComposeRevisionScope` enum): reconcile a `Single` imported revision (by its native OOXML `w:id`) or `All`
+ * tracked revisions in the document (batch, document order). PascalCase literals match the server's
+ * member-name serialization. R5 task 012 emits `Single`; `All` (batch) is task 013.
+ */
+export type ComposeRevisionScope = 'Single' | 'All';
 
 /** Fields common to every operation. Every op carries the durable `w14:paraId` coarse anchor. */
 interface ComposeOperationBase {
@@ -224,7 +235,34 @@ export interface SetBlockAttrOperation extends ComposeOperationBase {
 }
 
 /**
- * The CLOSED discriminated union of exactly ten operations (FR-11). Narrow on `type`
+ * `acceptRevision` — ACCEPT a pre-existing imported Word tracked change (native `w:ins`/`w:del`), reconciling
+ * it into settled content so a subsequent Save no longer 422s with `TrackedChangeReconciliationUnsupported`
+ * (ET-2 / FR-11). The revision is located by `revisionId` (its native `w:id` = `ImportedRevision.id`) within
+ * `paraId` — NEVER by text/content match (I-7). `revisionId` is required for `Single`, null for `All`.
+ */
+export interface AcceptRevisionOperation extends ComposeOperationBase {
+  type: 'acceptRevision';
+  /** `Single` = one revision by `revisionId`; `All` = every tracked revision (task 013 batch). */
+  scope: ComposeRevisionScope;
+  /** The native OOXML `w:ins`/`w:del` `w:id` to accept (= `ImportedRevision.id`); `null` for `All`. */
+  revisionId: string | null;
+}
+
+/**
+ * `rejectRevision` — REJECT a pre-existing imported Word tracked change (native `w:ins`/`w:del`), the inverse
+ * of {@link AcceptRevisionOperation}. Same shape (two discriminators, one per semantic action — the catalog's
+ * `setMark`/`clearMark` convention); located by `revisionId` within `paraId`, never by text/content match (I-7).
+ */
+export interface RejectRevisionOperation extends ComposeOperationBase {
+  type: 'rejectRevision';
+  /** `Single` = one revision by `revisionId`; `All` = every tracked revision (task 013 batch). */
+  scope: ComposeRevisionScope;
+  /** The native OOXML `w:ins`/`w:del` `w:id` to reject (= `ImportedRevision.id`); `null` for `All`. */
+  revisionId: string | null;
+}
+
+/**
+ * The CLOSED discriminated union of exactly twelve operations (FR-11). Narrow on `type`
  * before reading op-specific fields.
  */
 export type ComposeOperation =
@@ -237,7 +275,9 @@ export type ComposeOperation =
   | MergeParagraphOperation
   | InsertParagraphOperation
   | DeleteParagraphOperation
-  | SetBlockAttrOperation;
+  | SetBlockAttrOperation
+  | AcceptRevisionOperation
+  | RejectRevisionOperation;
 
 /**
  * The op-log ENVELOPE (FR-11): an ORDERED sequence of `operations` plus the

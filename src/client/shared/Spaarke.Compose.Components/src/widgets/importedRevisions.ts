@@ -175,9 +175,28 @@ export function resolveBlock(blocks: readonly BlockInfo[], target: AnchorHint): 
 
   // Fuzzy fallback (cross-Word-session): the document-order hint, verified loosely against anchorText.
   const anchor = target.anchorText ?? '';
+  const anchorEmpty = !normalize(anchor);
   if (target.paragraphHint >= 0 && target.paragraphHint < blocks.length) {
     const atHint = blocks[target.paragraphHint];
-    if (!normalize(anchor) || fuzzyMatches(atHint.text, anchor)) {
+    if (anchorEmpty) {
+      // R5 task 012 (G12) — imported-deletion end-of-paragraph re-anchor fix. A deletion that spans a
+      // PARAGRAPH BOUNDARY (the user deleted a whole paragraph's content up to / across the para mark)
+      // carries EMPTY anchorText: every run of that paragraph is inside <w:del>, so the reader's settled
+      // (non-tracked) anchor text is "". With no text to verify against, this branch used to trust the
+      // doc-order hint UNCONDITIONALLY — but on a cross-Word-session reload the fully-deleted paragraph is
+      // GONE from the mammoth-flattened editor (its paraId regenerated + unmatched above), so the hint
+      // index now lands on a DIFFERENT, already-identified paragraph, and applyDeletion would append the
+      // struck text at the END of that unrelated paragraph (silent mis-anchor). Only trust the empty-anchor
+      // hint when it does NOT collide with a distinct identified paragraph: a hint block with no paraId (a
+      // genuine empty slot) or a same-round-trip target with no id to disambiguate is still honest; a hint
+      // block carrying its OWN different present paraId is refused (return null → surfaced as a review
+      // placeholder, never guessed onto the wrong paragraph — invariant I-7 "never text-search / never guess").
+      const hintIsDistinctIdentifiedParagraph =
+        !!target.paraId && !!atHint.paraId && atHint.paraId !== target.paraId;
+      if (!hintIsDistinctIdentifiedParagraph) {
+        return atHint;
+      }
+    } else if (fuzzyMatches(atHint.text, anchor)) {
       return atHint;
     }
   }

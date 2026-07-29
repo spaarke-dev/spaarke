@@ -93,11 +93,24 @@ public sealed class ComposeOperationSchemaTests
                 Attr = ComposeBlockAttr.Alignment,
                 Value = "Center",
             },
+            // R5 task 012 (G12) — imported-revision reconciliation ops (Single scope, native-id addressed).
+            new AcceptRevisionOperation
+            {
+                ParaId = "DEADBEEF",
+                Scope = ComposeRevisionScope.Single,
+                RevisionId = "17",
+            },
+            new RejectRevisionOperation
+            {
+                ParaId = "CAFEF00D",
+                Scope = ComposeRevisionScope.Single,
+                RevisionId = "18",
+            },
         },
     };
 
-    [Fact(DisplayName = "FR-11: a full ten-op log round-trips serialize → deserialize → serialize byte-stable")]
-    public void OperationLog_WithAllTenOpTypes_RoundTripsWithoutLoss()
+    [Fact(DisplayName = "FR-11: a full twelve-op log round-trips serialize → deserialize → serialize byte-stable")]
+    public void OperationLog_WithAllTwelveOpTypes_RoundTripsWithoutLoss()
     {
         // Arrange
         var log = BuildCanonicalLog();
@@ -111,10 +124,10 @@ public sealed class ComposeOperationSchemaTests
         roundTripped.Should().NotBeNull();
         json2.Should().Be(json1);
         roundTripped!.SchemaVersion.Should().Be(ComposeOperationSchema.Version);
-        roundTripped.Operations.Should().HaveCount(10);
+        roundTripped.Operations.Should().HaveCount(12);
     }
 
-    [Fact(DisplayName = "FR-11: the polymorphic deserializer reconstructs each of the ten derived op types")]
+    [Fact(DisplayName = "FR-11: the polymorphic deserializer reconstructs each of the twelve derived op types")]
     public void OperationLog_AfterRoundTrip_ReconstructsEveryDerivedOpTypeAndFields()
     {
         // Arrange
@@ -155,6 +168,12 @@ public sealed class ComposeOperationSchemaTests
 
         log.Operations[9].Should().BeOfType<SetBlockAttrOperation>()
             .Which.Should().BeEquivalentTo(new { Attr = ComposeBlockAttr.Alignment, Value = "Center" });
+
+        log.Operations[10].Should().BeOfType<AcceptRevisionOperation>()
+            .Which.Should().BeEquivalentTo(new { ParaId = "DEADBEEF", Scope = ComposeRevisionScope.Single, RevisionId = "17" });
+
+        log.Operations[11].Should().BeOfType<RejectRevisionOperation>()
+            .Which.Should().BeEquivalentTo(new { ParaId = "CAFEF00D", Scope = ComposeRevisionScope.Single, RevisionId = "18" });
     }
 
     [Fact(DisplayName = "FR-11: every op serializes with its exact FR-11 `type` discriminator (cross-language wire contract)")]
@@ -176,14 +195,16 @@ public sealed class ComposeOperationSchemaTests
                      "\"type\":\"insertParagraph\"",
                      "\"type\":\"deleteParagraph\"",
                      "\"type\":\"setBlockAttr\"",
+                     "\"type\":\"acceptRevision\"",
+                     "\"type\":\"rejectRevision\"",
                  })
         {
             json.Should().Contain(discriminator);
         }
 
         // The envelope carries the schema-version field both ends validate against
-        json.Should().Contain("\"schemaVersion\":\"compose-ops-v1\"");
-        ComposeOperationSchema.Version.Should().Be("compose-ops-v1");
+        json.Should().Contain("\"schemaVersion\":\"compose-ops-v2\"");
+        ComposeOperationSchema.Version.Should().Be("compose-ops-v2");
     }
 
     [Fact(DisplayName = "FR-11: an op log authored as raw client JSON deserializes on the server (client→server direction)")]
@@ -192,7 +213,7 @@ public sealed class ComposeOperationSchemaTests
         // Arrange — the shape the TS client emits (camelCase, discriminator-first)
         const string clientJson = """
         {
-          "schemaVersion": "compose-ops-v1",
+          "schemaVersion": "compose-ops-v2",
           "operations": [
             { "type": "insertText", "paraId": "0A1B2C3D", "at": { "runIndex": 0, "offset": 5 }, "text": "hi", "marks": ["Bold"] },
             { "type": "splitParagraph", "paraId": "DEADBEEF", "at": { "runIndex": 1, "offset": 2 }, "newParaId": "CAFEF00D" },
@@ -205,7 +226,7 @@ public sealed class ComposeOperationSchemaTests
         var log = JsonSerializer.Deserialize<ComposeOperationLog>(clientJson, WireOptions)!;
 
         // Assert — server reconstructs the typed union from client-authored JSON
-        log.SchemaVersion.Should().Be("compose-ops-v1");
+        log.SchemaVersion.Should().Be("compose-ops-v2");
         log.Operations.Should().HaveCount(3);
         log.Operations[0].Should().BeOfType<InsertTextOperation>();
         log.Operations[1].Should().BeOfType<SplitParagraphOperation>()

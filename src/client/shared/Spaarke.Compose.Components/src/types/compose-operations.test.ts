@@ -25,7 +25,7 @@ import type { ComposeOperation, ComposeOperationLog } from './compose-operations
 // contracts module — importing from there must resolve the same symbols, not a fork).
 import { COMPOSE_OPERATION_SCHEMA_VERSION as VERSION_VIA_CONTRACTS } from './compose-contracts';
 
-/** A canonical op log exercising ALL TEN op types + the structural-op second-paragraph references. */
+/** A canonical op log exercising ALL TWELVE op types + the structural-op second-paragraph references. */
 function buildCanonicalLog(): ComposeOperationLog {
   const operations: ComposeOperation[] = [
     {
@@ -64,12 +64,15 @@ function buildCanonicalLog(): ComposeOperationLog {
     { type: 'insertParagraph', paraId: 'DEADBEEF', newParaId: '0BADF00D', position: 'After' },
     { type: 'deleteParagraph', paraId: '0BADF00D' },
     { type: 'setBlockAttr', paraId: 'DEADBEEF', attr: 'Alignment', value: 'Center' },
+    // R5 task 012 (G12) — imported-revision reconciliation ops (Single scope, addressed by native w:id).
+    { type: 'acceptRevision', paraId: 'DEADBEEF', scope: 'Single', revisionId: '17' },
+    { type: 'rejectRevision', paraId: 'CAFEF00D', scope: 'Single', revisionId: '18' },
   ];
   return { schemaVersion: COMPOSE_OPERATION_SCHEMA_VERSION, operations };
 }
 
 describe('compose-operations schema (FR-11)', () => {
-  it('COMPOSE_OPERATION_TYPES is the exact closed set of ten op discriminators', () => {
+  it('COMPOSE_OPERATION_TYPES is the exact closed set of twelve op discriminators', () => {
     expect([...COMPOSE_OPERATION_TYPES]).toEqual([
       'insertText',
       'deleteRange',
@@ -81,11 +84,13 @@ describe('compose-operations schema (FR-11)', () => {
       'insertParagraph',
       'deleteParagraph',
       'setBlockAttr',
+      'acceptRevision',
+      'rejectRevision',
     ]);
-    expect(COMPOSE_OPERATION_TYPES).toHaveLength(10);
+    expect(COMPOSE_OPERATION_TYPES).toHaveLength(12);
   });
 
-  it('a full ten-op log round-trips JSON.stringify → JSON.parse without loss', () => {
+  it('a full twelve-op log round-trips JSON.stringify → JSON.parse without loss', () => {
     const log = buildCanonicalLog();
 
     const json1 = JSON.stringify(log);
@@ -94,8 +99,8 @@ describe('compose-operations schema (FR-11)', () => {
 
     expect(json2).toBe(json1);
     expect(roundTripped).toEqual(log);
-    expect(roundTripped.operations).toHaveLength(10);
-    expect(roundTripped.schemaVersion).toBe('compose-ops-v1');
+    expect(roundTripped.operations).toHaveLength(12);
+    expect(roundTripped.schemaVersion).toBe('compose-ops-v2');
   });
 
   it('emits the exact FR-11 `type` discriminators + schemaVersion the server keys on', () => {
@@ -104,12 +109,12 @@ describe('compose-operations schema (FR-11)', () => {
     for (const t of COMPOSE_OPERATION_TYPES) {
       expect(json).toContain(`"type":"${t}"`);
     }
-    expect(json).toContain('"schemaVersion":"compose-ops-v1"');
+    expect(json).toContain('"schemaVersion":"compose-ops-v2"');
   });
 
   it('the operation schema version is re-exported unchanged via the contracts module (no fork)', () => {
     expect(VERSION_VIA_CONTRACTS).toBe(COMPOSE_OPERATION_SCHEMA_VERSION);
-    expect(VERSION_VIA_CONTRACTS).toBe('compose-ops-v1');
+    expect(VERSION_VIA_CONTRACTS).toBe('compose-ops-v2');
   });
 
   describe('isComposeOperation / isComposeOperationLog validation', () => {
@@ -133,7 +138,7 @@ describe('compose-operations schema (FR-11)', () => {
 
     it('rejects a log whose operations array contains an invalid op', () => {
       const badLog = {
-        schemaVersion: 'compose-ops-v1',
+        schemaVersion: 'compose-ops-v2',
         operations: [
           { type: 'insertText', paraId: 'ABC' },
           { type: 'nope', paraId: 'ABC' },

@@ -54,7 +54,13 @@ import {
 } from '@tiptap/pm/transform';
 
 import { PARAID_NODE_TYPES } from './paraIdExtension';
-import type { ComposeOperation, ComposeRunPoint, ComposeMarkType, ComposeBlockAttr } from '../types/compose-operations';
+import type {
+  ComposeOperation,
+  ComposeRunPoint,
+  ComposeMarkType,
+  ComposeBlockAttr,
+  ComposeRevisionScope,
+} from '../types/compose-operations';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -130,6 +136,149 @@ const TEXTALIGN_TO_COMPOSE: Readonly<Record<string, string>> = {
   right: 'Right',
   justify: 'Justify',
 };
+
+// ---------------------------------------------------------------------------
+// Imported-revision reconciliation (R5 task 012 — G12 acceptRevision/rejectRevision)
+// ---------------------------------------------------------------------------
+//
+// An IMPORTED Word tracked change is rendered by `importedRevisions.ts` as an `insertion`/`deletion` mark
+// whose `ledgerRef` is `imported:<native w:id>` (the `imported:` prefix distinguishes it from an AI-suggested
+// redline keyed `{bindingId}@t{n}`). Accepting/rejecting one flows through `usePendingRedline.accept/reject`,
+// which either DROPS the mark (keep the text) via a RemoveMarkStep, or DELETES the text via a ReplaceStep.
+// This maps each such step to the closed-catalog acceptRevision/rejectRevision op addressed by the native
+// revision id — so a save reconciles the pre-existing tracked change (no TrackedChangeReconciliationUnsupported
+// 422; G12/FR-11) instead of the interceptor mis-emitting a deleteRange or refusing the mark step.
+//
+//   insertion + drop-mark  → ACCEPT  (the insertion stands as normal text)
+//   insertion + delete     → REJECT  (the inserted text is removed)
+//   deletion  + drop-mark  → REJECT  (the struck text is restored to normal)
+//   deletion  + delete     → ACCEPT  (the deletion stands — the text is removed)
+
+const IMPORTED_REVISION_LEDGER_PREFIX = 'imported:';
+const INSERTION_MARK_NAME = 'insertion';
+const DELETION_MARK_NAME = 'deletion';
+
+/**
+ * Extract the native OOXML revision id from an `imported:<id>` ledgerRef, or null when it is not a clean
+ * imported-revision key carrying a REAL native id. A synthetic `imported:<paraId>#<i>` fallback (an imported
+ * revision the reader could not attach a `w:id` to) has no id the engine can reconcile by — we never emit a
+ * revision op the server could only `RevisionNotFound`; such a step falls through to existing behavior.
+ */
+function importedRevisionId(ledgerRef: unknown): string | null {
+  if (typeof ledgerRef !== 'string' || !ledgerRef.startsWith(IMPORTED_REVISION_LEDGER_PREFIX)) return null;
+  const id = ledgerRef.slice(IMPORTED_REVISION_LEDGER_PREFIX.length);
+  if (id.length === 0 || id.includes('#')) return null;
+  return id;
+}
+
+/** Build a `Single`-scope acceptRevision/rejectRevision op addressed by native revision id (never by offset). */
+function revisionOp(
+  type: 'acceptRevision' | 'rejectRevision',
+  paraId: string,
+  revisionId: string
+): ComposeOperation {
+  return { type, paraId, scope: 'Single' as ComposeRevisionScope, revisionId };
+}
+
+/** The imported insertion/deletion revision a text node carries (first such mark), or null. */
+function importedRevisionOfNode(node: PMNode): { markName: string; revisionId: string } | null {
+  for (const m of node.marks) {
+    if (m.type.name === INSERTION_MARK_NAME || m.type.name === DELETION_MARK_NAME) {
+      const id = importedRevisionId((m.attrs as { ledgerRef?: unknown }).ledgerRef);
+      if (id) return { markName: m.type.name, revisionId: id };
+    }
+  }
+  return null;
+}
+
+/**
+ * The single imported revision that covers the ENTIRE text of `[from, to)`, or null. A delete is diverted to
+ * accept/reject-revision ONLY when every text node in the range carries the SAME imported revision id — i.e.
+ * it is the accept/reject-UI action (usePendingRedline deletes exactly the marked span). A range that MIXES an
+ * imported revision with plain text or a second revision is NOT diverted: it falls through to normal
+ * classification so no content is silently dropped (the delete-onto-a-tracked-change ET-2 case is the engine's
+ * pre-existing TrackedChangeReconciliationUnsupported guard, out of this task's accept/reject-then-save scope).
+ */
+function wholeRangeImportedRevision(
+  doc: PMNode,
+  from: number,
+  to: number
+): { markName: string; revisionId: string } | null {
+  let found: { markName: string; revisionId: string } | null = null;
+  let uniform = true;
+  let sawText = false;
+  doc.nodesBetween(from, to, node => {
+    if (!uniform) return false;
+    if (!node.isText) return true;
+    sawText = true;
+    const rev = importedRevisionOfNode(node);
+    if (!rev) {
+      uniform = false; // a plain-text (or non-imported) span inside the range → not a pure reconciliation
+      return false;
+    }
+    if (!found) {
+      found = rev;
+    } else if (found.revisionId !== rev.revisionId || found.markName !== rev.markName) {
+      uniform = false; // two distinct imported revisions in one delete → not a single reconciliation
+      return false;
+    }
+    return true;
+  });
+  return sawText && uniform ? found : null;
+}
+
+/**
+ * Recognize an accept/reject of an IMPORTED tracked change and synthesize its closed-catalog
+ * acceptRevision/rejectRevision op (see the section header for the four cases). Returns null when the step is
+ * not an imported-revision reconciliation — only `imported:`-prefixed marks with a real native id divert here;
+ * AI-suggested redlines and id-less imported revisions fall through to existing classification untouched.
+ */
+function classifyImportedRevisionStep(step: Step, docBefore: PMNode): StepClassification | null {
+  // RemoveMarkStep — the mark is dropped, the text kept.
+  if (step instanceof RemoveMarkStep) {
+    const markName = step.mark.type.name;
+    if (markName !== INSERTION_MARK_NAME && markName !== DELETION_MARK_NAME) return null;
+    const revisionId = importedRevisionId((step.mark.attrs as { ledgerRef?: unknown }).ledgerRef);
+    if (!revisionId) return null;
+    const anchor = resolveRunAnchor(docBefore, step.from);
+    if (!anchor) return null;
+    const type = markName === INSERTION_MARK_NAME ? 'acceptRevision' : 'rejectRevision';
+    return { kind: 'ops', ops: [revisionOp(type, anchor.paraId, revisionId)] };
+  }
+
+  // ReplaceStep pure delete — the text (carrying the imported mark) is removed. Divert ONLY when the whole
+  // deleted range is one uniform imported revision (a mixed range falls through — never drop non-revision content).
+  if (step instanceof ReplaceStep && step.to > step.from && step.slice.content.size === 0) {
+    const found = wholeRangeImportedRevision(docBefore, step.from, step.to);
+    if (!found) return null;
+    const anchor = resolveRunAnchor(docBefore, step.from);
+    if (!anchor) return null;
+    const type = found.markName === DELETION_MARK_NAME ? 'acceptRevision' : 'rejectRevision';
+    return { kind: 'ops', ops: [revisionOp(type, anchor.paraId, found.revisionId)] };
+  }
+
+  return null;
+}
+
+/**
+ * Dedupe accept/reject-revision ops by (type, revisionId): one imported revision = one native w:id, but its
+ * rendered mark span can split across adjacent text nodes → several delete/drop-mark steps in ONE accept/reject
+ * transaction, each yielding the same op. Emitting the duplicate would make the SECOND server apply
+ * `RevisionNotFound` (the first already reconciled it). Non-revision ops pass through untouched, order preserved.
+ */
+function dedupeRevisionOps(ops: readonly ComposeOperation[]): ComposeOperation[] {
+  const seen = new Set<string>();
+  const out: ComposeOperation[] = [];
+  for (const op of ops) {
+    if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+      const key = `${op.type}:${op.revisionId ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    out.push(op);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Anchor resolution (D2 — the run-local fine anchor)
@@ -584,6 +733,12 @@ export function classifyStep(
       return { kind: 'refused-atom', step };
     }
 
+    // R5 task 012 (G12): a delete of IMPORTED-revision-marked text is an accept/reject of a pre-existing
+    // tracked change (acceptRevision/rejectRevision by native id), NOT a new deleteRange. Divert BEFORE the
+    // inline classification below would emit a deleteRange.
+    const importedRevision = classifyImportedRevisionStep(step, docBefore);
+    if (importedRevision) return importedRevision;
+
     const $from = docBefore.resolve(from);
     const $to = docBefore.resolve(to);
     const sameBlock = $from.sameParent($to);
@@ -653,8 +808,12 @@ export function classifyStep(
     return classifyMarkStep(step, docBefore, 'setMark');
   }
 
-  // --- RemoveMarkStep → clearMark --------------------------------------------------
+  // --- RemoveMarkStep → acceptRevision/rejectRevision (imported track-change) or clearMark ----------
   if (step instanceof RemoveMarkStep) {
+    // R5 task 012 (G12): dropping an IMPORTED insertion/deletion mark (keeping the text) is an accept/reject
+    // of a pre-existing tracked change by native id — not a clearMark of a char-format run property.
+    const importedRevision = classifyImportedRevisionStep(step, docBefore);
+    if (importedRevision) return importedRevision;
     return classifyMarkStep(step, docBefore, 'clearMark');
   }
 
@@ -778,8 +937,9 @@ export function createStepInterceptorPlugin(options: StepOperationInterceptorOpt
               break;
           }
         }
-        if (collected.length > 0) {
-          options.onOperations?.(collected, { transaction: tr });
+        const deduped = dedupeRevisionOps(collected);
+        if (deduped.length > 0) {
+          options.onOperations?.(deduped, { transaction: tr });
         }
       }
       // Read-only interceptor — never append a transaction.
@@ -979,6 +1139,17 @@ function buildAnchor(op: ComposeOperation, step: Step, mapping: Mapping, stepInd
     return null;
   }
 
+  if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+    // R5 task 012 (G12): an accept/reject-revision op is paragraph-scoped (its durable payload = paraId +
+    // native revisionId, captured at classify time). Anchor at the step's start position so the rebasing pass
+    // still flags it if a later edit deletes that position (never-silently-drop) — matches the setBlockAttr /
+    // structural handling above. Both a RemoveMarkStep (drop-mark) and a ReplaceStep (delete) carry `from`.
+    if (step instanceof RemoveMarkStep || step instanceof ReplaceStep) {
+      return { kind: 'block', point: toFinal(step.from, -1) };
+    }
+    return null;
+  }
+
   if (step instanceof ReplaceStep) {
     if (op.type === 'insertText') {
       // The insertion point sticks to content BEFORE it (assoc -1) — a caret-position anchor that
@@ -1038,6 +1209,12 @@ function deriveOperation(op: ComposeOperation, anchor: ComposeOpAnchor, doc: PMN
       // Structural ops carry durable `w14:paraId`s in their payload (paraId / targetParaId / newParaId),
       // captured from the pre-step doc — Word-native ids, NOT re-derivable from a live document position. Return
       // the op as-captured; the rebasing `deletedContentFlag` still guards it (never-silently-drop).
+      return op;
+    case 'acceptRevision':
+    case 'rejectRevision':
+      // R5 task 012 (G12): accept/reject-revision carry a durable paraId + native revisionId in their payload,
+      // captured from the pre-step doc — the revision is addressed by its native OOXML id, NOT by a live
+      // document position. Return as-captured; the rebasing `deletedContentFlag` still guards it.
       return op;
     default:
       return null;
@@ -1144,6 +1321,7 @@ export class RebasedOperationLog {
 
     // (2) Classify + append this transaction's own steps.
     const appended: ComposeOperation[] = [];
+    const revisionOpsThisTxn = new Set<string>(); // R5 task 012 (G12) accept/reject-revision dedup (see below)
     const steps = tr.steps;
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -1152,6 +1330,14 @@ export class RebasedOperationLog {
       switch (cls.kind) {
         case 'ops':
           for (const op of cls.ops) {
+            // R5 task 012 (G12): dedupe accept/reject-revision by (type, revisionId) across this transaction's
+            // steps — one imported revision = one native w:id, but its rendered span can split into several
+            // delete/drop-mark steps in ONE accept/reject; the duplicate op would `RevisionNotFound` server-side.
+            if (op.type === 'acceptRevision' || op.type === 'rejectRevision') {
+              const key = `${op.type}:${op.revisionId ?? ''}`;
+              if (revisionOpsThisTxn.has(key)) continue;
+              revisionOpsThisTxn.add(key);
+            }
             const anchor = buildAnchor(op, step, tr.mapping, i);
             if (!anchor) continue; // defensive — every op type classifyStep emits has an anchor shape above
             this.entries.push({ seq: this.seqCounter++, anchor, op, deletedContentFlag: false });
@@ -1180,14 +1366,27 @@ export class RebasedOperationLog {
    * `orderedOps`.
    */
   serialize(doc: PMNode): ComposeOperationLogSnapshot {
-    const rows = this.entries.map(entry => {
-      const derived = deriveOperation(entry.op, entry.anchor, doc);
-      const loggedOp: ComposeLoggedOperation = {
-        operation: derived ?? entry.op,
-        deletedContentFlag: entry.deletedContentFlag || derived === null,
-      };
-      return { seq: entry.seq, primaryPos: primaryPositionOf(entry.anchor), loggedOp };
-    });
+    // R5 task 012 (G12): dedupe accept/reject-revision by (type, revisionId) across the WHOLE log — the
+    // per-transaction dedup covers a single accept split into several steps; this also covers a re-accept of the
+    // same revision across transactions (undo+redo), whose second server apply would RevisionNotFound (the first
+    // already reconciled it). First occurrence wins; non-revision ops are never dropped.
+    const seenRevisions = new Set<string>();
+    const rows = this.entries
+      .filter(entry => {
+        if (entry.op.type !== 'acceptRevision' && entry.op.type !== 'rejectRevision') return true;
+        const key = `${entry.op.type}:${entry.op.revisionId ?? ''}`;
+        if (seenRevisions.has(key)) return false;
+        seenRevisions.add(key);
+        return true;
+      })
+      .map(entry => {
+        const derived = deriveOperation(entry.op, entry.anchor, doc);
+        const loggedOp: ComposeLoggedOperation = {
+          operation: derived ?? entry.op,
+          deletedContentFlag: entry.deletedContentFlag || derived === null,
+        };
+        return { seq: entry.seq, primaryPos: primaryPositionOf(entry.anchor), loggedOp };
+      });
 
     rows.sort((a, b) => a.primaryPos - b.primaryPos || a.seq - b.seq);
 

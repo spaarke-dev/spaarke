@@ -56,8 +56,13 @@ namespace Sprk.Bff.Api.Services.Compose.Operations;
 /// </summary>
 public static class ComposeOperationSchema
 {
-    /// <summary>Current schema version — <c>compose-ops-v1</c> (Phase 0, R4).</summary>
-    public const string Version = "compose-ops-v1";
+    /// <summary>Current schema version — <c>compose-ops-v2</c> (R5 task 012, G12/FR-11). Bumped from
+    /// <c>compose-ops-v1</c> when the closed catalog gained the <c>acceptRevision</c>/<c>rejectRevision</c>
+    /// revision-reconciliation ops: adding op types is backward-INCOMPATIBLE (a v1 engine can't
+    /// deserialize the new discriminators), so the bump makes a shared-deploy skew fail as a deterministic
+    /// <see cref="ComposePatchErrorKind.UnsupportedSchemaVersion"/> 400 rather than a confusing 500
+    /// (task-004 op-schema design §4.3).</summary>
+    public const string Version = "compose-ops-v2";
 }
 
 /// <summary>
@@ -137,7 +142,7 @@ public enum ComposeBlockAttr
 }
 
 /// <summary>
-/// Base of the CLOSED operation discriminated union (FR-11). Exactly ten derived
+/// Base of the CLOSED operation discriminated union (FR-11). Exactly twelve derived
 /// types, tagged by the <c>type</c> discriminator with the FR-11 literal names.
 /// Every op carries a <see cref="ParaId"/> — the durable <c>w14:paraId</c> coarse
 /// anchor. System.Text.Json polymorphic (de)serialization is driven by
@@ -155,6 +160,8 @@ public enum ComposeBlockAttr
 [JsonDerivedType(typeof(InsertParagraphOperation), "insertParagraph")]
 [JsonDerivedType(typeof(DeleteParagraphOperation), "deleteParagraph")]
 [JsonDerivedType(typeof(SetBlockAttrOperation), "setBlockAttr")]
+[JsonDerivedType(typeof(AcceptRevisionOperation), "acceptRevision")]
+[JsonDerivedType(typeof(RejectRevisionOperation), "rejectRevision")]
 public abstract record ComposeOperation
 {
     /// <summary>
@@ -356,6 +363,70 @@ public sealed record SetBlockAttrOperation : ComposeOperation
     /// <summary>The attribute value (interpreted per <see cref="Attr"/>); <c>null</c> clears to style default.</summary>
     [JsonPropertyName("value")]
     public string? Value { get; init; }
+}
+
+/// <summary>
+/// The scope of an <see cref="AcceptRevisionOperation"/> / <see cref="RejectRevisionOperation"/>: reconcile
+/// a SINGLE imported revision (addressed by its native OOXML <c>w:id</c>) or ALL tracked revisions in the
+/// document (batch, deterministic document order). Serialized as its PascalCase member name (same convention
+/// as <see cref="ComposeBlockAttr"/> / <see cref="ComposeParagraphPosition"/>); the client union mirrors the
+/// literals. R5 task 004 op-schema design §3; task 012 implements <see cref="Single"/>, task 013 adds
+/// <see cref="All"/>.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ComposeRevisionScope
+{
+    /// <summary>Reconcile exactly one revision, addressed by <c>revisionId</c> (its native <c>w:id</c>).</summary>
+    Single,
+
+    /// <summary>Reconcile EVERY tracked revision in the document, in document order (batch — task 013).</summary>
+    All,
+}
+
+/// <summary>
+/// <c>acceptRevision</c> — ACCEPT a pre-existing IMPORTED Word tracked change (native <c>w:ins</c>/<c>w:del</c>
+/// recovered on Load as an <c>ImportedRevision</c>), reconciling it into settled content so a subsequent Save
+/// no longer refuses with <see cref="ComposePatchErrorKind.TrackedChangeReconciliationUnsupported"/> (the ET-2
+/// gap / FR-11). Accepting a <c>w:ins</c> STRIPS the insertion wrapper keeping the inserted run as normal
+/// content; accepting a <c>w:del</c> REMOVES the run entirely. The revision is located BY <see cref="RevisionId"/>
+/// (its native <c>w:id</c>) within paragraph <see cref="ComposeOperation.ParaId"/> — NEVER by a text/content
+/// match (invariant I-7 / NFR-02).
+/// </summary>
+public sealed record AcceptRevisionOperation : ComposeOperation
+{
+    /// <summary><see cref="ComposeRevisionScope.Single"/> = one revision by <see cref="RevisionId"/>;
+    /// <see cref="ComposeRevisionScope.All"/> = every tracked revision (task 013 batch).</summary>
+    [JsonPropertyName("scope")]
+    public required ComposeRevisionScope Scope { get; init; }
+
+    /// <summary>The native OOXML <c>w:ins</c>/<c>w:del</c> <c>w:id</c> to accept (= <c>ImportedRevision.id</c>).
+    /// Required (non-null) for <see cref="ComposeRevisionScope.Single"/>; <c>null</c> for
+    /// <see cref="ComposeRevisionScope.All"/>.</summary>
+    [JsonPropertyName("revisionId")]
+    public string? RevisionId { get; init; }
+}
+
+/// <summary>
+/// <c>rejectRevision</c> — REJECT a pre-existing imported Word tracked change (native <c>w:ins</c>/<c>w:del</c>),
+/// the INVERSE of <see cref="AcceptRevisionOperation"/>: rejecting a <c>w:ins</c> REMOVES the inserted run;
+/// rejecting a <c>w:del</c> RESTORES the deleted run as normal content (<c>w:delText</c> → <c>w:t</c>, wrapper
+/// stripped). Located BY <see cref="RevisionId"/> within paragraph <see cref="ComposeOperation.ParaId"/> —
+/// never by text/content match (I-7 / NFR-02). Structurally identical to
+/// <see cref="AcceptRevisionOperation"/> (two discriminators, one per semantic action — the catalog's
+/// existing <c>setMark</c>/<c>clearMark</c> convention).
+/// </summary>
+public sealed record RejectRevisionOperation : ComposeOperation
+{
+    /// <summary><see cref="ComposeRevisionScope.Single"/> = one revision by <see cref="RevisionId"/>;
+    /// <see cref="ComposeRevisionScope.All"/> = every tracked revision (task 013 batch).</summary>
+    [JsonPropertyName("scope")]
+    public required ComposeRevisionScope Scope { get; init; }
+
+    /// <summary>The native OOXML <c>w:ins</c>/<c>w:del</c> <c>w:id</c> to reject (= <c>ImportedRevision.id</c>).
+    /// Required (non-null) for <see cref="ComposeRevisionScope.Single"/>; <c>null</c> for
+    /// <see cref="ComposeRevisionScope.All"/>.</summary>
+    [JsonPropertyName("revisionId")]
+    public string? RevisionId { get; init; }
 }
 
 /// <summary>
