@@ -47,6 +47,7 @@ import {
   XrmDataverseClient,
   createMembershipResolver,
   type MembershipResolver,
+  type DataGridHostContext,
 } from '@spaarke/ui-components';
 import { buildBffApiUrl } from '@spaarke/auth';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
@@ -90,6 +91,18 @@ export interface DataverseEntityViewWidgetData {
    * to config-level allowlist / all sibling views.
    */
   availableViews?: string[];
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): OPTIONAL override for the
+   * DataGrid's row-open behavior. Forwarded verbatim to `<DataGrid onRecordOpen={...} />` —
+   * an ALREADY-EXISTING DataGrid escape hatch ("hosts can still pass onRecordOpen to override
+   * entirely... custom side panes, registered React dialogs, etc.", `DataGrid.tsx`
+   * `defaultRecordOpen` doc comment). Extends this widget's existing pass-through pattern
+   * (`pageSize`, `availableViews`) rather than forking DataGrid or this widget (CLAUDE.md §11).
+   * Absent = DataGrid's default row-open (native Dataverse form via `Xrm.Navigation.navigateTo`)
+   * — every OTHER `DataverseEntityViewWidget` consumer (Documents/Projects/Invoices/Work
+   * Assignments) is unaffected.
+   */
+  onRecordOpen?: (recordId: string, record: Record<string, unknown>, ctx: DataGridHostContext) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +271,7 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
           membershipResolver={membershipResolver}
           pageSize={data.pageSize}
           availableViewsAllowlist={data.availableViews}
+          onRecordOpen={data.onRecordOpen}
         />
       </div>
     </div>

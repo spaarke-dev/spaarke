@@ -1412,6 +1412,16 @@ export interface ConversationPaneEvent {
    * - `first_message`     — user sent or selected their first message (Welcome → Stage 2)
    *                         Dispatched by ConversationPane on prompt button click.
    *                         ShellStageManager marks hasSession=true on receipt.
+   * - `session_switch`    — (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11) a
+   *                         DIFFERENT pane (e.g. `AnalysisHubWidget`'s grid-row reopen) asks
+   *                         ConversationPane to adopt an EXISTING `sessionId` and restore its
+   *                         transcript — the same effect as the user picking an entry from the
+   *                         History menu. Carries `sessionId` (reused field, declared below in
+   *                         the Compose field block). ConversationPane's receiver reuses its
+   *                         existing `handleSelectHistorySession`-equivalent behavior
+   *                         (`setChatSessionId` + SprkChat remount); no new restore mechanism
+   *                         is introduced. Additive discriminant per ADR-030 — existing
+   *                         subscribers ignore it.
    */
   type:
     | 'suggestion'
@@ -1427,7 +1437,9 @@ export interface ConversationPaneEvent {
     //   compose field block below + `@spaarke/compose-components`
     //   `ComposeWorkspaceToAssistantFlow` / `ComposeContextToAssistantFlow`.
     | 'compose_selection_offer'
-    | 'compose_context_offer';
+    | 'compose_context_offer'
+    // ── Session switch (ai-advanced-capabilities-analysis-hub-r1 task 031, FR-11) ──
+    | 'session_switch';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;

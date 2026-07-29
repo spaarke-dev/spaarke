@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W4c — 031 (reopen from grid → rehydrate session + review + files), serial
-**Next action**: 031 → W5 (050 → 052 → 053 entry) → W6 (retirement) → W7 (deploy/test/wrap). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 040 ✅ 041 ✅ 051 ✅. Publish 46.16 MB.
+**Active task**: W5 — 050 (entry matrix keystone), serial (then 052 → 053)
+**Next action**: 050 → 052 → 053 → W6 (060–064 retirement, ordered) → W7 (070–072, 090). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 031 ✅ 040 ✅ 041 ✅ 051 ✅ (16/28). Publish 46.16 MB.
 
 > **050 (entry matrix) is the integration keystone — 3 threads converge there:**
 >  1. Wizard deep-service wiring (`dataService`/`authenticatedFetch`/`navigationService`) — deferred from 030 (interim "Connecting to workspace services…").

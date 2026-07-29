@@ -29,7 +29,7 @@ import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, 
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
 import { MemoryDialog } from "./MemoryDialog";
-import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
+import { useAiSession, useDispatchPaneEvent, usePaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
 import type {
   IChatMessage,
@@ -1817,6 +1817,20 @@ export function ConversationPane(): React.JSX.Element {
     },
     [setChatSessionId, startNewSession]
   );
+
+  // ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): a DIFFERENT pane (the
+  // AnalysisHubWidget grid's row-open handler) asks this pane to adopt an EXISTING session —
+  // e.g. reopening an Analysis from the hub grid. Reuses the IDENTICAL mechanism the History
+  // menu already uses (`handleSelectHistorySession`): adopt the id + remount SprkChat, whose
+  // own `resumeSession()`/`loadHistory()` mount-effect restores the transcript (TTL-safe —
+  // `ChatSessionManager.GetSessionAsync` already falls back Redis→Cosmos→Dataverse per the
+  // task-025 hardening). No new restore mechanism; additive `conversation.session_switch`
+  // discriminant (ADR-030).
+  usePaneEvent("conversation", (event) => {
+    if (event.type === "session_switch" && event.sessionId) {
+      handleSelectHistorySession(event.sessionId);
+    }
+  });
 
   // ── OutcomeCard next-step chips (F-4, e2e-completion-audit 2026-07-10) ──────
   // A completed side-effect's OutcomeCard renders DECLARED next-step chips

@@ -49,6 +49,18 @@
  * task POML). A later project that server-gates one of these cards applies the
  * ADR-032 Null-Object kill-switch pattern then, not here.
  *
+ * Row reopen (task 031, spec FR-11):
+ *   Selecting a grid row (via `DataverseEntityViewWidget`'s `onRecordOpen` escape hatch —
+ *   an ALREADY-EXISTING DataGrid override point, not a new one) reopens that Analysis's
+ *   session IN PLACE inside this already-open three-pane surface: resolves the bound
+ *   session (task 020 FK, new `GET /ai/chat/sessions/by-analysis/{id}` lookup), dispatches
+ *   `conversation.session_switch` (additive ADR-030 discriminant consumed by
+ *   ConversationPane's existing History-select handler) to restore the transcript, and — for
+ *   a linked file — dispatches a `document-viewer` `widget_load` via the `sprk_documentid` →
+ *   `sprk_document` hop (ADR-007). A 404 (no session ever bound) degrades to an inline
+ *   notice, never a freshly-minted empty session. See `handleRowOpen` for the full sequence
+ *   and `resolveRowDocumentInfo` for the ADR-012 restatement rationale.
+ *
  * Standards:
  *   - ADR-012: shared-lib composition (ActionCard + DataverseEntityViewWidget +
  *     WorkspaceWidgetRegistry) — no fork of any of the three.
@@ -65,18 +77,21 @@
  */
 
 import * as React from 'react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
 import { ActionCard } from '@spaarke/ui-components';
 import type { ActionCardProps } from '@spaarke/ui-components';
+import { buildBffApiUrl } from '@spaarke/auth';
 
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { useAiSession } from '../../providers/useAiSession';
 import { DataverseEntityViewWidget } from './DataverseEntityViewWidget';
 import type { CreateAnalysisWizardData } from './CreateAnalysisWizardWidget';
+import type { DocumentViewerWidgetData } from './DocumentViewerWidget';
 
 // ---------------------------------------------------------------------------
 // sprk_worktype — raw Choice value, restated locally (ADR-012; see file header)
@@ -119,6 +134,54 @@ const ANALYSIS_HUB_GRID_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
 
 /** Widget-type string passed to the nested `DataverseEntityViewWidget` for debug/sub-routing only. */
 const ANALYSIS_HUB_GRID_WIDGET_TYPE = 'analysis-hub-grid';
+
+// ---------------------------------------------------------------------------
+// Row reopen — session lookup + file resolution (task 031, spec FR-11)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors the BFF's `AnalysisSessionSummary` record returned by
+ * `GET /api/ai/chat/sessions/by-analysis/{analysisId}` (task 031). camelCase per the
+ * endpoint's `JsonNamingPolicy.CamelCase` serializer options.
+ */
+interface AnalysisSessionLookupResponse {
+  sessionId: string;
+  messageCount: number;
+  isArchived: boolean;
+  createdOn: string | null;
+}
+
+/**
+ * Reads the `sprk_documentid` → `sprk_document` file-hop fields directly off the grid row
+ * (ADR-007) — one field access, no SPE pointer is ever read off `sprk_analysis`.
+ *
+ * Restated locally rather than imported from
+ * `src/solutions/SpaarkeAi/src/services/analysisFileResolution.ts` — that module is
+ * SpaarkeAi-solution-owned and this shared-lib widget cannot import it (ADR-012:
+ * dependency direction is solution → shared lib, never the reverse — see the identical
+ * `WORK_TYPE_AGREEMENT_REVIEW` restatement above for the established precedent). Returns
+ * `null` when the Analysis has no linked document — callers MUST treat that as "no file",
+ * never fabricate a pointer.
+ */
+function resolveRowDocumentInfo(
+  record: Record<string, unknown>
+): { documentId: string; documentName: string } | null {
+  const documentId = record['_sprk_documentid_value'];
+  if (typeof documentId !== 'string' || documentId.length === 0) {
+    return null;
+  }
+
+  const formattedName = record['_sprk_documentid_value@OData.Community.Display.V1.FormattedValue'];
+  const rowName = record['sprk_name'];
+  const documentName =
+    typeof formattedName === 'string' && formattedName.length > 0
+      ? formattedName
+      : typeof rowName === 'string' && rowName.length > 0
+        ? rowName
+        : 'Document';
+
+  return { documentId, documentName };
+}
 
 // ---------------------------------------------------------------------------
 // Data contract
@@ -224,6 +287,12 @@ const useStyles = makeStyles({
     paddingBottom: 0,
     color: tokens.colorNeutralForeground3,
   },
+  reopenNotice: {
+    padding: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: 0,
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -242,8 +311,14 @@ const useStyles = makeStyles({
 export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetData>> = ({ data, className }) => {
   const styles = useStyles();
   const dispatch = useDispatchPaneEvent();
+  const { bffBaseUrl, authenticatedFetch } = useAiSession();
 
   const gridConfigId = data?.configId ?? ANALYSIS_HUB_GRID_CONFIG_ID;
+
+  // Transient status line for the row-reopen flow (task 031) — cleared on every new attempt,
+  // only ever set on a graceful degrade (no session bound / lookup failure). Never blocks the
+  // grid; purely informational.
+  const [reopenNotice, setReopenNotice] = useState<string | null>(null);
 
   const handleAgreementReviewClick = useCallback(() => {
     dispatch('workspace', {
@@ -265,6 +340,105 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
       'agreement-review': handleAgreementReviewClick,
     }),
     [handleAgreementReviewClick]
+  );
+
+  /**
+   * Row-open handler — task 031 (FR-11): reopens an existing Analysis's session in the
+   * ALREADY-OPEN three-pane surface, IN PLACE (this widget is itself a workspace tab inside
+   * the three-pane it is rehydrating — there is no separate surface to navigate to).
+   *
+   * Sequence:
+   *   1. Resolve the Analysis's bound session via the task-020 FK
+   *      (`GET /ai/chat/sessions/by-analysis/{analysisId}`, task 031). A 404 (no session was
+   *      EVER bound to this Analysis) is a graceful no-op — the escalation trigger for this
+   *      task is explicit that reopening MUST NOT mint an empty session to paper over a gap.
+   *   2. Dispatch `conversation.session_switch` (additive ADR-030 discriminant, reuses the
+   *      channel's existing `sessionId` field — no new field needed). ConversationPane's
+   *      EXISTING History-select handler (`handleSelectHistorySession`) adopts the id and
+   *      remounts SprkChat; SprkChat's own `resumeSession()` + `loadHistory()` mount-effect
+   *      restores the transcript. This is TTL-safe: `ChatSessionManager.GetSessionAsync`
+   *      (task 025 hardening) already falls back Redis → Cosmos → Dataverse on a stale/expired
+   *      hot-cache entry — no second restore mechanism is built here (ADR-040: consume the
+   *      seam, don't rebuild it).
+   *   3. The SAME session-id change independently drives WorkspacePane's existing
+   *      chatSessionId-keyed `/tabs` restore effect — the task-025 seam that restores
+   *      review/findings widget state (e.g. AnalysisEditorWidget edit-state, FindingsWidget).
+   *   4. If the Analysis has a linked file (`sprk_documentid` → `sprk_document`, ADR-007),
+   *      dispatch a `document-viewer` `widget_load` with a live `fetchPreviewUrl` closure —
+   *      the SAME BFF call shape `analysisFileResolution.ts` uses, restated locally (see that
+   *      function's doc comment for the ADR-012 boundary rationale). No SPE pointer is ever
+   *      read off `sprk_analysis`.
+   *
+   * Both PaneEventBus dispatches (workspace + conversation channels) are the canonical
+   * mount-signalling mechanism (ADR-030) — no bespoke open path is invented.
+   */
+  const handleRowOpen = useCallback(
+    (recordId: string, record: Record<string, unknown>): void => {
+      setReopenNotice(null);
+
+      void (async (): Promise<void> => {
+        let session: AnalysisSessionLookupResponse;
+        try {
+          const lookupUrl = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/by-analysis/${encodeURIComponent(recordId)}`
+          );
+          const response = await authenticatedFetch(lookupUrl, { headers: { Accept: 'application/json' } });
+
+          if (response.status === 404) {
+            setReopenNotice('This analysis has no chat session yet.');
+            return;
+          }
+          if (!response.ok) {
+            setReopenNotice('Could not reopen this analysis — please try again.');
+            return;
+          }
+          session = (await response.json()) as AnalysisSessionLookupResponse;
+        } catch {
+          setReopenNotice('Could not reopen this analysis — please try again.');
+          return;
+        }
+
+        // Steps 2 + 3 — switch the already-open three-pane to this session, in place.
+        dispatch('conversation', {
+          type: 'session_switch',
+          sessionId: session.sessionId,
+        });
+
+        // Step 4 — restore the linked file, if any (ADR-007 hop; graceful no-file no-op).
+        const documentInfo = resolveRowDocumentInfo(record);
+        if (documentInfo) {
+          const widgetData: DocumentViewerWidgetData = {
+            filename: documentInfo.documentName,
+            contentType: 'application/octet-stream',
+            textContent: '',
+            documentId: documentInfo.documentId,
+            fetchPreviewUrl: async (): Promise<string | null> => {
+              try {
+                const previewUrlEndpoint = buildBffApiUrl(
+                  bffBaseUrl,
+                  `/documents/${encodeURIComponent(documentInfo.documentId)}/preview-url`
+                );
+                const previewResponse = await authenticatedFetch(previewUrlEndpoint);
+                if (!previewResponse.ok) return null;
+                const previewData = (await previewResponse.json()) as { previewUrl?: string | null };
+                return previewData.previewUrl ?? null;
+              } catch {
+                return null;
+              }
+            },
+          };
+
+          dispatch('workspace', {
+            type: 'widget_load',
+            widgetType: 'document-viewer',
+            widgetData,
+            displayName: documentInfo.documentName,
+          });
+        }
+      })();
+    },
+    [authenticatedFetch, bffBaseUrl, dispatch]
   );
 
   return (
@@ -306,7 +480,20 @@ export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetD
         <Text size={200} weight="semibold" className={styles.sectionLabel}>
           Analyses
         </Text>
-        <DataverseEntityViewWidget data={{ configId: gridConfigId }} widgetType={ANALYSIS_HUB_GRID_WIDGET_TYPE} />
+        {reopenNotice && (
+          <Text
+            size={200}
+            className={styles.reopenNotice}
+            role="status"
+            data-testid="analysis-hub-reopen-notice"
+          >
+            {reopenNotice}
+          </Text>
+        )}
+        <DataverseEntityViewWidget
+          data={{ configId: gridConfigId, onRecordOpen: handleRowOpen }}
+          widgetType={ANALYSIS_HUB_GRID_WIDGET_TYPE}
+        />
       </div>
     </div>
   );

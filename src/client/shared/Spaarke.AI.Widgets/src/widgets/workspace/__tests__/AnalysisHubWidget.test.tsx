@@ -41,6 +41,17 @@ jest.mock('../../../events/useDispatchPaneEvent', () => ({
   useDispatchPaneEvent: () => mockDispatch,
 }));
 
+// task 031 (FR-11 reopen): the widget now reads bffBaseUrl/authenticatedFetch from
+// useAiSession() for the row-open BFF lookups. Mocked here (not exercised by task-030's
+// card/grid-composition tests) so this suite keeps rendering without a real
+// AiSessionProvider ancestor — mirrors the useDispatchPaneEvent mock above.
+jest.mock('../../../providers/useAiSession', () => ({
+  useAiSession: () => ({
+    bffBaseUrl: 'https://bff.example.com',
+    authenticatedFetch: jest.fn(),
+  }),
+}));
+
 jest.mock('../DataverseEntityViewWidget', () => ({
   DataverseEntityViewWidget: (props: { data?: { configId?: string }; widgetType: string }) => (
     <div

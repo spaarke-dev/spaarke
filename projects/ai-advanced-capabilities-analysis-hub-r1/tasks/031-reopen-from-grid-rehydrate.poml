@@ -4,7 +4,7 @@
     <title>Reopen from grid → rehydrate session + review state + files</title>
     <phase>3 Hub</phase>
     <gate>deps 030,020,025 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend (.tsx) session-rehydration flow crossing the session-binding + persistence spine; user-facing three-pane reopen; FULL per §8 (frontend + session-state judgment).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -142,6 +142,49 @@
     Spec FR-11 (§126-128). Consumes the 020 binding + 025 persistence seams — do not rebuild them. Reuse the
     PaneEventBus widget_load mount path (ASSISTANT-SURFACE-LAUNCH-MECHANISM.md). Findings/review widgets
     (FindingsWidget / NdaReviewSummaryPanel) survive retirement and are reused for review-state restore.
+
+    COMPLETED (2026-07-29). Implementation summary + deviations:
+
+    - New thin BFF endpoint GET /api/ai/chat/sessions/by-analysis/{analysisId} (ChatEndpoints.cs) resolves
+      the Analysis's bound session via the task-020 GetSessionsByAnalysisAsync FK query (no such lookup
+      was previously exposed to clients). Picks the MOST RECENTLY CREATED session (archived or not — an
+      archived session still holds its transcript per task 022). Selection logic extracted to an
+      `internal static SelectMostRecentSession` helper, unit-tested directly (4 tests) — see
+      tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsSessionByAnalysisTests.cs. DEVIATION: no
+      HTTP-level contract test for the route itself — building a MapChatEndpoints()-hosting fixture would
+      require wiring that group's very large DI graph (RAG, SprkChatAgentFactory, session persistence,
+      etc.); no such fixture exists anywhere in the suite today. Accepted as a Path A (project-scoped)
+      exception per code-review — flagged as optional follow-up if full route coverage is wanted.
+
+    - AnalysisHubWidget.tsx reopens IN PLACE (no page reload) since the widget is itself already a tab
+      inside the open three-pane it is rehydrating. Row-open wires through DataverseEntityViewWidget's
+      existing (but previously unused) `onRecordOpen` DataGrid escape hatch — added as an optional
+      pass-through prop on DataverseEntityViewWidgetData (small, additive extension, not a fork).
+      Dispatches (a) a NEW additive `conversation.session_switch` PaneEventBus discriminant (reuses the
+      existing `sessionId` field on ConversationPaneEvent — see PaneEventTypes.ts) that ConversationPane
+      routes to its EXISTING `handleSelectHistorySession` (the History-menu session-select handler) — this
+      is TTL-safe because ChatSessionManager.GetSessionAsync (task-025 hardening) already falls back
+      Redis→Cosmos→Dataverse; and (b) for a linked file, a `workspace.widget_load` document-viewer event
+      with a live fetchPreviewUrl closure (ADR-007 hop, restated locally per the ADR-012 boundary — shared
+      lib cannot import the solution-owned analysisFileResolution.ts). Setting chatSessionId ALSO drives
+      WorkspacePane's existing chatSessionId-keyed /tabs restore effect, covering review/findings-state
+      restore for free (no new code needed there).
+      DEVIATION from the POML's literal file-scope: this required a small additive change to
+      ConversationPane.tsx (one usePaneEvent subscription reusing the existing handler) and PaneEventTypes.ts
+      (one new union member) — investigated and rejected alternatives: (1) a full-page reload via
+      ?sessionId= URL param — zero touches to ConversationPane but heavier UX and not what "reuse the
+      existing three-pane open path" was found to mean once traced; (2) persisting a document-viewer tab
+      via the /tabs PATCH endpoint before navigating — rejected because DocumentViewerWidget's
+      fetchPreviewUrl closure cannot survive JSON serialization (a persisted static previewUrl would be
+      stale by restore time). The in-place approach was the only one that genuinely satisfies "TTL-expired
+      resolves against Cosmos, never mints an empty session" (acceptance criterion 2) without duplicating
+      task-025's restore logic.
+
+    Build/test: dotnet build Sprk.Bff.Api (0 errors) + 4 new BFF unit tests pass; Spaarke.AI.Widgets
+    `npm run build` (tsc, 0 errors) + full jest suite (680/681 pass — the 1 pre-existing failure in
+    register-workspace-widgets.test.ts, "Communications" vs "Messages" metadata, is unrelated to this task
+    and predates it); SpaarkeAi `npm run typecheck` (0 surface-owned errors) + ConversationPane/WorkspacePane
+    jest suites (223/223 pass).
   </notes>
 
   <execution>
