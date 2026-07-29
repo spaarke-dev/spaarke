@@ -4,7 +4,7 @@
     <title>Fix 12 pre-existing e2e failures (green baseline)</title>
     <phase>0 Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Brownfield debug of `.tsx` e2e suites on the three-pane foundation; touches `.ts`/`.tsx`; the green baseline gates every Phase 2+ task, so a wrong "fix" (masking a regression) has high blast radius.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -115,6 +115,21 @@
   <notes>
     ui-tests are intentionally NOT included: this task's deliverable IS the e2e tests. spec §10 / FR-01 / PLAN Phase 0.
     Green baseline gates all Phase 2+ three-pane work (W0 in TASK-INDEX).
+
+    COMPLETED 2026-07-28. All 12 failures traced to test-infra drift, NOT a genuine product regression —
+    no escalation raised. Cluster A (3 tests, ConversationPane.compose-*-session-routing.e2e.test.tsx +
+    compose-edit-controls.test.tsx): stale assertions predating a deliberate, reviewer-approved UAT
+    round-8 #7 feature (ConversationPane.tsx dispatchComposeAction appends a "What I changed" explanation
+    line to the compose-edit confirmation; independently covered by composeResultFormat.test.ts). Cluster B
+    (9 tests, three-pane-compose-coordination.e2e.test.tsx): harness was missing an AiSessionProvider mock
+    after decision-1 (2026-07-19, ContextPaneController.tsx) made `execution-trace`
+    (&lt;ComposeTraceHost/&gt;, which calls useAiSession()) the Context pane's default view — the real shell
+    (ThreePaneShell.tsx) always supplies AiSessionProvider; the test harness did not. Fix: added the same
+    `useAiSession`-override jest.mock pattern already used by 3 sibling suites (`...actual` keeps
+    PaneEventBus/PaneEventBusProvider real). Only 4 test files touched; no product code changed. Before:
+    4 suites failed / 12 of 15 tests failed. After: 4 suites / 15 tests pass; full SpaarkeAi Jest portfolio
+    (76 suites / 673 tests) green, no regressions. Quality gates (code-review + adr-check, unconditional
+    per TEST-MODIFYING override): 0 Critical / 0 Warning. Evidence: notes/green-baseline.md.
   </notes>
 
   <execution>

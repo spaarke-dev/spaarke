@@ -12,7 +12,7 @@
 
 | # | Title | Phase | Rigor | Tier / Effort | Deps | Parallel-safe | Tags | Status |
 |---|---|---|---|---|---|---|---|---|
-| **001** | Fix 12 pre-existing e2e failures (green baseline) | 0 Foundation | FULL | sonnet / xhigh | — | false (gate) | testing, e2e, frontend | 🔲 |
+| **001** | Fix 12 pre-existing e2e failures (green baseline) | 0 Foundation | FULL | sonnet / xhigh | — | false (gate) | testing, e2e, frontend | ✅ |
 | **010** | Schema preflight — verify owner-created columns present | 1 Data spine | MINIMAL | sonnet / low | 001 | false (gate) | dataverse, preflight | 🔲 |
 | **011** | Client `sprk_analysis` TypeScript type (net-new) | 1 Data spine | STANDARD | sonnet / high | 010 | true (P1) | frontend, typescript, dataverse | 🔲 |
 | **012** | Consume `sprk_worktype` + regarding field-set (RegardingResolver, single-valued) | 1 Data spine | FULL | sonnet / high | 010,011 | true (P1) | frontend, dataverse, regarding | 🔲 |

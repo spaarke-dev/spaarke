@@ -41,6 +41,46 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 import type { WorkspacePaneEvent } from '@spaarke/ai-widgets';
 import { useComposeWorkspaceReceivers } from '@spaarke/compose-components/widgets/useComposeWorkspaceReceivers';
+
+// decision-1 (2026-07-19, ContextPaneController.tsx): the Context pane's resting default view
+// changed from the old "quick-start" GetStartedCardsWidget to `execution-trace`
+// (<ComposeTraceHost/>), which calls `useAiSession()` unconditionally on mount. In the running
+// shell this is always safe — ThreePaneShell wraps the whole pane tree in <AiSessionProvider>
+// (see ThreePaneShell.tsx provider-tree docblock) — but this harness mounts ContextPaneController
+// directly under only a PaneEventBusProvider, so ComposeTraceHost throws
+// "useAiSession must be used within an AiSessionProvider" the instant it renders. This mock
+// mirrors the same `useAiSession` override the ConversationPane compose-session-routing suites
+// already use (see ConversationPane.compose-edit-controls.test.tsx) — it stubs ONLY the session
+// hook; `...actual` keeps PaneEventBus/PaneEventBusProvider/everything else REAL, so the file's
+// forcing-function invariant (a REAL PaneEventBus, not a mocked bus) is unaffected. `bffBaseUrl`
+// is intentionally falsy so ComposeTraceHost's `restoreTrace` soft-fails to an empty trace
+// (its own documented fallback) without needing a fetch mock.
+jest.mock('@spaarke/ai-widgets', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actual = jest.requireActual('@spaarke/ai-widgets') as any;
+  return {
+    ...actual,
+    useAiSession: () => ({
+      isAuthenticated: true,
+      authenticatedFetch: jest.fn(async () => ({ ok: false, status: 404, json: async () => ({}) }) as unknown as Response),
+      getAccessToken: jest.fn(async () => 'token'),
+      bffBaseUrl: '',
+      tenantId: 'test-tenant',
+      chatSessionId: 'sess-1',
+      setChatSessionId: jest.fn(),
+      playbookId: undefined,
+      setPlaybookId: jest.fn(),
+      entityContext: null,
+      contextMapping: null,
+      isLoadingContextMapping: false,
+      streaming: { onPaneEvent: null },
+      streamingState: { isStreaming: false, tokenCount: 0 },
+      turnCount: 0,
+      isLoading: false,
+    }),
+  };
+});
+
 import { ContextPaneController } from '../../context/ContextPaneController';
 import { ComposeAssistantCoordination } from '../../conversation/ComposeAssistantCoordination';
 import type { ShellStageContextValue } from '../ThreePaneShell';

@@ -2,9 +2,9 @@
 
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
-**Status**: none (project in planning — pipeline Step 3 task decomposition pending)
-**Active task**: none
-**Next action**: Confirm UQ-1 (fork layer) + hot-path coordination → generate task POMLs (pipeline Step 3)
+**Status**: not-started
+**Active task**: 010 - Schema preflight — verify owner-created columns present
+**Next action**: Begin Step 1 of task 010 (invoke task-execute; MINIMAL rigor per POML — read-only Dataverse schema verification)
 
 ## Pipeline progress (2026-07-28)
 
@@ -17,12 +17,20 @@
 - [x] UQ-1 confirmed by owner → Option B (new BFF `POST /api/ai/analysis/fork`); ADR-013/§10 Path A exception recorded
 - [x] Step 3 task decomposition — 28 POMLs + TASK-INDEX; `Validate-TaskPoml.ps1` PASS (0 errors)
 - [ ] Step 4 commit project artifacts
-- [ ] Step 5 task execution — **NOT auto-started** (awaiting owner go-ahead; see below)
+- [x] Step 5 task execution — started: task 001 (green-baseline gate) ✅ complete 2026-07-28
+
+## Session Notes — Key Learnings (task 001)
+
+- All 12 pre-existing e2e failures were test-infra drift (stale assertions / missing test-harness provider),
+  NOT product regressions — no escalation fired. See `notes/green-baseline.md` for full root-cause detail
+  and before/after evidence. Full SpaarkeAi Jest portfolio (76 suites / 673 tests) green post-fix.
 
 ## Next action
 
-Owner review of the plan (PLAN.md + TASK-INDEX.md). Then start execution: `work on task 001` (green-baseline gate).
-Task 001 → 010 are gates; nothing downstream runs until the 12 e2e failures pass and owner schema is verified present.
+Task 010 (schema preflight) — MINIMAL rigor, read-only Dataverse verification gate (W1). Blocks all
+Phase-1/Phase-2 data + session code (011, 012, 013, 020…). `projects/.../notes/schema-prerequisites.md`
+already has an owner-verified-present note from 2026-07-28 (Dataverse MCP `describe` output) that task 010
+should confirm/consume.
 
 ## Open decisions
 

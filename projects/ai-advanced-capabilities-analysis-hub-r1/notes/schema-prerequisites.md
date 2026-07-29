@@ -67,3 +67,25 @@ Owner sets the **integer values** (Dataverse assigns or you pick, e.g. base 3-di
 - (`sprk_analysis.sprk_description` — ✅ already created)
 
 Once these exist, run **`work on task 001`** (green-baseline) — task 010 will then verify this contract and unblock the data-spine phase.
+
+---
+
+## ✅ VERIFIED PRESENT (2026-07-28, via Dataverse MCP describe)
+
+All 6 elements confirmed live. Concrete values for tasks 011/012 (use these — do not guess):
+
+**`sprk_analysis.sprk_worktype`** — Choice, option **integer values** (client type keys on these):
+| Label (Dataverse) | Integer value | kebab id used in code/spec |
+|---|---|---|
+| Agreement Analysis | `100000000` | `agreement-analysis` (LIVE) |
+| Legal Research | `100000001` | `legal-research` (coming-soon) |
+| Patent Application | `100000002` | `patent-application` (coming-soon) |
+
+**Regarding field-set** — `sprk_analysis` already carries the **full ADR-024 dual-field resolver pattern**, richer than the spec assumed:
+- Entity lookups present: `sprk_regardingmatter`→sprk_matter, `sprk_regardingproject`→sprk_project, `sprk_regardingdocument`→sprk_document (owner-added) **plus** pre-existing `sprk_regardingbudget`, `sprk_regardingcommunication`, `sprk_regardinginvoice`, `sprk_regardingservicerequest`-adjacent lookups.
+- Denormalized resolver fields present: `sprk_regardingrecordtype`→`sprk_recordtype_ref`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordnumber`.
+- → **Task 012 consumes the existing ADR-024 pattern** (RegardingResolver writes the denormalized fields from whichever single entity lookup is populated). Single-valued invariant still applies to the entity lookups.
+
+**`sprk_aichatsummary`** — `sprk_analysis` FK present; also has `sprk_sessionid` (grouping key), `sprk_isarchived` (BIT — usable for durable archive, relevant to task 022), `sprk_messagecount`, `sprk_documentid`, `sprk_playbookid`, `sprk_tenantid` — matching `ChatDataverseRepository.CreateSessionAsync` writes.
+
+**Note for task 022 (archive durability)**: `sprk_isarchived` exists on `sprk_aichatsummary`, so durable Dataverse archive IS feasible (the AIPL-054 stub gap is the missing cached summary-record GUID, not a missing column).

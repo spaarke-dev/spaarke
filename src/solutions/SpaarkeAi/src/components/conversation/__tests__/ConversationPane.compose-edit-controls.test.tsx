@@ -190,6 +190,16 @@ jest.mock('../../shell/ThreePaneShell', () => ({
 // Import AFTER mocks.
 import { ConversationPane, COMPOSE_EDIT_CONFIRMATION } from '../ConversationPane';
 
+// UAT round-8 #7 (ConversationPane.tsx dispatchComposeAction) appends a
+// "**What I changed:**" explanation line — sourced from the dispatched ledger
+// payload's `rationale` (see RATIONALE below, which the /dispatch mock returns
+// as `payload.rationale`) — onto the base summary-only confirmation. This is
+// the current, correct, reviewer-approved contract (see
+// composeResultFormat.test.ts "extractComposeEditExplanation" for the unit
+// coverage); the confirmation is no longer a bare COMPOSE_EDIT_CONFIRMATION
+// string when an explanation is present.
+const EXPECTED_CONFIRMATION = `${COMPOSE_EDIT_CONFIRMATION}\n\n**What I changed:** ${RATIONALE}`;
+
 const bridgeRef: { current: ComposeActionBridgeValue | null } = { current: null };
 function BridgeCapture(): null {
   bridgeRef.current = useComposeActionBridge();
@@ -255,11 +265,14 @@ describe('DEF-12: Accept/Reject/Try-another move onto the Assistant confirmation
 
     const confirmation = injectedMessages.find(m => m.metadata?.composeEdit);
     expect(confirmation).toBeDefined();
-    expect(confirmation!.content).toBe(COMPOSE_EDIT_CONFIRMATION);
+    expect(confirmation!.content).toBe(EXPECTED_CONFIRMATION);
     expect(confirmation!.metadata!.composeEdit).toEqual({ ledgerRef: LEDGER_REF, bindingId: DRAFT_BINDING });
-    // Summary-only — the proposed text and the reasoning are NOT dumped into the message.
+    // Summary-only for the REDLINE — the proposed text is never dumped into the message.
+    // The reasoning IS surfaced (UAT round-8 #7), but only via the explicit "What I changed"
+    // explanation line — never as raw duplicated redline prose.
     expect(confirmation!.content).not.toContain(NEW_TEXT);
-    expect(confirmation!.content).not.toContain(RATIONALE);
+    expect(confirmation!.content).toContain('**What I changed:**');
+    expect(confirmation!.content).toContain(RATIONALE);
 
     // The live edit is threaded to SprkChat so only its confirmation shows the controls.
     expect(captured.activeComposeEditLedgerRef).toBe(LEDGER_REF);
