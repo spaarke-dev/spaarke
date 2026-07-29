@@ -11,13 +11,14 @@
  * via `localStorage` (the hook's own persistence, keyed by `storageKey`).
  *
  * This is the COMPOSITION ROOT for the reading pane — it does NOT implement
- * the title-bar/body/attachments/related-to/association sub-views. Those are
- * supplied by the host as two `render*` slot props — `renderHeader` (the
- * TITLE BAR: the email subject on its own light-gray row, rendered ABOVE the
- * toolbar) and `renderBody` (the composed recipients + collapsible
- * Attachments/Related-to/Association sections + body region, rendered BELOW
- * the toolbar) — see `EmailReadingPaneShell.types.ts` for the full slot
- * contract. The full-width `<EmailToolbar/>` spans the reading-pane width and
+ * the association/title-bar/body/recipients/attachments/related-to sub-views.
+ * Those are supplied by the host as three `render*` slot props, top → bottom:
+ * `renderTop` (the Association section — rendered at the VERY TOP so its
+ * status dot is the first thing seen), `renderHeader` (the TITLE BAR: the
+ * email subject on its own light-gray row) and `renderBody` (the composed
+ * recipients + collapsible Attachments/Related-to sections + body region,
+ * rendered BELOW the toolbar) — see `EmailReadingPaneShell.types.ts` for the
+ * full slot contract. The full-width `<EmailToolbar/>` spans the reading-pane width and
  * dispatches Reply/Reply All/Forward/New plus the icon-only Save-to-SharePoint/
  * Create-Event/Create-To-Do/Link-Invoice/Open-full-form actions through the
  * host-supplied `actions` handlers — the shell never re-implements action-bar/
@@ -98,6 +99,7 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
   initialSelectedId,
   onSelectedIdChange,
   actions,
+  renderTop,
   renderHeader,
   renderBody,
   storageKey = DEFAULT_STORAGE_KEY,
@@ -149,6 +151,7 @@ export const EmailReadingPaneShell: React.FC<EmailReadingPaneShellProps> = ({
       <div className={s.readingPane} style={{ width: detailWidth }} data-testid="email-reading-pane">
         {selectedId ? (
           <React.Fragment key={selectedId}>
+            {renderTop?.(selectedId)}
             {renderHeader?.(selectedId)}
             <EmailToolbar selectedId={selectedId} actions={actions} />
             <div className={s.readingPaneScroll}>{renderBody?.(selectedId)}</div>

@@ -94,6 +94,35 @@ describe('EmailReadingPaneShell', () => {
     ]);
   });
 
+  it('renders the optional renderTop slot ABOVE the title-bar header (Association-at-top)', () => {
+    renderWithProvider(
+      <EmailReadingPaneShell
+        items={[makeItem({ id: 'e1', subject: 'Email one' })]}
+        renderTop={id => <div data-testid="top-slot">top:{id}</div>}
+        renderHeader={id => <div data-testid="header-slot">header:{id}</div>}
+        renderBody={id => <div data-testid="body-slot">body:{id}</div>}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Email one'));
+
+    expect(screen.getByTestId('top-slot')).toHaveTextContent('top:e1');
+    // Layout order: top slot (Association), then header (title bar), then the
+    // full-width toolbar, then the body region.
+    const readingPane = screen.getByTestId('email-reading-pane');
+    const nodes = Array.from(
+      readingPane.querySelectorAll(
+        '[data-testid="top-slot"], [data-testid="header-slot"], [role="toolbar"], [data-testid="body-slot"]'
+      )
+    );
+    expect(nodes.map(n => n.getAttribute('data-testid') ?? n.getAttribute('role'))).toEqual([
+      'top-slot',
+      'header-slot',
+      'toolbar',
+      'body-slot',
+    ]);
+  });
+
   it('notifies the host of selection changes via onSelectedIdChange without controlling selection', () => {
     const onSelectedIdChange = jest.fn();
     renderShell({ onSelectedIdChange });

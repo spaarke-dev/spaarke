@@ -180,7 +180,8 @@ describe('EmailConnectionsReview', () => {
     // Filed group header + the filed matter, with Change/Remove (no Confirm).
     expect(screen.getByText('Filed')).toBeInTheDocument();
     const filed = screen.getByTestId('association-filed');
-    expect(within(filed).getByText('Acme v Beta')).toBeInTheDocument();
+    expect(within(filed).getByText(/Acme v Beta/)).toBeInTheDocument();
+    expect(within(filed).getByText(/Filed to/i)).toBeInTheDocument();
     expect(within(filed).getByRole('button', { name: 'Change' })).toBeInTheDocument();
     expect(within(filed).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
   });
@@ -226,7 +227,7 @@ describe('EmailConnectionsReview', () => {
     expect(nulledBinds).toHaveLength(0);
 
     // The pre-existing sibling (the filed Matter) is still rendered — untouched.
-    expect(screen.getByText('Acme v Beta')).toBeInTheDocument();
+    expect(screen.getByText(/Acme v Beta/)).toBeInTheDocument();
   });
 
   it('removing a FILED association removes ONLY that one via unlinkRegarding — siblings (and other pending suggestions) are left intact', async () => {

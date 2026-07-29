@@ -21,7 +21,7 @@
  */
 import * as React from 'react';
 import { mergeClasses, Text, Button, Tooltip, Radio, RadioGroup } from '@fluentui/react-components';
-import { Checkmark16Filled, ArrowSwap16Regular, Dismiss16Regular } from '@fluentui/react-icons';
+import { Checkmark16Filled, Delete16Regular } from '@fluentui/react-icons';
 import { PolymorphicPicker, type RecordTypeCatalogEntry, type IPolymorphicPickerWebApi } from '@spaarke/ui-components';
 import {
   groupCandidatesByName,
@@ -117,6 +117,8 @@ export function DecisionBlock({
 }
 
 // ── SUGGESTED — one candidate, phrased by confidence (clear match vs possible) ──
+// Leads with the match statement top-down; the statement IS the content (no
+// group-header-then-paragraph-below). Then the actions.
 export function SuggestedMatch({
   conn,
   busy,
@@ -136,29 +138,22 @@ export function SuggestedMatch({
 }): React.ReactElement {
   const name = resolveDisplayName?.(conn.entity, conn.targetId) ?? conn.targetName;
   const isClear = confidenceBand(conn.confidence) === 'high';
-  const label = (
-    <>
-      <span className={s.strongName}>
-        {entityLabel(conn.entity)} · {name}
-      </span>
+  // The record identity: "{entity label} · {name}[ · {record number}]".
+  const record = (
+    <span className={s.strongName}>
+      {entityLabel(conn.entity)} · {name}
       {conn.recordNumber ? <span className={s.recNum}> · {conn.recordNumber}</span> : null}
-    </>
+    </span>
   );
 
   return (
     <div className={s.block} data-testid="association-suggested">
-      {isClear ? (
-        <Text className={s.leadText}>
-          This email looks like it&apos;s about {label}
-          {conn.matchReason ? <span className={s.why}> — {conn.matchReason}</span> : null}{' '}
-          <span className={s.pct}>· {pct(conn.confidence)}</span>
-        </Text>
-      ) : (
-        <Text className={s.leadText}>
-          Possible match: {label} <span className={s.pct}>· {pct(conn.confidence)}</span>
-          {conn.matchReason ? <span className={s.why}> · {conn.matchReason}</span> : null}
-        </Text>
-      )}
+      <Text className={s.leadText}>
+        {isClear ? "This email looks like it's about " : 'Possible match: '}
+        {record}
+        {conn.matchReason ? <span className={s.why}> — {conn.matchReason}</span> : null}{' '}
+        <span className={s.pct}>· {pct(conn.confidence)}</span>
+      </Text>
       {!readOnly && (
         <div className={s.actionsRow}>
           <Button appearance="primary" icon={<Checkmark16Filled />} disabled={busy} onClick={() => onConfirm(conn)}>
@@ -173,7 +168,9 @@ export function SuggestedMatch({
   );
 }
 
-// ── FILED — green, silent confirmed row (Change re-files via picker / Remove unlinks) ──
+// ── FILED — calm, silent confirmed row: "✓ Filed to X" + a plain Change link +
+//    a labelled Remove (trash) button. No checkbox — filed is done, nothing to
+//    select. Writes stay on the additive applyRegardingSelection / unlinkRegarding path.
 export function FiledRow({
   conn,
   busy,
@@ -206,19 +203,19 @@ export function FiledRow({
 
   return (
     <div className={s.filedRow} data-testid="association-filed">
-      <span className={s.filedCheck} aria-hidden="true">
-        <Checkmark16Filled />
-      </span>
-      <div className={s.filedRec}>
-        <Text className={s.filedName}>
-          {name}
-          {conn.recordNumber ? <span className={s.recNum}>· {conn.recordNumber}</span> : null}
-          <span className={s.typeTag}>{entityLabel(conn.entity)}</span>
-        </Text>
-      </div>
-      {readOnly ? (
-        <span />
-      ) : isChanging ? (
+      <Text className={s.filedLead}>
+        <span className={s.filedCheck} aria-hidden="true">
+          <Checkmark16Filled />
+        </span>
+        <span>
+          Filed to{' '}
+          <span className={s.filedName}>
+            {entityLabel(conn.entity)} · {name}
+            {conn.recordNumber ? <span className={s.recNum}> · {conn.recordNumber}</span> : null}
+          </span>
+        </span>
+      </Text>
+      {readOnly ? null : isChanging ? (
         <div className={s.rowActs}>
           <PolymorphicPicker
             title="Change"
@@ -233,21 +230,14 @@ export function FiledRow({
         </div>
       ) : (
         <div className={s.rowActs}>
-          <Tooltip content="Change" relationship="label">
-            <Button
-              size="small"
-              appearance="subtle"
-              icon={<ArrowSwap16Regular />}
-              aria-label="Change"
-              disabled={busy}
-              onClick={onRequestChange}
-            />
-          </Tooltip>
+          <Button appearance="transparent" className={s.linkBtn} disabled={busy} onClick={onRequestChange}>
+            Change
+          </Button>
           <Tooltip content="Remove" relationship="label">
             <Button
               size="small"
               appearance="subtle"
-              icon={<Dismiss16Regular />}
+              icon={<Delete16Regular />}
               aria-label="Remove"
               disabled={busy}
               onClick={onRemove}

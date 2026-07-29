@@ -66,27 +66,27 @@ export const useConnectionsReviewStyles = makeStyles({
   },
   recNum: { color: tokens.colorNeutralForeground2, fontVariantNumeric: 'tabular-nums', fontWeight: tokens.fontWeightRegular },
 
-  // ── Filed — silent confirmed rows (Change / Remove) ──
+  // ── Filed — calm, silent confirmed rows ("✓ Filed to X" + Change / Remove) ──
   filedRow: {
-    display: 'grid',
-    gridTemplateColumns: '20px 1fr auto',
-    gap: tokens.spacingHorizontalM,
-    alignItems: 'center',
-    paddingBlock: tokens.spacingVerticalXS,
-  },
-  filedCheck: { color: tokens.colorPaletteGreenForeground1, display: 'flex', flexShrink: 0 },
-  filedRec: { display: 'flex', flexDirection: 'column', minWidth: 0 },
-  filedName: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
-    color: tokens.colorNeutralForeground1,
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
+    gap: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXS,
     flexWrap: 'wrap',
   },
+  filedLead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    minWidth: 0,
+    flex: '1 1 auto',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground1,
+  },
+  filedCheck: { color: tokens.colorPaletteGreenForeground1, display: 'flex', flexShrink: 0 },
+  filedName: { fontWeight: tokens.fontWeightSemibold, color: tokens.colorNeutralForeground1 },
   typeTag: { color: tokens.colorNeutralForeground3, fontSize: tokens.fontSizeBase100, fontWeight: tokens.fontWeightRegular },
-  rowActs: { display: 'flex', gap: tokens.spacingHorizontalXS, justifyContent: 'flex-end', alignItems: 'center' },
+  rowActs: { display: 'flex', gap: tokens.spacingHorizontalS, justifyContent: 'flex-end', alignItems: 'center' },
 
   // ── Unmatched empty state ──
   unmatched: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },

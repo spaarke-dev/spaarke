@@ -90,7 +90,9 @@ export interface EmailReadingPaneShellProps {
   onSelectedIdChange?: (id: string | undefined) => void;
   /** Toolbar dispatch handlers (FR-08). Omitted handlers no-op with a console warning. */
   actions?: EmailToolbarActionHandlers;
-  /** TITLE-BAR slot — the email subject on its own light-gray row; rendered ABOVE the toolbar. Invoked with the selected id whenever a card is selected. */
+  /** TOP slot — rendered at the VERY TOP of the reading pane, ABOVE the title bar (the Association section lives here so its status dot is the first thing the user sees). Invoked with the selected id whenever a card is selected. */
+  renderTop?: EmailPaneSlotRenderer;
+  /** TITLE-BAR slot — the email subject on its own light-gray row; rendered ABOVE the toolbar (and below the top slot). Invoked with the selected id whenever a card is selected. */
   renderHeader?: EmailPaneSlotRenderer;
   /** Composed BODY-REGION slot — recipients block + collapsible Attachments / Related-to / Association sections + email body, in that order (the host composes them; the shell just renders the one returned node inside the scrollable region below the toolbar). Invoked with the selected id whenever a card is selected. */
   renderBody?: EmailPaneSlotRenderer;

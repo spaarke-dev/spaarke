@@ -8,21 +8,22 @@
  * parity: a bug fixed here fixes both surfaces).
  *
  * Reading-pane MAIN-AREA layout (one column, top → bottom — locked owner design):
- *   1. TITLE BAR (`renderHeader`) — the email Subject on its own light-gray row,
- *      rendered ABOVE the toolbar (`EmailReadingHeader`).
- *   2. TOOLBAR (shell's own `EmailToolbar`) — Reply / Reply All / Forward / New
+ *   1. ASSOCIATION (`renderTop`) — collapsible (COLLAPSED by default), header
+ *      status dot (🔴/🟡/🟢) → the redesigned resolver (`EmailConnectionsReview`).
+ *      Rendered at the VERY TOP so the status dot is the first thing seen.
+ *   2. TITLE BAR (`renderHeader`) — the email Subject on its own light-gray row
+ *      (`EmailReadingHeader`).
+ *   3. TOOLBAR (shell's own `EmailToolbar`) — Reply / Reply All / Forward / New
  *      (icon+text, left) + a right-aligned icon-only group with tooltips: Save to
  *      SharePoint, Create Event, Create To Do, Link Invoice, Open full form. The
  *      create/save actions act on the email's resolved association.
- *   3-7. `renderBody` composes, in order:
- *      3. RECIPIENTS — From/To always; Cc/Bcc only when non-empty (`EmailRecipients`).
- *      4. ATTACHMENTS — collapsible (COLLAPSED by default), header count
+ *   4-6. `renderBody` composes, in order:
+ *      4. RECIPIENTS — From/To always; Cc/Bcc only when non-empty (`EmailRecipients`).
+ *      5. ATTACHMENTS — collapsible (COLLAPSED by default), header count
  *         "Attachments (N)" → `EmailReadingAttachments`.
- *      5. RELATED TO — collapsible (COLLAPSED), confirmed associations as pills
+ *      6. RELATED TO — collapsible (COLLAPSED), confirmed associations as pills
  *         (`EmailRelatedToPills`) — confirmed-state display ONLY.
- *      6. ASSOCIATION — collapsible (COLLAPSED), header status dot (🔴/🟡/🟢) →
- *         the redesigned resolver (`EmailConnectionsReview`).
- *      7. BODY — `EmailBodyView`, placed AFTER the Related-to/Association sections.
+ *      7. BODY — `EmailBodyView`, placed AFTER the Related-to section.
  *   (The old Tracking trio — monitor/high-priority/access — is REMOVED from the
  *   reading pane entirely per the redesign.)
  *
@@ -226,6 +227,28 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           initialSelectedId={initialSelectedId}
           onSelectedIdChange={setSelectedId}
           actions={toolbarActions}
+          renderTop={id => (
+            // Association section at the VERY TOP — its status dot (🔴/🟡/🟢) is
+            // the first thing the user sees. COLLAPSED by default (dot signals
+            // state; do not auto-expand). Sits ABOVE the subject title bar.
+            <CollapsibleSection
+              id="association"
+              title="Association"
+              status={{ tone: associationSummary.tone, label: associationSummary.label }}
+            >
+              <EmailConnectionsReview
+                communicationId={id}
+                associationStatus={record.recordState?.associationStatus ?? null}
+                associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
+                regardingRecordName={record.recordState?.regardingRecordName ?? null}
+                filedAssociations={filedAssociations}
+                writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
+                pickerWebApi={webApi}
+                linkAnotherCatalog={linkAnotherCatalog}
+                onAssociationsChanged={record.reload}
+              />
+            </CollapsibleSection>
+          )}
           renderHeader={() => <EmailReadingHeader subject={record.recordState?.subject ?? null} />}
           renderBody={id => (
             <div className={s.bodyRegion}>
@@ -250,24 +273,6 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
 
               <CollapsibleSection id="related-to" title="Related to" count={filedAssociations.length}>
                 <EmailRelatedToPills associations={filedAssociations} />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                id="association"
-                title="Association"
-                status={{ tone: associationSummary.tone, label: associationSummary.label }}
-              >
-                <EmailConnectionsReview
-                  communicationId={id}
-                  associationStatus={record.recordState?.associationStatus ?? null}
-                  associationProvenanceJson={record.recordState?.associationProvenanceJson ?? null}
-                  regardingRecordName={record.recordState?.regardingRecordName ?? null}
-                  filedAssociations={filedAssociations}
-                  writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
-                  pickerWebApi={webApi}
-                  linkAnotherCatalog={linkAnotherCatalog}
-                  onAssociationsChanged={record.reload}
-                />
               </CollapsibleSection>
 
               <EmailBodyView
