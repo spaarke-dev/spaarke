@@ -1,0 +1,145 @@
+<task id="024" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>RI-confidence scorer — compute (urgency × deterministic-rung agreement) + wire into `CommunicationAssessedSignal` (`RunAssessmentEmissionAsync`); lights up `CommunicationRiActionService`</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>022</dependencies>
+    <deps>022</deps>
+    <blocks>060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Replaces the hardcoded-0 `CommunicationAssessedSignal.Confidence` with a computed score that GATES the shipped notification path (`CommunicationRiActionService` — Task + appnotification + ping). A wrong score either floods users with noise or leaves the path dark. BFF-touching + `.cs` in shared `Services/Communication/` + best-effort non-fatal → code-review + adr-check at Step 9.5; publish-size + CVE + `/conflict-check` required.</rigor-reason>
+    <parallel-group>P2-triage</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A well-specified scorer (urgency × rung-agreement blend) wired into a known emission point, with weights tuned against an eval set. Clear inputs/outputs, no open-ended architecture. Default execution tier at `high` effort.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-04</fr-refs>
+  </metadata>
+
+  <prompt>
+    Compute a real email-specific RI-confidence and pass it into `CommunicationAssessedSignal`, replacing the hardcoded `0` that currently leaves the shipped notification path inert. Today `CommunicationAssessedSignal.Confidence` is hardcoded 0, so `CommunicationRuleGate` denies under any threshold and `CommunicationRiActionService` creates nothing — Pillar 1 stays dark. This task lights it up.
+
+    1. **Compute the score** — an email-specific blend of **triage urgency** (from the triage output / classification signal, task 022/023) **× deterministic-rung agreement** (how strongly the association rungs, incl. task 020's identifier rung, agree on the match). Do NOT reuse the Workspace/Portfolio priority scorer (D-08 — email-specific). The exact weights are tuned during implementation against an eval set (C-5) — start from the spec's urgency × rung-agreement blend and tune so a high-urgency well-associated email scores ≥ the rule-gate threshold and noise scores below it.
+    2. **Wire into `CommunicationAssessedSignal`** — set the computed value where `RunAssessmentEmissionAsync` (~L238 in `CommunicationEnrichmentService.cs`) emits the signal, replacing the hardcoded 0. Reading the deterministic-rung agreement uses task 020's rung output (the rung-level/agreement signal); reading urgency uses the triage/classification signal (022/023).
+    3. **Light up the notification path** — with a real score, a high-signal email passes `CommunicationRuleGate` and fires `CommunicationRiActionService` (Task + appnotification + real-time ping); noise does not (success-criterion 5). Do NOT modify the shipped gate/action-service behavior beyond feeding the real confidence — the path already exists.
+    4. **Best-effort (NFR-04)** — a scorer failure MUST NOT fail the capture/enrichment path; degrade to a safe low/neutral confidence + log, never throw.
+
+    Add tests proving the blend + the gate outcome (high-signal fires, noise does not) + non-fatal degradation. Tune weights against an eval set; record the chosen weights + threshold rationale in the task note.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication enrichment + notification path. Authority on `CommunicationEnrichmentService.RunAssessmentEmissionAsync`, `CommunicationAssessedSignal`, `CommunicationRuleGate`, and `CommunicationRiActionService`. Fluent in the D-08 email-specific scorer decision (do NOT reuse portfolio scoring), the C-5 tune-with-eval-set approach, NFR-04 non-fatal discipline, §10 BFF Hygiene, and the shipped notification spine (feed it a real confidence; do not fork it).
+  </role>
+
+  <goal>
+    `CommunicationAssessedSignal.Confidence` carries a computed email-specific RI-confidence (urgency × deterministic-rung agreement) set at the `RunAssessmentEmissionAsync` emission point, replacing the hardcoded 0. A high-urgency, well-associated email scores ≥ the rule-gate threshold and fires the shipped `CommunicationRiActionService` (Task + appnotification + ping); noise scores below and fires nothing. The scorer is best-effort (a failure degrades to a safe low/neutral confidence, never throws). Weights + threshold are tuned against an eval set and documented. Build clean; tests prove the blend + gate outcome + non-fatal degradation; existing enrichment/notification tests stay green; publish-size delta ≈0 + no new HIGH CVE; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      The notification spine (`CommunicationRiActionService` + `ICommunicationAssessedProducer` + `CommunicationRuleGate`) shipped, but `CommunicationAssessedSignal.Confidence` is hardcoded 0 — so the gate denies under any threshold and the action service creates nothing (spec §New-Components: "notification path stays dark"). FR-04 computes a real email-specific confidence from triage urgency × deterministic-rung agreement and feeds it into the signal, unblocking the shipped path. This is the fix that makes Pillar 1 fire (success-criterion 5).
+
+      §11: this task ONLY modifies existing files (the scorer wires into `CommunicationEnrichmentService`; it replaces a hardcoded value and may add a small scorer helper). The scorer helper, if a new small class, is justified: (1) no existing email-specific RI scorer exists (the hardcoded 0 is the placeholder); (2) the Workspace/Portfolio scorer is explicitly NOT reused (D-08 — different intent, email-specific); (3) without it the notification path stays dark (success-criterion 5 fails). Keep it minimal — a helper on the enrichment path, not a new service surface.
+
+      The exact weights are a C-5 tuning item (spec Assumptions) — tuned with an eval set during implementation, not a blocker. Reads task 020's rung agreement + task 022/023's urgency signal.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (`RunAssessmentEmissionAsync` ~L238 — the emission point to set the computed confidence)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationAssessedProducer.cs (the signal producer — `CommunicationAssessedSignal.Confidence` was hardcoded 0)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs (the threshold gate the real confidence must pass for high-signal / fail for noise)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRiActionService.cs (the shipped action path lit up by a passing score — Task + appnotification + ping)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (urgency signal source) + the task-020 identifier rung (deterministic-rung agreement source)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-04">Scope: compute an email-specific RI-confidence from triage urgency × deterministic-rung agreement and pass it into `CommunicationAssessedSignal`, replacing the hardcoded 0. A high-urgency well-associated email scores ≥ the rule-gate threshold and fires `CommunicationRiActionService`; noise does not.</constraint>
+    <constraint source="D-08">Scope: the scorer is EMAIL-SPECIFIC; MUST NOT reuse the Workspace/Portfolio priority scoring. Compute from triage urgency + deterministic-rung agreement only.</constraint>
+    <constraint source="C-5">Scope: exact weights + threshold are tuned during implementation against an eval set; record the chosen values + rationale in the task note. Start from the urgency × rung-agreement blend.</constraint>
+    <constraint source="project (feed, don't fork)">Scope: do NOT modify the shipped `CommunicationRuleGate` / `CommunicationRiActionService` behavior beyond feeding the real confidence; the notification path already exists.</constraint>
+    <constraint source="NFR-04">Scope: the scorer MUST be best-effort — a failure degrades to a safe low/neutral confidence + log, never throws into the capture/enrichment path.</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: if urgency comes from an AI signal, read it via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService` into the scorer/Communication code.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR (scorer helper on the enrichment path; feeds the shipped signal); report publish-size delta vs ~49.63 MB baseline (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`; `/conflict-check` before the PR (shared `Services/Communication/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/ICommunicationAssessedProducer.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRiActionService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-047-notification-action-spine.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Assessment signal emission" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs">
+        `RunAssessmentEmissionAsync` (~L238) emits `CommunicationAssessedSignal`; set the computed confidence there (replacing the hardcoded 0). The gate + action-service consume the signal downstream — feed them a real score, don't fork them.
+      </pattern>
+      <pattern name="Email-specific blend" location="projects/email-communication-intelligence-r1/spec.md">
+        Confidence = f(triage urgency, deterministic-rung agreement); email-specific (D-08), weights tuned with an eval set (C-5). High-signal ≥ threshold fires the notification path; noise below.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` + spec FR-04/D-08/C-5 + `CommunicationEnrichmentService.RunAssessmentEmissionAsync` + `ICommunicationAssessedProducer` + `CommunicationRuleGate` + `CommunicationRiActionService` to fix the emission point, the hardcoded-0 location, the threshold, and the urgency + rung-agreement signal sources.</step>
+    <step order="2">Characterize the current inert path with a green baseline (confidence 0 → gate denies → no action) so the fix is a deliberate, tested change.</step>
+    <step order="3">Implement the email-specific scorer (urgency × deterministic-rung agreement; NOT the portfolio scorer); read urgency via the classification/triage signal (facade if AI) + rung agreement via task 020's rung output; best-effort (failure → safe low/neutral).</step>
+    <step order="4">Wire the computed value into `CommunicationAssessedSignal` at `RunAssessmentEmissionAsync` (~L238), replacing the hardcoded 0; do NOT alter the gate/action-service behavior.</step>
+    <step order="5">Tune the weights + threshold against an eval set so high-urgency well-associated emails score ≥ threshold and noise scores below; record the chosen weights + rationale in `notes/024-ri-confidence.md`.</step>
+    <step order="6">Add tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) a high-signal email scores ≥ threshold and fires `CommunicationRiActionService` (Task + appnotification + ping); (b) NEGATIVE — noise scores below threshold and fires nothing; (c) NEGATIVE — a scorer failure degrades to a safe low/neutral confidence and does NOT throw into capture/enrichment (NFR-04); (d) the score is email-specific (not the portfolio scorer).</step>
+    <step order="7">Run `dotnet build` + `dotnet test --filter Communication`; confirm existing enrichment/notification tests stay green.</step>
+    <step order="9.1">Run `dotnet publish -c Release ... -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: email-specific blend not portfolio; feeds not forks the gate/action; best-effort non-fatal; facade for AI signals); `adr-check` (FR-04, D-08, ADR-013, ADR-047, NFR-04). Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage — never concurrent with 023/025).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (024 ✅) + `current-task.md`; record the chosen weights, threshold, and the eval-set outcome.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Enrichment service + signal producer + gate + action service + classification rung</tool>
+    <tool name="grep">Locate the hardcoded-0 confidence + the emission point + the threshold read</tool>
+    <tool name="edit">The scorer + the emission wiring + tests</tool>
+    <tool name="bash">Build, tests, eval-set tuning run, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (email-specific RI-confidence scorer + wiring into `CommunicationAssessedSignal` at `RunAssessmentEmissionAsync`, replacing the hardcoded 0; best-effort)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — high-signal-fires + noise-does-not + non-fatal-degradation + email-specific cases</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/024-ri-confidence.md (chosen weights + threshold + eval-set rationale)</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CommunicationAssessedSignal.Confidence` carries a computed email-specific score (urgency × deterministic-rung agreement) set at `RunAssessmentEmissionAsync`, replacing the hardcoded 0.</criterion>
+    <criterion testable="true">A high-urgency, well-associated email scores ≥ the rule-gate threshold and fires the shipped `CommunicationRiActionService` (Task + appnotification + real-time ping).</criterion>
+    <criterion testable="true">NEGATIVE: noise scores below the threshold and fires nothing (no Task/notification/ping).</criterion>
+    <criterion testable="true">NEGATIVE: the scorer is email-specific — it does NOT reuse the Workspace/Portfolio priority scorer (D-08).</criterion>
+    <criterion testable="true">NEGATIVE: a scorer failure degrades to a safe low/neutral confidence and does NOT throw into the capture/enrichment path (NFR-04); the shipped gate/action-service behavior is unchanged (fed, not forked).</criterion>
+    <criterion testable="true">The chosen weights + threshold are documented; `dotnet build` clean; existing enrichment/notification tests green; publish delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 022 (triage urgency signal) and reads 020's rung agreement; within P2-triage the enrichment `.cs` edits serialize with 023/025 — never concurrent. This is the fix that makes Pillar 1 fire — the whole notification spine is dark until the hardcoded 0 is replaced. Feed the shipped gate/action-service a real confidence; do NOT fork them. Weights are a C-5 tuning item — tune with an eval set, don't block on "perfect" weights.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (gates the notification path). Per §10: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

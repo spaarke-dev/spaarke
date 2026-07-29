@@ -1,0 +1,144 @@
+<task id="025" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Persist triage output to `sprk_communication` triage fields on the enrichment path</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>011, 022</dependencies>
+    <deps>011, 022</deps>
+    <blocks>060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes the triage Action output to the `sprk_communication` triage fields on the shared enrichment path (`.cs` in `Services/Communication/`). A write bug corrupts triage state that r5 surfaces render (success-criterion 4). BFF-touching + best-effort non-fatal + resolver-discipline for the category lookup → code-review + adr-check at Step 9.5; publish-size + CVE + `/conflict-check` required.</rigor-reason>
+    <parallel-group>P2-triage</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A well-specified persistence step (map triage output → the 011 fields on the enrichment path) over shipped seams. Clear inputs/outputs, no open-ended design. Default execution tier at `high` effort for non-fatal + write correctness.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Persist the triage Action output (from 022/023) to the `sprk_communication` triage fields (created in 011) on the enrichment path. This closes FR-07: the triage fields POPULATE from the triage output so r5's surfaces can render category / 2-line summary / obligations / priority / review-outcome (success-criterion 4), and the RI-confidence field carries the score from task 024.
+
+    Map the triage output to the 011 fields, on the enrichment path (in/near `CommunicationEnrichmentService`, after triage runs):
+    - `category` → `sprk_triagecategory` (resolve the category NAME to the 013 taxonomy lookup — write the lookup, not free text)
+    - `priority` → `sprk_triagepriority`
+    - `summary` (2-line) → `sprk_triagesummary`
+    - `obligations[]` → `sprk_triageobligations` (serialize as the LEAN JSON shape documented in the 011 note — D-06)
+    - `reviewOutcome` → `sprk_reviewoutcome` (the D-05 closed set; the term is "review outcome")
+    - RI-confidence (from 024) → `sprk_riconfidence`
+
+    The persistence MUST be **best-effort / non-fatal (NFR-04)** — a write failure MUST NOT fail the capture or send path; degrade + log, never throw. Write via the shipped Dataverse write path used by the enrichment service (do NOT add a new write mechanism). If the `sprk_triagecategory` value has no matching taxonomy row, degrade gracefully (leave unset / log) rather than fabricating a row or throwing.
+
+    Add tests proving each field persists from the triage output + the lookup resolution + the non-fatal degradation. This task ONLY persists the output — the triage Action is 022/023, the scorer is 024, the fields are 011.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication enrichment path. Authority on `CommunicationEnrichmentService` and the shipped Dataverse write path. Fluent in the 011 triage-field schema, the 013 category taxonomy lookup, the D-06 lean-JSON obligation shape, the D-05 "review outcome" term, NFR-04 non-fatal discipline, ADR-024 (resolve the category via the lookup, not free text), §10 BFF Hygiene. You persist the triage output 1:1 onto the fields without adding a new write mechanism and without failing capture on a write error.
+  </role>
+
+  <goal>
+    On the enrichment path, the triage Action output persists to `sprk_communication`: `category`→`sprk_triagecategory` (resolved to the 013 taxonomy lookup), `priority`→`sprk_triagepriority`, `summary`→`sprk_triagesummary`, `obligations[]`→`sprk_triageobligations` (lean JSON per 011/D-06), `reviewOutcome`→`sprk_reviewoutcome`, and the 024 RI-confidence→`sprk_riconfidence`. Writes are best-effort (a failure never fails capture/send) and go through the shipped write path (no new mechanism). An unresolved category degrades gracefully. Build clean; tests prove each field persists + lookup resolution + non-fatal degradation; existing enrichment tests stay green; publish-size delta ≈0 + no new HIGH CVE; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      011 added the triage fields to `sprk_communication`; 022/023 produce the triage output; 024 produces the RI-confidence. This task writes those onto the fields so r5's shipped surfaces can render them (success-criterion 4: opening an email shows category / 2-line summary / obligations / priority). Without this step the triage output is computed but never persisted — the fields stay empty and r5 renders nothing. The write hangs off the enrichment path (after triage runs) and MUST be best-effort (NFR-04): triage/persistence must never fail capture or send.
+
+      §11: this task ONLY modifies existing files (the enrichment service persistence step) + writes to existing schema (011 fields) — no new surface, no new write mechanism. The category is written as a resolved lookup to the 013 taxonomy (ADR-024 discipline — typed reference, not free text). Obligations use the lean-JSON shape documented in the 011 note (D-06).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (the enrichment path — add the persistence step after triage runs; best-effort)</file>
+      <file>projects/email-communication-intelligence-r1/notes/011-triage-fields.md (the exact triage-field logical names + the obligations lean-JSON shape + the reviewOutcome value set — CONSUME)</file>
+      <file>projects/email-communication-intelligence-r1/notes/013-category-taxonomy.md (the taxonomy the category resolves to as a lookup — CONSUME)</file>
+      <file>projects/email-communication-intelligence-r1/notes/022-triage-email-action.md (the triage output shape the persistence maps from)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs (the produced output shape)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-07">Scope: persist the triage output ({category, priority, summary, obligations[], reviewOutcome} + RI-confidence) to the 011 `sprk_communication` triage fields on the enrichment path; the fields populate so r5 can render them.</constraint>
+    <constraint source="ADR-024">Scope: write `category` as a RESOLVED lookup to the 013 taxonomy (`sprk_triagecategory`), not free text; an unresolved category degrades gracefully (unset/log), never fabricates a taxonomy row.</constraint>
+    <constraint source="D-06">Scope: serialize `obligations[]` as the LEAN JSON shape documented in the 011 note; MUST NOT create per-obligation child rows.</constraint>
+    <constraint source="D-05">Scope: `reviewOutcome`→`sprk_reviewoutcome` uses the D-05 closed set; the term is "review outcome", never "disposition".</constraint>
+    <constraint source="project (no new write mechanism)">Scope: write via the shipped Dataverse write path used by the enrichment service; MUST NOT add a new write mechanism or a second resolver.</constraint>
+    <constraint source="NFR-04">Scope: persistence MUST be best-effort — a write failure MUST NOT fail the capture or send path; degrade + log, never throw into capture/send.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR; report publish-size delta vs ~49.63 MB baseline (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`; `/conflict-check` before the PR (shared `Services/Communication/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/011-triage-fields.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/013-category-taxonomy.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/022-triage-email-action.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Enrichment-path persistence" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs">
+        After triage runs, map the triage output onto the 011 `sprk_communication` fields via the shipped write path; best-effort (a write failure degrades + logs, never throws into capture/send).
+      </pattern>
+      <pattern name="Category lookup resolution" location="projects/email-communication-intelligence-r1/notes/013-category-taxonomy.md">
+        Resolve the triage `category` NAME to the 013 taxonomy row and write `sprk_triagecategory` as the lookup (ADR-024 — typed reference, not free text); an unresolved category degrades gracefully.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` + the 011/013/022 notes + `CommunicationEnrichmentService.cs` + `CommunicationClassificationResult.cs` to fix the exact field logical names, the obligations lean-JSON shape, the reviewOutcome value set, the taxonomy lookup, and the shipped write path.</step>
+    <step order="2">Identify the enrichment-path hook (after triage runs) where the persistence step belongs; confirm the shipped Dataverse write path to reuse (no new mechanism).</step>
+    <step order="3">Implement the persistence: map category→`sprk_triagecategory` (resolved lookup to 013), priority→`sprk_triagepriority`, summary→`sprk_triagesummary`, obligations[]→`sprk_triageobligations` (lean JSON), reviewOutcome→`sprk_reviewoutcome`, RI-confidence→`sprk_riconfidence`; best-effort (failure degrades + logs); unresolved category degrades gracefully.</step>
+    <step order="4">Add tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) each field persists from the triage output; (b) category resolves to the 013 taxonomy lookup (not free text); (c) obligations serialize to the lean-JSON shape; (d) reviewOutcome writes the D-05 value; (e) NEGATIVE — a write failure degrades and does NOT fail capture/send (NFR-04); (f) NEGATIVE — an unresolved category leaves the lookup unset + logs, does not fabricate a row or throw.</step>
+    <step order="5">Run `dotnet build` + `dotnet test --filter Communication`; confirm existing enrichment tests stay green.</step>
+    <step order="9.1">Run `dotnet publish -c Release ... -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: category-as-lookup not free text; lean-JSON obligations; best-effort non-fatal; no new write mechanism); `adr-check` (FR-07, ADR-024, NFR-04). Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage — never concurrent with 023/024).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (025 ✅) + `current-task.md`; record the field mappings + the taxonomy-resolution + degradation behavior.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Enrichment service + the 011/013/022 notes + the classification result shape</tool>
+    <tool name="grep">Locate the enrichment-path triage hook + the shipped write path</tool>
+    <tool name="edit">The persistence step + tests</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (UPDATED — best-effort persistence of triage output → the 011 `sprk_communication` triage fields; category as resolved lookup)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — per-field persistence + category-lookup-resolution + lean-JSON obligations + non-fatal-degradation + unresolved-category-degrades cases</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The triage output persists to `sprk_communication`: category→`sprk_triagecategory`, priority→`sprk_triagepriority`, summary→`sprk_triagesummary`, obligations[]→`sprk_triageobligations` (lean JSON), reviewOutcome→`sprk_reviewoutcome`, RI-confidence→`sprk_riconfidence`.</criterion>
+    <criterion testable="true">`sprk_triagecategory` is written as a RESOLVED lookup to the 013 taxonomy row (not free text); obligations use the lean-JSON shape from the 011 note; reviewOutcome uses the D-05 closed set ("review outcome").</criterion>
+    <criterion testable="true">The persistence uses the shipped Dataverse write path — NO new write mechanism or second resolver was added.</criterion>
+    <criterion testable="true">NEGATIVE: a write failure degrades + logs and does NOT fail the capture or send path (NFR-04).</criterion>
+    <criterion testable="true">NEGATIVE: an unresolved category leaves the lookup unset + logs — it does NOT fabricate a taxonomy row or throw.</criterion>
+    <criterion testable="true">`dotnet build` clean; existing enrichment tests green; publish delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 011 (the triage fields) + 022 (the triage output); reads 024's RI-confidence + 013's taxonomy; within P2-triage the enrichment `.cs` edits serialize with 023/024 — never concurrent. This is the step that makes the triage output VISIBLE (r5 renders these fields — success-criterion 4). Write category as a lookup (ADR-024), not free text; keep obligations lean JSON (D-06); never fail capture on a write error (NFR-04).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (write correctness + non-fatal). Per §10: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

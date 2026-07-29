@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Operator browser UAT — success criteria 1–9 on the deployed spine + r5's shipped surfaces</title>
+    <phase>P6 — Integration &amp; wrap</phase>
+    <gate>after:060</gate>
+    <status>not-started</status>
+    <tags>ui-test</tags>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Operator-executed browser acceptance of the 9 spec Success Criteria against the deployed environment + r5's shipped surfaces; verification, not implementation. MINIMAL rigor (no code change; no Step 9.5 gates).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Drives + records browser UAT against documented success criteria; no design judgment.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>P6</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification against the deployed environment; writes only a UAT report under notes/; no shared code touched.</parallel-reason>
+    <dependencies>060</dependencies>
+  </metadata>
+
+  <prompt>
+    Run the operator browser UAT for the 9 spec Success Criteria against the deployed `spaarkedev1` environment. r1 built no UI — the review/reading surfaces (association-suggestion cards, proposed-update/action cards, the Exceptions Queue) are **r5's shipped surfaces**; UAT drives r1's spine THROUGH those surfaces + direct Dataverse queries. Record each criterion PASS/FAIL with evidence in a UAT report under notes/.
+
+    Cover the 9 criteria: (1) cross-tenant identifier association across the 7 record types; (2) thread-reply inheritance (rung 1) + sender-only → Suggested not auto-filed (C-1); (3) "new filing based on X" does NOT auto-file onto X (offers create-new / file-onto / link-related); (4) opening an email shows category / 2-line summary / obligations / priority (r5 surface); (5) a high-signal email produces a Task + appnotification + real-time ping (RI-confidence fix); (6) a fact-bearing email proposes an allow-listed record update, cited, and on confirm the record updates + an `sprk_emailreviewlog` audit row is written (r5 surface + record + audit); (7) an action stated only in an attachment is extracted + cited; (8) a shared/group-mailbox email is captured + associated + triaged; (9) every AI proposal + human decision is queryable per matter (`sprk_emailreviewlog`).
+  </prompt>
+
+  <role>
+    Spaarke operator/QA running browser-based UAT against the deployed environment + r5's surfaces. Uses the ui-test skill (Chrome integration) where a surface renders; uses direct Dataverse queries for audit/queryability criteria. Records PASS/FAIL + evidence; does not modify code.
+  </role>
+
+  <goal>
+    A UAT report at `projects/email-communication-intelligence-r1/notes/` recording each of the 9 Success Criteria as PASS/FAIL with browser/query evidence, run against the deployed `spaarkedev1` spine + r5's shipped surfaces. Any FAIL is documented with the failing behavior for remediation before wrap-up (090).
+  </goal>
+
+  <context>
+    <background>
+      This is the acceptance gate before wrap-up. The spec's 9 Success Criteria are the graduation bar. r1 is backend-only, so UAT exercises the spine THROUGH r5's shipped surfaces (which consume r1's feed + apply endpoints) plus direct Dataverse queries for the audit/queryability criteria. Criteria 4 + 6 render on r5 surfaces; criterion 6 also verifies the record update + the `sprk_emailreviewlog` row; criterion 9 is a direct query.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/spec.md (the 9 Success Criteria — the UAT script)</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md (which r5 surface renders which r1 feed)</file>
+      <file>projects/email-communication-intelligence-r1/notes/ (OUTPUT — the UAT report)</file>
+    </relevant-files>
+    <dependencies>060 (the deployed environment UAT runs against).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: verification only — no code change; record PASS/FAIL + evidence for each of the 9 criteria. r1 built no UI; drive the spine through r5's shipped surfaces + direct Dataverse queries.</constraint>
+    <constraint source="spec Success Criteria">Scope: cover all 9 criteria exactly as written; a criterion is PASS only with concrete browser/query evidence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm 060 is ✅ (deployed environment ready). Read the spec's 9 Success Criteria + the coordination doc (which r5 surface renders which feed).</step>
+    <step order="1">Run the ui-tests below against the deployed `spaarkedev1` + r5's surfaces; capture evidence (screenshots / query results / console) per criterion.</step>
+    <step order="2">Record each criterion PASS/FAIL with evidence in `projects/email-communication-intelligence-r1/notes/uat-report.md`.</step>
+    <step order="3">For any FAIL, document the failing behavior + surface it for remediation before wrap-up (090). Do NOT mark the project complete on a FAIL.</step>
+    <step order="4">Update `TASK-INDEX.md` (061 ✅ once run) + `current-task.md` (ready for wrap-up 090).</step>
+  </steps>
+
+  <ui-tests>
+    <test name="SC1 — 7-entity identifier association">
+      <steps>
+        <step>Send/ingest an email quoting a project / invoice / work-assignment / budget / service-request / report-card number</step>
+        <step>Verify each associates to the correct record; test cross-tenant numbering (numbers not hardcoded)</step>
+      </steps>
+      <expected>Each identifier associates to the right record across the 7 types; onboarding needs only `sprk_recordtype_ref` config.</expected>
+    </test>
+    <test name="SC2 — thread inheritance + C-1 auto-file narrowing">
+      <steps>
+        <step>Send a thread reply on an already-associated thread; verify it inherits the parent's association (rung 1, auto-files)</step>
+        <step>Send a sender-only match; verify it lands `Suggested`, NOT auto-filed (C-1); a bare-numeric identifier alone does not auto-file</step>
+      </steps>
+      <expected>Thread reply + explicit-ID auto-file; sender-only / structural-only → Suggested; bare-numeric alone never auto-files.</expected>
+    </test>
+    <test name="SC3 — new-filing-based-on-X does not auto-file">
+      <steps>
+        <step>Send an email phrased "new filing based on PAT-908068"</step>
+        <step>Verify it does NOT auto-file onto PAT-908068; it offers create-new / file-onto / link-related</step>
+      </steps>
+      <expected>Identifier demoted from regarding to related; auto-file suppressed; three options offered.</expected>
+    </test>
+    <test name="SC4 — triage output on the r5 surface">
+      <steps>
+        <step>Open an email on r5's shipped surface</step>
+        <step>Verify category, 2-line summary, obligations, and priority are shown</step>
+      </steps>
+      <expected>Category / summary / obligations / priority render (from the TRIAGE-EMAIL Action).</expected>
+    </test>
+    <test name="SC5 — RI-confidence fix fires the notification path">
+      <steps>
+        <step>Ingest a high-signal (high-urgency, well-associated) email</step>
+        <step>Verify a Task + appnotification + real-time ping are produced (RI-confidence no longer hardcoded 0); verify noise does not</step>
+      </steps>
+      <expected>High-signal email fires `CommunicationRiActionService` (Task + appnotification + ping); noise does not.</expected>
+    </test>
+    <test name="SC6 — Job B propose → confirm → apply → audit">
+      <steps>
+        <step>Ingest a fact-bearing email ("closing moved to Aug 15") on a matter with an enabled allow-list field</step>
+        <step>Verify an allow-listed record update is proposed, cited, on the r5 surface</step>
+        <step>Confirm the proposal; verify the record updates AND an `sprk_emailreviewlog` row is written (AI proposed / human approved / from email X / confidence)</step>
+      </steps>
+      <expected>Proposal is cited + allow-listed; on confirm the record updates under OBO and an audit row is written.</expected>
+    </test>
+    <test name="SC7 — attachment-grounded action extraction">
+      <steps>
+        <step>Ingest an email whose action is stated ONLY in an attachment PDF</step>
+        <step>Verify the action is extracted and cited to the attachment + locator</step>
+      </steps>
+      <expected>Attachment-only action extracted + cited to the attachment.</expected>
+    </test>
+    <test name="SC8 — shared/group mailbox capture">
+      <steps>
+        <step>Send an email to a shared mailbox and to an M365-group mailbox</step>
+        <step>Verify each is captured, associated, and triaged like a user mailbox</step>
+      </steps>
+      <expected>Shared + group mailbox email captured + associated + triaged (FR-15).</expected>
+    </test>
+    <test name="SC9 — audit queryability per matter">
+      <steps>
+        <step>Query `sprk_emailreviewlog` for a matter</step>
+        <step>Verify every AI proposal + every human decision is present as rows</step>
+      </steps>
+      <expected>Machine-review + human-review both queryable per matter (`sprk_emailreviewlog`).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="ui-test">Browser-based UAT against r5's shipped surfaces (Chrome integration)</tool>
+    <tool name="read">Read the 9 Success Criteria + the coordination doc</tool>
+    <tool name="write">Author the UAT report under notes/</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/uat-report.md (NEW — the 9 Success Criteria PASS/FAIL + evidence)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md + current-task.md (UPDATED — 061 status)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 spec Success Criteria are exercised against the deployed `spaarkedev1` + r5's surfaces and recorded PASS/FAIL with concrete browser/query evidence.</criterion>
+    <criterion testable="true">SC3 confirms "new filing based on X" does NOT auto-file onto X (offers create-new / file-onto / link-related).</criterion>
+    <criterion testable="true">SC6 confirms a cited allow-listed proposal, and on confirm the record updates + an `sprk_emailreviewlog` audit row is written.</criterion>
+    <criterion testable="true">SC9 confirms every AI proposal + human decision is queryable per matter via `sprk_emailreviewlog`.</criterion>
+    <criterion testable="true">Any FAIL is documented for remediation; the project is NOT marked complete on a FAIL.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    r1 built no UI — UAT drives the spine through r5's shipped surfaces + direct Dataverse queries. If a live/deployed environment or r5 surface is unavailable this session, record which criteria are env-blocked (not faked) and hand them to the operator, consistent with prior sibling-project UAT practice. Precedes wrap-up (090).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. Apply MINIMAL rigor (verification). Run the ui-tests at Step 9.7; record PASS/FAIL + evidence. Model tier `sonnet` @ effort `low`.</protocol>
+  </execution>
+</task>

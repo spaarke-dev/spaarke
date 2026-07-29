@@ -1,0 +1,127 @@
+<task id="001" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Verify operator schema inputs in `spaarkedev1` (`sprk_regardingreportcard`; `sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`; `sprk_emailupdatefield`) + data-hygiene check of `sprk_recordtype_ref` `sprk_regardingfield` typos + contact-row anomaly</title>
+    <phase>P0 — Prerequisites &amp; verification</phase>
+    <gate>none (MINIMAL — Step 9.5 skipped; read-only verification, no code/schema change)</gate>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <deps>none</deps>
+    <blocks>010, 011, 012, 013, 020, 022, 030</blocks>
+    <tags>dataverse, verify, read-only</tags>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Read-only Phase-0 verification of operator-created schema — no schema mutation, no BFF code, no Step 9.5 gates. MINIMAL per §8 (verification/inventory). It grounds the identifier rung (020) roster + gates Job B (Phase 3, `sprk_emailupdatefield`); getting the live delta or typo map wrong cascades into a wrong rung, but the task itself changes nothing.</rigor-reason>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical live-schema read + note authoring; no architectural judgment or code generation. Default execution tier at the lowest effort suffices.</model-tier-reason>
+    <effort>low</effort>
+    <fr-refs>FR-11 (verify); grounds FR-01 (020), FR-02 (010), FR-09/FR-10 (030/031)</fr-refs>
+  </metadata>
+
+  <prompt>
+    De-risk Phases 1–3 by confirming the operator-created schema inputs are LIVE in `spaarkedev1` before any r1 task builds against them. This is a READ-ONLY spike — NO schema change, NO code change. Produce ONE findings note under `projects/email-communication-intelligence-r1/notes/` that downstream tasks (010, 020, 030) consume so they build against ground truth and read the `sprk_recordtype_ref` catalog **defensively** where it is dirty.
+
+    Confirm, at minimum, via Dataverse MCP read tools (`describe`, `read_query`, `search`) against the live env:
+
+    1. **`sprk_regardingreportcard` lookup on `sprk_communication`** — confirm the regarding lookup exists (target = the report-card entity) with its exact logical name; task 010 adds the `RegardingFieldMap.cs` entry that writes it.
+    2. **`sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`** — confirm a `sprk_recordtype_ref` row exists for the report-card record type (RPTC), and that the number field the identifier rung reverse-looks-up against (`sprk_reportcardnumber` or the value in that row's `sprk_regardingrecordnumberfield`) is present. Capture the row's `sprk_regardingfield` + `sprk_regardingrecordnumberfield` values verbatim.
+    3. **`sprk_emailupdatefield` table (Job B allow-list, FR-11)** — confirm the table exists with the FR-11 columns: `sprk_targetentity` (→ `sprk_recordtype_ref`), `sprk_targetfield`, `sprk_enabled`, `sprk_fieldtype`, `sprk_requireconfirm`, `sprk_extractionguidance`. Record any starter allow-list rows present. Phase 3 (Job B) is GATED on this table existing.
+    4. **`sprk_recordtype_ref` roster (7 core record types) + data-hygiene** — enumerate the rows for the 7 core records (matter, project, invoice, work assignment, budget, service request, report card). For EACH capture `sprk_regardingfield` + `sprk_regardingrecordnumberfield` verbatim. Flag the KNOWN data-hygiene issues explicitly: **typos in some `sprk_regardingfield` values** and the **`contact`-row anomaly**. Produce a "read-defensively" map that task 020 uses (which field names are trustworthy, which need normalization/guarding).
+
+    Do NOT mutate schema, do NOT write code. The single deliverable is the findings note (the confirmed presence/absence of each input + the verbatim `sprk_recordtype_ref` roster + the defensive-read typo/anomaly map).
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema-verification engineer. Fluent in the Dataverse MCP read tools (`describe`, `read_query`, `search`), the `sprk_recordtype_ref` catalog contract (codes + regarding fields + number fields), and the `Services/Communication/**` association-engine layout. You confirm ground truth and hand tasks 010/020/030 an exact, do-not-assume delta — you add nothing and change nothing live.
+  </role>
+
+  <goal>
+    A findings note exists under `projects/email-communication-intelligence-r1/notes/` recording: (a) `sprk_regardingreportcard` lookup present on `sprk_communication` with its exact logical name (for 010); (b) the `sprk_recordtype_ref` RPTC row present with `sprk_reportcardnumber` / its number-field value (for 020's roster); (c) `sprk_emailupdatefield` present with the FR-11 columns + any seed rows (gates Phase 3); (d) the 7-record `sprk_recordtype_ref` roster verbatim PLUS a "read-defensively" map of `sprk_regardingfield` typos and the `contact`-row anomaly that task 020 must guard against. Tasks 010/020/030 can build against ground truth. No schema or code changed. If ANY required input is missing, the note states it explicitly and flags the blocked downstream task (010/020 blocked on 1/2; Phase 3 blocked on 3).
+  </goal>
+
+  <context>
+    <background>
+      r1 builds the intelligence + record-write spine over the shipped communication engine (r4). Four schema inputs are OPERATOR-created (not r1 tasks): the `sprk_regardingreportcard` lookup, the `sprk_recordtype_ref` RPTC row + `sprk_reportcardnumber`, the `sprk_emailupdatefield` allow-list table, and the `sprk_recordtype_ref` catalog whose codes + number fields the identifier rung (020) reads. This spike verifies those exist LIVE before the dependent tasks run (plan §4). The recurring failure mode is building against an assumed schema shape; the second is trusting a `sprk_recordtype_ref` catalog that has known typos in some `sprk_regardingfield` values and a `contact`-row anomaly (spec §Dependencies → Prerequisites; CLAUDE.md Phase 0). Task 020 must read the catalog defensively (or the operator cleans it first) — this note produces the exact typo/anomaly map so 020 can guard deterministically.
+
+      This is a verification spike (verify-before-build), not new surface — no §11 Component Justification is required (it introduces no component; it changes nothing live).
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/spec.md (FR-11, §Dependencies → Prerequisites — the four operator inputs + the data-hygiene note)</file>
+      <file>projects/email-communication-intelligence-r1/plan.md §4 (External Prerequisites table — what each input gates)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (the regarding write map task 010 extends; the report-card entry it will add reads `sprk_regardingreportcard`)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs (the rung 0 pattern task 020 clones; it reads `sprk_recordtype_ref` roster + number fields)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">READ-ONLY. This spike MUST NOT create, update, or delete any Dataverse attribute/entity/option-set and MUST NOT modify any code. The single deliverable is a findings note.</constraint>
+    <constraint source="spec §Dependencies">Confirm the `sprk_recordtype_ref` `sprk_regardingfield` typos + the `contact`-row anomaly explicitly, and produce a "read-defensively" map (trustworthy vs needs-normalization field names) that task 020 consumes.</constraint>
+    <constraint source="spec FR-11">Confirm `sprk_emailupdatefield` exists with the FR-11 columns (`sprk_targetentity`→`sprk_recordtype_ref`, `sprk_targetfield`, `sprk_enabled`, `sprk_fieldtype`, `sprk_requireconfirm`, `sprk_extractionguidance`). Phase 3 (Job B) is gated on this table existing; if absent, flag Phase 3 blocked.</constraint>
+    <constraint source="project">Use Dataverse MCP read tools (`describe`/`read_query`/`search`) for live schema; capture `sprk_recordtype_ref` roster field values verbatim. Do NOT guess field names from memory.</constraint>
+    <constraint source="project">Gates 010 (needs `sprk_regardingreportcard` + RPTC row), 020 (needs the roster + defensive-read map), and Phase 3 (needs `sprk_emailupdatefield`) — the note MUST be specific enough that each builds with zero assumption. If an input is missing, name the blocked task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse MCP live-schema read" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Use the built-in MCP read tools (`describe`, `read_query`, `search`) to enumerate an entity's live attributes + a table's rows before any dependent task builds. Read-only; no mutation.
+      </pattern>
+      <pattern name="Record-type catalog roster" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs">
+        `sprk_recordtype_ref` supplies per-record-type `sprk_regardingfield` + `sprk_regardingrecordnumberfield`; the identifier rung reads it as the roster. Capture verbatim; flag typos/anomalies so 020 reads defensively.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read spec FR-11 + §Dependencies (the four operator inputs + the data-hygiene note) + plan §4 to fix exactly which inputs each downstream task needs and what "read defensively" means.</step>
+    <step order="2">MCP `describe` `sprk_communication`: confirm the `sprk_regardingreportcard` lookup exists (target + exact logical name) for task 010.</step>
+    <step order="3">MCP `read_query` `sprk_recordtype_ref`: confirm the RPTC (report-card) row exists; capture its `sprk_regardingfield` + `sprk_regardingrecordnumberfield` verbatim; confirm the `sprk_reportcardnumber` number field is present on the report-card entity.</step>
+    <step order="4">MCP `describe` `sprk_emailupdatefield`: confirm the table exists with the FR-11 columns; `read_query` any seed allow-list rows. If the table is absent, record it and flag Phase 3 (030/031) blocked.</step>
+    <step order="5">MCP `read_query` the `sprk_recordtype_ref` rows for the 7 core record types; capture each row's `sprk_regardingfield` + `sprk_regardingrecordnumberfield` verbatim; flag the known `sprk_regardingfield` typos + the `contact`-row anomaly; build the "read-defensively" map (trustworthy vs needs-normalization) for task 020.</step>
+    <step order="6">Write the findings note `projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md`: (a) `sprk_regardingreportcard` present + logical name; (b) RPTC row + number field; (c) `sprk_emailupdatefield` present + columns + seed rows (or ABSENT → Phase 3 blocked); (d) the 7-record roster verbatim + the defensive-read typo/anomaly map. State per-input PRESENT/ABSENT and name any blocked downstream task.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md` (001 ✅) + `current-task.md`; confirm 010/011/012/013/020/022 unblocked (or flag which are blocked on a missing input) and point them at the note.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Spec + plan + `RegardingFieldMap.cs` + `ExplicitReferenceRung.cs`</tool>
+    <tool name="mcp-dataverse-describe">Live `sprk_communication` / `sprk_emailupdatefield` attribute enumeration (read-only)</tool>
+    <tool name="mcp-dataverse-read_query">`sprk_recordtype_ref` roster rows + `sprk_emailupdatefield` seed rows (read-only)</tool>
+    <tool name="write">The findings note under `notes/`</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (per-input PRESENT/ABSENT + `sprk_regardingreportcard` logical name + RPTC row/number field + `sprk_emailupdatefield` columns/seed + verbatim 7-record `sprk_recordtype_ref` roster + defensive-read typo/anomaly map + any blocked-task flags)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md (status update 001 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note confirms whether `sprk_regardingreportcard` exists on `sprk_communication` and records its exact logical name + target (for task 010).</criterion>
+    <criterion testable="true">The note confirms whether the `sprk_recordtype_ref` RPTC row exists and captures its `sprk_regardingfield` + `sprk_regardingrecordnumberfield` + the `sprk_reportcardnumber` field (for task 020's roster).</criterion>
+    <criterion testable="true">The note confirms whether `sprk_emailupdatefield` exists with the FR-11 columns (`sprk_targetentity`, `sprk_targetfield`, `sprk_enabled`, `sprk_fieldtype`, `sprk_requireconfirm`, `sprk_extractionguidance`) and records seed rows; if absent, it flags Phase 3 (030/031) blocked.</criterion>
+    <criterion testable="true">The note enumerates the 7-core-record `sprk_recordtype_ref` roster verbatim (`sprk_regardingfield` + `sprk_regardingrecordnumberfield` per row) and produces a read-defensively map naming the `sprk_regardingfield` typos + the `contact`-row anomaly for task 020.</criterion>
+    <criterion testable="true">NEGATIVE: no Dataverse attribute/entity/option-set was created, updated, or deleted, and no source code was modified — this task changed nothing live (read-only verification).</criterion>
+    <criterion testable="true">NEGATIVE: the note does NOT assume any input is present — every one of the four inputs is stated PRESENT or ABSENT from a live MCP read, and any ABSENT input names the blocked downstream task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Gates Phase 1 (010/011/012/013) and the identifier rung (020) + Phase 3 (Job B, gated on `sprk_emailupdatefield`). Do NOT skip the live MCP read in favor of trusting the spec's prerequisite list — the list is the hypothesis; this task confirms it against the deployed env. The defensive-read typo/anomaly map is the single most load-bearing deliverable for 020 (bad roster → wrong reverse-lookup → misfiling).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply MINIMAL rigor — read-only verification, Step 9.5 gates SKIPPED. Use Dataverse MCP read tools only; NO schema mutation, NO code change. Model tier `sonnet` @ effort `low`.
+    </protocol>
+  </execution>
+</task>

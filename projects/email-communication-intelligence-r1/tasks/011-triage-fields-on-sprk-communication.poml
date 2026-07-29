@@ -1,0 +1,143 @@
+<task id="011" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Triage fields on `sprk_communication`: category, priority, summary, obligations (lean JSON), riconfidence, reviewoutcome</title>
+    <phase>P1 — Schema &amp; catalog foundation</phase>
+    <gate>none (STANDARD — Step 9.5 skipped; new-surface schema with constraints)</gate>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>025, 060</blocks>
+    <tags>dataverse, schema</tags>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds NEW Dataverse attributes to an existing entity (`sprk_communication`) — no BFF code, no Step 9.5 gates. STANDARD per §8 (new-surface schema creation with constraints). §11 Component Justification REQUIRED (triage fields are new surface). Additive/non-breaking is load-bearing (NFR-04) — existing `sprk_communication` columns MUST survive untouched. Verify-or-create: the operator may have pre-created these in parallel.</rigor-reason>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema authoring against a documented field spec — mechanical, no architectural judgment. Default execution tier at `medium` effort per §8.5 (schema/config).</model-tier-reason>
+    <effort>medium</effort>
+    <fr-refs>FR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add the triage output fields to the EXISTING `sprk_communication` entity so the triage Action (022/023) and the enrichment path (025) have somewhere to persist per-email triage state. This is ADDITIVE and non-breaking (NFR-04) — existing `sprk_communication` columns MUST stay exactly as-is. Per D-01 there is NO new triage entity — triage state hangs off `sprk_communication`.
+
+    **VERIFY-OR-CREATE**: the operator may have pre-created some/all of these fields in a parallel schema pass. FIRST enumerate the live `sprk_communication` attributes via Dataverse MCP `describe`; for each field below, CREATE it only if missing, and if present, RECONCILE its type/target against this spec (flag any mismatch — do NOT silently retype an in-use field; escalate a type conflict). Add ONLY what is missing.
+
+    Add, via the `dataverse-create-schema` skill patterns, the six triage fields (use Spaarke naming conventions; verify option-set integer conventions via MCP before creating any Choice):
+
+    1. **`sprk_triagecategory`** — a **Lookup** to the category taxonomy config table `sprk_triagecategory` (the config table itself is task 013). If 013's table does not exist yet at create time, create the lookup against it once available OR record the dependency; the field is a categorization pointer, not a free-text category.
+    2. **`sprk_triagepriority`** — priority (Choice or Whole Number per the priority-weight model; align with 013's priority-weight convention).
+    3. **`sprk_triagesummary`** — the 2-line summary (multiline Text).
+    4. **`sprk_triageobligations`** — extracted obligations as **lean JSON** (multiline Text holding a compact JSON array; D-06). Document the JSON shape in the task note for future promotion to child records (FR-07 acceptance).
+    5. **`sprk_riconfidence`** — the RI-confidence score (Decimal, 0–1) computed by task 024.
+    6. **`sprk_reviewoutcome`** — the review-outcome Choice (D-05: term "review outcome", NOT "disposition" — avoids the ADR-040 clash). Confirm the closed value set at task time (spec Assumptions: File / Update / Route / Dismiss + engine Suggested/Ambiguous statuses).
+
+    Deploy to the project solution. This is schema ONLY — the scorer LOGIC is 024, the triage Action is 022/023, the persistence wiring is 025.
+  </prompt>
+
+  <role>
+    Spaarke Dataverse schema engineer. Fluent in the `dataverse-create-schema` skill (Web API + PowerShell for patterns PAC CLI can't do), additive/non-breaking schema evolution, and the D-01 "triage hangs off `sprk_communication`" decision. You add exactly the fields FR-07 names — nothing speculative — you never retype an in-use field, and you verify-before-create so an operator's parallel schema pass is reconciled, not duplicated.
+  </role>
+
+  <goal>
+    `sprk_communication` gains the six triage fields (`sprk_triagecategory` lookup, `sprk_triagepriority`, `sprk_triagesummary`, `sprk_triageobligations` lean-JSON, `sprk_riconfidence` decimal, `sprk_reviewoutcome` choice) — all additive, existing columns untouched, verify-or-create reconciled against any operator-pre-created shape. The obligations JSON shape is documented for future child-record promotion. Tasks 024 (writes `sprk_riconfidence`) and 025 (persists category/priority/summary/obligations/reviewoutcome on the enrichment path) can build against real schema. No existing column retyped; the review-outcome term is "review outcome", never "disposition".
+  </goal>
+
+  <context>
+    <background>
+      r1 activates the already-produced-but-dark AI classification and computes a real RI-confidence, persisting the results as triage state on `sprk_communication` (D-01 — no new `sprk_triageitem` entity). Today `sprk_communication` has the association/enrichment fields but no triage output fields, so the triage Action (022/023) and the RI-confidence scorer (024) have nowhere to write. This task adds them additively.
+
+      §11 Component Justification (triage fields = new surface, but they EXTEND the entity per D-01): (1) **Existing overlap** — `sprk_associationstatus` exists but carries association state, not triage output (001 confirms no triage fields). (2) **Extension instead** — triage state extends `sprk_communication` (D-01); a new entity was explicitly rejected. (3) **Concrete cost-of-doing-nothing** — without these fields the triage Action has nowhere to persist category/summary/obligations/priority (Pillar 1 fails — success-criterion 4) and the RI-confidence scorer has nowhere to write the score (notification path stays dark — success-criterion 5). Named contract failures, not "future flexibility."
+
+      The review-outcome field is deliberately named "review outcome" (D-05) to avoid ADR-040's ownership of "disposition" (ADR Tensions path-A exception). The obligations are lean JSON (D-06) — a compact array on the parent, documented for later promotion.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (task 001 output — live `sprk_communication` attribute set; consume to know what already exists)</file>
+      <file>projects/email-communication-intelligence-r1/spec.md (FR-07, D-01/D-05/D-06, Assumptions → review-outcome value set)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs (the classification shape the triage output mirrors — category/summary/obligations/priority)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (the path task 025 uses to persist into these fields)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-07 / NFR-04">Additive only. Add the six triage fields; MUST NOT alter or retype any existing `sprk_communication` column. Verify-before-create; reconcile (do not duplicate) any operator-pre-created field; escalate a type conflict rather than silently retyping an in-use field.</constraint>
+    <constraint source="D-01">Triage state hangs off `sprk_communication`. MUST NOT create a new `sprk_triageitem` (or any new triage) entity.</constraint>
+    <constraint source="D-05 (ADR-040 path-A)">The review-outcome field uses the term "review outcome" (`sprk_reviewoutcome`); MUST NOT reuse "disposition" (owned by ADR-040).</constraint>
+    <constraint source="D-06">Obligations stored as lean JSON on `sprk_communication` (multiline Text); document the JSON shape in the task note for future child-record promotion. MUST NOT create per-obligation child rows in P1.</constraint>
+    <constraint source="project">Verify option-set/lookup conventions via Dataverse MCP `describe`/`read_query` BEFORE creating any Choice/Lookup; do NOT guess integers from memory. `sprk_triagecategory` is a Lookup to the config table (task 013).</constraint>
+    <constraint source="ADR-027">Author schema into the project's managed solution per subscription-isolation/solution conventions; no direct prod-only unmanaged changes.</constraint>
+    <constraint source="project">Schema ONLY. No scorer logic (024), no triage Action (022/023), no persistence wiring (025), no BFF code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>docs/data-model/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse schema creation" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Web API + PowerShell for attribute/lookup/option-set creation (patterns PAC CLI lacks). Verify conventions via MCP first; verify-or-create — add only the missing columns, reconcile the rest.
+      </pattern>
+      <pattern name="Classification result shape" location="src/server/api/Sprk.Bff.Api/Models/Ai/Communication/CommunicationClassificationResult.cs">
+        The triage output fields mirror the existing classification result (category/summary/obligations/priority) so 025 can persist it 1:1; obligations are lean JSON per D-06.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`sprk_communication` has `sprk_associationstatus` (association state) but no triage-output fields; grep/MCP-confirmed by task 001. The category taxonomy is a separate config table (013).</existing>
+    <extension>These fields EXTEND `sprk_communication` per D-01 (a new triage entity was explicitly rejected). No new entity; a lookup to the 013 config table plus five typed columns on the existing entity.</extension>
+    <cost-of-doing-nothing>Without these fields the triage Action (022/023) cannot persist category/summary/obligations/priority (Pillar 1 / success-criterion 4 fails) and the RI-confidence scorer (024) has nowhere to write the score, leaving the notification path dark (success-criterion 5 fails). Concrete contract failures, not scalability/flexibility.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="1">Read task 001's note (live `sprk_communication` attributes) + spec FR-07/D-01/D-05/D-06/Assumptions + `CommunicationClassificationResult.cs` to fix the exact fields + confirm the review-outcome closed value set and the obligations JSON shape.</step>
+    <step order="2">Via Dataverse MCP `describe`, enumerate the live `sprk_communication` attributes; determine which of the six triage fields already exist (operator parallel pass) and which are missing; reconcile types for any present field (flag/ escalate a conflict, do NOT retype an in-use field).</step>
+    <step order="3">Create ONLY the missing fields via `dataverse-create-schema`: `sprk_triagecategory` (Lookup → the 013 config table; record the dependency if 013 not yet created), `sprk_triagepriority`, `sprk_triagesummary` (multiline), `sprk_triageobligations` (multiline lean-JSON), `sprk_riconfidence` (Decimal 0–1), `sprk_reviewoutcome` (Choice, value set confirmed in step 1). Verify Choice integer conventions via MCP first.</step>
+    <step order="4">Deploy the schema to the project solution. Verify a `sprk_communication` record accepts a value in each new field; confirm existing columns are unchanged and still readable.</step>
+    <step order="5">Document the created-schema inventory (logical names, types, targets, the `sprk_reviewoutcome` value set, the `sprk_triageobligations` JSON shape) in `notes/011-triage-fields.md` for 025 + the §11 justification.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md` (011 ✅) + `current-task.md`; confirm 025 unblocked and note the `sprk_triagecategory`→013 dependency.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Consume the 001 note + spec + classification result shape</tool>
+    <tool name="mcp-dataverse-describe">Enumerate live `sprk_communication` attributes + Choice integer conventions (read-only, before create)</tool>
+    <tool name="dataverse-create-schema">Create the missing triage fields</tool>
+    <tool name="dataverse-deploy">Deploy schema to the project solution</tool>
+    <tool name="write">The created-schema inventory note</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">Dataverse: `sprk_communication` — `sprk_triagecategory` (Lookup→013), `sprk_triagepriority`, `sprk_triagesummary`, `sprk_triageobligations` (lean JSON), `sprk_riconfidence` (Decimal), `sprk_reviewoutcome` (Choice) — additive, missing-only</output>
+    <output type="docs">projects/email-communication-intelligence-r1/notes/011-triage-fields.md (schema inventory + review-outcome value set + obligations JSON shape + §11 justification)</output>
+    <output type="docs">projects/email-communication-intelligence-r1/tasks/TASK-INDEX.md (status update 011 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All six triage fields exist on `sprk_communication` with the specified types (`sprk_triagecategory` Lookup, `sprk_triagepriority`, `sprk_triagesummary` multiline, `sprk_triageobligations` lean-JSON multiline, `sprk_riconfidence` Decimal 0–1, `sprk_reviewoutcome` Choice).</criterion>
+    <criterion testable="true">Verify-or-create honored: any operator-pre-created field was reconciled (not duplicated); a type conflict was escalated, not silently retyped.</criterion>
+    <criterion testable="true">The obligations JSON shape and the `sprk_reviewoutcome` closed value set are documented in the task note for 025 + future child-record promotion.</criterion>
+    <criterion testable="true">NEGATIVE: no existing `sprk_communication` column was altered or retyped (NFR-04); no new triage entity was created (D-01).</criterion>
+    <criterion testable="true">NEGATIVE: the review-outcome field is named "review outcome" (`sprk_reviewoutcome`), NOT "disposition" (D-05 / ADR-040).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (live `sprk_communication` attribute set → verify-or-create). Blocks 025 (persistence of triage output) and gates the deploy (060). `sprk_triagecategory` is a Lookup to task 013's config table — if 013 has not created the table at create time, record the dependency and create the lookup once available (or coordinate order). The single most important property is non-breaking: existing `sprk_communication` columns MUST survive untouched — if any tool pushes toward retyping an in-use field, STOP and escalate.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply STANDARD rigor — schema creation, Step 9.5 gates SKIPPED. State the §11 Component Justification in the task note. Verify-or-create via MCP before creation; NEVER retype an in-use field. Model tier `sonnet` @ effort `medium`.
+    </protocol>
+  </execution>
+</task>

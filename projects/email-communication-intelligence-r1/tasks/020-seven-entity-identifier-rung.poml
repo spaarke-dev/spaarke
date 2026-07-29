@@ -1,0 +1,163 @@
+<task id="020" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>7-entity identifier rung — catalog-driven (`sprk_recordtype_ref`), value-based reverse lookup, reinforcement-gated, auto-file per C-1</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>021, 024, 030, 040, 042, 060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Highest-blast-radius task in the project — a new association rung in shared `Services/Communication/Engine/Rungs/` that decides which of 7 core records an email files onto. A wrong match MISFILES email (the #1 trust-killer per research). Value-based reverse lookup, defensive catalog reads, reinforcement-gated auto-file, per-message query-cost budget. BFF-touching + `.cs` in the shared engine → code-review + adr-check at Step 9.5 UNCONDITIONALLY; publish-size + CVE + `/conflict-check` required.</rigor-reason>
+    <parallel-group>P2-assoc</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural, high-blast-radius association correctness with genuine ambiguity boundaries (bare-numeric reinforcement, multi-entity disambiguation, defensive dirty-catalog reads). §8.5 assigns `opus` to high-blast-radius/architectural work; this is the canonical case.</model-tier-reason>
+    <effort>xhigh</effort>
+    <fr-refs>FR-01, NFR-08</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add ONE new deterministic association rung to the EXISTING ladder in `src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/` that extends identifier-based matching from matter-only to all 7 core record types (matter, project, invoice, work assignment, budget, service request, report card). Clone the shape of `ExplicitReferenceRung.cs` (rung 0) + `ThreadContinuityRung.cs` (rung 1) and implement `IAssociationRung`. This EXTENDS the ladder — MUST NOT add a second engine or a second regarding mechanism (ADR-045 / ADR-024).
+
+    The rung is **catalog-driven and value-based** — NO numbering scheme lives in code (binding MUST rule):
+
+    1. **Roster from `sprk_recordtype_ref`** — read the per-record-type `sprk_regardingfield` + `sprk_regardingrecordnumberfield` (the number field to reverse-look-up against) from the catalog. Read it **DEFENSIVELY** using task 001's typo/anomaly map (some `sprk_regardingfield` values have typos; the `contact` row is anomalous) — normalize/guard so a dirty row never produces a wrong field name or a false match. Onboarding a new tenant must require ONLY `sprk_recordtype_ref` config, no code change (FR-01 acceptance).
+    2. **Extract identifier-shaped tokens** from subject + body (the tokens that look like record numbers, e.g. `PRJT.10001.01`, `CMRCL-441482`, `INV-002`). Extraction is deterministic/pattern-based — do NOT hardcode per-entity numbering; extract candidate tokens broadly, then match by VALUE.
+    3. **Value-based reverse lookup** — for each candidate token, exact-match its VALUE against the number field of each of the 7 record types (via the catalog roster). A match is a record whose number field EQUALS the token value. The numbering scheme is NEVER decoded in code; matching is pure value equality against Dataverse.
+    4. **Reinforcement-gated auto-file (per C-1)** — a **bare-numeric identifier alone NEVER auto-files** (needs sender/participant/thread reinforcement). An explicit, well-formed identifier match is a rung-0-class result; a bare-numeric token needs reinforcement before it can be treated as auto-fileable. Emit the rung result + status; the actual auto-file-vs-Suggested narrowing is finalized by task 021, but THIS rung MUST emit the signals 021 needs (rung level + reinforcement flag) and MUST NOT itself auto-file a bare-numeric-only match.
+    5. **Multi-entity → `Ambiguous`** — if a token value matches records of MORE THAN ONE entity type (or multiple records), resolve to `Ambiguous`, never a guess.
+    6. **Cost budget (NFR-08)** — gate the reverse lookup to NOT-yet-resolved emails only; cache catalog + lookups; report the per-message query count. MUST NOT run the reverse lookup on already-associated emails.
+
+    Add seam + unit tests covering the acceptance set below. This is the rung ONLY — the auto-file policy narrowing (rung 0+1 vs 2/3) is task 021; the report-card `RegardingFieldMap` entry is task 010 (a dependency for writing a report-card match).
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication Association Engine — authority on `Services/Communication/Engine/Rungs/` and the deterministic association ladder. Fluent in ADR-045 (extend the ladder, add one rung — never fork), ADR-024 (one regarding mechanism, resolver-only write), the `sprk_recordtype_ref` catalog contract, value-based (not scheme-based) matching, §10 BFF Hygiene, §11 Component Justification, and NFR-08 query-cost discipline. You never encode a numbering scheme in code; you read the catalog defensively; you never let a bare-numeric token auto-file alone.
+  </role>
+
+  <goal>
+    A new catalog-driven identifier rung exists in the ladder (mirroring rung 0/1, implementing `IAssociationRung`): it extracts identifier-shaped tokens from subject/body, reverse-looks-them-up by VALUE against the 7 record types' number fields (roster from `sprk_recordtype_ref`, read defensively per the 001 typo/anomaly map), and emits a match + status + reinforcement signals. A well-formed explicit identifier associates to the correct record across all 7 types; a bare-numeric token alone NEVER auto-files; a token matching multiple entities resolves to `Ambiguous`; the reverse lookup runs only on not-yet-resolved emails, is cached, and the per-message query count is reported. No numbering scheme in code; onboarding a tenant needs only `sprk_recordtype_ref` config. Build clean; seam + unit tests green; existing association tests stay green; publish-size delta ≈0 + no new HIGH CVE; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      The shipped ladder deterministically associates matter numbers only (`ExplicitReferenceRung`, rung 0) and inherits thread associations (`ThreadContinuityRung`, rung 1). FR-01 extends this to all 7 core records via a catalog-driven rung: numbering schemes vary per tenant and per record type, so the rung MUST NOT hardcode them — it reads the roster (regarding field + number field per record type) from `sprk_recordtype_ref` and matches candidate tokens by VALUE. This keeps tenant onboarding to catalog config only.
+
+      §11 Component Justification: (1) **Existing** — `ExplicitReferenceRung` matches matter numbers only (grep-confirmed); no rung matches project/invoice/work-assignment/budget/service-request/report-card numbers. (2) **Extension** — this is ONE new rung class mirroring rung 0, reusing `IAssociationRung`, the catalog, and the resolver write path; no new engine, no new regarding mechanism. (3) **Cost-of-doing-nothing (concrete)** — without it only matter numbers deterministically associate; project/invoice/etc. never auto-match and G-1 fails (success-criterion 1). Named contract failure, not "future flexibility."
+
+      The dirty-catalog risk is real (spec §Dependencies; 001 note): some `sprk_regardingfield` values have typos and the `contact` row is anomalous. Reading the catalog naively would produce a wrong field name (query error) or a false field mapping (misfile). The rung MUST guard against this using the 001 map. Misfiling is the #1 trust-killer (design research) — hence bare-numeric-never-auto-files and multi-entity→Ambiguous are non-negotiable guardrails.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs (rung 0 — CLONE its shape: token extraction + catalog read + value match)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs (rung 1 — CLONE the rung structure + result/status emission)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/IAssociationRung.cs (the interface the new rung implements)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (the write map — the report-card entry from task 010 lets a report-card match be written)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs + AutoFileGate.cs (downstream C-1 narrowing — task 021 consumes this rung's level + reinforcement signals)</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (the verbatim `sprk_recordtype_ref` roster + the defensive-read typo/anomaly map — CONSUME)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-01">Scope: extract identifier-shaped tokens from subject/body; exact-match VALUES against each of the 7 record types' number fields; roster + fields from `sprk_recordtype_ref`. An email quoting `PRJT.10001.01` / `CMRCL-441482` / `INV-002` associates to the correct record; onboarding a tenant needs ONLY `sprk_recordtype_ref` config.</constraint>
+    <constraint source="project (numbering out of code)">Scope: NO numbering scheme in code — matching is pure value equality against the catalog-named number field. MUST NOT decode/parse any per-entity numbering format to decide the target entity.</constraint>
+    <constraint source="C-1 / FR-03">Scope: a bare-numeric identifier alone MUST NOT auto-file (needs sender/participant/thread reinforcement); emit the rung level + reinforcement flag that task 021 uses to gate auto-file vs `Suggested`. This rung MUST NOT itself auto-file a bare-numeric-only match.</constraint>
+    <constraint source="FR-01 (disambiguation)">Scope: a token value matching more than one entity type (or multiple records) resolves to `Ambiguous` — never a guess.</constraint>
+    <constraint source="spec §Dependencies">Scope: read `sprk_recordtype_ref` DEFENSIVELY using the 001 typo/anomaly map — normalize/guard so a typo'd `sprk_regardingfield` or the `contact` anomaly never yields a wrong field name or a false match.</constraint>
+    <constraint source="NFR-08">Scope: gate the reverse lookup to not-yet-resolved emails; cache the catalog + lookups; report the per-message query count. MUST NOT run the reverse lookup on already-associated emails.</constraint>
+    <constraint source="ADR-045 / ADR-024">Scope: extend the ladder (add ONE rung implementing `IAssociationRung`); write via the existing resolver/`RegardingFieldMap`. MUST NOT add a second engine or a second regarding mechanism.</constraint>
+    <constraint source="NFR-04">Scope: the rung MUST be best-effort — a lookup failure or dirty-catalog row MUST NOT fail the capture/enrichment path; degrade to no-match/Suggested, never throw into the capture path.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR; report publish-size delta vs ~49.63 MB baseline (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests (ADR-038); `/conflict-check` before the PR (shared `Services/Communication/Engine/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/IAssociationRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Association rung (clone rung 0)" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs">
+        Implement `IAssociationRung`; extract candidate tokens from subject/body; read the catalog roster; match by value; emit a result with rung level + status. Mirror the existing rung's structure exactly; add the 7-entity value-lookup + reinforcement/ambiguity guards.
+      </pattern>
+      <pattern name="Catalog-driven value match" location="projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md">
+        Roster (regarding field + number field per record type) comes from `sprk_recordtype_ref`, read defensively via the 001 typo/anomaly map. Matching is value equality against Dataverse; no numbering scheme in code; multi-entity → Ambiguous.
+      </pattern>
+      <pattern name="Query-cost discipline" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ThreadContinuityRung.cs">
+        Gate the rung to not-yet-resolved emails; cache the catalog + lookups; count and report per-message queries (NFR-08).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` §F/§G + §11 + task 001's note (verbatim roster + defensive-read typo/anomaly map) + `DATA-ACCESS-DECISION-CRITERIA.md` before designing.</step>
+    <step order="2">Read `ExplicitReferenceRung.cs`, `ThreadContinuityRung.cs`, `IAssociationRung.cs`, `RegardingFieldMap.cs`, `AssociationStatusMapper.cs`, `AutoFileGate.cs` to fix the rung contract, the result/status shape, how the ladder orders rungs, and the exact signals `AutoFileGate`/`AssociationStatusMapper` need from this rung for 021's C-1 narrowing.</step>
+    <step order="3">Characterize the existing ladder with a green test baseline (existing association behavior MUST stay green after the new rung is inserted).</step>
+    <step order="4">Implement the new rung: (a) deterministic token extraction from subject/body; (b) defensive catalog read (roster from `sprk_recordtype_ref` via the 001 map, guarding typos + the `contact` anomaly); (c) value-based reverse lookup against the 7 number fields, gated to not-yet-resolved emails + cached; (d) emit result with rung level, match, status, and the reinforcement flag; (e) bare-numeric-only → NOT auto-fileable (needs reinforcement); (f) multi-entity/multi-record → `Ambiguous`; (g) best-effort (never throw into the capture path). Count per-message queries.</step>
+    <step order="5">Insert the rung into the ladder at the correct precedence (mirroring how rung 0/1 register); confirm `RegardingFieldMap` (incl. the task-010 report-card entry) can write each of the 7 matches.</step>
+    <step order="6">Write seam + unit tests in `tests/unit/Sprk.Bff.Api.Tests/` + `tests/integration/seam/**`: (a) a well-formed identifier for EACH of the 7 record types associates to the correct record; (b) NEGATIVE — a bare-numeric token with NO reinforcement is NOT auto-filed (rung emits not-auto-fileable); (c) NEGATIVE — a token value matching two entity types resolves to `Ambiguous`; (d) NEGATIVE — a dirty/typo'd `sprk_recordtype_ref` row does NOT produce a wrong-field query or a false match (defensive read); (e) cross-tenant numbering works with only `sprk_recordtype_ref` config (no code change); (f) the reverse lookup does NOT run on an already-associated email + the per-message query count is asserted (NFR-08); (g) a lookup failure degrades to no-match, not an exception into the capture path (NFR-04).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication` + the seam tests; confirm existing association tests still pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus: no numbering scheme in code, defensive catalog read, bare-numeric-never-auto-files, multi-entity→Ambiguous, NFR-08 cost, NFR-04 non-fatal, one-mechanism/ADR-024); `adr-check` against `spec.md` (FR-01, ADR-045/ADR-024, NFR-08, NFR-04). Address Critical findings; cite bff-extensions Placement Justification + §11.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/Engine/`; coordinate with 010/021 — never concurrent).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (020 ✅) + `current-task.md`; record the per-message query count observed, the reinforcement-signal contract handed to 021, and the defensive-read guards applied.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the rungs, the interface, the write map, the status mapper/gate, the 001 note</tool>
+    <tool name="grep">Confirm only matter numbers match today (§11 evidence); trace the ladder registration order</tool>
+    <tool name="edit">Add the new rung + register it in the ladder + tests</tool>
+    <tool name="bash">Build, unit + seam tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <escalation>
+    <trigger>Identifier-extraction ambiguity that the deterministic guards do NOT cleanly resolve — e.g. a numbering format that is genuinely undecidable by value alone, a `sprk_recordtype_ref` anomaly beyond the 001 map (a row whose number field cannot be read defensively), or a case where "bare-numeric never auto-files" + "multi-entity → Ambiguous" would still risk a misfile. Misfiling is the #1 trust-killer; a genuine ambiguity boundary is a legitimate STOP (root §6), not something to guess past. Surface the specific token/record-type + the guard that fails and request a human decision on the disambiguation rule before shipping.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ (NEW identifier rung implementing `IAssociationRung`, catalog-driven value match, reinforcement + ambiguity guards, cost-gated)</output>
+    <output type="code">Ladder registration wiring (the new rung inserted at correct precedence; no second engine)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/** — 7-type match + bare-numeric-not-auto-filed + multi-entity-Ambiguous + defensive-dirty-catalog + cross-tenant-config-only + NFR-08 query-count + NFR-04 non-fatal cases</output>
+    <output type="docs">PR description with §11 Component Justification (FR-01 failure mode + grep evidence) + bff-extensions Placement Justification + publish-size delta + CVE result + per-message query count</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A well-formed identifier for EACH of the 7 core record types (matter, project, invoice, work assignment, budget, service request, report card) associates to the correct record via value-based reverse lookup against the catalog number field.</criterion>
+    <criterion testable="true">No numbering scheme is hardcoded in code — matching is pure value equality against the `sprk_recordtype_ref`-named number field; a new tenant's numbering works with only catalog config (no code change).</criterion>
+    <criterion testable="true">NEGATIVE: a bare-numeric identifier token with NO sender/participant/thread reinforcement is NEVER auto-filed by this rung — it emits a not-auto-fileable result + the reinforcement flag 021 consumes.</criterion>
+    <criterion testable="true">NEGATIVE: a token value matching more than one entity type (or multiple records) resolves to `Ambiguous`, never a guessed single match.</criterion>
+    <criterion testable="true">NEGATIVE: a typo'd `sprk_regardingfield` or the `contact`-row anomaly in `sprk_recordtype_ref` does NOT produce a wrong-field query or a false match — the catalog is read defensively per the 001 map.</criterion>
+    <criterion testable="true">NFR-08: the reverse lookup runs ONLY on not-yet-resolved emails, is cached, and the per-message query count is reported and asserted; it does NOT run on already-associated emails.</criterion>
+    <criterion testable="true">NFR-04: a lookup failure or dirty-catalog row degrades to no-match/Suggested and NEVER throws into the capture/enrichment path.</criterion>
+    <criterion testable="true">Extends the ladder (ONE rung implementing `IAssociationRung`, writes via the existing resolver/`RegardingFieldMap`) — no second engine, no second regarding mechanism; existing association tests stay green; publish delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The single most important property is no-misfile: bare-numeric-never-auto-files and multi-entity→Ambiguous are non-negotiable guardrails (misfiling is the #1 trust-killer). Depends on 001 (the defensive-read roster + typo/anomaly map) and coordinates with 010 (the report-card `RegardingFieldMap` entry that lets a report-card match be written). Blocks 021 (which finalizes the C-1 auto-file narrowing using this rung's level + reinforcement signals), 024 (RI-confidence reads this rung's agreement), 030/040/042. If a genuine ambiguity boundary appears, fire the escalation trigger — do NOT guess past it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (highest blast radius; association correctness). Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification + Component Justification + per-message query count in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/Engine/`; coordinate with 010/021). The `&lt;escalation&gt;` trigger is a legitimate stop, not improvisation. Model tier `opus` @ effort `xhigh`.
+    </protocol>
+  </execution>
+</task>

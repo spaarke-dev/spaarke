@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Job B apply endpoint → `IActionSeam.UpdateRecordAsync` under the confirming user's OBO + write `sprk_emailreviewlog` audit row</title>
+    <phase>P3 — Job B record currency</phase>
+    <gate>after:030,012</gate>
+    <status>not-started</status>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is the ONLY record-mutating task in r1 — it applies a human-confirmed field update to a customer record. It carries the heaviest guardrails: apply ONLY under the confirming user's OBO (NFR-05 / ADR-028), ONLY a proposal for an allow-listed field, ONLY after human confirm, and it MUST write an append-only audit row (`sprk_emailreviewlog`). A write under the wrong identity, to a non-allow-listed field, or without an audit row is a security/compliance defect. BFF-touching + security-sensitive: publish-size + CVE + Placement Justification; code-review + adr-check at Step 9.5 (unconditional).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-correctness on a record-mutating write path: the "apply under the confirming user's OBO, not app-only, never to a non-allow-listed field, always audited" invariant is exactly the reasoning that must not be sloppy; brownfield edit of the shared endpoint family + write-core seam.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the shared `Api/CommunicationEndpoints.cs` family + consumes the shared `IActionSeam` write core; serialize after 030 and never concurrent with other shared `Services/Communication/` writers. `/conflict-check` before the PR.</parallel-reason>
+    <dependencies>030, 012</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement **Job B — apply** (FR-10): an apply endpoint that takes a **confirmed** pending proposal (from 030), applies it to the associated record via `IActionSeam.UpdateRecordAsync` **under the confirming user's OBO** (ADR-028 — NOT app-only), and writes an append-only **`sprk_emailreviewlog`** audit row capturing "AI proposed / human approved / from email X / field / old→new / cited source / confidence / timestamp / actor".
+
+    Add the endpoint to the EXISTING `Api/CommunicationEndpoints.cs` communication group (extend the `suggest-associations` family — no new endpoint group). r5's shipped surface renders the confirm card and calls this endpoint on confirm (coordination doc); r1 builds no UI.
+
+    **Guardrails (non-negotiable, all MUST hold at apply time):**
+    - Re-validate the proposal is for an **allow-listed, enabled** `(entity, field)` pair in `sprk_emailupdatefield` at apply time (do not trust the client to have gated it). A non-allow-listed field is refused.
+    - Apply **only** under the confirming user's OBO token — resolve the caller server-side from `HttpContext.User`; never app-only, never a client-supplied identity. Fail closed (403) on an unresolved caller.
+    - The write goes through `IActionSeam.UpdateRecordAsync` (the blessed write core) — do NOT fork a bespoke Dataverse write, do NOT `new` a credential.
+    - Re-verify the cited source text still exists (NFR-06) before applying; nothing deadline-bearing / privilege-adjacent auto-finalizes (ADR-015).
+    - Write the `sprk_emailreviewlog` row as part of the same apply operation — an apply that mutates the record MUST leave a queryable audit trail (machine suggestion + human decision, both as fields on the row).
+
+    ADR-041/043/047 (judgment gate / execution spine / notification spine) are Proposed / in-flight — pin the apply to the current shape of those seams; `/conflict-check` before the PR.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication + Ai domains, authoritative on ADR-028 (OBO writes — the confirming user's on-behalf-of token is the blessed mechanism), the `IActionSeam.UpdateRecordAsync` write core, the `sprk_emailupdatefield` allow-list (FR-11), the `sprk_emailreviewlog` audit contract (FR-08 / 012), ADR-008 (endpoint filters), ADR-019 (ProblemDetails), and NFR-06 / ADR-015 trust-and-audit. Fluent in the r5 apply coordination contract.
+  </role>
+
+  <goal>
+    A `POST` apply endpoint on the existing `/api/communications` group takes a confirmed proposal id, re-validates it against the `sprk_emailupdatefield` allow-list, applies it via `IActionSeam.UpdateRecordAsync` under the confirming user's OBO, and writes an `sprk_emailreviewlog` row (AI proposed / human approved / from email X / old→new / citation / confidence / actor / timestamp). A non-allow-listed field is refused; an unresolved caller gets 403 (fail-closed, no app-only fallback); an unverifiable-citation proposal is refused. The endpoint carries the ADR-008 authorization filter + ADR-019 ProblemDetails and is registered unconditionally. Build clean; unit + seam tests (incl. the negative/authorization cases) pass; publish-size + CVE + Placement Justification reported.
+  </goal>
+
+  <context>
+    <background>
+      Job B is FULL depth (owner-locked). 030 produces pending, cited, allow-list-gated proposals; this task applies a confirmed one. The apply is the single record-mutating action in r1, so the auth + allow-list + audit guardrails are the whole point. Per NFR-05, background triage runs app-only but the Job B apply runs under the **confirming user's OBO** — the human who clicked confirm is the actor of record, and Dataverse row-level security applies under their identity.
+
+      `sprk_emailreviewlog` (012, FR-08) is the append-only audit entity: item, actor (user OR rule/model id), action, prior AI suggestion + confidence, timestamp — machine-review and human-review both as rows. The apply writes the human-decision row; 030's proposal is the machine-suggestion source. This audit row is the compliance differentiator (G-5 / Success Criteria 6 + 9) — an apply without it is a defect.
+
+      r5 renders the confirm card + calls this endpoint (C-3 / coordination doc). r1 builds no UI — it supplies the apply endpoint. ADR-041/043/047 are in-flight; pin to current shape.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (ADD the apply route to the existing `/api/communications` group — no new group)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs (REUSE — `UpdateRecordAsync` is the blessed write core; call under the confirming user's OBO)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs (REFERENCE — the update-record write core `IActionSeam` fronts)</file>
+      <file>sprk_emailupdatefield (Dataverse — re-validate the proposal's (entity, field) is enabled at apply time; READ-ONLY to r1)</file>
+      <file>sprk_emailreviewlog (Dataverse — append-only audit; WRITE the human-approved decision row here as part of apply, 012 / FR-08)</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md (r5 confirm/apply contract — the payload r5 posts on confirm)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (OBO writes — the confirming user's on-behalf-of token; app-only is for background only)</file>
+    </relevant-files>
+    <dependencies>030 (the pending proposal this applies), 012 (`sprk_emailreviewlog` audit entity this writes).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-10">Scope: the apply endpoint applies a confirmed proposal via `IActionSeam.UpdateRecordAsync` under the confirming user's OBO and writes the `sprk_emailreviewlog` row; rendered on r5's shipped surface.</constraint>
+    <constraint source="NFR-05 / ADR-028">Scope: apply runs under the confirming user's OBO token (NOT app-only); resolve the caller server-side from `HttpContext.User`, never client-supplied; fail closed (403) on an unresolved caller; do NOT `new` a credential — inject the central mechanism.</constraint>
+    <constraint source="FR-11 / C-4">Scope: re-validate at apply time that the proposal targets an ENABLED `(sprk_targetentity, sprk_targetfield)` allow-list row; refuse a non-allow-listed / disabled field even if the client requests it. `sprk_emailupdatefield` is READ-ONLY to r1.</constraint>
+    <constraint source="NFR-06 / ADR-015">Scope: re-verify the cited source text exists before applying; the apply writes a plain-language reason + citation into the audit row; nothing deadline-bearing / privilege-adjacent auto-finalizes; privilege flagged never decided.</constraint>
+    <constraint source="FR-08">Scope: the apply MUST write an append-only `sprk_emailreviewlog` row (item, actor=confirming user, action=approved, prior AI suggestion + confidence, old→new, citation, timestamp) — an apply without an audit row is invalid.</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach the write core ONLY via `Services/Ai/PublicContracts/`; MUST NOT inject `IOpenAiClient`/`IPlaybookService` or fork a bespoke Dataverse write.</constraint>
+    <constraint source="ADR-008 / ADR-019">Scope: the route carries the communication authorization endpoint filter; errors (proposal not found, forbidden, non-allow-listed field, unverifiable citation, unresolved caller) return RFC 7807 ProblemDetails; register unconditionally (ADR-032/ADR-010).</constraint>
+    <constraint source="ADR-041/043/047">Scope: Proposed / in-flight — pin the apply to the current shape of the judgment-gate / execution-spine / notification-spine seams; `/conflict-check` before the PR; check charters.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state Placement Justification (extends `CommunicationEndpoints` + reuses `IActionSeam`; no new group/mechanism); publish-size delta vs ~49.63 MB (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests (ADR-038).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/email-intelligence-r1-coordination.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="OBO record write" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IActionSeam.cs">
+        Resolve the confirming caller from `HttpContext.User`; call `UpdateRecordAsync` under their OBO token so Dataverse RLS applies under their identity; never app-only for the apply.
+      </pattern>
+      <pattern name="Apply-time allow-list re-validation" location="sprk_emailupdatefield (Dataverse)">
+        Re-read the enabled allow-list row for the proposal's `(entity, field)` at apply time; refuse if absent/disabled — do not trust client-side gating.
+      </pattern>
+      <pattern name="Audit-on-apply" location="sprk_emailreviewlog (Dataverse)">
+        Write the human-approved decision row (actor, action, prior AI suggestion + confidence, old→new, citation, timestamp) as part of the same apply operation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md`, ADR-028 (OBO write path), ADR-015 (privilege flagged never decided), the coordination doc (r5 confirm payload), and `DATA-ACCESS-DECISION-CRITERIA.md` (confirms BFF write, not Xrm.WebApi).</step>
+    <step order="2">Read `CommunicationEndpoints.cs` (the `suggest-associations` family + auth filter shape), `IActionSeam.cs` (`UpdateRecordAsync` signature + how OBO is threaded), and 030's stored-proposal shape. Grep to confirm no existing apply route.</step>
+    <step order="3">Implement the apply handler: load the confirmed proposal (030) → re-validate `(entity, field)` is enabled in `sprk_emailupdatefield` → re-verify the cited text exists → resolve the confirming caller from `HttpContext.User` (fail-closed 403 if unresolved) → call `IActionSeam.UpdateRecordAsync` under that caller's OBO.</step>
+    <step order="4">Write the `sprk_emailreviewlog` row (item, actor=confirming user, action=approved, prior AI suggestion + confidence, old→new, citation, timestamp) as part of the same operation; an apply that mutates the record but fails to audit is a failure (surface it, do not silently succeed).</step>
+    <step order="5">Add `POST /api/communications/{...}/apply` (or the coordination-doc-agreed route) to the existing `/api/communications` group: bind the proposal id/confirm payload, apply the ADR-008 authorization filter + ADR-019 ProblemDetails (not-found / forbidden / non-allow-listed / unverifiable-citation / unresolved-caller); register unconditionally (ADR-032/ADR-010).</step>
+    <step order="6">Write unit + seam tests: (a) a confirmed allow-listed proposal applies under OBO and writes an `sprk_emailreviewlog` row; (b) NEGATIVE — a non-allow-listed / disabled field is REFUSED even when the client requests it; (c) NEGATIVE — the apply runs ONLY under the confirming user's OBO (never app-only), and an unresolved caller gets 403; (d) NEGATIVE — a proposal whose cited text no longer exists is refused; (e) an audit row is written on every successful apply. Follow ADR-038 (boundary mocks only; no banned patterns).</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` + targeted `dotnet test`; run publish-size (report absolute + delta vs ~49.63 MB) + CVE scan.</step>
+    <step order="9.5">FULL-rigor gates (security-sensitive, unconditional): `code-review` (focus OBO-not-app-only, apply-time allow-list re-validation, audit-on-apply, no bespoke write); `adr-check` against ADR-028 / ADR-013 / ADR-015 + spec FR-10 / FR-11 / NFR-05 / NFR-06. Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/` + endpoint family; ADR-041/043/047 in-flight — pin to current shape).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (031 ✅) + `current-task.md`; record decisions (apply route, OBO threading point, allow-list re-validation, audit-row shape).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If applying under the confirming user's OBO surfaces an auth or judgment-gate ambiguity — e.g. the current ADR-028 OBO threading cannot be applied to `IActionSeam.UpdateRecordAsync` without app-only fallback, or the in-flight ADR-041 judgment gate's current shape conflicts with the confirm→apply contract — STOP and escalate per root §6 / §6.5. Do NOT fall back to app-only for the apply, and do NOT fork a bespoke write to work around the gate.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The `suggest-associations` endpoint family is read-only; there is no route that applies a confirmed proposal. `IActionSeam.UpdateRecordAsync` owns the write core; `sprk_emailreviewlog` owns the audit; `sprk_emailupdatefield` owns the allow-list.</existing>
+    <extension>Yes for the write mechanism (reuse `IActionSeam` — do not fork a bespoke Dataverse write); the route is new only because REST needs a new path to apply a confirmed proposal. No new service, no new write mechanism, no new auth mechanism.</extension>
+    <cost-of-doing-nothing>Without the apply endpoint, r5 has no way to apply a confirmed proposal and no record ever becomes current from email — FR-10 fails and the record-currency pillar (Success Criterion 6) does not ship; without apply-time allow-list re-validation + OBO + audit, an apply could mutate an arbitrary column under the wrong identity with no trail (security/compliance failure).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="read">Inspect the endpoint family, write-core seam, allow-list + audit contracts, coordination doc, ADR-028</tool>
+    <tool name="grep">Confirm no existing apply route (§11); confirm no bespoke Dataverse write / app-only apply path introduced</tool>
+    <tool name="edit">Add the apply route + handler; wire OBO + allow-list re-validation + audit-row write</tool>
+    <tool name="bash">Build, unit/seam tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor security-sensitive gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs (UPDATED — apply route on the existing group; OBO + allow-list re-validation + audit; unconditional; ADR-008/019)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (UPDATED — apply handler consuming `IActionSeam.UpdateRecordAsync` under OBO + writing `sprk_emailreviewlog`)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/seam/ — apply-under-OBO + non-allow-listed-refused + app-only-never + unresolved-caller-403 + unverifiable-citation-refused + audit-row-written</output>
+    <output type="docs">PR description with §11 Component Justification + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">On confirm, a confirmed allow-listed proposal is applied to the associated record via `IActionSeam.UpdateRecordAsync` under the confirming user's OBO, and an `sprk_emailreviewlog` row records "AI proposed / human approved / from email X / old→new / citation / confidence / actor / timestamp".</criterion>
+    <criterion testable="true">NEGATIVE (allow-list): a proposal targeting a non-allow-listed or disabled `(entity, field)` is REFUSED at apply time even when the client requests it (apply-time re-validation, not client-trusted).</criterion>
+    <criterion testable="true">NEGATIVE (auth): the apply runs ONLY under the confirming user's OBO — never app-only; an unresolved caller returns 403 (fail-closed, no app-only fallback); the caller is resolved server-side, never client-supplied.</criterion>
+    <criterion testable="true">NEGATIVE (citation): a proposal whose cited source text no longer exists is refused (NFR-06); nothing deadline-bearing / privilege-adjacent auto-finalizes.</criterion>
+    <criterion testable="true">Every successful apply writes exactly one append-only `sprk_emailreviewlog` audit row; a mutate-without-audit path does not exist.</criterion>
+    <criterion testable="true">The write reuses `IActionSeam.UpdateRecordAsync` (no bespoke Dataverse write, no `new` credential); AI/write core reached only via `Services/Ai/PublicContracts/`.</criterion>
+    <criterion testable="true">The route carries the ADR-008 authorization filter + ADR-019 ProblemDetails and is registered unconditionally; `dotnet build` clean; tests pass; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The single most important properties are: apply under the confirming user's OBO (never app-only), refuse any non-allow-listed field at apply time, and always write the audit row. These are security/compliance-sensitive and non-negotiable. r5 renders the confirm card + posts to this endpoint (coordination doc); r1 builds no UI. ADR-041/043/047 in-flight — pin to current shape; `/conflict-check` before the PR.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files. Apply FULL rigor — Step 9.5 gates REQUIRED and security-sensitive (record-mutating OBO write). Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + Placement + Component Justification in the PR. `/conflict-check` before the PR (ADR-041/043/047 in-flight). Model tier `opus` @ effort `high`.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,135 @@
+<task id="021" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Auto-file policy narrowing C-1 in `AssociationStatusMapper`/`AutoFileGate` — rung 0+1 auto-file, 2/3 → `Suggested`</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>020</dependencies>
+    <deps>020</deps>
+    <blocks>060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared `AssociationStatusMapper`/`AutoFileGate` that decides auto-file vs `Suggested` for EVERY association. Narrowing to rung 0+1 is a policy tightening (ADR-045 path-A exception) — a mistake here either auto-files a weak match (misfile, #1 trust-killer) or blocks a legitimate auto-file. BFF-touching + `.cs` in the shared engine → code-review + adr-check at Step 9.5; publish-size + CVE + `/conflict-check` required.</rigor-reason>
+    <parallel-group>P2-assoc</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A well-specified policy narrowing over an existing mapper/gate (rung-level threshold change + Suggested fallback) — clear rules, no open-ended design. Default execution tier at `high` effort for correctness on a shared-path edit.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-03</fr-refs>
+  </metadata>
+
+  <prompt>
+    Narrow the shipped auto-file policy to C-1 in the EXISTING `src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs` + `AutoFileGate.cs`. Today the engine auto-files deterministic matches at rungs 0–3 (≥0.85). C-1 tightens this: **auto-file ONLY on rung 0 (explicit ID) + rung 1 (thread inheritance); rung 2 (participant/sender-only) and rung 3 (structural) resolve to `Suggested`, never auto-file.** This is a documented ADR-045 path-A exception (misfiling = #1 trust-killer) — a tightening of the shipped policy, kill-switch-governed, not a new mechanism.
+
+    Additionally honor the identifier rung's (020) reinforcement signal: a **bare-numeric identifier match with NO reinforcement MUST resolve to `Suggested`**, not auto-file — even though the identifier rung is rung-0-class, a bare-numeric-only token is not a strong-enough explicit match to auto-file alone. Consume the rung-level + reinforcement flag that task 020's rung emits.
+
+    Do NOT change the rung ORDER or the rung matching logic (that is 020) — this task changes only the STATUS MAPPING: which rung levels/results map to `auto-file` vs `Suggested`. Keep the AI-tier rule intact (AI-tier never auto-files). Add/extend tests proving the narrowed policy. Keep the change kill-switch-governed (ADR-018) so the policy can be toggled without a redeploy if needed.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication Association Engine — authority on `AssociationStatusMapper`/`AutoFileGate` (the auto-file-vs-Suggested decision). Fluent in ADR-045 (the shipped auto-file policy + the C-1 path-A tightening), ADR-018 (kill-switch governance), the rung ladder's level/reinforcement contract from task 020, §10 BFF Hygiene, and §11. You change only the status-mapping policy, not the matching logic, and you never let a weak match auto-file.
+  </role>
+
+  <goal>
+    `AssociationStatusMapper`/`AutoFileGate` auto-file ONLY on rung 0 + rung 1; rung 2 + rung 3 resolve to `Suggested`. A bare-numeric identifier match with no reinforcement resolves to `Suggested` (consuming 020's reinforcement flag). AI-tier never auto-files (unchanged). The narrowing is kill-switch-governed. Build clean; tests prove: thread-reply (rung 1) and explicit-well-formed-ID (rung 0) auto-file; sender-only (rung 2) and structural (rung 3) land `Suggested`; bare-numeric-only lands `Suggested`. Existing association tests updated to the new policy and green; publish-size delta ≈0 + no new HIGH CVE; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      ADR-045 ships auto-file for deterministic matches at rungs 0–3 (≥0.85). Design research found misfiling is the #1 trust-killer, so C-1 conservatively narrows auto-file to the two rungs that carry the strongest intent: rung 0 (explicit identifier) + rung 1 (thread inheritance). Rung 2 (participant/sender-only) and rung 3 (structural) still MATCH but resolve to `Suggested` for human confirmation. This is a documented ADR-045 path-A exception (a tightening, kill-switch-governed — not a violation, not a new mechanism); it is recorded in the spec/plan ADR-Tensions tables.
+
+      The identifier rung (020) adds a subtlety: a bare-numeric token is rung-0-class by KIND but is weak by itself (a number with no sender/participant/thread reinforcement could match coincidentally). So the policy also treats bare-numeric-without-reinforcement as `Suggested`, consuming the reinforcement flag 020 emits. This task is pure policy: it changes which rung levels/results map to auto-file — it does NOT touch the matching logic.
+
+      §11: this task ONLY modifies existing files (`AssociationStatusMapper`/`AutoFileGate`) — no new surface; no §11 three-question form required (the rule applies to NEW surface). The change is a policy narrowing + a consumed reinforcement flag.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (the rung-level → status mapping — narrow to rung 0+1 auto-file)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs (the auto-file gate — honor the C-1 narrowing + the bare-numeric reinforcement flag)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ (rung 0/1/2/3 — the levels the mapper keys on; task 020's identifier rung emits the reinforcement flag)</file>
+      <file>projects/email-communication-intelligence-r1/notes/ (task 020's note — the reinforcement-signal contract this task consumes)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-03 / C-1">Scope: auto-file ONLY on rung 0 + rung 1; rung 2 (participant/sender-only) and rung 3 (structural) → `Suggested`. A sender-only or structural-only match NEVER auto-files; a thread reply or explicit-ID match does.</constraint>
+    <constraint source="C-1 (bare-numeric)">Scope: a bare-numeric identifier match with NO reinforcement → `Suggested`, not auto-file (consume 020's reinforcement flag). Bare-numeric alone never auto-files.</constraint>
+    <constraint source="ADR-045 (path-A exception)">Scope: this is a documented tightening of the shipped auto-file policy, not a new mechanism. Change only the status mapping; MUST NOT alter the rung ORDER or matching logic (that is 020). Keep the AI-tier rule intact (AI-tier never auto-files).</constraint>
+    <constraint source="ADR-018">Scope: keep the narrowing kill-switch-governed so the policy can be toggled without a redeploy; do NOT hardwire a policy that cannot be reverted.</constraint>
+    <constraint source="NFR-04">Scope: the status mapping MUST be best-effort — a mapping edge case degrades to `Suggested` (safe), never throws into the capture/enrichment path.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR (policy narrowing of the existing mapper/gate — no new surface); report publish-size delta vs ~49.63 MB baseline (expected ≈0); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`; `/conflict-check` before the PR (shared `Services/Communication/Engine/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/IAssociationRung.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Rung-level status mapping" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs">
+        The mapper keys the auto-file-vs-Suggested decision on the rung level of the winning match. C-1 narrows the auto-file set to {rung 0, rung 1}; rung 2/3 → Suggested; bare-numeric-without-reinforcement → Suggested. AI-tier → never auto-file (unchanged).
+      </pattern>
+      <pattern name="Kill-switch governance" location="docs/adr/ADR-045-communication-architecture.md">
+        The narrowing is a documented path-A tightening, kill-switch-governed (ADR-018) so it can be toggled without a redeploy.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` + the spec/plan ADR-Tensions (ADR-045 path-A) + task 020's note (the reinforcement-signal contract) before editing.</step>
+    <step order="2">Read `AssociationStatusMapper.cs` + `AutoFileGate.cs` to fix exactly where rung level → auto-file/Suggested is decided, how the AI-tier rule is expressed, and where the kill-switch is read; confirm 020's rung emits the reinforcement flag this task consumes.</step>
+    <step order="3">Characterize the current policy with a green baseline (record which rung levels auto-file today) so the narrowing is a deliberate, tested change.</step>
+    <step order="4">Narrow the policy: auto-file only on rung 0 + rung 1; rung 2 + rung 3 → `Suggested`; bare-numeric-without-reinforcement → `Suggested` (consume 020's flag); AI-tier never auto-files (unchanged); keep it kill-switch-governed; best-effort (edge case → `Suggested`).</step>
+    <step order="5">Update/add tests in `tests/unit/Sprk.Bff.Api.Tests/`: (a) rung 1 thread reply auto-files; (b) rung 0 explicit well-formed ID auto-files; (c) NEGATIVE — rung 2 sender-only lands `Suggested`; (d) NEGATIVE — rung 3 structural lands `Suggested`; (e) NEGATIVE — bare-numeric-only (no reinforcement) lands `Suggested`; (f) AI-tier never auto-files; (g) the kill-switch toggles the policy. Update existing policy tests to the narrowed behavior.</step>
+    <step order="6">Run `dotnet build` + `dotnet test --filter Communication`; confirm existing association tests reflect the new policy and pass.</step>
+    <step order="9.1">Run `dotnet publish -c Release ... -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: only status mapping changed not matching logic; rung 0+1-only auto-file; bare-numeric→Suggested; AI-tier unchanged; kill-switch present); `adr-check` (FR-03, ADR-045 path-A exception cited, ADR-018). Address Critical findings; cite the path-A exception in the PR.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/Engine/`; serial after 020 — never concurrent with 010/020).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (021 ✅) + `current-task.md`; record the rung levels that now auto-file + the kill-switch key.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect the mapper/gate + the rung interface + 020's note</tool>
+    <tool name="grep">Locate where rung level → auto-file/Suggested is decided + the AI-tier rule + the kill-switch read</tool>
+    <tool name="edit">Narrow the status mapping + consume the reinforcement flag + tests</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (UPDATED — auto-file narrowed to rung 0+1; rung 2/3 → Suggested)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AutoFileGate.cs (UPDATED — honors C-1 + the bare-numeric reinforcement flag; kill-switch-governed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — rung 0/1 auto-file + rung 2/3 Suggested + bare-numeric Suggested + AI-tier-never + kill-switch cases</output>
+    <output type="docs">PR description citing the ADR-045 path-A exception + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Auto-file happens ONLY on rung 0 + rung 1; a rung-1 thread reply and a rung-0 explicit well-formed ID auto-file.</criterion>
+    <criterion testable="true">NEGATIVE: a sender-only (rung 2) match and a structural-only (rung 3) match resolve to `Suggested`, never auto-file.</criterion>
+    <criterion testable="true">NEGATIVE: a bare-numeric identifier match with no reinforcement resolves to `Suggested` (consumes 020's reinforcement flag).</criterion>
+    <criterion testable="true">The AI-tier never-auto-file rule is intact; the narrowing is kill-switch-governed (togglable without redeploy).</criterion>
+    <criterion testable="true">NEGATIVE: the rung ORDER and matching logic are unchanged — only the status mapping changed; a mapping edge case degrades to `Suggested`, never throws (NFR-04).</criterion>
+    <criterion testable="true">`dotnet build` clean; existing association tests updated to the new policy and green; publish delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Serial after 020 (consumes its rung-level + reinforcement contract; both edit the shared engine — never concurrent). This task is a POLICY change only — if implementing it seems to require changing the matching logic, STOP: the matching lives in 020. The path-A ADR-045 exception (narrowing the shipped ≥0.85 rung 0–3 auto-file) MUST be cited in the PR per §6.5.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (shared-engine policy edit). Per §10: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification + the ADR-045 path-A exception citation in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/Engine/`; serial after 020). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

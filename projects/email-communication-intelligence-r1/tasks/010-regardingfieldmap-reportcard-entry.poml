@@ -1,0 +1,131 @@
+<task id="010" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>Add `sprk_reportcard`→`sprk_regardingreportcard` to `RegardingFieldMap.cs`</title>
+    <phase>P1 — Schema &amp; catalog foundation</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <deps>001</deps>
+    <blocks>060</blocks>
+    <tags>bff-api, communication</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` in shared `Services/Communication/Engine/` (the regarding write map) — the map governs which regarding lookup the engine writes for a matched record. A wrong entry misfiles report-card associations onto the wrong lookup. BFF-touching → publish-size + CVE + bff-extensions Placement Justification + `/conflict-check` required; correctness of the regarding write demands code-review + adr-check at Step 9.5 (root §8 FULL: modifying `.cs`, tags `bff-api`).</rigor-reason>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A single additive map entry mirroring the 6 existing entries — fully-specified, low-ambiguity, no architectural decision. Default execution tier at `high` effort for correctness on a shared-path edit.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-02</fr-refs>
+  </metadata>
+
+  <prompt>
+    Add ONE additive entry to the EXISTING regarding write map so the association engine can write a report-card association. This extends `src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs` — it does NOT add a new map, a new regarding mechanism, or a new engine (ADR-024 / ADR-045: one regarding mechanism; extend, never fork).
+
+    Add the mapping `sprk_reportcard` (the report-card record type) → `sprk_regardingreportcard` (the regarding lookup on `sprk_communication`), mirroring the exact shape/convention of the 6 existing entries in `RegardingFieldMap` (matter, project, invoice, work assignment, budget, service request). Use the EXACT logical names task 001 confirmed live: the `sprk_regardingreportcard` lookup logical name from the 001 note, and the report-card record-type code / `sprk_recordtype_ref` row (RPTC) it maps from. Do NOT hardcode any numbering scheme — the entry maps the record type to its regarding lookup only; the number-field roster lives in `sprk_recordtype_ref` (read by the identifier rung, task 020).
+
+    Consume task 001's verification note for the exact `sprk_regardingreportcard` logical name + the RPTC row shape. Add/extend the characterization test that proves the engine writes the correct regarding lookup for a report-card match. This is the SINGLE map entry — the identifier rung that MATCHES a report-card number is task 020; the auto-file policy is 021.
+  </prompt>
+
+  <role>
+    Spaarke BFF engineer for the Communication Association Engine. Authority on `Services/Communication/Engine/RegardingFieldMap.cs` and the ADR-024 polymorphic regarding family (write only via the resolver; one regarding mechanism). Fluent in ADR-045 (extend the engine, never fork), §10 BFF Hygiene, §11 Component Justification, and the additive/non-breaking discipline for shared `Services/Communication/` code.
+  </role>
+
+  <goal>
+    `RegardingFieldMap.cs` gains a single additive `sprk_reportcard`→`sprk_regardingreportcard` entry mirroring the 6 existing entries, using the exact logical names task 001 confirmed live. The engine can write a report-card association through the existing resolver path — no second map, no second regarding mechanism, no numbering scheme in code. Build clean; a characterization test proves the engine resolves a report-card match to the `sprk_regardingreportcard` lookup; existing regarding-map tests stay green; publish-size delta ≈0 + no new HIGH CVE reported; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      The Association Engine writes a matched record's association via a typed regarding lookup on `sprk_communication`, selected by `RegardingFieldMap` keyed on record type. It ships with the 6 non-report-card core types; the report card was added as an operator prerequisite (the `sprk_regardingreportcard` lookup + the `sprk_recordtype_ref` RPTC row, verified in 001) but the code map has no entry, so the engine cannot write a report-card association (FR-02). This task adds that one entry.
+
+      §11 Component Justification: (1) **Existing** — `RegardingFieldMap` already owns the record-type→regarding-lookup map for the other 6 core types (grep-confirmed); there is no report-card entry. (2) **Extension** — this is ONE additive dictionary entry reusing the existing map + resolver path; it introduces no new service, map, or mechanism. (3) **Cost-of-doing-nothing (concrete)** — without the entry the engine cannot write a report-card association even when the identifier rung (020) matches a report-card number; FR-02 fails and success-criterion 1 (report-card association) cannot pass. Named contract failure, not "future flexibility."
+
+      Numbering schemes stay OUT of code (spec MUST rule; CLAUDE.md): this entry maps the record type to its regarding lookup only. The report-card NUMBER match (reverse-lookup against `sprk_reportcardnumber`) is the identifier rung's job (020), driven by `sprk_recordtype_ref`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (ADD the `sprk_reportcard`→`sprk_regardingreportcard` entry, mirroring the 6 existing entries)</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md (task 001 output — the exact `sprk_regardingreportcard` logical name + RPTC row shape; consume it)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs (rung 0 — reads the map after a match; confirms how the entry is consumed)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs (downstream — status mapping consumes a resolved regarding write)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-02">Scope: add ONLY the `sprk_reportcard`→`sprk_regardingreportcard` entry to `RegardingFieldMap.cs`, mirroring the 6 existing entries; the engine can then write a report-card association. Nothing else.</constraint>
+    <constraint source="ADR-024">Scope: write the regarding via the existing resolver/map — ONE regarding mechanism. MUST NOT add a second map, a second regarding mechanism, or a bespoke report-card write path.</constraint>
+    <constraint source="ADR-045">Scope: extend the existing engine map additively; MUST NOT fork the engine or add a second engine. Existing entries + tests stay untouched/green (non-breaking).</constraint>
+    <constraint source="project (numbering out of code)">Scope: the entry maps record type → regarding lookup only. MUST NOT hardcode any report-card numbering scheme in code; the number-field roster lives in `sprk_recordtype_ref` (read by 020).</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR (extends the existing `RegardingFieldMap` — no new mechanism); report publish-size delta vs ~49.63 MB baseline (expected ≈0, no new packages); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/`; `/conflict-check` before the PR (shared `Services/Communication/`).</constraint>
+    <constraint source="project §11">Scope: Component Justification — one additive entry; state the concrete FR-02 failure mode prevented (engine cannot write a report-card association) with grep evidence that no report-card entry exists.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/001-operator-schema-verification.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/ExplicitReferenceRung.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-045-communication-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Regarding field map entry" location="src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs">
+        Each core record type maps to its `sprk_regarding{...}` lookup on `sprk_communication`. Mirror the 6 existing entries exactly; add the report-card entry with the live logical name from the 001 note. One mechanism (ADR-024/ADR-045); numbering stays out of code.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` §F/§G + §11 + task 001's note (exact `sprk_regardingreportcard` logical name + RPTC row) before editing.</step>
+    <step order="2">Read `RegardingFieldMap.cs` to identify the exact shape/convention of the 6 existing entries + how `ExplicitReferenceRung`/`AssociationStatusMapper` consume the map; grep-confirm no report-card entry exists (§11 evidence).</step>
+    <step order="3">Add the `sprk_reportcard`→`sprk_regardingreportcard` entry mirroring the existing entries, using the live logical name from the 001 note; no numbering scheme in code.</step>
+    <step order="4">Add/extend a characterization test in `tests/unit/Sprk.Bff.Api.Tests/`: given a report-card record match, the engine resolves the regarding write to `sprk_regardingreportcard`; assert the 6 existing entries are unchanged (non-breaking).</step>
+    <step order="5">Run `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter Communication`; confirm existing regarding-map tests still pass (characterization green).</step>
+    <step order="9.1">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0, no new packages).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` on the diff (focus one-mechanism/ADR-024 compliance + no numbering in code); `adr-check` against `spec.md` (FR-02, ADR-024/ADR-045). Address Critical findings; cite bff-extensions Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (BFF hot-path; shared `Services/Communication/Engine/`; coordinate with 020/021 which also edit the engine — never concurrent).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (010 ✅) + `current-task.md`; record the report-card logical name used + the test added.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">Inspect `RegardingFieldMap.cs`, the rung, the status mapper, the 001 note</tool>
+    <tool name="grep">Confirm no existing report-card entry (§11 evidence)</tool>
+    <tool name="edit">Add the report-card map entry + the characterization test</tool>
+    <tool name="bash">Build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/RegardingFieldMap.cs (UPDATED — additive `sprk_reportcard`→`sprk_regardingreportcard` entry)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — characterization test: report-card match resolves to `sprk_regardingreportcard`; 6 existing entries unchanged</output>
+    <output type="docs">PR description with §11 Component Justification (FR-02 failure mode + grep evidence) + bff-extensions Placement Justification + publish-size delta + CVE result</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RegardingFieldMap.cs` contains a `sprk_reportcard`→`sprk_regardingreportcard` entry using the exact logical name confirmed live in task 001, mirroring the 6 existing entries.</criterion>
+    <criterion testable="true">The engine resolves a report-card record match to the `sprk_regardingreportcard` lookup (characterization test passes).</criterion>
+    <criterion testable="true">NEGATIVE: no second regarding map/mechanism/engine was added (ADR-024/ADR-045); the 6 existing entries are unchanged and their tests stay green.</criterion>
+    <criterion testable="true">NEGATIVE: no report-card numbering scheme is hardcoded in code — the entry maps record type → regarding lookup only.</criterion>
+    <criterion testable="true">`dotnet build` clean; publish-size delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Depends on 001 (the confirmed `sprk_regardingreportcard` logical name + RPTC row). The report-card NUMBER match is task 020, not this task — 010 only teaches the engine WHERE to write a report-card association, not HOW to match one. If the 001 note reports `sprk_regardingreportcard` ABSENT, STOP and escalate (010 is blocked on the operator prerequisite).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (shared-engine edit). Per §10 + §11: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification + Component Justification in the PR. Run `/conflict-check` before the PR (shared `Services/Communication/Engine/`; coordinate with 020/021). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>

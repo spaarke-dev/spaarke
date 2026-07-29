@@ -1,0 +1,156 @@
+<task id="023" project="email-communication-intelligence-r1">
+  <metadata>
+    <title>`TRIAGE-EMAIL` Binding + input/output schema (mirror-first) + golden-utterance eval case + RAG grounding + enrichment/event trigger via `PublicContracts` facade</title>
+    <phase>P2 — Lean intelligence spine</phase>
+    <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <dependencies>022</dependencies>
+    <deps>022</deps>
+    <blocks>060</blocks>
+    <tags>catalog, bff-api, jps</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Wires the TRIAGE-EMAIL Action into the enrichment/event path (BFF `.cs` in shared `Services/Communication/` via `Services/Ai/PublicContracts/`), adds the Binding + mirror-first input schema + RAG grounding, and carries the NFR-07 golden-utterance eval case (blocking merge gate). BFF-touching + AI-facade discipline (ADR-013) + best-effort non-fatal (NFR-04) → code-review + adr-check at Step 9.5; publish-size + CVE + `/conflict-check` required.</rigor-reason>
+    <parallel-group>P2-triage</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified Binding + schema + trigger wiring over shipped seams (facade + enrichment path), with a documented eval obligation. Default execution tier at `high` effort for facade-discipline + non-fatal correctness.</model-tier-reason>
+    <effort>high</effort>
+    <fr-refs>FR-05, FR-06, NFR-07</fr-refs>
+  </metadata>
+
+  <prompt>
+    Wire the `TRIAGE-EMAIL` Action (authored in 022) into the pipeline: author its Binding, its mirror-first input/output schema, a golden-utterance eval case, RAG grounding on the matter's correspondence, and the enrichment/event trigger — all reached via the `Services/Ai/PublicContracts/` facade (ADR-013). This is code-directed Action + Binding (ADR-039) — MUST NOT land on the frozen node-graph engine.
+
+    1. **Binding row** — add a `sprk_playbookconsumer` Binding for `TRIAGE-EMAIL` to `infra/dataverse/sprk_playbookconsumer-rows.json`, following the shape of the existing rows; seed it via `scripts/dataverse/Seed-PlaybookConsumers.ps1`.
+    2. **Mirror-first input schema** — author the input schema in `infra/dataverse/inputschemas/` (mirror-first per the consumer-wiring guide; use `create-task-v1.input.schema.json` as the reference shape). The input MUST feed the ALREADY-PRODUCED classification signal (`AiClassificationRung`/`CommunicationClassificationResult`) into the Action — NOT re-run a full classification pass (FR-05 efficiency rule from 022). Author the output schema for `{category, summary, obligations[], priority, reviewOutcome}`.
+    3. **RAG grounding (FR-06)** — ground the classification/summary in the matter's OWN prior correspondence (already indexed). Wire the retrieval so triage improves with matter context vs a context-free pass; the eval case must DEMONSTRATE the improvement.
+    4. **Golden-utterance eval case (NFR-07)** — add a golden-utterance eval case for the Action/Binding (blocking merge gate). It MUST demonstrate: the structured triage output on a representative inbound email AND the FR-06 context-improvement (matter-grounded vs context-free).
+    5. **Enrichment/event trigger** — trigger the Action on the enrichment/event path via the `PublicContracts` facade (`ICommunicationClassificationAi` / the triage seam). The trigger MUST be **best-effort / non-fatal (NFR-04)** — a triage failure MUST NOT fail the capture or send path. Where the classification rung already ran, feed its result — no second full LLM pass.
+
+    Validate with `jps-validate`. Run `scripts/Refresh-ScopeModelIndex.ps1` after authoring so the scope catalog reflects the new Action. This task does NOT persist the output to `sprk_communication` (that is task 025) — it produces the triage output and grounds/evaluates it.
+  </prompt>
+
+  <role>
+    Spaarke AI consumer-wiring engineer. Fluent in `ai-guide-consumer-wiring.md` (Action + Binding authoring, mirror-first input schemas, all entry paths, eval-case obligation), the `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN`, ADR-039 (closed catalog), ADR-013 (`PublicContracts` facade only — no AI internals in Communication code), NFR-04 (best-effort/non-fatal), NFR-07 (golden-utterance eval as a blocking gate), and the existing enrichment path. You wire via facades, ground in matter context, and never fail capture on a triage error.
+  </role>
+
+  <goal>
+    `TRIAGE-EMAIL` is fully wired: a `sprk_playbookconsumer` Binding (seeded), a mirror-first input schema (feeding the produced classification signal — no second full pass) + output schema for the five fields, RAG grounding on the matter's correspondence, a golden-utterance eval case demonstrating the structured output AND the FR-06 context improvement, and an enrichment/event trigger via the `PublicContracts` facade that is best-effort/non-fatal (a triage failure never fails capture/send). `jps-validate` passes; the scope index is refreshed. Build clean; the eval-case gate passes; publish-size delta ≈0 (reuses the AI stack) + no new HIGH CVE; `/conflict-check` run before the PR.
+  </goal>
+
+  <context>
+    <background>
+      022 authored the `TRIAGE-EMAIL` Action definition (reusing the classification signal). This task makes it live on the enrichment/event path: the Binding + input/output schema (ADR-039 closed catalog), RAG grounding in the matter's correspondence (FR-06 — classification improves with matter context), the NFR-07 eval case (blocking merge gate), and the trigger via `Services/Ai/PublicContracts/` (ADR-013 — no AI internals in Communication code). The trigger is best-effort (NFR-04 / ADR-045 NFR-06): triage runs on the enrichment path but a failure MUST NOT fail capture or send. Where `AiClassificationRung` already produced a classification, the Action consumes it — no second full LLM pass (the FR-05 efficiency rule).
+
+      Placement (§10): the wiring lands in shared `Services/Communication/` (the enrichment/event trigger) reaching AI ONLY via `Services/Ai/PublicContracts/` (`ICommunicationClassificationAi` / the triage seam) — no `IOpenAiClient`/`IPlaybookService` injected into Communication code (NFR-03/ADR-013). Triage adds no new heavy dependency (reuses the AI stack) → publish delta ≈0.
+    </background>
+    <relevant-files>
+      <file>projects/email-communication-intelligence-r1/notes/022-triage-email-action.md (the authored Action + reuse-the-signal contract + reviewOutcome set — CONSUME)</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json (add the TRIAGE-EMAIL Binding row, mirroring existing rows)</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json (mirror-first input-schema reference shape)</file>
+      <file>scripts/dataverse/Seed-PlaybookConsumers.ps1 (seed the Binding row)</file>
+      <file>scripts/Refresh-ScopeModelIndex.ps1 (refresh the scope catalog after authoring)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ICommunicationClassificationAi.cs (the facade the trigger reaches AI through — no AI internals)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs (the enrichment path the trigger hangs off; best-effort/non-fatal)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs (the produced classification signal fed into the Action — no 2nd pass)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="FR-05">Scope: the input schema feeds the ALREADY-PRODUCED classification signal into the Action; MUST NOT re-run a full classification pass where `AiClassificationRung` already ran. Output schema = `{category, summary, obligations[], priority, reviewOutcome}`.</constraint>
+    <constraint source="FR-06">Scope: ground classification/summary in the matter's OWN prior correspondence (already indexed); the eval case MUST demonstrate matter-grounded improvement vs a context-free pass.</constraint>
+    <constraint source="NFR-07">Scope: add a golden-utterance eval case for the Action/Binding (blocking merge gate); it MUST demonstrate the structured output AND the FR-06 context improvement. Validate with `jps-validate`.</constraint>
+    <constraint source="ADR-013 / NFR-03">Scope: reach AI ONLY via `Services/Ai/PublicContracts/` (`ICommunicationClassificationAi` / the triage seam); MUST NOT inject `IOpenAiClient`/`IPlaybookService` into Communication code.</constraint>
+    <constraint source="ADR-039">Scope: Action + Binding on the closed catalog; MUST NOT land on the frozen node-graph engine / `IInvokePlaybookAi` (deleted).</constraint>
+    <constraint source="NFR-04">Scope: the enrichment/event trigger MUST be best-effort — a triage failure MUST NOT fail the capture or send path; degrade silently + log, never throw into capture/send.</constraint>
+    <constraint source="project §10">Scope: BFF Hygiene — load `.claude/constraints/bff-extensions.md`; state the Placement Justification in the PR (facade-reached triage trigger on the enrichment path — no new AI internals); report publish-size delta vs ~49.63 MB baseline (expected ≈0, reuses AI stack); no new HIGH CVE; update tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests; `/conflict-check` before the PR (shared `Services/Communication/`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/email-communication-intelligence-r1/spec.md</file>
+      <file>projects/email-communication-intelligence-r1/plan.md</file>
+      <file>projects/email-communication-intelligence-r1/CLAUDE.md</file>
+      <file>projects/email-communication-intelligence-r1/notes/022-triage-email-action.md</file>
+      <file>infra/dataverse/sprk_playbookconsumer-rows.json</file>
+      <file>infra/dataverse/inputschemas/create-task-v1.input.schema.json</file>
+      <file>scripts/dataverse/Seed-PlaybookConsumers.ps1</file>
+      <file>scripts/Refresh-ScopeModelIndex.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ICommunicationClassificationAi.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/Engine/Rungs/AiClassificationRung.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+      <file>docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Consumer wiring (Action + Binding)" location="docs/guides/ai-guide-consumer-wiring.md">
+        Author the Binding + mirror-first input schema; trigger via the `PublicContracts` facade; add the golden-utterance eval case (blocking gate); refresh the scope index. No AI internals in Communication code.
+      </pattern>
+      <pattern name="RAG grounding on matter correspondence" location="docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md">
+        Ground classification/summary in the matter's already-indexed correspondence so triage improves with context; the eval case demonstrates matter-grounded vs context-free.
+      </pattern>
+      <pattern name="Best-effort enrichment trigger" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationEnrichmentService.cs">
+        The triage trigger hangs off the enrichment path and is best-effort — a failure is logged + degraded, never thrown into capture/send (NFR-04).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read `.claude/constraints/bff-extensions.md` + `ai-guide-consumer-wiring.md` + `SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` + the 022 note + `ICommunicationClassificationAi.cs` + `CommunicationEnrichmentService.cs` + `AiClassificationRung.cs` to fix the Binding shape, the facade seam, the enrichment hook, and the reuse-the-signal input contract.</step>
+    <step order="2">Author the mirror-first input schema in `infra/dataverse/inputschemas/` (reference `create-task-v1.input.schema.json`) feeding the produced classification signal; author the output schema for the five fields; validate with `jps-validate`.</step>
+    <step order="3">Add the `TRIAGE-EMAIL` Binding row to `infra/dataverse/sprk_playbookconsumer-rows.json` (mirror existing rows); seed via `scripts/dataverse/Seed-PlaybookConsumers.ps1`.</step>
+    <step order="4">Wire the enrichment/event trigger in `Services/Communication/` reaching AI via `ICommunicationClassificationAi` / the triage seam (`PublicContracts`); make it best-effort/non-fatal (NFR-04); feed the produced classification (no second full pass); add RAG grounding on the matter's correspondence (FR-06).</step>
+    <step order="5">Add the golden-utterance eval case (NFR-07 blocking gate): representative inbound email → structured triage output; matter-grounded vs context-free demonstrates FR-06 improvement. Validate the eval renders/passes.</step>
+    <step order="6">Run `scripts/Refresh-ScopeModelIndex.ps1`; add/extend tests in `tests/unit/Sprk.Bff.Api.Tests/` + seam tests (facade reached; trigger non-fatal on failure; no AI internals in Communication code).</step>
+    <step order="7">Run `dotnet build` + `dotnet test --filter Communication` + the seam tests; confirm existing enrichment tests stay green.</step>
+    <step order="9.1">Run `dotnet publish -c Release ... -o deploy/api-publish/`; report compressed size + delta vs ~49.63 MB baseline (expected ≈0, reuses AI stack).</step>
+    <step order="9.2">Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH-severity CVEs.</step>
+    <step order="9.5">FULL-rigor quality gates: `code-review` (focus: facade-only AI reach / no internals; best-effort non-fatal; no second full pass; eval-case present); `adr-check` (FR-05/06, NFR-07, ADR-013/039, NFR-04). Address Critical findings; cite Placement Justification.</step>
+    <step order="10">Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage — never concurrent with 024/025).</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (023 ✅) + `current-task.md`; record the Binding id, the input-schema path, the eval-case path, and the facade seam used.</step>
+  </steps>
+
+  <tools>
+    <tool name="read">022 note + consumer-wiring guide + facade + enrichment path + classification rung</tool>
+    <tool name="jps-validate">Validate the input/output schema + eval render</tool>
+    <tool name="edit">Binding row + input/output schema + enrichment trigger + eval case + tests</tool>
+    <tool name="bash">Seed script, scope-index refresh, build, tests, publish-size, CVE scan</tool>
+    <tool name="code-review">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="adr-check">FULL-rigor quality gate (Step 9.5)</tool>
+    <tool name="conflict-check">Pre-PR hot-path conflict scan (Step 10)</tool>
+  </tools>
+
+  <outputs>
+    <output type="catalog">infra/dataverse/sprk_playbookconsumer-rows.json (UPDATED — TRIAGE-EMAIL Binding row) + seeded via `Seed-PlaybookConsumers.ps1`</output>
+    <output type="catalog">infra/dataverse/inputschemas/ (NEW TRIAGE-EMAIL mirror-first input schema + output schema) — validated by `jps-validate`</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ (enrichment/event trigger via `PublicContracts`, best-effort/non-fatal, RAG-grounded, feeds the produced classification)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + golden-utterance eval case (NFR-07) demonstrating structured output + FR-06 context improvement + non-fatal-on-failure seam test</output>
+    <output type="docs">PR description with Placement Justification + publish-size delta + CVE result + eval-case path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A `TRIAGE-EMAIL` `sprk_playbookconsumer` Binding row exists (seeded) and a mirror-first input schema + output schema for `{category, summary, obligations[], priority, reviewOutcome}` exist and pass `jps-validate`.</criterion>
+    <criterion testable="true">An inbound email yields the structured triage output via the Action, feeding the already-produced classification signal — NO second full LLM pass where the classification rung already ran.</criterion>
+    <criterion testable="true">RAG grounding on the matter's correspondence is wired and the golden-utterance eval case (NFR-07) demonstrates matter-grounded improvement vs a context-free pass.</criterion>
+    <criterion testable="true">The Action is reached ONLY via `Services/Ai/PublicContracts/` — no `IOpenAiClient`/`IPlaybookService` in Communication code; it lands on the closed catalog, not the frozen node engine.</criterion>
+    <criterion testable="true">NEGATIVE: a triage failure on the enrichment/event trigger does NOT fail the capture or send path (NFR-04 — best-effort, verified by a seam test).</criterion>
+    <criterion testable="true">`dotnet build` clean; eval-case gate passes; scope index refreshed; publish delta ≈0 vs ~49.63 MB; no new HIGH CVE; `/conflict-check` run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Serial after 022 (consumes the authored Action); within P2-triage the enrichment `.cs` edits serialize with 024/025 — never concurrent. Does NOT persist to `sprk_communication` (that is 025). The two load-bearing properties: facade-only AI reach (ADR-013) and best-effort/non-fatal trigger (NFR-04). The NFR-07 eval case is a blocking merge gate — the PR MUST NOT merge without it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Load all `&lt;knowledge&gt;&lt;files&gt;` before starting. Apply FULL rigor — Step 9.5 quality gates REQUIRED (AI-facade + non-fatal correctness). Per §10: publish-size delta (baseline ~49.63 MB) + CVE + bff-extensions Placement Justification in the PR + the NFR-07 eval case (blocking gate). Run `/conflict-check` before the PR (shared `Services/Communication/`; serial within P2-triage). Model tier `sonnet` @ effort `high`.
+    </protocol>
+  </execution>
+</task>
