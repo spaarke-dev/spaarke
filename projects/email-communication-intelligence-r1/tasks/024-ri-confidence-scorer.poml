@@ -3,7 +3,7 @@
     <title>RI-confidence scorer — compute (urgency × deterministic-rung agreement) + wire into `CommunicationAssessedSignal` (`RunAssessmentEmissionAsync`); lights up `CommunicationRiActionService`</title>
     <phase>P2 — Lean intelligence spine</phase>
     <gate>code-review + adr-check @ Step 9.5 (FULL)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <dependencies>022</dependencies>
     <deps>022</deps>

@@ -81,11 +81,18 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         await RunStepAsync("rag-indexing", communicationId,
             () => RunRagIndexingAsync(communicationId, direction, message, archivedDocumentId, ct));
 
+        // Hoisted (not re-derived) for task 024's RI-confidence scorer: the SAME CommunicationTriageResult
+        // produced by the email-triage step, captured here so the assessment-emission step below can prefer
+        // its Priority field without a second triage call. Null when triage produced no result (Action not
+        // routed/disabled, or no persisted classification signal yet) — the assessment step falls back to
+        // the classification's own Urgency field in that case (see RunAssessmentEmissionAsync).
+        CommunicationTriageResult? triageResult = null;
+
         await RunStepAsync("email-triage", communicationId,
-            () => RunEmailTriageAsync(communicationId, message, ct));
+            async () => { triageResult = await RunEmailTriageAsync(communicationId, message, ct); });
 
         await RunStepAsync("assessment-event", communicationId,
-            () => RunAssessmentEmissionAsync(communicationId, direction, message, ct));
+            () => RunAssessmentEmissionAsync(communicationId, direction, message, triageResult, ct));
 
         _logger.LogInformation(
             "Enrichment complete | CommunicationId: {CommunicationId}, Direction: {Direction}",
@@ -258,8 +265,15 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// to add the field writes, mapping the five result fields to the as-built columns documented in
     /// <c>notes/022-triage-email-action.md</c> §2.
     /// </para>
+    /// <para>
+    /// <b>Result is hoisted for task 024 (FR-04).</b> Returns the produced <see cref="CommunicationTriageResult"/>
+    /// (or <c>null</c> when no triage ran/produced a result) so <see cref="EnrichAsync"/> can pass it, in the
+    /// SAME orchestration call, into <see cref="RunAssessmentEmissionAsync"/> — the RI-confidence scorer
+    /// prefers <see cref="CommunicationTriageResult.Priority"/> as its urgency source without a second
+    /// triage call.
+    /// </para>
     /// </remarks>
-    private async Task RunEmailTriageAsync(Guid communicationId, NormalizedMessage message, CancellationToken ct)
+    private async Task<CommunicationTriageResult?> RunEmailTriageAsync(Guid communicationId, NormalizedMessage message, CancellationToken ct)
     {
         var record = await _genericEntityService.RetrieveAsync(
             "sprk_communication",
@@ -272,7 +286,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             _logger.LogDebug(
                 "Enrichment[email-triage] skipped: communication record could not be retrieved | CommunicationId: {CommunicationId}.",
                 communicationId);
-            return;
+            return null;
         }
 
         var provenanceJson = record.GetAttributeValue<string>("sprk_associationprovenance");
@@ -283,7 +297,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             _logger.LogDebug(
                 "Enrichment[email-triage] skipped: no persisted AI-classify signal for this communication yet | CommunicationId: {CommunicationId}.",
                 communicationId);
-            return;
+            return null;
         }
 
         var matterRef = record.GetAttributeValue<EntityReference>(MatterRegardingField);
@@ -305,7 +319,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             _logger.LogInformation(
                 "Enrichment[email-triage] produced no result (Action not routed/disabled, or completion failed — non-fatal) | CommunicationId: {CommunicationId}.",
                 communicationId);
-            return;
+            return null;
         }
 
         // ADR-015: identifiers/closed-set labels only — summary + obligations carry free text, never logged.
@@ -314,6 +328,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             communicationId, result.Category, result.Priority, result.ReviewOutcome, result.Obligations.Count, matterRef is not null);
 
         // Task 025 persists `result` to sprk_communication's triage fields here.
+        return result;
     }
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────
@@ -324,6 +339,12 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// consumer behind the same seam, and task 042 (downstream of that gate) writes the
     /// <c>kind=communication-assessed</c> outbox row + <c>appnotification</c> mirror — this method emits the
     /// input signal only and MUST NOT write the outbox or call <c>IEventRulesService.FireAsync</c>.
+    /// <para>
+    /// <b>FR-04 (email-communication-intelligence-r1 task 024):</b> <see cref="CommunicationAssessedSignal.Confidence"/>
+    /// now carries the computed email-specific RI-confidence (<see cref="ComputeRiConfidenceAsync"/>) instead
+    /// of the previous hardcoded <c>0</c> — this is what lights up <see cref="CommunicationRuleGate"/> /
+    /// <see cref="CommunicationRiActionService"/> for a genuinely urgent, well-associated communication.
+    /// </para>
     /// <para>
     /// <b>Fire-and-forget, non-fatal (NFR-05):</b> the producer call is wrapped so a producer exception is
     /// caught + logged (distinct from the success path, correlatable by CommunicationId) and swallowed — the
@@ -336,10 +357,16 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// </para>
     /// </summary>
     private async Task RunAssessmentEmissionAsync(
-        Guid communicationId, CommunicationDirection direction, NormalizedMessage message, CancellationToken ct)
+        Guid communicationId,
+        CommunicationDirection direction,
+        NormalizedMessage message,
+        CommunicationTriageResult? triageResult,
+        CancellationToken ct)
     {
+        var confidence = await ComputeRiConfidenceAsync(communicationId, triageResult, ct).ConfigureAwait(false);
+
         var signal = new CommunicationAssessedSignal(
-            communicationId, direction, message.Subject, message.From, message.To.Count);
+            communicationId, direction, message.Subject, message.From, message.To.Count, confidence);
 
         try
         {
@@ -353,6 +380,84 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 ex,
                 "communication_assessed producer failed (non-fatal) | CommunicationId: {CommunicationId}",
                 communicationId);
+        }
+    }
+
+    // ── FR-04: RI-confidence computation ─────────────────────────────────────────
+    /// <summary>
+    /// Computes the FR-04 email-specific RI-confidence — <c>urgencyWeight × deterministicAgreement</c>, via
+    /// the pure <see cref="RiConfidenceScorer"/> — for the <c>communication_assessed</c> signal.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Urgency source (preference order).</b> Prefers <paramref name="triageResult"/>'s
+    /// <see cref="CommunicationTriageResult.Priority"/> — the SAME result <see cref="RunEmailTriageAsync"/>
+    /// just produced in this call to <see cref="EnrichAsync"/>, hoisted rather than re-derived. When triage
+    /// produced no result (Action not routed/disabled, or no persisted classification signal yet — e.g.
+    /// outbound messages today), falls back to the classification's own <c>Urgency</c> field, reconstructed
+    /// from the SAME persisted <c>sprk_associationprovenance</c> JSON via
+    /// <see cref="PersistedClassificationSignalReader"/> (task 023's reuse pattern — no re-derivation, no
+    /// second classification call, per ADR-013/NFR-03).
+    /// </para>
+    /// <para>
+    /// <b>Deterministic-rung agreement source.</b> <see cref="Engine.AssociationDecisionTrace.TopDeterministicConfidence"/>
+    /// from that SAME provenance document — the reinforced confidence of the strongest deterministic-rung
+    /// (0–3) winner that task 021's <see cref="Engine.AssociationStatusMapper"/> already computed and
+    /// persisted. No provenance yet (e.g. an outbound message, or an inbound message whose association
+    /// hasn't resolved) ⇒ <c>0</c>, which — combined with any urgency weight — keeps the overall score at
+    /// <c>0</c>: the same conservative outcome the pre-024 hardcoded value produced for an unassessed
+    /// communication (no noise introduced for communications with no association signal at all).
+    /// </para>
+    /// <para>
+    /// <b>Best-effort (NFR-04).</b> ANY failure (the Dataverse read, JSON parse) is caught here and degrades
+    /// to confidence <c>0</c> — the same safe/conservative default the hardcoded value used — rather than
+    /// throwing into the assessment-emission step. Never propagates to capture/enrichment.
+    /// </para>
+    /// </remarks>
+    private async Task<double> ComputeRiConfidenceAsync(
+        Guid communicationId, CommunicationTriageResult? triageResult, CancellationToken ct)
+    {
+        try
+        {
+            var record = await _genericEntityService.RetrieveAsync(
+                "sprk_communication",
+                communicationId,
+                ["sprk_associationprovenance"],
+                ct);
+
+            var provenanceJson = record?.GetAttributeValue<string>("sprk_associationprovenance");
+            var provenance = PersistedClassificationSignalReader.TryDeserializeProvenance(provenanceJson);
+
+            var deterministicAgreement = provenance?.Decision.TopDeterministicConfidence ?? 0.0;
+
+            double urgencyWeight;
+            if (!string.IsNullOrWhiteSpace(triageResult?.Priority))
+            {
+                urgencyWeight = RiConfidenceScorer.UrgencyWeightFromPriority(triageResult!.Priority);
+            }
+            else
+            {
+                var classification = PersistedClassificationSignalReader.TryReconstruct(provenance);
+                urgencyWeight = RiConfidenceScorer.UrgencyWeightFromClassification(classification?.Urgency);
+            }
+
+            var score = RiConfidenceScorer.Compute(urgencyWeight, deterministicAgreement);
+
+            _logger.LogDebug(
+                "Enrichment[assessment-event] RI-confidence computed | CommunicationId: {CommunicationId}, UrgencyWeight: {UrgencyWeight:F2}, DeterministicAgreement: {DeterministicAgreement:F2}, Score: {Score:F2}",
+                communicationId, urgencyWeight, deterministicAgreement, score);
+
+            return score;
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: a scoring failure degrades to the safe/conservative default (0 — matches the pre-024
+            // hardcoded value) rather than throwing into the assessment-emission step.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[assessment-event] RI-confidence scoring failed (non-fatal); defaulting to 0 | CommunicationId: {CommunicationId}",
+                communicationId);
+            return 0.0;
         }
     }
 

@@ -57,17 +57,27 @@ public static class PersistedClassificationSignalReader
     /// <c>sprk_communication</c> record) and reconstructs the classification result. Returns <c>null</c>
     /// when the column is empty, malformed, or carries no AI-classify signal.
     /// </summary>
-    public static CommunicationClassificationResult? TryReadFromProvenanceJson(string? provenanceJson)
+    public static CommunicationClassificationResult? TryReadFromProvenanceJson(string? provenanceJson) =>
+        TryReconstruct(TryDeserializeProvenance(provenanceJson));
+
+    /// <summary>
+    /// Deserializes the raw <c>sprk_associationprovenance</c> JSON into the full <see cref="AssociationProvenance"/>
+    /// document (not just the classification-signal slice <see cref="TryReadFromProvenanceJson"/> reconstructs).
+    /// Used by task 024's RI-confidence scorer to read
+    /// <see cref="AssociationDecisionTrace.TopDeterministicConfidence"/> — the deterministic-rung agreement
+    /// factor — from the SAME persisted document, without a second parse of the JSON or a second read helper.
+    /// Returns <c>null</c> when the column is empty or malformed (best-effort, per NFR-04).
+    /// </summary>
+    public static AssociationProvenance? TryDeserializeProvenance(string? provenanceJson)
     {
         if (string.IsNullOrWhiteSpace(provenanceJson))
         {
             return null;
         }
 
-        AssociationProvenance? provenance;
         try
         {
-            provenance = JsonSerializer.Deserialize<AssociationProvenance>(
+            return JsonSerializer.Deserialize<AssociationProvenance>(
                 provenanceJson,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         }
@@ -75,8 +85,6 @@ public static class PersistedClassificationSignalReader
         {
             return null;
         }
-
-        return TryReconstruct(provenance);
     }
 
     /// <summary>
