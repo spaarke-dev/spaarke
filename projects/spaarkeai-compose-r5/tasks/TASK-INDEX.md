@@ -21,7 +21,7 @@
 | 004 | Op-schema extension design (table/acceptRevision/rejectRevision) | 0 Gate | ✅ | FULL | opus/high | none | ✅ true |
 | 005 | NumberingComputationEngine reuse decision (extract vs reference) | 0 Gate | ✅ | STANDARD | sonnet/high | none | ✅ true |
 | 006 | Reciprocal R4.5 coordination note (optional courtesy) | 0 Gate | ✅ | MINIMAL | sonnet/high | none | ✅ true |
-| 010 | G3 alignment applier (`Alignment`→`w:pPrChange`) | 1 Edit-path ops | 🔲 | FULL | sonnet/high | 001 | ❌ shared engine |
+| 010 | G3 alignment applier (`Alignment`→`w:pPrChange`) | 1 Edit-path ops | ✅ | FULL | sonnet/high | 001 | ❌ shared engine |
 | 011 | G3 heading/list applier (reuse numbering engine) | 1 Edit-path ops | 🔲 | FULL | opus/high | 005,010 | ❌ shared engine |
 | 012 | G12 accept/reject-revision single-by-id (ET-2) | 1 Edit-path ops | 🔲 | FULL | opus/xhigh | 004 | ❌ shared engine+catalog |
 | 013 | G12 accept-all/reject-all batch | 1 Edit-path ops | 🔲 | FULL | opus/high | 012 | ❌ shared engine |
