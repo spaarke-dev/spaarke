@@ -154,6 +154,59 @@ describe('buildLaunchUrl — Compose params (task 046)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// buildLaunchUrl — Analysis entry-matrix params (ai-advanced-capabilities-
+// analysis-hub-r1 task 052, spec §13.3 / FR-16)
+// ---------------------------------------------------------------------------
+
+describe('buildLaunchUrl — Analysis params (task 052)', () => {
+  test('omits analysis params when none are supplied (back-compat with non-Analysis launches)', () => {
+    const url = buildLaunchUrl({
+      entityLogicalName: 'sprk_matter',
+      entityId: '{abc-123}',
+    });
+
+    expect(url).toContain('entityLogicalName=sprk_matter');
+    expect(url).toContain('entityId=abc-123');
+    expect(url).not.toContain('analysisId');
+    expect(url).not.toContain('worktype');
+    expect(url).not.toContain('regarding');
+  });
+
+  test('emits worktype + regarding alongside entity context (entry case 2b: new-in-record)', () => {
+    const url = buildLaunchUrl({
+      entityLogicalName: 'sprk_matter',
+      entityId: 'matter-guid-1',
+      worktype: '100000000',
+      regarding: 'matter-guid-1',
+    });
+
+    expect(url).toContain('entityLogicalName=sprk_matter');
+    expect(url).toContain('entityId=matter-guid-1');
+    expect(url).toContain('worktype=100000000');
+    expect(url).toContain('regarding=matter-guid-1');
+    expect(url).not.toContain('analysisId');
+  });
+
+  test('emits analysisId (entry case 2d: open existing) with braces stripped', () => {
+    const url = buildLaunchUrl({
+      analysisId: '{D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF}',
+    });
+
+    expect(url).toContain('analysisId=D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF');
+    expect(url).not.toContain('worktype');
+    expect(url).not.toContain('regarding');
+  });
+
+  test('regarding braces are stripped like entityId', () => {
+    const url = buildLaunchUrl({
+      regarding: '{abc-123}',
+    });
+
+    expect(url).toContain('regarding=abc-123');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // openSpaarkeAi — back-compat regression
 // ---------------------------------------------------------------------------
 
@@ -194,6 +247,55 @@ describe('openSpaarkeAi — back-compat (entity form launch unchanged)', () => {
     openSpaarkeAi({}, 1);
     const [, navOptions] = nav.navigateTo.mock.calls[0];
     expect(navOptions).toMatchObject({ target: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// openSpaarkeAi — Analysis entry-matrix params (task 052)
+// ---------------------------------------------------------------------------
+
+describe('openSpaarkeAi — Analysis params (task 052 §ui-tests)', () => {
+  let nav: MockNavigation;
+
+  beforeEach(() => {
+    nav = installXrmMock();
+  });
+  afterEach(() => {
+    uninstallXrmMock();
+  });
+
+  /** POML ui-test #1: ribbon new-in-record opens modal with regarding. */
+  test('new-in-record: worktype + regarding=parent reach the URL data blob at target=2', () => {
+    openSpaarkeAi({
+      entityLogicalName: 'sprk_matter',
+      entityId: 'matter-guid-1',
+      worktype: '100000000',
+      regarding: 'matter-guid-1',
+    });
+
+    expect(nav.navigateTo).toHaveBeenCalledTimes(1);
+    const [pageInput, navOptions] = nav.navigateTo.mock.calls[0];
+    const data = (pageInput as { data: string }).data;
+    const params = new URLSearchParams(data);
+
+    expect(params.get('entityLogicalName')).toBe('sprk_matter');
+    expect(params.get('entityId')).toBe('matter-guid-1');
+    expect(params.get('worktype')).toBe('100000000');
+    expect(params.get('regarding')).toBe('matter-guid-1');
+    expect(params.get('analysisId')).toBeNull();
+    expect(navOptions).toMatchObject({ target: 2 });
+  });
+
+  /** POML ui-test #2: open existing passes analysisId. */
+  test('open existing: analysisId reaches the URL data blob at target=2', () => {
+    openSpaarkeAi({ analysisId: 'analysis-guid-1' });
+
+    const [pageInput, navOptions] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+
+    expect(params.get('analysisId')).toBe('analysis-guid-1');
+    expect(params.get('worktype')).toBeNull();
+    expect(navOptions).toMatchObject({ target: 2 });
   });
 });
 

@@ -17,6 +17,15 @@
  *      on mount. The "modal with full-screen toggle" UX (locked decision in
  *      design.md §14 row 3) is the Xrm dialog chrome itself opened at target=2,
  *      90%×90% — the platform provides the expand-to-full-screen button.
+ *   6. Record → Analysis modal (ai-advanced-capabilities-analysis-hub-r1 task 052,
+ *      spec §13.3 / FR-16) — opens the SpaarkeAi three-pane shell directly into
+ *      either an EXISTING analysis (`analysisId` present — entry case 2d in-record
+ *      modal / 2c URL open) or the "Create new analysis" hub (`worktype` present,
+ *      no `analysisId` — entry case 2a in-workspace / 2b in-record). The
+ *      `sprk_matter`/`sprk_project` ribbon launcher (`ribbon/AnalysisRecordLaunch.ts`)
+ *      threads the open record as `entityLogicalName`/`entityId` (the authoritative
+ *      regarding channel) alongside `regarding` (an additive parent-record shorthand
+ *      carried for symmetry — see the `regarding` param note below).
  *
  * URL parameter contract (all optional):
  *   entityLogicalName  — Dataverse logical name of the record (e.g. "sprk_matter")
@@ -33,6 +42,20 @@
  *   activeWorkType     — ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE
  *                        work type (e.g. "agreement-analysis") scoping the Compose AI toolbar
  *                        via getToolsForSurface (Compose only — optional)
+ *   analysisId         — ai-advanced-capabilities-analysis-hub-r1 task 052 (FR-16): GUID of an
+ *                        existing `sprk_analysis` record to open directly (entry case 2d
+ *                        in-record modal / 2c URL open). Braces are stripped like `entityId`.
+ *                        Wins over `worktype` when both are present (existing beats new).
+ *   worktype           — ai-advanced-capabilities-analysis-hub-r1 task 052 (FR-16): Analysis work
+ *                        type (Choice value, e.g. `SprkAnalysisWorkType`) that opens the
+ *                        "Create new analysis" hub (entry case 2a in-workspace / 2b in-record).
+ *                        Any non-empty value triggers "new" mode — `AnalysisHubWidget` always
+ *                        renders all cards; the specific value is not used to pre-select one.
+ *   regarding          — ai-advanced-capabilities-analysis-hub-r1 task 052 (FR-16): parent-record
+ *                        GUID shorthand carried for symmetry with the `entityLogicalName`/
+ *                        `entityId` channel. The canonical regarding pre-set is driven by
+ *                        `entityLogicalName`/`entityId` (already listed above) — `regarding` is
+ *                        additive and read for completeness by `main.tsx`. Braces stripped.
  *
  * @see ADR-006 — Ribbon scripts are invocation-only; business logic lives here
  * @see docs/guides/spaarkeai-launch-points.md — Full URL format documentation
@@ -55,6 +78,34 @@ export interface SpaarkeAiLaunchParams {
    * matter record GUID without requiring an Xrm form context.
    */
   matterId?: string;
+
+  /**
+   * GUID of an existing `sprk_analysis` record to open directly (ai-advanced-capabilities-
+   * analysis-hub-r1 task 052, spec §13.3 / FR-16 — entry case 2d in-record modal / 2c URL
+   * open). When present, the three-pane shell resolves the existing analysis and its bound
+   * session directly — no "Create new analysis" hub cards. Braces are stripped like
+   * `entityId`. Wins over `worktype` when both are present (existing beats new — mirrors
+   * `main.tsx`'s `analysisMode` derivation).
+   */
+  analysisId?: string;
+
+  /**
+   * Analysis work type (Choice value, e.g. `SprkAnalysisWorkType`) that opens the "Create
+   * new analysis" hub (task 052, spec §13.3 / FR-16 — entry case 2a in-workspace / 2b
+   * in-record). Any non-empty value triggers "new" mode; `AnalysisHubWidget` always renders
+   * all cards, so the specific value is not currently used to pre-select one. Mutually
+   * exclusive in effect with `analysisId` (existing wins if both are present).
+   */
+  worktype?: string;
+
+  /**
+   * Parent-record GUID shorthand carried for symmetry with the `entityLogicalName`/
+   * `entityId` channel (task 052, spec §13.3 / FR-16). The canonical regarding pre-set for
+   * the "new analysis" hub is driven by `entityLogicalName`/`entityId` (already threaded
+   * above) — `regarding` is additive and read for completeness by `main.tsx`. Braces are
+   * stripped like `entityId`.
+   */
+  regarding?: string;
 }
 
 /**
@@ -161,6 +212,21 @@ export function buildLaunchUrl(
     record["matterId"] = params.matterId.replace(/^\{|\}$/g, "");
   }
 
+  // Analysis entry-matrix params (ai-advanced-capabilities-analysis-hub-r1 task 052,
+  // spec §13.3 / FR-16). Additive on the base `SpaarkeAiLaunchParams` (unlike Compose,
+  // which lives on its own extended interface) because these params drive the SAME
+  // three-pane shell `openSpaarkeAi` already opens — no new modal-open primitive. When
+  // absent, non-Analysis launches keep their existing wire format byte-for-byte.
+  if (params.analysisId) {
+    record["analysisId"] = params.analysisId.replace(/^\{|\}$/g, "");
+  }
+  if (params.worktype) {
+    record["worktype"] = params.worktype;
+  }
+  if (params.regarding) {
+    record["regarding"] = params.regarding.replace(/^\{|\}$/g, "");
+  }
+
   // Compose-specific params (spaarkeai-compose-r1 task 046). When `composeMode`
   // is absent, none of these fire, so non-Compose launches keep their existing
   // wire format byte-for-byte.
@@ -212,6 +278,18 @@ export function buildLaunchUrl(
  *
  *   // Modal dialog (default)
  *   openSpaarkeAi({ matterId: "abc-123" }, 2);
+ *
+ *   // Record → new analysis (ai-advanced-capabilities-analysis-hub-r1 task 052,
+ *   // entry case 2b): worktype + regarding=parent, no analysisId → hub cards show.
+ *   openSpaarkeAi({
+ *     entityLogicalName: "sprk_matter",
+ *     entityId: "abc-123",
+ *     worktype: "100000000",
+ *     regarding: "abc-123",
+ *   });
+ *
+ *   // Record → existing analysis (task 052, entry case 2d): analysisId present.
+ *   openSpaarkeAi({ analysisId: "def-456" });
  */
 export function openSpaarkeAi(
   params: SpaarkeAiLaunchParams,

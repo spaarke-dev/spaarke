@@ -29,7 +29,7 @@
 | **041** | Wire `activeWorkType` host prop → `getToolsForSurface` scoping | 4 Wizard | STANDARD | sonnet / high | 040 | true (P4) | frontend, spaarkeai | ✅ |
 | **050** | Entry matrix 2a–2d host routing + context pre-set | 5 Entry | FULL | opus / high | 030,040 | false | frontend, spaarkeai, launch | ✅ |
 | **051** | Record→analysis 1:N + Analysis subgrid/tab on Matter/Project forms | 5 Entry | FULL | sonnet / high | 012 | true (P5a) | dataverse, forms, ribbon | ✅ |
-| **052** | Extend `openSpaarkeAi` (`analysisId`/`worktype`/`regarding`) + ribbon launcher | 5 Entry | FULL | sonnet / high | 050,051 | false | frontend, spaarkeai, ribbon, launch | 🔲 |
+| **052** | Extend `openSpaarkeAi` (`analysisId`/`worktype`/`regarding`) + ribbon launcher | 5 Entry | FULL | sonnet / high | 050,051 | false | frontend, spaarkeai, ribbon, launch | ✅ |
 | **053** | Enforce record-driven opens via `openSpaarkeAi`, not `surfaceLaunchRegistry` | 5 Entry | STANDARD | sonnet / medium | 052 | false | frontend, spaarkeai, adr-039 | 🔲 |
 | **060** | Repoint 4 server-side C# deep-links → `openSpaarkeAi` shape | 6 Retirement | FULL | sonnet / high | 052 | false (ordered) | bff, retirement | 🔲 |
 | **061** | Repoint client launch points + remove dead custom-page path | 6 Retirement | STANDARD | sonnet / high | 052,060 | false (ordered) | frontend, retirement | 🔲 |

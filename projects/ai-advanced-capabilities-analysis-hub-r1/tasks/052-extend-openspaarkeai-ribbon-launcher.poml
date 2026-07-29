@@ -4,7 +4,7 @@
     <title>Extend openSpaarkeAi (analysisId/worktype/regarding) + ribbon launcher</title>
     <phase>5 Entry model + record integration</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New launch-param surface on the shared modal-open primitive + a new ribbon script on Matter/Project forms; drives record-driven entry (2b/2d); modifies .ts frontend surface consumed by the retirement phase (060/061).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -146,7 +146,52 @@
 
   <notes>
     spec §13.3 / FR-16. Mirror `openSpaarkeAiCompose` (launch-resolver.ts:268) + `DocumentComposeLaunch` (:91). Consumed by
-    the 050 host routing; enforced ADR-039-clean by task 053. Completion summary appended here when done.
+    the 050 host routing; enforced ADR-039-clean by task 053.
+
+    COMPLETED 2026-07-29.
+
+    **launch-resolver.ts**: added `analysisId`/`worktype`/`regarding` directly to the base `SpaarkeAiLaunchParams`
+    interface (NOT a new extended interface like `SpaarkeAiComposeLaunchParams` — these params drive the SAME
+    three-pane shell `openSpaarkeAi` already opens, unlike Compose which bypasses it). Threaded through
+    `buildLaunchUrl` mirroring the `composeMode` block; braces stripped on `analysisId`/`regarding` like `entityId`.
+    `openSpaarkeAi`'s signature is unchanged (still `SpaarkeAiLaunchParams`) — fully additive; back-compat tests for
+    `openSpaarkeAi`/`openSpaarkeAiCompose` pass unmodified.
+
+    **AnalysisRecordLaunch.ts** (new): two exported handlers mirroring `DocumentComposeLaunch.openInCompose`'s
+    invocation-only shape (ADR-006) — `openNewAnalysisFromRecord(primaryControl, worktype)` (entry 2b: reads
+    entityId/entityLogicalName from the form, guards unsaved/empty id, then guards empty `worktype` too — added
+    during code-review Step 9.5 because a misconfigured ribbon StaticValue would otherwise silently degrade to the
+    default cold-load instead of the hub, with no diagnostic; opens with worktype + regarding=parent) and
+    `openExistingAnalysis(analysisId)` (entry 2d: opens with analysisId only). Neither function throws — mirrors
+    `DocumentComposeLaunch`'s "ribbon callbacks must never throw" contract. The ribbon XML itself (CrmParameters,
+    RibbonDiffXml) is explicitly task 071's job per its own POML — this task authors JS/TS only, confirmed against
+    task 051's completion notes ("Task 052 ... is the task that will wire any custom open behavior").
+
+    **Design resolution — worktype semantics**: confirmed via codebase research that a specific `worktype` value
+    does NOT pre-select a hub card — `AnalysisHubWidget` always renders all cards; any non-empty `worktype` string
+    only flips `main.tsx`'s `analysisMode` derivation to `"new"`. `openNewAnalysisFromRecord` therefore takes
+    `worktype` as a caller-supplied parameter (from the ribbon's StaticValue CrmParameter) rather than hardcoding
+    a value — the ribbon script stays invocation-only and has no opinion on which work type a button represents.
+
+    **ADR-039 compliance**: no import or call of `surfaceLaunchRegistry` anywhere in the new/modified files; the
+    docblock's explanatory mention of the name (to document why it is NOT used) mirrors the same convention already
+    present in `WorkspacePane.tsx`/`ConversationPane.tsx`. Grep-verified clean.
+
+    **Gates**: code-review — additive-only correctness confirmed (git diff stat: +78 lines, 0 deletions in
+    launch-resolver.ts); found and fixed one real Warning (missing empty-`worktype` guard, described above) before
+    completion. adr-check — ADR-006 (invocation-only, confirmed clean), ADR-039 (no registry routing, confirmed
+    clean), ADR-021 (N/A — zero rendering/React code in these files, legitimate non-applicability not a scope-skip),
+    ADR-028 (no manual token handling at the ribbon boundary, confirmed clean) — 0 violations.
+
+    **Tests**: SpaarkeAi typecheck (`tsc-surface-gate`) — 0 surface-owned errors. Full SpaarkeAi jest suite — 81
+    suites / 722 tests green (includes 8 new tests in `launch-resolver.test.ts` + 9 new tests in the new
+    `AnalysisRecordLaunch.test.ts`, covering the POML's 3 ui-tests testable at this layer: new-in-record
+    worktype+regarding threading, open-existing analysisId threading, unsaved-record guard). ADR-021 dark-mode
+    ui-test is deferred to task 071's deployed-environment verification (no rendering surface exists in this
+    task's files to test against).
+
+    No deviation from the POML's directional steps or escalation trigger (the additive threading did not break
+    any existing `openSpaarkeAi` caller; no divergence from the `composeMode` precedent was required).
   </notes>
 
   <execution>
