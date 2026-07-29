@@ -3,8 +3,9 @@
   <metadata>
     <title>Schema preflight — verify owner-created columns present</title>
     <phase>1 Data spine</phase>
-    <gate>blocked-until-001</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
+    <completion>Executed inline in the orchestration session (2026-07-28) via Dataverse MCP `describe`. All 6 contract elements verified PRESENT: sprk_analysis.{sprk_worktype (Choice 100000000/1/2), sprk_regardingmatter→sprk_matter, sprk_regardingproject→sprk_project, sprk_regardingdocument→sprk_document, sprk_description}, sprk_aichatsummary.sprk_analysis→sprk_analysis. Bonus: full ADR-024 resolver field-set (sprk_regardingrecordtype/id/name + budget/communication/invoice lookups) already present; sprk_isarchived present on sprk_aichatsummary (relevant to task 022). Evidence: notes/schema-prerequisites.md "VERIFIED PRESENT" section. Gate result: PASS — Phase 1/2 data+session code unblocked.</completion>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Read-only verification of Dataverse schema existence; no code authored; the value is the gate decision, not implementation.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -2,9 +2,9 @@
 
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
-**Status**: not-started
-**Active task**: 010 - Schema preflight — verify owner-created columns present
-**Next action**: Begin Step 1 of task 010 (invoke task-execute; MINIMAL rigor per POML — read-only Dataverse schema verification)
+**Status**: in-progress
+**Active task**: 011 - Client sprk_analysis TypeScript type (net-new)
+**Next action**: task 011 running (W2a); on completion → W2b (012 ∥ 013 parallel). 010 ✅ (schema verified present via MCP).
 
 ## Pipeline progress (2026-07-28)
 
