@@ -177,14 +177,33 @@ public class ChatSessionManager
             return cached;
         }
 
-        // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss)
+        // Warm path: Cosmos DB fallback (decision D-06 — checked before Dataverse on Redis miss).
+        // AIPL-054 hardening (task 025 / spec FR-09): a stale/expired Redis session MUST resolve
+        // against the durable Cosmos transcript (ADR-040 Path A store-of-record) rather than
+        // silently falling through to an empty/partial result. The Cosmos read is wrapped so a
+        // transient Cosmos failure (throttling, timeout, transient network error) does NOT abort
+        // the whole lookup — it degrades to the Dataverse cold path instead of surfacing a 500 or
+        // (worse) letting a caller interpret the exception as "session not found" and mint a new
+        // empty session on top of a durable transcript that still exists.
         if (_persistence is not null)
         {
             _logger.LogDebug(
                 "Cache MISS for session {SessionId} — checking Cosmos DB before Dataverse (tenant={TenantId})",
                 sessionId, tenantId);
 
-            var storedSession = await _persistence.LoadSessionAsync(tenantId, sessionId, ct);
+            StoredSession? storedSession = null;
+            try
+            {
+                storedSession = await _persistence.LoadSessionAsync(tenantId, sessionId, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "Cosmos DB read failed for session {SessionId} (tenant={TenantId}) — " +
+                    "falling back to Dataverse rather than losing the recovery attempt (task 025 hardening)",
+                    sessionId, tenantId);
+            }
+
             if (storedSession is not null)
             {
                 // Map StoredSession back to ChatSession and re-warm the Redis hot cache

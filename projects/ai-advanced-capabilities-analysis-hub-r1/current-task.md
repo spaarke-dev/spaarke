@@ -3,8 +3,10 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 025 (persistence hardening — stale→Cosmos, tab anchor, edit restore), serial (FINALE)
-**Next action**: 025 closes session phase → then W4 fan-out (030 hub ∥ 040 wizard ∥ 051 subgrid). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–024 ✅. Publish 47.52 MB.
+**Active task**: W4a — 040 (wizard) ∥ 051 (Matter/Project subgrid), parallel
+**Next action**: W4a (040∥051) → W4b (030 hub ∥ 041 activeWorkType) → W4c (031 reopen). Session phase DONE. Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅. Publish 46.16 MB.
+
+> W4 sequencing: wizard (040) built BEFORE hub (030) so the hub's "Create new" cards wire to the real wizard (avoids a hub↔wizard integration race + register-workspace-widgets.ts contention). 051 (Dataverse forms) is fully independent → parallel with 040.
 
 > W3 tail (024, 025) stays SERIAL — both touch the SpaarkeAi conversation/session client surface (ConversationPane hotspot); real fan-out resumes at W4.
 

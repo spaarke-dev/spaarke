@@ -550,6 +550,90 @@ public class ChatSessionManagerTests
     }
 
     [Fact]
+    public async Task GetSessionAsync_StaleSessionPastTtl_CosmosHasTranscript_RestoresHistory_NoEmptySessionDataLoss()
+    {
+        // Task 025 / spec FR-09 acceptance criterion: a Redis-expired (stale/TTL-expired) session
+        // MUST resolve against the durable Cosmos transcript rather than returning an empty
+        // session. This simulates the TTL-expiry reopen scenario end to end: Redis miss (as if
+        // SessionCacheTtl elapsed), Cosmos holds the full prior message history.
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        var priorMessages = new List<SessionMessage>
+        {
+            new() { MessageId = "m1", Role = "user", Content = "What are the key terms?", Timestamp = DateTimeOffset.UtcNow.AddHours(-30) },
+            new() { MessageId = "m2", Role = "assistant", Content = "The key terms are...", Timestamp = DateTimeOffset.UtcNow.AddHours(-30) },
+        };
+        var storedSession = new StoredSession
+        {
+            Id = "session-ttl-expired",
+            SessionId = "session-ttl-expired",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = priorMessages,
+            WidgetStates = [],
+            CreatedAt = DateTimeOffset.UtcNow.AddHours(-30),
+            LastActivity = DateTimeOffset.UtcNow.AddHours(-25), // past the 24h sliding TTL
+        };
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-ttl-expired", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(storedSession);
+
+        SetupCacheSetSuccess();
+
+        // Act
+        var result = await _sutWithCosmos.GetSessionAsync(TenantId, "session-ttl-expired");
+
+        // Assert — prior history restored, NOT an empty session.
+        result.Should().NotBeNull();
+        result!.Messages.Should().HaveCount(2, "the durable Cosmos transcript must be restored, not discarded");
+        result.Messages[0].Content.Should().Be("What are the key terms?");
+        result.Messages[1].Content.Should().Be("The key terms are...");
+
+        _repoMock.Verify(r => r.GetSessionAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Dataverse must not be consulted — Cosmos already restored the durable transcript");
+    }
+
+    [Fact]
+    public async Task GetSessionAsync_CosmosReadThrows_FallsBackToDataverse_DoesNotThrow()
+    {
+        // Task 025 hardening: a transient Cosmos failure during the stale-session fallback read
+        // must NOT abort the whole lookup — it must degrade to the Dataverse cold path instead of
+        // propagating (which a caller could otherwise misread as "not found" and mint an empty
+        // session on top of a still-existing durable transcript).
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-cosmos-down", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Cosmos DB transient failure"));
+
+        var dataverseSession = CreateTestSession("session-cosmos-down");
+        _repoMock
+            .Setup(r => r.GetSessionAsync(TenantId, "session-cosmos-down", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dataverseSession);
+
+        SetupCacheSetSuccess();
+
+        // Act
+        var act = async () => await _sutWithCosmos.GetSessionAsync(TenantId, "session-cosmos-down");
+
+        // Assert
+        var result = await act.Should().NotThrowAsync(
+            "a Cosmos read failure must degrade gracefully to the Dataverse fallback, never throw");
+        result.Subject.Should().NotBeNull();
+        result.Subject!.SessionId.Should().Be("session-cosmos-down");
+    }
+
+    [Fact]
     public async Task CreateSessionAsync_CosmosWriteFailure_RedisWriteSucceeds_NoExceptionThrown()
     {
         // Arrange — Dataverse succeeds

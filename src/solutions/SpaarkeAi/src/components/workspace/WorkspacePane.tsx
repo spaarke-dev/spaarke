@@ -117,6 +117,70 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
+// Analysis-anchored tab persistence (task 025 / spec FR-09)
+// ---------------------------------------------------------------------------
+//
+// Tab persistence (NFR-09, task 065) was previously gated entirely on
+// `chatSessionId`: the save effect no-op'd and the restore effect settled
+// immediately whenever no chat session existed yet. A pre-session tab (e.g.
+// the ribbon "compose" launch, which opens a workspace tab before the user
+// has sent a first chat message) therefore had NO durable store to persist
+// against and was silently lost on refresh — a data-loss bug (task 025
+// negative acceptance criterion).
+//
+// `entityContext` (the Analysis record this ThreePaneShell/WorkspacePane
+// instance is bound to) is known at mount — well before any chat session is
+// minted. Anchoring a fast, always-available localStorage cache on it closes
+// the gap without a new BFF endpoint or server contract change (§11
+// Component Justification: extends the SAME per-host-context localStorage
+// keying convention `AiSessionProvider.chatSessionKeyForContext` already
+// established for `chatSessionId`/`playbookId`). The BFF per-session
+// PATCH/GET remains the durable, cross-device store once a session exists;
+// this is an additive client-only fallback layer, not a replacement.
+const TAB_ANCHOR_KEY_PREFIX = "sprk_ai2_workspaceTabs";
+
+interface TabAnchorEntityContext {
+  entityType?: string;
+  entityId?: string;
+}
+
+/**
+ * Derive the localStorage key anchoring this Analysis (or other host entity)
+ * record's workspace-tab snapshot. Returns null when no entity context is
+ * bound (e.g. the unbound home surface) — there is no stable anchor to key
+ * on in that case, and the existing chatSessionId-gated BFF path is the only
+ * persistence available.
+ */
+export function tabAnchorKeyForContext(
+  entityContext: TabAnchorEntityContext | null | undefined,
+): string | null {
+  if (!entityContext?.entityType || !entityContext?.entityId) return null;
+  return `${TAB_ANCHOR_KEY_PREFIX}__${entityContext.entityType.toLowerCase()}:${entityContext.entityId.toLowerCase()}`;
+}
+
+/** Safe localStorage read — returns null on parse failure or unavailable storage. */
+function readLocalTabSnapshot(key: string): WorkspaceTabPersistenceSnapshot | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WorkspaceTabPersistenceSnapshot;
+    if (!parsed || !Array.isArray(parsed.tabs)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Safe localStorage write — silently swallows quota/security errors (best-effort). */
+function writeLocalTabSnapshot(key: string, snapshot: WorkspaceTabPersistenceSnapshot): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(snapshot));
+  } catch {
+    /* localStorage may be unavailable (quota / private mode) — best-effort only. */
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Compose instance-key derivation (spaarkeai-compose-r2 — multi-Compose-tab)
 // ---------------------------------------------------------------------------
 
@@ -210,8 +274,17 @@ export function WorkspacePane(): React.JSX.Element {
   // session and we can no-op cleanly when no session id is set yet.
   // ---------------------------------------------------------------------------
 
-  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated } =
+  const { bffBaseUrl, authenticatedFetch, chatSessionId, isAuthenticated, entityContext } =
     useAiSession();
+
+  // Task 025 (FR-09): the Analysis-record anchor tab persistence keys on — see the
+  // module-scope block above. Memoized on the entity identity fields (entityContext
+  // itself is a fresh object per AiSessionProvider render).
+  const tabAnchorKey = React.useMemo(
+    () => tabAnchorKeyForContext(entityContext),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entityContext?.entityType, entityContext?.entityId],
+  );
 
   // ---------------------------------------------------------------------------
   // Tab manager — single instance per WorkspacePane mount
@@ -282,6 +355,15 @@ export function WorkspacePane(): React.JSX.Element {
         const snap = pendingSnapshotRef.current;
         pendingSnapshotRef.current = null;
         if (!snap) return;
+
+        // Task 025 (FR-09): anchor persistence on the Analysis record — NOT gated on
+        // chatSessionId — so a pre-session/ribbon-compose tab survives a refresh. Always
+        // write the local anchor-keyed cache; the BFF PATCH below remains additive once a
+        // durable session exists (cross-device store-of-record for that session).
+        if (tabAnchorKey) {
+          writeLocalTabSnapshot(tabAnchorKey, snap);
+        }
+
         if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
 
         try {
@@ -311,7 +393,7 @@ export function WorkspacePane(): React.JSX.Element {
         }
       }, 200);
     },
-    [chatSessionId, bffBaseUrl, isAuthenticated, authenticatedFetch],
+    [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated, authenticatedFetch],
   );
 
   // Update the forwarding ref every render so the manager calls the latest
@@ -450,41 +532,75 @@ export function WorkspacePane(): React.JSX.Element {
 
   const [tabRestoreSettled, setTabRestoreSettled] = React.useState(false);
 
+  // Task 025 (FR-09): the BFF (chatSessionId-keyed) restore remains the durable,
+  // cross-device path once a session exists — UNCHANGED below. It is no longer the
+  // ONLY restore path: when there is no session yet (pre-session/ribbon-compose tab)
+  // OR the BFF has no tabs for this session (404 — e.g. a session freshly promoted
+  // from a pre-session tab whose saves only ever reached localStorage so far), this
+  // effect falls back to the Analysis-anchored local snapshot (tabAnchorKey) instead
+  // of leaving the workspace silently Home-only.
   React.useEffect(() => {
     if (!bffBaseUrl || !isAuthenticated) return;
-    if (!chatSessionId) {
-      // No chat session ⇒ nothing was ever persisted for it — unblock the
-      // auto-install/pin effects instead of deadlocking them. If a session id
-      // appears later this effect re-runs and restore proceeds (its manager-
-      // level guard still protects any tabs opened in the meantime).
-      setTabRestoreSettled(true);
-      return;
-    }
 
     let cancelled = false;
     (async () => {
-      try {
-        const url = buildBffApiUrl(
-          bffBaseUrl,
-          `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
-        );
-        const response = await authenticatedFetch(url, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-        if (cancelled) return;
-        if (response.status === 404) return; // no tabs to restore — benign
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      let restoredFromServer = false;
 
-        const snapshot =
-          (await response.json()) as WorkspaceTabPersistenceSnapshot;
-        if (cancelled) return;
+      if (chatSessionId) {
+        try {
+          const url = buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs`,
+          );
+          const response = await authenticatedFetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+          });
+          if (cancelled) return;
 
-        await managerRef.current.restoreFromPersistence(
-          snapshot,
-          resolveWorkspaceWidget,
-        );
-        if (cancelled) return;
+          if (response.ok) {
+            const snapshot =
+              (await response.json()) as WorkspaceTabPersistenceSnapshot;
+            if (cancelled) return;
+
+            await managerRef.current.restoreFromPersistence(
+              snapshot,
+              resolveWorkspaceWidget,
+            );
+            if (cancelled) return;
+
+            // restoreFromPersistence no-ops if a non-Home tab already exists (e.g.
+            // the user opened a tab during the restore window) — treat that as a
+            // successful server restore too, since a widget tab is present either way.
+            restoredFromServer = managerRef.current
+              .getSnapshot()
+              .tabs.some((t) => t.kind === "widget");
+          } else if (response.status !== 404) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          // 404 falls through to the local anchor-keyed fallback below (benign —
+          // no tabs known to the BFF for this session yet).
+        } catch (err) {
+          if (cancelled) return;
+          logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
+            sessionId: chatSessionId,
+            message: err instanceof Error ? err.message : String(err),
+          });
+          // Degrade gracefully — fall through to the local anchor-keyed fallback below.
+        }
+      }
+
+      if (!cancelled && !restoredFromServer && tabAnchorKey) {
+        const localSnapshot = readLocalTabSnapshot(tabAnchorKey);
+        if (localSnapshot) {
+          await managerRef.current.restoreFromPersistence(
+            localSnapshot,
+            resolveWorkspaceWidget,
+          );
+        }
+      }
+
+      if (!cancelled) {
         syncState();
 
         // Notify ShellStageManager about the restored tab count so it can
@@ -494,17 +610,11 @@ export function WorkspacePane(): React.JSX.Element {
           type: "tab_count_change",
           tabCount: snap.tabs.length,
         });
-      } catch (err) {
-        if (cancelled) return;
-        logTelemetryError(TELEMETRY_TAB_RESTORE_LOAD_FAILURE, {
-          sessionId: chatSessionId,
-          message: err instanceof Error ? err.message : String(err),
-        });
-        // Degrade gracefully — workspace continues with Home-only state.
-      } finally {
-        // R3-3: settle on EVERY terminal path (success, 404, error) so the
-        // auto-install-default + pin auto-open effects below can proceed.
-        if (!cancelled) setTabRestoreSettled(true);
+
+        // R3-3: settle on EVERY terminal path (server success, local fallback,
+        // no anchor at all, or error) so the auto-install-default + pin
+        // auto-open effects below can proceed.
+        setTabRestoreSettled(true);
       }
     })();
 
@@ -515,7 +625,7 @@ export function WorkspacePane(): React.JSX.Element {
     // (returned by useAiSession() but identical reference across renders).
     // Including it in deps would re-fire the effect needlessly.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chatSessionId, bffBaseUrl, isAuthenticated]);
+  }, [chatSessionId, tabAnchorKey, bffBaseUrl, isAuthenticated]);
 
   // ---------------------------------------------------------------------------
   // Auto-install default workspace tab — Wave 2b (task 109)
@@ -1380,6 +1490,40 @@ export function WorkspacePane(): React.JSX.Element {
   );
 
   // ---------------------------------------------------------------------------
+  // Tab data-change handler — task 025 (FR-09) live edit-state persistence
+  //
+  // A widget (e.g. AnalysisEditorWidget) reports a data patch via its `onDataChange`
+  // prop when the user is mid-edit. The patch is MERGED onto the tab's current
+  // widgetData (updateTab replaces wholesale, so the merge happens here — the widget
+  // only needs to report what changed) and pushed through
+  // WorkspaceTabManager.updateTab, which now fires the same persist-change signal
+  // every other mutation does (see WorkspaceTabManager.updateTab fix). This is what
+  // makes a live edit survive a tab close/reopen or page refresh instead of being
+  // silently lost (task 025 negative acceptance criterion).
+  // ---------------------------------------------------------------------------
+
+  const handleTabDataChange = React.useCallback(
+    (tabId: string, patch: unknown): void => {
+      const manager = managerRef.current;
+      const current = manager.getSnapshot().tabs.find((t) => t.id === tabId);
+      if (!current) return;
+
+      const currentData =
+        current.widgetData !== null && typeof current.widgetData === "object"
+          ? (current.widgetData as Record<string, unknown>)
+          : {};
+      const patchData =
+        patch !== null && typeof patch === "object"
+          ? (patch as Record<string, unknown>)
+          : {};
+
+      manager.updateTab(tabId, { ...currentData, ...patchData });
+      syncState();
+    },
+    [syncState]
+  );
+
+  // ---------------------------------------------------------------------------
   // Render
   //
   // FR-10: Render the shared <PaneHeader> at the top of every paint, with the
@@ -1474,6 +1618,7 @@ export function WorkspacePane(): React.JSX.Element {
         activeTabId={activeTabId}
         onTabChange={handleTabChange}
         onTabClose={handleTabClose}
+        onTabDataChange={handleTabDataChange}
         // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
         // mode; the Compose widget renders full-pane. See the block comment
         // above the header definition for rationale + widget-add contract.

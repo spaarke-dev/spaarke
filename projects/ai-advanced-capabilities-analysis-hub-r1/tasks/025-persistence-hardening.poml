@@ -4,7 +4,7 @@
     <title>Persistence hardening — stale→Cosmos, tab anchor, edit restore</title>
     <phase>2 Session</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Three data-loss-prevention changes spanning BFF session recovery + SpaarkeAi tab/editor persistence; brownfield root-cause (silent empty-session bug); tags bff/frontend/session.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -137,6 +137,68 @@
   <notes>
     spec.md FR-09 / §7 / PLAN §2.6 / NFR-04 (no session/transcript data loss). Cosmos is the durable store-of-record
     (ADR-040 Path A). `/conflict-check` before the BFF PR.
+
+    COMPLETED 2026-07-29. This task was implemented by a prior (interrupted) agent run; this pass was a
+    verify-and-finalize (task-execute Step 9.5 completion), NOT a re-implementation. No code changes were
+    necessary — the on-disk diff was coherent, reuse-first, and defect-free.
+
+    Summary of implementation verified: (a) `ChatSessionManager.GetSessionAsync` wraps the Cosmos
+    `LoadSessionAsync` warm-path read in a try/catch — a transient Cosmos failure now logs a warning and
+    degrades to the existing Dataverse cold path instead of throwing (which a caller could otherwise
+    misread as "not found" and mint an empty session over a still-durable transcript). No new store was
+    created; the existing Redis→Cosmos→Dataverse cascade is unchanged in shape. (b) SpaarkeAi tab
+    persistence in `WorkspacePane.tsx` gained a `tabAnchorKeyForContext()`-derived localStorage cache keyed
+    on the bound Analysis record (`entityType:entityId`), written on every debounced persist tick and read
+    as a fallback when there is no `chatSessionId` yet or the BFF returns 404 for the session's tabs — this
+    is what makes a pre-session/ribbon-compose tab survive a refresh. Reuses the SAME localStorage-with-
+    try/catch convention already established elsewhere in this codebase (`chipPreference.ts`,
+    `SemanticSearchCriteriaTool.tsx`, `ManageWorkspacesPane.tsx` pane-collapse) — not a new persistence
+    mechanism; the BFF PATCH/GET path remains the durable cross-device store once a session exists.
+    `WorkspaceTabManager.updateTab` now fires `_notifyPersistChange()` (the one mutating method that
+    previously didn't) plus a stale-tab-id guard. (c) `AnalysisEditorWidget` gained `onDataChange` /
+    `data.isEditing` + `data.draftSections` restore hints, threaded through
+    `WorkspaceWidgetWrapper`/`widget-types.ts` (optional prop, forwarded verbatim) and
+    `WorkspaceTabManagerComponent`'s `onTabDataChange` → `WorkspacePane.handleTabDataChange` (merges the
+    patch onto the tab's `widgetData` and calls `updateTab`, riding the same write-through as (b)) — a
+    live, unsaved edit now survives tab close/reopen or page refresh; Save/Cancel clear the restore hints
+    so no stale draft haunts a later reopen.
+
+    Gates run this pass:
+    - code-review: 0 Critical. 2 Warning (both pre-existing-pattern-adjacent, not defects): (1) the new
+      `sprk_ai2_workspaceTabs__{type}:{id}` localStorage key namespace has no eviction/cap, unlike the
+      sibling `chipPreference.ts` pattern that caps its tracked set — could grow one entry per Analysis
+      ever opened over a long-lived browser profile (low practical risk; small JSON payloads, try/catch
+      wrapped for quota errors); (2) `AnalysisEditorWidget`'s per-keystroke `onDataChange` triggers
+      `WorkspacePane.syncState()` (an undebounced `setTabState`) on every keystroke while editing, though
+      the actual write-through (localStorage + BFF PATCH) IS already debounced 200ms — a possible
+      per-keystroke re-render, likely negligible given typical section-edit cardinality. Neither blocks
+      merge; both are candidates for a follow-up task if profiling shows real impact. No fix applied (no
+      Critical found).
+    - adr-check: 0 violations across ADR-040 (no second transcript store; try/catch degrades to the
+      existing cold path, does not silently mint empty — verified by the negative-criterion test below),
+      ADR-013 (no new CRUD→AI-internal injection; change is internal to an existing session-recovery
+      method), ADR-021 (no styling/color changes; AnalysisEditorWidget's existing Fluent v9 dark-mode
+      tests untouched and still passing), ADR-028 (no auth surface touched), ADR-012 (additive optional
+      prop threading through existing wrapper forwarding, not a new component).
+    - Negative acceptance criterion verified: `GetSessionAsync_StaleSessionPastTtl_CosmosHasTranscript_
+      RestoresHistory_NoEmptySessionDataLoss` asserts 2 prior messages are restored (not an empty session)
+      and Dataverse is never consulted; `GetSessionAsync_CosmosReadThrows_FallsBackToDataverse_DoesNotThrow`
+      covers the transient-failure path. Both pass.
+    - BFF tests: `ChatSessionManagerTests` 23/23 passed. Full unit suite: 9029 passed / 8 failed / 101
+      skipped — the 8 failures (3 `AnalysisEndpointsExecuteDispatchContractTests`, 5
+      `Services/Communication/*`) were reproduced identically with the task-025 diff `git stash`'d out,
+      confirming pre-existing and unrelated (same 8 as task 023's baseline).
+    - Client: `npm run typecheck` (SpaarkeAi) — `tsc-surface-gate`: 244 pre-existing shared-lib errors
+      (deferred to Phase B), 0 surface-owned. `WorkspaceTabManager.test.ts`: 67/67 passed (incl. the 2 new
+      `updateTab`/`onPersistChange` tests). `AnalysisEditorWidget.test.tsx`: 12/12 passed (incl. the 5 new
+      restore/persist tests).
+    - Publish-size: `dotnet publish -c Release` → 46.16 MB compressed (`Compress-Archive`, matching the
+      task-023 measurement methodology) vs the 47.52 MB baseline recorded in task 023's notes — a **-1.36
+      MB** delta (net decrease; well under the +5 MB single-task justification threshold and the 55/60 MB
+      ceilings). `dotnet list package --vulnerable --include-transitive`: only the pre-existing
+      `System.Security.Cryptography.Xml 8.0.3` HIGH advisories (zero package changes this task).
+    - Build: `dotnet build src/server/api/Sprk.Bff.Api/` green (0 errors, pre-existing warnings only,
+      already confirmed before this verification pass).
   </notes>
 
   <execution>

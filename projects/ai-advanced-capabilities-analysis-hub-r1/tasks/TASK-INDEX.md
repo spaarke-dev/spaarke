@@ -22,7 +22,7 @@
 | **022** | Archive-durability decision + impl (AIPL-054 stub) | 2 Session | FULL | opus / high | 021 | false | bff, session, dataverse | ✅ |
 | **023** | Two-tier session model — loose vs Analysis-owned + explicit promotion | 2 Session | FULL | sonnet / high | 020 | false | bff, frontend, session | ✅ |
 | **024** | Add-file-to-running-chat prompt (new session vs add-to-current) | 2 Session | STANDARD | sonnet / high | 023 | true | frontend, session | ✅ |
-| **025** | Persistence hardening — stale→Cosmos, tab anchor, edit restore | 2 Session | FULL | sonnet / xhigh | 020 | false | bff, frontend, session | 🔲 |
+| **025** | Persistence hardening — stale→Cosmos, tab anchor, edit restore | 2 Session | FULL | sonnet / xhigh | 020 | false | bff, frontend, session | ✅ |
 | **030** | Analysis hub widget — 3 cards + DataGrid + view-by-type | 3 Hub | FULL | sonnet / high | 011,012,020 | true (P3) | frontend, spaarkeai, widget, fluent-ui, datagrid | 🔲 |
 | **031** | Reopen from grid → rehydrate session + review state + files | 3 Hub | FULL | sonnet / high | 030,020,025 | false | frontend, spaarkeai, session | 🔲 |
 | **040** | Per-type creation wizard (3 steps; `Create*Wizard` + Field Mapping) | 4 Wizard | FULL | sonnet / high | 011,012 | true (P4) | frontend, spaarkeai, wizard, fluent-ui, field-mapping | 🔲 |
