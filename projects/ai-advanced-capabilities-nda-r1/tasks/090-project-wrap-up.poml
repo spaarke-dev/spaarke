@@ -3,8 +3,8 @@
   <metadata>
     <title>Project wrap-up — quality gates, cleanup, test-diet, docs, lessons</title>
     <phase>6 Deploy &amp; Wrap-up</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Final quality gates (code-review + adr-check) across project code; repo cleanup; test-diet; doc closeout.</rigor-reason>
     <model-tier>sonnet</model-tier>

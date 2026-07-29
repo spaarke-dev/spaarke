@@ -88,8 +88,12 @@ const useStyles = makeStyles({
     rowGap: tokens.spacingVerticalL,
     width: '100%',
   },
-  // UAT follow-up: a clean CENTERED title (no ellipsis, no appended phrase). The body already centers.
+  // UAT follow-up: a clean CENTERED, ONE-LINE title. Span the full body width + center the text +
+  // never wrap (the shrink-to-fit flex item was wrapping "Reviewing your / agreement" onto two lines).
   title: {
+    width: '100%',
+    textAlign: 'center',
+    whiteSpace: 'nowrap',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
   },

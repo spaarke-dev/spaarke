@@ -22,6 +22,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBusProvider } from '@spaarke/ai-widgets/events';
 import { ComposeEditor, type ComposeEditorHandle, type ComposeEditorDocumentRef } from './ComposeEditor';
+import type { ComposeServerProjection } from '../types/compose-contracts';
 
 // ComposeAiToolbar's `useAuth()` throws outside a real `initAuth()` bootstrap (MSAL). This suite
 // never dispatches an action, so a stub token is sufficient — mirrors ComposeEditor.dirtyOnMount.test.tsx.
@@ -35,6 +36,8 @@ jest.mock('@spaarke/auth', () => ({
   }),
 }));
 
+// Regression guard only (task 013): production no longer imports `docxToTipTapHtml` or
+// `stampParaIds` — the editor mounts via the `projection` prop below instead (same content).
 jest.mock('../utils/docxBridge', () => ({
   docxToTipTapHtml: jest.fn(async () => ({
     html:
@@ -54,6 +57,21 @@ function docxBytesFixture(totalLen = 8): ArrayBuffer {
   return buf.buffer;
 }
 
+// Task 013 (F-2 "one reader"): the client-side mammoth reader is DELETED — the editor now
+// requires a server `projection` to mount the editable surface. Same body text the mocked
+// docxBridge above used to supply, so this suite's target-resolution assertions are unaffected.
+const ADVISORY_COMMENTS_PROJECTION: ComposeServerProjection = {
+  status: 'success',
+  canEdit: true,
+  html:
+    '<p data-paraid="AB12CD34">The receiving party shall retain confidential information indefinitely. ' +
+    'Either party may terminate this agreement. ' +
+    'Some unrelated boilerplate text. ' +
+    'Either party may terminate this agreement.</p>',
+  warnings: [],
+  schemaVersion: 'compose-html-v1',
+};
+
 function renderEditor(ref: React.Ref<ComposeEditorHandle>, documentRef: ComposeEditorDocumentRef) {
   return render(
     <FluentProvider theme={webLightTheme}>
@@ -61,6 +79,7 @@ function renderEditor(ref: React.Ref<ComposeEditorHandle>, documentRef: ComposeE
         <ComposeEditor
           ref={ref}
           docxBytes={docxBytesFixture(8)}
+          projection={ADVISORY_COMMENTS_PROJECTION}
           documentRef={documentRef}
           sessionId="session-nda-review-031"
           onDirtyChange={jest.fn()}

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-1: upload path returns a server projection (not raw bytes)</title>
+    <phase>1 WS-1 One reader</phase>
+    <gate>blocked until 002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (BFF endpoint + service) and `.tsx` (client effect) on the `bff-api` hot path; wires a new server round-trip into the upload entry path. FULL per root CLAUDE.md §8 (modifying `.cs`/`.ts`/`.tsx`, tags include `bff-api`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Extends existing, fully-specified surfaces (reuses the Load-path `ComposeServerProjection` shape + `ComposeDocxProjectionBuilder`); no new abstraction or architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared `Api/ComposeEndpoints.cs`, `Services/Compose/ComposeService.cs`/`IComposeService.cs`, and client `ComposeWorkspace.tsx`/`ComposeEditor.tsx` — the same files 011/012/013 touch. Sequential within group W1.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff-api,compose</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend `POST /api/compose/upload` so uploaded bytes are run through `ComposeDocxProjectionBuilder` and the
+    endpoint returns a `ComposeServerProjection` — the SAME shape the stored-doc Load path already returns
+    (`IComposeService.cs:356-362`) — instead of raw bytes. Then update the client upload effect
+    (`ComposeWorkspace.tsx ~1891-1983`) to hydrate `projection` from the response so the editor mount takes the
+    projection branch, identical to stored-doc Load. This is FR-01 and the first move toward F-2 (one reader):
+    upload stops falling back to the lossy client `mammoth` reader. Modify-only — reuse the existing projection
+    shape and builder; do NOT introduce a new projection type or a new component.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose client). Expert in the R4 server projection (`ComposeDocxProjectionBuilder`), the `byte[]`-in/projection-out boundary, and the TipTap mount path in `ComposeEditor.tsx`. Follow ADRs strictly.</role>
+
+  <goal>
+    `POST /api/compose/upload` returns a `ComposeServerProjection` (same shape as `IComposeService.cs:356-362`)
+    built from the uploaded bytes; the client upload effect hydrates `projection` and the editor renders via the
+    projection branch (no `mammoth` reached on upload). A seam slice covers the upload→projection path. Immediate
+    R4 projection wins — centered titles, alignment, tabs, comments/tracked-change recovery — are now correct on
+    upload.
+  </goal>
+
+  <context>
+    <background>
+      R4 built the high-fidelity server projection but wired it into only the stored-doc Load doorway. Uploads
+      fall back to the lossy client `mammoth` reader because `POST /api/compose/upload` returns raw bytes with no
+      projection (`ComposeEndpoints.cs:913-920`, record `:1797-1804`) and the editor mount is
+      `if (projection) { server projection } else { mammoth }` (`ComposeEditor.tsx:1667`/`:1718`). This task closes
+      the upload doorway: the server reads the uploaded docx once, returns the projection, and the client takes the
+      identical projection branch used for stored docs. Design §4 WS-1; spec FR-01. Line numbers are indicative —
+      RE-GREP before editing; a master merge may have shifted them.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — upload endpoint (`:913-920`; response record `:1797-1804`) now returns a projection</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — build the projection from uploaded bytes via `ComposeDocxProjectionBuilder`</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs — the projection shape the Load path returns (`:356-362`); upload must return the SAME shape</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the single docx→projection reader to reuse (single doc-order walk `:18-26`)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — upload client effect (`~:1891-1983`) hydrates `projection` from the response</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — editor mount projection branch (`:1667`/`:1718`) the upload path must reach</file>
+      <file role="modify">tests/integration/seam/ — add/extend a seam slice for the upload→projection path (ADR-038)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">The extended read-fidelity harness (text-exactness + numbering-exactness scaffold) — the seam-slice base the upload→projection test builds on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-01">The upload response MUST carry a `ComposeServerProjection` of the SAME shape the Load path returns (`IComposeService.cs:356-362`) — not a divergent/new shape. Scope: the client upload effect must be able to hydrate `projection` and take the projection branch with no upload-specific branching in `ComposeEditor.tsx`.</constraint>
+    <constraint source="ADR-007">The projection stays `byte[]`-in / projection-out; no `Microsoft.Graph` type above `SpeFileStore`. Scope: uploaded bytes → `ComposeDocxProjectionBuilder` → projection, entirely inside `Services/Compose/`.</constraint>
+    <constraint source="ADR-013">No AI-internal type (`IOpenAiClient`/`IPlaybookService`/executor/routing) injected into the upload/projection path; consume `Services/Ai/PublicContracts/` seams only if AI capability is ever needed. Scope: `Services/Compose/` stays pure (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-038">Add/extend a seam slice for the upload→projection vertical slice at its KEEP path (`tests/integration/seam/`); NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Scope: the seam asserts the upload response is a projection matching the Load-path shape.</constraint>
+    <constraint source="project / F-2">This task does NOT delete the `mammoth` fallback (that is task 013) — it makes upload reach the projection branch so 013 can prove zero call sites. Scope: leave the `else { mammoth }` branch in place; only ensure upload no longer enters it.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size and report absolute + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB (no new runtime package). Scope: run `/conflict-check` before the PR (`Services/Compose/` overlaps sibling compose worktrees).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>R4 server projection reuse; upload endpoint contract; TipTap mount projection branch; BFF hygiene + seam testing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Load-path projection shape" location="src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs:356-362">
+        The `ComposeServerProjection` shape the stored-doc Load returns — the upload path returns this SAME shape so the client mount is branch-identical.
+      </pattern>
+      <pattern name="Single docx→projection reader" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        Single document-order walk (`:18-26`); the one reader every entry path must route through (F-2).
+      </pattern>
+      <pattern name="Client projection branch" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx:1667">
+        `if (projection) { server projection } else { mammoth }` — hydrating `projection` in the upload effect takes the first branch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-01, design §4 WS-1, `.claude/constraints/bff-extensions.md`, ADR-007/013/038.</step>
+    <step order="1" name="Re-grep the anchors">RE-GREP the four anchors (upload endpoint + response record in `ComposeEndpoints.cs`; Load-path projection shape in `IComposeService.cs`; upload client effect in `ComposeWorkspace.tsx`; mount branch in `ComposeEditor.tsx`) — line numbers may have shifted after a master merge. Confirm the exact `ComposeServerProjection` type the Load path returns.</step>
+    <step order="2" name="Build the projection on upload (server)">In `ComposeService.cs`, run the uploaded bytes through `ComposeDocxProjectionBuilder` and return the same `ComposeServerProjection` shape the Load path returns. Update `IComposeService.cs` signature as needed. Change the `ComposeEndpoints.cs` upload response record (`:1797-1804`) from raw bytes to the projection.</step>
+    <step order="3" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="4" name="Hydrate projection on upload (client)">Update the upload client effect in `ComposeWorkspace.tsx` (`~:1891-1983`) to read `projection` from the response and hydrate it, so the editor mount takes the projection branch — no upload-specific branching in `ComposeEditor.tsx`.</step>
+    <step order="5" name="Seam slice">Add/extend a seam slice (`tests/integration/seam/`) asserting the upload→projection path returns a projection matching the Load-path shape (ADR-038; no banned mock/DI/ctor tests).</step>
+    <step order="6" name="Build + hygiene">Build BFF + Compose client; run the Compose suite + new seam. Run `dotnet publish -c Release` and report compressed size + delta vs ~49.63 MB (incl. PDBs). Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="7" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 010 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the uploaded-bytes projection cannot reuse the Load-path `ComposeServerProjection` shape as-is (the shape must diverge) — STOP. A forked shape breaks F-2 (single reader) and the branch-identical client mount. Surface per root CLAUDE.md §6.5 (ADR Conflict — Resolution Required) before forking the shape; do not proceed silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (upload returns projection)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs / IComposeService.cs (build projection from uploaded bytes)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx (upload effect hydrates projection)</output>
+    <output type="test">tests/integration/seam/ (upload→projection seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `.docx` uploaded via `POST /api/compose/upload`, when the request completes, then the response carries a `ComposeServerProjection` of the SAME shape `IComposeService.cs:356-362` returns — not raw bytes.</criterion>
+    <criterion testable="true">Given the upload response, when the client upload effect runs, then `projection` is hydrated and the editor mount takes the projection branch (`ComposeEditor.tsx:1667`), NOT the `mammoth` branch.</criterion>
+    <criterion testable="true">Given an uploaded doc with a centered title, alignment, tabs, and comments/tracked changes, when it renders on upload, then those render correctly (the R4 projection wins now apply on upload).</criterion>
+    <criterion testable="true">Negative: the upload endpoint does NOT inject any AI-internal type into `Services/Compose/` and does NOT reach `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest stays green (ADR-007/013).</criterion>
+    <criterion testable="true">A seam slice at the `tests/integration/seam/` KEEP path asserts the upload→projection path; no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null test is added (ADR-038).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size reported with ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 010 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-01; design §4 WS-1. The `mammoth` fallback is NOT removed here — task 013 deletes it after 010/011/012
+    route all three entry paths through the projection. Numbering is NOT fixed by WS-1 alone (that is WS-3) — a
+    numbered clause may still render "1." repeated after this task; that is expected. Immediate WS-1 wins are
+    centered titles / alignment / tabs / comments / tracked-change recovery.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

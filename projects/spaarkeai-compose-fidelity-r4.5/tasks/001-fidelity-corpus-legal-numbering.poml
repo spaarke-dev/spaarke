@@ -1,0 +1,152 @@
+<task id="001" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>Extend the fidelity corpus with legal-numbering exemplars (LFS fixtures + manifest)</title>
+    <phase>0 Foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New fixture files + manifest rows; no `.cs`/`.ts` implementation, no cutover. New-file creation with a defined contract — STANDARD. The `testing` tag triggers the TEST-MODIFYING override per root CLAUDE.md §8, so Step 9.5 (code-review + adr-check) runs UNCONDITIONALLY despite the default STANDARD skip.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical assembly + cataloguing against a fully-specified coverage matrix (design §5); no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only new files under `tests/fixtures/compose-corpus/` — no shared `Services/Compose/` source; runs alongside 002 (different files).</parallel-reason>
+    <deps>none</deps>
+    <tags>testing,fixtures,docx</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend the existing R4 fidelity corpus (`tests/fixtures/compose-corpus/`) with the legal-numbering exemplars
+    that break the projection today (design §5): an NDA-style doc with INTERRUPTED numbered clauses, a doc with
+    HEADING-STYLE numbering ("4.2 Confidentiality"), a MULTI-LEVEL scheme (1 / 1.1 / 1.1.1), a doc using `w:sym`
+    to render the section mark §, and a LINE-NUMBERED pleading doc (for WS-5). Extend `corpus-manifest.md` with a
+    row per new doc capturing filename, feature coverage, and the golden numbering label(s) Word displays. `.docx`
+    is already LFS-tracked via `.gitattributes` — confirm the new files land as LFS pointers, not raw binaries.
+    Author synthetic exemplars where needed and label them synthetic; do NOT fabricate owner-supplied documents.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer acting as a test-fixtures engineer. Understands the R4.5 acceptance model: the
+    text-exactness + numbering-exactness harness (task 002) consumes this corpus as its evidence base, and WS-5
+    (task 050) consumes the line-numbered pleading. Knows Git-LFS pointer semantics and OOXML numbering vocabulary
+    (`w:numPr`, `w:numId`/`w:ilvl`, `numbering.xml` abstractNum/level, `w:lvlText`, `w:numFmt`, style-linked
+    `w:numPr` on `pStyle`, `w:sym`, `w:lnNumType`). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Five new `.docx` legal-numbering exemplars registered as Git-LFS fixtures under `tests/fixtures/compose-corpus/`
+    (LFS pointers verified via `git lfs ls-files`), plus extended `corpus-manifest.md` rows — one per new doc —
+    each naming the filename, feature coverage, and the golden numbering label(s) Word displays (the
+    numbering-exactness golden values that task 002 asserts against). Owner-supplied real docs, if any arrive
+    later, occupy clearly-labelled placeholder rows; synthetic exemplars are labelled synthetic.
+  </goal>
+
+  <context>
+    <background>
+      R4 built the server projection but never reconstructed displayed numbering; its corpus
+      (`tests/fixtures/compose-corpus/`, established by `spaarkeai-compose-r4` task 002) has NO legal-numbering
+      exemplars — no interrupted-clause, heading-style, multi-level, or `w:sym` §  case, and no line-numbered
+      pleading. Without those inputs the WS-2/WS-3 text-exact + numbering-exact harness (task 002) has nothing to
+      exercise the constructs that break today: numbers collapse to "1." on interruption, heading-style numbers
+      drop, and `w:sym`/`w:cr` drop silently (design §1, §5). This task seeds those inputs. Per spec §Dependencies
+      the corpus additions are: NDA-style interrupted-clause doc, heading-style-numbering doc, multi-level
+      (1 / 1.1 / 1.1.1) doc, `w:sym` § doc, line-numbered pleading doc. The owner may supply real documents later —
+      those become labelled placeholder rows; where no real doc exists, author a synthetic exemplar and label it.
+    </background>
+    <relevant-files>
+      <file role="new">tests/fixtures/compose-corpus/nda-interrupted-clauses.docx — NDA-style doc with numbered clauses INTERRUPTED by headings/body/table so the run restarts (exercises the "every clause restarts at 1" defect); synthetic unless owner supplies</file>
+      <file role="new">tests/fixtures/compose-corpus/heading-style-numbering.docx — heading-STYLE numbering ("4.2 Confidentiality") where the number derives from the paragraph style's `w:numPr`, not a direct `w:numPr` (exercises dropped heading numbers)</file>
+      <file role="new">tests/fixtures/compose-corpus/multilevel-1-1-1.docx — multi-level scheme 1 / 1.1 / 1.1.1 (exercises `w:lvlText` "%1.%2.%3" composition + per-level counters)</file>
+      <file role="new">tests/fixtures/compose-corpus/symbol-section-mark.docx — doc using `w:sym` to render the section mark § (and/or a Wingdings custom bullet) — exercises the silent-`w:sym`-drop defect (FR-06)</file>
+      <file role="new">tests/fixtures/compose-corpus/line-numbered-pleading.docx — a pleading with `w:lnNumType` line numbering enabled (WS-5 / task 050 divergence-measurement input)</file>
+      <file role="modify">tests/fixtures/compose-corpus/corpus-manifest.md — add one row per new doc: filename, feature coverage, golden numbering label(s) Word displays</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r4/tasks/002-fidelity-corpus.poml — the R4 corpus-assembly task this extends (LFS + manifest pattern to mirror)</file>
+      <file role="canonical-reference">.gitattributes — `*.docx filter=lfs diff=lfs merge=lfs -text` (copying a `.docx` under a tracked path auto-registers it as an LFS pointer)</file>
+      <file role="spec">projects/spaarkeai-compose-fidelity-r4.5/spec.md — FR-05/FR-06 (w:sym/w:cr), FR-11/FR-12 (numbering), FR-19 (line-numbered pleading), NFR-02 (numbering-exact golden per doc), §Dependencies (corpus additions)</file>
+      <file role="design">projects/spaarkeai-compose-fidelity-r4.5/design.md §5 (corpus &amp; verification), §5.5 (page/line = layout artifact)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">Startable Phase-0 foundation task — no dependencies. Task 002 (harness) and task 050 (WS-5 spike) depend on THIS.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / §Dependencies">The five named exemplars (NDA interrupted-clause, heading-style, multi-level 1/1.1/1.1.1, `w:sym` §, line-numbered pleading) MUST all be present under `tests/fixtures/compose-corpus/`. Scope: this task adds to the EXISTING corpus dir — it does NOT create a new fixtures directory.</constraint>
+    <constraint source="project">Every new `.docx` MUST land as a Git-LFS pointer, not a raw binary. Scope: verify with `git lfs ls-files` / `git check-attr filter tests/fixtures/compose-corpus/x.docx` before committing; a mis-tracked multi-MB binary in git history is expensive to reverse.</constraint>
+    <constraint source="spec / NFR-02">The manifest MUST record, per new doc, the golden numbering label(s) exactly as Word displays them (e.g. "4.2", "1.1.1", "Article I") — these are the numbering-exactness golden values task 002 asserts against. Scope: capture labels by opening each doc in Word (or by OOXML-derived computation you verify), not by narrative assumption.</constraint>
+    <constraint source="project">Do NOT fabricate owner-supplied documents. Scope: where no real owner doc exists, author a SYNTHETIC exemplar that reproduces the target OOXML construct and label the manifest row "synthetic"; leave labelled placeholder rows for any real doc the owner will supply later.</constraint>
+    <constraint source="ADR-038">Fixtures feed the integration/seam fidelity harness (KEEP-path). Scope: this task adds fixtures + manifest only — it writes no test code and introduces no `Mock&lt;HttpMessageHandler&gt;`/DI-registration/ctor-null test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Git-LFS fixture registration; OOXML numbering-model vocabulary (numbering.xml, w:numPr, w:lvlText, w:numFmt, style-linked numbering); w:sym symbol glyphs; w:lnNumType line numbering; R4.5 numbering-exact golden acceptance model</topic>
+    <files>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r4/tasks/002-fidelity-corpus.poml</file>
+    </files>
+    <patterns>
+      <pattern name="LFS-tracked docx fixtures" location=".gitattributes">
+        `*.docx filter=lfs diff=lfs merge=lfs -text` — copying/authoring a `.docx` under `tests/fixtures/compose-corpus/` auto-registers it as an LFS pointer; verify with `git lfs ls-files` (never assume).
+      </pattern>
+      <pattern name="Golden numbering label capture" location="projects/spaarkeai-compose-fidelity-r4.5/design.md §5">
+        The numbering-exactness assertion is "computed label == the label Word displays, captured as a golden value per corpus doc." Record the exact Word-displayed labels in the manifest so task 002 has concrete targets (e.g. interrupted NDA clauses continue 1,2,3… across a heading rather than restarting at 1).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON incl. the `testing`-tag TEST-MODIFYING override so Step 9.5 runs / 📖 PROTOCOL STEPS). Load spec FR-05/06/11/12/19 + NFR-02 + design §5.</step>
+    <step order="1" name="Confirm LFS tracking covers the corpus path">Run `git check-attr filter tests/fixtures/compose-corpus/x.docx` to confirm `*.docx filter=lfs` applies before adding any binary.</step>
+    <step order="2" name="Assemble/author the five exemplars">For each of the five constructs, use a real owner-supplied doc if available; otherwise author a SYNTHETIC `.docx` reproducing the exact OOXML construct (interrupted `w:numPr` run; style-linked `w:numPr` on a heading style; multi-level `w:lvlText`; `w:sym` §; `w:lnNumType`). Place all under `tests/fixtures/compose-corpus/`. Label synthetic docs.</step>
+    <step order="3" name="Verify LFS registration">`git add` the new files, then run `git lfs ls-files` (and `git show :&lt;path&gt;` spot-check) to confirm every doc is an LFS pointer, not a raw binary. If any is a raw binary → STOP (escalation).</step>
+    <step order="4" name="Extend the manifest">Add one row per new doc to `corpus-manifest.md`: filename, feature coverage (interrupted numbering / heading-style numbering / multi-level / `w:sym` / line numbering), and the golden numbering label(s) Word displays. Mark synthetic vs owner-supplied; leave labelled placeholder rows for pending owner docs.</step>
+    <step order="5" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 001 status to ✅.</step>
+    <step order="6" name="Record deviations">Document any deviation (e.g. an LFS-tracking surprise, or a construct that could not be authored synthetically) in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A copied/authored `.docx` does NOT land as an LFS pointer (raw binary staged) — STOP before committing and surface the `.gitattributes` gap; a mis-tracked multi-MB binary in git history is expensive to reverse.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The R4 corpus (`tests/fixtures/compose-corpus/`) exists but has NO legal-numbering exemplars — no interrupted-clause, heading-style, multi-level, `w:sym`, or line-numbered pleading doc. Verified by inspecting the R4 corpus + its manifest (grep `tests/fixtures/compose-corpus/`).</existing>
+    <extension>Yes — adds fixtures to the existing corpus directory and rows to the existing `corpus-manifest.md`; no new directory, no new abstraction.</extension>
+    <cost-of-doing-nothing>The WS-2/WS-3 text-exact + numbering-exact harness (task 002) has no inputs that exercise interrupted / multi-level / style-linked numbering or `w:sym`; success criteria 2+3 (release blockers) cannot be measured, and WS-5's divergence measurement (task 050) has no line-numbered pleading to run against.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="git">LFS pointer verification (`git lfs ls-files`, `git check-attr filter`)</tool>
+  </tools>
+
+  <outputs>
+    <output type="fixture">tests/fixtures/compose-corpus/{nda-interrupted-clauses,heading-style-numbering,multilevel-1-1-1,symbol-section-mark,line-numbered-pleading}.docx (5 LFS-tracked exemplars)</output>
+    <output type="doc">tests/fixtures/compose-corpus/corpus-manifest.md (extended with one row per new doc incl. golden numbering labels)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the corpus dir, when listing it, then all five named exemplars (interrupted NDA, heading-style, multi-level 1/1.1/1.1.1, `w:sym` §, line-numbered pleading) are present under `tests/fixtures/compose-corpus/`.</criterion>
+    <criterion testable="true">`git lfs ls-files` shows every new `.docx` as an LFS pointer; no raw binary is staged.</criterion>
+    <criterion testable="true">`corpus-manifest.md` has one row per new doc naming filename, feature coverage, and the golden numbering label(s) Word displays (the NFR-02 golden values).</criterion>
+    <criterion testable="true">The interrupted-NDA exemplar actually reproduces the "clauses restart at 1 on interruption" construct at the OOXML level (verified by inspection, not filename), and its manifest golden labels record the CORRECT continued sequence Word shows.</criterion>
+    <criterion testable="true">Synthetic exemplars are labelled "synthetic"; no owner-supplied document is fabricated (pending owner docs are labelled placeholder rows).</criterion>
+    <criterion testable="true">Negative: if any new doc stages as a raw binary rather than an LFS pointer, the task STOPS before commit and records the escalation (no mis-tracked binary enters history).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 001 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    This is the foundation for the harness (002) and the WS-5 spike (050). The five constructs map 1:1 to the
+    defects design §1 documents: interrupted → "every clause restarts at 1"; heading-style → dropped heading
+    numbers; multi-level → discarded to a warning count; `w:sym` → silent glyph drop; line-numbered pleading →
+    the page/line honesty question (WS-5, layout artifact per §5.5). The line-numbered pleading is the ONLY
+    WS-5 corpus input, so 050 depends on this task. TASK-INDEX.md and current-task.md are owned by the main
+    session (sub-agent write boundary) — do not touch current-task.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

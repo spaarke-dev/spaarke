@@ -3,8 +3,8 @@
   <metadata>
     <title>Runtime model picker — Assistant tier control → sprk_modeltieroverride</title>
     <phase>1 Platform Enablers</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>done</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies SpaarkeAi client .tsx + a Binding override path; frontend + AI wiring.</rigor-reason>
     <model-tier>sonnet</model-tier>

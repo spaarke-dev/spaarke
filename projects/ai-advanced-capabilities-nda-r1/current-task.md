@@ -1,15 +1,16 @@
 # Current Task — `ai-advanced-capabilities-nda-r1`
 
-> **Last Updated**: 2026-07-28 (by context-handoff — everything below SHIPPED + SEEDED + DEPLOYED + MERGED to master; working tree CLEAN; pre-compaction). **Read this block first.**
+> **Last Updated**: 2026-07-28 (project CLOSED). **Read this block first.**
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **State** | **NDA r1 UAT COMPLETE — all fixes live in spaarkedev1 + merged to master.** Everything in the §SESSION-2026-07-28 recap below is done. Awaiting owner UAT of the last batch. Two follow-on projects scaffolded on master. |
-| **Branch** | `work/ai-nda-r1-followups`. HEAD `556d6e913`. **behind/ahead of origin/master = 0/0; branch = origin/branch = master; main repo `C:\code_files\spaarke` synced. Working tree CLEAN. Fully pushed + merged.** |
-| **Deployed** | `sprk_spaarkeai` (id 5206a442-3451-f111-bec7-7ced8d1dc988), ~4930 KB, client-only (no BFF). Latest deploy = popup UAT (556d6e913). Compose bindings SEEDED to Dataverse (see §SEEDED). |
-| **Next Action** | **Owner is UAT-ing.** Then: **(1)** create the **Agreement Analysis** project (owner's "nda-r2" enhancement list — name it for the WORK TYPE, e.g. `ai-agreement-analysis-r1`, NOT nda-r2; NDA = first knowledge sub-domain) — owner to paste the enhancement list → capture → `/design-to-spec` → new worktree. **(2)** formalize **`analysis-hub-r1`** (platform: `sprk_analysis` spine + session persistence + hub widget + wizard — design-discussion.md written, ready for `/design-to-spec`). **(3)** **`research-r1`** (Legal Research work type — notes written). **(4)** the 12 pre-existing e2e failures on master (compose-session-routing / edit-controls / three-pane-coordination) need a remediation pass — CONFIRMED independent of all this branch's work. |
+| **State** | ✅ **PROJECT COMPLETE — all 22 tasks ✅, deployed to spaarkedev1, UAT-approved, wrapped up.** 060/061/090 closed 2026-07-28. `/test-diet` clean (`notes/test-diet-report.md`, all 40 test files MAINTAIN). BFF publish 46.13 MB (≤60 MB §10 gate ✅). Active task = **none**. |
+| **Branch** | `work/ai-advanced-capabilities-nda-r1`. **0/0 vs origin/master; working tree was CLEAN before this closeout commit.** All nda-r1 work is on master. |
+| **Deployed** | `sprk_spaarkeai` code page + `spaarke-bff-dev` (deployed 2026-07-28 12:15 UTC, healthz 200). Actions/Bindings seeded; AI Search KNW-011 seeded (8 chunks). NDA-REVIEW runs on `gpt-5-reasoning`, RAG-grounded via the OR-clause tenant-pin fix (`ReferenceRetrievalService.cs:316`). |
+| **⚠️ Re-UAT** | The deployed NDA-REVIEW is the FIRST version actually RAG-grounded on the KNW-011 standard (prior UAT ran on the prompt-embedded standard / silently-zero grounding). Output character may have shifted — owner should do a fresh UAT pass. |
+| **Next (follow-on program)** | **(1)** get **`analysis-hub-r1`** to project readiness (platform: `sprk_analysis` spine + session persistence + hub widget + wizard; `design-discussion.md` written → `/design-to-spec`). **(2)** scope + `design.md` the **`ai-agreement-analysis-r1`** ("nda-r2" — the Agreement Analysis work-type widget; owner to paste enhancement list). **(3)** **`research-r1`** (Legal Research) AFTER (1)+(2) are advanced. **(4)** 12 pre-existing e2e failures on master (compose-session-routing / edit-controls / three-pane-coordination) — separate remediation, confirmed independent. |
 
 ## 📓 SESSION 2026-07-28 recap (what shipped — all merged to master + deployed)
 

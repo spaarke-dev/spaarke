@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-compose-fidelity-r4.5">
+  <metadata>
+    <title>WS-1: delete the mammoth fallback + docxToTipTapHtml from the Compose path</title>
+    <phase>1 WS-1 One reader</phase>
+    <gate>blocked until 012</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes client reader code (`.tsx`/`.ts`) on the compose hot path and must grep-prove zero remaining Compose call sites; a wrong deletion breaks a live entry path. FULL per root CLAUDE.md §8 (modifying `.ts`/`.tsx`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deletion + grep-proof against a fully-specified target set (two known branches + `docxToTipTapHtml`); no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared client `ComposeEditor.tsx` and `docxBridge.ts` (same files 010/012 touch); must run after all three entry paths route through the projection. Sequential within group W1.</parallel-reason>
+    <deps>012</deps>
+    <tags>compose,frontend,cleanup</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Delete the `mammoth` fallback branch in `ComposeEditor.tsx` (`:1667`/`:1718`) and the `docxToTipTapHtml`
+    function in `docxBridge.ts`, now that upload (010), browse (011), and open-in-Compose (012) all hydrate a
+    server projection. GREP-PROVE zero `mammoth` / `docxToTipTapHtml` call sites remain under
+    `Spaarke.Compose.Components`. This is FR-04 and completes F-2 (single auditable reader). CRITICAL: `mammoth`
+    STAYS a repo dependency — SprkChat and Notepad still use it — so remove ONLY the Compose usage; do NOT
+    uninstall the package.
+  </prompt>
+
+  <role>SPAARKE platform developer (Compose client). Expert in the editor mount path and the `docxBridge.ts` client reader. Meticulous about grep-proving deletions and not breaking unrelated `mammoth` consumers. Follow ADRs strictly.</role>
+
+  <goal>
+    The `mammoth` fallback branch and `docxToTipTapHtml` are deleted from the Compose path; a grep under
+    `Spaarke.Compose.Components` finds zero `mammoth` / `docxToTipTapHtml` references; `mammoth` remains installed
+    for SprkChat/Notepad; the Compose client builds and all three entry paths render via the projection.
+  </goal>
+
+  <context>
+    <background>
+      After 010/011/012, every Compose entry path hydrates a server projection, so the editor mount's
+      `else { mammoth }` branch (`ComposeEditor.tsx:1667`/`:1718`) is unreachable and the client reader
+      `docxToTipTapHtml` (`docxBridge.ts`) is dead for Compose. F-2 requires exactly ONE docx→editor reader — this
+      task removes the second one. `mammoth` is a shared repo dependency (SprkChat + Notepad consume it), so only
+      the Compose call sites are removed; the package stays. Spec FR-04; design §4 WS-1. Line numbers indicative —
+      RE-GREP before deleting.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — delete the `else { mammoth }` fallback branch (`:1667`/`:1718`)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/**/docxBridge.ts — delete `docxToTipTapHtml` (and any now-orphaned `mammoth` import in the Compose path)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/** (SprkChat/Notepad) — OTHER `mammoth` consumers that MUST keep working; do NOT touch</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Open-in-Compose transient drafts projected server-side — the last of the three entry paths; only after it does the `mammoth` branch become unreachable.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-04">After this task, a grep for `mammoth` / `docxToTipTapHtml` under `Spaarke.Compose.Components` MUST return zero matches. Scope: capture the grep output as PR evidence.</constraint>
+    <constraint source="project / F-2">Exactly one docx→editor reader (the server projection) may remain for Compose; no second client-side docx parser. Scope: the deletion is what makes F-2 true — do not leave a dormant branch behind.</constraint>
+    <constraint source="project / dependency retention">`mammoth` MUST remain a repo dependency; SprkChat + Notepad still use it. Scope: do NOT run `npm uninstall mammoth` or remove it from `package.json`; remove ONLY Compose call sites/imports.</constraint>
+    <constraint source="project / BFF Hygiene §10">Client-only task, but still run `/conflict-check` before the PR (`Spaarke.Compose.Components/` overlaps sibling compose worktrees); no BFF publish-size change expected. Scope: state the change scope in the PR.</constraint>
+    <constraint source="ADR-021">The editor surface MUST remain theme-correct after the deletion (dark + light). Scope: the projection branch renders correctly in both themes — verified in the ui-tests section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Grep-proven client-reader deletion; shared-dependency retention; single-reader invariant (F-2)</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/spec.md</file>
+      <file>projects/spaarkeai-compose-fidelity-r4.5/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mount projection branch (survivor)" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx:1667">
+        `if (projection) { server projection } else { mammoth }` — delete the `else` branch; the `if` branch is now the only reader.
+      </pattern>
+      <pattern name="Grep-proof deletion" location="src/client/shared/Spaarke.Compose.Components/">
+        `grep -rn "mammoth\|docxToTipTapHtml" src/client/shared/Spaarke.Compose.Components/` MUST return nothing after deletion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration. Load spec FR-04, design §4 WS-1, ADR-021 (dark-mode).</step>
+    <step order="1" name="Grep the Compose mammoth surface">Grep `Spaarke.Compose.Components` for `mammoth` and `docxToTipTapHtml`. Confirm the ONLY call sites are the two known branches (`ComposeEditor.tsx:1667`/`:1718`) + `docxToTipTapHtml` in `docxBridge.ts`. If an UNEXPECTED consumer appears, escalate (see escalation).</step>
+    <step order="2" name="Delete the fallback + reader">Delete the `else { mammoth }` branch in `ComposeEditor.tsx` and `docxToTipTapHtml` in `docxBridge.ts`; remove now-orphaned `mammoth` imports in the Compose path ONLY. Do NOT touch SprkChat/Notepad or `package.json`.</step>
+    <step order="3" name="Grep-prove zero Compose call sites">Re-run the grep; confirm zero `mammoth` / `docxToTipTapHtml` matches under `Spaarke.Compose.Components`. Confirm `mammoth` still resolves for SprkChat/Notepad (grep those still match). Capture output for the PR.</step>
+    <step order="4" name="Build + ui-tests + conflict-check">Build the Compose client; run the ui-tests below (projection render, no console errors, ADR-021 dark-mode). Run `/conflict-check`. State the change scope + grep evidence in the PR.</step>
+    <step order="5" name="Set task ✅ in tasks/TASK-INDEX.md">Update `projects/spaarkeai-compose-fidelity-r4.5/tasks/TASK-INDEX.md`: set task 013 status to ✅. Record any deviation in `projects/spaarkeai-compose-fidelity-r4.5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the grep finds a Compose `mammoth` / `docxToTipTapHtml` call site that is NOT one of the two known branches (`ComposeEditor.tsx:1667`/`:1718`) or `docxToTipTapHtml` in `docxBridge.ts` — i.e. an unexpected consumer — STOP and surface per root CLAUDE.md §6 before deleting. There may be an entry path not covered by 010-012; deleting blind would break it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Renders via projection, no console errors">
+      <steps>
+        <step>Open a docx in Compose via each entry path (upload, browse, open-in-Compose).</step>
+        <step>Confirm the editor renders content and the browser console shows no errors/warnings from the removed reader.</step>
+      </steps>
+      <expected>All three paths render via the server projection; no `mammoth`/`docxToTipTapHtml` reference or error in the console.</expected>
+    </test>
+    <test name="ADR-021 dark-mode">
+      <steps>
+        <step>Toggle the app to dark theme with a docx open in Compose.</step>
+        <step>Toggle back to light theme.</step>
+      </steps>
+      <expected>The editor surface renders theme-correct in both dark and light (ADR-021); no unstyled/inverted regions from the deletion.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (mammoth branch deleted)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/**/docxBridge.ts (docxToTipTapHtml deleted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Compose codebase after this task, when grepping `Spaarke.Compose.Components` for `mammoth` and `docxToTipTapHtml`, then zero matches are returned (evidence captured in the PR).</criterion>
+    <criterion testable="true">Given `package.json` and the SprkChat/Notepad code, when the deletion is complete, then `mammoth` is still installed and those consumers still reference it (the package is NOT uninstalled).</criterion>
+    <criterion testable="true">Given a docx opened via upload, browse, and open-in-Compose, when the editor mounts, then all three render via the server projection with no console errors.</criterion>
+    <criterion testable="true">The editor surface renders theme-correct in dark and light mode after the deletion (ADR-021).</criterion>
+    <criterion testable="true">Negative: no SprkChat/Notepad `mammoth` call site was modified or removed.</criterion>
+    <criterion testable="true">Compose client builds green; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 013 as ✅ and any deviation is recorded in projects/spaarkeai-compose-fidelity-r4.5/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-04; design §4 WS-1. This closes WS-1: after it, `mammoth` has zero Compose call sites and the server
+    projection is the sole docx→editor reader (F-2 / NFR-05). `mammoth` removal from the repo is explicitly OUT of
+    scope (SprkChat/Notepad retention). Numbering correctness is still WS-3 — do not expect correct clause numbers
+    yet. Task 014 deploys + runs UAT on the completed WS-1.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
