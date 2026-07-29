@@ -2,6 +2,8 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -30,19 +32,27 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly IGenericEntityService _genericEntityService;
     private readonly IConfiguration _configuration;
     private readonly ICommunicationAssessedProducer _assessedProducer;
+    private readonly ICommunicationTriageAi _triageAi;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
+
+    /// <summary>Regarding-matter lookup field (ADR-024) — used ONLY to scope the FR-06 prior-correspondence
+    /// grounding for email triage; read-only reference to the shared field map (Engine/RegardingFieldMap.cs
+    /// is not modified by this task).</summary>
+    private static readonly string MatterRegardingField = RegardingFieldMap.FieldFor("sprk_matter")!;
 
     public CommunicationEnrichmentService(
         IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IGenericEntityService genericEntityService,
         IConfiguration configuration,
         ICommunicationAssessedProducer assessedProducer,
+        ICommunicationTriageAi triageAi,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _genericEntityService = genericEntityService;
         _configuration = configuration;
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
+        _triageAi = triageAi ?? throw new ArgumentNullException(nameof(triageAi));
         _logger = logger;
     }
 
@@ -70,6 +80,9 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         await RunStepAsync("rag-indexing", communicationId,
             () => RunRagIndexingAsync(communicationId, direction, message, archivedDocumentId, ct));
+
+        await RunStepAsync("email-triage", communicationId,
+            () => RunEmailTriageAsync(communicationId, message, ct));
 
         await RunStepAsync("assessment-event", communicationId,
             () => RunAssessmentEmissionAsync(communicationId, direction, message, ct));
@@ -214,6 +227,93 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _logger.LogInformation(
             "Enrichment[rag-indexing] enqueued outbound RAG indexing (previously-missing half closed) | CommunicationId: {CommunicationId}, DocumentId: {DocumentId}.",
             communicationId, archivedDocumentId.Value);
+    }
+
+    // ── Step 4.5: Email triage (FR-05) ───────────────────────────────────────────
+    /// <summary>
+    /// email-communication-intelligence-r1 task 023 (FR-05). Triggers the catalog-authored TRIAGE-EMAIL
+    /// Action via the <see cref="ICommunicationTriageAi"/> facade (ADR-013 — no AI internals injected into
+    /// this Communication-layer class), reusing the classification signal
+    /// <see cref="Engine.Rungs.AiClassificationRung"/> ALREADY produced during association resolution — no
+    /// second full LLM pass. The signal is reconstructed from the persisted
+    /// <c>sprk_communication.sprk_associationprovenance</c> JSON (see
+    /// <see cref="PersistedClassificationSignalReader"/>) rather than re-derived, since rung 5 runs at a
+    /// different call site (the Association Engine, via <c>IncomingAssociationResolver</c>) than this
+    /// enrichment step.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Best-effort (NFR-04).</b> No persisted classification signal (e.g. outbound messages today, or
+    /// an inbound message where rung 5 found nothing useful) → this step no-ops (logged at Debug). A
+    /// facade failure (Action not routed, completion failure) is ALSO absorbed by
+    /// <see cref="ICommunicationTriageAi"/> itself (returns null rather than throwing); this method's own
+    /// try/catch plus <see cref="RunStepAsync"/>'s outer guard are defense-in-depth. A triage failure never
+    /// fails capture or send.
+    /// </para>
+    /// <para>
+    /// <b>Persistence is task 025's job.</b> This step logs the produced
+    /// <see cref="CommunicationTriageResult"/> (closed-set label fields only — summary/obligations are
+    /// free text and are NOT logged, per ADR-015) but does NOT write any <c>sprk_communication</c> triage
+    /// field. Task 025 extends this method (immediately after the <c>_triageAi.TriageAsync</c> call below)
+    /// to add the field writes, mapping the five result fields to the as-built columns documented in
+    /// <c>notes/022-triage-email-action.md</c> §2.
+    /// </para>
+    /// </remarks>
+    private async Task RunEmailTriageAsync(Guid communicationId, NormalizedMessage message, CancellationToken ct)
+    {
+        var record = await _genericEntityService.RetrieveAsync(
+            "sprk_communication",
+            communicationId,
+            ["sprk_associationprovenance", MatterRegardingField],
+            ct);
+
+        if (record is null)
+        {
+            _logger.LogDebug(
+                "Enrichment[email-triage] skipped: communication record could not be retrieved | CommunicationId: {CommunicationId}.",
+                communicationId);
+            return;
+        }
+
+        var provenanceJson = record.GetAttributeValue<string>("sprk_associationprovenance");
+        var classification = PersistedClassificationSignalReader.TryReadFromProvenanceJson(provenanceJson);
+
+        if (classification is null)
+        {
+            _logger.LogDebug(
+                "Enrichment[email-triage] skipped: no persisted AI-classify signal for this communication yet | CommunicationId: {CommunicationId}.",
+                communicationId);
+            return;
+        }
+
+        var matterRef = record.GetAttributeValue<EntityReference>(MatterRegardingField);
+        var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+        var request = new CommunicationTriageRequest
+        {
+            Classification = classification,
+            Subject = message.Subject ?? string.Empty,
+            BodyText = message.BodyText ?? string.Empty,
+            MatterId = matterRef?.Id,
+            TenantId = tenantId,
+        };
+
+        var result = await _triageAi.TriageAsync(request, ct);
+
+        if (result is null)
+        {
+            _logger.LogInformation(
+                "Enrichment[email-triage] produced no result (Action not routed/disabled, or completion failed — non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+            return;
+        }
+
+        // ADR-015: identifiers/closed-set labels only — summary + obligations carry free text, never logged.
+        _logger.LogInformation(
+            "Enrichment[email-triage] produced triage result | CommunicationId: {CommunicationId}, Category: {Category}, Priority: {Priority}, ReviewOutcome: {ReviewOutcome}, ObligationCount: {ObligationCount}, MatterGrounded: {MatterGrounded}.",
+            communicationId, result.Category, result.Priority, result.ReviewOutcome, result.Obligations.Count, matterRef is not null);
+
+        // Task 025 persists `result` to sprk_communication's triage fields here.
     }
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────

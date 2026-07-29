@@ -284,6 +284,23 @@
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-01)" }
     },
     {
+      "caseId": "GU-138",
+      "family": "email-triage",
+      "ucId": "UC-D-3",
+      "channel": "event",
+      "utterance": "inbound email enrichment fires after AiClassificationRung produced a classification signal (email-communication-intelligence-r1 task 023, FR-05)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.EmailTriage constant (added task 023) — a Linear AI Consumer, same shape as GU-016's email-analysis event case (no chat/loop channel; the SAME §3 UC-D-3 'new email arrives' trigger family). The dedicated per-family coverage (structured-output shape, FR-06 grounding, Binding resolution, no-second-pass structural guarantee) lives in the net-new tests/integration/contract/Eval/triage-email-eval-cases.json + TriageEmailEvalTests.cs (same net-new-family pattern as the NDA-review/Assistant-Enhancements-R1/Resourcefulness/Origin-classification families) — this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "email-processing-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-triage",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)" }
+    },
+    {
       "caseId": "GU-018",
       "family": "briefing",
       "ucId": "UC-B-3",

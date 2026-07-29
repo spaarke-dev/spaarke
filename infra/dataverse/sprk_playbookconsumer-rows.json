@@ -432,6 +432,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "email-communication-intelligence-r1 task 023 (FR-05) — Binding for email-triage, a Linear AI Consumer (routed via IConsumerRoutingService.ResolveActionAsync/IActionResolver, mirroring document-profile/email-analysis/matter-pre-fill above) — NOT a chat/loop-projectable capability, deliberately: toolDescription/surfaces/disposition/risk/captureMode/chipTransitions/onEventBindings are all null because CommunicationEnrichmentService.RunEmailTriageAsync invokes the TRIAGE-EMAIL Action DIRECTLY off the enrichment path (via the ICommunicationTriageAi PublicContracts facade, ADR-013) — it is never agent-selectable and never Click-dispatched, so none of the chat-loop/click-path columns apply (confirmed: no infra/dataverse/inputschemas/ mirror authored either, for the same reason — see notes/023-triage-email-wiring.md). actionCode resolves to the JPS Action authored by task 022 (infra/dataverse/actions/triage-email.action.json, sprk_actioncode='triage-email') which structures the ALREADY-PRODUCED AiClassificationRung classification signal into {category, summary, obligations[], priority, reviewOutcome} — no second full LLM pass.",
+      "consumerType": "email-triage",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Email Triage (Communication Enrichment)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "triage-email",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "insights-ask",
       "consumerCode": "default",
       "environment": "*",

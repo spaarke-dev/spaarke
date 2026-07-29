@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
@@ -47,10 +48,13 @@ public sealed class CommsAssessedProducerSeamTests
 
     private static CommunicationEnrichmentService CreateService(ICommunicationAssessedProducer producer)
     {
-        // The other four enrichment steps run through the real RunStepAsync (non-fatal); loose mocks let them
-        // no-op/fail-safe so this seam isolates step 5's producer behavior.
+        // The other steps run through the real RunStepAsync (non-fatal); loose mocks let them no-op/
+        // fail-safe so this seam isolates the assessment-event step's producer behavior. The triage facade
+        // is a loose mock too — GenericEntityService returns a default (empty) Entity, so
+        // RunEmailTriageAsync's provenance read finds no signal and no-ops before ever calling the facade.
         var enqueuer = new Mock<IPostUploadIndexingEnqueuer>(MockBehavior.Loose);
         var entity = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        var triageAi = new Mock<ICommunicationTriageAi>(MockBehavior.Loose);
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
@@ -58,6 +62,7 @@ public sealed class CommsAssessedProducerSeamTests
             entity.Object,
             config,
             producer,
+            triageAi.Object,
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

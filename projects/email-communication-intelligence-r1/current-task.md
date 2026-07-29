@@ -9,10 +9,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | **Execution — Wave 1 DONE; 020 in flight** |
-| **Task** | Wave 1 ✅: 001 010 011 012 013 022 050. **020 (identifier rung) dispatched as background opus agent** (brief in scratchpad/task-020-brief.md). |
-| **Status** | in-progress — waiting on 020 |
-| **Next Action** | On 020 completion: verify build+tests, run Step 9.5 (`/code-review` + `/adr-check`) + `/conflict-check`, mark 020 ✅ → then 021 (C-1) → triage track 023→024→025 (serial, shared enrichment) → Job B 030→031→032 → Job C/intent 040→041→042 → 051a. All serial (BFF `Services/Communication/` writers never concurrent). |
+| **Phase** | **Execution — Wave 2/3 in flight** |
+| **Task** | ✅ 001 010 011 012 013 020 021 022 050 (`71ac39087`, `ab23d632b`). P2-assoc (020+021) DONE. **IN FLIGHT: 023 (enrichment trigger).** |
+| **Status** | in-progress — 023 running (sole enrichment-track worker) |
+| **Next Action** | On 023 done: dispatch 024 (RI-confidence) then 025 (persist) serial on `CommunicationEnrichmentService`. Then Job B 030→031→032; Job C/intent 040→041→042; 051a — SERIAL (shared endpoints/DI/enrichment; genuine parallelism exhausted after P1 + P2-assoc‖P2-triage). Then 060 deploy → 061 UAT → 090 wrap. **Pattern: delegate each BFF task to a subagent, verify+gate+commit inline.** |
+| **021 note** | Caught + fixed a write-set regression (decoupled write-eligibility from auto-file-eligibility) so rung 2/3 fallback associations still written on auto-file. ADR-045 path-A, kill-switch `AutoFileOptions.Rung2And3AutoFileEnabled`. |
+| **Baseline test note** | 5 pre-existing Communication failures (sender-identity/DTO) = branch debt, documented in `notes/wave2-review-findings.md`. NOT r1's; don't fix, don't regress. Suite: 705 pass / 5 pre-existing fail. |
 | **🔔 OWNER DECISION PENDING** | **050 escalation FIRED** (group mailbox). 051a (shared mailbox) = shippable no-code. 051b (M365 group mailbox) = BLOCKED: needs forked pipeline + tenant-wide `Group.Read.All` + security sign-off. Owner picks: A-descope (recommended) / B-build / C-defer. See `notes/050-mailbox-capture-spike.md`. |
 | **001 findings** | `notes/001-operator-schema-verification.md` — ALL 4 inputs PRESENT. Deltas: `sprk_targetfieldlogicalname` (Job B), `sprk_triageobligation` singular (011/025), contact-row anomaly (filter null number-field), typos already clean. |
 | **010 finding (LOAD-BEARING for 020/021)** | **TWO regarding maps exist**: `Engine/RegardingFieldMap.cs` (used by association rungs — 020/021 path) AND `CommunicationService.RegardingLookupMap` (send-time caller-supplied path, carries `EntitySetName`). ADR-024 "one mechanism" tension is PRE-EXISTING. 010 added report-card to BOTH. 020 reads the Engine map + `sprk_recordtype_ref` roster. |
