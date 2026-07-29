@@ -119,7 +119,7 @@ Grounded in live `spaarkedev1` data + operator decisions, 2026-07-28.
 
 **Report-card enablement:** operator has added `sprk_regardingreportcard` on `sprk_communication` and the `sprk_recordtype_ref` row (code RPTC, number field `sprk_reportcardnumber`). r1 adds the matching entry in `Services/Communication/Engine/RegardingFieldMap.cs` so the engine can write it.
 
-**Bonus signal:** the `PAT-` matter prefix deterministically flags **IP matters** — a free routing hint toward the docketing wedge (§2.0b) with no AI call.
+**Bonus signal:** the `PAT-` matter prefix deterministically flags **IP matters** — a free practice-area routing signal with no AI call (IP *docketing* itself is out of scope for this project — see §0.11).
 
 **Catalog data hygiene (prerequisite):** `sprk_recordtype_ref` has known typos in some `sprk_regardingfield` values (e.g. `sprk_regarrdingbudget`, `sprk_egardingproject`) and a `contact`-row logical-name anomaly; the rung must read defensively or these are cleaned up first.
 
@@ -127,14 +127,37 @@ Grounded in live `spaarkedev1` data + operator decisions, 2026-07-28.
 
 **(a) "Regarding" vs "related-to" — intent-aware matching (net-new).** An email that quotes a record identifier is not always *about* that record. *"New filing based on PAT-908068"* means a **new** record *related to* PAT-908068, not filing onto it — a naive deterministic match would misfile. Required: (i) context-sensitive phrasing (*"new filing based on / re: / related to / parent:"*) **demotes** the identifier from *regarding* to *related*, suppressing auto-file; (ii) the triage Action classifies intent — `file-to-existing` vs `update-existing` vs **`new-record-related-to`** — and on the last proposes *creating* a record (gated `dataverse.create_record`), human-confirmed, with the referenced record linked as related. The ADR-024 regarding model expresses "regarding" only; representing "related-to" distinctly is new surface.
 
-**(b) Attachment-grounded action extraction (critical for IP).** The action an email implies often lives in the **attachment**, not the body (*"please see attached"* + a PDF Office Action). The Association Engine's `NormalizedMessage` envelope carries attachment **metadata only** (name / type / size), so rung-5 classification is body-only. Required: the triage / action-extraction Action **grounds on extracted attachment text** via the existing text-extraction → SPE-download → child-`sprk_document` path (already RAG-indexed), deterministically gated to likely action-triggers for cost. The IP-PDF deadline/action extraction is the **highest-value, highest-difficulty AI** in the project and carries the heaviest eval-case obligation.
+**(b) Attachment-grounded action extraction (Job C).** The action an email implies often lives in the **attachment**, not the body (*"please see attached"* + a PDF). The Association Engine's `NormalizedMessage` envelope carries attachment **metadata only** (name / type / size), so rung-5 classification is body-only. Required: the triage / action-extraction Action **grounds on extracted attachment text** via the existing text-extraction → SPE-download → child-`sprk_document` path (already RAG-indexed), deterministically gated to likely action-triggers for cost. Attachment-derived actions are the **highest-difficulty AI** in the project and carry the heaviest eval-case obligation. *(This is general Job-C action extraction — not IP docketing, which is out of scope per §0.11.)*
 
-### 0.10 Phase 1 boundary + surface gate (operator decisions 2026-07-28)
+### 0.10 Phase 1 boundary + surfaces (operator decisions 2026-07-28)
 
-- **UI is gated on r5** (`email-communication-solution-r5`, the Outlook-style client — designed, not built). r1 Phase 1 is the **backend intelligence spine**; the triage-inbox rendering and rich review UX are r5's. *Open tension the operator flagged (§0.6 Q1): "make human review very easy" is core value and is r5-owned — revisit r1+r5 co-delivery if r5 slips; the shipped Connections PCF + chat gate are only interim review surfaces.*
-- **Phase 1 is visible without r5** via the shipped notification spine: fixing the RI-confidence-0 gap lights up `CommunicationRiActionService` → **Task + appnotification + SignalR ping** for high-signal email. Interim confirm surface for Job B = the existing chat confirmation-gate dialog + the shipped **Connections PCF** (association review on the OOB form).
-- **Phase 1 =** RI-confidence scorer (derive from the classification rung + deterministic-rung agreement) + `TRIAGE-EMAIL` Action/Binding + the 7-entity identifier rung (§0.8) + triage fields on `sprk_communication` + `sprk_emailreviewlog` audit entity + the report-card `RegardingFieldMap` entry. **Job B backend** (propose → confirm → `IActionSeam.UpdateRecordAsync`) is in Phase 1 with the interim confirm surface; the rich confirm UX and the regarding-vs-related intent flow (§0.9a) deepen with r5.
-- **Phase 2 (deferred, non-blocking now):** IP Auto-Docketing deadline-cascade (greenfield — Phase-1 schema keeps obligations/audit general so a docket entry is *"an obligation type + a dated-cascade rule,"* not a migration); Daily Briefing 7th channel; the r5-gated inbox UX.
+- **r5 is COMPLETE and owns the review/reading surfaces** (`email-communication-solution-r5` — reading pane, `.eml` render, associations/tracking view, email card list, dual-use Code Page + SpaarkeAi widget, all shipped). r1 is the **backend intelligence + record-write layer**; it *feeds* r5's surfaces via a shared data + confirm contract (`notes/email-intelligence-r1-coordination.md`). The earlier "UI gated on r5 (not built)" framing is **void** — the surfaces exist. r1's Phase-1 output renders in r5's shipped views.
+- **Phase 1 is also visible via the notification spine** (independent of any UI): fixing the RI-confidence-0 gap lights up `CommunicationRiActionService` → **Task + appnotification + SignalR ping** for high-signal email.
+- **Phase 1 scope =** RI-confidence scorer (email-specific — from triage urgency + deterministic-rung agreement) + `TRIAGE-EMAIL` Action/Binding (categorize / summarize / obligations / priority) + **RAG grounding** in the matter's own correspondence + the 7-entity identifier rung (§0.8, auto-file per C-1) + triage fields on `sprk_communication` + `sprk_emailreviewlog` audit + the report-card `RegardingFieldMap` entry + **Job B in FULL** (propose → confirm → apply via `IActionSeam.UpdateRecordAsync` → audit; confirm/apply on r5's shipped surface via a stored-proposal apply endpoint) + shared/group-mailbox capture coverage (D-07).
+- **Phase 2 (deferred):** SprkChat conversational review over the matter's mail (D-11c); Daily Briefing triage channel. *(IP Auto-Docketing is removed from this project — §0.11.)*
+
+### 0.11 Open decisions closed + scope locks (operator, 2026-07-28) — AUTHORITATIVE over §11
+
+All §11 open decisions (D-01…D-13) are resolved:
+
+| Ref | Decision | Resolution |
+|---|---|---|
+| D-01 | Triage unit | **`sprk_communication`** — no new entity |
+| D-02 / D-04 | Legacy OOB `email`-activity stack (Stack B) | **Moot — already retired by r4 (task 007).** Build only on `sprk_communication`/`.eml`; nothing to re-point or deprecate |
+| D-03 | Category taxonomy + priority weights | **Dataverse-tuneable**, starter set seeded |
+| D-05 | Triage-outcome term (avoid ADR-040 "disposition" collision) | **"review outcome"** |
+| D-06 | Obligation storage | **Lean JSON** on `sprk_communication`, shaped so it can be promoted to child records later (the child-record driver — per-deadline docketing — is removed with IP docketing) |
+| D-07 | Mailbox coverage | **Must support shared + M365 group mailboxes** — a capture-layer extension (communication-service domain); coordination item, not free |
+| D-08 | Email priority scorer | **Build email-specific** (triage urgency + RI-confidence). Do **NOT** reuse Workspace/Portfolio priority scoring (different signal — that ranks work items by due/status) |
+| D-09 | Client scope | Record-backed over `sprk_communication` (settled) |
+| D-10 | Surface placement | **Dual-use — Code Page AND SpaarkeAi widget; the build MUST mount in both** (Pattern D, following r5's shipped dual-deploy) |
+| D-11 | AI capabilities in P1 | **(a) Triage Action + (b) RAG grounding → P1.** (c) SprkChat-over-mail → P2 (revisit only if a small add) |
+| D-12 / D-13 | IP Auto-Docketing | **REMOVED from this project entirely** — §2.0b, G-9 docketing content, and D-12/D-13 are void |
+
+**Additional locks:**
+- **C-1 — auto-file policy:** auto-file only on **rung 0 (explicit caller-supplied / matter-number regex) + rung 1 (thread inheritance)**. Rung 2 (sender/participant) and rung 3 (structural) matches are **`Suggested`** (human-confirm), not auto-filed. Conservative per research (misfiling = the #1 trust-killer). More restrictive than the shipped "any deterministic ≥0.85" rule.
+- **Job B stays FULL** (propose → confirm → apply → audit) — explicitly **not** downscoped to propose-only. Confirm/apply lands on r5's shipped surfaces via a stored-proposal apply endpoint (coordination C-2).
+- **Phasing / complexity guardrail (build order):** (1) **lean spine** — identifier rung + `TRIAGE-EMAIL` + RAG grounding + RI-confidence + triage fields + `sprk_emailreviewlog` + notification path; (2) **Job B** propose→apply on r5 surfaces; (3) **regarding-vs-related intent** (§0.9a). Each stage validated before the next. The design *document* is elaborate (it did reconciliation work); the *Phase-1 build* is small and mostly harvest on shipped infrastructure — keep it that way.
 
 ---
 
@@ -211,6 +234,8 @@ The module delivers **three jobs**, all on the same substrate (matter-grounded, 
 **Pillars 2 and 3 are the differentiators** (the research confirms 1 is table stakes everyone does behaviorally). Filing an email — every DMS does it — is not the same as **making the record reflect the email** (Pillar 2) or **turning the email into correctly-dated obligations** (Pillar 3). Spaarke already owns the engines: `UpdateRecordNodeExecutor` (Update) and the rules + Event/To-Do + Action machinery (Act). This module points them at email.
 
 ### 2.0b Flagship use case — IP Auto-Docketing (the wedge)
+
+> **⛔ REMOVED from this project (operator, 2026-07-28 — §0.11 / D-12 / D-13).** IP Auto-Docketing is **out of scope** for `email-communication-intelligence-r1`. The section below is retained for historical/strategic rationale only; no docketing entity, deadline-cascade engine, or IP-specific playbook is built here. General email-triggered actions (Job C) remain in scope; the IP *docketing* vertical does not.
 
 **Pillar 3's killer application, and the recommended beachhead.** In patent & trademark practice, a high volume of email carries **procedural instructions that trigger official actions with hard, malpractice-grade deadlines** — Office Actions ("response due in 3 months"), Notices of Allowance (issue-fee windows), foreign-associate instructions, annuity/renewal notices, priority deadlines. Calendaring these ("docketing") is mission-critical, high-volume, and — for *free-text email instructions* (as opposed to structured patent-office data feeds) — **still substantially manual**. A missed docket date can forfeit an IP right.
 
