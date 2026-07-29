@@ -7,8 +7,10 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -43,6 +45,26 @@ public static class AnalysisEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(403)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
+        // POST /api/ai/analysis/fork - Fork-on-analysis (ai-advanced-capabilities-analysis-hub-r1
+        // task 021 / UQ-1 Option B / §6.5 Path A). ONE handler atomically composes existing
+        // server-owned seams: create sprk_analysis → mint a new session BOUND to it (task-020
+        // sprk_aichatsummary.sprk_analysis FK) → snapshot + archive the prior session. Returns
+        // { analysisId, newSessionId, archivedSessionId }; the client only stores newSessionId +
+        // shows the warning (server mints session GUIDs, so the fork MUST be server-side).
+        group.MapPost("/fork", ForkAnalysis)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-batch")
+            .WithName("ForkAnalysis")
+            .WithSummary("Fork a running chat into a new Analysis + bound session")
+            .WithDescription("Atomically creates an sprk_analysis, mints a new chat session bound to it via the sprk_aichatsummary.sprk_analysis FK, and archives + snapshots the prior session (transcript preserved in the Cosmos store-of-record per ADR-040). Returns { analysisId, newSessionId, archivedSessionId }.")
+            .Produces<AnalysisForkResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
             .ProducesProblem(429)
             .ProducesProblem(500);
 
@@ -1127,6 +1149,201 @@ public static class AnalysisEndpoints
         ParentEntityContext? parentEntity,
         ILogger logger)
         => DocumentProfileOutputMapper.BuildFields(root, fileName, parentEntity, logger);
+
+    // =========================================================================
+    // Fork-on-analysis (task 021 / UQ-1 Option B / §6.5 Path A)
+    // =========================================================================
+
+    /// <summary>Logical name of the Analysis anchor entity — used for compensation delete.</summary>
+    private const string AnalysisEntityLogicalName = "sprk_analysis";
+
+    /// <summary>
+    /// HostContext.EntityType sentinel that flags an Analysis-owned chat session. Setting this on
+    /// the new session's <see cref="ChatHostContext"/> is what makes
+    /// <c>ChatDataverseRepository.CreateSessionAsync</c> write the <c>sprk_aichatsummary.sprk_analysis</c>
+    /// lookup FK (task 020, spec FR-05). MUST match <c>ChatDataverseRepository.AnalysisHostContextEntityType</c>.
+    /// </summary>
+    private const string AnalysisHostContextEntityType = "sprk_analysisoutput";
+
+    /// <summary>
+    /// Fork-on-analysis. <c>POST /api/ai/analysis/fork</c>.
+    ///
+    /// <para>
+    /// Composes existing server-owned seams in ONE handler (ADR-013 — no <c>Services/Ai/</c>
+    /// orchestration fork; consumes <see cref="IAnalysisDataverseService"/>,
+    /// <see cref="ChatSessionManager"/>, <see cref="IChatDataverseRepository"/>):
+    /// </para>
+    /// <list type="number">
+    ///   <item><b>Snapshot + verify prior</b> — <see cref="ChatSessionManager.GetSessionAsync"/>
+    ///     materialises the prior transcript into the Cosmos store-of-record (ADR-040 Path A) and
+    ///     confirms existence <i>before</i> any write, so a missing prior can never orphan a new
+    ///     Analysis.</item>
+    ///   <item><b>Create Analysis</b> — <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>.</item>
+    ///   <item><b>Mint bound session</b> — <see cref="ChatSessionManager.CreateSessionAsync"/> with
+    ///     an Analysis <see cref="ChatHostContext"/> so the task-020 <c>sprk_analysis</c> FK write
+    ///     fires. If the mint throws, the Analysis is compensated (deleted) — no orphan.</item>
+    ///   <item><b>Archive prior</b> — <see cref="IChatDataverseRepository.ArchiveSessionAsync"/>
+    ///     (the durable <c>sprk_isarchived</c> flip is task 022's scope, AIPL-054). We deliberately
+    ///     do NOT call <see cref="ChatSessionManager.DeleteSessionAsync"/> — that hard-deletes the
+    ///     Cosmos transcript (GDPR erasure path) and would LOSE the prior transcript, both the
+    ///     forbidden "archived-but-transcript-lost" orphan and an ADR-040 violation.</item>
+    /// </list>
+    ///
+    /// <para>
+    /// Partial-failure model mirrors <c>CreateSessionAsync</c> (Redis authoritative; a Dataverse
+    /// write failure is tolerated, not fatal): the FK bind failing inside the mint leaves the new
+    /// session live in Redis (bound in-memory), not orphaned; the archive-marker failing leaves the
+    /// fork durable with the transcript preserved. The only compensating rollback is deleting the
+    /// Analysis when the mint itself throws.
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> ForkAnalysis(
+        AnalysisForkRequest request,
+        IAnalysisDataverseService analysisService,
+        ChatSessionManager sessionManager,
+        IChatDataverseRepository chatRepository,
+        IGenericEntityService entityService,
+        HttpContext httpContext,
+        ILogger<AnalysisOrchestrationService> logger,
+        CancellationToken cancellationToken)
+    {
+        // ---- Validate ----
+        if (request is null || string.IsNullOrWhiteSpace(request.PriorSessionId))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A priorSessionId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "Analysis name is required.");
+        }
+        if (request.DocumentId == Guid.Empty)
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A valid documentId is required.");
+        }
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        var correlationId = httpContext.TraceIdentifier;
+
+        // ---- Step 1: snapshot + verify the prior session (read-only — NO mutation yet) ----
+        var priorSession = await sessionManager.GetSessionAsync(tenantId, request.PriorSessionId, cancellationToken);
+        if (priorSession is null)
+        {
+            // Nothing has been written yet — a missing/expired prior cannot orphan anything.
+            return Results.NotFound(new { error = "Prior session not found", correlationId });
+        }
+        var priorMessageCount = priorSession.Messages?.Count ?? 0;
+
+        // ---- Step 2: create the new Analysis anchor ----
+        Guid analysisId;
+        try
+        {
+            analysisId = await analysisService.CreateAnalysisAsync(
+                request.DocumentId, request.Name, playbookId: request.PlaybookId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Fork: failed to create Analysis for document {DocumentId} (corr={CorrelationId})",
+                request.DocumentId, correlationId);
+            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "Failed to create the analysis record.");
+        }
+
+        // ---- Step 3: mint the new session BOUND to the Analysis (task-020 FK write fires) ----
+        ChatSession newSession;
+        try
+        {
+            var analysisHostContext = new ChatHostContext(
+                EntityType: AnalysisHostContextEntityType,
+                EntityId: analysisId.ToString(),
+                EntityName: request.Name,
+                WorkspaceType: request.HostContext?.WorkspaceType,
+                PageType: request.HostContext?.PageType);
+
+            newSession = await sessionManager.CreateSessionAsync(
+                tenantId,
+                request.DocumentId.ToString(),
+                request.PlaybookId,
+                analysisHostContext,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Compensation: the Analysis was created but the new session could not be minted
+            // (e.g. Redis hot-cache unavailable — CreateSessionAsync tolerates a Dataverse write
+            // failure but not a cache-write failure). Roll back the Analysis so no dangling anchor
+            // remains. Compensation uses CancellationToken.None so client abort cannot skip cleanup.
+            logger.LogError(ex,
+                "Fork: new-session mint failed after Analysis {AnalysisId} create — compensating by deleting the Analysis (corr={CorrelationId})",
+                analysisId, correlationId);
+            try
+            {
+                await entityService.DeleteAsync(AnalysisEntityLogicalName, analysisId, CancellationToken.None);
+            }
+            catch (Exception compensationEx)
+            {
+                logger.LogError(compensationEx,
+                    "Fork: COMPENSATION FAILED — Analysis {AnalysisId} may be orphaned; manual cleanup required (corr={CorrelationId})",
+                    analysisId, correlationId);
+            }
+            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "Failed to create the forked chat session.");
+        }
+
+        // ---- Step 4: archive the prior session (transcript-preserving; see method remarks) ----
+        try
+        {
+            await chatRepository.ArchiveSessionAsync(tenantId, request.PriorSessionId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal — the fork is already durable (Analysis + new bound session exist) and the
+            // prior transcript is preserved in the Cosmos store-of-record. The durable archived-flag
+            // flip is task 022 (AIPL-054); the archive-marker call is best-effort here.
+            logger.LogWarning(ex,
+                "Fork: prior-session archive-marker write failed for the archived session — fork already durable " +
+                "(analysis={AnalysisId} newSession={NewSessionId}); transcript preserved; durable archived-flag is task 022 (corr={CorrelationId})",
+                analysisId, newSession.SessionId, correlationId);
+        }
+
+        logger.LogInformation(
+            "Fork complete: analysis={AnalysisId} newSession={NewSessionId} archivedPriorMsgs={PriorMessageCount} (corr={CorrelationId})",
+            analysisId, newSession.SessionId, priorMessageCount, correlationId);
+
+        return Results.Created(
+            $"/api/ai/analysis/{analysisId}",
+            new AnalysisForkResponse(analysisId, newSession.SessionId, request.PriorSessionId));
+    }
+
+    /// <summary>Builds a canonical ProblemDetails result for the fork endpoint.</summary>
+    private static IResult AnalysisProblem(int statusCode, string title, string detail) => Results.Problem(
+        statusCode: statusCode,
+        title: title,
+        detail: detail,
+        type: statusCode == StatusCodes.Status400BadRequest
+            ? "https://tools.ietf.org/html/rfc7231#section-6.5.1"
+            : "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+
+    /// <summary>
+    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014) with an <c>X-Tenant-Id</c>
+    /// header fallback for service-to-service calls. Mirrors <c>ChatEndpoints.ExtractTenantId</c>.
+    /// </summary>
+    private static string? ExtractTenantId(HttpContext httpContext)
+    {
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        }
+        return tenantId;
+    }
 }
 
 /// <summary>

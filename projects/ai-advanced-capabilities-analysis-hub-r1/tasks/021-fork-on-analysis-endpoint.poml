@@ -4,7 +4,7 @@
     <title>Fork-on-analysis BFF endpoint `POST /api/ai/analysis/fork` (UQ-1 Option B)</title>
     <phase>2 Session</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>NEW BFF surface (new endpoint) touching auth, session persistence, and atomic multi-write composition; §6.5 Path A owner-approved exception; highest-blast-radius task in the project.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -142,6 +142,41 @@
   <notes>
     spec.md FR-06 + ADR Tensions row 2 (owner-approved Path A) + UQ-1. Archive durability is hardened in task 022;
     this task performs the archive/snapshot on the current contract. `/conflict-check` before the BFF PR.
+
+    === COMPLETION (2026-07-28, FULL rigor, opus/xhigh) ===
+    Endpoint: POST /api/ai/analysis/fork — ONE authenticated minimal-API handler in Api/Ai/AnalysisEndpoints.cs
+    composing existing seams (IAnalysisDataverseService.CreateAnalysisAsync + ChatSessionManager mint/read +
+    IChatDataverseRepository.ArchiveSessionAsync + IGenericEntityService.DeleteAsync for compensation). Returns
+    { analysisId, newSessionId, archivedSessionId } (201). New session bound to the new Analysis via
+    ChatHostContext(EntityType="sprk_analysisoutput", EntityId=analysisId) → task-020 sprk_analysis FK fires.
+
+    Files: Api/Ai/AnalysisEndpoints.cs (handler+registration+helpers), Api/Ai/AnalysisForkContracts.cs (new DTOs),
+    tests/integration/contract/Api/Ai/AnalysisForkEndpointContractTests.cs (new, 4 tests all pass).
+    Full write-up: projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-021-fork-endpoint.md.
+
+    PLACEMENT JUSTIFICATION (§10 / bff-extensions.md): server-side is mandatory (session GUIDs minted server-side,
+    ChatSessionManager.cs:108) → UQ-1 Option B / §6.5 Path A (owner-approved). One handler, NO new service, NO new
+    DI registration, NO new package. ADR-013 honored: injects analysis-CRUD + session-lifecycle seams only, NOT
+    AI-internal orchestration types; ZERO edits to Services/Ai/ (redesign-r2 sole-owned) — verified via git status +
+    /conflict-check. Endpoint/DI symmetry (ADR-032): all deps unconditionally registered → no Null-Object needed.
+
+    PUBLISH-SIZE (§10/NFR-01): 47.51 MB compressed = baseline 47.51 MB, delta 0.00 MB (no package added). ≤60 MB ✅.
+    CVE: only pre-existing HIGH System.Security.Cryptography.Xml 8.0.3 (known/unrelated); NO new HIGH CVE.
+
+    ARCHIVE DESIGN DECISION (surfaced): did NOT call ChatSessionManager.DeleteSessionAsync (it hard-deletes the
+    Cosmos transcript → the forbidden "archived-but-transcript-lost" orphan + ADR-040 violation). Instead archive =
+    Dataverse archive-marker seam while PRESERVING the Cosmos transcript (store-of-record). The GetSessionAsync read
+    IS the snapshot; prior session stays retrievable/switchable-back. Durable sprk_isarchived flip = task 022 (AIPL-054).
+    No escalation fired — atomicity achieved by composition; no residual-inconsistency window.
+
+    COMPENSATION: reordered (directional mode) to existence-check→create-Analysis→mint→archive so a missing prior
+    never orphans an Analysis; if the mint throws after Analysis create, the Analysis is deleted (CancellationToken.None)
+    → 500, no orphan. FK-bind failure inside the mint is tolerated (Redis authoritative), mirroring CreateSessionAsync.
+
+    GATES: build green; 4/4 tests pass (happy+401+404-no-orphan+compensation); code-review PASS (0 critical);
+    adr-check CLEAN; /conflict-check soft-pass (no Services/Ai edit, no PR overlap). Tests placed under compiled
+    tests/integration/contract/** (ADR-038/tests/CLAUDE.md KEEP path) rather than tests/unit/ — binding KEEP-path
+    rule supersedes the POML's tests/unit hint (data-mutation/** is not compiled by any csproj in this repo state).
   </notes>
 
   <execution>

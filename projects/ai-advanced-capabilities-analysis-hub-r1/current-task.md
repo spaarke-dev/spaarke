@@ -3,8 +3,8 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W3 — 021 (fork-on-analysis BFF endpoint, opus/xhigh, §6.5 Path A), serial
-**Next action**: 021 → 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅. BFF baseline publish 47.51 MB.
+**Active task**: W3 — 022 (archive durability — durable sprk_isarchived flip), serial
+**Next action**: 022 → 023 → 024 → 025. Done: 001 ✅ 010 ✅ 011 ✅ 012 ✅ 013 ✅ 020 ✅ 021 ✅. Publish 47.51 MB (delta 0). Fork endpoint POST /api/ai/analysis/fork live; archive preserves Cosmos + Dataverse marker; 022 makes sprk_isarchived durable.
 
 ## Pipeline progress (2026-07-28)
 
