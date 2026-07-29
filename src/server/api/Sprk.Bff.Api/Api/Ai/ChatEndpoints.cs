@@ -412,7 +412,6 @@ public static class ChatEndpoints
         SprkChatAgentFactory agentFactory,
         PendingPlanManager pendingPlanManager,
         IChatClient chatClient,
-        [FromServices] IWorkingDocumentService workingDocumentService,
         [FromServices] IMatterContextDetector matterContextDetector,
         [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
@@ -967,19 +966,15 @@ public static class ChatEndpoints
                 CreatedAt: DateTimeOffset.UtcNow,
                 SequenceNumber: seqBase + 2);
 
-            var finalSession = await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
+            await historyManager.AddMessageAsync(updatedSession, assistantMessage, CancellationToken.None);
 
-            // Persist chat history to sprk_chathistory when session is scoped to an analysis record.
-            // EntityType "sprk_analysisoutput" with EntityId = analysisId identifies analysis sessions.
-            if (session.HostContext?.EntityType == "sprk_analysisoutput" &&
-                Guid.TryParse(session.HostContext.EntityId, out var analysisGuid))
-            {
-                var historyPayload = finalSession.Messages
-                    .Select(m => new { role = m.Role.ToString(), content = m.Content, timestamp = m.CreatedAt.ToString("O") })
-                    .ToArray();
-                var chatHistoryJson = JsonSerializer.Serialize(historyPayload);
-                await workingDocumentService.UpdateChatHistoryAsync(analysisGuid, chatHistoryJson, CancellationToken.None);
-            }
+            // task 064 (ADR-040 Path A, spec §13.5 / FR-22): the sprk_chathistory per-turn write to
+            // sprk_analysis was removed here — task 062/064's hand-trace confirmed the ONLY reader
+            // (AnalysisDocumentLoader.GetOrReloadFromDataverseAsync, feeding GET/save/export) no
+            // longer reads that column, so this write became provably dead. Cosmos (via
+            // historyManager.AddMessageAsync above) is the sole transcript store-of-record; analysis
+            // sessions remain discoverable via GET /api/ai/chat/sessions/by-analysis/{id} (task 031).
+            // See notes/task-064-chathistory-read-drop.md.
         }
         catch (OperationCanceledException)
         {

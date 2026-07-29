@@ -29,7 +29,10 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
     private const string AnalysisEntityName = "sprk_analysis";
 
     // HostContext.EntityType value that identifies an Analysis-owned chat session (existing
-    // convention — see ChatEndpoints.cs SendMessageAsync sprk_chathistory write seam).
+    // convention — set at session-create time for sessions bound to an sprk_analysis record;
+    // see AnalysisEndpoints.cs ForkAnalysis/PromoteSession, task 020/021/023). The sibling
+    // per-turn sprk_chathistory write in ChatEndpoints.cs that used to reference this same
+    // convention was removed by task 064 (provably dead once its sole reader was dropped).
     private const string AnalysisHostContextEntityType = "sprk_analysisoutput";
 
     private readonly IGenericEntityService _genericEntityService;
@@ -58,8 +61,7 @@ public sealed class ChatDataverseRepository : IChatDataverseRepository
 
         // Analysis-owned session binding (task 020, spec FR-05): when the session's
         // HostContext identifies an analysis-scoped session (the existing
-        // "sprk_analysisoutput" + analysis GUID convention — see ChatEndpoints.cs
-        // SendMessageAsync sprk_chathistory write seam), set the sprk_analysis lookup FK
+        // "sprk_analysisoutput" + analysis GUID convention), set the sprk_analysis lookup FK
         // alongside sprk_sessionid so "one Analysis → many sessions" is queryable
         // (GetSessionsByAnalysisAsync below). Loose (non-Analysis) sessions write no FK —
         // the record persists with only sprk_sessionid, matching pre-existing behavior.

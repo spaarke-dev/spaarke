@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -212,6 +211,19 @@ public class AnalysisDocumentLoader
     /// This is the "lite" version that does NOT extract document text (no HttpContext needed).
     /// Suitable for GET, save, and export operations that only need the persisted analysis data.
     /// </summary>
+    /// <remarks>
+    /// ai-advanced-capabilities-analysis-hub-r1 task 064 (spec §13.5 / FR-22, ADR-040 Path A):
+    /// this loader no longer reads <c>sprk_chathistory</c> off the <c>sprk_analysis</c> record.
+    /// The transcript store-of-record is Cosmos (via <c>ChatEndpoints</c> sessions bound to the
+    /// analysis, resolved client-side through <c>GET /api/ai/chat/sessions/by-analysis/{id}</c> —
+    /// task 031); this endpoint returns only the anchor + outputs. <see cref="AnalysisInternalModel.ChatHistory"/>
+    /// therefore stays at its default empty array for every caller of this method (GET, save,
+    /// export) — none of the three read chat history off the Dataverse record any more (verified:
+    /// SaveWorkingDocumentAsync uses only WorkingDocument; ExportAnalysisAsync's ExportContext never
+    /// referenced ChatHistory even before this change; GetAnalysisAsync's ChatHistory projection is
+    /// unconsumed by any live client — WorkspacePane/AnalysisHubWidget read the Cosmos-backed
+    /// by-analysis session endpoint instead). See notes/task-064-chathistory-read-drop.md.
+    /// </remarks>
     public async Task<AnalysisInternalModel> GetOrReloadFromDataverseAsync(
         Guid analysisId,
         CancellationToken cancellationToken)
@@ -233,8 +245,6 @@ public class AnalysisDocumentLoader
         var record = await _analysisService.GetAnalysisAsync(analysisId.ToString(), cancellationToken)
             ?? throw new KeyNotFoundException($"Analysis {analysisId} not found in Dataverse");
 
-        var chatHistory = DeserializeChatHistory(record.ChatHistory, analysisId);
-
         var analysis = new AnalysisInternalModel
         {
             Id = analysisId,
@@ -243,7 +253,6 @@ public class AnalysisDocumentLoader
             ActionId = Guid.Empty,
             Status = "Completed",
             WorkingDocument = record.WorkingDocument,
-            ChatHistory = chatHistory,
             StartedOn = record.CreatedOn,
             CompletedOn = record.ModifiedOn,
         };
@@ -251,39 +260,10 @@ public class AnalysisDocumentLoader
         await CacheAnalysisAsync(analysisId, analysis);
 
         _logger.LogInformation(
-            "Loaded analysis {AnalysisId} from Dataverse (lite): {DocChars} chars, {ChatCount} messages",
-            analysisId, record.WorkingDocument?.Length ?? 0, chatHistory.Length);
+            "Loaded analysis {AnalysisId} from Dataverse (lite): {DocChars} chars (chat history sourced from Cosmos, not Dataverse — task 064)",
+            analysisId, record.WorkingDocument?.Length ?? 0);
 
         return analysis;
-    }
-
-    /// <summary>
-    /// Deserialize chat history from JSON string, returning empty array on failure.
-    /// </summary>
-    internal ChatMessageModel[] DeserializeChatHistory(string? chatHistoryJson, Guid analysisId)
-    {
-        if (string.IsNullOrWhiteSpace(chatHistoryJson))
-            return [];
-
-        try
-        {
-            var messages = JsonSerializer.Deserialize<ChatMessageModel[]>(
-                chatHistoryJson,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-            if (messages != null)
-            {
-                _logger.LogDebug("Restored {Count} chat messages for analysis {AnalysisId}",
-                    messages.Length, analysisId);
-                return messages;
-            }
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogWarning(ex, "Failed to deserialize chat history for analysis {AnalysisId}", analysisId);
-        }
-
-        return [];
     }
 
     /// <summary>

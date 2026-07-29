@@ -2,8 +2,9 @@
 
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
-**Status**: in-progress
-**Active task**: W6 — 064 (migrate /save+GET + generalize hooks + fold 3-pane + 062 write-cleanup), ORDERED retirement (final W6 task)
+**Status**: CODE COMPLETE (24/28) — awaiting go-ahead on the live deploy phase (W7)
+**Active task**: none (paused at deploy checkpoint)
+**Next action**: HUMAN CHECKPOINT before W7 (070 BFF deploy → 071 client/code-page deploy + ribbon XML + grid-config seed + Dataverse env WR deletion → 072 e2e → 090 wrap). These are outward-facing/irreversible (Azure deploy + Dataverse artifact deletion); 063 already flagged env deletes need per-call human approval. Recommended: review/merge PR #694 first, then deploy from master. Done: Phases 0–6 (001, 010–013, 020–025, 030/031, 040/041, 050–053, 051, 060–064) ✅. Publish 47.51 MB.
 
 > **064 scope**: drop `sprk_chathistory` READ from GET/save (FR-22); assess /export reader (062 note: DeserializeChatHistory feeds save/export/GET) — repoint to Cosmos or drop; then complete 062 hand-off (write cleanup: UpdateChatHistoryAsync impl, AnalysisResultPersistence if dead, 3-file column plumbing) — escalation-guarded if it balloons. Generalize NDA hooks→work-type; shared widgets survive.
 > **071 (deploy) owes 3 items**: (1) hub `sprk_gridconfiguration` seed (notes/hub-grid-config-deployment.md); (2) ribbon XML for AnalysisRecordLaunch (Matter/Project buttons); (3) Dataverse env web-resource/canvasapp deletion w/ exact GUIDs (notes/task-063-env-deletion-deferred-to-071.md).

@@ -296,6 +296,10 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
             Status = analysis.Status,
             WorkingDocument = analysis.WorkingDocument,
             FinalOutput = analysis.FinalOutput,
+            // task 064 (ADR-040 Path A): analysis.ChatHistory is always empty now — the loader no
+            // longer reads sprk_chathistory (Dataverse is anchor + outputs only; Cosmos is the
+            // transcript store-of-record, read via GET /api/ai/chat/sessions/by-analysis/{id}).
+            // The field stays on the wire contract for back-compat but no longer carries data.
             ChatHistory = analysis.ChatHistory
                 .Select(m => new ChatMessageInfo(m.Role, m.Content, m.Timestamp))
                 .ToArray(),

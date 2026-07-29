@@ -65,14 +65,10 @@ public interface IWorkingDocumentService
         int tokenDelta,
         CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Persist the chat history JSON to the sprk_chathistory field on the analysis record.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="chatHistoryJson">JSON-serialized chat message array.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    Task UpdateChatHistoryAsync(
-        Guid analysisId,
-        string chatHistoryJson,
-        CancellationToken cancellationToken);
+    // task 064 (ADR-040 Path A, spec §13.5 / FR-22): UpdateChatHistoryAsync (persisting chat
+    // history JSON to sprk_analysis.sprk_chathistory) was removed here. Task 062 confirmed the
+    // per-turn write in ChatEndpoints.SendMessage was the last production caller; task 064's
+    // hand-trace confirmed the last reader (AnalysisDocumentLoader.GetOrReloadFromDataverseAsync)
+    // was removed in the same task, so the write was provably dead. See
+    // notes/task-064-chathistory-read-drop.md.
 }

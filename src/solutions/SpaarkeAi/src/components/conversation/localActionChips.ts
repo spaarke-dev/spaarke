@@ -84,11 +84,63 @@ export function buildReviseInComposeChip(): ConsumerChip {
  * ai-advanced-capabilities-nda-r1 follow-up (UAT 2026-07-26): "Review an NDA" as an in-line
  * Suggested-Next-Steps card, alongside "Summarize this file / Revise document", instead of a
  * separate top-of-pane notification card that read as "hidden". It rides the local-chip path
- * because the click needs a client-side bridge (open the file in Compose + dispatch nda-review
- * scoped to that file) rather than a bare server Binding dispatch — see the host's
- * `handleReviewNda`. Only appended when the classifier flagged the upload as an NDA (host gates
- * on `ndaReviewFileRef`); `requiresAttachments:true` because it acts on the uploaded file.
+ * because the click needs a client-side bridge (open the file in Compose + dispatch a
+ * document-review capability scoped to that file) rather than a bare server Binding dispatch —
+ * see the host's `handleReviewNda`. Only appended when the classifier flagged the upload as a
+ * reviewable document type (host gates on `ndaReviewFileRef`); `requiresAttachments:true`
+ * because it acts on the uploaded file.
+ *
+ * `cardLabel` defaults to "Review an NDA" (unchanged behavior for the NDA docType) — task 064
+ * (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22) generalized the caller
+ * (ConversationPane's `handleNdaClassified`) to resolve the label from
+ * {@link getDocumentReviewCapability} by classified `docType` instead of hardcoding "nda", so a
+ * different work-type's review capability (once its Action/Binding exists in the catalog) can
+ * pass its own label here without a second chip-builder function.
  */
-export function buildNdaReviewChip(): ConsumerChip {
-  return { label: "Review an NDA", bindingId: LOCAL_CHIP.ndaReview, requiresAttachments: true };
+export function buildNdaReviewChip(cardLabel: string = "Review an NDA"): ConsumerChip {
+  return { label: cardLabel, bindingId: LOCAL_CHIP.ndaReview, requiresAttachments: true };
+}
+
+/**
+ * A classified upload's structural-clause-review capability — the Binding's `consumerType`
+ * (resolved from the closed capability catalog per ADR-039, never invented/hardcoded at dispatch
+ * time) and the Suggested-Next-Steps card label to show for that document type.
+ *
+ * task 064 (ai-advanced-capabilities-analysis-hub-r1, spec §13.5 / FR-22): generalizes the
+ * previously NDA-hardcoded `docType !== "nda"` gate in ConversationPane's `handleNdaClassified`
+ * into a small, extensible table keyed by the classifier's `docType` output. Adding a new
+ * work-type's clause-review capability (once its Action/Binding is authored in Dataverse) is a
+ * ONE-LINE addition here — no other code change. `isNdaReviewResult` (the structural
+ * `{overallRisk, flaggedSections[]}` shape guard in `useNdaReviewAdvisoryCommentsBridge.ts`) is
+ * already work-type-agnostic — it matches on OUTPUT SHAPE, not on which docType triggered the
+ * dispatch — so no change was needed there.
+ */
+export interface DocumentReviewCapability {
+  /** The classifier's `docType` output this capability applies to (compared case-insensitively). */
+  docType: string;
+  /** The Action/Binding `consumerType` to resolve a bindingId for via capability discovery. */
+  consumerType: string;
+  /** Suggested-Next-Steps card label for this document type. */
+  cardLabel: string;
+}
+
+/**
+ * Registered document-review capabilities by classified docType. Only "nda" has a real Action
+ * today (ai-advanced-capabilities-nda-r1) — additional entries are inert until a matching
+ * Action/Binding exists in the catalog (capability discovery safely resolves an unregistered
+ * consumerType to a null bindingId — see ConversationPane's `handleReviewNda` no-bindingId branch).
+ */
+export const DOCUMENT_REVIEW_CAPABILITIES: readonly DocumentReviewCapability[] = [
+  { docType: "nda", consumerType: "nda-review", cardLabel: "Review an NDA" },
+];
+
+/**
+ * Looks up the document-review capability registered for a classified `docType`, or `null` when
+ * the docType is absent/unrecognized (mirrors the prior hardcoded `docType !== "nda"` negative
+ * case — any other docType, including empty/unclassified, yields no card).
+ */
+export function getDocumentReviewCapability(docType: string | undefined): DocumentReviewCapability | null {
+  const normalized = typeof docType === "string" ? docType.trim().toLowerCase() : "";
+  if (!normalized) return null;
+  return DOCUMENT_REVIEW_CAPABILITIES.find((c) => c.docType === normalized) ?? null;
 }

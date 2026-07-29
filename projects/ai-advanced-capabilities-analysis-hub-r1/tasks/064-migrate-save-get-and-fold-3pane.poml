@@ -4,7 +4,7 @@
     <title>Migrate /save + GET /{id} (drop chathistory) + generalize NDA hooks → work-type + fold 3-pane</title>
     <phase>6 Retirement</phase>
     <gate>blocked — 062 (legacy session path retired first)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies surviving BFF endpoints (/save, GET /{id}) + generalizes conversation hooks + folds 3-pane behavior into SpaarkeAi; bff+frontend blast radius; test updates required.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -138,6 +138,38 @@
   <notes>
     Spec §13.5 / FR-22. Keep-with-changes (not retirement) for /save + GET /{id}. Depends on 062 having removed the
     sprk_chathistory read. Shared widgets are contracts to preserve, not to refactor.
+
+    COMPLETED 2026-07-29. Full decision record: notes/task-064-chathistory-read-drop.md.
+
+    A (read drop): dropped sprk_chathistory read from the shared AnalysisDocumentLoader.GetOrReloadFromDataverseAsync
+    loader (feeds /save, GET, and /export). GET's ChatHistory field stays on the wire (back-compat) but is now always
+    empty — verified zero live client consumers of it; the actual Cosmos-backed transcript path clients use is the
+    separate GET /api/ai/chat/sessions/by-analysis/{id} (task 031). Escalation guard did not fire.
+
+    B (write cleanup): completed the 062 hand-off in full — removed IWorkingDocumentService.UpdateChatHistoryAsync +
+    impl, the ChatEndpoints.cs per-turn write + its now-unused workingDocumentService param, and the 3-file
+    sprk_chathistory column plumbing (DataverseServiceClientImpl.cs ColumnSet, DataverseWebApiService.cs $select,
+    Models.cs AnalysisEntity.ChatHistory property). Insights ObservationMirrorMapper.cs (different entity) untouched
+    per negative-check requirement.
+
+    C (NDA hooks -> work-type): CreateAnalysisWizardWidget.tsx was already work-type-parameterized (no NDA hardcoding
+    found). Found + generalized the actual hardcoded gate: ConversationPane.tsx's handleNdaClassified
+    (`docType !== "nda"`) -> table-driven DOCUMENT_REVIEW_CAPABILITIES registry in localActionChips.ts. A second
+    work-type is now a one-line registry addition (no Action exists yet for one, so none was added speculatively).
+    isNdaReviewResult (shape-based, not docType-based) needed no change. Cosmetic Nda-prefixed names left as-is
+    (deep rename, ~15 test files, no behavior change) — noted as deferred.
+
+    D (3-pane + widgets): verified, not rebuilt. ThreePaneLayout already consumed by ThreePaneShell.tsx;
+    FindingsWidget/AnalysisEditorWidget/NdaReviewSummaryPanel all confirmed registered + wired; no contract changes.
+
+    Verification: dotnet build 0 errors; dotnet test 9036 passed/8 pre-existing failures (confirmed via git-stash
+    baseline, unrelated to this task)/101 skipped; SpaarkeAi conversation Jest suite 48/433 passed (was 47/426, +7 new
+    registry tests); publish size 47.51 MB (matches baseline, no delta); no new HIGH CVE; /conflict-check clean
+    (Services/Ai sole-owner spaarke-ai-architecture-redesign-r2 has no active worktree, already merged).
+
+    Deferred (out of scope, noted for follow-up): AnalysisContextBuilder.BuildContinuationPrompt/
+    BuildContinuationPromptWithContext appear caller-less after 062's /continue removal — not in 062's hand-off list,
+    left untouched.
   </notes>
 
   <execution>
