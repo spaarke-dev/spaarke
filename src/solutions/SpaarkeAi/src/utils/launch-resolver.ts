@@ -30,6 +30,9 @@
  *   speDriveId         — SPE container drive id (Compose only — optional; can be
  *                        resolved from runtime config when omitted)
  *   speFileName        — Display name of the document (Compose only — optional)
+ *   activeWorkType     — ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE
+ *                        work type (e.g. "agreement-analysis") scoping the Compose AI toolbar
+ *                        via getToolsForSurface (Compose only — optional)
  *
  * @see ADR-006 — Ribbon scripts are invocation-only; business logic lives here
  * @see docs/guides/spaarkeai-launch-points.md — Full URL format documentation
@@ -103,6 +106,17 @@ export interface SpaarkeAiComposeLaunchParams extends SpaarkeAiLaunchParams {
    * because the BFF Load response also returns it.
    */
   speFileName?: string;
+
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review). Forwarded through
+   * `main.tsx` → `App` → `ThreePaneShell` → `ComposeLaunchContext` → `ComposeWorkspace` →
+   * `ComposeEditor`'s existing `activeWorkType` prop, which threads it into the ALREADY-SHIPPED
+   * `getToolsForSurface(surface, activeWorkType)` (`ComposeAiToolbar.tsx:490`) — no new
+   * tool-filtering logic. Optional; omitting it preserves the unscoped `'*'` default (every
+   * pre-existing launch is unaffected).
+   */
+  activeWorkType?: string;
 }
 
 /** Dialog opening mode — matches Xrm.Navigation.NavigationOptions.target values. */
@@ -165,6 +179,10 @@ export function buildLaunchUrl(
   }
   if (composeParams.speFileName) {
     record["speFileName"] = composeParams.speFileName;
+  }
+  // task 041 (FR-13): active work type — scopes the Compose AI toolbar via getToolsForSurface.
+  if (composeParams.activeWorkType) {
+    record["activeWorkType"] = composeParams.activeWorkType;
   }
 
   return new URLSearchParams(record).toString();

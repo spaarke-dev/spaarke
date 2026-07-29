@@ -115,6 +115,26 @@ describe('buildLaunchUrl — Compose params (task 046)', () => {
     expect(url).toContain('speFileName=Acme+MSA.docx');
   });
 
+  /** task 041 (FR-13): activeWorkType is additive — encoded alongside the existing params. */
+  test('emits activeWorkType when supplied (task 041, FR-13)', () => {
+    const url = buildLaunchUrl({
+      composeMode: 'editor',
+      speDriveItemId: '01ABCDEF0123456789',
+      activeWorkType: 'agreement-analysis',
+    } satisfies SpaarkeAiComposeLaunchParams);
+
+    expect(url).toContain('activeWorkType=agreement-analysis');
+  });
+
+  test('omits activeWorkType when not supplied (no regression on pre-existing launches)', () => {
+    const url = buildLaunchUrl({
+      composeMode: 'editor',
+      speDriveItemId: '01ABCDEF0123456789',
+    } satisfies SpaarkeAiComposeLaunchParams);
+
+    expect(url).not.toContain('activeWorkType');
+  });
+
   test('allows Compose params alongside the existing entityLogicalName / entityId envelope (FR-19 ribbon path)', () => {
     const url = buildLaunchUrl({
       entityLogicalName: 'sprk_document',
@@ -268,6 +288,40 @@ describe('openSpaarkeAiCompose — Path A entry (task 046 §ui-tests)', () => {
    * speDriveItemId; ComposeWorkspace then renders its empty-state picker
    * per FR-19 + design.md §14 row 5.
    */
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): activeWorkType (e.g. an
+   * Agreement Review launch) reaches the URL data blob so main.tsx → App → ThreePaneShell →
+   * ComposeLaunchContext → ComposeWorkspace → ComposeEditor can scope the AI toolbar via the
+   * already-shipped getToolsForSurface(surface, activeWorkType).
+   */
+  test('Agreement Review scopes palette: activeWorkType="agreement-analysis" reaches the URL data blob', () => {
+    openSpaarkeAiCompose({
+      sprkDocumentId: 'doc-guid-2',
+      speDriveItemId: '01DRIVEITEM2',
+      activeWorkType: 'agreement-analysis',
+    });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+    expect(params.get('activeWorkType')).toBe('agreement-analysis');
+    expect(params.get('composeMode')).toBe('editor');
+  });
+
+  /**
+   * Default is unscoped (no regression): omitting activeWorkType keeps the URL free of the
+   * param — main.tsx falls through to `undefined`, and ComposeEditor's own `'*'` default applies.
+   */
+  test("Default is unscoped: omitting activeWorkType omits the param (ComposeEditor's own '*' default applies)", () => {
+    openSpaarkeAiCompose({
+      sprkDocumentId: 'doc-guid-3',
+      speDriveItemId: '01DRIVEITEM3',
+    });
+
+    const [pageInput] = nav.navigateTo.mock.calls[0];
+    const params = new URLSearchParams((pageInput as { data: string }).data);
+    expect(params.get('activeWorkType')).toBeNull();
+  });
+
   test('Empty-state launch: composeMode=editor only, no document context', () => {
     openSpaarkeAiCompose({});
 

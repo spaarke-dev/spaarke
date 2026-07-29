@@ -365,6 +365,19 @@ export interface ComposeWorkspaceProps {
    * `tab_change` effect.
    */
   isActiveTab?: boolean;
+
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type — the
+   * product surface the user launched (e.g. `'agreement-analysis'` for an Agreement Review).
+   * Forwarded UNCHANGED to `<ComposeEditor activeWorkType>`, which threads it into
+   * `getToolsForSurface(surface, activeWorkType)` (`ComposeAiToolbar.tsx:490`) so the inline AI
+   * toolbar / Review-Note menu surface work-type-scoped tools alongside the shared `['*']`
+   * primitives. Optional — omitting it preserves `ComposeEditor`'s own `'*'` default (unscoped,
+   * every existing non-Agreement-Review mount is unaffected). This is pure pass-through; NO
+   * tool-filtering logic lives in `ComposeWorkspace` (reuse the shipped `getToolsForSurface`,
+   * never reimplement).
+   */
+  activeWorkType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -449,6 +462,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     enqueueComposeAction,
     workspaceTabId,
     isActiveTab = true,
+    activeWorkType,
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
@@ -2378,6 +2392,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               documentRef={editorDocRef}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}
+              // task 041 (FR-13): pass-through to getToolsForSurface via ComposeEditor's own
+              // activeWorkType prop; ComposeEditor defaults to '*' when omitted.
+              activeWorkType={activeWorkType}
               onDirtyChange={handleDirtyChange}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}

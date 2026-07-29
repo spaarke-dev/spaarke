@@ -4,7 +4,7 @@
     <title>Analysis hub widget — 3 cards + DataGrid + view-by-type</title>
     <phase>3 Hub</phase>
     <gate>deps 011,012,020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new frontend/fluent-ui widget surface (.tsx) composing DataGrid framework + registry; user-facing home/launcher; FULL per §8 (frontend/fluent-ui/pcf-adjacent + NEW-surface).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -158,6 +158,29 @@
     Spec FR-10 (§122-125) + Open-Question resolution (§345, three cards; Research/Patent coming-soon). Reuse-first per
     CLAUDE.md §11 — compose DataGrid + ViewSelector + registry; do not fork. Card actionable-click wiring to the create
     flow is provided by the wizard (task 040) and entry routing (task 050); this task ships the hub surface + cards.
+
+    COMPLETED (2026-07-29). Built `AnalysisHubWidget.tsx` composing (not forking): `ActionCard` for the 3 cards
+    (Agreement Review actionable + Fluent `Badge` "Coming soon" affordance on the 2 disabled cards) and the EXISTING
+    `DataverseEntityViewWidget` (which itself renders `&lt;DataGrid configId=… />`) for the Analysis grid — the
+    view-by-type dropdown is the DataGrid framework's own `ViewSelector`, populated by sibling saved queries once the
+    hub's `sprk_gridconfiguration` row is seeded (deployment note below). Agreement Review dispatches `widget_load`
+    opening `create-analysis-wizard` (task 040's `CreateAnalysisWizardWidget`) — deep service wiring
+    (dataService/authenticatedFetch/navigationService/searchUsers) is explicitly task 050's scope, not this task's
+    (documented deviation). Registered both `analysis-hub` and `create-analysis-wizard` in
+    `register-workspace-widgets.ts` (the latter was built by task 040 but deliberately left unregistered per the
+    040/030 handoff) and added both to the package barrel (`index.ts`).
+
+    Deviations: `notes/task-030-deviations.md`. Grid-config seed requirement (placeholder GUID
+    `00000000-0000-0000-0000-000000000000`, 4 sibling saved queries needed): `notes/hub-grid-config-deployment.md`
+    (handed to task 071 deploy).
+
+    Gates: code-review (clean; 1 test-coverage-gap Warning documented — grid data-rendering is mock-boundary tested,
+    matching precedent since no DataverseEntityViewWidget/DataGrid+Xrm test harness exists in this package yet) +
+    adr-check (0 violations — ADR-021/012/032/022 all compliant) — both PASS. Builds: shared-lib `tsc --noEmit` clean;
+    package jest 675/675 pass except 1 PRE-EXISTING unrelated failure (`communications-list` displayName drift from
+    commit `0bf1bb8ac`, not touched by this task); SpaarkeAi jest 701/701 pass; SpaarkeAi `tsc --noEmit` has
+    pre-existing unrelated errors (LegalWorkspace, missing `@hello-pangea/dnd`/`@spaarke/daily-briefing-components`
+    etc.) with zero hits for AnalysisHubWidget/CreateAnalysisWizardWidget/register-workspace-widgets.
   </notes>
 
   <execution>

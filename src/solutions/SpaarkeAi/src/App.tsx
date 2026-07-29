@@ -104,6 +104,13 @@ export interface AppProps {
   speDriveId?: string;
   /** Display name of the document for the workspace title (Compose-only). */
   speFileName?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Forwarded
+   * to `ThreePaneShell` → `ComposeLaunchContext` → `ComposeWorkspace` → `ComposeEditor`, scoping
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +208,7 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           composeMode={props.composeMode}
           composeDocument={initialComposeDocument}
           composeDriveId={props.speDriveId ?? ""}
+          activeWorkType={props.activeWorkType}
         />
       </div>
     </div>

@@ -4,7 +4,7 @@
     <title>Wire activeWorkType host prop → getToolsForSurface scoping</title>
     <phase>4 Wizard</phase>
     <gate>deps 040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modify-only wiring of an existing host prop to the already-shipped getToolsForSurface; no new surface, small blast radius; STANDARD per §8. ui-tests still required (frontend).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,6 +117,35 @@
   <notes>
     Spec FR-13 (§137-139). Pure wiring — the scoping function is already shipped; this task only passes the host launch
     value into the existing prop. Modify-only, so no §11 justification required.
+
+    COMPLETION (deviation from the literal file list — documented per Step 5; see
+    projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-041-deviations.md for full detail):
+    Investigation found `ComposeEditor.tsx` ALREADY fully implements `activeWorkType` (documented
+    prop, already threaded into `getToolsForSurface` at both its mount sites) — no change was
+    needed there. The real, concrete gap was one layer up: `ComposeWorkspace` (the component that
+    actually mounts `&lt;ComposeEditor&gt;`) did not expose or forward the prop at all. Task 040's
+    `CreateAnalysisWizardWidget` dispatches to the `document-viewer` widget (not `compose`) per its
+    own documented scoping (session/AI-execution binding to Compose is owned by tasks 020-025) — so
+    there was no live "Agreement Review → Compose" dispatch site to modify. Delivered instead: the
+    full additive, optional `activeWorkType` plumbing chain from every existing Compose host down to
+    `ComposeEditor` — `ComposeWorkspaceProps.activeWorkType` (Spaarke.Compose.Components), the shared
+    `ComposeLaunchContextValue.activeWorkType` (both LegalWorkspace's `composeEditor.registration.ts`
+    and SpaarkeAi's `ComposeDirectWidget`/`ComposeDirectMount` thread it through), `ComposeWidgetSeed.
+    activeWorkType` (Direct-widget seed + `buildLaunchFromSeed`'s 3 branches), the mirrored seed
+    translation in `main.tsx`'s `SpaarkeAiWorkspaceRenderer`, the URL-param chain (`main.tsx` → `App.
+    tsx` → `ThreePaneShell.tsx`), and `SpaarkeAiComposeLaunchParams.activeWorkType` / `buildLaunchUrl`
+    in `launch-resolver.ts` (the ribbon "Open in Compose" launch point). Every addition is optional
+    and additive — no pre-existing mount's behavior changes when the value is omitted (ComposeEditor's
+    own `'*'` default still applies). getToolsForSurface itself was NOT touched (reused unchanged, per
+    constraint). New tests: `ComposeEditor.activeWorkType.test.tsx` (real-mount, proves the palette
+    scoping end-to-end via the already-shipped getToolsForSurface) + `ComposeWorkspace.activeWorkType.
+    test.tsx` (mocked-editor, proves the new prop-forwarding seam) in Spaarke.Compose.Components; two
+    new cases added to `launch-resolver.test.ts` (URL encoding). Build/test: Spaarke.Compose.Components
+    typecheck clean, 636/637 tests pass (1 pre-existing unrelated failure in
+    ComposeEditor.advisoryComments.test.tsx, reproduces in isolation on an untouched file — not
+    introduced by this task); SpaarkeAi tsc-surface-gate reports 0 surface-owned errors; all targeted
+    SpaarkeAi jest suites (workspace/, utils/, shell/, launch-resolver, three-pane-compose-coordination,
+    DocumentComposeLaunch, registerComposeWidget) pass.
   </notes>
 
   <execution>

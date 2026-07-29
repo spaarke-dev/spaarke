@@ -3,11 +3,15 @@
 > Active-task tracker. History lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 **Status**: in-progress
-**Active task**: W4b — 030 (hub widget) ∥ 041 (activeWorkType tool-scoping), parallel
-**Next action**: W4b → W4c (031 reopen) → W5 (050 → 052 → 053 entry) → W6 (retirement) → W7 (deploy/test/wrap). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 040 ✅ 051 ✅. Publish 46.16 MB.
+**Active task**: W4c — 031 (reopen from grid → rehydrate session + review + files), serial
+**Next action**: 031 → W5 (050 → 052 → 053 entry) → W6 (retirement) → W7 (deploy/test/wrap). Done: 001 ✅ 010 ✅ 011–013 ✅ 020–025 ✅ 030 ✅ 040 ✅ 041 ✅ 051 ✅. Publish 46.16 MB.
 
-> 030 wires "Create new" cards to the real CreateAnalysisWizardWidget (040) + owns register-workspace-widgets.ts. 041 (activeWorkType→getToolsForSurface) is a distinct host-prop/tool-palette surface → parallel with 030.
-> WATCH: 040 scoped "run the analysis" to a status flip + file-load handoff — verify the wizard→three-pane execution launch actually fires at 050 (entry matrix).
+> **050 (entry matrix) is the integration keystone — 3 threads converge there:**
+>  1. Wizard deep-service wiring (`dataService`/`authenticatedFetch`/`navigationService`) — deferred from 030 (interim "Connecting to workspace services…").
+>  2. Wizard-finish → three-pane **execution launch** — deferred from 040 (currently status-flip + file-load only).
+>  3. Connect Agreement-Review launch → Compose with `activeWorkType='agreement-analysis'` — plumbing READY from 041; no live dispatch site yet.
+> **071 (deploy) owes**: seed the hub `sprk_gridconfiguration` row + 4 saved queries (recipe: notes/hub-grid-config-deployment.md).
+> **launch-resolver.ts** now touched by 041; 050 + 052 also touch it (serial in W5, no conflict).
 
 > W3 tail (024, 025) stays SERIAL — both touch the SpaarkeAi conversation/session client surface (ConversationPane hotspot); real fan-out resumes at W4.
 

@@ -239,6 +239,13 @@ export interface ThreePaneShellProps {
   composeDocument?: ComposeDocumentRef | null;
   /** SPE container/drive id from URL — optional; resolved at runtime if absent. */
   composeDriveId?: string;
+  /**
+   * ai-advanced-capabilities-analysis-hub-r1 task 041 (FR-13): the ACTIVE work type the launch
+   * is scoped to (e.g. `"agreement-analysis"` for an Agreement Review; Compose-only). Threaded
+   * into `ComposeLaunchContextValue.activeWorkType` so `ComposeWorkspace` → `ComposeEditor` scope
+   * the inline AI toolbar via `getToolsForSurface`. Omitted preserves the unscoped `'*'` default.
+   */
+  activeWorkType?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +635,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
     composeMode,
     composeDocument = null,
     composeDriveId = "",
+    activeWorkType,
   } = props;
 
   // spaarkeai-compose-r1 task 092: assemble the Compose launch context so
@@ -656,9 +664,12 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
               // failed/absent association is non-fatal (surfaced via the gate's own `error` state).
               onCreateOnSaveAssociationComplete(newDocumentId);
             },
+            // task 041 (FR-13): forward the launch's active work type so getToolsForSurface
+            // scopes the Compose AI toolbar (e.g. Agreement Review).
+            activeWorkType,
           }
         : null,
-    [composeMode, composeDocument, composeDriveId, onCreateOnSaveAssociationComplete],
+    [composeMode, composeDocument, composeDriveId, activeWorkType, onCreateOnSaveAssociationComplete],
   );
 
   // Build the entity context for AiSessionProvider from URL params.

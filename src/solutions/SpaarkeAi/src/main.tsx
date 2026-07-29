@@ -273,6 +273,9 @@ async function bootstrap(): Promise<void> {
             html?: string;
             fileName?: string | null;
           };
+          // task 041 (FR-13): active work type — scopes the Compose AI toolbar via
+          // getToolsForSurface. Cross-cutting; applies regardless of door shape.
+          activeWorkType?: string;
         }
       | undefined;
     if (!seed) {
@@ -298,6 +301,7 @@ async function bootstrap(): Promise<void> {
           html: seed.draft.html,
           fileName: seed.draft.fileName ?? undefined,
         },
+        activeWorkType: seed.activeWorkType,
       };
       return <ComposeLaunchContext.Provider value={composeDraftLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -321,6 +325,7 @@ async function bootstrap(): Promise<void> {
           sessionFileId: seed.upload.sessionFileId,
           fileName: seed.upload.fileName ?? undefined,
         },
+        activeWorkType: seed.activeWorkType,
       };
       return <ComposeLaunchContext.Provider value={composeUploadLaunch}>{app}</ComposeLaunchContext.Provider>;
     }
@@ -337,6 +342,7 @@ async function bootstrap(): Promise<void> {
         fileName: seed.fileName ?? undefined,
       },
       driveId: seed.speDriveId ?? "",
+      activeWorkType: seed.activeWorkType,
     };
     return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
   };
@@ -537,6 +543,14 @@ async function bootstrap(): Promise<void> {
     dataParams.get("speFileName") ??
     undefined;
 
+  // task 041 (FR-13): active work type (e.g. "agreement-analysis") — scopes the Compose AI
+  // toolbar via getToolsForSurface. Compose-only; falls through to undefined (ComposeEditor's
+  // own '*' default) for every non-work-type-scoped launch.
+  const activeWorkType =
+    searchParams.get("activeWorkType") ??
+    dataParams.get("activeWorkType") ??
+    undefined;
+
   // -------------------------------------------------------------------------
   // 4. Render the app
   // -------------------------------------------------------------------------
@@ -560,6 +574,7 @@ async function bootstrap(): Promise<void> {
           speDriveItemId={speDriveItemId}
           speDriveId={speDriveId}
           speFileName={speFileName}
+          activeWorkType={activeWorkType}
         />
       </AppErrorBoundary>
     </React.StrictMode>

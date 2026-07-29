@@ -1,0 +1,317 @@
+/**
+ * @spaarke/ai-widgets — AnalysisHubWidget
+ *
+ * The Analysis platform's home/launcher surface (ai-advanced-capabilities-analysis-hub-r1
+ * task 030 / spec FR-10). Renders:
+ *   1. A top row of THREE "Create new" work-type cards — Agreement Review is LIVE
+ *      (actionable); Legal Research + Patent Application render "coming soon" with a
+ *      visible, disabled affordance (spec Open-Question resolution, §345).
+ *   2. Below the cards, the existing `sprk_analysis` records via the shared DataGrid
+ *      framework (`<DataGrid configId=… />`, consumed through the canonical
+ *      `DataverseEntityViewWidget` wrapper — NOT re-implemented here).
+ *
+ * Reuse (CLAUDE.md §11 — default to reuse, no forking):
+ *   - Cards: the shared `ActionCard` primitive (`@spaarke/ui-components`, the same
+ *     component `GetStartedCardsWidget` uses for its 7-card grid). This widget adds a
+ *     "Coming soon" `Badge` overlay for the two disabled cards — `ActionCard` has no
+ *     built-in badge slot, so the overlay composes around it rather than forking it.
+ *   - Grid: `DataverseEntityViewWidget` (this same package) — the canonical "Dataverse
+ *     list" wrapper that owns the Xrm frame-walk, `XrmDataverseClient` construction, and
+ *     `<DataGrid configId=… />` render. The view-by-type dropdown is NOT a bespoke
+ *     control — it is the DataGrid framework's OWN `ViewSelector`, driven by sibling
+ *     saved queries on the `sprk_gridconfiguration` row (see
+ *     `ANALYSIS_HUB_GRID_CONFIG_ID` below for the required view set).
+ *   - Registration: `registerWorkspaceWidget` (`WorkspaceWidgetRegistry.ts`) — this file
+ *     owns `register-workspace-widgets.ts` per the task-040/030 parallel-execution
+ *     handoff (see that file's `create-analysis-wizard` registration + this task's
+ *     `analysis-hub` registration).
+ *
+ * Card → launch wiring (scoping note, mirrors task 040's own deviation record):
+ *   The Agreement Review card dispatches a `widget_load` PaneEventBus event
+ *   (`workspace` channel) with `widgetType: 'create-analysis-wizard'`, opening
+ *   `CreateAnalysisWizardWidget` (task 040) as a new workspace tab — the literal
+ *   "launches THIS" wiring named in this task's brief. The raw `sprk_worktype` Choice
+ *   value (100000000 = Agreement Review) is restated locally rather than imported from
+ *   `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts` because that file is
+ *   SOLUTION-owned and depends on this shared-lib package, not the reverse (ADR-012;
+ *   see `CreateAnalysisWizardData`'s own doc comment for the identical precedent).
+ *   Deep service wiring (`dataService`/`authenticatedFetch`/`navigationService`/
+ *   `searchUsers` — the live function objects `CreateAnalysisWizardWidget` needs to
+ *   actually create a record) is explicitly OUT of this task's scope — task 050
+ *   (entry routing) owns resolving those from the host and threading them through.
+ *   Until then, the opened wizard tab shows its own "Connecting to workspace
+ *   services…" placeholder state (an existing, graceful `CreateAnalysisWizardWidget`
+ *   render branch — not a crash). See
+ *   `projects/ai-advanced-capabilities-analysis-hub-r1/notes/task-030-deviations.md`.
+ *
+ * The two "coming soon" cards (Legal Research, Patent Application) are DISABLED,
+ * CLIENT-ONLY affordances this project — no server gating (ADR-032 SCOPE note in the
+ * task POML). A later project that server-gates one of these cards applies the
+ * ADR-032 Null-Object kill-switch pattern then, not here.
+ *
+ * Standards:
+ *   - ADR-012: shared-lib composition (ActionCard + DataverseEntityViewWidget +
+ *     WorkspaceWidgetRegistry) — no fork of any of the three.
+ *   - ADR-021: Fluent v9 semantic tokens only; light/dark both verified (ui-tests).
+ *   - ADR-022: React 19 functional component.
+ *   - ADR-032: coming-soon cards are a client-only affordance this project.
+ *
+ * @see ActionCard                — @spaarke/ui-components (card primitive, reused as-is)
+ * @see DataverseEntityViewWidget — this package (DataGrid framework composition)
+ * @see CreateAnalysisWizardWidget — this package (task 040 — the Agreement launch target)
+ * @see register-workspace-widgets.ts — registration entries for both widgets
+ * @see docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md
+ * @see docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md
+ */
+
+import * as React from 'react';
+import { useCallback, useMemo } from 'react';
+import { Badge, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { DocumentAddRegular, DocumentMultipleRegular, DocumentSearchRegular } from '@fluentui/react-icons';
+import type { FluentIcon } from '@fluentui/react-icons';
+
+import { ActionCard } from '@spaarke/ui-components';
+import type { ActionCardProps } from '@spaarke/ui-components';
+
+import type { WorkspaceWidgetProps } from '../../types/widget-types';
+import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
+import { DataverseEntityViewWidget } from './DataverseEntityViewWidget';
+import type { CreateAnalysisWizardData } from './CreateAnalysisWizardWidget';
+
+// ---------------------------------------------------------------------------
+// sprk_worktype — raw Choice value, restated locally (ADR-012; see file header)
+// ---------------------------------------------------------------------------
+
+/**
+ * `sprk_worktype` — SprkAnalysisWorkType.AgreementAnalysis (task 011,
+ * `src/solutions/SpaarkeAi/src/types/sprkAnalysis.ts`). Restated as a local raw
+ * constant — this shared-lib widget cannot import the SpaarkeAi-solution-owned enum
+ * (ADR-012: dependency direction is solution → shared lib, never the reverse). Mirrors
+ * `CreateAnalysisWizardWidget`'s identical `DEFAULT_WORK_TYPE_VALUE` restatement.
+ */
+const WORK_TYPE_AGREEMENT_REVIEW = 100000000;
+
+// ---------------------------------------------------------------------------
+// Grid configuration — sprk_gridconfiguration for the hub's Analysis grid
+// ---------------------------------------------------------------------------
+
+/**
+ * GUID of the `sprk_gridconfiguration` row driving the hub's Analysis grid.
+ *
+ * **DEPLOYMENT REQUIREMENT** (mirrors the `ENTITY_VIEW_CONFIG_IDS` pattern in
+ * `register-workspace-widgets.ts`): before this widget lists real data, an operator
+ * MUST create ONE `sprk_gridconfiguration` row over `sprk_analysis` with sibling saved
+ * queries — the DataGrid framework's OWN `ViewSelector` renders the "view by type"
+ * dropdown automatically once multiple saved queries exist for the entity:
+ *   - "All Analyses" (default — no filter; the config's own `source.savedQueryId`)
+ *   - "Agreement Review Analyses" (`sprk_worktype eq 100000000`)
+ *   - "Legal Research Analyses" (`sprk_worktype eq 100000001`)
+ *   - "Patent Application Analyses" (`sprk_worktype eq 100000002`)
+ *
+ * Replace this placeholder with the real GUID once seeded. Handed to task 071
+ * (deploy) — see
+ * `projects/ai-advanced-capabilities-analysis-hub-r1/notes/hub-grid-config-deployment.md`
+ * for the full operator recipe. Until seeded, `DataGrid`'s own invalid-config guard
+ * (via `DataverseEntityViewWidget` → `fetchConfigRecord`) renders a clear empty state —
+ * no production crash.
+ */
+const ANALYSIS_HUB_GRID_CONFIG_ID = '00000000-0000-0000-0000-000000000000';
+
+/** Widget-type string passed to the nested `DataverseEntityViewWidget` for debug/sub-routing only. */
+const ANALYSIS_HUB_GRID_WIDGET_TYPE = 'analysis-hub-grid';
+
+// ---------------------------------------------------------------------------
+// Data contract
+// ---------------------------------------------------------------------------
+
+export interface AnalysisHubWidgetData {
+  /**
+   * Override for the `sprk_gridconfiguration` GUID driving the Analysis grid. Optional —
+   * defaults to {@link ANALYSIS_HUB_GRID_CONFIG_ID}. Present so a future dispatcher (or
+   * test) can point the hub at an alternate config record without a code change.
+   */
+  configId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Card definitions
+// ---------------------------------------------------------------------------
+
+type HubCardId = 'agreement-review' | 'legal-research' | 'patent-application';
+
+interface HubCardDefinition {
+  id: HubCardId;
+  label: string;
+  description: string;
+  icon: FluentIcon;
+  /** When true the card renders disabled with a "Coming soon" badge affordance. */
+  comingSoon: boolean;
+}
+
+/**
+ * Exactly three cards ship this project (spec Open-Question resolution, §345). Do NOT
+ * add or remove cards here — see the task POML's "card set" constraint.
+ */
+const HUB_CARDS: readonly HubCardDefinition[] = Object.freeze([
+  {
+    id: 'agreement-review',
+    label: 'Agreement Review',
+    description: 'Analyze a contract or agreement document.',
+    icon: DocumentAddRegular,
+    comingSoon: false,
+  },
+  {
+    id: 'legal-research',
+    label: 'Legal Research',
+    description: 'Legal research analysis — coming soon.',
+    icon: DocumentSearchRegular,
+    comingSoon: true,
+  },
+  {
+    id: 'patent-application',
+    label: 'Patent Application',
+    description: 'Patent application analysis — coming soon.',
+    icon: DocumentMultipleRegular,
+    comingSoon: true,
+  },
+]);
+
+// ---------------------------------------------------------------------------
+// Styles — Fluent v9 tokens only (ADR-021)
+// ---------------------------------------------------------------------------
+
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    width: '100%',
+    minWidth: 0,
+    overflow: 'hidden',
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  cardsRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: tokens.spacingHorizontalM,
+    padding: tokens.spacingHorizontalM,
+    flexShrink: 0,
+  },
+  cardWrapper: {
+    position: 'relative',
+    display: 'flex',
+    flex: '1 1 0',
+    minWidth: '120px',
+  },
+  comingSoonBadge: {
+    position: 'absolute',
+    top: tokens.spacingVerticalXS,
+    right: tokens.spacingHorizontalXS,
+    pointerEvents: 'none',
+  },
+  gridSection: {
+    flex: 1,
+    minHeight: 0,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  sectionLabel: {
+    padding: tokens.spacingHorizontalM,
+    paddingBottom: 0,
+    color: tokens.colorNeutralForeground3,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * AnalysisHubWidget — the Analysis platform's home/launcher workspace tab.
+ *
+ * @example
+ * ```tsx
+ * // Resolved via WorkspaceWidgetRegistry under 'analysis-hub':
+ * <AnalysisHubWidget data={{}} widgetType="analysis-hub" />
+ * ```
+ */
+export const AnalysisHubWidget: React.FC<WorkspaceWidgetProps<AnalysisHubWidgetData>> = ({ data, className }) => {
+  const styles = useStyles();
+  const dispatch = useDispatchPaneEvent();
+
+  const gridConfigId = data?.configId ?? ANALYSIS_HUB_GRID_CONFIG_ID;
+
+  const handleAgreementReviewClick = useCallback(() => {
+    dispatch('workspace', {
+      type: 'widget_load',
+      widgetType: 'create-analysis-wizard',
+      widgetData: {
+        workTypeValue: WORK_TYPE_AGREEMENT_REVIEW,
+        workTypeLabel: 'Agreement Review',
+      } as CreateAnalysisWizardData,
+      displayName: 'Create Agreement Review Analysis',
+    });
+  }, [dispatch]);
+
+  // Stable per-card click handler map. Only the actionable (non-comingSoon) card gets a
+  // real handler — disabled ActionCard instances already ignore onClick internally, but
+  // omitting it here keeps the intent explicit (no dead click handler on a disabled card).
+  const cardHandlers = useMemo<Partial<Record<HubCardId, () => void>>>(
+    () => ({
+      'agreement-review': handleAgreementReviewClick,
+    }),
+    [handleAgreementReviewClick]
+  );
+
+  return (
+    <div className={mergeClasses(styles.root, className)} data-testid="analysis-hub-widget">
+      <div className={styles.cardsRow} role="group" aria-label="Create new analysis">
+        {HUB_CARDS.map(card => (
+          <div key={card.id} className={styles.cardWrapper} data-testid={`analysis-hub-card-${card.id}`}>
+            <ActionCard
+              // Type assertion is intentional and load-bearing — see the identical
+              // precedent + rationale in GetStartedCardsWidget.tsx: this package pins
+              // its own copy of `@fluentui/react-icons`, structurally identical to but
+              // nominally distinct from `@spaarke/ui-components`'s copy.
+              icon={card.icon as ActionCardProps['icon']}
+              label={card.label}
+              ariaLabel={
+                card.comingSoon
+                  ? `${card.label} — coming soon, not yet available`
+                  : `${card.label} — ${card.description}`
+              }
+              onClick={cardHandlers[card.id]}
+              disabled={card.comingSoon}
+            />
+            {card.comingSoon && (
+              <Badge
+                className={styles.comingSoonBadge}
+                appearance="tint"
+                color="informative"
+                size="small"
+                data-testid={`analysis-hub-coming-soon-badge-${card.id}`}
+              >
+                Coming soon
+              </Badge>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className={styles.gridSection}>
+        <Text size={200} weight="semibold" className={styles.sectionLabel}>
+          Analyses
+        </Text>
+        <DataverseEntityViewWidget data={{ configId: gridConfigId }} widgetType={ANALYSIS_HUB_GRID_WIDGET_TYPE} />
+      </div>
+    </div>
+  );
+};
+
+AnalysisHubWidget.displayName = 'AnalysisHubWidget';
+
+export default AnalysisHubWidget;
