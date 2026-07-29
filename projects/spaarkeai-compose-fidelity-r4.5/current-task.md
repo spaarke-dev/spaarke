@@ -4,8 +4,16 @@
 
 ## Active Task
 
-**Status**: in-progress (autonomous parallel execution)
+**Status**: CODE-COMPLETE — all 20 code/research tasks ✅. Remaining: wrap-up 090 + human deploys 014/034.
 **Mode**: autonomous, parallel-where-possible; `/conflict-check` before every BFF PR.
+
+### Success criteria (spec §Success Criteria)
+1. One reader ✅ · 2. Text-exact ✅ (8/8) · 3. Numbering-exact ✅ (24/24 = Word; round-trip caught+fixed DEF-03) · 4. Referenceable ✅ (map + resolver; survives edits) · 5. Page/line honest ✅ (WS-5 DEFER) · 6. Hygiene ✅ (739 Compose pass, ~47 MB, no new pkg, ADR-013 purity green) — caveats: DEF-01 + ADR-007 GraphIsolation both PRE-EXISTING/unrelated.
+
+### Remaining before "Complete"
+- **090 wrap-up**: /test-diet · file DEF-01/02 + ADR-007 + 042 contract/corpus as GitHub issues (two-write rule) · README→Complete · lessons-learned · final report.
+- **014 + 034 deploy+UAT** (HUMAN): live Compose deploy to sprk_spaarkeai + manual UAT before production sign-off.
+- **042 confirm items** (HUMAN): citation-resolver contract (pure fn over map, no PublicContracts wrapper — confirm/adjust); add a real letter/roman sub-item corpus fixture (owner-intake).
 
 ### Completed (11/21)
 - Phase 0: **001** fixtures ✅ · **002** harness ✅
