@@ -1,6 +1,6 @@
 # Spaarke Compose — Legal Fidelity (R4.5)
 
-> **Status**: 🟡 In Progress (initialized 2026-07-28 via `/project-pipeline`)
+> **Status**: ✅ **Complete** (merged to master 2026-07-28 `81f64dad0`; deployed to dev `spaarke-bff-dev` + `sprk_spaarkeai`; archived 2026-07-29). All 6 success criteria met; 739 Compose tests green. Read/reference architecture: [`docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`](../../docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md).
 > **Branch**: `work/spaarkeai-compose-fidelity-r4.5`
 > **Relationship**: Priority interstitial between R4 (Shadow Document Architecture — shipped, master `a58c0b5cc` 2026-07-24) and R5 (Editing Completeness — backlog). Absorbs R5 **G6**.
 
