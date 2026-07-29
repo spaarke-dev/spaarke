@@ -89,6 +89,7 @@ public sealed class TriagePersistenceSeamTests
             config,
             assessedProducer,
             triageAi,
+            new NullCommunicationProposeAi(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

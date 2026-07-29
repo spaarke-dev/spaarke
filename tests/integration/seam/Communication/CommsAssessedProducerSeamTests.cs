@@ -108,6 +108,7 @@ public sealed class CommsAssessedProducerSeamTests
             config,
             producer,
             triageAi,
+            new NullCommunicationProposeAi(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

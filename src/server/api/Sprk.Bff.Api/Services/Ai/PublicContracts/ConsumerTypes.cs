@@ -96,6 +96,19 @@ public static class ConsumerTypes
     public const string EmailTriage = "email-triage";
 
     /// <summary>
+    /// <c>CommunicationEnrichmentService</c> (email-communication-intelligence-r1 task 030, FR-09) —
+    /// the Job B "propose" capability. A Linear AI Consumer (routed like <see cref="EmailTriage"/>: no
+    /// <c>toolDescription</c>/<c>surfaces</c> — invoked directly off the Communication enrichment path via
+    /// <see cref="ICommunicationProposeAi"/>, never chat/loop-projected). Resolves to the catalog-authored
+    /// <c>PROPOSE-FIELD-UPDATES</c> Action (<c>sprk_actioncode = "propose-field-updates"</c>, task 030),
+    /// which extracts candidate NEW values for the operator-owned allow-list fields
+    /// (<c>sprk_emailupdatefield</c> enabled rows) — each with a verbatim citation + confidence — for the
+    /// record the email is associated to. Job B's OWN targeted field-value extraction (a single Action
+    /// call), NOT a second classification pass (the triage output is reused as grounding only).
+    /// </summary>
+    public const string EmailPropose = "email-propose";
+
+    /// <summary>
     /// <c>DailyBriefingCompositeService</c> — the Daily Briefing coded composite
     /// (FR-P3-04, spaarke-ai-architecture-redesign-r1 task 043; the platform's FIRST
     /// full <c>coded</c> Action). Two Binding rows: <c>default</c> (informational —
@@ -332,6 +345,7 @@ public static class ConsumerTypes
         ChatClassify,
         EmailAnalysis,
         EmailTriage,
+        EmailPropose,
         DailyBriefingNarrate,
         DocumentProfile,
         ComposeSummarize,

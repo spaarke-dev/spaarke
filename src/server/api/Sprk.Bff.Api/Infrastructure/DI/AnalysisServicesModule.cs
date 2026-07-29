@@ -471,6 +471,12 @@ public static class AnalysisServicesModule
         // above (returns null, never throws) — NFR-04: triage never fails capture/enrichment.
         services.AddScoped<ICommunicationTriageAi, NullCommunicationTriageAi>();
 
+        // L1 — ICommunicationProposeAi (email-communication-intelligence-r1 task 030 / FR-09). Real impl
+        // registered in AddPublicContractsFacade. Consumed by CommunicationEnrichmentService's best-effort
+        // Job B propose step. Same P2 graceful-degradation shape as ICommunicationTriageAi immediately above
+        // (returns null, never throws) — NFR-04: proposal generation never fails capture/enrichment.
+        services.AddScoped<ICommunicationProposeAi, NullCommunicationProposeAi>();
+
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
         // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
@@ -1230,6 +1236,14 @@ public static class AnalysisServicesModule
         // grounding). Null peer (NullCommunicationTriageAi) is registered in AddNullObjectsForCompoundOff.
         // Scoped to match IActionRunner's transitive IOpenAiClient lifetime.
         services.AddScoped<ICommunicationTriageAi, CommunicationTriageAi>();
+
+        // ICommunicationProposeAi → CommunicationProposeAi (email-communication-intelligence-r1 task 030 /
+        // FR-09): the ADR-013 PublicContracts seam for the PROPOSE-FIELD-UPDATES Action. Wraps the Linear AI
+        // Consumer primitives (IActionResolver/IActionRunner, always registered unconditionally via
+        // AddLinearConsumers — no compound-gate dependency). NO ICommunicationClassificationAi/IOpenAiClient
+        // dependency (structurally incapable of a second classification, FR-05/FR-09). Null peer
+        // (NullCommunicationProposeAi) is registered in AddNullObjectsForCompoundOff.
+        services.AddScoped<ICommunicationProposeAi, CommunicationProposeAi>();
 
         // FR-P3-05 (spaarke-ai-architecture-redesign-r1 task 044): the generic playbook-
         // invocation facade triangle and the engine shell that backed the loop's playbook

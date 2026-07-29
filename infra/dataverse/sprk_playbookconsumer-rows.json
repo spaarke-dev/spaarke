@@ -452,6 +452,26 @@
       "toolDescription": null
     },
     {
+      "$comment": "email-communication-intelligence-r1 task 030 (FR-09) — Binding for email-propose, a Linear AI Consumer (routed via IConsumerRoutingService.ResolveActionAsync/IActionResolver, mirroring email-triage/document-profile/matter-pre-fill) — NOT a chat/loop-projectable capability: toolDescription/surfaces/disposition/risk/captureMode/chipTransitions/onEventBindings are all null because CommunicationEnrichmentService.RunEmailProposeAsync invokes the PROPOSE-FIELD-UPDATES Action DIRECTLY off the enrichment path (via the ICommunicationProposeAi PublicContracts facade, ADR-013) — never agent-selectable, never Click-dispatched (no infra/dataverse/inputschemas/ mirror either, same reason as email-triage). actionCode resolves to the JPS Action authored by task 030 (infra/dataverse/actions/propose-field-updates.action.json, sprk_actioncode='propose-field-updates') which extracts candidate NEW values for the operator-owned allow-list fields (sprk_emailupdatefield enabled rows), each with a verbatim citation + confidence, stored PENDING (sprk_emailreviewlog Proposed rows) and applied later under human confirmation (task 031). Job B's own targeted field-value extraction, NOT a second classification pass (the triage output is reused as grounding only).",
+      "consumerType": "email-propose",
+      "consumerCode": "default",
+      "environment": "*",
+      "name": "Email Propose Field Updates (Job B)",
+      "priority": 500,
+      "enabled": true,
+      "playbookName": null,
+      "actionCode": "propose-field-updates",
+      "ucid": null,
+      "disposition": null,
+      "risk": null,
+      "captureMode": null,
+      "surfaces": null,
+      "chipTransitions": null,
+      "onEventBindings": null,
+      "matchConditions": null,
+      "toolDescription": null
+    },
+    {
       "consumerType": "insights-ask",
       "consumerCode": "default",
       "environment": "*",

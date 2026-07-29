@@ -301,6 +301,23 @@
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)" }
     },
     {
+      "caseId": "GU-139",
+      "family": "email-propose",
+      "ucId": "UC-F-1",
+      "channel": "event",
+      "utterance": "inbound email enrichment proposes an allow-listed field update (old->new, cited, confidence-scored) on the associated record, stored PENDING (email-communication-intelligence-r1 task 030, FR-09)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.EmailPropose constant (added task 030) — a Linear AI Consumer (Job B propose), same shape as GU-138's email-triage event case (no chat/loop channel; UC-F data enrichment). The dedicated per-family coverage (proposals[] output shape, NFR-06 verify-cited-text, Binding resolution, no-second-pass structural guarantee) lives in the net-new tests/integration/contract/Eval/propose-field-updates-eval-cases.json + ProposeFieldUpdatesEvalTests.cs (same net-new-family pattern as the triage-email family) — this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file.",
+      "context": { "surface": "email-processing-pipeline" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "email-propose",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)" }
+    },
+    {
       "caseId": "GU-018",
       "family": "briefing",
       "ucId": "UC-B-3",

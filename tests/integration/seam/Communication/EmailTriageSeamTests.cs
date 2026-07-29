@@ -47,6 +47,7 @@ public sealed class EmailTriageSeamTests
             config,
             producer.Object,
             triageAi,
+            new NullCommunicationProposeAi(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

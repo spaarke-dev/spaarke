@@ -36,7 +36,37 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly IConfiguration _configuration;
     private readonly ICommunicationAssessedProducer _assessedProducer;
     private readonly ICommunicationTriageAi _triageAi;
+    private readonly ICommunicationProposeAi _proposeAi;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
+
+    // ── Job B propose (task 030, FR-09) — sprk_emailreviewlog / sprk_emailupdatefield constants ──
+
+    /// <summary>As-built <c>sprk_emailreviewlog.sprk_action</c> option-set integers (task 012 verification).</summary>
+    private const int ReviewActionProposed = 100000001;
+    private const int ReviewActionApproved = 100000002;
+    private const int ReviewActionOverriden = 100000003; // as-built single-d spelling; code keys on the int
+    private const int ReviewActionDismissed = 100000004;
+    private const int ReviewActionApplied = 100000005;
+
+    /// <summary>As-built <c>sprk_emailreviewlog.sprk_actortype</c> = Machine (task 012 verification).</summary>
+    private const int ReviewActorTypeMachine = 100000000;
+
+    /// <summary>
+    /// The 7 core record types whose <c>sprk_communication</c> regarding lookup Job B may propose updates to
+    /// (task 020 / note 001 — matter, project, invoice, work assignment, budget, service request, report
+    /// card). Reads the WRITE field from the code source of truth (<see cref="RegardingFieldMap"/>), never a
+    /// catalog column. The allow-list (<c>sprk_emailupdatefield</c>) is still the SOLE gate on WHICH fields
+    /// may be proposed — this list only determines WHICH associated record a proposal targets.
+    /// </summary>
+    private static readonly IReadOnlyList<(string Entity, string RegardingField)> CoreProposeTargets =
+        new[]
+        {
+            "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment",
+            "sprk_budget", "sprk_servicerequest", "sprk_reportcard",
+        }
+        .Select(e => (Entity: e, RegardingField: RegardingFieldMap.FieldFor(e)!))
+        .Where(t => !string.IsNullOrWhiteSpace(t.RegardingField))
+        .ToArray();
 
     /// <summary>Regarding-matter lookup field (ADR-024) — used ONLY to scope the FR-06 prior-correspondence
     /// grounding for email triage; read-only reference to the shared field map (Engine/RegardingFieldMap.cs
@@ -83,6 +113,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         IConfiguration configuration,
         ICommunicationAssessedProducer assessedProducer,
         ICommunicationTriageAi triageAi,
+        ICommunicationProposeAi proposeAi,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
@@ -90,6 +121,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _configuration = configuration;
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
         _triageAi = triageAi ?? throw new ArgumentNullException(nameof(triageAi));
+        _proposeAi = proposeAi ?? throw new ArgumentNullException(nameof(proposeAi));
         _logger = logger;
     }
 
@@ -127,6 +159,12 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         await RunStepAsync("email-triage", communicationId,
             async () => { triageResult = await RunEmailTriageAsync(communicationId, message, ct); });
+
+        // Job B propose (task 030, FR-09): best-effort, non-fatal (NFR-04). Runs AFTER email-triage so the
+        // already-produced triage output can ground the targeted field-value extraction (no second
+        // classification). Reuses the hoisted triageResult; no re-derivation.
+        await RunStepAsync("email-propose", communicationId,
+            () => RunEmailProposeAsync(communicationId, message, triageResult, ct));
 
         await RunStepAsync("assessment-event", communicationId,
             () => RunAssessmentEmissionAsync(communicationId, direction, message, triageResult, ct));
@@ -506,6 +544,444 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return result.Entities.Count > 0 ? result.Entities[0].Id : null;
     }
+
+    // ── Step 4.6: Job B propose (task 030, FR-09) ────────────────────────────────
+    /// <summary>
+    /// email-communication-intelligence-r1 task 030 (FR-09). For a communication associated to one of the 7
+    /// core records (task 020), proposes ALLOW-LISTED field updates on that record — each carrying old→new
+    /// value, a VERIFIED citation (source + locator + quoted text), a plain-language reason, and a
+    /// confidence — stored as PENDING <c>sprk_emailreviewlog</c> <c>Proposed</c> rows. This step NEVER writes
+    /// the target record (application is task 031, human-confirmed).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Allow-list is the SOLE gate (FR-11 / C-4).</b> Reads the operator-owned <c>sprk_emailupdatefield</c>
+    /// (READ-ONLY to r1) for the associated entity, taking ONLY <c>sprk_enabled = true</c> rows. A field with
+    /// no enabled row is never proposed. Each candidate returned by the Action is re-checked against that
+    /// enabled set (defense-in-depth even though the fields are supplied to the model).
+    /// </para>
+    /// <para>
+    /// <b>Verify-cited-text (NFR-06).</b> Each surviving candidate's <c>quotedText</c> is re-located in the
+    /// source communication/attachment text (<see cref="CitationVerifier"/>); a proposal whose citation
+    /// cannot be located is DROPPED, never stored.
+    /// </para>
+    /// <para>
+    /// <b>Reuse, no second pass (FR-05).</b> <paramref name="triageResult"/> — the already-produced triage
+    /// output hoisted from the email-triage step — is passed to the propose Action as grounding only, never
+    /// re-derived. The <see cref="ICommunicationProposeAi"/> facade is structurally incapable of a second
+    /// classification.
+    /// </para>
+    /// <para>
+    /// <b>Best-effort (NFR-04).</b> The ENTIRE method is wrapped in try/catch — any failure (allow-list read,
+    /// facade completion, a Proposed-row write) degrades to a logged warning and returns without throwing,
+    /// independent of <see cref="RunStepAsync"/>'s outer guard on the "email-propose" step. A propose failure
+    /// never fails capture or send.
+    /// </para>
+    /// <para>
+    /// <b>Append-only + idempotent.</b> A proposal is immutable once proposed (task 031 writes a NEW
+    /// Approved/Applied row on resolution; this step never mutates a Proposed row). Re-enrichment is
+    /// idempotent: an OPEN Proposed row for the same <c>(communication, targetentity, targetfield)</c> — one
+    /// with no later terminal row — suppresses a duplicate.
+    /// </para>
+    /// </remarks>
+    private async Task RunEmailProposeAsync(
+        Guid communicationId, NormalizedMessage message, CommunicationTriageResult? triageResult, CancellationToken ct)
+    {
+        try
+        {
+            // Read the communication's core regarding lookups (the association from task 020) + privilege flag.
+            var columns = CoreProposeTargets.Select(t => t.RegardingField)
+                .Append("sprk_associationprovenance").ToArray();
+            var record = await _genericEntityService.RetrieveAsync("sprk_communication", communicationId, columns, ct)
+                .ConfigureAwait(false);
+            if (record is null)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] skipped: communication record could not be retrieved | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            var associations = ResolveAssociatedCoreRecords(record);
+            if (associations.Count == 0)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] skipped: no association to a core record (nothing to keep current) | CommunicationId: {CommunicationId}.",
+                    communicationId);
+                return;
+            }
+
+            // ADR-015: privilege is a FLAG carried into the proposal JSON, never a suppress/auto-act decision.
+            var provenanceJson = record.GetAttributeValue<string>("sprk_associationprovenance");
+            var privilegeFlagged =
+                PersistedClassificationSignalReader.TryReadFromProvenanceJson(provenanceJson)?.PrivilegeFlagged ?? false;
+
+            var sourceText = CitationVerifier.BuildSourceText(message.Subject, message.BodyText, message.AttachmentText);
+            var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
+
+            foreach (var (entityLogicalName, recordId) in associations)
+            {
+                await ProposeForRecordAsync(
+                    communicationId, entityLogicalName, recordId, message, triageResult,
+                    sourceText, privilegeFlagged, tenantId, ct).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            // NFR-04: a propose failure MUST NOT fail capture/enrichment — degrade + log, never throw.
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-propose] failed (non-fatal) | CommunicationId: {CommunicationId}.",
+                communicationId);
+        }
+    }
+
+    /// <summary>
+    /// Proposes allow-listed updates for ONE associated record: reads the enabled allow-list, invokes the
+    /// propose Action, then gates each candidate (allow-list re-check → coerce → old-value read →
+    /// verify-cited-text → no-op skip → open-proposal dedup) and stores the survivors as <c>Proposed</c> rows.
+    /// </summary>
+    private async Task ProposeForRecordAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        NormalizedMessage message,
+        CommunicationTriageResult? triageResult,
+        string sourceText,
+        bool privilegeFlagged,
+        string tenantId,
+        CancellationToken ct)
+    {
+        var allowList = await LoadEnabledAllowListAsync(entityLogicalName, ct).ConfigureAwait(false);
+        if (allowList.Count == 0)
+        {
+            _logger.LogDebug(
+                "Enrichment[email-propose] no enabled sprk_emailupdatefield rows for {Entity} — no proposals | CommunicationId: {CommunicationId}.",
+                entityLogicalName, communicationId);
+            return;
+        }
+
+        var request = new CommunicationProposeRequest
+        {
+            EntityLogicalName = entityLogicalName,
+            Fields = allowList.Values.Select(a => new ProposableField
+            {
+                FieldLogicalName = a.FieldLogicalName,
+                FieldType = a.FieldType,
+                ExtractionGuidance = a.ExtractionGuidance,
+            }).ToArray(),
+            Triage = triageResult,
+            Subject = message.Subject ?? string.Empty,
+            BodyText = message.BodyText ?? string.Empty,
+            AttachmentText = message.AttachmentText,
+            TenantId = tenantId,
+        };
+
+        var candidates = await _proposeAi.ProposeAsync(request, ct).ConfigureAwait(false);
+        if (candidates is not { Count: > 0 })
+        {
+            _logger.LogDebug(
+                "Enrichment[email-propose] produced no candidate proposals for {Entity} | CommunicationId: {CommunicationId}.",
+                entityLogicalName, communicationId);
+            return;
+        }
+
+        var openProposalFields = await LoadOpenProposalFieldsAsync(communicationId, entityLogicalName, ct).ConfigureAwait(false);
+        var storedCount = 0;
+
+        foreach (var candidate in candidates)
+        {
+            // (a) Allow-list re-check — a field with no enabled row is NEVER proposed (the SOLE gate).
+            if (candidate.Field is null || !allowList.TryGetValue(candidate.Field, out var allowRow))
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] dropped candidate for non-allow-listed field {Field} on {Entity} | CommunicationId: {CommunicationId}.",
+                    candidate.Field, entityLogicalName, communicationId);
+                continue;
+            }
+
+            // (b) Coerce the raw value per the allow-listed field type; drop if it cannot be shaped.
+            if (!EmailUpdateFieldCoercion.TryCoerce(allowRow.FieldType, candidate.NewValue, out var coercedValue)
+                || coercedValue is null)
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] dropped candidate for {Entity}.{Field}: value not coercible to {FieldType} | CommunicationId: {CommunicationId}.",
+                    entityLogicalName, candidate.Field, allowRow.FieldType, communicationId);
+                continue;
+            }
+
+            // (d) Verify-cited-text (NFR-06) — drop any candidate whose quotedText is not in the source.
+            if (!CitationVerifier.IsCitedTextPresent(sourceText, candidate.Citation?.QuotedText))
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] dropped candidate for {Entity}.{Field}: cited text not located in source (NFR-06) | CommunicationId: {CommunicationId}.",
+                    entityLogicalName, candidate.Field, communicationId);
+                continue;
+            }
+
+            // Idempotency — skip if an OPEN Proposed row already exists for this (entity, field).
+            if (openProposalFields.Contains(candidate.Field))
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] skipped {Entity}.{Field}: an open Proposed row already exists (append-only, idempotent) | CommunicationId: {CommunicationId}.",
+                    entityLogicalName, candidate.Field, communicationId);
+                continue;
+            }
+
+            // (c) Read the record's CURRENT value = oldValue.
+            var oldValue = await ReadCurrentFieldValueAsync(entityLogicalName, recordId, candidate.Field, ct)
+                .ConfigureAwait(false);
+
+            // (e) Skip a no-op (proposed value equals current value).
+            if (string.Equals(oldValue?.Trim(), coercedValue.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogDebug(
+                    "Enrichment[email-propose] skipped {Entity}.{Field}: proposed value equals current value (no-op) | CommunicationId: {CommunicationId}.",
+                    entityLogicalName, candidate.Field, communicationId);
+                continue;
+            }
+
+            await StoreProposedRowAsync(
+                communicationId, entityLogicalName, recordId, allowRow, candidate,
+                oldValue, coercedValue, privilegeFlagged, ct).ConfigureAwait(false);
+            storedCount++;
+        }
+
+        _logger.LogInformation(
+            "Enrichment[email-propose] stored {StoredCount} pending proposal(s) of {CandidateCount} candidate(s) for {Entity} (allow-listed, cited, PENDING) | CommunicationId: {CommunicationId}.",
+            storedCount, candidates.Count, entityLogicalName, communicationId);
+    }
+
+    /// <summary>An enabled <c>sprk_emailupdatefield</c> allow-list row (coercion hint + guidance + confirm).</summary>
+    private sealed record AllowListRow(string FieldLogicalName, string FieldType, string? ExtractionGuidance, bool RequireConfirm);
+
+    /// <summary>Resolves the associated core records from the communication's populated regarding lookups.</summary>
+    private static IReadOnlyList<(string Entity, Guid RecordId)> ResolveAssociatedCoreRecords(Entity record)
+    {
+        var associations = new List<(string, Guid)>();
+        foreach (var (entity, regardingField) in CoreProposeTargets)
+        {
+            var reference = record.GetAttributeValue<EntityReference>(regardingField);
+            if (reference is not null && reference.Id != Guid.Empty)
+            {
+                associations.Add((entity, reference.Id));
+            }
+        }
+        return associations;
+    }
+
+    /// <summary>
+    /// Reads the ENABLED <c>sprk_emailupdatefield</c> rows for the associated entity, keyed by target field
+    /// logical name (<c>sprk_targetfieldlogicalname</c> — NOT <c>sprk_targetfield</c>, per note 001). Resolves
+    /// the entity's <c>sprk_recordtype_ref</c> id first, then filters the (org-owned) allow-list by that
+    /// lookup + <c>sprk_enabled = true</c>. Rows with an unrecognized field type or a blank field name are
+    /// skipped (never guessed). Empty when the operator enabled nothing for this entity.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, AllowListRow>> LoadEnabledAllowListAsync(
+        string entityLogicalName, CancellationToken ct)
+    {
+        var recordTypeRefId = await ResolveRecordTypeRefIdAsync(entityLogicalName, ct).ConfigureAwait(false);
+        if (recordTypeRefId is null)
+        {
+            return new Dictionary<string, AllowListRow>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var query = new QueryExpression("sprk_emailupdatefield")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_targetfieldlogicalname", "sprk_fieldtype", "sprk_extractionguidance", "sprk_requireconfirm"),
+        };
+        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+        query.Criteria.AddCondition("sprk_targetentity", ConditionOperator.Equal, recordTypeRefId.Value);
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+
+        var rows = new Dictionary<string, AllowListRow>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in result.Entities)
+        {
+            var field = row.GetAttributeValue<string>("sprk_targetfieldlogicalname")?.Trim();
+            if (string.IsNullOrWhiteSpace(field))
+            {
+                continue;
+            }
+
+            var fieldTypeValue = row.GetAttributeValue<OptionSetValue>("sprk_fieldtype")?.Value;
+            var fieldType = fieldTypeValue.HasValue ? EmailUpdateFieldTypes.FromOptionSet(fieldTypeValue.Value) : null;
+            if (fieldType is null)
+            {
+                continue; // unrecognized sprk_fieldtype ⇒ never guess a coercion
+            }
+
+            rows[field] = new AllowListRow(
+                FieldLogicalName: field,
+                FieldType: fieldType,
+                ExtractionGuidance: row.GetAttributeValue<string>("sprk_extractionguidance"),
+                RequireConfirm: row.GetAttributeValue<bool>("sprk_requireconfirm"));
+        }
+
+        return rows;
+    }
+
+    /// <summary>Resolves the <c>sprk_recordtype_ref</c> id for an entity logical name (via
+    /// <c>sprk_recordlogicalname</c>). Null when no catalog row matches.</summary>
+    private async Task<Guid?> ResolveRecordTypeRefIdAsync(string entityLogicalName, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_recordtype_ref")
+        {
+            ColumnSet = new ColumnSet(false),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_recordlogicalname", ConditionOperator.Equal, entityLogicalName);
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
+    }
+
+    /// <summary>
+    /// Loads the set of target fields that already have an OPEN proposal for this (communication, entity) —
+    /// a <c>Proposed</c> row whose most-recent state (walking <c>createdon</c> ascending) is still open (no
+    /// later Approved/Applied/Dismissed/Overriden). This is the same "open/pending" definition task 032's feed
+    /// and task 031's apply use; here it makes re-enrichment idempotent (no duplicate Proposed rows).
+    /// </summary>
+    private async Task<IReadOnlySet<string>> LoadOpenProposalFieldsAsync(
+        Guid communicationId, string entityLogicalName, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_emailreviewlog")
+        {
+            ColumnSet = new ColumnSet("sprk_action", "sprk_targetfield", "sprk_targetentity", "createdon"),
+        };
+        query.Criteria.AddCondition("sprk_communication", ConditionOperator.Equal, communicationId);
+        query.Criteria.AddCondition("sprk_targetentity", ConditionOperator.Equal, entityLogicalName);
+        query.AddOrder("createdon", OrderType.Ascending);
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+
+        // Walk chronologically per field: a Proposed row opens; a terminal row closes.
+        var state = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in result.Entities)
+        {
+            var field = row.GetAttributeValue<string>("sprk_targetfield")?.Trim();
+            if (string.IsNullOrWhiteSpace(field))
+            {
+                continue;
+            }
+
+            var action = row.GetAttributeValue<OptionSetValue>("sprk_action")?.Value;
+            switch (action)
+            {
+                case ReviewActionProposed:
+                    state[field] = true;
+                    break;
+                case ReviewActionApproved:
+                case ReviewActionApplied:
+                case ReviewActionDismissed:
+                case ReviewActionOverriden:
+                    state[field] = false;
+                    break;
+            }
+        }
+
+        return state.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Reads the record's current value for a field and renders it to a comparable string (the
+    /// proposal's <c>oldValue</c>). Best-effort — a read failure degrades to null (unknown current value),
+    /// never throws into the propose batch.</summary>
+    private async Task<string?> ReadCurrentFieldValueAsync(
+        string entityLogicalName, Guid recordId, string field, CancellationToken ct)
+    {
+        try
+        {
+            var record = await _genericEntityService.RetrieveAsync(entityLogicalName, recordId, new[] { field }, ct)
+                .ConfigureAwait(false);
+            return StringifyDataverseValue(record?.GetAttributeValue<object>(field));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "Enrichment[email-propose] could not read current value of {Entity}.{Field} (non-fatal; oldValue unknown).",
+                entityLogicalName, field);
+            return null;
+        }
+    }
+
+    /// <summary>Renders a Dataverse attribute value to a stable comparison string.</summary>
+    private static string? StringifyDataverseValue(object? value) => value switch
+    {
+        null => null,
+        EntityReference er => er.Id.ToString(),
+        OptionSetValue osv => osv.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        Money money => money.Value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        bool b => b ? "true" : "false",
+        DateTime dt => dt.TimeOfDay == TimeSpan.Zero
+            ? dt.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)
+            : dt.ToString("yyyy-MM-ddTHH:mm:ss", System.Globalization.CultureInfo.InvariantCulture),
+        IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+        _ => value.ToString(),
+    };
+
+    /// <summary>
+    /// Stores ONE surviving proposal as a PENDING <c>sprk_emailreviewlog</c> <c>Proposed</c> row (Decision 1
+    /// — the schema's designed proposal-lifecycle store; no new table). Carries the typed columns task 032's
+    /// feed + task 031's apply read, plus the full old→new + citation JSON in <c>sprk_aisuggestion</c>. NEVER
+    /// writes the target record (application is task 031).
+    /// </summary>
+    private async Task StoreProposedRowAsync(
+        Guid communicationId,
+        string entityLogicalName,
+        Guid recordId,
+        AllowListRow allowRow,
+        ProposedFieldCandidate candidate,
+        string? oldValue,
+        string coercedValue,
+        bool privilegeFlagged,
+        CancellationToken ct)
+    {
+        var suggestion = new
+        {
+            field = allowRow.FieldLogicalName,
+            fieldType = allowRow.FieldType,
+            oldValue,
+            newValue = coercedValue,
+            citation = new
+            {
+                source = candidate.Citation?.Source,
+                locator = candidate.Citation?.Locator,
+                quotedText = candidate.Citation?.QuotedText,
+            },
+            reason = candidate.Reason,
+            confidence = candidate.Confidence,
+            requireConfirm = allowRow.RequireConfirm,
+            privilegeFlagged, // ADR-015: carried as a flag, never a suppress/auto-act decision
+        };
+        var suggestionJson = JsonSerializer.Serialize(suggestion);
+
+        var name = $"Proposed update: {entityLogicalName}.{allowRow.FieldLogicalName}";
+        var entity = new Entity("sprk_emailreviewlog")
+        {
+            ["sprk_name"] = Truncate(name, 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeMachine),
+            ["sprk_action"] = new OptionSetValue(ReviewActionProposed),
+            ["sprk_actor"] = ConsumerTypes.EmailPropose,
+            ["sprk_targetentity"] = Truncate(entityLogicalName, 100),
+            ["sprk_targetrecordid"] = Truncate(recordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(allowRow.FieldLogicalName, 100),
+            ["sprk_confidence"] = (decimal)candidate.Confidence,
+            ["sprk_sourceref"] = Truncate(candidate.Citation?.Locator ?? candidate.Citation?.Source ?? string.Empty, 1000),
+            ["sprk_aisuggestion"] = suggestionJson,
+        };
+
+        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Enrichment[email-propose] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, TargetField: {Field}, Confidence: {Confidence:F2}, PrivilegeFlagged: {PrivilegeFlagged}.",
+            communicationId, entityLogicalName, allowRow.FieldLogicalName, candidate.Confidence, privilegeFlagged);
+    }
+
+    private static string Truncate(string value, int maxLength) =>
+        string.IsNullOrEmpty(value) || value.Length <= maxLength ? value : value[..maxLength];
 
     // ── Step 5: Responsive-Intelligence trigger (assessment event) ───────────────
     /// <summary>
