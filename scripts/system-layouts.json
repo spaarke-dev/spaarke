@@ -73,6 +73,14 @@
       "sortOrder": 9,
       "isDefault": false,
       "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace work-assignments section (Active Work Assignments — sprk_workassignment). Row-click opens Layout 1 (85%×85%)."
+    },
+    {
+      "name": "Email",
+      "sectionId": "email",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 10,
+      "isDefault": false,
+      "description": "email-communication-solution-r5 task 041 (FR-01). LegalWorkspace email section — Outlook-style two-pane reading surface over sprk_communication (EmailWorkspace, task 040). Pattern D dual-use with the `email` direct widget in @spaarke/ai-widgets/register-workspace-widgets.ts."
     }
   ]
 }

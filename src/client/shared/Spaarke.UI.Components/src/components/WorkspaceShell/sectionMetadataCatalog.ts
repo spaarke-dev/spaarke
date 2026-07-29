@@ -266,6 +266,21 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: EditRegular,
     defaultHeight: '720px',
   },
+  // email-communication-solution-r5 task 041 (FR-01, 2026-07-28): Email
+  // section — Outlook-style two-pane reading surface over sprk_communication
+  // (`EmailWorkspace`, task 040). Pattern D dual-use with the `email` direct
+  // widget in `@spaarke/ai-widgets/register-workspace-widgets.ts`. Distinct
+  // from the existing `communications` (dense list) section — see
+  // `email.registration.ts` module docblock + task 041 justification.
+  {
+    id: 'email',
+    label: 'Email',
+    description: 'Outlook-style reading pane for your email communications',
+    category: 'data',
+    icon: MailRegular,
+    defaultHeight: '720px',
+    entityName: 'sprk_communication',
+  },
 ] as const;
 
 /** Look up section metadata by ID. Returns `undefined` if not found. */
